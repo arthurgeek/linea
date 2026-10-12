@@ -1,6 +1,8 @@
 // A postfix call counts the arguments written between its parentheses: the
 // receiver before the dot fills `self` and is not one of them. A call through
-// the type writes the receiver as its first argument, so it counts it.
+// the type writes the receiver as its first argument, so it counts it. One
+// argument too many for a form that has an `_in` partner names the partner,
+// which takes the allocator.
 import std.mem
 
 struct Gauge {

@@ -9683,9 +9683,9 @@ const Checker = struct {
                 else
                     "this callback owns what must be released";
                 const hint = if (capture) |held|
-                    try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`", .{held.name})
+                    try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or keep the closure with `mem.Closure.open(closure)`, whose memory is released", .{held.name})
                 else
-                    "capture nothing that must be released, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`";
+                    "capture nothing that must be released, or keep the closure with `mem.Closure.open(closure)`, whose memory is released";
                 try self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(at),
@@ -12230,6 +12230,18 @@ const Checker = struct {
         primary: []const u8,
         origin: ?Label,
     ) TypeId {
+        return self.reportWithOriginNotes(code, id, message, primary, origin, &.{});
+    }
+
+    fn reportWithOriginNotes(
+        self: *Checker,
+        code: Code,
+        id: ExprId,
+        message: []const u8,
+        primary: []const u8,
+        origin: ?Label,
+        notes: []const []const u8,
+    ) TypeId {
         const at = self.ast.exprSpan(id);
         const here: Label = .{ .file = self.ast.fileOfExpr(id), .span = at, .message = primary, .style = .primary };
 
@@ -12244,6 +12256,7 @@ const Checker = struct {
                 .code = code,
                 .message = message,
                 .labels = labels,
+                .notes = notes,
             }) catch {};
         } else {
             const labels = self.gpa.alloc(Label, 1) catch return self.record(id, .poison);
@@ -12253,6 +12266,7 @@ const Checker = struct {
                 .code = code,
                 .message = message,
                 .labels = labels,
+                .notes = notes,
             }) catch {};
         }
         return self.record(id, .poison);
@@ -16484,8 +16498,8 @@ const Checker = struct {
         // parameter, which must be `S`, and it is the one type parameter the
         // opener declares. `open_in` takes the allocator and then the callback;
         // `open`, on the system closure, takes the callback alone.
-        return self.validClosureOpener(raw.closure_open, .{ .head = 2, .params = 2 }) and
-            self.validClosureOpener(raw.closure_open_system, .{ .head = 1, .params = 1 });
+        return self.validClosureOpener(raw.closure_open_in, .{ .head = 2, .params = 2 }) and
+            self.validClosureOpener(raw.closure_open, .{ .head = 1, .params = 1 });
     }
 
     fn validClosureOpener(self: *const Checker, open: DeclId, shape: struct { head: usize, params: usize }) bool {
@@ -18670,13 +18684,43 @@ const Checker = struct {
         found: usize,
         receiver: usize,
     ) std.mem.Allocator.Error!void {
-        _ = self.reportWithOrigin(
+        const sibling = if (found == wanted + 1) try self.allocatorFormOf(owner) else null;
+        const notes: []const []const u8 = if (sibling) |name|
+            try self.sink.arena.dupe([]const u8, &.{try std.fmt.allocPrint(self.sink.arena, "`{s}` uses the system allocator; use `{s}(allocator, …)` to choose the allocator", .{ name[0 .. name.len - 3], name })})
+        else
+            &.{};
+        _ = self.reportWithOriginNotes(
             .t_arity,
             id,
             try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
             "the wrong number of arguments",
             owner.origin(self),
+            notes,
         );
+    }
+
+    /// The name of the declaration beside `owner` that takes the allocator
+    /// first, `x_in` beside `x`, when there is one: a call that passed `x` one
+    /// argument too many most often meant to choose the allocator. Asked only
+    /// on this error path, of the declarations of the callee's own module.
+    fn allocatorFormOf(self: *Checker, owner: CallParameters) std.mem.Allocator.Error!?[]const u8 {
+        const d = switch (owner) {
+            .declaration => |d| d,
+            else => return null,
+        };
+        const name = self.ast.declName(d);
+        if (name == .none) return null;
+        const wanted = try std.fmt.allocPrint(self.sink.arena, "{s}_in", .{self.ast.tokenText(name)});
+        const owned_by = self.ast.declOwner(d);
+        for (self.program.declsOf(self.program.moduleOf(d))) |other| {
+            const other_name = self.ast.declName(other);
+            if (other_name == .none or !std.mem.eql(u8, self.ast.tokenText(other_name), wanted)) continue;
+            const other_owner = self.ast.declOwner(other);
+            if ((owned_by == .none) != (other_owner == .none)) continue;
+            if (owned_by != .none and !std.mem.eql(u8, self.ast.tokenText(owned_by), self.ast.tokenText(other_owner))) continue;
+            return wanted;
+        }
+        return null;
     }
 
     /// A parameter no argument filled and no declaration fills, named rather

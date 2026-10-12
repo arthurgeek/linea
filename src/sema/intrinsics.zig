@@ -70,8 +70,8 @@ pub const RawAccesses = struct {
     closure_entry_type: DeclId = .none,
     /// `Closure.open_in` and `Closure.open`, whose callback must be callable
     /// as the closure's `S`. The second opens in the system allocator.
+    closure_open_in: DeclId = .none,
     closure_open: DeclId = .none,
-    closure_open_system: DeclId = .none,
     /// The generated entry and release addresses for a callable type, and
     /// that type's size.
     closure_entry: DeclId = .none,
@@ -95,8 +95,8 @@ pub const RawAccesses = struct {
             .place = rawAccessDecl(program, ast, "slot_place", 5),
             .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
             .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
-            .closure_open = closureOpenDecl(program, ast, "open_in"),
-            .closure_open_system = closureOpenDecl(program, ast, "open"),
+            .closure_open_in = closureOpenDecl(program, ast, "open_in"),
+            .closure_open = closureOpenDecl(program, ast, "open"),
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
@@ -119,7 +119,7 @@ pub const RawAccesses = struct {
     /// Whether `d` opens a closure: its first type parameter is the callback,
     /// which must be callable as the closure's `S`.
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.closure_open or d == self.closure_open_system);
+        return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }
 
     pub fn contains(self: RawAccesses, d: DeclId) bool {
@@ -157,7 +157,7 @@ pub const RawAccesses = struct {
     }
 
     test "the erasure intrinsics are the closure entry, release and size" {
-        const raw: RawAccesses = .{ .closure_entry = DeclId.at(1), .closure_settle = DeclId.at(2), .closure_size = DeclId.at(3), .closure_open = DeclId.at(4) };
+        const raw: RawAccesses = .{ .closure_entry = DeclId.at(1), .closure_settle = DeclId.at(2), .closure_size = DeclId.at(3), .closure_open_in = DeclId.at(4) };
         try std.testing.expect(raw.erasure(DeclId.at(1)) and raw.erasure(DeclId.at(2)) and raw.erasure(DeclId.at(3)));
         try std.testing.expect(!raw.erasure(DeclId.at(4)) and !raw.erasure(DeclId.none));
         // They are typed storage primitives, so a program cannot reach them.

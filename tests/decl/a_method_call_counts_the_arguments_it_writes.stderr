@@ -1,37 +1,41 @@
 error[T-Arity]: expected 1 argument(s), found 2
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:18:16
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:20:16
    |
-11 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |        ------ declared here
-18 |     let many = gauge.raised(2, 3)
+20 |     let many = gauge.raised(2, 3)
    |                ^^^^^^^^^^^^^^^^^^ the wrong number of arguments
 error[T-MissingArgument]: `step` receives no argument
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:19:15
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:21:15
    |
-11 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |                           ---- declared here
-19 |     let few = gauge.raised()
+21 |     let few = gauge.raised()
    |               ^^^^^^^^^^^^^^ every parameter receives one
 error[T-Arity]: expected 2 argument(s), found 3
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:20:19
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:22:19
    |
-11 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |        ------ declared here
-20 |     let through = Gauge.raised(gauge, 2, 3)
+22 |     let through = Gauge.raised(gauge, 2, 3)
    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
 error[T-Arity]: expected 0 argument(s), found 1
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:21:18
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:23:18
    |
-21 |     let _owned = "Lisbon".to_owned(mem.system())
+23 |     let _owned = "Lisbon".to_owned(mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
 L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
    |            -------- declared here
-error[T-Arity]: expected 1 argument(s), found 2
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:22:18
    |
-22 |     let _named = Str.to_owned("Lisbon", mem.system())
+   = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
+error[T-Arity]: expected 1 argument(s), found 2
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:24:18
+   |
+24 |     let _named = Str.to_owned("Lisbon", mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
 L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
    |            -------- declared here
+   |
+   = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
