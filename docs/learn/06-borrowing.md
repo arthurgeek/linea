@@ -915,6 +915,144 @@ lifetime from a rule about the parameters (a single input lifetime, or `&self`);
 Linea fills in an omitted contract from a mark on the type, and the mark is
 written once where the type is declared, not guessed from each signature.
 
+## `Owned` — a generic value that points at nothing
+
+The clauses so far describe what a function does with views. A generic
+function has a harder time, because it does not know whether its type
+parameter *is* a view. This one copies the readings out of a slice into a
+vector that lives in an arena:
+
+```linea
+import std.io
+import std.mem
+
+use mem.Owner
+
+// Copy every element of `items` onto the end of `values`.
+fn copy_all[T: Copyable + Owned, A: Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> Result[(), mem.Oom] {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(failure) => return .Err(failure.reason),
+        }
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    var log: Vec[UInt16, mem.Handle] = Vec.new_in(arena.handle())
+    var readings = [UInt16(410), 415, 420]
+    if copy_all(&log, readings.as_slice()).is_err() {
+        return .Ok(1)
+    }
+    // The log holds copies, so the readings may change while it is in use.
+    readings[0] = 0
+    io.println("logged {log.length()} readings, the first {log[0]}")?
+    .Ok(0)
+}
+```
+
+```
+logged 3 readings, the first 410
+```
+
+`T: Owned` says that `T` is a type whose values point at nothing: no view, no
+`borrow`, nothing that keeps another value pinned. A `UInt16` is one, so the
+copies in `log` depend on nothing, and `readings[0] = 0` is allowed while the
+log is still in use.
+
+Take `+ Owned` away and the function no longer compiles:
+
+<!-- guide: unchecked the error an edit of the program above produces -->
+```
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> readings_unbounded.lin:9:15
+  |
+9 |         match &values.push(copy(*item)) {
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+```
+
+Without the bound, `T` could be `Str`, and a copied `Str` still points at the
+text it was cut from. The push would then put a view inside `values`, which the
+signature does not declare. The only clause that fits, `retains(values: items)`,
+says more than you mean: the vector would keep the slice's own storage pinned
+too, so `readings[0] = 0` would be refused, even though every copy is a plain
+number. `Owned` says the precise thing: the elements carry nothing, so storing
+one stores no dependency.
+
+The compiler decides whether a type is `Owned` by looking at what it holds,
+private fields included. You never write `impl Owned for` a type; the compiler
+refuses that. A struct of numbers is `Owned`, and so is a `Vec[UInt8]` from the
+system allocator. A `Str`, a `borrow`, a `mem.Slice`, and a vector in an arena,
+whose handle borrows the arena, are not. `Owned` says nothing about copying or
+releasing: a linear value that must be released can be `Owned`.
+
+Hand the same function a type that holds a `Str`, and the call is refused with
+the path to the view:
+
+```linea
+import std.io
+import std.mem
+
+use mem.Owner
+
+@copyable
+struct Label {
+    text: Str,
+}
+
+// Copy every element of `items` onto the end of `values`.
+fn copy_all[T: Copyable + Owned, A: Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> Result[(), mem.Oom] {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(failure) => return .Err(failure.reason),
+        }
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    var shown: Vec[Label, mem.Handle] = Vec.new_in(arena.handle())
+    let labels = [Label { text = "hall" }, Label { text = "studio" }]
+    if copy_all(&shown, labels.as_slice()).is_err() {
+        return .Ok(1)
+    }
+    io.println("showing {shown.length()} labels")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text.bytes` is a `mem.Slice[UInt8]`, a view of storage it does not own
+  --> labels.lin:26:8
+   |
+26 |     if copy_all(&shown, labels.as_slice()).is_err() {
+   |        ^^^^^^^^ use a type that owns everything it holds, or drop the bound
+```
+
+`Label`'s field `text` is a `Str`, and a `Str`'s bytes are a view. To keep
+labels, either store owned text, a `String`, or write the generic function
+without `Owned` and declare what it retains.
+
+A generic function that calls one bounded `Owned` needs the bound itself:
+passing its own `U` is refused with the help ``bound `U` by `Owned` ``, just as
+it would be for `Copyable`. An associated type can be bounded too, in the
+function's own `where` clause: `where I.Item: Owned` under `[I: Iterator]`.
+
+The standard library does this for you. `Vec.append_slice` copies an `Owned`
+slice into a vector, reserving room for all of it first, and `iter.extend_owned`
+appends the items of an iterator whose items are `Owned`; neither keeps
+anything of its source.
+
+If you know Rust, `T: Owned` is close to `T: 'static`: a type that holds no
+borrow of anything shorter-lived. The difference is text. Rust's `&'static str`
+is `'static`, because a string literal lives in the program. A Linea `Str` is
+never `Owned`, even one made from a literal, because the type is a view
+whatever it points at. Owned text is a `String`.
+
 ## Saying that only part of the result points at it
 
 Look again at `first_field`:
@@ -1124,6 +1262,7 @@ what you write. Each one has been answered in a chapter of this guide:
 | Do I look, change or take? | `read`, `inout` or `sink` | [Linea in an hour](01-linea-in-an-hour.md#read-inout-and-sink) |
 | Does my result point into an input? | name it with `borrows`, `carries` or `retains` | this chapter |
 | Into the input, or where the input pointed? | `borrows(x)` for the input, `carries(x)` for where it pointed | this chapter |
+| Can it point at anything? | not if it is `Owned`; a generic function asks with `T: Owned` | this chapter |
 | Who chooses the memory? | the caller, by passing an allocator | [Memory](07-memory.md) |
 
 ## What you have seen
@@ -1136,6 +1275,7 @@ what you write. Each one has been answered in a chapter of this guide:
 | my result points wherever this view pointed | `where carries(param)` |
 | my result points at nothing of yours | `where carries()` |
 | values built from this type point into it | `@carrier` on the type |
+| a generic type whose values point at nothing | `T: Owned` |
 | this `inout` argument now holds what that one held | `where retains(dest: source)` |
 | this `inout` argument now holds a view of that one | `where retains(dest: borrow source)` |
 | only the `.Some`/`.Ok` part does | put the target first: `borrows(.Ok: param)` |
