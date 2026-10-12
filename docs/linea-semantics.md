@@ -3463,7 +3463,10 @@ instead. Where nothing is expected, as in `let make = Mode.Exact`, neither
 reading is selected and the name is [T-Infer]. Parentheses around a
 construction's callee do not change it: `(Mode.Exact)(5)` builds the variant as
 `Mode.Exact(5)` does. [T-Arity] diagnoses surplus arguments; an unfilled
-parameter is [T-MissingArgument].
+parameter is [T-MissingArgument]. A postfix call `x.f(a)` counts only the
+arguments written between its parentheses, since its receiver fills `self`
+unwritten; a call through the type, `T.f(x, a)`, writes the receiver as its
+first argument and counts it.
 
 **[T-UnknownParameter]** A named argument must name a parameter declared by the
 callee. Conversions and variant constructions have no parameter signatures and

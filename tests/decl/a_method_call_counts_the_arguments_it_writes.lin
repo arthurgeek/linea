@@ -1,0 +1,24 @@
+// A postfix call counts the arguments written between its parentheses: the
+// receiver before the dot fills `self` and is not one of them. A call through
+// the type writes the receiver as its first argument, so it counts it.
+import std.mem
+
+struct Gauge {
+    level: UInt8,
+}
+
+impl Gauge {
+    fn raised(self: Self, step: UInt8) -> UInt8 {
+        self.level + step
+    }
+}
+
+fn main() -> UInt8 {
+    let gauge = Gauge { level = 1 }
+    let many = gauge.raised(2, 3)
+    let few = gauge.raised()
+    let through = Gauge.raised(gauge, 2, 3)
+    let _owned = "Lisbon".to_owned(mem.system())
+    let _named = Str.to_owned("Lisbon", mem.system())
+    many + few + through
+}

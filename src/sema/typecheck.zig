@@ -18457,7 +18457,7 @@ const Checker = struct {
         // Nothing is named, so each argument fills the parameter at its own
         // position and the tree's list already is the answer. Nearly every call
         // in a program takes this path, and none of them allocates.
-        if (!named_one) return self.positionalArguments(id, owner, target, given);
+        if (!named_one) return self.positionalArguments(id, owner, target, given, receiver);
 
         // A value nothing declared names for has no labels to match, so
         // its call takes arguments by position, and that is the one thing
@@ -18574,7 +18574,7 @@ const Checker = struct {
         }
 
         if (pairing_end == null and surplus) {
-            try self.reportSurplus(id, owner, param_count, given.len);
+            try self.reportSurplus(id, owner, param_count, given.len, receiver);
             refused = true;
         }
 
@@ -18614,10 +18614,11 @@ const Checker = struct {
         owner: CallParameters,
         target: types_mod.CallTarget,
         given: []const ExprId,
+        receiver: usize,
     ) std.mem.Allocator.Error!?Matched {
         const param_count = owner.len(self);
         if (given.len > param_count) {
-            try self.reportSurplus(id, owner, param_count, given.len);
+            try self.reportSurplus(id, owner, param_count, given.len, receiver);
             const slots = try self.gpa.alloc(?u32, given.len);
             defer self.gpa.free(slots);
             for (slots, 0..) |*slot, i| slot.* = if (i < param_count) @intCast(i) else null;
@@ -18651,18 +18652,21 @@ const Checker = struct {
     ///
     /// Counted rather than named, because there is no name to report one by: an
     /// argument past the end of the parameter list fills nothing, and how many
-    /// were written is what the programmer can see.
+    /// were written is what the programmer can see. A postfix call's receiver
+    /// is not written between the parentheses, so both counts leave it out; a
+    /// call through the type writes the receiver first and counts it.
     fn reportSurplus(
         self: *Checker,
         id: ExprId,
         owner: CallParameters,
         wanted: usize,
         found: usize,
+        receiver: usize,
     ) std.mem.Allocator.Error!void {
         _ = self.reportWithOrigin(
             .t_arity,
             id,
-            try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted, found }),
+            try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
             "the wrong number of arguments",
             owner.origin(self),
         );

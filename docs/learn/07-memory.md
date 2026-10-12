@@ -347,7 +347,7 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-error[T-Arity]: expected 1 argument(s), found 2
+error[T-Arity]: expected 0 argument(s), found 1
   --> main.lin:5:22
    |
 5  |     defer let city = "Lisbon".to_owned(mem.system()) else |_| {
@@ -357,8 +357,7 @@ error[T-Arity]: expected 1 argument(s), found 2
    |            -------- declared here
 ```
 
-The count includes the text the method is called on, which is its first
-argument. Write `"Lisbon".to_owned()` for the system allocator, and
+Write `"Lisbon".to_owned()` for the system allocator, and
 `"Lisbon".to_owned_in(allocator)` when the allocator is one you were given. A
 function of your own that allocates can follow the same rule: take the
 allocator first in the `_in` form, and let the plain form pass `mem.system()`
