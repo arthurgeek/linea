@@ -1,0 +1,15 @@
+error[T-Bound]: `Owned` bounds a type parameter of the declaration that writes it, and `T` is not one of `take`'s
+ --> tests/generics/owned/owned_bounds_its_own_declarations_parameter.lin:9:44
+  |
+9 |     fn take(sink self: Self) -> T where T: Owned {
+  |                                            ^^^^^ write `Owned` where the type parameter is declared
+error[T-Bound]: `Owned` bounds a type parameter, and `Key` is not one
+  --> tests/generics/owned/owned_bounds_its_own_declarations_parameter.lin:15:12
+   |
+15 | trait Key: Owned {
+   |            ^^^^^ write `Owned` on the type parameter that needs it
+error[T-Bound]: `Owned` bounds a type parameter, and `Item` is not one
+  --> tests/generics/owned/owned_bounds_its_own_declarations_parameter.lin:20:16
+   |
+20 |     type Item: Owned
+   |                ^^^^^ write `Owned` on the type parameter that needs it

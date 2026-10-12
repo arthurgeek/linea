@@ -993,6 +993,7 @@ fn typecheckInternal(
                 &.{},
             );
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
+            c.builder.pool.items[row[k].index()].parameter.owned = ownedDemandedBy(ast, resolution, bounds);
         }
     }
 
@@ -1772,7 +1773,7 @@ fn capabilityDemand(
                 .discardable => &discardable,
                 .unrestricted => &unrestricted,
             },
-            .trait, .integer, .unknown => continue,
+            .trait, .integer, .owned, .unknown => continue,
         };
         if (source.written == .none) {
             source.written = b.named.name;
@@ -1793,7 +1794,7 @@ fn capabilityDemand(
                     .discardable => &discardable,
                     .unrestricted => &unrestricted,
                 },
-                .trait, .integer, .unknown => continue,
+                .trait, .integer, .owned, .unknown => continue,
             };
             if (source.through == node.DeclId.none) source.through = trait;
         }
@@ -1817,6 +1818,15 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
         for (ast.declBounds(node.DeclId.at(required.trait))) |bound| {
             if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .integer) return true;
         }
+    }
+    return false;
+}
+
+/// Whether a run of bounds writes `Owned`. Only the run itself is read: a
+/// trait cannot require `Owned`, so no trait it reaches adds the demand.
+fn ownedDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) bool {
+    for (bounds) |bound| {
+        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .owned) return true;
     }
     return false;
 }
@@ -5755,6 +5765,7 @@ const Checker = struct {
                         .callables = callables,
                         .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                         .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
+                        .owned = ownedDemandedBy(self.ast, self.res, requirements),
                     },
                 });
             }
@@ -10357,6 +10368,81 @@ const Checker = struct {
         reason: ?[]const u8,
     };
 
+    /// Refuses `held` for an `Owned` bound, naming the parts walked from it to
+    /// what carries the dependency. The path is found over the edges the
+    /// containment answer was computed from, so it names the reason that
+    /// answer gave.
+    fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
+        const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
+        defer self.gpa.free(witness.steps);
+        const held_name = try self.typeName(held);
+        const seed_name = try self.typeName(witness.seed);
+        const file = self.ast.fileOf(at);
+        if (self.builder.get(witness.seed) == .parameter) {
+            const help = try std.fmt.allocPrint(self.sink.arena, "bound `{s}` by `Owned`", .{seed_name});
+            if (witness.steps.len == 0) return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                help,
+                "`{s}` requires `Owned`, and `{s}` may stand for a type that carries a borrow",
+                .{ subject, held_name },
+            );
+            return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                help,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is `{s}`, which may stand for a type that carries one",
+                .{ subject, held_name, try self.witnessPath(witness.steps), seed_name },
+            );
+        }
+        const what: []const u8 = if (self.builder.get(witness.seed) == .borrow)
+            "an observation of another value"
+        else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
+            "a view of storage it does not own"
+        else
+            "raw storage another value owns";
+        const help = "use a type that owns everything it holds, or drop the bound";
+        if (witness.steps.len == 0) return self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            help,
+            "`{s}` requires `Owned`, and `{s}` is {s}",
+            .{ subject, held_name, what },
+        );
+        try self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            help,
+            "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, {s}",
+            .{ subject, held_name, try self.witnessPath(witness.steps), article.before(seed_name), seed_name, what },
+        );
+    }
+
+    /// A witness path as the parts a reader would select: fields and
+    /// variants by name, elements as `[_]`.
+    fn witnessPath(self: *Checker, steps: []const types_mod.ContainmentStep) std.mem.Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        for (steps) |step| {
+            const name: []const u8 = switch (step) {
+                .field => |field| field,
+                .variant => |variant| variant,
+                .base => "0",
+                .element, .stored => {
+                    try out.appendSlice(self.sink.arena, "[_]");
+                    continue;
+                },
+                .environment, .argument => continue,
+            };
+            if (out.items.len > 0) try out.append(self.sink.arena, '.');
+            try out.appendSlice(self.sink.arena, name);
+        }
+        return out.items;
+    }
+
     /// The reason a library operation disposes of a value, where the trait that
     /// provides it records one.
     fn disposalReason(self: *Checker, d: node.DeclId) ?[]const u8 {
@@ -10465,6 +10551,13 @@ const Checker = struct {
             if (mode == .ask) return true;
             try self.noteRefused(at);
             try self.sink.addErrorFmt(.t_bound, self.ast.fileOf(at), span, "supply a built-in integer type or an Integer-constrained parameter", "`{s}` requires `Integer`, and `{s}` is not a built-in integer type", .{ subject, (try self.typeName(held)) });
+            return true;
+        }
+        if (ownedDemandedBy(self.ast, self.res, bounds) and held != .poison and try self.builder.mayCarryDependencies(held)) {
+            if (mode == .ask) return true;
+            if (self.builder.view().mentionsOpenType(held)) return true;
+            try self.noteRefused(at);
+            try self.reportNotOwned(subject, held, at, span);
             return true;
         }
         if (try self.builder.meetsCapabilityWithin(self.generic, held, requirement)) return false;
@@ -10578,7 +10671,7 @@ const Checker = struct {
     fn namesATrait(self: *const Checker, bound: TokenId) bool {
         return switch (resolve_mod.boundNames(self.ast, bound, traitAt(self.ast, self.res, bound))) {
             .trait => true,
-            .capability, .integer, .unknown => false,
+            .capability, .integer, .owned, .unknown => false,
         };
     }
 
@@ -10594,7 +10687,7 @@ const Checker = struct {
             const ast = self.checker.ast;
             return switch (resolve_mod.boundNames(ast, tok, traitAt(ast, self.checker.res, tok))) {
                 .trait => |d| d,
-                .capability, .integer, .unknown => null,
+                .capability, .integer, .owned, .unknown => null,
             };
         }
 
@@ -26025,6 +26118,7 @@ const Checker = struct {
                     .callables = callables,
                     .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                     .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
+                    .owned = ownedDemandedBy(self.ast, self.res, requirements),
                 },
             };
             filled += 1;
@@ -26758,11 +26852,47 @@ const Checker = struct {
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             const own = self.ast.declBounds(d);
-            if (own.len > 0) try self.reportCapabilityDemand(own, self.ast.declName(d));
+            if (own.len > 0) {
+                try self.reportCapabilityDemand(own, self.ast.declName(d));
+                if (self.ownedBoundIn(own)) |bound| try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(bound),
+                    self.ast.tokenSpan(bound),
+                    "write `Owned` on the type parameter that needs it",
+                    "`Owned` bounds a type parameter, and `{s}` is not one",
+                    .{self.ast.tokenText(self.ast.declName(d))},
+                );
+            }
             for (self.ast.declTypeParams(d), 0..) |p, k| {
                 try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
             }
+            // The seed reads `Owned` from the parameter's own record, so a
+            // promise made about any other subject would be checked at every
+            // call and relied on nowhere.
+            for (self.constraints.ofDeclaration(d)) |constraint| {
+                const written = switch (constraint.subject) {
+                    .written => |written| written,
+                    .parameter => continue,
+                };
+                const bound = self.ownedBoundIn(self.constraints.requirementsOf(constraint)) orelse continue;
+                try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(bound),
+                    self.ast.tokenSpan(bound),
+                    "write `Owned` where the type parameter is declared",
+                    "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
+                    .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
+                );
+            }
         }
+    }
+
+    /// The first bound in a run that names `Owned`.
+    fn ownedBoundIn(self: *const Checker, bounds: []const node.TraitBound) ?TokenId {
+        for (bounds) |bound| {
+            if (bound.kind == .named and resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) == .owned) return bound.named.name;
+        }
+        return null;
     }
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
@@ -26778,6 +26908,24 @@ const Checker = struct {
         // A declaration whose name the parser never read still wrote a list,
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
+
+        if (self.ownedBoundIn(bounds)) |first| {
+            for (bounds) |bound| {
+                if (bound.kind != .named or bound.named.name == first) continue;
+                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != .owned) continue;
+                return self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(at),
+                    self.ast.tokenSpan(at),
+                    "drop one of the two bounds",
+                    "`{s}` is bounded `Owned` twice",
+                    .{self.ast.tokenText(at)},
+                );
+            }
+            if (integerDemandedBy(self.ast, self.res, bounds, through)) {
+                return self.sink.addError(.t_bound, self.ast.fileOf(at), self.ast.tokenSpan(at), "Integer already includes Owned", "drop the redundant Owned bound");
+            }
+        }
 
         if (demand.copyable.demanded() and demand.discardable.written != .none) {
             return self.sink.addError(.t_bound, self.ast.fileOf(at), self.ast.tokenSpan(at), "Copyable already includes Discardable", "drop the redundant Discardable bound");
@@ -27095,6 +27243,7 @@ const Checker = struct {
         switch (wanted_name) {
             .capability => return false,
             .integer => if (got_name != .integer) return false,
+            .owned => if (got_name != .owned) return false,
             .trait => |wanted| switch (got_name) {
                 .trait => |got| if (wanted != got) return false,
                 else => return false,

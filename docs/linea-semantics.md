@@ -3140,7 +3140,8 @@ Repeating an explicit capability bound, or explicitly restating one already
 inherited through a trait, is rejected at the declaration. An explicit
 Discardable bound is redundant when Copyable is already required. Linear adds no
 capability requirement and cannot add information beside Copyable or
-Discardable. Reaching a capability through two different trait bounds does not
+Discardable. `Owned` written twice on one parameter, or beside `Integer`, which
+implies it, is rejected the same way. Reaching a capability through two different trait bounds does not
 make either trait redundant: each trait also grants its own operations.
 Diagnostics identify the bounded name and the redundant requirement, including
 an inherited source where applicable.

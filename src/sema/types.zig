@@ -306,6 +306,9 @@ pub const Type = union(enum) {
         /// The capability promised by the parameter's normalized bounds.
         requirement: CapabilityRequirement = .unrestricted,
         integer: bool = false,
+        /// Whether its bounds promise `Owned`: every admitted argument carries
+        /// no dependency, so the parameter seeds none.
+        owned: bool = false,
         /// The traits its bounds name, by declaration, and the arguments each
         /// was written with.
         ///
@@ -1189,6 +1192,81 @@ const BorrowContainment = struct {
         if (self.values.items[@intFromEnum(child)]) try self.mark(gpa, owner);
     }
 
+    /// One step from a type to a part whose dependencies it holds.
+    pub const Step = union(enum) {
+        /// A structure's field, a closure environment's capture included.
+        field: []const u8,
+        /// A payload of the named variant.
+        variant: []const u8,
+        /// An element of a fixed array, or an observation's referent.
+        element,
+        /// A newtype's base.
+        base,
+        /// A closure's environment.
+        environment,
+        /// The elements certified storage holds.
+        stored,
+        /// A type argument, which a writer may be.
+        argument,
+    };
+
+    /// Every part `ty` holds whose dependencies `ty` holds too, in `mode`,
+    /// handed to `visit.child(step, part)`. The containment table is built
+    /// over these edges and a witness path is found over them, so the two
+    /// cannot disagree about what a type contains.
+    fn eachChild(builder: *Typing.Builder, ty: TypeId, mode: Mode, visit: anytype) std.mem.Allocator.Error!void {
+        const view = builder.view();
+        const typed_storage = builder.certified_storage != .none and
+            view.declOfType(ty) == builder.certified_storage and view.instanceOf(ty) != null;
+        switch (builder.get(ty)) {
+            .closure => |closure| try visit.child(.environment, closure.environment),
+            .borrow => |observation| if (mode == .writers) try visit.child(.element, observation.referent),
+            .parameter => {},
+            .array => |array| if (array.count != 0) {
+                try visit.child(.element, array.element);
+            },
+            .newtype => |newtype| try visit.child(.base, newtype.base),
+            .struct_ => |record| {
+                const names = builder.fields.items(.name)[record.first_field..][0..record.field_count];
+                for (builder.fields.items(.ty)[record.first_field..][0..record.field_count], names, 0..) |field, name, index| {
+                    // Certified storage's optional backing owner erases its
+                    // elements. Its logical T and separate allocator field
+                    // describe their dependencies without that raw erasure.
+                    if (typed_storage and index == 0 and mode != .writers) continue;
+                    try visit.child(.{ .field = name }, field);
+                }
+            },
+            .enum_ => |sum| {
+                for (sum.first_variant..sum.first_variant + sum.variant_count) |variant| {
+                    const first = builder.variants.items(.first_field)[variant];
+                    const len = builder.variants.items(.field_count)[variant];
+                    const name = builder.variants.items(.name)[variant];
+                    for (builder.fields.items(.ty)[first..][0..len]) |field| try visit.child(.{ .variant = name }, field);
+                }
+            },
+            else => {},
+        }
+        if (mode == .writers) {
+            if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try visit.child(.argument, argument);
+        } else if (builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
+            if (view.instanceOf(ty)) |instance| {
+                const arguments = view.argsOf(instance);
+                if (arguments.len != 0) try visit.child(.stored, arguments[0]);
+            }
+        }
+    }
+
+    /// Records each part a type holds as an edge back to that type.
+    const Edges = struct {
+        containment: *BorrowContainment,
+        gpa: std.mem.Allocator,
+        owner: TypeId,
+
+        fn child(edges: Edges, _: Step, part: TypeId) std.mem.Allocator.Error!void {
+            try edges.containment.edge(edges.gpa, edges.owner, part);
+        }
+    };
+
     fn update(self: *BorrowContainment, builder: *Typing.Builder, mode: Mode) !void {
         const gpa = builder.gpa;
         if (self.dirty) {
@@ -1205,49 +1283,13 @@ const BorrowContainment = struct {
         const view = builder.view();
         while (self.scanned < count) : (self.scanned += 1) {
             const ty: TypeId = @enumFromInt(@as(u32, @intCast(self.scanned)));
-            const typed_storage = builder.certified_storage != .none and
-                view.declOfType(ty) == builder.certified_storage and view.instanceOf(ty) != null;
-            switch (builder.get(ty)) {
-                .closure => |closure| try self.edge(gpa, ty, closure.environment),
-                .borrow => |observation| if (mode == .writers) try self.edge(gpa, ty, observation.referent),
-                .parameter => {},
-                .array => |array| if (array.count != 0) {
-                    try self.edge(gpa, ty, array.element);
-                },
-                .newtype => |newtype| try self.edge(gpa, ty, newtype.base),
-                .struct_ => |record| {
-                    for (builder.fields.items(.ty)[record.first_field..][0..record.field_count], 0..) |field, index| {
-                        // Certified storage's optional backing owner erases its
-                        // elements. Its logical T and separate allocator field
-                        // describe their dependencies without that raw erasure.
-                        if (typed_storage and index == 0 and mode != .writers) continue;
-                        try self.edge(gpa, ty, field);
-                    }
-                },
-                .enum_ => |sum| {
-                    for (sum.first_variant..sum.first_variant + sum.variant_count) |variant| {
-                        const first = builder.variants.items(.first_field)[variant];
-                        const len = builder.variants.items(.field_count)[variant];
-                        for (builder.fields.items(.ty)[first..][0..len]) |field| try self.edge(gpa, ty, field);
-                    }
-                },
-                else => {},
-            }
+            try eachChild(builder, ty, mode, Edges{ .containment = self, .gpa = gpa, .owner = ty });
             switch (mode) {
-                .writers => {
-                    switch (builder.get(ty)) {
-                        .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
-                        else => {},
-                    }
-                    if (view.instanceOf(ty)) |instance| for (view.argsOf(instance)) |argument| try self.edge(gpa, ty, argument);
+                .writers => switch (builder.get(ty)) {
+                    .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
+                    else => {},
                 },
                 else => if (view.directDependencySeed(ty, mode == .raw_carriers)) try self.mark(gpa, ty),
-            }
-            if (mode != .writers and builder.certified_storage != .none and view.declOfType(ty) == builder.certified_storage) {
-                if (view.instanceOf(ty)) |instance| {
-                    const arguments = view.argsOf(instance);
-                    if (arguments.len != 0) try self.edge(gpa, ty, arguments[0]);
-                }
             }
         }
         var next: usize = 0;
@@ -1261,6 +1303,15 @@ const BorrowContainment = struct {
         }
         self.queue.clearRetainingCapacity();
     }
+};
+
+pub const ContainmentStep = BorrowContainment.Step;
+
+/// A path from a type to a part that holds a dependency directly: an
+/// observation, a view, raw storage, or a type parameter that may be one.
+pub const DependencyWitness = struct {
+    steps: []const ContainmentStep,
+    seed: TypeId,
 };
 
 pub const PathSelector = union(enum) { field: StringId, observed };
@@ -2361,6 +2412,8 @@ pub const Demand = struct {
     /// The capability the bounds demand. `Linear` imposes no restriction.
     requirement: CapabilityRequirement = .unrestricted,
     integer: bool = false,
+    /// Whether the argument must carry no dependency.
+    owned: bool = false,
 };
 
 /// A demand a bound refusal reported unmet: what `ty` was told it lacks.
@@ -3966,6 +4019,7 @@ pub const ImplIndex = struct {
         if (!try pool.meetsCapabilityWithin(within, given, demand.requirement) and
             !decided.grants(.{ .ty = given, .lacks = .{ .capability = demand.requirement } })) return false;
         if (demand.integer and !pool.isIntegerWithin(within, given)) return false;
+        if (demand.owned and try pool.mayCarryDependencies(given)) return false;
         for (demand.traits) |required| {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
@@ -6454,7 +6508,11 @@ pub const Typing = struct {
 
     fn directDependencySeed(self: *const Typing, t: TypeId, raw_carriers: bool) bool {
         switch (self.get(t)) {
-            .borrow, .parameter => return true,
+            .borrow => return true,
+            // An instantiation may supply any type, so a parameter carries
+            // unless its bounds admit only types that carry nothing: `Owned`,
+            // or the integer family, all of which are Owned.
+            .parameter => |p| return !(p.owned or p.integer),
             else => {},
         }
         const declaration = self.declOfType(t) orelse return false;
@@ -6475,6 +6533,38 @@ pub const Typing = struct {
         const index = @intFromEnum(t);
         std.debug.assert(index < self.writer_containment.len);
         return self.writer_containment[index];
+    }
+
+    test "an Owned or Integer parameter carries nothing, and a carrier names its path" {
+        const gpa = testing.allocator;
+        var builder = try Builder.init(gpa);
+        defer builder.deinit();
+        const plain = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+        const owned = try builder.addParameter("U", 0, 1, .unrestricted, &.{});
+        builder.pool.items[@intFromEnum(owned)].parameter.owned = true;
+        const counted = try builder.addParameter("N", 0, 2, .unrestricted, &.{});
+        builder.pool.items[@intFromEnum(counted)].parameter.integer = true;
+        const number = try builder.borrowOf(.u8);
+        const reading = try builder.addStruct("Reading", .affine, &.{.{ .name = "celsius", .ty = .i64 }});
+        const label = try builder.addStruct("Label", .affine, &.{ .{ .name = "count", .ty = .u8 }, .{ .name = "first", .ty = number } });
+        const shelf = try builder.addStruct("Shelf", .affine, &.{.{ .name = "label", .ty = label }});
+
+        try testing.expect(try builder.mayCarryDependencies(plain));
+        try testing.expect(!try builder.mayCarryDependencies(owned));
+        try testing.expect(!try builder.mayCarryDependencies(counted));
+        try testing.expect(try builder.dependencyWitness(gpa, reading) == null);
+
+        const witness = (try builder.dependencyWitness(gpa, shelf)).?;
+        defer gpa.free(witness.steps);
+        try testing.expectEqual(number, witness.seed);
+        try testing.expectEqual(@as(usize, 2), witness.steps.len);
+        try testing.expectEqualStrings("label", witness.steps[0].field);
+        try testing.expectEqualStrings("first", witness.steps[1].field);
+
+        const itself = (try builder.dependencyWitness(gpa, plain)).?;
+        defer gpa.free(itself.steps);
+        try testing.expectEqual(plain, itself.seed);
+        try testing.expectEqual(@as(usize, 0), itself.steps.len);
     }
 
     test "a type holds a writer when a closure, function or type parameter can reach it" {
@@ -8560,6 +8650,48 @@ pub const Typing = struct {
             try self.dependency_facts.update(self, .raw_carriers);
             return self.dependency_facts.values.items[@intFromEnum(t)];
         }
+
+        /// Why a value of `t` may carry a dependency: the parts walked from
+        /// `t` to a type that holds one directly, over the edges the
+        /// containment table is built from. Null where `t` carries nothing.
+        /// The steps are allocated from `gpa` and owned by the caller.
+        ///
+        /// **Bound:** each type reachable from `t` is entered once.
+        pub fn dependencyWitness(self: *Builder, gpa: std.mem.Allocator, t: TypeId) !?DependencyWitness {
+            if (!try self.mayCarryDependencies(t)) return null;
+            var search: WitnessSearch = .{ .builder = self, .gpa = gpa };
+            defer search.visited.deinit(gpa);
+            defer search.steps.deinit(gpa);
+            const seed = try search.from(t) orelse return null;
+            return .{ .steps = try search.steps.toOwnedSlice(gpa), .seed = seed };
+        }
+
+        const WitnessSearch = struct {
+            builder: *Builder,
+            gpa: std.mem.Allocator,
+            visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+            steps: std.ArrayList(ContainmentStep) = .empty,
+            found: ?TypeId = null,
+
+            /// The seed reached from `ty`, with `steps` holding the path to it.
+            fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
+                if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
+                if (search.builder.view().directDependencySeed(ty, true)) return ty;
+                try BorrowContainment.eachChild(search.builder, ty, .raw_carriers, search);
+                return search.found;
+            }
+
+            fn child(search: *WitnessSearch, step: ContainmentStep, part: TypeId) std.mem.Allocator.Error!void {
+                if (search.found != null) return;
+                if (!search.builder.dependency_facts.values.items[@intFromEnum(part)]) return;
+                try search.steps.append(search.gpa, step);
+                if (try search.from(part)) |seed| {
+                    search.found = seed;
+                    return;
+                }
+                _ = search.steps.pop();
+            }
+        };
 
         /// A callable requirement's signature: `signature`, whose result may
         /// also carry what the callable itself carries. A callback meeting a

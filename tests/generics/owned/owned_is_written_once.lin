@@ -1,0 +1,12 @@
+fn twice[T: Owned + Owned](sink value: T) -> T {
+    value
+}
+
+// Every Integer type is Owned already.
+fn counted[N: Integer + Owned](sink value: N) -> N {
+    value
+}
+
+fn main() -> UInt8 {
+    twice(UInt8(1)) + counted(UInt8(2))
+}

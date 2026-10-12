@@ -1,0 +1,10 @@
+error[T-Bound]: `T` is bounded `Owned` twice
+ --> tests/generics/owned/owned_is_written_once.lin:1:10
+  |
+1 | fn twice[T: Owned + Owned](sink value: T) -> T {
+  |          ^ drop one of the two bounds
+error[T-Bound]: Integer already includes Owned
+ --> tests/generics/owned/owned_is_written_once.lin:6:12
+  |
+6 | fn counted[N: Integer + Owned](sink value: N) -> N {
+  |            ^ drop the redundant Owned bound
