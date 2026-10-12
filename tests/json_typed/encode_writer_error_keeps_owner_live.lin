@@ -1,5 +1,4 @@
 import std.json
-import std.mem
 
 struct FailingWriter { error: Str }
 
@@ -15,7 +14,7 @@ impl Writer for FailingWriter {
 }
 
 fn main() -> UInt8 {
-    let message = "stopped".to_owned(mem.system()).unwrap()
+    let message = "stopped".to_owned().unwrap()
     var writer: FailingWriter = .{ error = message.view() }
     let result = json.encode(&writer, true)
     message.release()

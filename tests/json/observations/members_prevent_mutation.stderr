@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/json/observations/members_prevent_mutation.lin:8:5
+ --> tests/json/observations/members_prevent_mutation.lin:7:5
   |
-8 |     json.Value.remove_member(&document, "key").unwrap().release()
+7 |     json.Value.remove_member(&document, "key").unwrap().release()
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-9 |     let found = Iterator.next(&members).is_some()
+8 |     let found = Iterator.next(&members).is_some()
   |                                ------- the observation is still used here

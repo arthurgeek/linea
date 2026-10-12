@@ -2,7 +2,7 @@ import std.iter
 import std.mem
 
 fn main() -> UInt8 {
-    let owner = "one,two".to_owned(mem.system()).unwrap()
+    let owner = "one,two".to_owned().unwrap()
     var source = owner.view().split(",").unwrap()
     var values: Vec[Str, mem.SystemAllocator] = Vec.new()
     iter.extend(&values, &source).unwrap()

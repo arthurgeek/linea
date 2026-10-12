@@ -156,7 +156,7 @@ test fn rendering_reports_allocation_failure_after_a_short_entry() {
 }
 
 test fn rendered_configuration_owns_its_bytes_after_input_is_released() {
-    let input = "name=Ada\ncount=3\n".to_owned(mem.system()).unwrap()
+    let input = "name=Ada\ncount=3\n".to_owned().unwrap()
     let entries = parse(mem.system(), input.view()).unwrap()
     defer let rendered = render(mem.system(), entries, key: "name", value: "Grace", max_bytes: max_config_bytes).unwrap()
     entries.release()
@@ -309,7 +309,7 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
         }
         // `map_err` replaces the allocation failure with this step's own
         // variant, which `?` returns.
-        given.to_owned(mem.system()).map_err(|sink _oom| ConfigFailure.ValueAllocation)?
+        given.to_owned().map_err(|sink _oom| ConfigFailure.ValueAllocation)?
     } else {
         var reader = io.BufferedReader.open(mem.system(), capacity: input_capacity, reader: io.stdin()) else |_| {
             return .Err(.PromptBuffer)
@@ -328,6 +328,6 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
     defer let output = render(mem.system(), entries, key: key, value: chosen, max_bytes: max_config_bytes)?
     // Atomic publication installs the complete rendered file. The error also
     // says whether publication happened before a later cleanup failure.
-    fs.save_atomic(mem.system(), path, output.as_bytes(), policy: .Replace)?
+    fs.save_atomic(path, output.as_bytes(), policy: .Replace)?
     .Ok(())
 }

@@ -1,6 +1,6 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/iterator_collection/extension_rejects_an_iterator_observing_its_destination.lin:7:5
+ --> tests/iterator_collection/extension_rejects_an_iterator_observing_its_destination.lin:6:5
   |
-7 |     iter.extend(&values, &source).unwrap()
+6 |     iter.extend(&values, &source).unwrap()
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
   |                          ------- the observation is still used here

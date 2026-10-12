@@ -1,6 +1,5 @@
 // Process a batch of payments against an available balance. Each transaction
 // must be committed or rolled back after it leaves the vector.
-import std.mem
 import std.io
 
 @linear
@@ -25,7 +24,6 @@ fn main() -> Result[UInt8, io.IoError] {
     // any, so a failed allocation never leaves a `@linear` transaction unsettled.
     // The annotation gives the struct literals below their type.
     let payments: Vec[Transaction] = Vec.from_fn(
-        mem.system(),
         count: 3,
         initializer: |index| match index {
             0 => .{ recipient = "rent", amount = 7000 },

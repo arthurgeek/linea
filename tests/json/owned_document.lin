@@ -1,11 +1,9 @@
 import std.json
-import std.mem
 
 fn main() -> UInt8 {
-    let allocator = mem.system()
-    var document = json.Value.array(allocator)
-    var product = json.Value.object(allocator)
-    let name = json.Value.string(allocator, "tea").unwrap()
+    var document = json.Value.array()
+    var product = json.Value.object()
+    let name = json.Value.string("tea").unwrap()
     json.Value.insert(&product, "name", name).unwrap().release()
     json.Value.append(&document, product).unwrap()
     let correct = document.at(0).unwrap().get("name").unwrap().as_str().unwrap() == "tea"

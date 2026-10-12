@@ -60,7 +60,6 @@ name, as a `String`, and a function that hands out a view of it:
 
 ```linea
 import std.io
-import std.mem
 
 @derive(Release)
 struct Station {
@@ -74,7 +73,7 @@ fn label(station: Station) -> Str where borrows(station) {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let name = "Harbour".to_owned(mem.system()) else |_| {
+    let name = "Harbour".to_owned() else |_| {
         return .Ok(1)
     }
     let station = Station { name, samples = 2 }
@@ -89,7 +88,7 @@ fn main() -> Result[UInt8, io.IoError] {
 Harbour has 7 letters
 ```
 
-`"Harbour".to_owned(mem.system())` copies the literal into memory the station
+`"Harbour".to_owned()` copies the literal into memory the station
 owns ([Memory](07-memory.md) covers allocators), and `defer station.release()`
 frees it when `main` ends. `title` is a `Str` pointing into the station's name.
 
@@ -351,18 +350,17 @@ over `A: Allocator`, and `String[A]` is text allocated from an `A`;
 
 ```linea
 import std.io
-import std.mem
 
 fn preferred[A: Allocator](primary: String[A], fallback: String[A], use_primary: Bool) -> Str {
     if use_primary { primary.view() } else { fallback.view() }
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let home = "home".to_owned(mem.system()) else |_| {
+    let home = "home".to_owned() else |_| {
         return .Ok(1)
     }
     defer home.release()
-    let work = "work".to_owned(mem.system()) else |_| {
+    let work = "work".to_owned() else |_| {
         return .Ok(1)
     }
     defer work.release()
@@ -373,9 +371,9 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[T-BorrowContract]: the result has more than one eligible observation source
- --> preferred.lin:4:4
+ --> preferred.lin:3:4
   |
-4 | fn preferred[A: Allocator](primary: String[A], fallback: String[A], use_primary: Bool) -> Str {
+3 | fn preferred[A: Allocator](primary: String[A], fallback: String[A], use_primary: Bool) -> Str {
   |    ^^^^^^^^^ the result may borrow from `primary` or `fallback`; add `where borrows(primary)` or `where borrows(fallback)`, or list several sources in one clause
 ```
 
@@ -638,7 +636,6 @@ a clause anywhere, and the compiler still refuses:
 
 ```linea
 import std.io
-import std.mem
 
 // No clause: with one possible source, Linea infers `carries(line)`.
 fn shortened(line: Str) -> Option[Str] {
@@ -646,7 +643,7 @@ fn shortened(line: Str) -> Option[Str] {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let name = "Harbour".to_owned(mem.system()) else |_| {
+    let name = "Harbour".to_owned() else |_| {
         return .Ok(1)
     }
     match shortened(name.view()) {
@@ -663,11 +660,11 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> shortened.lin:16:13
+  --> shortened.lin:15:13
    |
-16 |             name.release()
+15 |             name.release()
    |             ^^^^ keep this place available until the last use of its observation
-17 |             io.println("{head.length()}")?
+16 |             io.println("{head.length()}")?
    |                          ---- the observation is still used here
 ```
 
@@ -692,7 +689,6 @@ The implementation writes no clause of its own:
 
 ```linea
 import std.io
-import std.mem
 
 trait Labelled {
     fn label(self: Self) -> Str where borrows(self)
@@ -712,7 +708,7 @@ impl Labelled for Station {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let name = "Harbour".to_owned(mem.system()) else |_| {
+    let name = "Harbour".to_owned() else |_| {
         return .Ok(1)
     }
     defer let station = Station { name, samples = 2 }

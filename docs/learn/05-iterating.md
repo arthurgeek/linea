@@ -870,7 +870,6 @@ for each index; try to schedule the release anyway:
 
 ```linea
 import std.io
-import std.mem
 
 @linear
 struct Payment {
@@ -882,7 +881,6 @@ fn main() -> Result[UInt8, io.IoError] {
     // `Vec.from_fn` makes room for three payments, then builds one for each
     // index, so no payment exists until there is room for all of them.
     let queue = Vec.from_fn(
-        mem.system(),
         count: 3,
         initializer: [amounts] |index| Payment { cents = amounts[index] },
     ) else |_| {
@@ -896,9 +894,9 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[T-Bound]: `release` comes from `Release`, and `Vec[Payment, mem.SystemAllocator]` does not implement it
-  --> queue_release.lin:20:11
+  --> queue_release.lin:18:11
    |
-20 |     defer queue.release()
+18 |     defer queue.release()
    |           ^^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
    |
    = help: `Vec[T, A]` implements `Release` when `T` implements `Release`, and `Payment` does not
@@ -931,7 +929,6 @@ closes early and refunds every payment still waiting:
 
 ```linea
 import std.io
-import std.mem
 
 @linear
 struct Payment {
@@ -949,7 +946,6 @@ impl Payment {
 fn main() -> Result[UInt8, io.IoError] {
     let amounts = [UInt64(250), 400, 480]
     var queue = Vec.from_fn(
-        mem.system(),
         count: 3,
         initializer: [amounts] |index| Payment { cents = amounts[index] },
     ) else |_| {
@@ -994,7 +990,6 @@ a queue of payments in order:
 
 ```linea
 import std.io
-import std.mem
 
 // A payment must be consumed exactly once: committed or refunded.
 @linear
@@ -1013,7 +1008,6 @@ impl Payment {
 fn main() -> Result[UInt8, io.IoError] {
     let amounts = [UInt64(250), 400, 480, 180, 90]
     let queue = Vec.from_fn(
-        mem.system(),
         count: 5,
         initializer: [amounts] |index| Payment { cents = amounts[index] },
     ) else |_| {
@@ -1030,9 +1024,9 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[O-LinearWalk]: walking a `mem.Drain[Payment, mem.SystemAllocator]` abandons it where the walk ends, and it is linear
-  --> queue_walk.lin:28:20
+  --> queue_walk.lin:26:20
    |
-28 |     for payment in queue.drain() {
+26 |     for payment in queue.drain() {
    |                    ^^^^^^^^^^^^^ it still holds the `Payment` items it has not handed over, and `Payment` is linear
    |
    = help: bind it, `var pending = queue.drain()`, walk it lent with `for payment in &pending`, then settle `pending` with `finish()`
@@ -1053,7 +1047,6 @@ refunds the rest:
 
 ```linea
 import std.io
-import std.mem
 
 // A payment must be consumed exactly once: committed or refunded.
 @linear
@@ -1078,7 +1071,6 @@ impl Payment {
 fn main() -> Result[UInt8, io.IoError] {
     let amounts = [UInt64(250), 400, 480, 180, 90]
     let queue = Vec.from_fn(
-        mem.system(),
         count: 5,
         initializer: [amounts] |index| Payment { cents = amounts[index] },
     ) else |_| {

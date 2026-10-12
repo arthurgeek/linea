@@ -4,10 +4,10 @@ import std.mem
 // the second cannot pass it again.
 fn main() -> UInt8 {
     let square = |index: UInt64| index * index
-    let small = mem.Vec.from_fn(mem.system(), 2, square) else |_| {
+    let small = mem.Vec.from_fn(2, square) else |_| {
         return 1
     }
-    let large = mem.Vec.from_fn(mem.system(), 4, square) else |_| {
+    let large = mem.Vec.from_fn(4, square) else |_| {
         small.release()
         return 1
     }

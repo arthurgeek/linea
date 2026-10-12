@@ -17,7 +17,7 @@ fn settle(sink transaction: Transaction) -> UInt64 {
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), 256)
     defer arena.release()
-    let built: Result[Vec[Transaction, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: |index| Transaction { cents = index })
+    let built: Result[Vec[Transaction, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: |index| Transaction { cents = index })
     let pending = built.unwrap()
     var total: UInt64 = 0
     for transaction in pending.drain() {

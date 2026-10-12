@@ -1,7 +1,6 @@
 // A generic trait's whole-result contract is adopted by a generic
 // implementation, with the trait's parameters read as the implementation's.
 import std.io
-import std.mem
 
 struct Request[T] {
     tag: T,
@@ -27,7 +26,7 @@ fn serve[T, H: Handler[T]](handler: H, request: Request[T]) -> Option[Str] where
 }
 
 fn main() -> UInt8 {
-    let motd = "welcome".to_owned(mem.system()).unwrap()
+    let motd = "welcome".to_owned().unwrap()
     let greeter = Greeter { motd = motd.view() }
     let numbered: Request[Int64] = .{ tag = 1, name = "numbered" }
     let flagged: Request[Bool] = .{ tag = true, name = "flagged" }

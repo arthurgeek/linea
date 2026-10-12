@@ -1,11 +1,10 @@
 import std.json
-import std.mem
 
 fn main() -> UInt8 {
-    var document = json.Value.array(mem.system())
-    json.Value.append(&document, json.Value.boolean(mem.system(), true)).unwrap()
+    var document = json.Value.array()
+    json.Value.append(&document, json.Value.boolean(true)).unwrap()
     let child = document.at(0).unwrap()
-    json.Value.append(&document, json.Value.null(mem.system())).unwrap()
+    json.Value.append(&document, json.Value.null()).unwrap()
     let result = child.as_bool().unwrap()
     document.release()
     if result {

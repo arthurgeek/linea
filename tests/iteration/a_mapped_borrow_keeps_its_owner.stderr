@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/iteration/a_mapped_borrow_keeps_its_owner.lin:14:5
+  --> tests/iteration/a_mapped_borrow_keeps_its_owner.lin:12:5
    |
-14 |     owner.release()
+12 |     owner.release()
    |     ^^^^^ keep this place available until the last use of its observation
-15 |     if word.value == "word" {
+13 |     if word.value == "word" {
    |        ---------- the observation is still used here

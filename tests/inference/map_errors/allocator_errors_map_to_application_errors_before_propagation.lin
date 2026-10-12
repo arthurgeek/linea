@@ -7,7 +7,7 @@ enum RenderError {
 }
 
 fn render[A: Allocator](allocator: A) -> Result[String[A], RenderError] where carries(.Ok: allocator) {
-    let output = "rendered".to_owned(allocator).map_err(|sink error| RenderError.Allocation(error))?
+    let output = "rendered".to_owned_in(allocator).map_err(|sink error| RenderError.Allocation(error))?
     return .Ok(output)
 }
 

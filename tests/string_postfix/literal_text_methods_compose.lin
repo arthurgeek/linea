@@ -1,7 +1,5 @@
-import std.mem
-
 fn main() -> UInt8 {
-    let owned = "café".to_owned(mem.system()).unwrap()
+    let owned = "café".to_owned().unwrap()
     defer owned.release()
     let first = "tea".as_bytes()[0]
     let trimmed = " tea ".trim_unicode()

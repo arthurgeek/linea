@@ -116,7 +116,7 @@ fn write_field[A: Allocator, B: Allocator](inout letter: String[B], order: Order
 // inside are text. The annotation tells `json.decode` to build an `Order`,
 // and `unwrap` hands it over.
 test fn a_template_keeps_its_backslashes_and_fills_its_fields() {
-    defer let order: Order = json.decode(mem.system(), r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
+    defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
     // In a raw literal a backslash is an ordinary byte, so a Windows path
     // needs no escaping.
     defer let path = fill(mem.system(), r"C:\letters\{name}-{count}.txt", order).unwrap()
@@ -124,7 +124,7 @@ test fn a_template_keeps_its_backslashes_and_fills_its_fields() {
 }
 
 test fn a_field_the_order_lacks_is_refused() {
-    defer let order: Order = json.decode(mem.system(), r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
+    defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
     let refused = match fill(mem.system(), r"Hello {nickname}", order) {
         Err(error) => {
             let named = match read error { Missing(field) => field == "nickname", _ => false }
@@ -140,10 +140,10 @@ test fn a_field_the_order_lacks_is_refused() {
 }
 
 test fn an_order_with_a_count_in_words_is_refused() {
-    let decoded: Result[OrderList, json.DecodeError] = json.decode(mem.system(), r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
+    let decoded: Result[OrderList, json.DecodeError] = json.decode(r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
     defer let refused = match decoded {
         Err(error) => {
-            let shown = fmt.render_owned(mem.system(), error).unwrap()
+            let shown = fmt.render_owned(error).unwrap()
             error.release()
             shown
         },
@@ -157,7 +157,7 @@ test fn an_order_with_a_count_in_words_is_refused() {
 
 fn write_letters() -> Result[(), LetterError] {
     // The annotation tells `json.decode` to build a list of orders.
-    defer let list: OrderList = json.decode(mem.system(), orders)?
+    defer let list: OrderList = json.decode(orders)?
     var first = true
     for read order in list {
         defer let letter = fill(mem.system(), letter_form, order)?

@@ -158,6 +158,7 @@ The library tests itself.
   ok    fmt.int64_renderers_preserve_decimal_boundaries
   ok    fmt.int8_renderers_preserve_decimal_boundaries
   ok    fmt.option_display_distinguishes_absence_and_renders_its_payload
+  ok    fmt.owned_rendering_allocates_from_the_system_allocator
   ok    fmt.owned_rendering_allocates_its_text_from_an_arena
   ok    fmt.owned_rendering_formats_interpolation_values
   ok    fmt.owned_rendering_outlives_its_input_owner
@@ -219,14 +220,17 @@ The library tests itself.
   ok    fs.path_errors_are_independent_of_released_input_bytes
   ok    fs.paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset
   ok    fs.reading_a_file_accepts_its_exact_byte_limit
+  ok    fs.reading_a_file_allocates_from_the_system_allocator
   ok    fs.reading_a_file_allocates_its_bytes_from_an_arena
   ok    fs.reading_a_file_retains_the_extra_byte_after_a_limit_failure
   ok    fs.reading_text_decodes_the_file_as_utf8
   ok    fs.reading_text_names_the_offset_of_invalid_utf8
   ok    fs.reading_text_releases_the_bytes_of_every_failure_and_every_refusal
   ok    fs.reading_text_reports_a_missing_file_as_a_read_failure
+  ok    fs.saving_atomically_publishes_the_new_contents
   ok    fs.settling_a_failed_file_read_keeps_the_read_and_close_errors
   ok    fs.temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator
+  ok    fs.writing_a_file_reports_the_bytes_written
   ok    hash.boolean_hashes_distinguish_values
   ok    hash.boolean_queries_match_only_the_same_value
   ok    hash.hasher_finish_observes_without_resetting_or_consuming_the_stream
@@ -248,7 +252,6 @@ The library tests itself.
   ok    http.a_bound_address_that_cannot_be_read_closes_the_listener_and_releases_the_handler
   ok    http.a_bytes_response_holds_its_body_as_built
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
-  ok    http.a_client_sent_number_is_never_logged
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
   ok    http.a_decode_error_answers_by_whose_mistake_it_is
   ok    http.a_derived_params_reads_each_field_by_its_name
@@ -265,7 +268,6 @@ The library tests itself.
   ok    http.a_form_of_one_pair_too_many_is_refused_with_413
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
   ok    http.a_handler_error_before_headers_answers_its_status
-  ok    http.a_handlers_own_number_is_replaced
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
   ok    http.a_header_is_found_by_its_folded_name
@@ -294,8 +296,6 @@ The library tests itself.
   ok    http.a_new_header_list_is_empty
   ok    http.a_new_request_holds_its_method_target_and_body
   ok    http.a_new_router_answers_404
-  ok    http.a_numbered_exchange_is_logged_with_its_number
-  ok    http.a_numbered_request_keeps_the_rest_of_the_request
   ok    http.a_param_value_is_found_by_its_exact_name_once
   ok    http.a_param_value_parses_borrows_or_is_optional
   ok    http.a_parameter_beats_a_remainder
@@ -320,7 +320,6 @@ The library tests itself.
   ok    http.a_recorded_body_is_what_a_client_would_read
   ok    http.a_refused_arena_is_answered_503
   ok    http.a_refused_body_left_unread_does_not_lose_the_answer
-  ok    http.a_refused_buffer_answers_500_before_the_handler
   ok    http.a_refused_document_change_answers_500
   ok    http.a_refused_header_answers_500
   ok    http.a_replacement_refused_for_memory_keeps_the_old_value
@@ -340,7 +339,6 @@ The library tests itself.
   ok    http.a_request_read_after_its_deadline_from_accept_times_out
   ok    http.a_request_split_into_single_bytes_parses_as_one
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
-  ok    http.a_request_the_handler_never_saw_is_logged_without_a_number
   ok    http.a_request_with_a_body_parses
   ok    http.a_response_reads_its_held_body_and_no_streamed_one
   ok    http.a_response_reads_its_status
@@ -381,7 +379,6 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
-  ok    http.a_walk_of_the_headers_shows_one_number
   ok    http.a_wrong_method_is_405_with_allow
   ok    http.add_header_keeps_the_values_a_name_already_has
   ok    http.adding_a_header_keeps_earlier_values
@@ -407,10 +404,8 @@ The library tests itself.
   ok    http.decoding_appends_the_bytes_escapes_spell
   ok    http.each_accept_retry_is_observed_with_its_pause
   ok    http.each_allocation_failure_covers_every_acquisition_from_the_parent
-  ok    http.each_allocation_failure_covers_every_buffer_the_numbering_grows
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
-  ok    http.each_request_is_numbered_for_the_handler_and_the_response
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
@@ -532,12 +527,14 @@ The library tests itself.
   ok    io.prompt_reads_through_a_reader_in_an_arena
   ok    io.prompt_writes_to_standard_error_and_reads_its_reader
   ok    io.raw_resume_preserves_invalid_utf8_and_the_terminator
+  ok    io.read_exact_allocates_from_the_system_allocator
   ok    io.read_exact_allocates_the_body_from_its_allocator
   ok    io.read_exact_collects_a_body_split_across_reads
   ok    io.read_exact_refuses_past_its_limit_before_reading
   ok    io.read_exact_refuses_while_a_line_read_needs_recovery
   ok    io.read_exact_reports_a_reader_that_overruns_its_destination
   ok    io.read_exact_reports_how_much_arrived_before_the_end
+  ok    io.reading_all_allocates_from_the_system_allocator
   ok    io.reading_text_decodes_the_input_as_utf8
   ok    io.reading_text_names_the_offset_of_invalid_utf8
   ok    io.reading_text_releases_the_bytes_of_every_failure_and_every_refusal
@@ -654,6 +651,7 @@ The library tests itself.
   ok    json.an_object_decoder_records_its_fields_in_an_arena
   ok    json.array_allocation_refusal_preserves_the_incoming_value
   ok    json.array_height_tracks_repeated_maxima_and_absent_removal
+  ok    json.array_makes_an_empty_array_in_the_system_allocator
   ok    json.array_makes_an_empty_array_without_allocating
   ok    json.arrays_transfer_children_and_preserve_order_after_removal
   ok    json.as_bool_reads_only_a_boolean
@@ -662,13 +660,16 @@ The library tests itself.
   ok    json.as_str_reads_only_a_string
   ok    json.as_uint64_checks_kind_sign_and_range
   ok    json.as_uint64_reads_a_number_value_and_refuses_other_kinds
+  ok    json.at_field_copies_the_name_into_the_system_allocator
   ok    json.at_finds_an_element_by_position
   ok    json.at_index_records_an_array_position
   ok    json.attachment_enforces_depth_and_recomputes_height_after_removal
   ok    json.begin_object_opens_an_object_that_takes_members
+  ok    json.boolean_makes_a_boolean_value_in_the_system_allocator
   ok    json.boolean_makes_a_boolean_value_without_allocating
   ok    json.boolean_writes_true_or_false
   ok    json.configured_limits_accept_the_boundary_and_reject_the_next_value
+  ok    json.decode_allocates_from_the_system_allocator
   ok    json.decode_allocates_the_record_from_an_arena
   ok    json.decode_error_allocation_failure_releases_owned_path_segments
   ok    json.decode_error_path_allocation_failure_settles_the_partial_error
@@ -689,16 +690,22 @@ The library tests itself.
   ok    json.end_array_closes_only_an_array
   ok    json.end_object_refuses_an_object_waiting_for_a_value
   ok    json.failure_starts_a_value_error_at_the_root
+  ok    json.failure_starts_a_value_error_in_the_system_allocator
   ok    json.field_takes_the_missing_value_of_an_absent_member
   ok    json.finish_refuses_a_member_no_field_read
   ok    json.float64_writes_the_shortest_digits_and_refuses_nan
   ok    json.float_observations_are_independent_of_the_document
+  ok    json.from_int_keeps_the_token_in_the_system_allocator
   ok    json.from_int_makes_a_number_value
+  ok    json.from_int_makes_a_number_value_in_the_system_allocator
   ok    json.from_int_uses_the_exact_decimal_text
+  ok    json.from_uint_keeps_the_token_in_the_system_allocator
   ok    json.from_uint_makes_a_number_value
+  ok    json.from_uint_makes_a_number_value_in_the_system_allocator
   ok    json.from_uint_uses_the_exact_decimal_text
   ok    json.from_value_decodes_a_parsed_value_and_leaves_it_with_the_caller
   ok    json.from_value_decodes_a_value_into_an_arena
+  ok    json.from_value_decodes_into_the_system_allocator
   ok    json.get_finds_a_member_by_name_without_retaining_the_query
   ok    json.height_tracks_repeated_maxima_and_replacement_of_the_last_tall_child
   ok    json.incomplete_documents_release_completed_siblings_and_report_eof
@@ -717,12 +724,15 @@ The library tests itself.
   ok    json.member_limit_refuses_new_names_and_allows_replacement
   ok    json.members_walk_only_an_objects_entries
   ok    json.nested_codecs_emit_one_value_and_preserve_the_callers_container
+  ok    json.null_makes_a_null_value_in_the_system_allocator
   ok    json.null_makes_a_null_value_without_allocating
   ok    json.null_writes_one_null_value
   ok    json.number_allocation_failure_is_a_value
   ok    json.number_constructor_enforces_the_hard_token_limit
   ok    json.number_float_access_rounds_without_changing_the_token
+  ok    json.number_keeps_its_spelling_in_the_system_allocator
   ok    json.number_owns_its_token_independently_of_input
+  ok    json.number_parse_keeps_the_token_in_the_system_allocator
   ok    json.number_preserves_validated_decimal_spelling
   ok    json.number_requires_one_complete_json_token
   ok    json.number_scanning_classifies_every_prefix_of_a_number
@@ -730,10 +740,13 @@ The library tests itself.
   ok    json.number_text_reads_only_a_number
   ok    json.number_values_keep_their_spelling_and_refuse_other_text
   ok    json.object_decoder_copies_queries_and_decoded_results_outlive_document
+  ok    json.object_makes_an_empty_object_in_the_system_allocator
   ok    json.object_makes_an_empty_object_without_allocating
   ok    json.only_an_allocation_failure_is_running_out_of_memory
   ok    json.open_accepts_only_an_object
   ok    json.optional_decodes_a_present_member_and_answers_none_for_an_absent_one
+  ok    json.parse_allocates_the_document_from_the_system_allocator
+  ok    json.parse_bytes_allocates_the_document_from_the_system_allocator
   ok    json.parsed_bytes_are_allocated_from_an_arena
   ok    json.parsed_documents_own_text_and_preserve_number_tokens
   ok    json.parser_accepts_128_containers_and_refuses_the_next_opener
@@ -744,12 +757,14 @@ The library tests itself.
   ok    json.refused_mutations_return_the_complete_incoming_owner
   ok    json.releasing_a_recursive_document_settles_both_allocator_owners
   ok    json.remove_member_returns_the_stored_value_and_forgets_its_name
+  ok    json.render_allocates_the_text_from_the_system_allocator
   ok    json.render_allocation_failure_leaves_the_document_usable
   ok    json.rendered_text_is_independent_of_the_document
   ok    json.replacement_reuses_the_stored_key_with_an_exhausted_allocator
   ok    json.required_refuses_an_absent_member_even_for_an_option
   ok    json.segment_reads_the_path_root_first
   ok    json.settling_a_refused_member_releases_it_and_keeps_the_reason
+  ok    json.string_copies_its_text_into_the_system_allocator
   ok    json.string_escape_errors_keep_absolute_offsets_after_input_release
   ok    json.string_limits_count_decoded_bytes_and_allow_empty_text
   ok    json.string_scanning_decodes_all_short_escapes
@@ -784,7 +799,9 @@ The library tests itself.
   ok    log.a_line_the_allocator_refuses_is_reported_and_not_written
   ok    log.a_line_the_sink_refuses_is_reported
   ok    log.a_logger_is_enabled_at_its_minimum_level_and_above
+  ok    log.a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given
   ok    log.a_logger_to_standard_error_copies_freely
+  ok    log.a_logger_to_standard_error_uses_the_system_allocator
   ok    log.a_logger_writes_to_the_sink_it_was_given
   ok    log.a_message_is_quoted_only_when_it_could_be_read_as_a_field
   ok    log.a_value_is_quoted_when_it_could_not_be_read_back_otherwise
@@ -838,11 +855,13 @@ The library tests itself.
   ok    mem.derived_system_allocator_debug_renders_its_case
   ok    mem.derived_system_allocator_equality_compares_its_case
   ok    mem.each_allocation_failure_covers_every_growth_step_in_a_push_sequence
-  ok    mem.each_allocation_failure_covers_every_growth_step_in_an_append_bytes_sequence
   ok    mem.empty_fd_requests_do_not_access_a_descriptor
   ok    mem.equal_slices_hash_equally
   ok    mem.fd_reads_reject_a_count_past_the_remaining_buffer
   ok    mem.fd_reads_reject_an_offset_past_the_buffer
+  ok    mem.filled_repeats_a_value_in_the_system_allocator
+  ok    mem.from_fn_builds_a_vector_in_the_system_allocator
+  ok    mem.from_fn_inout_builds_a_vector_in_the_system_allocator
   ok    mem.from_fn_takes_an_initializer_that_changes_a_lent_count
   ok    mem.get_borrows_an_element_or_answers_none_past_the_end
   ok    mem.length_counts_the_viewed_elements
@@ -871,9 +890,6 @@ The library tests itself.
   ok    mem.store_traps_past_the_end
   ok    mem.take_leaves_the_default_behind
   ok    mem.typed_slots_move_an_aggregate_to_independent_storage
-  ok    mem.vec_append_bytes_copies_the_elements_after_the_live_ones
-  ok    mem.vec_append_bytes_keeps_every_byte_across_growth
-  ok    mem.vec_append_bytes_of_nothing_changes_nothing_and_allocates_nothing
   ok    mem.vec_byte_buffer_transfer_rejects_a_prefix_past_the_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_an_empty_prefix_and_an_empty_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom
@@ -1031,6 +1047,7 @@ The library tests itself.
   ok    testing.a_new_recorder_holds_nothing
   ok    testing.a_recorder_keeps_what_was_rendered_into_it
   ok    testing.a_recorder_records_into_an_arena
+  ok    testing.a_recorder_records_into_the_system_allocator
   ok    testing.a_recorder_traps_when_a_write_exceeds_its_storage
   ok    testing.a_refused_failure_is_a_refusal_and_an_assertion_is_not
   ok    testing.a_success_matches_its_value_and_an_error_never_does
@@ -1098,6 +1115,8 @@ The library tests itself.
   ok    text.owned_text_compares_ignoring_ascii_case
   ok    text.owned_text_copies_appends_and_transfers_bytes
   ok    text.owned_text_copies_into_another_allocator
+  ok    text.owned_text_copies_into_the_system_allocator
+  ok    text.owned_text_copies_into_the_system_allocator_from_an_arena
   ok    text.owned_text_equality_compares_utf8_contents
   ok    text.owned_text_finds_a_needle
   ok    text.owned_text_iterates_its_scalars
@@ -1167,4 +1186,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1164 passed, 0 failed
+  1183 passed, 0 failed

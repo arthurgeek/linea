@@ -429,7 +429,7 @@ add them to the end of `stations.lin`, with `import std.testing`,
 // The tests hand the handlers a state whose logger writes only errors, so the
 // lines they log stay out of the test report.
 fn quiet() -> App {
-    .{ logger = log.to_stderr(mem.system(), minimum: .Error), readings = 0 }
+    .{ logger = log.to_stderr(minimum: .Error), readings = 0 }
 }
 
 // Build a request in an arena, as `serve` would, and send it through the routes.

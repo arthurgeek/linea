@@ -6,8 +6,8 @@ use mem.Owner
 fn main() -> UInt8 {
     let first = mem.Arena.open(mem.system(), 4096)
     let second = mem.Arena.open(mem.system(), 4096)
-    var document = json.Value.array(first.handle())
-    let child = json.Value.string(second.handle(), "tea").unwrap()
+    var document = json.Value.array_in(first.handle())
+    let child = json.Value.string_in(second.handle(), "tea").unwrap()
     json.Value.append(&document, child).unwrap()
     first.release()
     let found = document.at(0).unwrap().as_str().unwrap() == "tea"

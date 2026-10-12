@@ -3,7 +3,7 @@ import std.mem
 use mem.Owner
 
 fn main() -> UInt8 {
-    let owner = "one,two".to_owned(mem.system()).unwrap()
+    let owner = "one,two".to_owned().unwrap()
     let arena = mem.Arena.open(mem.system(), 0)
     defer arena.release()
     let source = owner.view().split(",").unwrap()

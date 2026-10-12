@@ -3,7 +3,7 @@ import std.mem
 // `any` drops its predicate when it returns, and this predicate owns a vector
 // that must be released.
 fn main() -> UInt8 {
-    let seen = mem.Vec.filled(mem.system(), 2, UInt64(7)) else |_| {
+    let seen = mem.Vec.filled(2, UInt64(7)) else |_| {
         return 1
     }
     let heavy = [sink seen] |sink weight: UInt64| weight > seen.length()

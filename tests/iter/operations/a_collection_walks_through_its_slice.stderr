@@ -1,10 +1,10 @@
 error[T-UnknownOperation]: `[UInt64; 3]` has no operation `map`
- --> tests/iter/operations/a_collection_walks_through_its_slice.lin:7:19
+ --> tests/iter/operations/a_collection_walks_through_its_slice.lin:5:19
   |
-7 |     let doubled = scores.map(|sink score| score * 2)
+5 |     let doubled = scores.map(|sink score| score * 2)
   |                   ^^^^^^^^^^ `Sequence` declares it, and `[UInt64; 3]` does not implement `Sequence`; `scores.as_slice()` does
 error[T-UnknownOperation]: `Vec[UInt64, mem.SystemAllocator]` has no operation `fold`
- --> tests/iter/operations/a_collection_walks_through_its_slice.lin:9:17
+ --> tests/iter/operations/a_collection_walks_through_its_slice.lin:7:17
   |
-9 |     let total = kept.fold(0, |sink sum, sink value| sum + value)
+7 |     let total = kept.fold(0, |sink sum, sink value| sum + value)
   |                 ^^^^^^^^^ `Sequence` declares it, and `Vec[UInt64, mem.SystemAllocator]` does not implement `Sequence`; `kept.as_slice()` does

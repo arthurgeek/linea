@@ -1,5 +1,3 @@
-import std.mem
-
 struct Word { value: Str }
 
 fn wrap(sink item: Str) -> Word where carries(item) {
@@ -7,7 +5,7 @@ fn wrap(sink item: Str) -> Word where carries(item) {
 }
 
 fn main() -> UInt8 {
-    let owner = "word".to_owned(mem.system()).unwrap()
+    let owner = "word".to_owned().unwrap()
     let parts = Str.split(owner.view(), ",").unwrap()
     var mapped = parts.map(wrap)
     let word = Iterator.next(&mapped).unwrap()

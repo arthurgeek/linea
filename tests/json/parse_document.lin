@@ -1,9 +1,8 @@
 import std.json
-import std.mem
 
 fn main() -> UInt8 {
-    let source = r#"{"items":[{"name":"tea","count":3}]}"#.to_owned(mem.system()).unwrap()
-    let document = json.parse(mem.system(), source.view()).unwrap()
+    let source = r#"{"items":[{"name":"tea","count":3}]}"#.to_owned().unwrap()
+    let document = json.parse(source.view()).unwrap()
     source.release()
     let item = document.get("items").unwrap().at(0).unwrap()
     let correct = item.get("name").unwrap().as_str().unwrap() == "tea" && item.get("count").unwrap().as_uint64().unwrap() == 3

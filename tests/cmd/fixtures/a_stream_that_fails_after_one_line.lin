@@ -38,7 +38,7 @@ fn main() -> UInt8 {
     var router = http.Router.new()
     http.Router.route_raw(&router, "GET /report", report).unwrap()
     let listener = net.listen(net.loopback(port)).unwrap()
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     let bound = listener.local_address().unwrap()
     logger.info("listening", log.field("address", bound))
     var server = http.logged(logger, router)

@@ -15,7 +15,7 @@ fn make_entry(index: UInt64) -> Entry {
 fn main() -> UInt8 {
     let arena = Arena.open(system(), 128)
     defer arena.release()
-    let built: Result[Vec[Entry, Handle[SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: make_entry)
+    let built: Result[Vec[Entry, Handle[SystemAllocator]], mem.Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: make_entry)
     let values = built.unwrap()
     if values[2].value == 2 {
         0

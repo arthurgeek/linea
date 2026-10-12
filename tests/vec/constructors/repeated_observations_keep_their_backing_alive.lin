@@ -1,8 +1,6 @@
-import std.mem
-
 fn main() -> UInt8 {
     var number: UInt64 = 41
-    var repeated = Vec.filled(mem.system(), count: 3, value: borrow number).unwrap()
+    var repeated = Vec.filled(count: 3, value: borrow number).unwrap()
     number = 9
     let answer = *repeated[1]
     for _index in UInt64(0)..3 {

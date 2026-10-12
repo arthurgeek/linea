@@ -25,7 +25,7 @@ fn count_lines[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], 
         // `make_entry` runs only for a line not seen before: it copies the
         // line into a key and starts its count at 1.
         let make_entry = |query: Str, allocator: A| -> Result[collections.Entry[String[A], UInt64], mem.Oom] where carries(.Ok: allocator) {
-            .Ok(.{ key = query.to_owned(allocator)?, value = 1 })
+            .Ok(.{ key = query.to_owned_in(allocator)?, value = 1 })
         }
         // `upsert` adds one to the count of a line it has seen, and inserts a
         // new entry otherwise. `settled()` releases an entry built under the
@@ -56,7 +56,7 @@ test fn empty_and_whitespace_only_inputs_have_no_frequencies() {
 }
 
 test fn frequency_keys_own_unicode_text_after_input_is_released() {
-    let input = "　café　\n東京\ncafé\n".to_owned(mem.system()).unwrap()
+    let input = "　café　\n東京\ncafé\n".to_owned().unwrap()
     defer let counts = count_lines(mem.system(), input.view()).unwrap()
     input.release()
     testing.assert_eq(*counts.get("café").unwrap(), 2, "owned Unicode key lost its count")?
@@ -127,7 +127,7 @@ test fn arena_frequencies_outlive_the_separate_input_owner() {
     // `arena.handle()` lends the arena as the map's allocator, so each key is
     // carved from the arena's 4096-byte block rather than from the input.
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "café\n茶\ncafé\n".to_owned(mem.system()).unwrap()
+    let input = "café\n茶\ncafé\n".to_owned().unwrap()
     defer let counts = count_lines(arena.handle(), input.view()).unwrap()
     input.release()
     testing.assert_eq(*counts.get("café").unwrap(), 2, "arena count retained its input owner")?

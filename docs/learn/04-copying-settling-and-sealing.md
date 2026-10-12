@@ -982,7 +982,6 @@ its title text, so the note must be settled, and `defer` settles it however
 
 ```linea
 import std.io
-import std.mem
 
 // A String owns memory, so a Note must be settled. Deriving Release gives it
 // a `release` that releases each field in turn.
@@ -993,7 +992,7 @@ struct Note {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let title = "Buy milk".to_owned(mem.system()) else |_| {
+    let title = "Buy milk".to_owned() else |_| {
         return .Ok(1)
     }
     let note = Note { title, pinned = true }
@@ -1007,7 +1006,7 @@ fn main() -> Result[UInt8, io.IoError] {
 Buy milk (pinned: true)
 ```
 
-`"Buy milk".to_owned(mem.system())` copies the text into memory from the heap,
+`"Buy milk".to_owned()` copies the text into memory from the heap,
 and can fail when there is none. `note.title.view()` lends the `String` back
 out as a `Str`, which is what the interpolation writes. `Note` has no `@linear`. It must be settled
 because its `String` must be.
@@ -1060,7 +1059,6 @@ value is no longer yours to release, and that `defer` is skipped on that path:
 
 ```linea
 import std.io
-import std.mem
 
 @derive(Release)
 struct Note {
@@ -1086,10 +1084,10 @@ fn tidy(sink note: Note) -> Result[(), io.IoError] {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let milk = "Buy milk".to_owned(mem.system()) else |_| {
+    let milk = "Buy milk".to_owned() else |_| {
         return .Ok(1)
     }
-    let bread = "Buy bread".to_owned(mem.system()) else |_| {
+    let bread = "Buy bread".to_owned() else |_| {
         milk.release()
         return .Ok(1)
     }
@@ -1282,10 +1280,9 @@ schedules the release in one statement:
 
 ```linea
 import std.io
-import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let milk = "Buy milk".to_owned(mem.system()) else |_| {
+    defer let milk = "Buy milk".to_owned() else |_| {
         return .Ok(1)
     }
     io.println("Noted {milk.view()}.")?

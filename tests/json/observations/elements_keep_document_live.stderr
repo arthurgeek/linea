@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/json/observations/elements_keep_document_live.lin:8:5
+ --> tests/json/observations/elements_keep_document_live.lin:7:5
   |
-8 |     document.release()
+7 |     document.release()
   |     ^^^^^^^^ keep this place available until the last use of its observation
-9 |     if elements[UInt64(0)].as_bool().unwrap() {
+8 |     if elements[UInt64(0)].as_bool().unwrap() {
   |        ------------------- the observation is still used here

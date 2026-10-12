@@ -9,10 +9,10 @@ fn signed(value: Int64) -> Bool {
 }
 
 fn main() -> Result[UInt8, mem.Oom] {
-    let opened: Result[Vec[UInt64, mem.SystemAllocator], mem.Oom] = Vec.filled(mem.system(), count: 3, value: 0)
+    let opened: Result[Vec[UInt64, mem.SystemAllocator], mem.Oom] = Vec.filled(count: 3, value: 0)
     let vector = opened?
     defer vector.release()
-    let defaulted = Vec.filled(mem.system(), count: 3, value: 0)?
+    let defaulted = Vec.filled(count: 3, value: 0)?
     defer defaulted.release()
     return .Ok(
         if unsigned(vector[0]) && signed(defaulted[0]) {

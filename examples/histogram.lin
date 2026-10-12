@@ -9,8 +9,6 @@ import std.testing
 import std.io
 
 use mem.Oom
-use mem.SystemAllocator
-use mem.system
 use io.IoError
 use io.println
 
@@ -24,9 +22,11 @@ struct Histogram {
 
 impl Histogram {
     // Allocate every bucket together and initialize each count to zero.
-    // `?` returns an allocation error to the caller.
-    pub fn open(a: SystemAllocator, buckets: UInt64) -> Result[Histogram, Oom] {
-        let counts = Vec.filled(a, count: buckets, value: UInt64(0))?
+    // `Vec.filled` takes the memory from the system allocator, and
+    // `Vec.filled_in` would take an allocator first. `?` returns an
+    // allocation error to the caller.
+    pub fn open(buckets: UInt64) -> Result[Histogram, Oom] {
+        let counts = Vec.filled(count: buckets, value: UInt64(0))?
         .Ok(.{ counts })
     }
 
@@ -50,7 +50,7 @@ impl Histogram {
 }
 
 test fn a_histogram_counts_what_is_recorded_into_it() {
-    var h = Histogram.open(system(), 4).unwrap()
+    var h = Histogram.open(4).unwrap()
     // Leave bucket 0 empty; record once in bucket 1 and twice in bucket 3.
     &h.record(1)
     &h.record(3)
@@ -67,8 +67,8 @@ test fn a_histogram_counts_what_is_recorded_into_it() {
 }
 
 test fn two_histograms_keep_independent_counts() {
-    var first = Histogram.open(system(), 2).unwrap()
-    var second = Histogram.open(system(), 2).unwrap()
+    var first = Histogram.open(2).unwrap()
+    var second = Histogram.open(2).unwrap()
     &first.record(0)
     &second.record(0)
     &second.record(0)
@@ -106,7 +106,7 @@ fn main() -> Result[UInt8, IoError] {
     // `let … else` binds what `Ok` holds when `open` succeeds. Otherwise the
     // `else` block runs and must leave `main`; `|_|` names the error and drops
     // it, since the message below says all this program knows about it.
-    var h = Histogram.open(system(), 4) else |_| {
+    var h = Histogram.open(4) else |_| {
         io.eprintln("could not allocate the request latency histogram")
         return .Ok(1)
     }
@@ -127,7 +127,7 @@ fn main() -> Result[UInt8, IoError] {
 }
 
 test fn an_unrepresentable_bucket_count_is_refused() {
-    match Histogram.open(system(), UInt64.max) {
+    match Histogram.open(UInt64.max) {
         Err(_) => {},
         Ok(histogram) => {
             histogram.close()

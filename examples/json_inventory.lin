@@ -95,8 +95,8 @@ fn inventory_total[A: Allocator](document: json.Value[A]) -> Result[UInt64, Inve
 }
 
 test fn inventory_totals_integer_counts() {
-    let input = sample.to_owned(mem.system()).unwrap()
-    defer let document = json.parse(mem.system(), input.view()).unwrap()
+    let input = sample.to_owned().unwrap()
+    defer let document = json.parse(input.view()).unwrap()
     // Parsing owns its text; the input can be released before using the result.
     input.release()
     testing.assert_eq(inventory_total(document).unwrap(), 5, "inventory total changed")?
@@ -110,7 +110,7 @@ test fn inventory_refuses_fractional_negative_and_overflowing_counts() {
         r#"{"products":[{"units":1}]}"#,
     ]
     for input in inputs {
-        defer let document = json.parse(mem.system(), input).unwrap()
+        defer let document = json.parse(input).unwrap()
         testing.assert(inventory_total(document).is_err(), "invalid inventory was accepted")?
     }
 }
@@ -120,8 +120,8 @@ test fn inventory_refuses_fractional_negative_and_overflowing_counts() {
 // usable for as long as the document does.
 fn attach_summary[A: Allocator](allocator: A, inout document: json.Value[A]) -> Result[(), InventoryError] where retains(document: document, allocator) {
     let total = inventory_total(document)?
-    defer var summary = json.Value.object(allocator)
-    let count = json.Value.from_uint(allocator, total)?
+    defer var summary = json.Value.object_in(allocator)
+    let count = json.Value.from_uint_in(allocator, total)?
     // A refused insertion returns the incoming value inside its failure.
     // `settled()` releases that value and keeps only the reason, which `?`
     // converts into an `InventoryError`. A successful insertion returns the
@@ -134,7 +134,7 @@ fn attach_summary[A: Allocator](allocator: A, inout document: json.Value[A]) -> 
 }
 
 test fn summaries_replace_the_previous_owned_value() {
-    defer var document = json.parse(mem.system(), sample).unwrap()
+    defer var document = json.parse(sample).unwrap()
     attach_summary(mem.system(), &document).unwrap()
     attach_summary(mem.system(), &document).unwrap()
     let count = document.get("summary").unwrap().get("total_units").unwrap().as_uint64().unwrap()
@@ -144,7 +144,7 @@ test fn summaries_replace_the_previous_owned_value() {
 fn load_inventory() -> Result[json.Value, InventoryError] {
     let args = env.args()
     if args.count() == 1 {
-        return .Ok(json.parse(mem.system(), sample)?)
+        return .Ok(json.parse(sample)?)
     }
     if args.count() != 2 {
         return .Err(.Usage)
@@ -154,8 +154,8 @@ fn load_inventory() -> Result[json.Value, InventoryError] {
     let limits = json.ParseLimits.default()
     // A failed read owns the bytes read before the failure; `settled()`
     // releases them and keeps why reading or closing the file failed.
-    let bytes = fs.read_file(mem.system(), path, max_bytes: limits.max_input_bytes).settled()?
-    let parsed = json.parse_bytes(mem.system(), bytes.as_slice())
+    let bytes = fs.read_file(path, max_bytes: limits.max_input_bytes).settled()?
+    let parsed = json.parse_bytes(bytes.as_slice())
     bytes.release()
     .Ok(parsed?)
 }
@@ -192,7 +192,7 @@ impl Writer for Disk {
 }
 
 test fn inventory_output_propagates_failure_without_consuming_the_inventory() {
-    defer var document = json.parse(mem.system(), sample).unwrap()
+    defer var document = json.parse(sample).unwrap()
     attach_summary(mem.system(), &document).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }

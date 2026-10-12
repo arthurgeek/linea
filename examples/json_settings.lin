@@ -36,7 +36,7 @@ fn validate[A: Allocator](settings: Settings[A]) -> Result[(), Str] {
 fn input() -> Result[String, Str] {
     let args = env.args()
     if args.count() == 1 {
-        return r#"{"name":"catalog","ports":[8080,8081]}"#.to_owned(mem.system()).map_err(|sink _error| "cannot allocate sample settings")
+        return r#"{"name":"catalog","ports":[8080,8081]}"#.to_owned().map_err(|sink _error| "cannot allocate sample settings")
     }
     if args.count() != 2 {
         return .Err("usage: json_settings [path]")
@@ -61,7 +61,7 @@ fn main() -> UInt8 {
         return 1
     }
     // The annotated type tells `json.decode` which struct to build.
-    defer let settings: Settings = json.decode(mem.system(), source.view()) else |error| {
+    defer let settings: Settings = json.decode(source.view()) else |error| {
         // `{error:?}` borrows the error while the line is written, so the
         // `defer` still releases it afterwards.
         defer error.release()
@@ -114,7 +114,7 @@ impl Writer for Disk {
 }
 
 test fn settings_output_stops_at_the_first_writer_error() {
-    defer let settings: Settings = json.decode(mem.system(), r#"{"name":"catalog","ports":[8080]}"#).unwrap()
+    defer let settings: Settings = json.decode(r#"{"name":"catalog","ports":[8080]}"#).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }
     let result = write_settings(&disk, settings)
@@ -124,8 +124,8 @@ test fn settings_output_stops_at_the_first_writer_error() {
 }
 
 test fn settings_own_fields_after_input_is_released() {
-    let source = r#"{"name":"catalog","ports":[8080]}"#.to_owned(mem.system()).unwrap()
-    let parsed: Result[Settings, json.DecodeError] = json.decode(mem.system(), source.view())
+    let source = r#"{"name":"catalog","ports":[8080]}"#.to_owned().unwrap()
+    let parsed: Result[Settings, json.DecodeError] = json.decode(source.view())
     source.release()
     defer let settings = parsed.unwrap()
     testing.assert_eq(settings.name.view(), "catalog", "settings retained input text")?
@@ -135,7 +135,7 @@ test fn settings_own_fields_after_input_is_released() {
 }
 
 test fn settings_report_the_nested_field_that_failed() {
-    let parsed: Result[Settings, json.DecodeError] = json.decode(mem.system(), r#"{"name":"catalog","ports":[8080,"https"]}"#)
+    let parsed: Result[Settings, json.DecodeError] = json.decode(r#"{"name":"catalog","ports":[8080,"https"]}"#)
     defer let error = match parsed {
         Err(error) => error,
         Ok(settings) => {

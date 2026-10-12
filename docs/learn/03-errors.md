@@ -1289,7 +1289,7 @@ fn main() -> Result[UInt8, io.IoError] {
     let sent: [UInt64; _] = [2, 3, 1]
     for count in sent {
         // `Vec.filled` makes a buffer holding `count` copies of one reading.
-        let buffer = Vec.filled(mem.system(), count, value: 21) else |_| {
+        let buffer = Vec.filled(count, value: 21) else |_| {
             return .Ok(1)
         }
         if keep(&buffers, buffer).is_err() {

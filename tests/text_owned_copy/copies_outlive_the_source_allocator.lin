@@ -6,9 +6,9 @@ fn main() -> UInt8 {
     let copied = {
         let arena = mem.Arena.open(mem.system(), size: 64)
         defer arena.release()
-        let original = "café\u{0}".to_owned(arena.handle()).unwrap()
+        let original = "café\u{0}".to_owned_in(arena.handle()).unwrap()
         defer original.release()
-        original.view().to_owned(mem.system()).unwrap()
+        original.view().to_owned().unwrap()
     }
     defer copied.release()
     if copied.view() == "café\u{0}" {

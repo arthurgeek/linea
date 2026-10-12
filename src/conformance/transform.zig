@@ -3780,7 +3780,7 @@ test "renaming declines a capture recovery the file alone cannot settle" {
         \\import std.mem
         \\
         \\fn main() -> UInt8 {
-        \\    let seen = mem.Vec.filled(mem.system(), 2, UInt64(7)) else |_| {
+        \\    let seen = mem.Vec.filled(2, UInt64(7)) else |_| {
         \\        return 1
         \\    }
         \\    var heavy = [sink seen] |sink weight: UInt64| weight > seen.length()

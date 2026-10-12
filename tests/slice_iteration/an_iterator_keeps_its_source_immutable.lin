@@ -1,7 +1,5 @@
-import std.mem
-
 fn main() -> UInt8 {
-    var values = Vec.filled(mem.system(), count: 2, value: UInt8(7)).unwrap()
+    var values = Vec.filled(count: 2, value: UInt8(7)).unwrap()
     defer values.release()
     var iterator = values.as_slice().iterate()
     values[0] = 9

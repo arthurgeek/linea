@@ -14,7 +14,7 @@ fn commit(sink payment: Payment) -> UInt64 {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(mem.system(), count: 4, initializer: |index| Payment { cents = (index + 1) * 100 })
+    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(count: 4, initializer: |index| Payment { cents = (index + 1) * 100 })
     var pending = built.unwrap().drain()
     var committed: UInt64 = 0
     for payment in &pending {

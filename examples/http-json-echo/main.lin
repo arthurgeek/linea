@@ -211,7 +211,7 @@ fn main() -> UInt8 {
     }
     // The logger writes lines at `Info` and above to standard error, building
     // each line in memory from `mem.system()` before writing it whole.
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     // The annotation names the state the routes take, `App`.
     var router: http.Router[App] = http.Router.new()
     let _ = routes(&router) else |error| {
@@ -281,7 +281,7 @@ fn body_of(response: http.Response) -> Str where borrows(response) {
 // The tests hand the handlers a state whose logger writes only errors, so
 // the lines they log while answering stay out of the test report.
 fn quiet() -> App {
-    .{ logger = log.to_stderr(mem.system(), minimum: .Error), echoed = 0 }
+    .{ logger = log.to_stderr(minimum: .Error), echoed = 0 }
 }
 
 // `sent_by` builds a POST /echo request in `memory` carrying `body` as JSON,
@@ -370,7 +370,7 @@ test fn echo_names_the_field_a_message_gets_wrong() {
 test fn echo_answers_500_when_the_arena_cannot_hold_the_message() {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
-    defer let letters = Vec.filled(mem.system(), 3000, UInt8(120)).unwrap()
+    defer let letters = Vec.filled(3000, UInt8(120)).unwrap()
     defer var body = String.new()
     &body.append(r#"{"text":""#).unwrap()
     &body.append(Str.from_bytes(letters.as_slice()).unwrap()).unwrap()

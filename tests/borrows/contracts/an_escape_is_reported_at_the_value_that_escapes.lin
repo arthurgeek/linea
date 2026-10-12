@@ -16,7 +16,7 @@ fn label(station: Station) -> Str {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let name = "Harbour".to_owned(mem.system()) else |_| {
+    let name = "Harbour".to_owned() else |_| {
         return .Ok(1)
     }
     let station = Station { name = name, samples = 2 }

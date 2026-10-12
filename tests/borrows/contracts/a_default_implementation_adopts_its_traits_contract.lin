@@ -2,7 +2,6 @@
 // other implementation's. Every type has a label here, and the label depends
 // only on the fallback text it was given.
 import std.io
-import std.mem
 
 trait Labelled {
     fn label(self: Self, fallback: Str) -> Str where carries(fallback)
@@ -23,7 +22,7 @@ fn describe[T: Labelled](value: T, fallback: Str) -> Str where carries(fallback)
 }
 
 fn main() -> UInt8 {
-    let holder = "ada".to_owned(mem.system()).unwrap()
+    let holder = "ada".to_owned().unwrap()
     let label = describe(Ticket { holder = holder.view() }, "ticket")
     holder.release()
     let _printed = io.println(label)

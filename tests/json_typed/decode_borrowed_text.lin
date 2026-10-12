@@ -2,7 +2,7 @@ import std.json
 import std.mem
 
 fn main() -> UInt8 {
-    let result: Result[Str, json.DecodeError[mem.SystemAllocator]] = json.decode(mem.system(), r#""tea""#)
+    let result: Result[Str, json.DecodeError[mem.SystemAllocator]] = json.decode(r#""tea""#)
     result.release()
     return 0
 }

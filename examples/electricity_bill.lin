@@ -73,7 +73,7 @@ struct Bill {
 fn bill(document: Str) -> Result[Bill, BillError] {
     // The annotation tells `json.decode` to build a `Reading`. It fails with
     // `json.DecodeError`, which `?` converts.
-    defer let reading: Reading = json.decode(mem.system(), document)?
+    defer let reading: Reading = json.decode(document)?
     // Text that is not a number is a `text.ParseError`, which `?` converts.
     let meter: UInt64 = reading.meter.parse()?
     if reading.current < reading.previous {

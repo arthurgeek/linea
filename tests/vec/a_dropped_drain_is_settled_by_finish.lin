@@ -17,7 +17,7 @@ fn close(sink ticket: Ticket) -> UInt64 {
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), 256)
     defer arena.release()
-    let built: Result[Vec[Ticket, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: |index| Ticket { number = index })
+    let built: Result[Vec[Ticket, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: |index| Ticket { number = index })
     var pending = built.unwrap().drain()
     let ticket = &pending.next().unwrap()
     UInt8(close(ticket))

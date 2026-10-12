@@ -1,5 +1,5 @@
 error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
- --> tests/constants/aggregates/runtime_text_default.lin:9:35
+ --> tests/constants/aggregates/runtime_text_default.lin:7:35
   |
-9 |     let length = |_label: Label = label| UInt8(0)
+7 |     let length = |_label: Label = label| UInt8(0)
   |                                   ^^^^^ this is not a constant
