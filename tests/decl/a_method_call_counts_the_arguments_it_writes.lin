@@ -1,8 +1,11 @@
 // A postfix call counts the arguments written between its parentheses: the
 // receiver before the dot fills `self` and is not one of them. A call through
-// the type writes the receiver as its first argument, so it counts it. One
-// argument too many for a form that has an `_in` partner names the partner,
-// which takes the allocator.
+// the type writes the receiver as its first argument, so it counts it. An
+// allocator given to a form that has an `_in` partner, as one argument too many
+// or where a parameter of another type stands, names the partner, which takes
+// the allocator.
+import std.json
+import std.log
 import std.mem
 
 struct Gauge {
@@ -22,5 +25,8 @@ fn main() -> UInt8 {
     let through = Gauge.raised(gauge, 2, 3)
     let _owned = "Lisbon".to_owned(mem.system())
     let _named = Str.to_owned("Lisbon", mem.system())
+    let _parsed = json.parse(mem.system(), "1")
+    let _logger = log.to_stderr(mem.system())
+    let _filled: Result[Vec[UInt8], mem.Oom] = Vec.filled(mem.system(), 2, UInt8(0))
     many + few + through
 }

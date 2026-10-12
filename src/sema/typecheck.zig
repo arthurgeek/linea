@@ -4674,6 +4674,9 @@ const Expected = struct {
     /// For a call's argument, the receiver the call was made on, so a
     /// mismatch can say where the receiver's type came from.
     receiver: ExprId = .none,
+    /// For a call's argument, the declaration the call reaches, so a
+    /// mismatch can name the partner that takes an allocator.
+    passed_to: node.DeclId = .none,
 
     const Reason = enum {
         return_type,
@@ -12172,10 +12175,21 @@ const Checker = struct {
         else
             &.{};
         const fill_note = self.defaultedFillNote(id, actual, want) catch return self.recordMismatch(id);
-        const all_notes: []const []const u8 = if (fill_note) |text| blk: {
-            const joined = self.sink.arena.alloc([]const u8, notes.len + 1) catch return self.recordMismatch(id);
+        const allocator_note = self.allocatorPassedNote(actual, want) catch return self.recordMismatch(id);
+        var extra: [2][]const u8 = undefined;
+        var extras: usize = 0;
+        if (fill_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
+        if (allocator_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
+        const all_notes: []const []const u8 = if (extras > 0) blk: {
+            const joined = self.sink.arena.alloc([]const u8, notes.len + extras) catch return self.recordMismatch(id);
             @memcpy(joined[0..notes.len], notes);
-            joined[notes.len] = text;
+            @memcpy(joined[notes.len..], extra[0..extras]);
             break :blk joined;
         } else notes;
 
@@ -18684,11 +18698,8 @@ const Checker = struct {
         found: usize,
         receiver: usize,
     ) std.mem.Allocator.Error!void {
-        const sibling = if (found == wanted + 1) try self.allocatorFormOf(owner) else null;
-        const notes: []const []const u8 = if (sibling) |name|
-            try self.sink.arena.dupe([]const u8, &.{try std.fmt.allocPrint(self.sink.arena, "`{s}` uses the system allocator; use `{s}(allocator, …)` to choose the allocator", .{ name[0 .. name.len - 3], name })})
-        else
-            &.{};
+        const note = if (found == wanted + 1) try self.allocatorFormNote(owner) else null;
+        const notes: []const []const u8 = if (note) |text| try self.sink.arena.dupe([]const u8, &.{text}) else &.{};
         _ = self.reportWithOriginNotes(
             .t_arity,
             id,
@@ -18697,6 +18708,24 @@ const Checker = struct {
             owner.origin(self),
             notes,
         );
+    }
+
+    /// The help that names the `_in` partner of the declaration a call
+    /// reaches, for a call that gave the system form an allocator.
+    fn allocatorFormNote(self: *Checker, owner: CallParameters) std.mem.Allocator.Error!?[]const u8 {
+        const name = (try self.allocatorFormOf(owner)) orelse return null;
+        return try std.fmt.allocPrint(self.sink.arena, "`{s}` uses the system allocator; use `{s}(allocator, …)` to choose the allocator", .{ name[0 .. name.len - 3], name });
+    }
+
+    /// An allocator passed where a parameter of another type stands, to a
+    /// declaration with an `_in` partner: the call most often meant the
+    /// partner. Asked only when the argument was already refused.
+    fn allocatorPassedNote(self: *Checker, actual: TypeId, want: Expected) std.mem.Allocator.Error!?[]const u8 {
+        if (want.reason != .parameter or want.passed_to == .none or self.allocator_decl == null) return null;
+        if (actual == .poison or want.ty == .poison) return null;
+        if (!try self.answersTrait(actual, self.allocator_decl)) return null;
+        if (try self.answersTrait(want.ty, self.allocator_decl)) return null;
+        return try self.allocatorFormNote(.{ .declaration = want.passed_to });
     }
 
     /// The name of the declaration beside `owner` that takes the allocator
@@ -19314,6 +19343,7 @@ const Checker = struct {
                 .at = .{ .file = self.ast.fileOf(p.name), .span = self.ast.tokenSpan(p.name) },
                 .reason = .parameter,
                 .receiver = try self.receiverArgument(d, args, params, j, try paramType(self, d, j)),
+                .passed_to = d,
             };
             var adjusted: ?types_mod.ReceiverAdjustment = null;
             if (readsSelf(self.ast, p)) {
@@ -28423,7 +28453,7 @@ const Checker = struct {
                         continue;
                     }
                     signature = try self.callableContext(bound, settling);
-                    got = try self.check(value, .{ .ty = signature, .at = at_parameter, .reason = .parameter, .callable_context = callable_context, .callee = d, .receiver = try self.receiverArgument(d, args, params, j, bound) });
+                    got = try self.check(value, .{ .ty = signature, .at = at_parameter, .reason = .parameter, .callable_context = callable_context, .callee = d, .receiver = try self.receiverArgument(d, args, params, j, bound), .passed_to = d });
                 } else {
                     got = try self.check(value, .{
                         .ty = signature,
@@ -28432,6 +28462,7 @@ const Checker = struct {
                         .callable_context = callable_context,
                         .callee = d,
                         .receiver = try self.receiverArgument(d, args, params, j, bound),
+                        .passed_to = d,
                         .infer_lambda_result = infer_result,
                         .inference = if (infer_result) settling else null,
                     });

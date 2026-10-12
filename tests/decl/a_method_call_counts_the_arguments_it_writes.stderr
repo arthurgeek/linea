@@ -1,28 +1,28 @@
 error[T-Arity]: expected 1 argument(s), found 2
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:20:16
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:23:16
    |
-13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+16 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |        ------ declared here
-20 |     let many = gauge.raised(2, 3)
+23 |     let many = gauge.raised(2, 3)
    |                ^^^^^^^^^^^^^^^^^^ the wrong number of arguments
 error[T-MissingArgument]: `step` receives no argument
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:21:15
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:24:15
    |
-13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+16 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |                           ---- declared here
-21 |     let few = gauge.raised()
+24 |     let few = gauge.raised()
    |               ^^^^^^^^^^^^^^ every parameter receives one
 error[T-Arity]: expected 2 argument(s), found 3
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:22:19
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:25:19
    |
-13 |     fn raised(self: Self, step: UInt8) -> UInt8 {
+16 |     fn raised(self: Self, step: UInt8) -> UInt8 {
    |        ------ declared here
-22 |     let through = Gauge.raised(gauge, 2, 3)
+25 |     let through = Gauge.raised(gauge, 2, 3)
    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
 error[T-Arity]: expected 0 argument(s), found 1
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:23:18
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:26:18
    |
-23 |     let _owned = "Lisbon".to_owned(mem.system())
+26 |     let _owned = "Lisbon".to_owned(mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
 L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
@@ -30,12 +30,50 @@ L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() 
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
 error[T-Arity]: expected 1 argument(s), found 2
-  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:24:18
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:27:18
    |
-24 |     let _named = Str.to_owned("Lisbon", mem.system())
+27 |     let _named = Str.to_owned("Lisbon", mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
 L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
+error[T-Mismatch]: expected `Str`, found `mem.SystemAllocator`
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:28:30
+   |
+28 |     let _parsed = json.parse(mem.system(), "1")
+   |                              ^^^^^^^^^^^^ expected `Str`, found `mem.SystemAllocator`
+  ::: std/json/parse.lin
+L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+   |              ----- expected because of this parameter
+   |
+   = help: `parse` uses the system allocator; use `parse_in(allocator, …)` to choose the allocator
+error[T-Mismatch]: expected `json.ParseLimits`, found `Str`
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:28:44
+   |
+28 |     let _parsed = json.parse(mem.system(), "1")
+   |                                            ^^^ expected `json.ParseLimits`, found `Str`
+  ::: std/json/parse.lin
+L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+   |                          ------ expected because of this parameter
+error[T-Mismatch]: expected `log.Level`, found `mem.SystemAllocator`
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:29:33
+   |
+29 |     let _logger = log.to_stderr(mem.system())
+   |                                 ^^^^^^^^^^^^ expected `log.Level`, found `mem.SystemAllocator`
+  ::: std/log/log.lin
+L  | pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor] {
+   |                  ------- expected because of this parameter
+   |
+   = help: `to_stderr` uses the system allocator; use `to_stderr_in(allocator, …)` to choose the allocator
+error[T-Arity]: expected 2 argument(s), found 3
+  --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:30:48
+   |
+30 |     let _filled: Result[Vec[UInt8], mem.Oom] = Vec.filled(mem.system(), 2, UInt8(0))
+   |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
+  ::: std/mem/vec.lin
+L  |     pub fn filled(count: UInt64, value: T) -> Result[Self, Oom] where carries(.Ok: value) {
+   |            ------ declared here
+   |
+   = help: `filled` uses the system allocator; use `filled_in(allocator, …)` to choose the allocator
