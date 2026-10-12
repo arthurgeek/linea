@@ -8,7 +8,8 @@ provides that memory, who gives it back, and how.
 
 The short answer: **the caller always chooses.** Nothing in Linea allocates
 behind your back. A function that needs memory takes an allocator as an
-argument, and the value it builds keeps that allocator to give the memory back.
+argument, or says in its name that it uses the system allocator, and the value
+it builds keeps that allocator to give the memory back.
 
 ## An allocator is an argument
 
@@ -106,7 +107,6 @@ allocator in a type:
 
 ```linea
 import std.io
-import std.mem
 
 // `String` and `Vec[Str]` take their memory from the system allocator, so the
 // fields name no allocator.
@@ -118,7 +118,7 @@ struct Report {
 
 fn main() -> Result[UInt8, io.IoError] {
     var report = Report {
-        title = "Daily report".to_owned(mem.system()).unwrap(),
+        title = "Daily report".to_owned().unwrap(),
         lines = Vec.new(),
     }
     defer report.release()
@@ -292,11 +292,84 @@ fn main() -> Result[UInt8, io.IoError] {
 `Vec`, `String`, `collections.Map` and `http.Router` each have the pair; only
 `new_in` lets you choose the allocator, and the type records the choice.
 
+### A function's `_in` form takes the allocator
+
+Functions that allocate follow the same rule as `new` and `new_in`. The plain
+name uses the system allocator, and the name ending in `_in` takes the
+allocator as its first argument. `"Lisbon".to_owned()` copies text into the
+system allocator, and `"Lisbon".to_owned_in(arena.handle())` copies it into an
+arena. `fmt.render_owned` and `fmt.render_owned_in`, `json.parse` and
+`json.parse_in`, and `Vec.filled` and `Vec.filled_in` are pairs in the same
+way:
+
+```linea
+import std.fmt
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `to_owned` copies the text into memory from the system allocator.
+    defer let city = "Lisbon".to_owned() else |_| {
+        return .Ok(1)
+    }
+    let arena = mem.Arena.open(mem.system(), size: 256)
+    defer arena.release()
+    // `render_owned_in` takes the arena's handle first, so the line lives in
+    // the arena and goes back with it.
+    let line = fmt.render_owned_in(arena.handle(), "{city.view()} reaches 27 degrees") else |_| {
+        return .Ok(1)
+    }
+    io.println(line.view())?
+    .Ok(0)
+}
+```
+
+```
+Lisbon reaches 27 degrees
+```
+
+The plain form takes no allocator at all, so passing one is an error rather
+than a second way to say the same thing:
+
+```linea
+import std.io
+import std.mem
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let city = "Lisbon".to_owned(mem.system()) else |_| {
+        return .Ok(1)
+    }
+    io.println(city.view())?
+    .Ok(0)
+}
+```
+
+```
+error[T-Arity]: expected 1 argument(s), found 2
+  --> main.lin:5:22
+   |
+5  |     defer let city = "Lisbon".to_owned(mem.system()) else |_| {
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
+  ::: std/text/str.lin
+36 |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+   |            -------- declared here
+```
+
+The count includes the text the method is called on, which is its first
+argument. Write `"Lisbon".to_owned()` for the system allocator, and
+`"Lisbon".to_owned_in(allocator)` when the allocator is one you were given. A
+function of your own that allocates can follow the same rule: take the
+allocator first in the `_in` form, and let the plain form pass `mem.system()`
+to it.
+
 ### An arena outlives everything built in it
 
 Every string built from `arena.handle()` points into the arena, so the compiler
 holds the arena in place while any of them is still used. The programs in
-this section keep `banner` and the imports from the one above, and change only
+this section keep `banner` and the imports from the arena program in
+[Arenas](#arenas-allocate-many-things-give-them-back-at-once), and change only
 `main`. Release the arena too early:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
@@ -737,7 +810,7 @@ drives these steps with a real handler once handlers have been introduced.
 | --- | --- |
 | a value with a life of its own: a configuration, a cache, a table that grows | `mem.system()`, and `release()` or `defer … .release()` |
 | many values that die together: one request, one line of input, one pass of a loop | a `mem.Arena`, released once, or rewound between passes |
-| a library function that allocates | take `A: Allocator` as a parameter and let the caller choose |
+| a library function that allocates | take `A: Allocator` as a parameter and let the caller choose; name it `x_in`, and add `x` for the system allocator |
 | a closure kept for later | `mem.Closure.open(allocator, closure)`, settled like that allocator's memory |
 | a test that must check every allocation failure is handled | `mem.AllocationLog`, which refuses a chosen allocation; [Testing](10-testing.md#every-allocation-can-fail) shows it |
 
@@ -752,6 +825,8 @@ allocator.
 ## What you have seen
 
 - A function that allocates takes an allocator, and the caller chooses it.
+- `x(...)` uses the system allocator and `x_in(allocator, ...)` takes one, as
+  `new` and `new_in` do for constructors.
 - Allocation can fail, and says so with a `Result`.
 - Memory from `mem.system()` is released by hand; `defer` schedules the release
   on every way out, and a path that returns the value skips it.

@@ -469,6 +469,11 @@ APIs.
   alone. Supersede only decisions that were built against; an option weighed and
   discarded belongs under *Alternatives considered* in the record that rejected
   it. Records still on an unmerged branch are rewritten, not superseded.
+- Name constructors by what they do: `T.new()` builds in the system allocator,
+  `T.new_in(allocator)` in the one given, and `T.open(...)` can fail or
+  acquires a resource. A library function whose first argument is an allocator
+  is a pair the same way: `x(...)` uses the system allocator and
+  `x_in(allocator, ...)` takes one.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

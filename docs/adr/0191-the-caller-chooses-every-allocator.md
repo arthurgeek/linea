@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-09-28. Extends
 [0095](0095-the-system-allocator-is-named-rather-than-received.md) and
-[0098](0098-a-container-names-its-allocator-in-its-type.md).
+[0098](0098-a-container-names-its-allocator-in-its-type.md). Its clause that
+every allocating API takes its allocator from its caller is superseded by
+[0220](0220-a-function-that-allocates-pairs-a-system-form-with-an-in-form.md).
 
 ## Context
 
