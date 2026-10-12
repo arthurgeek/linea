@@ -2,7 +2,7 @@ import std.mem
 import std.release
 import std.testing
 
-use mem.Owner
+use mem.Lender
 use release.Settle
 
 // Append every item of `iterator` to `values`, in source order. On refusal, the

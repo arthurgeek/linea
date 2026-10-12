@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // The walk abandons the drain wherever it ends, and the drain holds
 // transactions nobody settles.

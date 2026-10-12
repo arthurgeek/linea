@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // A closure kept in an arena's memory owes nothing the arena's release does
 // not settle, so it may be dropped without a release, like a vector there.

@@ -1,7 +1,7 @@
 import std.json
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), 4096)

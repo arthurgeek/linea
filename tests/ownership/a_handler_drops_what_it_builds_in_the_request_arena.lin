@@ -4,7 +4,7 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // Answer the words of the query, `+` between them, in reverse order.
 fn reverse[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {

@@ -4,7 +4,7 @@
 import std.iter
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 enum Shortage {
     Memory,

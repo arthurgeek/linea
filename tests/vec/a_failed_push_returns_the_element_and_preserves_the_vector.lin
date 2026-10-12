@@ -1,7 +1,7 @@
 import std.mem
 
 use mem.PushFailure
-use mem.Owner
+use mem.Lender
 
 @linear
 struct Token {

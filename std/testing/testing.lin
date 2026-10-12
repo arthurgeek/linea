@@ -4,7 +4,7 @@ import std.mem
 
 use mem.Buffer
 use mem.Oom
-use mem.Owner
+use mem.Lender
 
 // Tests that walk every allocation-failure path reach the refusing allocator
 // through testing, without importing mem.

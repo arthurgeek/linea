@@ -74,7 +74,7 @@ pub trait Allocator: Copyable {
 
 // An owner provides a non-owning allocator handle. For an arena, the handle
 // borrows its storage and cannot outlive it; a system handle has no such owner.
-pub trait Owner {
+pub trait Lender {
     type Handle: Allocator
 
     fn handle(self: Self) -> Self.Handle where borrows(self)
@@ -119,7 +119,7 @@ impl Allocator for SystemAllocator {
 @linear
 struct SystemAllocation {}
 
-impl Owner for SystemAllocator {
+impl Lender for SystemAllocator {
     type Handle = SystemAllocator
 
     fn handle(self: Self) -> SystemAllocator where carries() {

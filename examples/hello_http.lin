@@ -11,9 +11,9 @@ import std.net
 import std.testing
 
 // `use` brings a trait's operations into scope; the tests call `arena.handle()`,
-// which `Owner` declares, and `router.serve_http`, which `Handler` declares.
+// which `Lender` declares, and `router.serve_http`, which `Handler` declares.
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // `Message` is the JSON object POST /echo expects. `json.Decode[A]` builds one
 // from a document and refuses an object that lacks `text`, gives it the wrong

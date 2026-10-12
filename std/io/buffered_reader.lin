@@ -5,7 +5,7 @@ use text.Utf8Failure
 
 import std.testing
 
-use mem.Owner
+use mem.Lender
 
 // A LineEncodingError locates invalid UTF-8 by its byte in the line and by
 // its absolute stream byte.

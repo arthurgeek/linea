@@ -7,7 +7,7 @@ import std.io
 import std.mem
 import std.testing
 
-use mem.Owner
+use mem.Lender
 
 @derive(Release)
 struct Entry {

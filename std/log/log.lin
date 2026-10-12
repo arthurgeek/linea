@@ -6,7 +6,7 @@ import std.testing
 import std.time
 
 use io.Descriptor
-use mem.Owner
+use mem.Lender
 
 // A `Level` says how much a log line matters: `Debug` for detail wanted
 // while investigating, `Info` for ordinary events, `Warn` for something

@@ -9,7 +9,7 @@ import std.mem
 import std.net
 import std.testing
 
-use mem.Owner
+use mem.Lender
 use net.Accepted
 use net.Acceptor
 

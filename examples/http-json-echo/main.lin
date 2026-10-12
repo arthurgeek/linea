@@ -19,7 +19,7 @@ import std.testing
 // `use` brings a trait's operations into scope, so a test can call
 // `&router.serve_http(&app, request)` on a router directly.
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // `Options` holds what the command line asked for: the port to listen on,
 // and how many requests to answer before stopping, or `.None` to serve until

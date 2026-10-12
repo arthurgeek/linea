@@ -3,7 +3,7 @@ import std.mem
 import std.testing
 import std.text as strings
 
-use mem.Owner
+use mem.Lender
 
 // A `Span` is a byte range of a request's stored text: `start` inclusive, `end`
 // exclusive.

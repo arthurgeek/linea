@@ -3,7 +3,7 @@ import std.release
 import std.testing
 
 use mem.Oom
-use mem.Owner
+use mem.Lender
 
 // A String owns valid UTF-8 text in storage from `A` and grows as text is
 // appended.

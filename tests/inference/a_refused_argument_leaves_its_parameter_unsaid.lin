@@ -1,5 +1,5 @@
-// `handle` is an operation of the `mem.Owner` trait, which this module does
-// not bring into scope with `use mem.Owner`. The refused argument says nothing
+// `handle` is an operation of the `mem.Lender` trait, which this module does
+// not bring into scope with `use mem.Lender`. The refused argument says nothing
 // about `A`, and the call does not ask again what it cannot settle. The same
 // holds for `println`, whose argument comes from the refused call.
 import std.io

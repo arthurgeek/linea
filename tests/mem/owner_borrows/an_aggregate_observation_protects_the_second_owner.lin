@@ -1,7 +1,7 @@
 import std.mem
 
 use mem.Arena
-use mem.Owner
+use mem.Lender
 use mem.system
 
 struct Pair { first: mem.Handle[mem.SystemAllocator], second: mem.Handle[mem.SystemAllocator] }

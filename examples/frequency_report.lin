@@ -6,7 +6,7 @@ import std.io
 import std.mem
 import std.testing
 
-use mem.Owner
+use mem.Lender
 
 // `LineCounts[A]` maps each distinct line to how often it appears, with the
 // lines and the table both allocated with `A`.

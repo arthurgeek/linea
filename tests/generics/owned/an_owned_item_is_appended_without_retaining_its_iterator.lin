@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // The items `iterator` yields are Owned, so the vector keeps nothing of the
 // iterator or of what it walks. `I.Item` is read through this function's own

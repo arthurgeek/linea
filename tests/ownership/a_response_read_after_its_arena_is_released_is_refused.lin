@@ -4,7 +4,7 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn greet[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
     let name = request.query().unwrap_or("stranger")

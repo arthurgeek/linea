@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn keep[T: Owned](sink value: T) -> T {
     value

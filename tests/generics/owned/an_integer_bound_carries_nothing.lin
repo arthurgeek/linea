@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // Every Integer type is Owned, so copying elements out of a slice retains
 // nothing of it.

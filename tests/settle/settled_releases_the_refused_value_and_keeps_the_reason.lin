@@ -6,7 +6,7 @@ import std.io
 import std.json
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // A ticket prints when it is released, so the output shows each refused
 // ticket going back through `Release`.

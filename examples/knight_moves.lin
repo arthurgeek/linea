@@ -16,7 +16,7 @@ import std.io
 
 use mem.Arena
 use mem.Oom
-use mem.Owner
+use mem.Lender
 use mem.system
 use io.IoError
 use io.println

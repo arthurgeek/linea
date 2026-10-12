@@ -926,7 +926,7 @@ vector that lives in an arena:
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // Copy every element of `items` onto the end of `values`.
 fn copy_all[T: Copyable + Owned, A: Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> Result[(), mem.Oom] {
@@ -995,7 +995,7 @@ the path to the view:
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 @copyable
 struct Label {

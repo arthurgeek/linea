@@ -6,7 +6,7 @@ import std.io
 import std.mem
 
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 @derive(Release)
 struct App {

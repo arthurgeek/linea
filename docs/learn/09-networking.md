@@ -37,7 +37,7 @@ import std.io
 import std.mem
 import std.net
 
-use mem.Owner
+use mem.Lender
 use net.Accepted
 use net.Acceptor
 
@@ -247,7 +247,7 @@ import std.io
 import std.mem
 import std.net
 
-use mem.Owner
+use mem.Lender
 
 // Print everything the server sent, then close the connection.
 fn print_greeting(label: Str, sink client: net.Connection) {
@@ -434,7 +434,7 @@ import std.io
 import std.mem
 import std.net
 
-use mem.Owner
+use mem.Lender
 use net.Accepted
 use net.Acceptor
 
@@ -1030,7 +1030,7 @@ import std.io
 import std.mem
 
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // Everything this handler builds comes from `request.allocator()`, the
 // request's arena, so it releases nothing.
@@ -1414,7 +1414,7 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
@@ -1475,7 +1475,7 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
@@ -1531,7 +1531,7 @@ import std.json
 import std.mem
 
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 @derive(Release, json.Decode[mem.Handle])
 struct Note {

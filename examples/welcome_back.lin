@@ -12,7 +12,7 @@ import std.net
 import std.testing
 
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // The count stops growing here, so a browser that sends a huge `visits` cookie
 // cannot overflow it.
