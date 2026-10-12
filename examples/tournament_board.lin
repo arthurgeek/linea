@@ -1,6 +1,7 @@
 // Update tournament scores and print the standings after the final round.
 import std.testing
 import std.io
+import std.mem
 
 use io.IoError
 use io.println
@@ -17,24 +18,14 @@ impl Index[UInt64] for Board via scores
 
 impl Index[FromEnd] for Board via scores
 
-fn standings(board: Board) -> [UInt64; 4] {
-    var order: [UInt64; _] = [0, 1, 2, 3]
-    var i: UInt64 = 1
-    while i < order.length() {
-        let team = order[i]
-        var position = i
-        // Insert ahead of lower scores; ties keep registration order.
-        while position > 0 {
-            if board[order[position - 1]] >= board[team] {
-                break
-            }
-            order[position] = order[position - 1]
-            position -= 1
-        }
-        order[position] = team
-        i += 1
-    }
-    order
+// List the team indexes from the highest score down. `sort_by` reorders a
+// vector in place with a comparison that says whether `left` belongs before
+// `right`, and `[board]` lets that comparison read the scores. The sort is
+// stable, so tied teams keep their registration order.
+fn standings(board: Board) -> Result[Vec[UInt64], mem.Oom] {
+    var order = Vec.from_fn(count: board.scores.length(), initializer: |team| team)?
+    &order.sort_by([board] |left, right| board[left] > board[right])
+    .Ok(order)
 }
 
 test fn final_round_points_change_the_standings() {
@@ -46,13 +37,15 @@ test fn final_round_points_change_the_standings() {
     let scores: [UInt8; _] = [4, 15, 8, 16]
     let ranked: [UInt64; _] = [3, 1, 2, 0]
     testing.assert_eq(board.scores, scores, "final-round points were not added to the scores")?
-    testing.assert_eq(standings(board), ranked, "the highest score should lead the standings")?
+    defer let order = standings(board).unwrap()
+    testing.assert_eq(order.as_slice(), ranked.as_slice(), "the highest score should lead the standings")?
 }
 
 test fn tied_teams_keep_registration_order() {
     let board = Board { scores = [8, 12, 8, 12] }
     let ranked: [UInt64; _] = [1, 3, 0, 2]
-    testing.assert_eq(standings(board), ranked, "tied teams changed registration order")?
+    defer let order = standings(board).unwrap()
+    testing.assert_eq(order.as_slice(), ranked.as_slice(), "tied teams changed registration order")?
 }
 
 fn main() -> Result[UInt8, IoError] {
@@ -63,7 +56,10 @@ fn main() -> Result[UInt8, IoError] {
     // ^1 selects the last registered team's score.
     board[^1] += 3
 
-    let order = standings(board)
+    defer let order = standings(board) else |reason| {
+        io.eprintln("could not rank the teams: {reason:?}")
+        return .Ok(1)
+    }
     println("Final standings")?
     // `enumerate` pairs each team index with its position, counting from
     // zero. The pattern `(rank, team)` takes the pair apart, and `*team`

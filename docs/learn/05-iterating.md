@@ -761,6 +761,118 @@ reason, `mem.Oom`, releasing what was gathered so far
 nothing can be moved out through a view; copying the `Str` copies a view of
 the name, not its text.
 
+## Sorting a `Vec`: `sort` and `sort_by`
+
+`sort` puts a vector's elements in ascending order, in place. `sort_by` orders
+them by a comparison you write, which answers whether `left` belongs before
+`right`. An array's view and a map cannot be reordered, so collect what you
+want sorted into a `Vec` first:
+
+```linea
+import std.io
+
+struct Line {
+    item: Str,
+    cents: UInt64,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let order = [
+        Line { item = "jam", cents = 40 },
+        Line { item = "tea", cents = 175 },
+        Line { item = "coffee", cents = 250 },
+        Line { item = "croissant", cents = 175 },
+    ]
+    let { values: names, iterator: _ } = order.as_slice().map(|sink line| copy(line.item)).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = names
+    // `sort` puts the names in ascending order.
+    &sorted.sort()
+    io.println("{sorted.as_slice():?}")?
+    let { values: viewed, iterator: _ } = order.as_slice().collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var lines = viewed
+    // `sort_by` orders by a comparison you write: the dearest line first.
+    &lines.sort_by(|left, right| left.cents > right.cents)
+    for line in lines.as_slice() {
+        io.println("{line.cents:>4} {line.item}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+["coffee", "croissant", "jam", "tea"]
+ 250 coffee
+ 175 tea
+ 175 croissant
+  40 jam
+```
+
+The tea and the croissant cost the same, so the comparison puts neither before
+the other, and they keep the order they had in `order`: both sorts are
+*stable*. Neither allocates, so neither can fail, and both make O(n log n)
+comparisons. Like Rust's `sort` and `sort_by`, they reorder the vector itself;
+unlike Rust's `sort_by`, the comparison answers a `Bool`, "does `left` come
+first?", rather than an ordering.
+
+`sort` needs an element type that is `Ordered`: one where any two values are
+equal or one is less than the other. Integers, `Str`, tuples of them and types
+that derive `Ordered` are. `Float64` is not, because NaN is neither less than,
+greater than nor equal to any number, itself included:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let readings = [Float64(2.5), -1.0, 0.0 / 0.0, 0.5]
+    let { values, iterator: _ } = readings.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = values
+    &sorted.sort()
+    io.println("{sorted.as_slice():?}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Bound]: `T` requires `Ordered`, and `Float64` does not implement it
+ --> sort_floats.lin:9:13
+  |
+9 |     &sorted.sort()
+  |             ^^^^ implement it for that type, or drop the bound
+```
+
+Sort floats with `sort_by` and a comparison that decides where NaN goes:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let readings = [Float64(2.5), -1.0, 0.0 / 0.0, 0.5]
+    let { values, iterator: _ } = readings.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = values
+    // NaN goes after every number, and two NaNs are equal for the sort.
+    &sorted.sort_by(|left, right| !left.is_nan() && (right.is_nan() || left < right))
+    io.println("{sorted.as_slice():?}")?
+    .Ok(0)
+}
+```
+
+```
+[-1.0, 0.5, 2.5, NaN]
+```
+
+A comparison must be consistent: never true for a value against itself, and
+transitive. Plain `<` on floats is not once NaN is among them. Given an
+inconsistent comparison, a sort still finishes and the vector still holds
+every element it held, in an order nobody promises.
+
 ## Callbacks and searches that keep their state
 
 Some operations come with an `_inout` twin, such as `fold_inout`, which borrows
@@ -1153,6 +1265,8 @@ operation they offer, and not a protocol the language asks of every type.
 | one value from all the items | `xs.fold(start, \|sink value, sink x\| …)` |
 | to ask about the items | `any`, `all`, `find`, `find_map` |
 | the items in a new `Vec` | `xs.collect().settled()`, or `xs.collect_in(allocator).settled()` |
+| a vector in ascending order | `&v.sort()`, for `Ordered` elements |
+| a vector in an order you choose | `&v.sort_by(\|left, right\| …)`, true when `left` comes first |
 | a search that continues, with a count of the items inspected | `&it.find_counted(\|x\| …)` on an iterator you keep |
 | a fold or search whose callback keeps its state | `fold_inout`, `find_inout`, `find_counted_inout` |
 | a chain across several lines | one step per line, each opening with `.` |
