@@ -1,0 +1,5 @@
+error[O-Move]: this read-only observation cannot give away the value it observes
+  --> tests/traits/integer_generics/a_symbolic_integer_is_copied_out_of_an_observation.lin:15:23
+   |
+15 |         Some(item) => *item,
+   |                       ^^^^^ read the observation, or copy a copyable referent
