@@ -1173,7 +1173,7 @@ error[O-Capture]: a capturing closure cannot become a function pointer
   --> lambdas_fnptr.lin:30:46
    |
 30 |     io.println("To take away: {total(orders, [surcharge] |coffee| coffee.cents() + surcharge)} cents.")?
-   |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep its environment with `mem.Closure.open(allocator, closure)`, or take a generic callable parameter
+   |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep its environment with `mem.Closure.open(closure)`, or take a generic callable parameter
 ```
 
 A bound accepts functions and closures alike. It is Rust's

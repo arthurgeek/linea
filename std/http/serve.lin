@@ -1134,7 +1134,7 @@ fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection:
 // connection, and tell `handler` how the exchange ended. Nothing this
 // allocates in `memory` outlives the call.
 fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) -> Served {
-    var reader = io.BufferedReader.open(memory, capacity: request_buffer_bytes, reader: connection) else |failure| {
+    var reader = io.BufferedReader.open_in(memory, capacity: request_buffer_bytes, reader: connection) else |failure| {
         let BufferOpenFailure { resource, reason: _ } = failure
         return refuse_for_want_of_arena(resource, &handler, memory, &refusal, limits)
     }

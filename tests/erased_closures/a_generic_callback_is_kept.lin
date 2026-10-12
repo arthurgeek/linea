@@ -4,7 +4,7 @@ import std.mem
 // stores it where the caller's allocator says. That may be an arena, whose
 // closures are dropped with it, so the callable must be `Discardable`.
 fn keep[A: Allocator, F: inout fn(value: UInt64) -> UInt64 + Release + Discardable](allocator: A, sink step: F) -> Result[mem.Closure[inout fn(value: UInt64) -> UInt64, A], mem.Oom] where carries(.Ok: allocator, step) {
-    mem.Closure.open(allocator, step)
+    mem.Closure.open_in(allocator, step)
 }
 
 fn main() -> Result[UInt8, mem.Oom] {

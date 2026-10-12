@@ -7,7 +7,7 @@ fn double(value: UInt64) -> UInt64 {
 // Nothing names the closure's type, so the function's own signature is what
 // the closure is called as.
 fn main() -> Result[UInt8, mem.Oom] {
-    let doubling = mem.Closure.open(mem.system(), double)?
+    let doubling = mem.Closure.open(double)?
     let answer = doubling(21)
     doubling.release()
     return .Ok(UInt8(answer))

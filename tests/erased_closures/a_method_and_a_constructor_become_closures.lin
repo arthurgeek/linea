@@ -15,10 +15,10 @@ enum Reading {
 // A member of an implementation and an enum constructor are functions too,
 // so each becomes a closure where its signature fits.
 fn main() -> Result[UInt8, mem.Oom] {
-    let doubling: mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = mem.Closure.open(mem.system(), Meter.doubled)?
+    let doubling: mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = mem.Closure.open(Meter.doubled)?
     let four = doubling(2)
     doubling.release()
-    let reading: mem.Closure[fn(sink value: UInt64) -> Reading, mem.SystemAllocator] = mem.Closure.open(mem.system(), Reading.Value)?
+    let reading: mem.Closure[fn(sink value: UInt64) -> Reading, mem.SystemAllocator] = mem.Closure.open(Reading.Value)?
     let seven = match reading(7) {
         Value(value) => value,
     }

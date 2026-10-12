@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/erased_closures/a_read_capture_keeps_its_owner_alive.lin:13:5
+  --> tests/erased_closures/a_read_capture_keeps_its_owner_alive.lin:12:5
    |
-13 |     scores.release()
+12 |     scores.release()
    |     ^^^^^^ keep this place available until the last use of its observation
-14 |     let count = counted()
+13 |     let count = counted()
    |                 ------- the observation is still used here

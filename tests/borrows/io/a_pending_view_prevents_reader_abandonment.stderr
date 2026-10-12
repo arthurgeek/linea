@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/borrows/io/a_pending_view_prevents_reader_abandonment.lin:11:18
+  --> tests/borrows/io/a_pending_view_prevents_reader_abandonment.lin:10:18
    |
-11 |     let _input = reader.abandon()
+10 |     let _input = reader.abandon()
    |                  ^^^^^^ keep this place available until the last use of its observation
-12 |     return UInt8(pending.length())
+11 |     return UInt8(pending.length())
    |                  ------- the observation is still used here

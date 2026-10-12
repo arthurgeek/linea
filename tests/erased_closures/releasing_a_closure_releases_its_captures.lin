@@ -24,7 +24,6 @@ fn main() -> Result[UInt8, mem.Oom] {
     let first = Ticket { number = 1 }
     let second = Ticket { number = 2 }
     let total = mem.Closure.open(
-        mem.system(),
         [sink first, sink second] || -> UInt8 {
             first.number + second.number
         },

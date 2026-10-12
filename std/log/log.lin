@@ -96,10 +96,24 @@ struct Logger[S: Sink, A: Allocator = mem.SystemAllocator] {
 }
 
 impl[S: Sink, A: Allocator] Logger[S, A] {
-    // `open` makes a logger that writes the lines at `minimum` and above to
+    // `open_in` makes a logger that writes the lines at `minimum` and above to
     // `output`, building each line in a buffer from `allocator`.
-    pub fn open(sink output: S, allocator: A, minimum: Level) -> Logger[S, A] where carries(output, allocator) {
+    pub fn open_in(allocator: A, sink output: S, minimum: Level) -> Logger[S, A] where carries(output, allocator) {
         .{ output, allocator = copy(allocator), minimum }
+    }
+}
+
+test fn a_logger_builds_its_lines_in_the_allocator_it_was_given() {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    let logger = Logger.open_in(arena.handle(), io.stderr(), minimum: .Warn)
+    testing.assert(logger.enabled(.Warn), "the logger dropped its minimum level")?
+}
+
+impl[S: Sink] Logger[S] {
+    // `open` makes a logger that writes the lines at `minimum` and above to
+    // `output`, building each line in a buffer from the system allocator.
+    pub fn open(sink output: S, minimum: Level) -> Logger[S] where carries(output) {
+        Logger.open_in(mem.system(), output, minimum)
     }
 }
 
@@ -117,7 +131,7 @@ test fn a_logger_writes_to_the_sink_it_was_given() {
 // standard error, building each in a buffer from `allocator`. The logger does
 // not own standard error, so it copies freely and needs no release.
 pub fn to_stderr_in[A: Allocator](allocator: A, minimum: Level) -> Logger[io.Descriptor, A] where carries(allocator) {
-    Logger.open(io.stderr(), allocator, minimum)
+    Logger.open_in(allocator, io.stderr(), minimum)
 }
 
 test fn a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given() {
@@ -205,7 +219,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
 test fn a_line_below_the_minimum_level_is_not_written() {
     let file = capture()
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let logger = Logger.open(file.open(), log.allocator(), minimum: .Warn)
+    let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Warn)
     let ignored = logger.log(.Info, "ignored", field("count", 3).and("path", "/items")).is_ok()
     let attempts_below = log.attempts()
     let kept = logger.log(.Error, "kept", ()).is_ok()
@@ -223,7 +237,7 @@ test fn a_line_below_the_minimum_level_is_not_written() {
 test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
     let file = capture()
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let logger = Logger.open(file.open(), log.allocator(), minimum: .Info)
+    let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Info)
     log.refuse_attempt(log.attempts() + 1)
     let refused = match logger.log(.Info, "refused", ()) {
         Err(error) => match read error {
@@ -245,7 +259,7 @@ test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
 
 // A line the sink refuses is reported by `log` and dropped by `error`.
 test fn a_line_the_sink_refuses_is_reported() {
-    let logger = Logger.open(io.descriptor(-1), mem.system(), minimum: .Info)
+    let logger = Logger.open(io.descriptor(-1), minimum: .Info)
     let reported = match logger.log(.Error, "lost", ()) {
         Err(error) => match read error {
             Sink(_) => true,
@@ -263,7 +277,7 @@ test fn a_line_is_built_in_an_arena() {
     // the arena is released.
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let file = capture()
-    let logger = Logger.open(file.open(), arena.handle(), minimum: .Info)
+    let logger = Logger.open_in(arena.handle(), file.open(), minimum: .Info)
     let first = logger.log(.Info, "listening", field("port", 8080)).is_ok()
     let second = logger.log(.Warn, "slow", field("path", "/items").and("count", 3)).is_ok()
     logger.release()
@@ -278,7 +292,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_line() -> Result[(
         mem.system(),
         |allocator| -> Result[(), LogError[io.IoError]] {
             let file = capture()
-            let logger = Logger.open(file.open(), allocator, minimum: .Info)
+            let logger = Logger.open_in(allocator, file.open(), minimum: .Info)
             let outcome = logger.log(.Info, "a message long enough to grow the line", field("path", "/items/42").and("count", 3))
             logger.release()
             let written = file.finish()
@@ -400,12 +414,12 @@ impl Capture {
     // `open` creates the file, empty, for a logger to own.
     internal fn open(self: Self) -> fs.File {
         let path = fs.Path.from_str(self.path.view()).unwrap()
-        fs.File.create(mem.system(), path, policy: .Replace).unwrap()
+        fs.File.create(path, policy: .Replace).unwrap()
     }
 
     // `logger` opens a logger over the file that allocates from the system.
     internal fn logger(self: Self, minimum: Level) -> Logger[fs.File] {
-        Logger.open(self.open(), mem.system(), minimum)
+        Logger.open(self.open(), minimum)
     }
 
     // `finish_with_times` returns what was written, removes the file and

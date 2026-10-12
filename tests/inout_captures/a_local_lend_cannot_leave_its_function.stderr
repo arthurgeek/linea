@@ -3,7 +3,7 @@ error[O-Escapes]: a value holding a place lent `inout` cannot leave the function
   |
 5 |     mem.Closure.open(
   |     ^^^^^^^^^^^^^^^^^ this value holds the lend
-7 |         inout [inout count] || {
+6 |         inout [inout count] || {
   |                      ----- lent `inout` here
   |
   = help: finish with the value inside this function, or give the closure its own state with a `sink` capture

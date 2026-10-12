@@ -1,12 +1,11 @@
 import std.io
-import std.mem
 
 fn consume[T: Release](sink value: T) -> () {
     Release.release(value)
 }
 
 fn main() -> UInt8 {
-    let output = match io.BufferedWriter.open(mem.system(), capacity: 8, writer: io.stdout()) {
+    let output = match io.BufferedWriter.open(capacity: 8, writer: io.stdout()) {
         Ok(writer) => writer,
         Err(_) => return 1,
     }

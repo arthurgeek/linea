@@ -233,7 +233,7 @@ impl[S, P: Allocator] Router[S, P] {
             handler.release()
             return .Err(refused)
         }
-        let kept = Closure.open(self.allocator, handler)?
+        let kept = Closure.open_in(self.allocator, handler)?
         let index = &self.add_handler(slot.path, kept)?
         if slot.subtree {
             &self.nodes[slot.node].subtree.register(slot.method, index)

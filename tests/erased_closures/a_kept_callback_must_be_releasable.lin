@@ -10,7 +10,6 @@ struct Key {
 fn main() -> UInt8 {
     let key = Key { id = 3 }
     let reveal = mem.Closure.open(
-        mem.system(),
         [sink key] || -> UInt8 {
             key.id
         },

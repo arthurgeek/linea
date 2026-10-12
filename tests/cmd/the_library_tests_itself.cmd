@@ -204,6 +204,7 @@ The library tests itself.
   ok    fs.atomic_save_rejects_an_observed_nonregular_destination_before_writing
   ok    fs.atomic_save_rejects_special_permission_bits_before_io
   ok    fs.create_refuses_an_existing_entry_unless_it_replaces_it
+  ok    fs.creating_a_file_makes_an_entry_that_opens
   ok    fs.creating_a_file_reports_scratch_allocation_failure
   ok    fs.creating_a_file_takes_its_path_scratch_from_an_arena
   ok    fs.direct_file_writes_require_a_policy_and_report_the_accepted_extent
@@ -213,6 +214,7 @@ The library tests itself.
   ok    fs.each_allocation_failure_covers_every_growth_step_of_a_file_read
   ok    fs.file_close_consumes_a_failed_descriptor
   ok    fs.from_str_accepts_text_and_refuses_an_embedded_nul
+  ok    fs.opening_a_file_reads_what_was_written
   ok    fs.opening_a_file_takes_its_path_scratch_from_an_arena
   ok    fs.opening_a_path_reports_scratch_allocation_failure
   ok    fs.path_components_preserve_a_root_parent_and_reject_special_final_names
@@ -460,12 +462,14 @@ The library tests itself.
   ok    io.a_prompt_finishes_short_writes_and_keeps_input_lookahead
   ok    io.a_prompt_reads_its_response_into_an_arena
   ok    io.a_raw_line_preserves_crlf_without_text_conversion
+  ok    io.a_reader_buffers_from_the_system_allocator
   ok    io.a_refused_buffer_displays_a_failed_close
   ok    io.a_resumed_borrowed_line_is_held_in_an_arena
   ok    io.a_resumed_borrowed_raw_line_is_held_in_an_arena
   ok    io.a_resumed_owned_line_is_allocated_from_an_arena
   ok    io.a_resumed_owned_raw_line_is_allocated_from_an_arena
   ok    io.a_smaller_line_limit_releases_excess_record_capacity
+  ok    io.a_writer_buffers_from_the_system_allocator
   ok    io.abandon_returns_the_reader_and_drops_its_read_ahead
   ok    io.abort_drops_pending_bytes_and_returns_the_writer
   ok    io.allocation_failure_preserves_the_prefix_and_unconsumed_lookahead
@@ -744,6 +748,7 @@ The library tests itself.
   ok    json.object_makes_an_empty_object_without_allocating
   ok    json.only_an_allocation_failure_is_running_out_of_memory
   ok    json.open_accepts_only_an_object
+  ok    json.open_reads_an_object_with_the_system_allocator
   ok    json.optional_decodes_a_present_member_and_answers_none_for_an_absent_one
   ok    json.parse_allocates_the_document_from_the_system_allocator
   ok    json.parse_bytes_allocates_the_document_from_the_system_allocator
@@ -798,6 +803,7 @@ The library tests itself.
   ok    log.a_line_starts_with_the_time_it_was_written
   ok    log.a_line_the_allocator_refuses_is_reported_and_not_written
   ok    log.a_line_the_sink_refuses_is_reported
+  ok    log.a_logger_builds_its_lines_in_the_allocator_it_was_given
   ok    log.a_logger_is_enabled_at_its_minimum_level_and_above
   ok    log.a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given
   ok    log.a_logger_to_standard_error_copies_freely
@@ -819,6 +825,7 @@ The library tests itself.
   ok    mem.a_byte_store_reaches_one_byte
   ok    mem.a_closure_calls_what_it_captured
   ok    mem.a_closure_keeps_its_captures_in_an_arena
+  ok    mem.a_closure_opened_in_the_system_allocator_calls_what_it_captured
   ok    mem.a_drain_stopped_early_is_returned_by_finish_and_resumes
   ok    mem.a_handle_written_without_a_parent_is_a_handle_over_the_system
   ok    mem.a_lambda_that_captures_nothing_allocates_nothing
@@ -1186,4 +1193,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1183 passed, 0 failed
+  1190 passed, 0 failed

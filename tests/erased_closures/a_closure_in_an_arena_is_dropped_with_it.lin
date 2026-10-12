@@ -7,7 +7,7 @@ use mem.Owner
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), size: 1024)
     let step: UInt8 = 2
-    let add = mem.Closure.open(
+    let add = mem.Closure.open_in(
         arena.handle(),
         [sink step] |value: UInt8| -> UInt8 {
             value + step

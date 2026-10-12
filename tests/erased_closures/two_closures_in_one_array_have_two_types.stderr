@@ -5,4 +5,4 @@ error[T-Mismatch]: each closure has its own type, so this closure is not the one
   |                  -------------------------------------- this element settles what the array holds
   |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a different closure
   |
-  = help: closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(allocator, closure)`; closures that capture nothing also convert to a written `fn` type
+  = help: closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(closure)`; closures that capture nothing also convert to a written `fn` type

@@ -2,7 +2,6 @@
 // visitor it was. The server counts visitors across connections, so the third
 // to arrive is greeted as visitor 3 whichever connection that was.
 import std.io
-import std.mem
 import std.net
 
 // Read the visitor's name, then answer with their number and close.
@@ -10,7 +9,7 @@ import std.net
 // never arrives is not counted.
 fn greet(sink connection: net.Connection, inout visitors: UInt64) -> () {
     // A refused buffer hands the connection back; `settled()` closes it.
-    var reader = io.BufferedReader.open(mem.system(), capacity: 256, reader: connection).settled() else |reason| {
+    var reader = io.BufferedReader.open(capacity: 256, reader: connection).settled() else |reason| {
         io.eprintln("cannot buffer a connection: {reason}")
         return
     }
@@ -56,7 +55,7 @@ fn arrive(address: net.Address, name: Str) -> Option[net.Connection] {
 
 // Print the greeting the server sent back, then close the connection.
 fn read_greeting(sink visitor: net.Connection) -> () {
-    var reader = io.BufferedReader.open(mem.system(), capacity: 256, reader: visitor).settled() else |reason| {
+    var reader = io.BufferedReader.open(capacity: 256, reader: visitor).settled() else |reason| {
         io.eprintln("cannot buffer a connection: {reason}")
         return
     }

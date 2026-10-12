@@ -144,7 +144,7 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
             testing.assert_eq(failure.written, UInt64(5), "publication failure lost temporary write progress")?
         },
     }
-    var file = File.open(allocator, path).unwrap()
+    var file = File.open(path).unwrap()
     defer var bytes = allocator.acquire(16).unwrap()
     let received = &file.read_some(&bytes, offset: 0, count: 16)
     file.close().unwrap()
@@ -153,7 +153,7 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
         testing.assert_eq(bytes.load_byte(index), before.byte(index).unwrap(), "create conflict changed old contents")?
     }
     save_atomic(path, after.as_bytes(), policy: .Replace).unwrap()
-    var changed = File.open(allocator, path).unwrap()
+    var changed = File.open(path).unwrap()
     let received_after = &changed.read_some(&bytes, offset: 0, count: 16)
     changed.close().unwrap()
     testing.assert_eq(received_after.unwrap(), after.length(), "atomic replace lost the new extent")?

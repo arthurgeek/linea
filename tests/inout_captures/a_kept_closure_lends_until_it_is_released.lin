@@ -5,7 +5,6 @@ import std.mem
 fn main() -> Result[UInt8, mem.Oom] {
     var count: UInt8 = 0
     var tick: mem.Closure[inout fn() -> (), mem.SystemAllocator] = mem.Closure.open(
-        mem.system(),
         inout [inout count] || {
             count += 1
         },

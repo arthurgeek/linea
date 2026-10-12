@@ -311,7 +311,7 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
         // variant, which `?` returns.
         given.to_owned().map_err(|sink _oom| ConfigFailure.ValueAllocation)?
     } else {
-        var reader = io.BufferedReader.open(mem.system(), capacity: input_capacity, reader: io.stdin()) else |_| {
+        var reader = io.BufferedReader.open(capacity: input_capacity, reader: io.stdin()) else |_| {
             return .Err(.PromptBuffer)
         }
         let answer = io.prompt(&reader, message: "new value: ", max_bytes: max_value_bytes)

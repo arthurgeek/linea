@@ -19,7 +19,6 @@ impl Release for Ticket {
 fn main() -> Result[UInt8, mem.Oom] {
     let ticket = Ticket {}
     let admit = mem.Closure.open(
-        mem.system(),
         [sink _held = ticket] || -> UInt8 {
             5
         },

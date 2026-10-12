@@ -7,7 +7,7 @@ use mem.Owner
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), size: 1024)
     let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
-    let count = mem.Closure.open(
+    let count = mem.Closure.open_in(
         arena.handle(),
         [sink scores] || -> UInt64 {
             scores.length()

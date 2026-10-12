@@ -139,7 +139,7 @@ pub fn prompt_with[R: Reader, A: Allocator, W: ByteWriter](inout reader: Buffere
 test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
     let input = "one\ntwo\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
         return testing.assert(false, "reader allocation failed")
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
@@ -177,7 +177,7 @@ test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
 test fn a_failed_prompt_write_does_not_read_input() {
     let input = "answer\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
         return testing.assert(false, "reader allocation failed")
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = true, fail_flush = false }
@@ -198,7 +198,7 @@ test fn a_failed_prompt_write_does_not_read_input() {
 test fn a_failed_prompt_flush_does_not_read_input() {
     let input = "answer\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
         return testing.assert(false, "reader allocation failed")
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = true }
@@ -219,7 +219,7 @@ test fn a_failed_prompt_flush_does_not_read_input() {
 test fn a_failed_prompt_preserves_existing_input_lookahead() {
     let input = "one\ntwo\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+    var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line(max_bytes: 3) {
@@ -263,7 +263,7 @@ test fn a_prompt_reads_its_response_into_an_arena() {
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
     let input = "a response long enough to grow its record\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-    var reader = BufferedReader.open(arena.handle(), capacity: 4, reader: source) else |_| {
+    var reader = BufferedReader.open_in(arena.handle(), capacity: 4, reader: source) else |_| {
         return testing.assert(false, "an arena reader was refused")
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
@@ -285,7 +285,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_prompt() -> Result
         |allocator| -> Result[(), PromptError[UInt8, UInt8]] {
             let input = "a response long enough to grow its record\n"
             let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
-            var reader = BufferedReader.open(allocator, capacity: 4, reader: source) else |_| {
+            var reader = BufferedReader.open_in(allocator, capacity: 4, reader: source) else |_| {
                 return .Err(.Read(.Allocation(.Exhausted)))
             }
             var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
@@ -315,7 +315,7 @@ pub fn prompt[A: Allocator](inout reader: BufferedReader[Descriptor, A], message
 test fn prompt_writes_to_standard_error_and_reads_its_reader() {
     // An invalid descriptor stands in for standard input, so the read fails
     // after the empty message is written to standard error and flushed.
-    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: descriptor(-1)) else |_| {
+    var reader = BufferedReader.open(capacity: 8, reader: descriptor(-1)) else |_| {
         return testing.assert(false, "reader allocation failed")
     }
     let failed = match prompt(&reader, "", max_bytes: 8) {
@@ -336,7 +336,7 @@ test fn prompt_reads_through_a_reader_in_an_arena() {
     // arena.
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let input = open_empty_input()
-    var reader = BufferedReader.open(arena.handle(), capacity: 8, reader: descriptor(input)) else |_| {
+    var reader = BufferedReader.open_in(arena.handle(), capacity: 8, reader: descriptor(input)) else |_| {
         let _closed = mem._close_fd(input)
         return testing.assert(false, "an arena reader was refused")
     }

@@ -2,10 +2,9 @@
 // A descriptor owes nothing, so `abort` settles the writer, and the report
 // names `_kept.abort()`.
 import std.io
-import std.mem
 
 fn main() -> UInt8 {
-    match io.BufferedWriter.open(mem.system(), capacity: 64, writer: io.stdout()) {
+    match io.BufferedWriter.open(capacity: 64, writer: io.stdout()) {
         Ok(output) => {
             let _kept = output
             0

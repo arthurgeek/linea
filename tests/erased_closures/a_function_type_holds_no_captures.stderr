@@ -2,4 +2,4 @@ error[O-Capture]: a capturing closure cannot become a function pointer
  --> tests/erased_closures/a_function_type_holds_no_captures.lin:5:44
   |
 5 |     let shift: fn(value: UInt8) -> UInt8 = [sink offset] |value| value + offset
-  |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep its environment with `mem.Closure.open(allocator, closure)`, or take a generic callable parameter
+  |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep its environment with `mem.Closure.open(closure)`, or take a generic callable parameter

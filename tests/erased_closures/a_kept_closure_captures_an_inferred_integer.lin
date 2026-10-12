@@ -6,29 +6,29 @@ import std.mem
 // a kept closure releases each of them.
 fn main() -> Result[UInt8, mem.Oom] {
     let fee = 499
-    let shipping = mem.Closure.open(mem.system(), [sink fee] |cents: UInt64| cents + fee)?
+    let shipping = mem.Closure.open([sink fee] |cents: UInt64| cents + fee)?
     defer shipping.release()
 
     let tax = 120
     let add_tax = [sink tax] |cents: UInt64| cents + tax
-    let taxed = mem.Closure.open(mem.system(), add_tax)?
+    let taxed = mem.Closure.open(add_tax)?
     defer taxed.release()
 
     let discount = 250
-    let discounted = mem.Closure.open(mem.system(), [sink off = discount] |cents: UInt64| cents - off)?
+    let discounted = mem.Closure.open([sink off = discount] |cents: UInt64| cents - off)?
     defer discounted.release()
 
     let tip = 75
-    let tipped = mem.Closure.open(mem.system(), [read tip] |cents: UInt64| cents + tip)?
+    let tipped = mem.Closure.open([read tip] |cents: UInt64| cents + tip)?
     defer tipped.release()
 
     let bonus = 10
     let add_bonus = [sink bonus] |cents: UInt64| cents + bonus
-    let rewarded = mem.Closure.open(mem.system(), [sink add_bonus] |cents: UInt64| add_bonus(cents) + 1)?
+    let rewarded = mem.Closure.open([sink add_bonus] |cents: UInt64| add_bonus(cents) + 1)?
     defer rewarded.release()
 
     let rate = 1.5
-    let scaled = mem.Closure.open(mem.system(), [sink rate] |amount: Float64| amount * rate)?
+    let scaled = mem.Closure.open([sink rate] |amount: Float64| amount * rate)?
     defer scaled.release()
 
     let order = discounted(taxed(shipping(6000)))

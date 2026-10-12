@@ -1,9 +1,8 @@
 import std.io
-import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
-    var input = io.BufferedReader.open(mem.system(), capacity: 16, reader: io.stdin()).unwrap()
-    var output = io.BufferedWriter.open(mem.system(), capacity: 32, writer: io.stderr()).unwrap()
+    var input = io.BufferedReader.open(capacity: 16, reader: io.stdin()).unwrap()
+    var output = io.BufferedWriter.open(capacity: 32, writer: io.stderr()).unwrap()
     let name = io.prompt_with(&input, &output, message: "name: ", max_bytes: 64).unwrap().unwrap()
     let _stdin = input.abandon()
     let _stderr = output.finish().unwrap()

@@ -113,7 +113,7 @@ test fn settling_a_failed_file_read_keeps_the_read_and_close_errors() {
 // partial bytes run one byte past the limit. Every opened descriptor is closed
 // once, including after a read or limit failure.
 pub fn read_file_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, A], ReadFileFailure[A]] where carries(.Ok: allocator), carries(.Err.partial.Some: allocator) {
-    var file = File.open(allocator, path) else |reason| {
+    var file = File.open_in(allocator, path) else |reason| {
         return .Err(.{ partial = .None, reason = .{ primary = .Some(.Open(reason)), close = .None } })
     }
     let outcome = io.read_all_in(allocator, &file, max_bytes)

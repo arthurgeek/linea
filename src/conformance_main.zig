@@ -6451,7 +6451,7 @@ fn erasedClosuresModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     for (0..n) |i| try w.print(
         "fn step{d}(seed: UInt64) -> UInt64 {{\n" ++
             "    let bump: UInt64 = {d}\n" ++
-            "    let kept = mem.Closure.open(mem.system(), [sink bump] |value: UInt64| -> UInt64 {{ value + bump }}).unwrap()\n" ++
+            "    let kept = mem.Closure.open([sink bump] |value: UInt64| -> UInt64 {{ value + bump }}).unwrap()\n" ++
             "    let answer = kept(seed)\n" ++
             "    kept.release()\n" ++
             "    answer\n" ++

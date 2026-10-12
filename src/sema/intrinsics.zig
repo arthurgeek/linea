@@ -68,8 +68,10 @@ pub const RawAccesses = struct {
     /// stored callable's address and length appended.
     closure: DeclId = .none,
     closure_entry_type: DeclId = .none,
-    /// `Closure.open`, whose callback must be callable as the closure's `S`.
+    /// `Closure.open_in` and `Closure.open`, whose callback must be callable
+    /// as the closure's `S`. The second opens in the system allocator.
     closure_open: DeclId = .none,
+    closure_open_system: DeclId = .none,
     /// The generated entry and release addresses for a callable type, and
     /// that type's size.
     closure_entry: DeclId = .none,
@@ -93,7 +95,8 @@ pub const RawAccesses = struct {
             .place = rawAccessDecl(program, ast, "slot_place", 5),
             .closure = program.libraryDeclIn("mem", "Closure") orelse .none,
             .closure_entry_type = program.libraryDeclIn("mem", "ClosureEntry") orelse .none,
-            .closure_open = closureOpenDecl(program, ast),
+            .closure_open = closureOpenDecl(program, ast, "open_in"),
+            .closure_open_system = closureOpenDecl(program, ast, "open"),
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
@@ -111,6 +114,12 @@ pub const RawAccesses = struct {
         checked.store8 = libraryExternDecl(program, ast, typing, "linea_raw_store8");
         checked.load8 = libraryExternDecl(program, ast, typing, "linea_raw_load8");
         return checked;
+    }
+
+    /// Whether `d` opens a closure: its first type parameter is the callback,
+    /// which must be callable as the closure's `S`.
+    pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
+        return d != DeclId.none and (d == self.closure_open or d == self.closure_open_system);
     }
 
     pub fn contains(self: RawAccesses, d: DeclId) bool {
@@ -156,17 +165,17 @@ pub const RawAccesses = struct {
     }
 };
 
-/// `Closure.open` in the library's `mem`: the member named `open` of an
-/// implementation whose head names `Closure`. Other types in `mem` declare an
-/// `open` of their own, so the name alone does not identify it.
-fn closureOpenDecl(program: *const ExpandedProgram, ast: *const Ast) DeclId {
+/// `Closure.open_in` or `Closure.open` in the library's `mem`: the member of
+/// that name of an implementation whose head names `Closure`. Other types in
+/// `mem` declare an `open` of their own, so the name alone does not identify it.
+fn closureOpenDecl(program: *const ExpandedProgram, ast: *const Ast, member: []const u8) DeclId {
     const closure = program.libraryDeclIn("mem", "Closure") orelse return .none;
     const module = program.moduleOf(closure);
     for (program.declsOf(module)) |d| {
         const name = ast.declName(d);
         const owner = ast.declOwner(d);
         if (name == .none or owner == .none) continue;
-        if (std.mem.eql(u8, ast.tokenText(name), "open") and std.mem.eql(u8, ast.tokenText(owner), "Closure")) return d;
+        if (std.mem.eql(u8, ast.tokenText(name), member) and std.mem.eql(u8, ast.tokenText(owner), "Closure")) return d;
     }
     return .none;
 }

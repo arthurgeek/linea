@@ -1,5 +1,4 @@
 import std.io
-import std.mem
 import std.testing
 import std.time
 
@@ -232,7 +231,7 @@ test fn the_handler_reads_from_each_connection_and_names_its_peer() {
     let client_closed = client.close().is_ok()
     var handler = inout [sink received = false, sink from_loopback = false] |sink connection: Connection, peer: Address| {
         from_loopback = peer == loopback(peer.port)
-        var reader = io.BufferedReader.open(mem.system(), capacity: 16, reader: connection) else |_| {
+        var reader = io.BufferedReader.open(capacity: 16, reader: connection) else |_| {
             panic("the reader was refused its buffer")
         }
         received = match &reader.read_line_borrowed(max_bytes: 16) {

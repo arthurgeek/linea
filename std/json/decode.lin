@@ -19,7 +19,7 @@ template impl[A: Allocator] Decode[A] where
     reflect.components: Decode[A],
 {
     fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
-        defer var fields = ObjectDecoder.open(value, allocator)?
+        defer var fields = ObjectDecoder.open_in(allocator, value)?
         let result: Self = reflect.construct(
             reflect.product,
             |component| {
@@ -400,8 +400,9 @@ struct ObjectDecoder[A: Allocator] {
 }
 
 impl[A: Allocator] ObjectDecoder[A] {
-    // Start decoding the members of `value`, which must be an object.
-    pub fn open(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
+    // Start decoding the members of `value`, which must be an object,
+    // recording the names read in storage from `allocator`.
+    pub fn open_in(allocator: A, value: Value[A]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
         if value.kind() != .Object {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
@@ -411,7 +412,7 @@ impl[A: Allocator] ObjectDecoder[A] {
 
 test fn open_accepts_only_an_object() {
     defer let array = parse("[]").unwrap()
-    let refused = match ObjectDecoder.open(array, mem.system()) {
+    let refused = match ObjectDecoder.open(array) {
         Ok(fields) => {
             fields.release()
             false
@@ -423,9 +424,25 @@ test fn open_accepts_only_an_object() {
         },
     }
     defer let object = parse(r"{}").unwrap()
-    let fields = ObjectDecoder.open(object, mem.system()).unwrap()
+    let fields = ObjectDecoder.open(object).unwrap()
     fields.release()
     testing.assert(refused, "an array opened as an object")?
+}
+
+impl ObjectDecoder[mem.SystemAllocator] {
+    // Start decoding the members of `value`, which must be an object,
+    // recording the names read in the system allocator.
+    pub fn open(value: Value) -> Result[Self, DecodeError] where borrows(.Ok.object: value) {
+        ObjectDecoder.open_in(mem.system(), value)
+    }
+}
+
+test fn open_reads_an_object_with_the_system_allocator() {
+    defer let object = parse(r#"{"tea":2}"#).unwrap()
+    defer var fields = ObjectDecoder.open(object).unwrap()
+    let tea: UInt8 = ObjectDecoder.required(&fields, "tea").unwrap()
+    fields.finish().unwrap()
+    testing.assert_eq(tea, UInt8(2), "the member did not decode")?
 }
 
 impl[A: Allocator] ObjectDecoder[A] {
@@ -464,9 +481,8 @@ impl[A: Allocator] ObjectDecoder[A] {
 }
 
 test fn field_takes_the_missing_value_of_an_absent_member() {
-    let allocator = mem.system()
     defer let document = parse(r#"{"present":null}"#).unwrap()
-    defer var fields = ObjectDecoder.open(document, allocator).unwrap()
+    defer var fields = ObjectDecoder.open(document).unwrap()
     let missing_result: Result[Option[String], DecodeError] = &fields.field("missing")
     let missing = missing_result.unwrap()
     let absent = missing.is_none()
@@ -480,9 +496,8 @@ test fn field_takes_the_missing_value_of_an_absent_member() {
 }
 
 test fn object_decoder_copies_queries_and_decoded_results_outlive_document() {
-    let allocator = mem.system()
     let document = parse(r#"{"name":"tea"}"#).unwrap()
-    var fields = ObjectDecoder.open(document, allocator).unwrap()
+    var fields = ObjectDecoder.open(document).unwrap()
     let query = "name".to_owned().unwrap()
     let name_result: Result[String, DecodeError] = &fields.field(query.view())
     let name = name_result.unwrap()
@@ -510,9 +525,8 @@ impl[A: Allocator] ObjectDecoder[A] {
 }
 
 test fn required_refuses_an_absent_member_even_for_an_option() {
-    let allocator = mem.system()
     defer let document = parse(r#"{"present":null}"#).unwrap()
-    defer var fields = ObjectDecoder.open(document, allocator).unwrap()
+    defer var fields = ObjectDecoder.open(document).unwrap()
     let required: Result[Option[String], DecodeError] = &fields.required("required")
     defer let error = match required {
         Err(error) => error,
@@ -532,9 +546,8 @@ impl[A: Allocator] ObjectDecoder[A] {
 }
 
 test fn optional_decodes_a_present_member_and_answers_none_for_an_absent_one() {
-    let allocator = mem.system()
     defer let document = parse(r#"{"retries":5}"#).unwrap()
-    defer var fields = ObjectDecoder.open(document, allocator).unwrap()
+    defer var fields = ObjectDecoder.open(document).unwrap()
     let present: Result[Option[UInt8], DecodeError] = &fields.optional("retries")
     let retries = present.unwrap()
     let absent: Result[Option[UInt8], DecodeError] = &fields.optional("delay")
@@ -547,7 +560,7 @@ test fn an_object_decoder_records_its_fields_in_an_arena() {
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let allocator = arena.handle()
     defer let document = parse_in(allocator, r#"{"name":"tea","size":2}"#).unwrap()
-    defer var fields = ObjectDecoder.open(document, allocator).unwrap()
+    defer var fields = ObjectDecoder.open_in(allocator, document).unwrap()
     let name: Result[String[mem.Handle], DecodeError[mem.Handle]] = &fields.required("name")
     let size: Result[Option[UInt8], DecodeError[mem.Handle]] = &fields.optional("size")
     let colour: Result[Option[String[mem.Handle]], DecodeError[mem.Handle]] = &fields.field("colour")
@@ -572,9 +585,8 @@ impl[A: Allocator] ObjectDecoder[A] {
 }
 
 test fn finish_refuses_a_member_no_field_read() {
-    let allocator = mem.system()
     defer let document = parse(r#"{"name":"tea","extra":true}"#).unwrap()
-    defer var fields = ObjectDecoder.open(document, allocator).unwrap()
+    defer var fields = ObjectDecoder.open(document).unwrap()
     let name: Result[String, DecodeError] = &fields.field("name")
     name.unwrap().release()
     let refused = match fields.finish() {
@@ -600,7 +612,7 @@ derive[A: Allocator] Release for DecodeSettings[A]
 
 impl[A: Allocator] Decode[A] for DecodeSettings[A] {
     fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
-        defer var fields = ObjectDecoder.open(value, allocator)?
+        defer var fields = ObjectDecoder.open_in(allocator, value)?
         defer let name: String[A] = &fields.field("name")?
         defer let labels: Vec[String[A], A] = &fields.field("labels")?
         let supplied: Option[UInt8] = &fields.optional("retries")?

@@ -4083,13 +4083,15 @@ test "the library's erased closure declarations are found and certified" {
     const semantics = try checkedWithLibrary(&prefix, gpa, &sink, "fn main() -> UInt8 { 0 }");
     try testing.expect(!sink.hasErrors());
     const raw = semantics.typing.raw_accesses;
-    for ([_]DeclId{ raw.closure, raw.closure_entry_type, raw.closure_open, raw.closure_entry, raw.closure_settle, raw.closure_size }) |d| {
+    for ([_]DeclId{ raw.closure, raw.closure_entry_type, raw.closure_open, raw.closure_open_system, raw.closure_entry, raw.closure_settle, raw.closure_size }) |d| {
         try testing.expect(d != DeclId.none);
     }
-    // `open` is the one `Closure` declares, not another type's of that name.
+    // `open_in` and `open` are the ones `Closure` declares, not another type's
+    // of those names.
     const ast = &semantics.expanded.ast;
     try testing.expectEqualStrings("Closure", ast.tokenText(ast.declOwner(raw.closure_open)));
-    try testing.expect(raw.erasure(raw.closure_size) and !raw.erasure(raw.closure_open));
+    try testing.expectEqualStrings("Closure", ast.tokenText(ast.declOwner(raw.closure_open_system)));
+    try testing.expect(raw.erasure(raw.closure_size) and !raw.erasure(raw.closure_open) and !raw.erasure(raw.closure_open_system));
 }
 
 test "generatedComponentName and subjectAt spell struct fields, enum payloads and newtype bases" {

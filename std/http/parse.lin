@@ -184,7 +184,7 @@ test fn a_read_timeout_answers_408() {
     let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var reader = io.BufferedReader.open(arena.handle(), capacity: 16, reader: source).unwrap()
+    var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
     let outcome = read_request(&reader, arena.handle(), Limits.default())
     let _source = reader.abandon()
     let error = match outcome {
@@ -570,7 +570,7 @@ impl io.Reader for Fragments {
 // 16-byte buffer.
 fn read_in_steps[P: Allocator](memory: mem.Handle[P], sink bytes: mem.Slice[UInt8], step: UInt64, limits: Limits) -> Result[Message[P], RequestError] where carries(.Ok: memory) {
     let source = Fragments { bytes = bytes, position = 0, step = step, failure = .None }
-    var reader = io.BufferedReader.open(memory, capacity: 16, reader: source).unwrap()
+    var reader = io.BufferedReader.open_in(memory, capacity: 16, reader: source).unwrap()
     let outcome = read_request(&reader, memory, limits)
     let _source = reader.abandon()
     outcome

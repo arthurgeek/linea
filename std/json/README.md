@@ -191,7 +191,8 @@ linea run examples/json_settings.lin
 linea run examples/json_settings.lin -- settings.json
 ```
 
-For a handwritten record decoder, `ObjectDecoder.open(document, allocator)`
+For a handwritten record decoder, `ObjectDecoder.open(document)`, or
+`ObjectDecoder.open_in(allocator, document)`,
 borrows the object and owns its used-name tracking. Settle it with Release.
 Its field helpers accept borrowed names and return independently owned results:
 

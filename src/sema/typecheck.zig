@@ -1083,7 +1083,7 @@ fn typecheckInternal(
                 bounds,
                 admits,
             );
-            if (d == c.raw_accesses.closure_open and k == 0) owned = try c.withClosureSignature(d, owned);
+            if (c.raw_accesses.opensClosure(d) and k == 0) owned = try c.withClosureSignature(d, owned);
             try c.builder.setCallableBounds(param_types[i][k], owned);
         }
     }
@@ -9642,7 +9642,7 @@ const Checker = struct {
             );
             return true;
         }
-        if (d == self.raw_accesses.closure_open and args.len == 1) if (enclosing) |outer| if (outer.settled.len > 0) {
+        if (self.raw_accesses.opensClosure(d) and args.len == 1) if (enclosing) |outer| if (outer.settled.len > 0) {
             const callback = args[0];
             const signature = outer.settled[0];
             if (callback == .poison or signature == .poison) return false;
@@ -12208,7 +12208,7 @@ const Checker = struct {
         const wanted_signature = try self.withoutEnvironmentContracts(try self.callbackValueSignature(wanted));
         const found_signature = try self.withoutEnvironmentContracts(try self.callbackValueSignature(found));
         if (self.builder.view().callableSatisfies(found_signature, wanted_signature)) {
-            return "closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(allocator, closure)`; closures that capture nothing also convert to a written `fn` type";
+            return "closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(closure)`; closures that capture nothing also convert to a written `fn` type";
         }
         return std.fmt.allocPrint(
             self.sink.arena,
@@ -16480,13 +16480,20 @@ const Checker = struct {
         if (self.option_decl == null or self.builder.view().declOfType(optional) != self.option_decl or optional_args.len != 1) return false;
         const buffer_args = self.builder.appliedTo(optional_args[0]);
         if (self.builder.view().declOfType(optional_args[0]) != raw.buffer or buffer_args.len != 1 or buffer_args[0] != allocator) return false;
-        // `open`'s callback is bounded by the implementation's first parameter,
-        // which must be `S`, and it is the one type parameter `open` declares.
-        const open = raw.closure_open;
+        // Each opener's callback is bounded by the implementation's first
+        // parameter, which must be `S`, and it is the one type parameter the
+        // opener declares. `open_in` takes the allocator and then the callback;
+        // `open`, on the system closure, takes the callback alone.
+        return self.validClosureOpener(raw.closure_open, .{ .head = 2, .params = 2 }) and
+            self.validClosureOpener(raw.closure_open_system, .{ .head = 1, .params = 1 });
+    }
+
+    fn validClosureOpener(self: *const Checker, open: DeclId, shape: struct { head: usize, params: usize }) bool {
         if (open == .none) return true;
         const head = self.headParametersOf(open);
-        return head != .none and self.ast.declTypeParams(head).len == 2 and self.ast.declTypeParams(open).len == 1 and
-            self.ast.declParams(open).len == 2 and self.ast.declParams(open)[1].convention == .sink;
+        const params = self.ast.declParams(open);
+        return head != .none and self.ast.declTypeParams(head).len == shape.head and self.ast.declTypeParams(open).len == 1 and
+            params.len == shape.params and params[shape.params - 1].convention == .sink;
     }
 
     fn validStorageEffects(self: *const Checker, d: DeclId) bool {
@@ -17524,7 +17531,7 @@ const Checker = struct {
             }
         }
         if (contextual != null and resolved_captures.len != 0 and !expected.?.callable_context) {
-            _ = self.report(.o_capture, id, "a capturing closure cannot become a function pointer", .{}, "keep its environment with `mem.Closure.open(allocator, closure)`, or take a generic callable parameter");
+            _ = self.report(.o_capture, id, "a capturing closure cannot become a function pointer", .{}, "keep its environment with `mem.Closure.open(closure)`, or take a generic callable parameter");
             refused = true;
         }
         const expected_params = try self.gpa.dupe(types_mod.CallableParam, if (contextual) |signature|

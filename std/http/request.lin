@@ -639,7 +639,7 @@ test fn a_body_holds_exactly_its_length() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let input = "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcdef"
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
-    var reader = io.BufferedReader.open(arena.handle(), capacity: 16, reader: source).unwrap()
+    var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
     let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
     let rest = &reader.read_exact_in(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
     let ended = match &reader.read_raw_line_borrowed(1) {
