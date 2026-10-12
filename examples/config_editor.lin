@@ -91,17 +91,17 @@ fn parse_in[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], Con
     // Error exits release partial entries; returning them transfers ownership.
     defer var entries: Vec[Entry, A] = Vec.new_in(allocator)
     var number: UInt64 = 0
-    for record in input.split("\n").unwrap() {
+    for record in input.lines() {
         number += 1
         let line = record.trim_ascii()
         if line.length() == 0 || line.starts_with("#") {
             continue
         }
-        let separator = line.find("=") else {
+        let (raw_key, raw_value) = line.split_once("=") else {
             return .Err(.{ line = number, reason = .Syntax })
         }
-        let key = line.slice(0, separator).unwrap().trim_ascii()
-        let value = line.slice(separator + 1, line.length()).unwrap().trim_ascii()
+        let key = raw_key.trim_ascii()
+        let value = raw_value.trim_ascii()
         if key.length() == 0 {
             return .Err(.{ line = number, reason = .Syntax })
         }

@@ -184,8 +184,8 @@ test fn a_new_request_holds_its_method_target_and_body() {
 // pairs is refused with 414, as a target longer than the server reads, before
 // anything is decoded. Running out of memory answers 500.
 fn query_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], target: Str, memory: mem.Handle[P], max_pairs: UInt64) -> Result[Option[Vec[Field, mem.Handle[P]]], RequestError] where carries(.Ok: memory) {
-    let query = match target.find("?") {
-        Some(at) => target.slice(at + 1, target.length()).unwrap(),
+    let query = match target.split_once("?") {
+        Some(halves) => halves._1,
         None => "",
     }
     if pair_count(query) > max_pairs {
@@ -299,9 +299,10 @@ fn pair_count(source: Str) -> UInt64 {
 // `decode_pair` decodes one `name=value` pair into `stored` and records its
 // ranges in `fields`.
 fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
-    let equals = pair.find("=").unwrap_or(pair.length())
-    let raw_name = pair.slice(0, equals).unwrap()
-    let raw_value = pair.slice(equals + 1, pair.length()).unwrap_or("")
+    let (raw_name, raw_value) = match pair.split_once("=") {
+        Some(halves) => halves,
+        None => (pair, ""),
+    }
     let name = append_decoded(&stored, raw_name, plus_is_space: true)?
     let value = append_decoded(&stored, raw_value, plus_is_space: true)?
     match &fields.push(.{ name, value }) {
@@ -542,8 +543,8 @@ impl[P: Allocator] Request[P] {
     // `query` returns the target after its first `?`, not percent-decoded.
     pub fn query(self: Self) -> Option[Str] where carries(.Some: self) {
         let target = stored_part(self.head, self.target)
-        let at = target.find("?")?
-        target.slice(at + 1, target.length())
+        let (_, query) = target.split_once("?")?
+        .Some(query)
     }
 }
 

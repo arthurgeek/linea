@@ -18,7 +18,7 @@ alias LineCounts[A: Allocator] = collections.Map[String[A], UInt64, A]
 // `count_lines` uses the system allocator.
 fn count_lines_in[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], mem.Oom] where carries(.Ok: allocator) {
     defer var counts = LineCounts.new_in(allocator)
-    for record in input.split("\n").unwrap() {
+    for record in input.lines() {
         // Trim Unicode whitespace; preserve case and whitespace within each line.
         let line = record.trim_unicode()
         if line.length() == 0 {

@@ -454,10 +454,10 @@ fn without_times(written: Str) -> String {
     var copied = String.new()
     var rest = copy(written)
     loop {
-        let end = rest.find("\n") else {
+        let (record, remaining) = rest.split_once("\n") else {
             break
         }
-        let line = rest.slice(21, end).unwrap_or("")
+        let line = record.slice(21, record.length()).unwrap_or("")
         match line.find("duration=") {
             Some(start) => {
                 let value_start = start + 9
@@ -473,7 +473,7 @@ fn without_times(written: Str) -> String {
             None => &copied.append(line).unwrap(),
         }
         &copied.append("\n").unwrap()
-        rest = rest.slice(end + 1, rest.length()).unwrap_or("")
+        rest = remaining
     }
     copied
 }

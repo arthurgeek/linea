@@ -37,10 +37,10 @@ import std.text
 
 // Read the port after the colon in an address such as "localhost:8080".
 fn port_of(address: Str) -> Result[UInt16, text.ParseError] {
-    let colon = address.find(":") else {
+    let (_, port) = address.split_once(":") else {
         return .Err(.Syntax(address.length()))
     }
-    address.slice(colon + 1, address.length()).unwrap().parse[UInt16]()
+    port.parse[UInt16]()
 }
 
 test fn the_port_follows_the_colon() {
