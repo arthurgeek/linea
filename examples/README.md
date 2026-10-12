@@ -61,7 +61,7 @@ Traits, allocator parameters, borrow contracts, and `From`.
 - [release_comparison.lin](release_comparison.lin): plans an upgrade from release versions; derived ordering.
 - [temperature_conversion.lin](temperature_conversion.lin): converts sensor readings; `From` and `TryFrom` conversions.
 - [electricity_bill.lin](electricity_bill.lin): bills JSON meter readings; `From` impls so `?` joins several error types.
-- [config_editor.lin](config_editor.lin): sets one key and saves atomically; allocator parameters and `carries` borrow contracts.
+- [config_editor.lin](config_editor.lin): sets one key and saves atomically; `parse_in` and `render_in` that take an allocator beside system forms, and `carries` borrow contracts.
 
 ## Streams and recovery
 

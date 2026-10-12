@@ -254,6 +254,7 @@ The library tests itself.
   ok    http.a_bound_address_that_cannot_be_read_closes_the_listener_and_releases_the_handler
   ok    http.a_bytes_response_holds_its_body_as_built
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
+  ok    http.a_client_sent_number_is_never_logged
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
   ok    http.a_decode_error_answers_by_whose_mistake_it_is
   ok    http.a_derived_params_reads_each_field_by_its_name
@@ -270,6 +271,7 @@ The library tests itself.
   ok    http.a_form_of_one_pair_too_many_is_refused_with_413
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
   ok    http.a_handler_error_before_headers_answers_its_status
+  ok    http.a_handlers_own_number_is_replaced
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
   ok    http.a_header_is_found_by_its_folded_name
@@ -298,6 +300,8 @@ The library tests itself.
   ok    http.a_new_header_list_is_empty
   ok    http.a_new_request_holds_its_method_target_and_body
   ok    http.a_new_router_answers_404
+  ok    http.a_numbered_exchange_is_logged_with_its_number
+  ok    http.a_numbered_request_keeps_the_rest_of_the_request
   ok    http.a_param_value_is_found_by_its_exact_name_once
   ok    http.a_param_value_parses_borrows_or_is_optional
   ok    http.a_parameter_beats_a_remainder
@@ -322,6 +326,7 @@ The library tests itself.
   ok    http.a_recorded_body_is_what_a_client_would_read
   ok    http.a_refused_arena_is_answered_503
   ok    http.a_refused_body_left_unread_does_not_lose_the_answer
+  ok    http.a_refused_buffer_answers_500_before_the_handler
   ok    http.a_refused_document_change_answers_500
   ok    http.a_refused_header_answers_500
   ok    http.a_replacement_refused_for_memory_keeps_the_old_value
@@ -341,6 +346,7 @@ The library tests itself.
   ok    http.a_request_read_after_its_deadline_from_accept_times_out
   ok    http.a_request_split_into_single_bytes_parses_as_one
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
+  ok    http.a_request_the_handler_never_saw_is_logged_without_a_number
   ok    http.a_request_with_a_body_parses
   ok    http.a_response_reads_its_held_body_and_no_streamed_one
   ok    http.a_response_reads_its_status
@@ -381,6 +387,7 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
+  ok    http.a_walk_of_the_headers_shows_one_number
   ok    http.a_wrong_method_is_405_with_allow
   ok    http.add_header_keeps_the_values_a_name_already_has
   ok    http.adding_a_header_keeps_earlier_values
@@ -406,8 +413,10 @@ The library tests itself.
   ok    http.decoding_appends_the_bytes_escapes_spell
   ok    http.each_accept_retry_is_observed_with_its_pause
   ok    http.each_allocation_failure_covers_every_acquisition_from_the_parent
+  ok    http.each_allocation_failure_covers_every_buffer_the_numbering_grows
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
+  ok    http.each_request_is_numbered_for_the_handler_and_the_response
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
   ok    http.every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal
@@ -862,6 +871,7 @@ The library tests itself.
   ok    mem.derived_system_allocator_debug_renders_its_case
   ok    mem.derived_system_allocator_equality_compares_its_case
   ok    mem.each_allocation_failure_covers_every_growth_step_in_a_push_sequence
+  ok    mem.each_allocation_failure_covers_every_growth_step_in_an_append_bytes_sequence
   ok    mem.empty_fd_requests_do_not_access_a_descriptor
   ok    mem.equal_slices_hash_equally
   ok    mem.fd_reads_reject_a_count_past_the_remaining_buffer
@@ -897,6 +907,9 @@ The library tests itself.
   ok    mem.store_traps_past_the_end
   ok    mem.take_leaves_the_default_behind
   ok    mem.typed_slots_move_an_aggregate_to_independent_storage
+  ok    mem.vec_append_bytes_copies_the_elements_after_the_live_ones
+  ok    mem.vec_append_bytes_keeps_every_byte_across_growth
+  ok    mem.vec_append_bytes_of_nothing_changes_nothing_and_allocates_nothing
   ok    mem.vec_byte_buffer_transfer_rejects_a_prefix_past_the_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_an_empty_prefix_and_an_empty_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom
@@ -1193,4 +1206,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1190 passed, 0 failed
+  1203 passed, 0 failed
