@@ -1070,8 +1070,8 @@ fn main() -> Result[UInt8, io.IoError] {
         let response = &router.serve_http(&nothing, sent.request()) else |_| {
             return .Ok(1)
         }
-        // The body is bytes; `Str.from_bytes` reads them as text.
-        let body = Str.from_bytes(response.body().unwrap()).unwrap()
+        // `text()` reads the held body as text.
+        let body = response.text().unwrap()
         // `io.print` writes the text without adding a line break.
         io.print(body)?
     }
@@ -1101,8 +1101,10 @@ arena, and `&router.serve_http(state, request)` runs the router on it, as
 trait, hence `use http.Handler`. This router has no state, so the loop passes
 `()`, the unit type's one value, from a `var`, because the state is lent
 `inout`.
-`response.body()` answers the body's bytes, `Str.from_bytes` reads them as
-text, and `io.print` writes that text without adding a line break.
+`response.text()` reads the body held in the arena as text, and `io.print`
+writes that text without adding a line break. It answers an error for a
+streamed body, which exists only as it is written, and for bytes that are not
+UTF-8; `unwrap()` is right here because this router only holds text.
 
 The rewind protects every request the way it protected `first` in
 [Memory](07-memory.md#rewinding-one-arena-used-again-and-again). Build a
@@ -1576,7 +1578,7 @@ fn main() -> Result[UInt8, io.IoError] {
     let response = &router.serve_http(&nothing, sent.request()) else |_| {
         return .Ok(1)
     }
-    io.println(Str.from_bytes(response.body().unwrap()).unwrap())?
+    io.println(response.text().unwrap())?
     .Ok(0)
 }
 ```

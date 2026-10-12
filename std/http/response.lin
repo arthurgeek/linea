@@ -1,8 +1,10 @@
+import std.fmt
 import std.io
 import std.json as json_format
 import std.mem
 import std.net
 import std.testing
+import std.text as strings
 
 use io.ByteWriter
 use io.FinishFailure
@@ -64,7 +66,7 @@ test fn a_text_response_holds_its_rendered_body() {
     let response = text(sent.request(), "{count} items").unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
     testing.assert_eq(response.header("Content-Type"), .None, "a content type was set")?
-    testing.assert_eq(held_text(response), Option.Some("3 items"), "the body changed")?
+    testing.assert_ok_eq(response.text(), "3 items", "the body changed")?
     .Ok(())
 }
 
@@ -103,7 +105,7 @@ test fn a_json_response_holds_its_encoded_value() {
     let response = json(sent.request(), Greeting { hello = r#"say "hi""# }).unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
     testing.assert_eq(response.header("content-type"), Option.Some("application/json"), "the content type changed")?
-    testing.assert_eq(held_text(response), Option.Some(r#"{"hello":"say \"hi\""}"#), "the body changed")?
+    testing.assert_ok_eq(response.text(), r#"{"hello":"say \"hi\""}"#, "the body changed")?
     .Ok(())
 }
 
@@ -118,7 +120,7 @@ test fn a_status_response_has_no_body() {
     let sent = new_request(arena.handle(), "DELETE", "/items/1", body: "").unwrap()
     let response = status(sent.request(), .NoContent)
     testing.assert_eq(response.status(), Status.NoContent, "the status changed")?
-    testing.assert_eq(held_text(response), Option.Some(""), "an empty response had a body")?
+    testing.assert_ok_eq(response.text(), "", "an empty response had a body")?
     .Ok(())
 }
 
@@ -183,7 +185,7 @@ test fn a_bytes_response_holds_its_body_as_built() {
     var built = String.new_in(sent.request().allocator())
     &built.append("built once").unwrap()
     let response = bytes(sent.request(), built.into_bytes())
-    testing.assert_eq(held_text(response), Option.Some("built once"), "the body changed")?
+    testing.assert_ok_eq(response.text(), "built once", "the body changed")?
     .Ok(())
 }
 
@@ -204,7 +206,7 @@ test fn a_response_takes_another_status() {
     let sent = new_request(arena.handle(), "POST", "/items", body: "").unwrap()
     let response = text(sent.request(), "made").unwrap().with_status(.Created)
     testing.assert_eq(response.status(), Status.Created, "the status did not change")?
-    testing.assert_eq(held_text(response), Option.Some("made"), "changing the status changed the body")?
+    testing.assert_ok_eq(response.text(), "made", "changing the status changed the body")?
     .Ok(())
 }
 
@@ -317,8 +319,75 @@ test fn a_response_reads_its_held_body_and_no_streamed_one() {
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     let held = text(sent.request(), "abc").unwrap()
     let streamed = stream(sent.request(), count_to_three).unwrap()
-    testing.assert_eq(held_text(held), Option.Some("abc"), "the held body changed")?
+    testing.assert_ok_eq(held.text(), "abc", "the held body changed")?
     testing.assert(streamed.body().is_none(), "a streamed body was held")?
+    .Ok(())
+}
+
+// A BodyTextError says why a response body cannot be read as text: it is
+// streamed, so it exists only as it is written, or the bytes it holds are not
+// valid UTF-8.
+@(copyable, derive(Debug))
+pub enum BodyTextError {
+    Streamed,
+    Encoding(strings.Utf8Error),
+}
+
+impl Display for BodyTextError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Streamed => &w.write_str("the body is streamed, so it is not held as text"),
+            Encoding(error) => error.fmt(&w),
+        }
+    }
+}
+
+impl[P: Allocator] Response[P] {
+    // `text` returns the body held in the arena as text, or why it is not text:
+    // a streamed body is not held, and the held bytes may not be UTF-8. Running
+    // a streamed body into memory consumes the response, which
+    // `recorded_body` does.
+    pub fn text(self: Self) -> Result[Str, BodyTextError] where borrows(.Ok: self) {
+        let bytes = self.body() else {
+            return .Err(.Streamed)
+        }
+        match Str.from_bytes(bytes) {
+            Ok(text) => .Ok(text),
+            Err(error) => .Err(.Encoding(error)),
+        }
+    }
+}
+
+test fn a_response_body_is_text_only_when_it_is_held_utf8() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    testing.assert_ok_eq(text(sent.request(), "olá").unwrap().text(), "olá", "the held text changed")?
+    testing.assert_ok_eq(text(sent.request(), "").unwrap().text(), "", "an empty body was not empty text")?
+    let streamed = stream(sent.request(), count_to_three).unwrap()
+    testing.assert(match read streamed.text() {
+        Err(reason) => match read reason {
+            Streamed => true,
+            Encoding(_) => false,
+        },
+        Ok(_) => false,
+    }, "a streamed body was read as text")?
+    var raw: Vec[UInt8, mem.Handle[mem.SystemAllocator]] = Vec.new_in(sent.request().allocator())
+    &raw.push(104).unwrap()
+    &raw.push(195).unwrap()
+    let broken = bytes(sent.request(), raw)
+    let invalid_at: Option[UInt64] = match broken.text() {
+        Err(reason) => match reason {
+            Encoding(error) => .Some(error.offset),
+            Streamed => .None,
+        },
+        Ok(_) => .None,
+    }
+    testing.assert_eq(invalid_at, .Some(1), "bytes ending inside a character were text")?
+    defer let reason = match streamed.text() {
+        Err(error) => fmt.render_owned("{error}").unwrap(),
+        Ok(_) => "".to_owned().unwrap(),
+    }
+    testing.assert_eq(reason.view(), "the body is streamed, so it is not held as text", "a streamed body's refusal changed")?
     .Ok(())
 }
 
@@ -865,17 +934,6 @@ fn progressed[E](sink failure: WriteFailure[E], before: UInt64) -> WriteFailure[
 // `digit` spells `value`, which is below 10, as one decimal digit.
 fn digit(value: UInt16) -> Str {
     "0123456789".slice(UInt64(value), UInt64(value) + 1).unwrap()
-}
-
-// `held_text` reads the body `response` holds as text.
-fn held_text[P: Allocator](response: Response[P]) -> Option[Str] where borrows(.Some: response) {
-    match response.body() {
-        Some(bytes) => match Str.from_bytes(bytes) {
-            Ok(text) => .Some(text),
-            Err(_) => .None,
-        },
-        None => .None,
-    }
 }
 
 // `text_of` describes a test answer with a text body.

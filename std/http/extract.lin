@@ -365,7 +365,7 @@ fn form_posted(content_type: Str, body: Str) -> String {
     var nothing = ()
     let described = match &router.serve_http(&nothing, sent.request()) {
         Ok(response) => {
-            let answer = Str.from_bytes(response.body().unwrap()).unwrap()
+            let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
         },
         Err(error) => {
@@ -503,7 +503,7 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
     var nothing = ()
     let described = match &router.serve_http(&nothing, sent.request()) {
         Ok(response) => {
-            let answer = Str.from_bytes(response.body().unwrap()).unwrap()
+            let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
         },
         Err(error) => {

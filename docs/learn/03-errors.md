@@ -22,7 +22,10 @@ import std.io
 // or `.None` when there is none.
 fn hours_of(time: Str) -> Option[Str] {
     match time.split_once(":") {
-        Some(parts) => .Some(parts._0),
+        Some(parts) => {
+            let (hours, _) = parts
+            .Some(hours)
+        },
         None => .None,
     }
 }
@@ -46,7 +49,8 @@ noon: no colon
 
 The two parts are a pair, a tuple
 ([Linea in an hour](01-linea-in-an-hour.md#tuples)), and both are views into
-`time`. Here the `Some` arm keeps the first, `parts._0`, and drops the second.
+`time`. Here the `Some` arm takes the pair apart with a tuple pattern, keeps the
+hours and drops the rest.
 
 You cannot use an `Option[Str]` as a `Str`. The type makes you say what
 happens when the value is missing, and `match` makes you cover both cases.

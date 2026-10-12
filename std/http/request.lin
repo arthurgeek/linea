@@ -185,7 +185,10 @@ test fn a_new_request_holds_its_method_target_and_body() {
 // anything is decoded. Running out of memory answers 500.
 fn query_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], target: Str, memory: mem.Handle[P], max_pairs: UInt64) -> Result[Option[Vec[Field, mem.Handle[P]]], RequestError] where carries(.Ok: memory) {
     let query = match target.split_once("?") {
-        Some(halves) => halves._1,
+        Some(halves) => {
+            let (_, after) = halves
+            after
+        },
         None => "",
     }
     if pair_count(query) > max_pairs {
@@ -301,7 +304,7 @@ fn pair_count(source: Str) -> UInt64 {
 fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
     let (raw_name, raw_value) = match pair.split_once("=") {
         Some(halves) => halves,
-        None => (pair, ""),
+        None => (copy(pair), ""),
     }
     let name = append_decoded(&stored, raw_name, plus_is_space: true)?
     let value = append_decoded(&stored, raw_value, plus_is_space: true)?
@@ -643,7 +646,7 @@ test fn a_body_holds_exactly_its_length() {
         Err(_) => false,
     }
     let _source = reader.abandon()
-    testing.assert_ok_eq(Str.from_bytes(sent.request().body()), "abc", "the body changed")?
+    testing.assert_ok_eq(sent.request().text(), "abc", "the body changed")?
     testing.assert_ok_eq(Str.from_bytes(rest.as_slice()), "def", "the bytes after the body left the reader")?
     testing.assert(ended, "the reader held more than the bytes after the body")?
     .Ok(())

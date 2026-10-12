@@ -370,7 +370,7 @@ type does that for you.
 | io | `IoError`, `WriteFailure[E]`, `InputFailure[E]`, `LineError[E]`, `ExactError[E]`, `ReadAllError[E]`, `ReadAllFailure[A, E]`, `ReadTextError[E]`, `PromptError[I, O]`, `BufferError`, `BufferOpenFailure[R]`, `FinishFailure[W, A, E]` | Console and descriptor calls answer `IoError`; readers and writers carry their own error type `E`; buffered operations that consume a stream hand it back in a `...Failure`. |
 | fs | `FsError`, `FsFailure`, `PathError`, `ReadFileError`, `ReadFileFailure[A]`, `ReadTextError` | `File` and `write_file`/`save_atomic` answer `FsFailure`; `Path` construction `PathError`; `read_file` hands the partial bytes back in `ReadFileFailure`; `read_text` answers a `ReadTextError` that owns nothing. |
 | net | `NetError`, `ServeError` | `listen` and `connect` answer `NetError`; closing a socket answers `io.IoError`; `net.serve` ends with `ServeError`. |
-| http | `Error[P]`, `RouteError`, `RequestError`, `HeaderError`, `ParamError`, `ServeError`, `ListenAndServeError`, `CgiError` | A handler answers `Error[P]`, which carries the status; `Router.route` answers `RouteError`; `new_request` and header and parameter parsing answer the others; `serve` ends with `ServeError`, and `listen_and_serve` with `ListenAndServeError`: `Listen`, or `Serve` carrying the `ServeError`; `serve_cgi` ends with `CgiError`. |
+| http | `Error[P]`, `RouteError`, `RequestError`, `BodyTextError`, `HeaderError`, `ParamError`, `ServeError`, `ListenAndServeError`, `CgiError` | A handler answers `Error[P]`, which carries the status; `Router.route` answers `RouteError`; `new_request` and header and parameter parsing answer the others, and `Response.text` answers `BodyTextError`; `serve` ends with `ServeError`, and `listen_and_serve` with `ListenAndServeError`: `Listen`, or `Serve` carrying the `ServeError`; `serve_cgi` ends with `CgiError`. |
 | json | `ParseError`, `DecodeError[A]`, `EncodeError[E]`, `NumberError`, `NumberAccessError`, `KindError`, `MutationFailure[A]` | One per operation: parsing, decoding into a type, encoding, reading numbers, asking a value for the wrong kind, and editing a document (which hands the member back). |
 | collections | `InsertFailure[K, V]`, `UpsertFailure[K, V, E]` | `Map.insert` and `merge` return the key and value on refusal; `upsert` also carries its constructor's own error `E`. |
 | log | `LogError[E]` | `Logger.log`; `debug`, `info`, `warn` and `error` drop it. |
@@ -798,7 +798,8 @@ any closure or function taking the writer, so it captures what the handler
 computed: `http.stream(request, [sink year] |inout body| write_days(year, &body))?`
 keeps the checked year in the request's arena until the body runs. When
 `write` fails partway, the connection is reset so the client does not take a
-short body for a whole one. A test reads a streamed body with
+short body for a whole one. A test reads a held body with `response.text()`, which
+answers `BodyTextError.Streamed` for a streamed one, and a streamed body with
 `response.recorded_body()`, which runs it into the arena. The closure lives in
 the arena with the rest of the response and is dropped with it, so it may
 capture nothing that must be released, such as a vector from `mem.system()`.

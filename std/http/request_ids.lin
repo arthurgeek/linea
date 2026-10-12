@@ -208,12 +208,12 @@ test fn each_request_is_numbered_for_the_handler_and_the_response() {
     let first: Result[Response, Error] = &numbering.serve_http(&nothing, sent1.request())
     let first_response = first.unwrap()
     testing.assert_eq(first_response.header("X-Request-Id"), Option.Some("1"), "the first response was not numbered 1")?
-    testing.assert_eq(held_text(first_response), Option.Some("1"), "the handler did not read the number, or a forged one won")?
+    testing.assert_ok_eq(first_response.text(), "1", "the handler did not read the number, or a forged one won")?
     let sent2 = new_request(arena.handle(), "GET", "/b", body: "").unwrap()
     let second: Result[Response, Error] = &numbering.serve_http(&nothing, sent2.request())
     let second_response = second.unwrap()
     testing.assert_eq(second_response.header("x-request-id"), Option.Some("2"), "the second response was not numbered 2")?
-    testing.assert_eq(held_text(second_response), Option.Some("2"), "the handler did not read the second number")?
+    testing.assert_ok_eq(second_response.text(), "2", "the handler did not read the second number")?
     testing.assert_eq(numbering.handler.served, UInt64(2), "the handler did not answer both requests")?
 }
 
@@ -228,7 +228,7 @@ test fn a_numbered_request_keeps_the_rest_of_the_request() {
     testing.assert_eq(numbered.path(), "/orders", "the path changed")?
     testing.assert_eq(numbered.query(), Option.Some("id=7"), "the query changed")?
     testing.assert_eq(numbered.method(), Method.Post, "the method changed")?
-    testing.assert_eq(Str.from_bytes(numbered.body()).unwrap(), "payload", "the body changed")?
+    testing.assert_ok_eq(numbered.text(), "payload", "the body changed")?
 }
 
 // Numbering outside `logged` puts the number in the line the exchange logs,

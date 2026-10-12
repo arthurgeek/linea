@@ -36,6 +36,6 @@ test fn a_route_returning_a_response_is_registered_and_answers() {
     let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
     let answered: Result[Response, Error] = &router.serve_http(&nothing, sent.request())
     let response = answered.unwrap()
-    testing.assert_eq(Str.from_bytes(response.body().unwrap()).unwrap(), "hello", "the answer changed")?
+    testing.assert_ok_eq(response.text(), "hello", "the answer changed")?
     .Ok(())
 }

@@ -33,7 +33,7 @@ test fn with_state_lends_its_state_to_every_request() {
     let _first = &server.serve_http(&nothing, first.request()).unwrap()
     let second = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
     let answered = &server.serve_http(&nothing, second.request()).unwrap()
-    testing.assert_eq(Str.from_bytes(answered.body().unwrap()).unwrap(), "visit 2", "the state was not kept between requests")?
+    testing.assert_ok_eq(answered.text(), "visit 2", "the state was not kept between requests")?
     .Ok(())
 }
 

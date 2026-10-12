@@ -443,7 +443,7 @@ test fn a_reading_is_recorded_and_counted() {
     &sent.add_header("Authorization", "Bearer harbour").unwrap()
     var app = quiet()
     let response = &router.serve_http(&app, sent.request()).unwrap()
-    testing.assert_eq(Str.from_bytes(response.body().unwrap()).unwrap(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
+    testing.assert_ok_eq(response.text(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
     testing.assert_eq(app.readings, 1, "the reading was not counted")?
 }
 
@@ -482,7 +482,7 @@ test fn the_root_answers_with_the_greeting() {
     let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var app = quiet()
     let response = &router.serve_http(&app, sent.request()).unwrap()
-    testing.assert_eq(Str.from_bytes(response.body().unwrap()).unwrap(), "Weather stations report here.\n", "the greeting changed")?
+    testing.assert_ok_eq(response.text(), "Weather stations report here.\n", "the greeting changed")?
 }
 ```
 
@@ -504,6 +504,9 @@ A few things to notice:
 - `&router.serve_http(&app, request)` runs the router as `serve` does: it reads
   the extractors `record` names and calls it, and the test then reads
   `app.readings` to see what it changed.
+- `response.text()` reads a held body as text, and answers an error instead
+  for a streamed body or for bytes that are not UTF-8; `testing.assert_ok_eq`
+  compares it with the text a client should see.
 - `response.recorded_body()` runs a streamed body into the arena, so a test can
   read what a client would receive.
 - Every test goes through the router, so a handler's extractors, its path
