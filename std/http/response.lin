@@ -624,11 +624,8 @@ fn connection_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[net.
 // write as running out of any resource does.
 fn record[P: Allocator](inout recorded: Vec[UInt8, mem.Handle[P]], bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
     let exhausted: io.IoError = .{ operation = .Write, category = .ResourceExhausted, code = .None, progress = 0 }
-    if &recorded.reserve(bytes.length()).is_err() {
+    if &recorded.append_slice(bytes).is_err() {
         return .Err(.{ kind = .Underlying, reason = .Some(exhausted), written = 0 })
-    }
-    for byte in copy(bytes) {
-        let _pushed = &recorded.push(*byte)
     }
     .Ok(bytes.length())
 }

@@ -89,7 +89,7 @@ fn number_request[P: Allocator, A: Allocator](inout buffers: Buffers[A], request
     &buffers.fields.clear()
     &buffers.head.reserve(held.length() + request_id_header.length() + value.length())?
     &buffers.fields.reserve(request.header_fields.length() + 1)?
-    &buffers.head.append_bytes(held.as_bytes())?
+    &buffers.head.append_slice(held.as_bytes())?
     let name = push_stored(&buffers.head, request_id_header.as_bytes())?
     let text = push_stored(&buffers.head, value.as_bytes())?
     // The number's header comes first; the client's headers follow in arrival
@@ -117,17 +117,10 @@ fn numbered_view[P: Allocator, A: Allocator](buffers: Buffers[A], request: Reque
     Request[P] { head = whole, header_fields = buffers.fields.as_slice(), request_id = .Some(number), ..copy(request) }
 }
 
-// Append `bytes` to `stored` one at a time and return the range they occupy.
-// It is for the few bytes the middleware writes itself; the request's head is
-// copied whole.
+// Append `bytes` to `stored` and return the range they occupy.
 fn push_stored[A: Allocator](inout stored: Vec[UInt8, A], bytes: mem.Slice[UInt8]) -> Result[Span, mem.Oom] where carries() {
     let start = stored.length()
-    for byte in copy(bytes) {
-        match &stored.push(*byte) {
-            Ok(_) => {},
-            Err(_) => return .Err(.Exhausted),
-        }
-    }
+    &stored.append_slice(bytes)?
     .Ok(.{ start, end = stored.length() })
 }
 

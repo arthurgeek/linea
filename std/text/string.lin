@@ -439,7 +439,7 @@ impl[A: Allocator] String[A] {
     // Append `text`. Room for all of it is reserved first, so a refusal leaves
     // the text unchanged.
     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
-        append_valid_bytes(&self, text.as_bytes())
+        &self.bytes.append_slice(text.as_bytes())
     }
 }
 
@@ -490,7 +490,7 @@ impl[A: Allocator] String[A] {
     // and reserved before the owned text changes.
     pub fn append_bytes(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[(), TextError] where carries() {
         validate_utf8(bytes)?
-        append_valid_bytes(&self, bytes)?
+        &self.bytes.append_slice(bytes)?
         .Ok(())
     }
 }
@@ -534,19 +534,6 @@ test fn each_allocation_failure_covers_every_byte_append() -> Result[(), testing
         TextError.is_refusal,
     )
     testing.assert(checked.is_ok(), "a growing byte append sequence was reported as failing")?
-    .Ok(())
-}
-
-// Reserve room for all of `bytes`, then push them. The reservation means no
-// push can be refused.
-fn append_valid_bytes[A: Allocator](inout text: String[A], bytes: mem.Slice[UInt8]) -> Result[(), Oom] where carries() {
-    &text.bytes.reserve(bytes.length())?
-    for i in 0..bytes.length() {
-        match &text.bytes.push(bytes[i]) {
-            Ok(_) => {},
-            Err(_) => panic("reserved text capacity was exhausted"),
-        }
-    }
     .Ok(())
 }
 

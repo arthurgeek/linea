@@ -15,7 +15,7 @@ fn spelled(inout name: Vec[UInt8], word: Str) -> Result[Str, Problem] where borr
     if word.length() > 4 {
         return .Err(.TooLong(word.length(), 4))
     }
-    &name.append_bytes(word.as_bytes()).unwrap()
+    &name.append_slice(word.as_bytes()).unwrap()
     .Ok(Str.from_bytes(name.as_slice()).unwrap())
 }
 

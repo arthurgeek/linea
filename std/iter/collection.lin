@@ -108,6 +108,49 @@ test fn each_allocation_failure_covers_every_growth_step_of_an_extension() -> Re
     .Ok(())
 }
 
+// Append every item of `iterator` to `values`, in source order, when the items
+// are Owned. A copied byte or number carries nothing, so the vector keeps
+// nothing of the iterator or of what it walks, which `extend` cannot promise
+// for items that may borrow. On refusal, the vector keeps its accepted prefix
+// and the error owns the next item.
+pub fn extend_owned[I: Iterator, A: Allocator](
+    inout values: Vec[I.Item, A],
+    inout iterator: I,
+) -> Result[(), mem.PushFailure[I.Item]] where I.Item: Owned {
+    while true {
+        match &iterator.next() {
+            None => break,
+            Some(value) => &values.push(value)?,
+        }
+    }
+    .Ok(())
+}
+
+// The vector lives in an arena, so it carries the arena's borrow; it still
+// keeps nothing of `readings`, which changes while the vector is live.
+test fn extend_owned_keeps_nothing_of_what_the_iterator_walks() {
+    defer let arena = mem.Arena.open(mem.system(), 128)
+    var values: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    var readings = [UInt8(3), 5, 8]
+    var doubled = readings.as_slice().map(|sink reading| *reading * 2)
+    testing.assert(extend_owned(&values, &doubled).is_ok(), "extending the vector failed")?
+    readings[0] = 0
+    testing.assert_eq(values.as_slice(), [UInt8(6), 10, 16].as_slice(), "the items did not arrive in source order")?
+}
+
+test fn extend_owned_returns_the_refused_item_and_keeps_the_prefix() {
+    // The cursor and four UInt64 slots consume all 40 bytes.
+    defer let arena = mem.Arena.open(mem.system(), size: 40)
+    var values: Vec[UInt64, mem.Handle] = Vec.new_in(arena.handle())
+    var source = UInt64(0)..7
+    let rejected = match extend_owned(&values, &source) {
+        Ok(_) => return testing.assert(false, "bounded vector unexpectedly grew"),
+        Err(failure) => failure.value,
+    }
+    testing.assert_eq(rejected, UInt64(4), "extension returned the wrong refused item")?
+    testing.assert_eq(values.length(), UInt64(4), "the refusal changed the prefix")?
+}
+
 // A Collected holds the collected values and the iterator they came from,
 // which may still hold state the caller must settle. `T` is the iterator's
 // item type: `collect` always builds a

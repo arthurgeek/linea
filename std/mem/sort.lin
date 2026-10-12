@@ -358,9 +358,7 @@ fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second
 // Build a vector of the given integers, in order.
 fn sort_test_values(values: Slice[UInt64]) -> Vec[UInt64] {
     var built: Vec[UInt64] = Vec.new()
-    for value in copy(values) {
-        &built.push(*value).unwrap()
-    }
+    &built.append_slice(values).unwrap()
     built
 }
 
