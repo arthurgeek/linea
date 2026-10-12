@@ -1,0 +1,43 @@
+import std.mem
+
+use mem.Owner
+
+// Each element copied out of `items` is Owned, so the vector keeps nothing of
+// the slice it was read from and the function needs no `retains` clause.
+fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(_) => panic("the arena is full"),
+        }
+    }
+}
+
+// The same bound written in the function's own `where` clause.
+fn copied[T: Copyable, A: mem.Allocator](allocator: A, items: mem.Slice[T]) -> Vec[T, A] where carries(allocator), T: Owned {
+    var values: Vec[T, A] = Vec.new_in(allocator)
+    append_all(&values, items)
+    values
+}
+
+@copyable
+struct Reading {
+    celsius: Int64,
+    sensor: UInt8,
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var bytes = [UInt8(4), 5, 6]
+    var values = copied(arena.handle(), bytes.as_slice())
+    // The vector borrowed nothing from `bytes`, so it can change while the
+    // vector is live.
+    bytes[0] = 40
+    let readings = [Reading { celsius = 21, sensor = 2 }]
+    var kept = copied(arena.handle(), readings.as_slice())
+    let total = values[0] + values[2] + kept[0].sensor
+    // Arena storage is given back with the arena, so the vectors are not
+    // released one by one.
+    arena.release()
+    total + bytes[0]
+}

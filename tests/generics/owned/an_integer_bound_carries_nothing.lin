@@ -1,0 +1,35 @@
+import std.mem
+
+use mem.Owner
+
+// Every Integer type is Owned, so copying elements out of a slice retains
+// nothing of it.
+fn append_all[T: Integer, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(_) => panic("the arena is full"),
+        }
+    }
+}
+
+// The result is an integer, which carries nothing of `label`.
+fn labelled[T: Integer](value: T, label: Str) -> T {
+    if label.length() > 0 {
+        copy(value)
+    } else {
+        copy(value)
+    }
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var values: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    var bytes = [UInt8(1), 2]
+    append_all(&values, bytes.as_slice())
+    bytes[0] = 10
+    let total = values[0] + values[1] + labelled(UInt8(3), "n")
+    values.release()
+    arena.release()
+    total + bytes[0]
+}

@@ -1,0 +1,66 @@
+import std.mem
+
+use mem.PushFailure
+
+// `value` is Owned, so the result cannot carry anything of it, and `tag` is
+// the only parameter that could supply a dependency to a `T`. No clause is
+// needed.
+fn tagged[T: Copyable + Owned](value: T, tag: Str) -> T {
+    if tag.length() > 0 {
+        copy(value)
+    } else {
+        copy(value)
+    }
+}
+
+// A linear file owner is Owned too: the bound says nothing about copying or
+// settlement.
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _ } = self
+    }
+}
+
+fn keep_all[T: Owned + Release, A: mem.Allocator](inout values: Vec[T, A], sink first: T, sink second: T) -> () {
+    match &values.push(first) {
+        Ok(_) => {},
+        Err(failure) => {
+            let PushFailure { reason: _, value: refused } = failure
+            refused.release()
+            second.release()
+            return
+        },
+    }
+    match &values.push(second) {
+        Ok(_) => {},
+        Err(failure) => {
+            let PushFailure { reason: _, value: refused } = failure
+            refused.release()
+        },
+    }
+}
+
+trait Stash {
+    fn stash[T: Owned](sink value: T) -> T
+}
+
+struct Shelf {}
+
+impl Stash for Shelf {
+    fn stash[T: Owned](sink value: T) -> T {
+        value
+    }
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Ticket] = Vec.new()
+    keep_all(&values, Ticket { number = 1 }, Ticket { number = 2 })
+    let kept = values.length()
+    values.release()
+    tagged(UInt8(3), "x") + UInt8(kept) + Shelf.stash(UInt8(1))
+}

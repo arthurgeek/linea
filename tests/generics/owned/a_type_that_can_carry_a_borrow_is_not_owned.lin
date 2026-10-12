@@ -1,0 +1,30 @@
+import std.mem
+
+use mem.Owner
+
+fn keep[T: Owned](sink value: T) -> T {
+    value
+}
+
+struct Pool[T: Owned] {
+    first: T,
+}
+
+@copyable
+struct Label {
+    text: Str,
+}
+
+fn main() -> UInt8 {
+    let label = keep(Label { text = "bench" })
+    let text = keep("hall")
+    let arena = mem.Arena.open(mem.system(), 64)
+    let empty: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let values = keep(empty)
+    let pool: Pool[Label] = .{ first = copy(label) }
+    let number = UInt8(7)
+    let observed = keep(borrow number)
+    let length = values.length()
+    arena.release()
+    UInt8(label.text.length() + text.length() + pool.first.text.length() + length) + *observed
+}

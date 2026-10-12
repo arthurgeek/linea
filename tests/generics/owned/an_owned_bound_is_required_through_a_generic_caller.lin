@@ -1,0 +1,25 @@
+import std.mem
+
+fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(_) => panic("full"),
+        }
+    }
+}
+
+// `U` may be instantiated with a type that carries a borrow, so it cannot
+// stand where `Owned` is required.
+fn outer[U: Copyable](inout values: Vec[U], items: mem.Slice[U]) -> () {
+    append_all(&values, items)
+}
+
+fn main() -> UInt8 {
+    var values: Vec[UInt8] = Vec.new()
+    let bytes = [UInt8(1), 2]
+    outer(&values, bytes.as_slice())
+    let length = values.length()
+    values.release()
+    UInt8(length)
+}
