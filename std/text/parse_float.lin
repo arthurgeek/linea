@@ -77,18 +77,18 @@ test fn float_parsing_refuses_range_loss_and_invalid_decimal_tokens() {
 }
 
 test fn float_parsing_results_and_errors_outlive_input() {
-    let input = "-12.5e1".to_owned(mem.system()).unwrap()
+    let input = "-12.5e1".to_owned().unwrap()
     let result = parse_float64(input.view())
     input.release()
     testing.assert_eq(result.unwrap(), -125.0, "parsed float retained input")?
-    let malformed = "12x".to_owned(mem.system()).unwrap()
+    let malformed = "12x".to_owned().unwrap()
     let failure = parse_float64(malformed.view())
     malformed.release()
     testing.assert(match failure { Err(error) => error == ParseError.Syntax(2), Ok(_) => false }, "parse error retained input")?
 }
 
 test fn float_parsing_bounds_token_work_before_conversion() {
-    let bytes = Vec.filled(mem.system(), count: 65536, value: UInt8(48)).unwrap()
+    let bytes = Vec.filled(count: 65536, value: UInt8(48)).unwrap()
     defer var input = String.from_bytes(bytes).unwrap()
     testing.assert_eq(parse_float64(input.view()).unwrap(), 0.0, "maximum-length zero token was refused")?
     &input.append("0").unwrap()

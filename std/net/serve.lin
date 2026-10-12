@@ -38,7 +38,7 @@ impl Display for ServeError {
 test fn a_serve_error_displays_its_cause() {
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
     let invalid = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
-    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var writer = testing.Recorder.of(256).unwrap()
     var wrote = true
     for error in [ServeError.Accept(.Io(reset)), ServeError.Close(invalid)] {
         wrote = wrote && error.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok()

@@ -179,7 +179,7 @@ test fn settling_an_upsert_mismatch_releases_the_built_entry() {
     testing.assert_eq(mismatched, .Err(.KeyMismatch), "settling a mismatch kept the entry or lost the reason")?
     testing.assert_eq(failed, .Err(.Factory(41)), "settling a factory failure lost its error")?
     // The 64-byte recorder holds the mismatch explanation.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let reason: UpsertReason[UInt64] = .KeyMismatch
     let wrote = reason.fmt(&writer).is_ok()
     let equal = writer.holds("the built key does not match the lookup query")
@@ -198,7 +198,7 @@ test fn map_failures_display_their_reason() {
     let factory: UpsertFailure[UInt64, UInt64, Str] = .Factory("ticket office closed")
     let mismatch: UpsertFailure[UInt64, UInt64, Str] = .KeyMismatch(.{ key = 3, value = 99 })
     // The 256-byte recorder holds all four reasons, one per line.
-    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var writer = testing.Recorder.of(256).unwrap()
     var wrote = refused.fmt(&writer).is_ok()
     for failure in [allocation, factory, mismatch] {
         wrote = wrote && &writer.write_str("\n").is_ok() && failure.fmt(&writer).is_ok()
@@ -429,7 +429,7 @@ impl[K, V, A: Allocator] Map[K, V, A] {
     // tombstone. Allocate before transferring entries, so allocation refusal
     // leaves self intact.
     fn rehash(inout self: Self, capacity: UInt64) -> Result[(), mem.Oom] where carries(), retains(self: self) {
-        let allocated: Result[Vec[Bucket[K, V], A], mem.Oom] = Vec.from_fn(self.allocator, capacity, |_index| .Empty)
+        let allocated: Result[Vec[Bucket[K, V], A], mem.Oom] = Vec.from_fn_in(self.allocator, capacity, |_index| .Empty)
         var next = allocated?
         let Map { slots, allocator, len, used: _ } = self
         var previous = slots
@@ -845,8 +845,8 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
 test fn get_accepts_a_borrowed_query_for_an_owned_text_key() {
     defer var counts: Map[String, UInt64] = Map.new()
-    &counts.insert("café".to_owned(mem.system()).unwrap(), 2).unwrap().release()
-    let query = "café".to_owned(mem.system()).unwrap()
+    &counts.insert("café".to_owned().unwrap(), 2).unwrap().release()
+    let query = "café".to_owned().unwrap()
     let found = counts.get(query.view()).unwrap()
     query.release()
     testing.assert_eq(*found, UInt64(2), "lookup retained its query instead of the map")?
@@ -872,7 +872,7 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
 
 test fn remove_accepts_a_borrowed_query_and_returns_the_owned_key() {
     defer var counts: Map[String, UInt64] = Map.new()
-    &counts.insert("café".to_owned(mem.system()).unwrap(), 3).unwrap().release()
+    &counts.insert("café".to_owned().unwrap(), 3).unwrap().release()
     let missing = &counts.remove("absent")
     let absent = missing.is_none()
     missing.release()
@@ -950,7 +950,7 @@ test fn update_transforms_a_present_value_and_ignores_a_missing_key() {
 
 test fn update_accepts_a_borrowed_query_for_an_owned_text_key() {
     defer var counts: Map[String, UInt64] = Map.new()
-    &counts.insert("café".to_owned(mem.system()).unwrap(), 2).unwrap().release()
+    &counts.insert("café".to_owned().unwrap(), 2).unwrap().release()
     testing.assert(&counts.update("café", |sink count| count + 1), "borrowed update missed an owned key")?
     let updated_absent = &counts.update("absent", |sink _count| panic("missing query invoked the callback"))
     testing.assert(!updated_absent, "missing query updated an entry")?
@@ -960,7 +960,7 @@ test fn update_accepts_a_borrowed_query_for_an_owned_text_key() {
 test fn mixed_operations_match_a_dense_keyed_reference() {
     defer var values: Map[UInt64, UInt64] = Map.new()
     // Zero marks absence; all inserted values are positive.
-    defer var expected = Vec.filled(mem.system(), count: 32, value: UInt64(0)).unwrap()
+    defer var expected = Vec.filled(count: 32, value: UInt64(0)).unwrap()
     for step in UInt64(0)..400 {
         let key = (step * 17 + step / 7) % 32
         if step % 3 == 0 {

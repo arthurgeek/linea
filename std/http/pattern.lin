@@ -34,9 +34,9 @@ impl Display for RouteError {
 }
 
 test fn a_route_error_displays_its_reason() {
-    defer let invalid = fmt.render_owned(mem.system(), RouteError.InvalidPattern).unwrap()
-    defer let duplicate = fmt.render_owned(mem.system(), RouteError.Duplicate).unwrap()
-    defer let allocation = fmt.render_owned(mem.system(), RouteError.Allocation(.Exhausted)).unwrap()
+    defer let invalid = fmt.render_owned(RouteError.InvalidPattern).unwrap()
+    defer let duplicate = fmt.render_owned(RouteError.Duplicate).unwrap()
+    defer let allocation = fmt.render_owned(RouteError.Allocation(.Exhausted)).unwrap()
     testing.assert_eq(invalid.view(), "the pattern is not [METHOD ]PATH", "the invalid pattern reason changed")?
     testing.assert_eq(duplicate.view(), "a pattern with the same method and shape is already registered", "the duplicate reason changed")?
     testing.assert_eq(allocation.view(), "no memory to register the pattern", "the allocation reason changed")?

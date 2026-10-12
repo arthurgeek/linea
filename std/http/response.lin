@@ -71,7 +71,7 @@ test fn a_text_response_holds_its_rendered_body() {
 test fn a_text_response_past_the_arena_is_refused() {
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    defer let long = Vec.filled(mem.system(), 512, UInt8(120)).unwrap()
+    defer let long = Vec.filled(512, UInt8(120)).unwrap()
     let refused = match text(sent.request(), Str.from_bytes(long.as_slice()).unwrap()) {
         Ok(_) => Option.None,
         Err(error) => Option.Some(error.status()),
@@ -160,7 +160,7 @@ test fn a_stream_the_arena_cannot_hold_is_refused() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/count", body: "").unwrap()
     // Fill the arena eight bytes at a time until it refuses.
-    while Vec.filled(sent.request().allocator(), 1, UInt8(0)).is_ok() {}
+    while Vec.filled_in(sent.request().allocator(), 1, UInt8(0)).is_ok() {}
     let last: UInt64 = 4
     let refused: Option[Status] = match stream(sent.request(), inout [sink last] |inout body| count_to(last, &body)) {
         Ok(_) => Option.None,
@@ -580,7 +580,7 @@ test fn a_failed_write_is_reported_by_every_later_write() {
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var body = BodyWriter.open(server, sent.request()).unwrap()
     // A chunk larger than the buffer is sent before the write returns.
-    defer let chunk = Vec.filled(mem.system(), response_buffer_bytes + 1, UInt8(120)).unwrap()
+    defer let chunk = Vec.filled(response_buffer_bytes + 1, UInt8(120)).unwrap()
     let failed = &body.write_str(Str.from_bytes(chunk.as_slice()).unwrap())
     let later = &body.write_str("y")
     let reported: Option[io.IoError] = match body.finish() {
@@ -695,7 +695,7 @@ test fn a_streamed_body_may_exceed_the_arena() {
     server.close().unwrap()
     arena.release()
     var reader = client
-    let bytes = io.read_all(mem.system(), &reader, max_bytes: 65536).unwrap()
+    let bytes = io.read_all(&reader, max_bytes: 65536).unwrap()
     let length = bytes.length()
     bytes.release()
     reader.close().unwrap()
@@ -973,6 +973,6 @@ fn read_or_reset(sink connection: net.Connection) -> String {
     let _closed = reader.close()
     match outcome {
         Ok(text) => text,
-        Err(_) => "reset".to_owned(mem.system()).unwrap(),
+        Err(_) => "reset".to_owned().unwrap(),
     }
 }

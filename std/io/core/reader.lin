@@ -36,7 +36,7 @@ impl[E: Display] Display for InputFailure[E] {
 test fn an_input_failure_displays_its_position_and_reason() {
     let failure: InputFailure[Str] = .{ reason = "device unplugged", stream_offset = 12 }
     // The 64-byte recorder holds the position and the reason.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = failure.fmt(&writer).is_ok()
     let equal = writer.holds("input failed at stream byte 12: device unplugged")
     writer.release()

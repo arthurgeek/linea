@@ -509,7 +509,7 @@ test fn swallowed_child_and_writer_failures_poison_the_encoder() {
         defer var output = String.new()
         testing.assert(match encode(&output, invalid) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }, "swallowed child failure was accepted")?
     }
-    defer let message = "stopped".to_owned(mem.system()).unwrap()
+    defer let message = "stopped".to_owned().unwrap()
     var writer: RefusingJsonWriter = .{ remaining = 0, accepted = 0, error = message.view() }
     var encoder = Encoder.open()
     let failure = &encoder.string(&writer, "tea")
@@ -574,7 +574,7 @@ test fn string_writes_quoted_escaped_text() {
 }
 
 test fn typed_encoding_preserves_borrowed_writer_errors() {
-    defer let message = "stopped".to_owned(mem.system()).unwrap()
+    defer let message = "stopped".to_owned().unwrap()
     for budget in UInt64(0)..5 {
         var writer: RefusingJsonWriter = .{ remaining = budget, accepted = 0, error = message.view() }
         let refused = match encode(&writer, "tea") {
@@ -909,7 +909,7 @@ test fn typed_encoding_preserves_scalars_text_and_container_order() {
     encode(&output, UInt64.max).unwrap()
     testing.assert_eq(output.view(), "18446744073709551615", "unsigned encoding changed value")?
     let items: [Option[Str]; 3] = [.Some("tea"), .None, .Some("é\n")]
-    defer let values = Vec.from_fn(mem.system(), count: 3, initializer: [items] |index| copy(items[index])).unwrap()
+    defer let values = Vec.from_fn(count: 3, initializer: [items] |index| copy(items[index])).unwrap()
     defer var array = String.new()
     encode(&array, values).unwrap()
     testing.assert_eq(array.view(), r#"["tea",null,"é\n"]"#, "typed array encoding changed order or text")?

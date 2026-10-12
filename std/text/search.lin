@@ -1,5 +1,4 @@
 import std.testing
-import std.mem
 
 // A SplitError says why text cannot be split: an empty separator would match
 // between every pair of bytes.
@@ -100,7 +99,7 @@ test fn find_respects_boundaries_and_empty_needles() {
 }
 
 test fn a_search_position_outlives_the_text_that_was_searched() {
-    let source = "before:after".to_owned(mem.system()).unwrap()
+    let source = "before:after".to_owned().unwrap()
     let position = source.view().find(":")
     source.release()
     testing.assert_eq(position.unwrap(), UInt64(6), "search position depended on released text")?

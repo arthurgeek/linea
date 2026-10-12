@@ -49,7 +49,7 @@ authoritative.
 | [time](time/time.lin) | now, sleep, Timestamp, Instant, Duration | `now` reads the wall clock as a UTC Timestamp that displays in RFC 3339; `Instant.now` reads the monotonic clock, and `since`/`elapsed` measure a Duration. `sleep` blocks for at least a Duration on the monotonic clock, sleeping again after an interruption for what remains. A clock the system cannot read panics. |
 | [log](log/log.lin) | Logger, to_stderr, Level, LogError, field, and; Sink, Fields, Visitor | A Logger writes leveled lines with key–value fields to a Sink the caller chooses, building each in a buffer from the caller's allocator and writing it whole. Logging reads the logger, so a logger to standard error copies freely; one that owns a file moves and is released. A line below the minimum level costs one comparison. `log` reports a line that could not be written; `debug`, `info`, `warn` and `error` drop it. A field borrows its value. |
 | [http](http/serve.lin) | serve, Router, Handler, Endpoint, Observer, Event, Request, Response, Error; Extract, Path, Query, Json, Form, Params, ParamValue; text, json, bytes, status, stream, error; logged; with_request_ids, with_request_ids_in; with_state; new_request; listen_and_serve | A handler is a named function whose parameters are an optional `inout` state, up to six extractors and a read-only request last, and returns `Result[Response, Error]`; `Router.route` reads each extractor (`http.Path`, `http.Query`, `http.Json`, `http.Form` or a type of its own that implements `Extract`) in parameter order, answers the first refusal with its status, and releases what it read, last first, and `route_raw` registers a closure or a function of the state and the request that reads its own inputs with `request.extract[T]()`; `with_state` owns the state and lends it down through every middleware to the route that answers, and releases it with the server. Requests are served from one arena carved from the caller's allocator: each request is read into it, the handler builds its response in it with `request.allocator()`, and it is rewound once the response is written, so a handler releases nothing. The body is read before the handler runs, bounded by Limits. `?` turns the library's errors into the status that answers them. `stream` writes a body through a BodyWriter after the head is sent, from a closure that may capture what its handler computed. `listen_and_serve(address, handler, state:, parent:, limits:)` opens the listener, announces its bound address to the handler as `Event.Listening` (`http.logged` logs it), serves, closes the listener and releases the handler on every exit, and fails with `ListenAndServeError` (`Listen(NetError)`, or `Serve(ServeError)` for what ended serving); it announces the address once serving can begin, so a server that refuses its limits logs no `listening` line. `state:` defaults to `()` and `parent:` to the system allocator; a call that passes `state:` shares it with the routes and gets it back when serving ends, which the caller releases, and a call without it returns `()`. A program that opens its own listener calls `serve`. serve takes a 4 KiB buffer from the parent before accepting, which each 503 discards the unread request into, and ends with `ServeError.Memory` when that is refused. serve owns the listener and closes it on every exit; one failed connection never stops it, and it writes no log of its own: each exchange is reported through `Observer`, which every handler ignores unless it implements it, and `http.logged` logs them. `with_request_ids(handler)` numbers each request 1, 2, 3, ...: the handler reads the number as the request's `X-Request-Id` header (a client-sent one is removed), the handler's response or refusal carries it, and, placed outside `logged`, the number appears in the logged line as `request_id=N`, read from a field only this middleware sets; it keeps two buffers for the rebuilt request, from the system allocator or from the one `with_request_ids_in(allocator, handler)` takes, which keep the size of the largest head seen, and answers 500 without a number when they cannot grow. |
-| [testing](testing/testing.lin) | assert, assert_eq, assert_ok_eq, assert_err; Recorder; each_allocation_failure, refused, oom_is_a_refusal; AllocationLog, RefusingAllocator | A test function may omit its return type; `?` on an assertion fails the test. assert checks Bool; assert_eq compares complete Equatable + Debug values and reports both sides. Give assertions a useful message; `Recorder.of(allocator, bytes)` records formatted output into a buffer from the caller's allocator, so a test can inspect it without pretending to expose owned Str. `each_allocation_failure(backing, body, is_refusal)` runs an `inout fn(allocator) -> Result[(), E]` body, which may change a place it is lent `inout`, over logs opened from `backing` once to count its allocation attempts, then once per attempt with that allocation refused, and returns the attempts it walked; the unrefused run must succeed and attempt at least one allocation, and a refused run may complete when the refusal was optional or return an error `is_refusal` accepts, so any other error, such as a failed assertion, fails the walk. A body that asserts reports its refusal with `testing.refused(...)` and passes `testing.Failure.is_refusal`. A body whose only error is `mem.Oom` passes `testing.oom_is_a_refusal`, which takes nothing but `Oom`, so an asserting body cannot pass it and have its assertions bind only the unrefused run. Which variants of a library error type are refusals is that library's own classification, so the per-type `is_refusal` methods are internal, and a caller outside the library names one of these two instead. AllocationLog and RefusingAllocator are mem's, re-exported here so a test finds them beside the assertions that use them. |
+| [testing](testing/testing.lin) | assert, assert_eq, assert_ok_eq, assert_err; Recorder; each_allocation_failure, refused, oom_is_a_refusal; AllocationLog, RefusingAllocator | A test function may omit its return type; `?` on an assertion fails the test. assert checks Bool; assert_eq compares complete Equatable + Debug values and reports both sides. Give assertions a useful message; `Recorder.of(bytes)` records formatted output into a buffer from the system allocator, and `Recorder.of_in(allocator, bytes)` from the caller's, so a test can inspect it without pretending to expose owned Str. `each_allocation_failure(backing, body, is_refusal)` runs an `inout fn(allocator) -> Result[(), E]` body, which may change a place it is lent `inout`, over logs opened from `backing` once to count its allocation attempts, then once per attempt with that allocation refused, and returns the attempts it walked; the unrefused run must succeed and attempt at least one allocation, and a refused run may complete when the refusal was optional or return an error `is_refusal` accepts, so any other error, such as a failed assertion, fails the walk. A body that asserts reports its refusal with `testing.refused(...)` and passes `testing.Failure.is_refusal`. A body whose only error is `mem.Oom` passes `testing.oom_is_a_refusal`, which takes nothing but `Oom`, so an asserting body cannot pass it and have its assertions bind only the unrefused run. Which variants of a library error type are refusals is that library's own classification, so the per-type `is_refusal` methods are internal, and a caller outside the library names one of these two instead. AllocationLog and RefusingAllocator are mem's, re-exported here so a test finds them beside the assertions that use them. |
 
 A signature spells out a fact the programmer decides: which allocator a
 container takes memory from, whether an argument is lent with `inout` or given
@@ -60,6 +60,16 @@ allocator, so `Vec[Str]` is `Vec[Str, mem.SystemAllocator]`. A declaration that
 declares an allocator parameter of its own writes the allocator of every type
 that has one ([T-DefaultedAllocator]). Ceremony that carries an ownership proof
 stays; incidental repetition goes.
+
+The same rule names the system allocator by name rather than by argument. A
+constructor builds with `T.new()` in the system allocator and `T.new_in(allocator)`
+in the one given, and a function that takes an allocator first is a pair the same
+way: `"tea".to_owned()`, `fmt.render_owned(value)`, `json.parse(text)` and
+`Vec.filled(count: 3, value: 0)` use the system allocator, and `to_owned_in`,
+`render_owned_in`, `json.parse_in` and `Vec.filled_in` take the allocator first.
+An `open` constructor and an allocator built over a backing, such as
+`mem.Arena.open(backing, size)` or `testing.each_allocation_failure(backing, ...)`,
+keep their allocator argument.
 
 Parameter names are part of APIs: `text.slice(from: 0, to: 3)` explains the
 two bounds, while `text.length()` needs no extra label. Callback implementations
@@ -562,7 +572,7 @@ deliveries separately for each product and warehouse. Fresh struct values query
 the totals without allocating text or requiring an explicit Key implementation.
 
 `let tea = "tea"` already creates a Str without allocation. Use
-`tea.to_owned(allocator)?` when independent owned storage is needed; the returned
+`tea.to_owned()?`, or `tea.to_owned_in(allocator)?`, when independent owned storage is needed; the returned
 String retains its allocator but not the source text. The frequency report
 copies only newly inserted keys. String hashes contents, not allocation addresses. Different keys may collide;
 probe chains still compare equality. Hash values and map order can change with
@@ -687,8 +697,9 @@ without moving any other. The [payment batch](../examples/payment_batch.lin)
 drains its transactions in order and commits or rolls back each one before
 finishing the drain.
 
-For owned text, `line.to_owned(allocator)?` copies a Str, while
-`fmt.render_owned(allocator, "name={name}\n")?` builds formatted text. Both expose
+For owned text, `line.to_owned()?` copies a Str, while
+`fmt.render_owned("name={name}\n")?` builds formatted text; `to_owned_in` and
+`render_owned_in` take the allocator first. Both expose
 allocation refusal and release partial construction through their written
 cleanup. A successful String retains its allocator, so keep that allocator's
 backing owner alive until the String is settled. Use an existing writer directly
@@ -1015,10 +1026,9 @@ minimum level:
 
 ```linea
 import std.log
-import std.mem
 
 fn main() -> UInt8 {
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     logger.info("listening", log.field("port", 8080))
     logger.debug("not written", ())
     0
@@ -1038,7 +1048,7 @@ comparison. Ask `logger.enabled(level)` before computing a field that is
 costly in itself.
 
 Logging reads the logger and never changes it, so `logger.info(...)` needs no
-`&`. `log.to_stderr(allocator, minimum)` makes a logger over standard error,
+`&`. `log.to_stderr(minimum)` makes a logger over standard error, building lines in the system allocator (`log.to_stderr_in(allocator, minimum)` takes one),
 which it does not own: it copies freely, and a program hands `copy(logger)` to
 whatever else logs, such as a closure that keeps its copy with
 `[sink logger = copy(logger)]`, or a router's state, from which every
@@ -1061,7 +1071,7 @@ on, with the state it was lent, and may change what comes back or the state.
 request once the response has been written or streamed:
 
 ```linea
-let logger = log.to_stderr(mem.system(), minimum: .Info)
+let logger = log.to_stderr(minimum: .Info)
 var server = http.logged(copy(logger), router)
 defer server.release()
 match http.serve(listener, &server, mem.system()) {

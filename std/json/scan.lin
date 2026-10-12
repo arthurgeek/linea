@@ -300,7 +300,7 @@ test fn unicode_escapes_cover_each_utf8_width_boundary() {
 test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes() {
     let hex = "0123456789abcdef"
     for code in UInt64(0)..32 {
-        var raw_bytes = Vec.filled(mem.system(), count: 3, value: UInt8(34)).unwrap()
+        var raw_bytes = Vec.filled(count: 3, value: UInt8(34)).unwrap()
         raw_bytes[1] = UInt8(code)
         defer let raw = String.from_bytes(raw_bytes).unwrap()
         var raw_at: UInt64 = 0
@@ -314,7 +314,7 @@ test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes()
                 testing.assert_eq(error, expected, "raw control error changed")?
             },
         }
-        var escaped_bytes = Vec.filled(mem.system(), count: 8, value: UInt8(48)).unwrap()
+        var escaped_bytes = Vec.filled(count: 8, value: UInt8(48)).unwrap()
         escaped_bytes[0] = 34
         escaped_bytes[1] = 92
         escaped_bytes[2] = 117
@@ -362,7 +362,7 @@ test fn string_escape_errors_keep_absolute_offsets_after_input_release() {
     let kinds = [ParseErrorKind.InvalidEscape, ParseErrorKind.InvalidEscape, ParseErrorKind.InvalidSurrogate, ParseErrorKind.InvalidSurrogate, ParseErrorKind.InvalidSurrogate]
     let offsets: [UInt64; _] = [3, 5, 2, 2, 2]
     for index in 0..inputs.length() {
-        let owned = inputs[index].to_owned(mem.system()).unwrap()
+        let owned = inputs[index].to_owned().unwrap()
         var at: UInt64 = 1
         let result = scan_string(mem.system(), owned.view(), &at, 64)
         owned.release()
@@ -447,7 +447,7 @@ test fn string_limits_count_decoded_bytes_and_allow_empty_text() {
 
 test fn decoded_string_owns_storage_and_settles_allocation_failure() {
     defer let decoded = {
-        let input = r#""name\u0000😀""#.to_owned(mem.system()).unwrap()
+        let input = r#""name\u0000😀""#.to_owned().unwrap()
         var at: UInt64 = 0
         let value = scan_string(mem.system(), input.view(), &at, 64).unwrap()
         input.release()

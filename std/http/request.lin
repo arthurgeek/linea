@@ -480,7 +480,7 @@ test fn a_request_allocates_in_its_arena() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     // The arena can hold 4088 bytes; the message already holds some.
-    let fits = "x".to_owned(sent.request().allocator()).is_ok()
+    let fits = "x".to_owned_in(sent.request().allocator()).is_ok()
     let past = match sent.request().allocator().acquire(4096) {
         Ok(_) => false,
         Err(_) => true,
@@ -641,7 +641,7 @@ test fn a_body_holds_exactly_its_length() {
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
     var reader = io.BufferedReader.open(arena.handle(), capacity: 16, reader: source).unwrap()
     let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
-    let rest = &reader.read_exact(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
+    let rest = &reader.read_exact_in(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
     let ended = match &reader.read_raw_line_borrowed(1) {
         Ok(line) => line.is_none(),
         Err(_) => false,

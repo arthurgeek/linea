@@ -1,4 +1,3 @@
-import std.mem
 import std.testing
 
 // `Address` holds an IPv4 address and a port. Port 0 asks the operating system
@@ -13,7 +12,7 @@ pub struct Address {
 
 test fn an_address_debugs_its_parts() {
     let address = Address.v4(10, 0, 0, 2, 443)
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = address.debug(&writer).is_ok()
     let rendered = writer.holds(r"Address { octets: [10, 0, 0, 2], port: 443 }")
     writer.release()
@@ -28,7 +27,7 @@ impl Display for Address {
 }
 
 test fn an_address_displays_as_dotted_octets_and_a_port() {
-    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    var writer = testing.Recorder.of(32).unwrap()
     let wrote = Address.v4(10, 0, 0, 2, 443).fmt(&writer).is_ok()
     let printed = writer.holds("10.0.0.2:443")
     writer.release()
@@ -109,7 +108,7 @@ test fn an_address_parses_and_prints_the_same() {
     let address = Address.parse("127.0.0.1:8080").unwrap()
     testing.assert_eq(address, Address.v4(127, 0, 0, 1, 8080), "parse lost a part")?
     testing.assert_eq(address.port, 8080, "the port changed")?
-    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    var writer = testing.Recorder.of(32).unwrap()
     let wrote = address.fmt(&writer).is_ok()
     let printed = writer.holds("127.0.0.1:8080")
     writer.release()

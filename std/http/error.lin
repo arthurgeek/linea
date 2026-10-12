@@ -66,7 +66,7 @@ test fn an_error_whose_message_does_not_fit_keeps_its_status() {
     // The request's head fills eight of this arena's 56 usable bytes.
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    defer let long = Vec.filled(mem.system(), 512, UInt8(120)).unwrap()
+    defer let long = Vec.filled(512, UInt8(120)).unwrap()
     let error = error(sent.request(), .BadRequest, Str.from_bytes(long.as_slice()).unwrap())
     testing.assert_eq(error.status(), Status.BadRequest, "the status changed")?
     testing.assert_eq(error.message(), .None, "a message past the arena was kept")?
@@ -192,9 +192,9 @@ test fn an_error_displays_its_status_and_message() {
     let plain: Error = Error.new(.NotFound)
     let unnamed: Error = Error.new(.Other(Code(299)))
     let explained = error(sent.request(), .BadRequest, "the body is not JSON")
-    defer let named = fmt.render_owned(mem.system(), plain).unwrap()
-    defer let bare = fmt.render_owned(mem.system(), unnamed).unwrap()
-    defer let messaged = fmt.render_owned(mem.system(), explained).unwrap()
+    defer let named = fmt.render_owned(plain).unwrap()
+    defer let bare = fmt.render_owned(unnamed).unwrap()
+    defer let messaged = fmt.render_owned(explained).unwrap()
     testing.assert_eq(named.view(), "404 Not Found", "a named status changed")?
     testing.assert_eq(bare.view(), "299", "a status without a phrase changed")?
     testing.assert_eq(messaged.view(), "400 Bad Request: the body is not JSON", "a message was not shown")?
@@ -277,8 +277,8 @@ impl[P: Allocator] From[json_format.MutationReason] for Error[P] {
 }
 
 test fn a_refused_document_change_answers_500() {
-    defer var list = json_format.Value.array(mem.system())
-    let refused = &list.insert("summary", json_format.Value.boolean(mem.system(), true))
+    defer var list = json_format.Value.array()
+    let refused = &list.insert("summary", json_format.Value.boolean(true))
     let status = match refused {
         Ok(previous) => {
             previous.release()
@@ -319,7 +319,7 @@ impl[P: Allocator] From[json_format.ParseError] for Error[P] {
 }
 
 test fn a_body_that_is_not_json_answers_400() {
-    let refused = match json_format.parse(mem.system(), "not json") {
+    let refused = match json_format.parse("not json") {
         Ok(value) => {
             value.release()
             return testing.assert(false, "text that is not JSON parsed")
@@ -355,12 +355,12 @@ impl[P: Allocator, A: Allocator] From[json_format.DecodeError[A]] for Error[P] {
 }
 
 test fn a_decode_error_answers_by_whose_mistake_it_is() {
-    let shaped: Result[UInt64, json_format.DecodeError] = json_format.decode(mem.system(), r#"{"x":1}"#)
+    let shaped: Result[UInt64, json_format.DecodeError] = json_format.decode(r#"{"x":1}"#)
     let wrong: Error = match shaped {
         Ok(_) => return testing.assert(false, "an object decoded as a number"),
         Err(error) => error.into(),
     }
-    let malformed: Result[UInt64, json_format.DecodeError] = json_format.decode(mem.system(), r"{")
+    let malformed: Result[UInt64, json_format.DecodeError] = json_format.decode(r"{")
     let broken: Error = match malformed {
         Ok(_) => return testing.assert(false, "an unclosed object decoded"),
         Err(error) => error.into(),

@@ -127,7 +127,7 @@ impl[T] Index[UInt64] for Slice[T] {
 }
 
 test fn releasing_a_slice_leaves_its_storage_owned() {
-    var values = Vec.filled(system(), count: 3, value: UInt64(7)).unwrap()
+    var values = Vec.filled(count: 3, value: UInt64(7)).unwrap()
     let view = values.as_slice()
     view.release()
     values[0] = 8
@@ -247,7 +247,7 @@ impl[T: Debug] Debug for Slice[T] {
 test fn a_slice_debugs_as_its_elements_in_brackets() {
     let words = ["tea", "jam"]
     let empty: [Bool; _] = []
-    var rendered = testing.Recorder.of(system(), 32).unwrap()
+    var rendered = testing.Recorder.of(32).unwrap()
     let wrote = words.as_slice().debug(&rendered).is_ok() && empty.as_slice().debug(&rendered).is_ok()
     let listed = rendered.holds(r#"["tea", "jam"][]"#)
     rendered.release()
@@ -291,7 +291,7 @@ impl[T] Iterator for SliceIter[T] {
 }
 
 test fn slice_iteration_retains_order_and_independent_observations() {
-    defer let values = Vec.from_fn(system(), count: 3, initializer: |index| index + 11).unwrap()
+    defer let values = Vec.from_fn(count: 3, initializer: |index| index + 11).unwrap()
     var iterator = values.as_slice().iterate()
     let first = &iterator.next().unwrap()
     let second = &iterator.next().unwrap()
@@ -309,7 +309,7 @@ test fn slice_iteration_handles_empty_and_single_element_subspans() {
     var empty_iterator = empty.as_slice().iterate()
     testing.assert(&empty_iterator.next().is_none(), "empty source yielded an item")?
     testing.assert(&empty_iterator.next().is_none(), "empty source restarted")?
-    defer let values = Vec.from_fn(system(), count: 3, initializer: |index| index + 21).unwrap()
+    defer let values = Vec.from_fn(count: 3, initializer: |index| index + 21).unwrap()
     var middle = values.as_slice().subspan(start: 1, count: 1).unwrap().iterate()
     let selected = &middle.next().unwrap()
     testing.assert_eq(*selected, UInt64(22), "subspan iteration selected the wrong element")?
@@ -345,7 +345,7 @@ test fn slice_iteration_observes_affine_and_linear_elements_without_copying_or_s
 }
 
 test fn slice_iteration_early_exit_leaves_the_source_mutable() {
-    defer var values = Vec.from_fn(system(), count: 3, initializer: |index| index + 1).unwrap()
+    defer var values = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     var selected: UInt64 = 0
     for item in values.as_slice().iterate() {
         selected = *item
@@ -359,7 +359,7 @@ test fn slice_iteration_early_exit_leaves_the_source_mutable() {
 }
 
 test fn slice_iteration_collects_observations_and_transformed_values() {
-    defer let source = Vec.from_fn(system(), count: 3, initializer: |index| index + 1).unwrap()
+    defer let source = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     let { values: observations, iterator: observed } = source.as_slice().collect(system()).unwrap()
     observed.release()
     let first = *observations[0]

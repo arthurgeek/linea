@@ -134,10 +134,10 @@ test fn only_an_allocation_failure_is_running_out_of_memory() {
 
 test fn a_parse_error_displays_its_problem_and_the_byte_it_stopped_at() {
     let syntax = ParseError { kind = .Syntax, offset = 7 }
-    defer let shown = fmt.render_owned(mem.system(), syntax).unwrap()
+    defer let shown = fmt.render_owned(syntax).unwrap()
     testing.assert_eq(shown.view(), "invalid syntax at byte 7", "the syntax error changed")?
     let deep = ParseError { kind = .DepthLimit, offset = 129 }
-    defer let limit = fmt.render_owned(mem.system(), deep).unwrap()
+    defer let limit = fmt.render_owned(deep).unwrap()
     testing.assert_eq(limit.view(), "nesting too deep at byte 129", "the limit error changed")?
 }
 
@@ -164,7 +164,7 @@ impl Display for MutationReason {
 
 test fn a_mutation_reason_displays_its_problem() {
     // The 64-byte recorder holds the longest reason.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let reason = MutationReason.WrongKind
     let wrote = reason.fmt(&writer).is_ok()
     let equal = writer.holds("the value is the wrong kind for this change")
@@ -187,9 +187,8 @@ impl[A: Allocator] release.Settle for MutationFailure[A] {
 }
 
 test fn settling_a_refused_member_releases_it_and_keeps_the_reason() {
-    let allocator = mem.system()
-    defer var list = Value.array(allocator)
-    let wrong_kind = match &list.insert("summary", Value.string(allocator, "all clear").unwrap()).settled() {
+    defer var list = Value.array()
+    let wrong_kind = match &list.insert("summary", Value.string("all clear").unwrap()).settled() {
         Ok(previous) => {
             previous.release()
             false

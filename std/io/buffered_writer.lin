@@ -117,7 +117,7 @@ test fn settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason() {
 test fn a_refused_buffer_displays_a_failed_close() {
     let reason: BufferOpenReason[UInt8] = .{ reason = .ZeroCapacity, close = .Some(5) }
     // The 64-byte recorder holds the refusal and the close failure.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = reason.fmt(&writer).is_ok()
     let equal = writer.holds("ZeroCapacity; closing the stream failed: 5")
     writer.release()
@@ -278,7 +278,7 @@ test fn a_buffer_refusal_returns_the_supplied_writer() {
         },
         Err(failure) => {
             // The 32-byte recorder holds the refusal reason.
-            var recorder = testing.Recorder.of(mem.system(), 32).unwrap()
+            var recorder = testing.Recorder.of(32).unwrap()
             let explained = failure.fmt(&recorder).is_ok() && recorder.holds("ZeroCapacity")
             recorder.release()
             let BufferOpenFailure { resource: returned, reason: reason } = failure
@@ -448,7 +448,7 @@ test fn finishing_after_an_underlying_flush_failure_does_not_repeat_bytes() {
         Err(failure) => {
             // Display borrows the failure, so its writer is still returned below.
             // The 96-byte recorder holds the finishing context and the reason.
-            var recorder = testing.Recorder.of(mem.system(), 96).unwrap()
+            var recorder = testing.Recorder.of(96).unwrap()
             explained = failure.fmt(&recorder).is_ok() && recorder.holds("could not finish buffered output: write failed after 4 bytes: 9")
             recorder.release()
             let FinishFailure { writer: writer, failure: error } = failure

@@ -94,7 +94,7 @@ impl[A: Debug, B: Debug] Debug for Tuple2[A, B] {
 
 test fn a_pair_prints_its_components_in_parentheses() {
     let pair = Tuple2[UInt8, Str] { _0 = 1, _1 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    var writer = testing.Recorder.of(32).unwrap()
     let wrote = pair.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && pair.debug(&writer).is_ok()
     let rendered = writer.holds("(1, a) (1, \"a\")")
     writer.release()
@@ -169,7 +169,7 @@ impl[A: Debug, B: Debug, C: Debug] Debug for Tuple3[A, B, C] {
 
 test fn a_three_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple3[UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, a) (1, 2, \"a\")")
     writer.release()
@@ -255,7 +255,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug] Debug for Tuple4[A, B, C, D] {
 
 test fn a_four_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple4[UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, 3, a) (1, 2, 3, \"a\")")
     writer.release()
@@ -352,7 +352,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug] Debug for Tuple5[A, B, C,
 
 test fn a_five_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple5[UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, 3, 4, a) (1, 2, 3, 4, \"a\")")
     writer.release()
@@ -460,7 +460,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug] Debug for Tuple
 
 test fn a_six_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, 3, 4, 5, a) (1, 2, 3, 4, 5, \"a\")")
     writer.release()
@@ -579,7 +579,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug] Debug
 
 test fn a_seven_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, 3, 4, 5, 6, a) (1, 2, 3, 4, 5, 6, \"a\")")
     writer.release()
@@ -734,7 +734,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug, H: De
 
 test fn an_eight_tuple_prints_its_components_in_parentheses() {
     let tuple = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = "a" }
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
     let rendered = writer.holds("(1, 2, 3, 4, 5, 6, 7, a) (1, 2, 3, 4, 5, 6, 7, \"a\")")
     writer.release()

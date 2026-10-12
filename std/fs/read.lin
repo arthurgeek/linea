@@ -95,7 +95,7 @@ impl[A: Allocator] release.Settle for ReadFileFailure[A] {
 
 test fn settling_a_failed_file_read_keeps_the_read_and_close_errors() {
     var file = File { fd = -1 }
-    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    let outcome = io.read_all(&file, max_bytes: 8)
     let settled = finish_file_read(file, outcome).settled()
     let both = match settled {
         Ok(bytes) => {
@@ -112,12 +112,27 @@ test fn settling_a_failed_file_read_keeps_the_read_and_close_errors() {
 // guarantee. A file longer than `max_bytes` fails with a limit error whose
 // partial bytes run one byte past the limit. Every opened descriptor is closed
 // once, including after a read or limit failure.
-pub fn read_file[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, A], ReadFileFailure[A]] where carries(.Ok: allocator), carries(.Err.partial.Some: allocator) {
+pub fn read_file_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, A], ReadFileFailure[A]] where carries(.Ok: allocator), carries(.Err.partial.Some: allocator) {
     var file = File.open(allocator, path) else |reason| {
         return .Err(.{ partial = .None, reason = .{ primary = .Some(.Open(reason)), close = .None } })
     }
-    let outcome = io.read_all(allocator, &file, max_bytes)
+    let outcome = io.read_all_in(allocator, &file, max_bytes)
     finish_file_read(file, outcome)
+}
+
+// Read the file at `path` through EOF into storage from the system allocator,
+// under the limits of `read_file_in`.
+pub fn read_file(path: Path, max_bytes: UInt64) -> Result[Vec[UInt8], ReadFileFailure[mem.SystemAllocator]] where carries() {
+    read_file_in(mem.system(), path, max_bytes)
+}
+
+test fn reading_a_file_allocates_from_the_system_allocator() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let _written = write_file(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
+    defer let bytes = read_file(path, max_bytes: 8).unwrap()
+    testing.assert_eq(bytes.length(), UInt64(3), "reading into the system allocator lost bytes")?
 }
 
 test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
@@ -125,8 +140,8 @@ test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
     let input = "abcde"
-    let _written = write_file(mem.system(), path, input.as_bytes(), policy: .CreateNew).unwrap()
-    match read_file(mem.system(), path, max_bytes: 3) {
+    let _written = write_file(path, input.as_bytes(), policy: .CreateNew).unwrap()
+    match read_file(path, max_bytes: 3) {
         Ok(bytes) => {
             bytes.release()
             return testing.assert(false, "an oversized file read succeeded")
@@ -147,8 +162,8 @@ test fn reading_a_file_accepts_its_exact_byte_limit() {
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
     let input = "a\0á"
-    let _written = write_file(mem.system(), path, input.as_bytes(), policy: .CreateNew).unwrap()
-    defer let bytes = read_file(mem.system(), path, max_bytes: 4).unwrap()
+    let _written = write_file(path, input.as_bytes(), policy: .CreateNew).unwrap()
+    defer let bytes = read_file(path, max_bytes: 4).unwrap()
     testing.assert_eq(bytes.length(), UInt64(4), "reading a file changed its exact-limit length")?
     for index in 0..bytes.length() {
         testing.assert_eq(bytes[index], input.byte(index).unwrap(), "reading a file changed a byte")?
@@ -163,9 +178,9 @@ test fn reading_a_file_allocates_its_bytes_from_an_arena() {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
-    let _written = write_file(mem.system(), path, "green tea".as_bytes(), policy: .CreateNew).unwrap()
+    let _written = write_file(path, "green tea".as_bytes(), policy: .CreateNew).unwrap()
     // An arena's bytes are reclaimed with the arena, so the vector is dropped.
-    let bytes = read_file(allocator, path, max_bytes: 16) else |_| {
+    let bytes = read_file_in(allocator, path, max_bytes: 16) else |_| {
         return testing.assert(false, "reading a file into an arena failed")
     }
     testing.assert_eq(bytes.as_slice(), "green tea".as_bytes(), "reading a file into an arena changed its bytes")?
@@ -180,9 +195,9 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Res
             let path = Path.from_str(owned.view()).unwrap()
             defer remove_scratch(path)
             // Five thousand bytes outgrow the first 4096-byte read buffer.
-            defer let input = Vec.filled(mem.system(), count: 5000, value: UInt8(7)).unwrap()
-            let _written = write_file(mem.system(), path, input.as_slice(), policy: .CreateNew).unwrap()
-            let bytes = read_file(allocator, path, max_bytes: 5000).settled()?
+            defer let input = Vec.filled(count: 5000, value: UInt8(7)).unwrap()
+            let _written = write_file(path, input.as_slice(), policy: .CreateNew).unwrap()
+            let bytes = read_file_in(allocator, path, max_bytes: 5000).settled()?
             bytes.release()
             return .Ok(())
         },
@@ -195,7 +210,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Res
 test fn a_file_open_failure_has_no_partial_allocation() {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
-    match read_file(mem.system(), path, max_bytes: 8) {
+    match read_file(path, max_bytes: 8) {
         Ok(bytes) => {
             bytes.release()
             return testing.assert(false, "a missing file was opened")
@@ -243,7 +258,7 @@ impl Display for ReadTextError {
 // read that fails, or bytes that are not UTF-8, release what was read and
 // leave only the reason.
 pub fn read_text_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[String[A], ReadTextError] where carries(.Ok: allocator) {
-    let bytes = read_file(allocator, path, max_bytes).settled()?
+    let bytes = read_file_in(allocator, path, max_bytes).settled()?
     let text = String.from_bytes(bytes).settled()?
     .Ok(text)
 }
@@ -258,7 +273,7 @@ test fn reading_text_decodes_the_file_as_utf8() {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
-    let _written = write_file(mem.system(), path, "café\n".as_bytes(), policy: .CreateNew).unwrap()
+    let _written = write_file(path, "café\n".as_bytes(), policy: .CreateNew).unwrap()
     defer let text = read_text(path, max_bytes: 16).unwrap()
     testing.assert_eq(text.view(), "café\n", "reading text changed the file's contents")?
 }
@@ -270,7 +285,7 @@ test fn reading_text_names_the_offset_of_invalid_utf8() {
     // The bytes are ASCII a followed by ED A0 80, which would encode the
     // forbidden surrogate U+D800.
     let invalid = [UInt8(97), 237, 160, 128]
-    let _written = write_file(mem.system(), path, invalid.as_slice(), policy: .CreateNew).unwrap()
+    let _written = write_file(path, invalid.as_slice(), policy: .CreateNew).unwrap()
     let outcome = read_text(path, max_bytes: 16)
     let offset = match outcome {
         Ok(text) => {
@@ -306,7 +321,7 @@ test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> 
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
     let invalid = [UInt8(97), 237, 160, 128]
-    let _written = write_file(mem.system(), path, invalid.as_slice(), policy: .CreateNew).unwrap()
+    let _written = write_file(path, invalid.as_slice(), policy: .CreateNew).unwrap()
     let checked = testing.each_allocation_failure(
         mem.system(),
         [path] |allocator| -> Result[(), ReadTextError] {
@@ -347,7 +362,7 @@ fn finish_file_read[A: Allocator](sink file: File, sink outcome: Result[Vec[UInt
 }
 
 test fn a_file_close_failure_returns_all_successfully_read_bytes() {
-    let bytes = Vec.filled(mem.system(), count: 3, value: UInt8(7)).unwrap()
+    let bytes = Vec.filled(count: 3, value: UInt8(7)).unwrap()
     let file = File { fd = -1 }
     let outcome: Result[Vec[UInt8], io.ReadAllFailure[mem.SystemAllocator, io.IoError]] = .Ok(bytes)
     match finish_file_read(file, outcome) {
@@ -368,7 +383,7 @@ test fn a_file_close_failure_returns_all_successfully_read_bytes() {
 
 test fn a_file_read_failure_and_close_failure_are_both_retained() {
     var file = File { fd = -1 }
-    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    let outcome = io.read_all(&file, max_bytes: 8)
     match finish_file_read(file, outcome) {
         Ok(bytes) => {
             bytes.release()
@@ -396,7 +411,7 @@ test fn a_file_read_failure_and_close_failure_are_both_retained() {
 
 test fn a_file_read_failure_displays_its_primary_and_cleanup_reasons() {
     var file = File { fd = -1 }
-    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    let outcome = io.read_all(&file, max_bytes: 8)
     let failure = match finish_file_read(file, outcome) {
         Ok(bytes) => {
             bytes.release()
@@ -406,7 +421,7 @@ test fn a_file_read_failure_displays_its_primary_and_cleanup_reasons() {
     }
     let opening: ReadFileError = .Open(FsFailure.new(.InvalidPermissions))
     // The 320-byte recorder holds both renderings and their separator.
-    var writer = testing.Recorder.of(mem.system(), 320).unwrap()
+    var writer = testing.Recorder.of(320).unwrap()
     let wrote = failure.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok() && opening.fmt(&writer).is_ok()
     let expected =
         \\file read failed: input failed at stream byte 0: Read failed (InvalidDescriptor) after 0 bytes; errno 9; file cleanup: Close failed (InvalidDescriptor) after 0 bytes; errno 9

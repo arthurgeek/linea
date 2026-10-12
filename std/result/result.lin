@@ -37,9 +37,8 @@ test fn derived_result_equality_compares_cases_and_payloads() {
 test fn derived_result_debug_renders_both_cases() {
     let ok: Result[UInt8, UInt8] = .Ok(7)
     let error: Result[UInt8, UInt8] = .Err(9)
-    let a = mem.system()
     // Sixty-four bytes leave room for the complete debug text checked below.
-    var writer = testing.Recorder.of(a, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{ok:?} {error:?}".fmt(&writer).is_ok()
     let rendered = writer.holds("Ok(7) Err(9)")
     writer.release()

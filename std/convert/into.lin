@@ -1,5 +1,4 @@
 import std.testing
-import std.mem
 
 // Define a total conversion on its destination. Every From implementation
 // supplies the corresponding Into conversion for its source.
@@ -88,7 +87,7 @@ impl From[Label] for Str {
 }
 
 test fn into_preserves_the_external_owner_of_a_transferred_view() {
-    defer let owner = "shipment".to_owned(mem.system()).unwrap()
+    defer let owner = "shipment".to_owned().unwrap()
     let label = Label { text = owner.view() }
     let view: Str = label.into()
     testing.assert_eq(view, "shipment", "conversion lost its backing text")?

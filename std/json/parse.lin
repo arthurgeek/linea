@@ -140,15 +140,15 @@ fn parse_value[A: Allocator](allocator: A, input: Str, inout cursor: Cursor, lim
     let byte = input.byte(start).unwrap()
     if byte == 110 {
         literal(input, &cursor, "null")?
-        return .Ok(Value.null(allocator))
+        return .Ok(Value.null_in(allocator))
     }
     if byte == 116 {
         literal(input, &cursor, "true")?
-        return .Ok(Value.boolean(allocator, true))
+        return .Ok(Value.boolean_in(allocator, true))
     }
     if byte == 102 {
         literal(input, &cursor, "false")?
-        return .Ok(Value.boolean(allocator, false))
+        return .Ok(Value.boolean_in(allocator, false))
     }
     if byte == 34 {
         let string = scan_string(allocator, input, &cursor.offset, limits.max_string_bytes)?
@@ -264,15 +264,25 @@ fn parse_object[A: Allocator](allocator: A, input: Str, inout cursor: Cursor, li
 
 // Parse `input` as one JSON document, allocating its values from `allocator`,
 // within `limits`.
-pub fn parse[A: Allocator](allocator: A, input: Str, limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+pub fn parse_in[A: Allocator](allocator: A, input: Str, limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
     preflight(input.length(), limits)?
     parse_document(allocator, input, limits)
 }
 
+// Parse `input` as one JSON document, allocating its values from the system
+// allocator, within `limits`.
+pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+    parse_in(mem.system(), input, limits: limits)
+}
+
+test fn parse_allocates_the_document_from_the_system_allocator() {
+    defer let document = parse(r#"{"tea":2}"#).unwrap()
+    testing.assert_eq(document.get("tea").unwrap().as_uint64().unwrap(), UInt64(2), "a parsed member changed")?
+}
+
 test fn parsed_documents_own_text_and_preserve_number_tokens() {
-    let allocator = mem.system()
-    let input = r#"{"tea": [true, null, "café", 1.00, 1e400]}"#.to_owned(allocator).unwrap()
-    let document = parse(allocator, input.view()).unwrap()
+    let input = r#"{"tea": [true, null, "café", 1.00, 1e400]}"#.to_owned().unwrap()
+    let document = parse(input.view()).unwrap()
     input.release()
     defer document.release()
     let items = document.get("tea").unwrap()
@@ -285,7 +295,7 @@ test fn parsed_documents_own_text_and_preserve_number_tokens() {
 }
 
 test fn duplicate_decoded_names_are_refused_before_their_values() {
-    let error = match parse(mem.system(), r#"{"a":1,"\u0061":not_json}"#) {
+    let error = match parse(r#"{"a":1,"\u0061":not_json}"#) {
         Err(error) => error,
         Ok(document) => {
             document.release()
@@ -301,7 +311,7 @@ test fn malformed_documents_report_the_first_unusable_byte() {
     let kinds: [ParseErrorKind; 8] = [.Syntax, .Syntax, .TrailingData, .Syntax, .Syntax, .Syntax, .Syntax, .Syntax]
     let offsets: [UInt64; 8] = [0, 1, 5, 3, 5, 2, 5, 0]
     for index in 0..inputs.length() {
-        let error = match parse(mem.system(), inputs[index]) {
+        let error = match parse(inputs[index]) {
             Err(error) => error,
             Ok(value) => {
                 value.release()
@@ -315,7 +325,7 @@ test fn malformed_documents_report_the_first_unusable_byte() {
 
 test fn zero_limits_are_restrictions_and_container_depth_excludes_scalars() {
     var limits = ParseLimits { max_nodes = 0, ..ParseLimits.default() }
-    let no_nodes = match parse(mem.system(), "null", limits: limits) {
+    let no_nodes = match parse("null", limits: limits) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -326,8 +336,8 @@ test fn zero_limits_are_restrictions_and_container_depth_excludes_scalars() {
     testing.assert_eq(no_nodes, expected_nodes, "node limit did not point at the value")?
     limits.max_nodes = 1
     limits.max_depth = MaxDepth(0)
-    parse(mem.system(), "null", limits: limits).unwrap().release()
-    let no_containers = match parse(mem.system(), "[]", limits: limits) {
+    parse("null", limits: limits).unwrap().release()
+    let no_containers = match parse("[]", limits: limits) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -337,10 +347,10 @@ test fn zero_limits_are_restrictions_and_container_depth_excludes_scalars() {
     let expected_depth: ParseError = .{ kind = .DepthLimit, offset = 0 }
     testing.assert_eq(no_containers, expected_depth, "depth limit did not point at the opener")?
     limits.max_depth = MaxDepth(1)
-    parse(mem.system(), "[]", limits: limits).unwrap().release()
+    parse("[]", limits: limits).unwrap().release()
     limits.max_nodes = 2
-    parse(mem.system(), "[null]", limits: limits).unwrap().release()
-    let nested = match parse(mem.system(), "[[]]", limits: limits) {
+    parse("[null]", limits: limits).unwrap().release()
+    let nested = match parse("[[]]", limits: limits) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -357,7 +367,7 @@ test fn parsing_nested_documents_handles_bounded_allocation_refusal() {
     var accepted: UInt64 = 0
     for size in UInt64(0)..64 {
         defer let arena = mem.Arena.open(mem.system(), size * 1024)
-        match parse(arena.handle(), input) {
+        match parse_in(arena.handle(), input) {
             Err(error) => {
                 testing.assert_eq(error.kind, ParseErrorKind.Allocation, "bounded arena changed JSON syntax")?
                 refused += 1
@@ -395,8 +405,8 @@ test fn configured_limits_accept_the_boundary_and_reject_the_next_value() {
             3 => limits.max_number_bytes = MaxNumberBytes(2),
             _ => limits.max_object_members = MaxMembers(1),
         }
-        parse(mem.system(), inputs[index], limits: limits).unwrap().release()
-        let failure = match parse(mem.system(), larger[index], limits: limits) {
+        parse(inputs[index], limits: limits).unwrap().release()
+        let failure = match parse(larger[index], limits: limits) {
             Err(error) => error,
             Ok(value) => {
                 value.release()
@@ -416,14 +426,14 @@ test fn parser_accepts_128_containers_and_refuses_the_next_opener() {
     for _index in UInt64(0)..hard_depth {
         &input.append("]").unwrap()
     }
-    let document = parse(mem.system(), input.view()).unwrap()
+    let document = parse(input.view()).unwrap()
     let height = document.height
     document.release()
     testing.assert_eq(height, hard_depth, "parsed depth changed")?
-    defer var excessive = "[".to_owned(mem.system()).unwrap()
+    defer var excessive = "[".to_owned().unwrap()
     &excessive.append(input.view()).unwrap()
     &excessive.append("]").unwrap()
-    let error = match parse(mem.system(), excessive.view()) {
+    let error = match parse(excessive.view()) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -442,7 +452,7 @@ test fn json_parser_disposes_every_allocation_on_success_and_each_refusal() {
     let input = r#"{"first":["tea",123,{"nested":"green\nleaf"}],"second":[true,false,null,"a longer owned string"],"last":{"price":1.25}}"#
     defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let allocator = baseline.allocator()
-    let document = parse(allocator, input).unwrap()
+    let document = parse_in(allocator, input).unwrap()
     document.release()
     let attempts = baseline.attempts()
     testing.assert(attempts > 0, "parser did not exercise allocated ownership")?
@@ -451,7 +461,7 @@ test fn json_parser_disposes_every_allocation_on_success_and_each_refusal() {
     for refusal in UInt64(1)..(attempts + 1) {
         defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
         let failing = log.allocator()
-        let allocation_error = match parse(failing, input) {
+        let allocation_error = match parse_in(failing, input) {
             Err(error) => error.kind == ParseErrorKind.Allocation,
             Ok(value) => {
                 value.release()
@@ -481,7 +491,7 @@ test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_in
     for input in inputs {
         defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
         let allocator = baseline.allocator()
-        let invalid = match parse(allocator, input) {
+        let invalid = match parse_in(allocator, input) {
             Err(error) => error.kind != ParseErrorKind.Allocation,
             Ok(value) => {
                 value.release()
@@ -495,7 +505,7 @@ test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_in
         for refusal in UInt64(1)..(attempts + 1) {
             defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
             let failing = log.allocator()
-            let refused = match parse(failing, input) {
+            let refused = match parse_in(failing, input) {
                 Err(error) => error.kind == ParseErrorKind.Allocation,
                 Ok(value) => {
                     value.release()
@@ -511,7 +521,7 @@ test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_in
 
 // Parse bytes as `parse` does, refusing input that is not UTF-8 before its
 // grammar is read.
-pub fn parse_bytes[A: Allocator](allocator: A, input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+pub fn parse_bytes_in[A: Allocator](allocator: A, input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
     preflight(input.length(), limits)?
     let valid = Str.from_bytes(input) else |error| {
         return .Err(.{ kind = .InvalidUtf8, offset = error.offset })
@@ -519,10 +529,20 @@ pub fn parse_bytes[A: Allocator](allocator: A, input: mem.Slice[UInt8], limits: 
     parse_document(allocator, valid, limits)
 }
 
+// Parse bytes as `parse` does, allocating from the system allocator.
+pub fn parse_bytes(input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+    parse_bytes_in(mem.system(), input, limits: limits)
+}
+
+test fn parse_bytes_allocates_the_document_from_the_system_allocator() {
+    defer let document = parse_bytes("[1]".as_bytes()).unwrap()
+    testing.assert_eq(document.elements().unwrap().length(), UInt64(1), "a parsed array lost its element")?
+}
+
 test fn preflight_precedes_utf8_and_utf8_precedes_grammar() {
     let bytes: [UInt8; _] = [255, 0]
     var limits = ParseLimits { max_input_bytes = 0, ..ParseLimits.default() }
-    let extent = match parse_bytes(mem.system(), bytes.as_slice(), limits: limits) {
+    let extent = match parse_bytes(bytes.as_slice(), limits: limits) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -532,7 +552,7 @@ test fn preflight_precedes_utf8_and_utf8_precedes_grammar() {
     let expected_extent: ParseError = .{ kind = .InputLimit, offset = 0 }
     testing.assert_eq(extent, expected_extent, "UTF-8 validation preceded the extent check")?
     limits.max_input_bytes = 2
-    let encoding = match parse_bytes(mem.system(), bytes.as_slice(), limits: limits) {
+    let encoding = match parse_bytes(bytes.as_slice(), limits: limits) {
         Err(error) => error,
         Ok(value) => {
             value.release()
@@ -549,7 +569,7 @@ test fn incomplete_documents_release_completed_siblings_and_report_eof() {
         for end in UInt64(0)..input.length() {
             // UTF-8 prefixes may end within a scalar; parse_bytes validates them.
             let prefix = input.as_bytes().subspan(0, end).unwrap()
-            match parse_bytes(mem.system(), prefix) {
+            match parse_bytes(prefix) {
                 Err(error) => testing.assert(error.offset <= end, "truncated input produced an out-of-bounds offset")?,
                 Ok(value) => {
                     value.release()
@@ -562,6 +582,6 @@ test fn incomplete_documents_release_completed_siblings_and_report_eof() {
 
 test fn parsed_bytes_are_allocated_from_an_arena() {
     defer let arena = mem.Arena.open(mem.system(), 4096)
-    defer let document = parse_bytes(arena.handle(), r#"{"tea":["green","black"]}"#.as_bytes()).unwrap()
+    defer let document = parse_bytes_in(arena.handle(), r#"{"tea":["green","black"]}"#.as_bytes()).unwrap()
     testing.assert_eq(document.get("tea").unwrap().at(1).unwrap().as_str().unwrap(), "black", "parsed bytes lost a value in an arena")?
 }

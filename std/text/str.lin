@@ -10,7 +10,7 @@ struct Str {
 
 impl Str {
     // Copy encoded text into storage owned by the supplied allocator.
-    pub fn to_owned[A: Allocator](self: Self, allocator: A) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    pub fn to_owned_in[A: Allocator](self: Self, allocator: A) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
         defer var owned = String.new_in(allocator)
         &owned.append(self)?
         .Ok(owned)
@@ -19,7 +19,7 @@ impl Str {
 
 test fn an_empty_allocator_refuses_owned_text() {
     defer let arena = mem.Arena.open(mem.system(), 0)
-    let result = "text".to_owned(arena.handle())
+    let result = "text".to_owned_in(arena.handle())
     let failed = match result {
         Err(_) => true,
         Ok(text) => {
@@ -31,9 +31,21 @@ test fn an_empty_allocator_refuses_owned_text() {
     .Ok(())
 }
 
+impl Str {
+    // Copy encoded text into storage owned by the system allocator.
+    pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+        self.to_owned_in(mem.system())
+    }
+}
+
+test fn owned_text_copies_into_the_system_allocator() {
+    defer let text = "olá".to_owned().unwrap()
+    testing.assert_eq(text.view(), "olá", "the copy changed the text")?
+}
+
 test fn copied_text_outlives_its_source_owner() {
-    let original = "kept á\u{0}".to_owned(mem.system()).unwrap()
-    let copied = original.view().to_owned(mem.system()).unwrap()
+    let original = "kept á\u{0}".to_owned().unwrap()
+    let copied = original.view().to_owned().unwrap()
     original.release()
     defer copied.release()
     testing.assert_eq(copied.view(), "kept á\u{0}", "explicit text copy retained the source owner")?
@@ -43,7 +55,7 @@ test fn copied_text_outlives_its_source_owner() {
 test fn initial_copy_refusal_releases_the_empty_owner() {
     // The cursor fills the arena, leaving no space for content.
     defer let arena = mem.Arena.open(mem.system(), 8)
-    let refused = match "content".to_owned(arena.handle()) {
+    let refused = match "content".to_owned_in(arena.handle()) {
         Err(_) => true,
         Ok(text) => {
             text.release()
@@ -57,8 +69,8 @@ test fn initial_copy_refusal_releases_the_empty_owner() {
 test fn copied_text_outlives_the_source_allocation_owner() {
     defer let copied = {
         defer let arena = mem.Arena.open(mem.system(), 64)
-        defer let original = "source á".to_owned(arena.handle()).unwrap()
-        original.view().to_owned(mem.system()).unwrap()
+        defer let original = "source á".to_owned_in(arena.handle()).unwrap()
+        original.view().to_owned().unwrap()
     }
     testing.assert_eq(copied.view(), "source á", "explicit copy retained the source allocation owner")?
     .Ok(())

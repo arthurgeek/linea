@@ -1,4 +1,3 @@
-import std.mem
 import std.testing
 
 // Display renders an operation or category by its case name, as in IoError messages.
@@ -136,8 +135,7 @@ test fn derived_io_error_equality_compares_the_code() {
 
 test fn derived_io_error_debug_renders_the_code() {
     let error = IoError.from_os(.Write, 5)
-    let a = mem.system()
-    var writer = testing.Recorder.of(a, 128).unwrap()
+    var writer = testing.Recorder.of(128).unwrap()
     let wrote = "{error:?}".fmt(&writer).is_ok()
     let rendered = writer.holds(r"IoError { operation: Write, category: Other, code: Some(5), progress: 0 }")
     writer.release()
@@ -164,8 +162,7 @@ impl Display for IoError {
 
 test fn an_io_error_displays_its_numeric_reason() {
     let error = IoError.from_os(.Write, 9)
-    let allocator = mem.system()
-    var writer = testing.Recorder.of(allocator, 256) else |_| {
+    var writer = testing.Recorder.of(256) else |_| {
         return testing.assert(false, "the display recorder was refused")
     }
     let wrote = error.fmt(&writer).is_ok()
@@ -179,9 +176,8 @@ test fn an_io_error_displays_its_numeric_reason() {
 test fn io_operations_and_categories_display_their_names() {
     let operation: IoOperation = .Publish
     let category: IoCategory = .PermissionDenied
-    let allocator = mem.system()
     // The 64-byte recorder holds both names and their separator.
-    var writer = testing.Recorder.of(allocator, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{operation} {category}".fmt(&writer).is_ok()
     let equal = writer.holds("Publish PermissionDenied")
     writer.release()

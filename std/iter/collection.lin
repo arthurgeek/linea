@@ -22,7 +22,7 @@ pub fn extend[I: Iterator, A: Allocator](
 }
 
 test fn extend_appends_items_in_source_order() {
-    defer var values = Vec.filled(mem.system(), count: 1, value: UInt64(9)).unwrap()
+    defer var values = Vec.filled(count: 1, value: UInt64(9)).unwrap()
     var source = UInt64(1)..4
     match extend(&values, &source) {
         Ok(_) => {},
@@ -39,7 +39,7 @@ test fn extend_appends_items_in_source_order() {
 test fn extend_at_exact_capacity_does_not_allocate_after_exhaustion() {
     // Eight cursor bytes and four UInt64 slots leave no room for another allocation.
     defer let arena = mem.Arena.open(mem.system(), size: 40)
-    var values = Vec.filled(arena.handle(), count: 4, value: UInt64(7)).unwrap()
+    var values = Vec.filled_in(arena.handle(), count: 4, value: UInt64(7)).unwrap()
     var source = UInt64(0)..0
     testing.assert(extend(&values, &source).is_ok(), "empty extension attempted growth")?
     testing.assert_eq(values.length(), UInt64(4), "empty extension changed the prefix")?
@@ -237,7 +237,7 @@ test fn collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
     }
     // Display borrows the failure before its parts are recovered below.
     // The 64-byte recorder holds the growth refusal.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let explained = refused.fmt(&writer).is_ok() && writer.holds("could not grow the vector: Exhausted")
     writer.release()
     let { collected, failure } = refused

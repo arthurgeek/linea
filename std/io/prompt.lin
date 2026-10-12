@@ -47,7 +47,7 @@ test fn prompt_errors_display_the_failed_step_and_its_reason() {
     let flush: PromptError[Str, Str] = .Flush(.{ kind = .NoProgress, reason = .None, written = 0 })
     let response: PromptError[Str, Str] = .Read(.Limit)
     // The 256-byte recorder holds all three failures, one per line.
-    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var writer = testing.Recorder.of(256).unwrap()
     let wrote = "{output}\n{flush}\n{response}".fmt(&writer).is_ok()
     let expected =
         \\could not write the prompt: write failed after 1 bytes: pipe closed

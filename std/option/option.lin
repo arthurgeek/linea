@@ -48,9 +48,8 @@ test fn derived_option_equality_compares_cases_and_payloads() {
 test fn derived_option_debug_renders_its_case_and_payload() {
     let none: Option[UInt8] = .None
     let some: Option[UInt8] = .Some(7)
-    let a = mem.system()
     // Sixty-four bytes leave room for the complete debug text checked below.
-    var writer = testing.Recorder.of(a, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{none:?} {some:?}".fmt(&writer).is_ok()
     let rendered = writer.holds("None Some(7)")
     writer.release()

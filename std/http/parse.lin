@@ -34,9 +34,9 @@ impl Display for RequestError {
 
 test fn a_request_error_displays_its_reason() {
     let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
-    defer let closed = fmt.render_owned(mem.system(), RequestError.Closed).unwrap()
-    defer let refused = fmt.render_owned(mem.system(), RequestError.Status(.ContentTooLarge)).unwrap()
-    defer let failed = fmt.render_owned(mem.system(), RequestError.Io(reset)).unwrap()
+    defer let closed = fmt.render_owned(RequestError.Closed).unwrap()
+    defer let refused = fmt.render_owned(RequestError.Status(.ContentTooLarge)).unwrap()
+    defer let failed = fmt.render_owned(RequestError.Io(reset)).unwrap()
     testing.assert_eq(closed.view(), "the client closed the connection before sending a request", "the closed reason changed")?
     testing.assert_eq(refused.view(), "the request was refused with 413 Content Too Large", "the refusal changed")?
     testing.assert_eq(failed.view(), "Read failed (ConnectionReset) after 3 bytes", "the connection failure changed")?
@@ -381,7 +381,7 @@ fn read_body[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], 
         Some(count) => count,
         None => return .Ok(Vec.new_in(allocator)),
     }
-    match &reader.read_exact(allocator, count, limits.max_body_bytes) {
+    match &reader.read_exact_in(allocator, count, limits.max_body_bytes) {
         Ok(bytes) => .Ok(bytes),
         Err(error) => .Err(match error {
             Input(failure) => input_failure(failure),

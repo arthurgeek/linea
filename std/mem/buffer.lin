@@ -69,8 +69,7 @@ test fn derived_oom_equality_compares_its_case() {
 
 test fn derived_oom_rendering_names_its_case() {
     let exhausted: Oom = .Exhausted
-    let a = system()
-    var writer = testing.Recorder.of(a, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{exhausted} {exhausted:?}".fmt(&writer).is_ok()
     let rendered = writer.holds("Exhausted Exhausted")
     writer.release()

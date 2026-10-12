@@ -187,9 +187,8 @@ test fn write_failures_display_their_kind_or_underlying_reason() {
     let stalled: WriteFailure[UInt8] = .{ kind = .NoProgress, reason = .None, written = 2 }
     let overcounted: WriteFailure[UInt8] = .{ kind = .InvalidProgress, reason = .Some(9), written = 4 }
     let kind: WriteFailureKind = .Underlying
-    let allocator = mem.system()
     // The 384-byte recorder holds all five renderings and their separators.
-    var writer = testing.Recorder.of(allocator, 384).unwrap()
+    var writer = testing.Recorder.of(384).unwrap()
     let wrote = "{underlying}; {unexplained}; {stalled}; {overcounted}; {kind}".fmt(&writer).is_ok()
     let equal = writer.holds("write failed after 3 bytes: 9; write failed after 0 bytes: underlying output failure; write failed after 2 bytes: the writer made no progress; write failed after 4 bytes: the writer reported an invalid count; underlying output failure")
     writer.release()

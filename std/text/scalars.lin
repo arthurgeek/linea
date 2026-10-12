@@ -1,5 +1,4 @@
 import std.testing
-import std.mem
 
 // A ScalarPosition is a Unicode scalar value and the byte offset its encoding
 // starts at.
@@ -97,7 +96,7 @@ test fn scalar_iteration_preserves_nul_bom_and_scalar_extrema() {
 }
 
 test fn a_scalar_value_outlives_the_text_that_encoded_it() {
-    let source = "á".to_owned(mem.system()).unwrap()
+    let source = "á".to_owned().unwrap()
     var scalars = source.view().scalars()
     let first = &scalars.next().unwrap()
     source.release()

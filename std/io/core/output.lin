@@ -1,4 +1,3 @@
-import std.mem
 import std.testing
 
 // Render `x` to standard output and report a failed write.
@@ -21,8 +20,7 @@ pub fn line[T: Display, W: Writer](x: T, inout w: W) -> Result[(), W.Error] wher
 }
 
 test fn a_line_is_the_value_and_the_ending_after_it() {
-    let a = mem.system()
-    var w = testing.Recorder.of(a, 64) else |_| {
+    var w = testing.Recorder.of(64) else |_| {
         return testing.assert(false, "a recorder was refused")
     }
     let wrote = line("hello", &w).is_ok()
@@ -32,7 +30,7 @@ test fn a_line_is_the_value_and_the_ending_after_it() {
     testing.assert(wrote, "writing a line into a recorder failed")?
     testing.assert(said, "a line is not the value and the ending after it")?
 
-    var w = testing.Recorder.of(a, 64) else |_| {
+    var w = testing.Recorder.of(64) else |_| {
         return testing.assert(false, "a recorder was refused")
     }
     let wrote = line(1250, &w).is_ok()
@@ -75,7 +73,7 @@ test fn eprint_renders_a_value_and_ignores_a_refused_write() {
     // The test runner shows what a test wrote to standard error only when it
     // fails.
     eprint("checked")
-    var recorder = testing.Recorder.of(mem.system(), 16).unwrap()
+    var recorder = testing.Recorder.of(16).unwrap()
     eprint_to(1250, &recorder)
     let rendered = recorder.holds("1250")
     recorder.release()
@@ -102,7 +100,7 @@ pub fn eprintln[T: Display](x: T) -> () {
 
 test fn eprintln_renders_a_line_and_ignores_a_refused_write() {
     eprintln("checked")
-    var recorder = testing.Recorder.of(mem.system(), 16).unwrap()
+    var recorder = testing.Recorder.of(16).unwrap()
     eprintln_to("ready", &recorder)
     let rendered = recorder.holds("ready\n")
     recorder.release()

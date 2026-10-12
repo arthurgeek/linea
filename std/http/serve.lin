@@ -63,13 +63,13 @@ impl Display for ServeError {
 test fn a_serve_error_displays_its_cause() {
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     let closing = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
-    defer let accept = fmt.render_owned(mem.system(), ServeError.Accept(.Io(invalid))).unwrap()
-    defer let close = fmt.render_owned(mem.system(), ServeError.Close(closing)).unwrap()
+    defer let accept = fmt.render_owned(ServeError.Accept(.Io(invalid))).unwrap()
+    defer let close = fmt.render_owned(ServeError.Close(closing)).unwrap()
     testing.assert_eq(accept.view(), "accepting a connection failed: Accept failed (InvalidDescriptor) after 0 bytes", "the accept failure changed")?
     testing.assert_eq(close.view(), "closing the listener failed: Close failed (InvalidDescriptor) after 0 bytes", "the close failure changed")?
-    defer let small = fmt.render_owned(mem.system(), ServeError.ArenaTooSmall).unwrap()
+    defer let small = fmt.render_owned(ServeError.ArenaTooSmall).unwrap()
     testing.assert_eq(small.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
-    defer let memory = fmt.render_owned(mem.system(), ServeError.Memory(.Exhausted)).unwrap()
+    defer let memory = fmt.render_owned(ServeError.Memory(.Exhausted)).unwrap()
     testing.assert_eq(memory.view(), "the parent refused the buffer a refused request is discarded into: Exhausted", "the memory refusal changed")?
     .Ok(())
 }
@@ -640,8 +640,8 @@ impl Display for ListenAndServeError {
 
 test fn a_listen_and_serve_error_displays_its_cause() {
     let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
-    defer let listening = fmt.render_owned(mem.system(), ListenAndServeError.Listen(.Io(invalid))).unwrap()
-    defer let arena = fmt.render_owned(mem.system(), ListenAndServeError.Serve(.ArenaTooSmall)).unwrap()
+    defer let listening = fmt.render_owned(ListenAndServeError.Listen(.Io(invalid))).unwrap()
+    defer let arena = fmt.render_owned(ListenAndServeError.Serve(.ArenaTooSmall)).unwrap()
     testing.assert_eq(listening.view(), "listening failed: Listen failed (InvalidDescriptor) after 0 bytes", "the listen failure changed")?
     testing.assert_eq(arena.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
     .Ok(())

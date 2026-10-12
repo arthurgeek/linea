@@ -13,24 +13,35 @@ use mem.Owner
 // The result owns its text, so it outlives any storage `value` borrows. When
 // allocation fails part way, the partial string is released and the refusal
 // is returned.
-pub fn render_owned[A: Allocator, T: Display](allocator: A, value: T) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+pub fn render_owned_in[A: Allocator, T: Display](allocator: A, value: T) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
     defer var rendered = String.new_in(allocator)
     value.fmt(&rendered)?
     .Ok(rendered)
 }
 
+// Render `value` with Display into a new String allocated from the system
+// allocator. See `render_owned_in`.
+pub fn render_owned[T: Display](value: T) -> Result[String, mem.Oom] where carries() {
+    render_owned_in(mem.system(), value)
+}
+
+test fn owned_rendering_allocates_from_the_system_allocator() {
+    defer let rendered = render_owned(UInt64(42)).unwrap()
+    testing.assert_eq(rendered.view(), "42", "rendering into the system allocator changed the value")?
+}
+
 test fn owned_rendering_formats_interpolation_values() {
     let count: UInt64 = 3
     let enabled = true
-    defer let rendered = render_owned(mem.system(), "count={count}, enabled={enabled}").unwrap()
+    defer let rendered = render_owned("count={count}, enabled={enabled}").unwrap()
     testing.assert_eq(rendered.view(), "count=3, enabled=true", "owned interpolation rendering changed its values")?
     .Ok(())
 }
 
 test fn owned_rendering_outlives_its_input_owner() {
     defer let rendered = {
-        defer let source = "source á".to_owned(mem.system()).unwrap()
-        render_owned(mem.system(), source.view()).unwrap()
+        defer let source = "source á".to_owned().unwrap()
+        render_owned(source.view()).unwrap()
     }
     testing.assert_eq(rendered.view(), "source á", "owned rendering retained its source owner")?
     .Ok(())
@@ -50,7 +61,7 @@ test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
     // The remaining eight cannot hold the next fragment's 16-byte reservation.
     let arena = mem.Arena.open(mem.system(), 24)
     let value = PartialRenderFixture {}
-    let refused = match render_owned(arena.handle(), value) {
+    let refused = match render_owned_in(arena.handle(), value) {
         Ok(rendered) => {
             rendered.release()
             false
@@ -65,7 +76,7 @@ test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
 test fn owned_rendering_allocates_its_text_from_an_arena() {
     defer let arena = mem.Arena.open(mem.system(), 64)
     let count: UInt64 = 3
-    let rendered = render_owned(arena.handle(), "{count} teas").unwrap()
+    let rendered = render_owned_in(arena.handle(), "{count} teas").unwrap()
     testing.assert_eq(rendered.view(), "3 teas", "owned rendering into an arena changed its text")?
 }
 
@@ -74,7 +85,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_an_owned_rendering()
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
             let count: UInt64 = 3
-            let rendered = render_owned(allocator, "{count} teas, rendered into text long enough to grow its string twice")?
+            let rendered = render_owned_in(allocator, "{count} teas, rendered into text long enough to grow its string twice")?
             rendered.release()
             return .Ok(())
         },
@@ -137,7 +148,7 @@ impl Debug for Never {
 test fn an_impossible_close_error_renders_as_none() {
     let absent: Option[Never] = .None
     // The 16-byte recorder holds the rendered option.
-    var writer = testing.Recorder.of(mem.system(), 16).unwrap()
+    var writer = testing.Recorder.of(16).unwrap()
     let wrote = absent.debug(&writer).is_ok()
     let equal = writer.holds("None")
     writer.release()
@@ -314,9 +325,8 @@ test fn renderers_stop_at_the_first_writer_failure() {
 
 // Record Display output for an exact comparison in formatting tests.
 fn display_text_equals[T: Copyable + Display](value: T, expected: Str) -> Bool {
-    let allocator = mem.system()
     // A 256-byte recorder holds the decimal and nested-value fixtures.
-    var writer = testing.Recorder.of(allocator, 256) else |_| {
+    var writer = testing.Recorder.of(256) else |_| {
         return false
     }
     let rendered = "{value}"
@@ -328,9 +338,8 @@ fn display_text_equals[T: Copyable + Display](value: T, expected: Str) -> Bool {
 
 // Record Debug output for an exact comparison in formatting tests.
 fn debug_text_equals[T: Copyable + Debug](value: T, expected: Str) -> Bool {
-    let allocator = mem.system()
     // A 256-byte recorder also leaves room for quotes and structural names.
-    var writer = testing.Recorder.of(allocator, 256) else |_| {
+    var writer = testing.Recorder.of(256) else |_| {
         return false
     }
     let rendered = "{value:?}"
@@ -366,9 +375,8 @@ impl Display for SplitError {
 }
 
 test fn text_errors_render_the_reason_and_byte_offset() {
-    let allocator = mem.system()
     // The 160-byte recorder holds all five error renderings and separators.
-    var writer = testing.Recorder.of(allocator, 160).unwrap()
+    var writer = testing.Recorder.of(160).unwrap()
     let syntax: ParseError = .Syntax(2)
     let overflow: ParseError = .Overflow(19)
     let separator: SplitError = .EmptySeparator
@@ -381,8 +389,7 @@ test fn text_errors_render_the_reason_and_byte_offset() {
 }
 
 test fn a_nullary_parse_error_renders_its_reason() {
-    let allocator = mem.system()
-    var writer = testing.Recorder.of(allocator, 96).unwrap()
+    var writer = testing.Recorder.of(96).unwrap()
     let out_of_range: ParseError = .OutOfRange
     let token_limit: ParseError = .TokenLimit
     let written = "{out_of_range}; {token_limit}".fmt(&writer).is_ok()
@@ -429,10 +436,9 @@ impl Display for TextError {
 }
 
 test fn owned_text_renders_content_and_encoding_errors() {
-    defer let value = "á\n".to_owned(mem.system()).unwrap()
-    let allocator = mem.system()
+    defer let value = "á\n".to_owned().unwrap()
     // The 128-byte recorder holds raw text, its quoted form and the error message.
-    var writer = testing.Recorder.of(allocator, 128).unwrap()
+    var writer = testing.Recorder.of(128).unwrap()
     let error = text.Utf8Error { offset = 3 }
     value.fmt(&writer).unwrap()
     &writer.write_str("|").unwrap()
@@ -446,7 +452,7 @@ test fn owned_text_renders_content_and_encoding_errors() {
 }
 
 test fn a_utf8_failure_displays_its_offset_and_keeps_its_bytes() {
-    var bytes = Vec.filled(mem.system(), count: 3, value: UInt8(97)).unwrap()
+    var bytes = Vec.filled(count: 3, value: UInt8(97)).unwrap()
     // 255 is never valid in UTF-8.
     bytes[2] = 255
     let failure = match String.from_bytes(bytes) {
@@ -457,7 +463,7 @@ test fn a_utf8_failure_displays_its_offset_and_keeps_its_bytes() {
         Err(failure) => failure,
     }
     // The 64-byte recorder holds the offset message.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = failure.fmt(&writer).is_ok()
     let equal = writer.holds("invalid UTF-8 sequence at byte 2")
     writer.release()

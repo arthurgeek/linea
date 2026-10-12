@@ -29,10 +29,10 @@ impl Display for HeaderError {
 }
 
 test fn a_header_error_displays_its_reason() {
-    defer let token = fmt.render_owned(mem.system(), HeaderError.NotAToken).unwrap()
-    defer let framing = fmt.render_owned(mem.system(), HeaderError.Framing).unwrap()
-    defer let control = fmt.render_owned(mem.system(), HeaderError.ControlByte).unwrap()
-    defer let allocation = fmt.render_owned(mem.system(), HeaderError.Allocation(.Exhausted)).unwrap()
+    defer let token = fmt.render_owned(HeaderError.NotAToken).unwrap()
+    defer let framing = fmt.render_owned(HeaderError.Framing).unwrap()
+    defer let control = fmt.render_owned(HeaderError.ControlByte).unwrap()
+    defer let allocation = fmt.render_owned(HeaderError.Allocation(.Exhausted)).unwrap()
     testing.assert_eq(token.view(), "the header name is not an HTTP token", "the token reason changed")?
     testing.assert_eq(framing.view(), "the header decides how the response is framed, which only the server sets", "the framing reason changed")?
     testing.assert_eq(control.view(), "the header value holds a control byte", "the control byte reason changed")?
@@ -138,7 +138,7 @@ test fn setting_a_header_replaces_every_value() {
 // A 1 KiB arena holds the first header, but not a 2 KiB replacement value.
 test fn a_replacement_refused_for_memory_keeps_the_old_value() {
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    defer let long = Vec.filled(mem.system(), 2048, UInt8(120)).unwrap()
+    defer let long = Vec.filled(2048, UInt8(120)).unwrap()
     defer var headers = ResponseHeaders.open(arena.handle())
     let added = &headers.add("Cache-Control", "no-cache")
     let replaced = &headers.set("Cache-Control", Str.from_bytes(long.as_slice()).unwrap())

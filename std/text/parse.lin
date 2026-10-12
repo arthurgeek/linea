@@ -1,5 +1,4 @@
 import std.testing
-import std.mem
 
 // A ParseError says why text is not a value. Offsets count bytes, and a
 // missing digit is reported at the end of the input. Overflow reports a
@@ -110,12 +109,11 @@ test fn integer_parsing_accepts_zeroes_and_reports_missing_digit_offsets() {
 }
 
 test fn parsed_values_and_errors_outlive_their_input_text() {
-    let allocator = mem.system()
-    let digits = "42".to_owned(allocator).unwrap()
+    let digits = "42".to_owned().unwrap()
     let number = digits.view().parse[UInt64]()
     digits.release()
     testing.assert_eq(number.unwrap(), UInt64(42), "parsed number depended on released text")?
-    let malformed = "12x".to_owned(allocator).unwrap()
+    let malformed = "12x".to_owned().unwrap()
     let failure = malformed.view().parse[UInt64]()
     malformed.release()
     testing.assert_eq(failure, .Err(.Syntax(2)), "owned parse error depended on released text")?

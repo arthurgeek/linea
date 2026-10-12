@@ -50,7 +50,7 @@ test fn a_field_is_written_as_its_key_and_value() {
 // A field borrows its value, so the caller keeps a value it logs, even one
 // that owns memory, and may log it twice.
 test fn a_field_observes_a_value_its_caller_keeps() {
-    let path = "/items/7".to_owned(mem.system()).unwrap()
+    let path = "/items/7".to_owned().unwrap()
     defer let text = fields_text(field("path", path).and("again", path))
     let kept = path.view() == "/items/7"
     path.release()

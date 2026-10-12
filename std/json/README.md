@@ -14,7 +14,7 @@ struct Stock[A: Allocator] {
 }
 
 fn main() -> UInt8 {
-    let stock: Stock[mem.SystemAllocator] = json.decode(mem.system(), r#"{"name":"tea","units":3}"#) else |error| {
+    let stock: Stock[mem.SystemAllocator] = json.decode(r#"{"name":"tea","units":3}"#) else |error| {
         io.eprintln(error)
         error.release()
         return 1
@@ -38,7 +38,8 @@ prints as the problem and where it is, such as `missing field at $["units"]`.
 
 Walk a `json.Value` instead when the shape is not fixed, or when a program
 edits a document and writes it back with members it never reads.
-`parse(allocator, input)` accepts borrowed `Str`; `parse_bytes` accepts borrowed
+`parse(input)` accepts borrowed `Str` and allocates from the system allocator, and
+`parse_in(allocator, input)` from the one given; `parse_bytes` and `parse_bytes_in` accept borrowed
 `mem.Slice[UInt8]` and validates UTF-8. Both return an owned `Value` that depends
 on its allocator, not the source bytes. Release it explicitly. An arena must
 remain alive until every value allocated through its handle has finished.
@@ -98,7 +99,7 @@ Write the limits a specific input policy changes and take the rest from
 
 ```linea
 let limits = json.ParseLimits { max_input_bytes = 65536, max_nodes = 1000, ..json.ParseLimits.default() }
-let document = json.parse(allocator, input, limits: limits)?
+let document = json.parse_in(allocator, input, limits: limits)?
 ```
 
 | Limit | Default | Meaning |
@@ -134,7 +135,7 @@ write may leave a prefix in the destination. The document remains usable.
 Object member order is unspecified; array order and numeric token spelling
 are preserved.
 
-`json.render(allocator, document)` returns independently owned UTF-8 text and
+`json.render(document)`, or `json.render_in(allocator, document)`, returns independently owned UTF-8 text and
 releases partial output on allocation failure. The allocator may differ from
 the document's allocator. JSON string escaping is shared with writer output.
 
@@ -152,11 +153,11 @@ writer's error, so a function returning `EncodeError[W.Error]` propagates a
 direct write with `?`. Output may contain a prefix on failure; the encoder
 neither flushes nor closes the writer.
 
-`json.decode(allocator, input)` parses a temporary document and constructs an
+`json.decode(input)`, or `json.decode_in(allocator, input)`, parses a temporary document and constructs an
 owning result selected by its expected type:
 
 ```linea
-let names: Vec[String[mem.SystemAllocator], mem.SystemAllocator] = json.decode(mem.system(), r#"["tea","coffee"]"#).unwrap()
+let names: Vec[String[mem.SystemAllocator], mem.SystemAllocator] = json.decode(r#"["tea","coffee"]"#).unwrap()
 defer names.release()
 ```
 
@@ -164,8 +165,9 @@ The annotation supplies the schema through `unwrap`, whose result is the
 success of the Result `decode` returns; `?`, `else` and a function's return
 type supply it the same way. The same
 `limits:` override used by `parse` applies to `decode`. Use
-`json.from_value(allocator, document)` to decode an existing document; the
-allocator and document must use the same allocator type. Neither successful
+`json.from_value(document)`, or `json.from_value_in(allocator, document)`, to
+decode an existing document; the allocator and document must use the same
+allocator type. Neither successful
 values nor decoding errors borrow the document or input. They retain
 the supplied allocator's ownership dependencies. There is no owning Decode
 implementation for borrowed `Str`.
@@ -228,8 +230,8 @@ owned field name or an array index. Debug output reads, for example,
 or sent back as a message. A `Parse` error displays as the parse error does.
 Typed errors do not invent source offsets.
 
-Custom validation can create `DecodeError.failure(allocator, .InvalidValue)`
-and add context with consuming `at_field` or `at_index`. The error owns its
+Custom validation can create `DecodeError.failure_in(allocator, .InvalidValue)`
+and add context with consuming `at_field_in(allocator, name)` or `at_index`. The error owns its
 path and survives release of input and document. If allocating that path fails,
 its partial storage is released and the result is Allocation. Release the final
 error after inspecting or formatting it.

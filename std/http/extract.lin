@@ -366,12 +366,12 @@ fn form_posted(content_type: Str, body: Str) -> String {
     let described = match &router.serve_http(&nothing, sent.request()) {
         Ok(response) => {
             let answer = Str.from_bytes(response.body().unwrap()).unwrap()
-            fmt.render_owned(mem.system(), "200 {answer}").unwrap()
+            fmt.render_owned("200 {answer}").unwrap()
         },
         Err(error) => {
             let code = error.status().code()
             let message = error.message().unwrap_or("")
-            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+            fmt.render_owned("{code} {message}").unwrap()
         },
     }
     arena.release()
@@ -430,7 +430,7 @@ impl[P: Allocator, T: json_format.Decode[mem.Handle[P]]] Extract[P] for Json[T] 
         let body = request.text() else |_| {
             return .Err(error(request, .BadRequest, "the body is not UTF-8"))
         }
-        let decoded: Result[T, json_format.DecodeError[mem.Handle[P]]] = json_format.decode(request.allocator(), body)
+        let decoded: Result[T, json_format.DecodeError[mem.Handle[P]]] = json_format.decode_in(request.allocator(), body)
         match decoded {
             Ok(value) => .Ok(.{ value }),
             Err(failure) => {
@@ -504,12 +504,12 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
     let described = match &router.serve_http(&nothing, sent.request()) {
         Ok(response) => {
             let answer = Str.from_bytes(response.body().unwrap()).unwrap()
-            fmt.render_owned(mem.system(), "200 {answer}").unwrap()
+            fmt.render_owned("200 {answer}").unwrap()
         },
         Err(error) => {
             let code = error.status().code()
             let message = error.message().unwrap_or("")
-            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+            fmt.render_owned("{code} {message}").unwrap()
         },
     }
     arena.release()

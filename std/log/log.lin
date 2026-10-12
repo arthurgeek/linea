@@ -34,7 +34,7 @@ impl Display for Level {
 }
 
 test fn a_level_displays_in_capitals() {
-    defer let named = fmt.render_owned(mem.system(), "{Level.Debug} {Level.Info} {Level.Warn} {Level.Error}").unwrap()
+    defer let named = fmt.render_owned("{Level.Debug} {Level.Info} {Level.Warn} {Level.Error}").unwrap()
     testing.assert_eq(named.view(), "DEBUG INFO WARN ERROR", "a level's name changed")?
     .Ok(())
 }
@@ -113,15 +113,32 @@ test fn a_logger_writes_to_the_sink_it_was_given() {
     .Ok(())
 }
 
-// `to_stderr` makes a logger that writes the lines at `minimum` and above to
+// `to_stderr_in` makes a logger that writes the lines at `minimum` and above to
 // standard error, building each in a buffer from `allocator`. The logger does
 // not own standard error, so it copies freely and needs no release.
-pub fn to_stderr[A: Allocator](allocator: A, minimum: Level) -> Logger[io.Descriptor, A] where carries(allocator) {
+pub fn to_stderr_in[A: Allocator](allocator: A, minimum: Level) -> Logger[io.Descriptor, A] where carries(allocator) {
     Logger.open(io.stderr(), allocator, minimum)
 }
 
+test fn a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given() {
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    let logger = to_stderr_in(arena.handle(), minimum: .Error)
+    testing.assert(logger.enabled(.Error), "the logger dropped its minimum level")?
+}
+
+// `to_stderr` makes a logger that writes the lines at `minimum` and above to
+// standard error, building each in a buffer from the system allocator.
+pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor] {
+    to_stderr_in(mem.system(), minimum)
+}
+
+test fn a_logger_to_standard_error_uses_the_system_allocator() {
+    let logger: Logger[io.Descriptor, mem.SystemAllocator] = to_stderr(minimum: .Info)
+    testing.assert(logger.enabled(.Info), "the logger dropped its minimum level")?
+}
+
 test fn a_logger_to_standard_error_copies_freely() {
-    let logger = to_stderr(mem.system(), minimum: .Error)
+    let logger = to_stderr(minimum: .Error)
     let kept = copy(logger)
     logger.debug("not written", ())
     testing.assert_eq([kept.enabled(.Warn), kept.enabled(.Error)], [false, true], "the enabled levels changed")?
@@ -137,7 +154,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
 }
 
 test fn a_logger_is_enabled_at_its_minimum_level_and_above() {
-    let logger = to_stderr(mem.system(), minimum: .Warn)
+    let logger = to_stderr(minimum: .Warn)
     let enabled = [logger.enabled(.Debug), logger.enabled(.Info), logger.enabled(.Warn), logger.enabled(.Error)]
     testing.assert_eq(enabled, [false, false, true, true], "the enabled levels changed")?
     .Ok(())
@@ -351,8 +368,8 @@ test fn a_line_starts_with_the_time_it_was_written() {
     logger.release()
     defer let written = file.finish_with_times()
     let stamp = written.slice(0, 20).unwrap_or("")
-    defer let earliest = fmt.render_owned(mem.system(), before).unwrap()
-    defer let latest = fmt.render_owned(mem.system(), after).unwrap()
+    defer let earliest = fmt.render_owned(before).unwrap()
+    defer let latest = fmt.render_owned(after).unwrap()
     testing.assert(stamp == earliest.view() || stamp == latest.view(), "the line did not start with the time it was written")?
     testing.assert_eq(written.slice(20, 21), Option.Some(" "), "the time was not followed by a space")?
     .Ok(())
@@ -396,7 +413,7 @@ impl Capture {
     internal fn finish_with_times(sink self: Self) -> String {
         let Capture { path: owned } = self
         let path = fs.Path.from_str(owned.view()).unwrap()
-        let bytes = fs.read_file(mem.system(), path, max_bytes: 1048576).unwrap()
+        let bytes = fs.read_file(path, max_bytes: 1048576).unwrap()
         fs.remove_scratch(path)
         var written = String.new()
         &written.append(Str.from_bytes(bytes.as_slice()).unwrap()).unwrap()
