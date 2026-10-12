@@ -143,42 +143,18 @@ pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str
     var head = String.new_in(memory)
     let method_token = stored_or_refused(&head, method)?
     let target_span = stored_or_refused(&head, target)?
-    var query_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
-    let query_fields = query_of(&query_text, target, memory, standard_limits.max_query_pairs)?
     var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
-    var is_form = false
     if content_type.length() > 0 {
-        if !is_field_value(content_type) {
-            return .Err(.Status(.BadRequest))
-        }
-        let name_span = stored_or_refused(&head, "Content-Type")?
-        let value_span = stored_or_refused(&head, trim_optional_whitespace(content_type))?
-        match &header_fields.push(.{ name = name_span, value = value_span }) {
-            Ok(_) => {},
-            Err(_) => return .Err(.Status(.InternalServerError)),
-        }
-        is_form = is_form_content_type(.Some(copy(content_type)))
+        var tally = no_headers
+        add_header_field(&head, &header_fields, &tally, "Content-Type", trim_optional_whitespace(content_type), standard_limits)?
     }
     var payload = String.new_in(memory)
     match &payload.append(body) {
         Ok(_) => {},
         Err(_) => return .Err(.Status(.InternalServerError)),
     }
-    var body_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
-    let body_fields = form_of(&body_text, is_form, body.as_bytes(), memory, standard_limits.max_form_pairs)?
-    .Ok(.{
-        memory = copy(memory),
-        known_method = method_of(method),
-        head,
-        method_token,
-        target = target_span,
-        header_fields,
-        query_text,
-        query_fields,
-        payload = payload.into_bytes(),
-        body_text,
-        body_fields,
-    })
+    let line = RequestLine { method = method_of(method), method_token, target = target_span }
+    assembled(memory, head, line, header_fields, payload.into_bytes(), standard_limits)
 }
 
 test fn a_new_request_holds_its_method_target_and_body() {
@@ -410,15 +386,8 @@ impl[P: Allocator] Message[P] {
     // name that is not a token, or a value holding a control byte, is refused
     // with 400, as a header line holding them is.
     pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), RequestError] where carries() {
-        if !is_token(name) || !is_field_value(value) {
-            return .Err(.Status(.BadRequest))
-        }
-        let name_span = stored_or_refused(&self.head, name)?
-        let value_span = stored_or_refused(&self.head, trim_optional_whitespace(value))?
-        match &self.header_fields.push(.{ name = name_span, value = value_span }) {
-            Ok(_) => .Ok(()),
-            Err(_) => .Err(.Status(.InternalServerError)),
-        }
+        var tally = no_headers
+        add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 }
 

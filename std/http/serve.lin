@@ -1208,7 +1208,17 @@ fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink connection: 
             Answered { status, refused = true, noted, sent = settle_answer(body, written, &note) }
         },
     }
-    let failure: Option[Failure] = match read answered.sent.delivery {
+    let failure = answer_failure(answered, note)
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, failure })
+    &handler.observe(event)
+    .Answered
+}
+
+// `answer_failure` says what went wrong with an answer, quoting a message
+// copied into `note`, or `None` when the handler's response was written
+// whole.
+fn answer_failure[A: Allocator](answered: Answered, note: String[A]) -> Option[Failure] where borrows(.Some: note) {
+    match read answered.sent.delivery {
         Whole => if answered.refused {
             .Some(.Refused(noted_text(note, answered.noted)))
         } else {
@@ -1217,9 +1227,6 @@ fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink connection: 
         Write(error) => .Some(.Write(copy(error))),
         Stream(status, noted) => .Some(.Stream(copy(status), noted_text(note, noted))),
     }
-    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, failure })
-    &handler.observe(event)
-    .Answered
 }
 
 // `Answered` is how the handler answered: the status, whether it refused the
@@ -1332,7 +1339,7 @@ fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink con
 // Answer a request that was not read with `status` alone.
 fn refuse[A: Allocator](inout connection: net.Connection, status: Status, allocator: A) -> Result[(), io.IoError] {
     let headers = ResponseHeaders.new_in(allocator)
-    let wrote = write_head(&connection, status, headers)
+    let wrote = write_head(&connection, status, headers, .Http)
     headers.release()
     let _written = wrote?
     .Ok(())

@@ -16529,7 +16529,7 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or d == raw.argument_span) return contracts.len == 0;
+        if (d == raw.stride or raw.processText(d) != null) return contracts.len == 0;
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
@@ -16543,7 +16543,7 @@ const Checker = struct {
         if (self.raw_accesses.erasure(d)) return self.validErasureSignature(d);
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
-        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.argument_span) return self.validSpanSignature(d);
+        if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or raw.processText(d) != null) return self.validSpanSignature(d);
         const count: usize = if (d == raw.stride) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
@@ -16609,10 +16609,11 @@ const Checker = struct {
         const raw = self.raw_accesses;
         const ps = self.ast.declParams(d);
         const tps = self.ast.declTypeParams(d);
-        const count: usize = if (d == raw.argument_span) 0 else if (d == raw.span) 2 else 1;
+        const process_text = raw.processText(d) != null;
+        const count: usize = if (process_text) 0 else if (d == raw.span) 2 else 1;
         if (tps.len != count or self.ast.declVisibility(d) != .private or raw.slice == .none) return false;
         for (ps) |param| if (param.convention != .read or param.default != .none) return false;
-        const element = if (d == raw.buffer_span or d == raw.argument_span) TypeId.u8 else self.param_types[d.index()][0];
+        const element = if (d == raw.buffer_span or process_text) TypeId.u8 else self.param_types[d.index()][0];
         const result = try self.declaredResultType(d);
         if (d == raw.slice_place) {
             if (result != element) return false;
@@ -16620,7 +16621,7 @@ const Checker = struct {
             const result_args = self.builder.appliedTo(result);
             if (self.builder.view().declOfType(result) != raw.slice or result_args.len != 1 or result_args[0] != element) return false;
         }
-        if (d == raw.argument_span) return try self.declaredParamType(d, 0) == .u64;
+        if (process_text) return try self.declaredParamType(d, 0) == .u64;
         const owner = try self.declaredParamType(d, 0);
         const owner_args = self.builder.appliedTo(owner);
         const owner_decl = if (d == raw.span) raw.storage else if (d == raw.buffer_span) self.program.libraryDeclIn("mem", "Buffer") orelse return false else raw.slice;

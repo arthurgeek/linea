@@ -51,10 +51,17 @@ pub const RawAccesses = struct {
     buffer_span: DeclId = .none,
     subspan: DeclId = .none,
     slice_place: DeclId = .none,
+    /// `argument_span` and `environment_span` view text the process was
+    /// started with; each lowers to the runtime's count, address and length
+    /// for its source, which `processText` names.
     argument_span: DeclId = .none,
     argument_count: DeclId = .none,
     argument_at: DeclId = .none,
     argument_len: DeclId = .none,
+    environment_span: DeclId = .none,
+    environment_count: DeclId = .none,
+    environment_at: DeclId = .none,
+    environment_len: DeclId = .none,
     stride: DeclId = DeclId.none,
     take: DeclId = DeclId.none,
     put: DeclId = DeclId.none,
@@ -89,6 +96,7 @@ pub const RawAccesses = struct {
             .subspan = rawAccessDecl(program, ast, "slice_subspan", 3),
             .slice_place = rawAccessDecl(program, ast, "slice_place", 2),
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
+            .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
             .stride = rawAccessDecl(program, ast, "slot_stride", 1),
             .take = rawAccessDecl(program, ast, "slot_take", 4),
             .put = rawAccessDecl(program, ast, "slot_put", 5),
@@ -109,6 +117,9 @@ pub const RawAccesses = struct {
         checked.argument_count = libraryExternDecl(program, ast, typing, "linea_arg_count");
         checked.argument_at = libraryExternDecl(program, ast, typing, "linea_arg_at");
         checked.argument_len = libraryExternDecl(program, ast, typing, "linea_arg_len");
+        checked.environment_count = libraryExternDecl(program, ast, typing, "linea_env_count");
+        checked.environment_at = libraryExternDecl(program, ast, typing, "linea_env_at");
+        checked.environment_len = libraryExternDecl(program, ast, typing, "linea_env_len");
         checked.store = libraryExternDecl(program, ast, typing, "linea_raw_store");
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
         checked.store8 = libraryExternDecl(program, ast, typing, "linea_raw_store8");
@@ -127,7 +138,20 @@ pub const RawAccesses = struct {
             (d == self.store or d == self.load or d == self.store8 or d == self.load8 or self.typed(d));
     }
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.argument_span or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or self.processText(d) != null or self.erasure(d));
+    }
+
+    /// The runtime declarations a process-text span reads: how many entries
+    /// its source holds, and one entry's address and length.
+    pub const ProcessText = struct { count: DeclId, at: DeclId, len: DeclId };
+
+    /// The runtime source `d` views when it is `argument_span` or
+    /// `environment_span`, or null for any other declaration.
+    pub fn processText(self: RawAccesses, d: DeclId) ?ProcessText {
+        if (d == DeclId.none) return null;
+        if (d == self.argument_span) return .{ .count = self.argument_count, .at = self.argument_at, .len = self.argument_len };
+        if (d == self.environment_span) return .{ .count = self.environment_count, .at = self.environment_at, .len = self.environment_len };
+        return null;
     }
 
     /// Whether `d` is one of the declarations lowering replaces with what it

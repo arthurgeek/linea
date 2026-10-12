@@ -306,7 +306,7 @@ that settles it**:
   generics, ownership facts and monomorphisation state; "Semantic IR" is the
   working name.
 
-Eight further questions have been identified but not yet scheduled.
+Nine further questions have been identified but not yet scheduled.
 
 How **incremental compilation** interacts with
 [0012](0012-immutable-representations.md), which a rebuild-and-swap model
@@ -369,6 +369,19 @@ which is why printing it was enough; the cost is that
 everything the compiler emits except one function. What settles it is whether
 the wrapper ever varies — a program with no `main`, which the test runner needs,
 is the first thing that would make it.
+
+How **one process serves requests concurrently**, and how ownership governs
+what concurrent tasks share and send. `http.listen_and_serve` answers one
+connection at a time ([0154](0154-sockets-and-http-follow-go.md)), so today
+concurrency comes from processes: `http.serve_cgi` runs once per request under
+a web server, or several server processes share the load. Threads, asynchronous
+I/O and a pre-forked pool of worker processes are the candidates. A worker pool
+needs no new rule, since processes share nothing; threads and asynchronous
+tasks need one. What settles it is how ownership extends across tasks: whether
+a value sent to another task must be owned and moved whole, never an
+observation of the sender's storage; what tasks may share read-only; and
+whether the state `http.with_state` lends to every request is shared under a
+rule or partitioned per task.
 
 None of them is answered here. The third came close: a buffered writer, `slice`, and building text from
 computed bytes appeared to reach it together, and on inspection only the last

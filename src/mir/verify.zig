@@ -2458,6 +2458,10 @@ pub const Harness = struct {
         .{ .name = "pairs", .ty = callback_array },
         .{ .name = "tail", .ty = empty },
         .{ .name = "scalar", .ty = .u64 },
+        .{ .name = "word", .ty = .u64 },
+        .{ .name = "other", .ty = .u64 },
+        .{ .name = "first", .ty = .u64 },
+        .{ .name = "plain", .ty = plain },
     };
 
     const all_variants = [_]types_mod.Variant{
@@ -2490,6 +2494,11 @@ pub const Harness = struct {
     const callable_array: TypeId = @enumFromInt(TypeId.builtins.len + 15);
     /// A borrow of `Big`, the type of a pointer value observing a `Big`.
     pub const big_borrow: TypeId = @enumFromInt(TypeId.builtins.len + 16);
+    /// `Plain` is two words and holds no observation, as a value of an enum
+    /// of scalars does; `Holder` is a word and then a `Plain`, and may hold
+    /// one.
+    pub const plain: TypeId = @enumFromInt(TypeId.builtins.len + 17);
+    pub const holder: TypeId = @enumFromInt(TypeId.builtins.len + 18);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2515,7 +2524,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 17;
+            const fixed_type_count = TypeId.builtins.len + 19;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2535,6 +2544,8 @@ pub const Harness = struct {
             pool[@intFromEnum(callback_array)] = .{ .array = .{ .name = "[CallbackPair; 2]", .element = callback_pair, .count = 2 } };
             pool[@intFromEnum(callable_array)] = .{ .array = .{ .name = "[fn() -> UInt8; 2]", .element = nullary_callable, .count = 2 } };
             pool[@intFromEnum(big_borrow)] = .{ .borrow = .{ .referent = big, .name = "borrow Big" } };
+            pool[@intFromEnum(plain)] = .{ .struct_ = .{ .name = "Plain", .first_field = 17, .field_count = 2 } };
+            pool[@intFromEnum(holder)] = .{ .struct_ = .{ .name = "Holder", .first_field = 19, .field_count = 2 } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
             const callable_params = [_]types_mod.CallableParam{
                 .{ .spelling = "value", .convention = .read, .ty = .u8, .default = .absent },
@@ -2585,11 +2596,12 @@ pub const Harness = struct {
 
             const expr_types = try gpa.alloc(TypeId, 0);
             errdefer gpa.free(expr_types);
-            // Every fixture type may carry a dependency: the table covers the
-            // whole pool, as a finished one does.
+            // Every fixture type but `Plain` may carry a dependency: the
+            // table covers the whole pool, as a finished one does.
             const dependency_containment = try gpa.alloc(bool, pool.len);
             errdefer gpa.free(dependency_containment);
             @memset(dependency_containment, true);
+            dependency_containment[@intFromEnum(plain)] = false;
             break :blk .{
                 .binding_types = .empty,
                 .decl_returns = .empty,

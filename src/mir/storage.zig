@@ -1716,10 +1716,13 @@ pub const Phase = struct {
                 // The source is taken before the destination is written, so
                 // a self-assignment leaves its place holding the value. The
                 // parts the source holds in the copied bytes land at the same
-                // places in the destination.
+                // places in the destination, unless the copied type is one no
+                // observation can be held in: the error payload of a result
+                // whose success payload borrows overlaps that payload's bytes,
+                // and carries nothing of what they held.
                 var carried: SetId = empty_set;
                 var carried_marks: MarkId = empty_set;
-                if (src.carrier != no_entity and dst.root != no_entity) {
+                if (src.carrier != no_entity and dst.root != no_entity and self.mayCarry(ty)) {
                     const from = self.accessOf(src, ty);
                     const to = self.accessOf(dst, ty).first();
                     const placement: Placement = .{ .at = .{ .off = to.off, .len = to.len, .structure = true } };
@@ -2765,6 +2768,45 @@ fn copyThroughBorrow(gpa: std.mem.Allocator, copy_after_write: bool) ![]Mir {
     const used = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads, &.{into});
     try ret(&b, entry, used);
     return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+/// Stores the address bits of `x` in the `Plain` of a holder, copies that
+/// `Plain` into the `Plain` of another holder, writes `x`, and copies the
+/// other holder whole. `Plain` is a type no observation can be held in, so its
+/// bytes carry none, whatever was stored in them.
+fn copyOfPlainPart(gpa: std.mem.Allocator, tag: mir_mod.Inst.Tag) ![]Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const x = try b.addLocal(Harness.big, .value);
+    const source = try b.addLocal(Harness.holder, .value);
+    const outer = try b.addLocal(Harness.holder, .value);
+    const copied = try b.addLocal(Harness.holder, .value);
+    const entry = try b.addBlock();
+    const a = try addrOf(&b, entry, x);
+    const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
+    const zero = try constant(&b, entry, 0);
+    const eight = try constant(&b, entry, 8);
+    const s = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = source } });
+    const held = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = s, .rhs = eight } } });
+    const word = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = held, .rhs = zero } } });
+    _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = word, .rhs = bits } } });
+    const o = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = outer } });
+    const into = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = o, .rhs = eight } } });
+    _ = try b.addInst(entry, .{ .tag = tag, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = held } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
+    _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
+    const c = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = copied } });
+    _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.holder, .span = Span.empty, .data = .{ .binary = .{ .lhs = c, .rhs = o } } });
+    try ret(&b, entry, zero);
+    return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+test "a copy of a part no observation can be held in carries none into its new place" {
+    for ([_]mir_mod.Inst.Tag{ .copy_value, .move_value }) |tag| {
+        try expectAccepted(try copyOfPlainPart(testing.allocator, tag));
+    }
 }
 
 test "a copy of the bytes a borrow points at does not observe the place they were copied from" {

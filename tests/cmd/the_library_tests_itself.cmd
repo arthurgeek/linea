@@ -123,8 +123,11 @@ The library tests itself.
   ok    default.generic_code_starts_from_a_default
   ok    default.numbers_default_to_zero
   ok    env.a_count_says_where_the_arguments_stop
+  ok    env.a_variable_is_read_by_its_exact_name
+  ok    env.an_entry_splits_at_its_first_equals_sign
   ok    env.args_start_with_the_executable_path
   ok    env.at_reads_an_argument_as_text_and_refuses_an_index_past_the_end
+  ok    env.every_variable_has_a_name_and_no_equals_sign_in_it
   ok    env.raw_arguments_preserve_existing_storage_and_missing_indices
   ok    fmt.a_default_spec_adds_no_padding
   ok    fmt.a_fill_of_several_scalars_stays_within_the_width
@@ -253,10 +256,13 @@ The library tests itself.
   ok    http.a_body_that_is_not_utf8_answers_400
   ok    http.a_bound_address_that_cannot_be_read_closes_the_listener_and_releases_the_handler
   ok    http.a_bytes_response_holds_its_body_as_built
+  ok    http.a_cgi_error_displays_its_cause
+  ok    http.a_cgi_head_request_is_answered_with_the_head_alone
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
   ok    http.a_client_sent_number_is_never_logged
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
   ok    http.a_decode_error_answers_by_whose_mistake_it_is
+  ok    http.a_decoded_path_is_encoded_again_into_the_target
   ok    http.a_derived_params_reads_each_field_by_its_name
   ok    http.a_failed_encoding_answers_500
   ok    http.a_failed_flush_answers_500
@@ -266,16 +272,20 @@ The library tests itself.
   ok    http.a_fatal_accept_failure_ends_serving_and_closes_the_listener
   ok    http.a_field_reads_its_value_or_says_why_it_cannot
   ok    http.a_folded_header_is_refused
+  ok    http.a_form_body_is_read_from_standard_input
   ok    http.a_form_body_is_read_only_when_the_content_type_names_one
   ok    http.a_form_content_type_is_named_exactly
   ok    http.a_form_of_one_pair_too_many_is_refused_with_413
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
+  ok    http.a_get_is_answered_with_a_status_header
   ok    http.a_handler_error_before_headers_answers_its_status
+  ok    http.a_handler_error_is_answered_with_its_status_and_message
   ok    http.a_handlers_own_number_is_replaced
   ok    http.a_head_request_is_answered_with_the_head_alone
   ok    http.a_header_error_displays_its_reason
   ok    http.a_header_is_found_by_its_folded_name
   ok    http.a_header_is_read_by_its_folded_name
+  ok    http.a_header_is_spelled_from_its_variable
   ok    http.a_header_value_is_found_by_its_folded_name
   ok    http.a_held_body_follows_the_head
   ok    http.a_json_body_within_the_default_limits_decodes_in_the_default_arena
@@ -288,6 +298,7 @@ The library tests itself.
   ok    http.a_malformed_header_is_refused
   ok    http.a_malformed_pattern_is_refused
   ok    http.a_malformed_request_is_answered_and_serving_continues
+  ok    http.a_malformed_request_is_refused_before_the_handler
   ok    http.a_malformed_request_line_is_refused
   ok    http.a_match_visits_only_nodes_whose_prefix_matches
   ok    http.a_media_type_is_the_value_without_its_parameters
@@ -295,6 +306,7 @@ The library tests itself.
   ok    http.a_method_mismatch_gives_way_to_a_less_specific_path
   ok    http.a_method_pattern_beats_a_methodless_one
   ok    http.a_method_token_names_its_method_exactly
+  ok    http.a_missing_request_method_answers_nothing
   ok    http.a_named_code_finds_its_variant
   ok    http.a_new_error_has_its_status_and_no_message
   ok    http.a_new_header_list_is_empty
@@ -315,6 +327,7 @@ The library tests itself.
   ok    http.a_path_value_is_found_by_its_exact_name
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
+  ok    http.a_process_without_a_request_answers_nothing
   ok    http.a_query_answers_a_refusal_of_a_params_of_its_own
   ok    http.a_query_decodes_into_its_pairs
   ok    http.a_query_follows_the_first_question_mark
@@ -332,6 +345,7 @@ The library tests itself.
   ok    http.a_replacement_refused_for_memory_keeps_the_old_value
   ok    http.a_request_allocates_in_its_arena
   ok    http.a_request_at_every_limit_is_answered_in_the_smallest_arena
+  ok    http.a_request_at_the_header_and_body_limits_is_answered
   ok    http.a_request_error_answers_its_status
   ok    http.a_request_error_displays_its_reason
   ok    http.a_request_error_names_the_status_that_answers_it
@@ -394,6 +408,7 @@ The library tests itself.
   ok    http.an_announced_server_answers_the_connection_queued_for_it
   ok    http.an_arena_below_the_body_limit_is_refused_before_serving
   ok    http.an_arena_parent_serves_every_exchange_from_one_request_arena
+  ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
   ok    http.an_error_displays_its_status_and_message
   ok    http.an_error_is_answered_with_its_headers
   ok    http.an_error_is_answered_with_its_message
@@ -404,6 +419,7 @@ The library tests itself.
   ok    http.an_escape_is_two_hexadecimal_digits_in_either_case
   ok    http.an_exchange_is_logged_at_the_level_its_status_calls_for
   ok    http.an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_read
+  ok    http.an_http_variable_is_a_header
   ok    http.an_io_error_answers_500
   ok    http.an_unknown_version_is_refused
   ok    http.an_upsert_reason_answers_with_its_cause
@@ -416,6 +432,7 @@ The library tests itself.
   ok    http.each_allocation_failure_covers_every_buffer_the_numbering_grows
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
+  ok    http.each_limit_answers_its_status_one_past_the_bound
   ok    http.each_request_is_numbered_for_the_handler_and_the_response
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
@@ -1206,4 +1223,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1203 passed, 0 failed
+  1220 passed, 0 failed

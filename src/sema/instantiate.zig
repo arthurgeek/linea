@@ -1574,8 +1574,8 @@ const Discovery = struct {
         // The raw access declarations are compiler intrinsics. Lowering
         // replaces their calls with checked accesses before asking `Mono` for
         // an id, so they contribute no instance to the ordered set.
-        if (decl == self.raw_accesses.argument_span) {
-            for ([_]DeclId{ self.raw_accesses.argument_count, self.raw_accesses.argument_at, self.raw_accesses.argument_len }) |runtime_decl| {
+        if (self.raw_accesses.processText(decl)) |source| {
+            for ([_]DeclId{ source.count, source.at, source.len }) |runtime_decl| {
                 if (runtime_decl == .none) continue;
                 _ = try self.table.intern(.{ .body = .{ .declaration = runtime_decl }, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
             }

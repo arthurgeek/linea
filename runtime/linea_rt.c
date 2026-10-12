@@ -496,9 +496,21 @@ static void checked_free(unsigned long at, unsigned long size) {
 static int linea_argc = 0;
 static char **linea_argv = 0;
 
+/* The environment the process was started with: the `NAME=value` strings C's
+ * startup placed beside the arguments, ended by a null pointer.
+ *
+ * The array is recorded when the arguments are, before any Linea code runs.
+ * Linea has no operation that changes the environment, and C's setenv never
+ * frees the array or the strings a process started with: adding a variable
+ * builds a new array and leaves this one where it was. So the strings stay
+ * valid until the process exits, which is what a view of text asks. */
+extern char **environ;
+static char **linea_envp = 0;
+
 void linea_set_args(int argc, char **argv) {
     linea_argc = argc;
     linea_argv = argv;
+    linea_envp = environ;
 }
 
 unsigned long linea_arg_count(void) {
@@ -530,6 +542,30 @@ unsigned long linea_arg_len(unsigned long i) {
     if (i >= linea_arg_count()) return 0UL;
 
     const char *s = linea_argv[i];
+    unsigned long n = 0UL;
+    while (s[n] != '\0') n += 1UL;
+    return n;
+}
+
+/* How many entries the environment held at startup, and where entry `i`
+ * starts and how many bytes it holds. Like the argument calls above, an index
+ * at or past the end answers zero, and the bytes are passed on unexamined. */
+unsigned long linea_env_count(void) {
+    if (linea_envp == 0) return 0UL;
+    unsigned long n = 0UL;
+    while (linea_envp[n] != 0) n += 1UL;
+    return n;
+}
+
+unsigned long linea_env_at(unsigned long i) {
+    if (i >= linea_env_count()) return 0UL;
+    return (unsigned long)linea_envp[i];
+}
+
+unsigned long linea_env_len(unsigned long i) {
+    if (i >= linea_env_count()) return 0UL;
+
+    const char *s = linea_envp[i];
     unsigned long n = 0UL;
     while (s[n] != '\0') n += 1UL;
     return n;

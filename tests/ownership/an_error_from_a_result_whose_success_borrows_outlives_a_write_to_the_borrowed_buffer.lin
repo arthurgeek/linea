@@ -1,0 +1,74 @@
+// An error taken from a result whose success borrows a buffer observes
+// nothing, so it may be returned in a value that holds a view after the
+// buffer has changed.
+@(copyable, derive(Equatable, Debug))
+enum Problem {
+    Empty,
+    TooLong(UInt64, UInt64),
+}
+
+fn spelled(inout name: Vec[UInt8], word: Str) -> Result[Str, Problem] where borrows(.Ok: name) {
+    &name.clear()
+    if word.length() == 0 {
+        return .Err(.Empty)
+    }
+    if word.length() > 4 {
+        return .Err(.TooLong(word.length(), 4))
+    }
+    &name.append_bytes(word.as_bytes()).unwrap()
+    .Ok(Str.from_bytes(name.as_slice()).unwrap())
+}
+
+enum Refusal {
+    Unnamed,
+    Refused(Problem),
+}
+
+struct Labelled {
+    label: Str,
+    total: UInt64,
+}
+
+fn labelled(sink words: [Str; 3], label: Str) -> Result[Labelled, Refusal] where carries(.Ok: label) {
+    var name: Vec[UInt8] = Vec.new()
+    var total: UInt64 = 0
+    var refused: Option[Problem] = .None
+    for word in words {
+        match spelled(&name, word) {
+            Ok(text) => total += text.length(),
+            Err(error) => if refused.is_none() {
+                refused = .Some(error)
+            },
+        }
+    }
+    name.release()
+    if label.length() == 0 {
+        return .Err(.Unnamed)
+    }
+    match refused {
+        Some(error) => return .Err(.Refused(error)),
+        None => {},
+    }
+    .Ok(.{ label = copy(label), total })
+}
+
+fn main() -> UInt8 {
+    let refused = match labelled(["ab", "toolong", "cd"], "words") {
+        Ok(_) => Option.None,
+        Err(refusal) => match refusal {
+            Unnamed => Option.None,
+            Refused(problem) => Option.Some(problem),
+        },
+    }
+    if refused != Option.Some(Problem.TooLong(7, 4)) {
+        return 1
+    }
+    match labelled(["ab", "c", "de"], "words") {
+        Ok(found) => if found.total == 5 {
+            0
+        } else {
+            2
+        },
+        Err(_) => 3,
+    }
+}

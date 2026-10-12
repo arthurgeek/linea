@@ -82,6 +82,7 @@ Sockets, connections, and what a server owes each one.
 HTTP routing, request bodies, and responses, from two routes to a full JSON service.
 
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
+- [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
 - [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values and streamed responses.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.
 - [http-json-echo](http-json-echo/main.lin): a JSON service with headers, forms, and shared counters; the largest example.

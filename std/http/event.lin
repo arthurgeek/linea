@@ -6,7 +6,8 @@ import std.testing
 
 // An `Observer` is told what happened while serving. `serve` calls `observe`
 // once each exchange has ended, after its answer has been written and its
-// connection settled, and before it retries a failed accept. Serving writes no
+// connection settled, and before it retries a failed accept; `serve_cgi`
+// calls it once its one answer has been written and flushed. Serving writes no
 // log of its own: `http.logged` turns events into log lines. `listen_and_serve`
 // also calls `observe` once with `Listening` when serving can begin.
 pub trait Observer {
