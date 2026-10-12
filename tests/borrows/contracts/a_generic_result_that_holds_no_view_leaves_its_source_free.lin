@@ -1,0 +1,32 @@
+// A generic function that writes no clause carries its one text parameter
+// into its result, because `T` might hold a view. Instantiated with a type that
+// holds no view, the result depends on nothing, so the text it was built from
+// may be released while the result is still used.
+struct Label {
+    text: String,
+}
+
+derive Release for Label
+
+trait FromText {
+    fn from_text(input: Str) -> Self where carries()
+}
+
+impl FromText for Label {
+    fn from_text(input: Str) -> Self where carries() {
+        Label { text = input.to_owned().unwrap() }
+    }
+}
+
+fn build[T: FromText](input: Str) -> T {
+    T.from_text(input)
+}
+
+fn main() -> UInt8 {
+    let input = "tea".to_owned().unwrap()
+    let label: Label = build(input.view())
+    input.release()
+    let length = label.text.view().length()
+    label.release()
+    UInt8(length)
+}
