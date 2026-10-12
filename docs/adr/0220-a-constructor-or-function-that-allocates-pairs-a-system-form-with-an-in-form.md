@@ -1,4 +1,4 @@
-# 220. A function that allocates pairs a system form with an `_in` form
+# 220. A constructor or function that allocates pairs a system form with an `_in` form
 
 Status: Accepted — 2026-10-12. Supersedes the clause of
 [0191](0191-the-caller-chooses-every-allocator.md) that every allocating
@@ -15,10 +15,12 @@ with `T.new()` in the system allocator and `T.new_in(allocator)` in the one
 given, and `fs.read_text` and `io.read_text` pair with `read_text_in` the same
 way ([0218](0218-the-library-gives-up-no-value-at-question-mark.md)).
 
-Every other allocating function still took the allocator first. A census of
-the library, the examples, the guide and the corpus found 44 public functions
-that take an allocator, and about 580 of their calls passed `mem.system()`
-(or a local bound to it and used for nothing else): `"text".to_owned(mem.system())`
+Every other allocating constructor and function still took the allocator
+first. A census of the library, the examples, the guide and the corpus found 44
+public functions that take an allocator, and about 580 of their calls passed
+`mem.system()` (or a local bound to it and used for nothing else), with about
+140 more at the `open` and `create` constructors of readers, writers, files,
+loggers, closures and the JSON object decoder: `"text".to_owned(mem.system())`
 98 times, `json.parse(mem.system(), text)` 62, `fmt.render_owned(mem.system(), value)`
 49, `Vec.filled(mem.system(), ...)` 44. The argument names the same allocator at
 almost every call and teaches nothing after the first, while the constructors
@@ -27,11 +29,14 @@ two conventions for one decision.
 
 ## Decision
 
-**A standard-library function or method whose first parameter (after `self`)
-is the allocator its result or its scratch storage comes from is a pair: `x(...)`
-uses the system allocator, and `x_in(allocator, ...)` takes the allocator
-first.** The system form calls the `_in` form with `mem.system()` and nothing
-else, so the two cannot drift; its result names the system allocator in its
+**A standard-library constructor, function or method that takes the allocator
+its result or its scratch storage comes from is a pair: `x(...)` uses the system
+allocator, and `x_in(allocator, ...)` takes the allocator first.** The
+constructor rule still decides the base name: `new` builds and cannot fail, and
+`open` (or `create`) can fail or acquires a resource, so a resource constructor
+is `open` with `open_in`, as a plain one is `new` with `new_in`.
+
+The system form calls the `_in` form with `mem.system()` and nothing else, so the two cannot drift; its result names the system allocator in its
 type (`String`, `Vec[UInt8]`, `json.Value`), and its contract drops the
 allocator from the `_in` form's (`where carries()` where the `_in` form wrote
 `carries(.Ok: allocator)`).
@@ -57,17 +62,22 @@ The pairs are:
 | `json` | `DecodeError.failure(reason)`, `error.at_field(name)` | `failure_in`, `at_field_in` |
 | `mem` | `Vec.filled`, `Vec.from_fn`, `Vec.from_fn_inout` | `filled_in`, `from_fn_in`, `from_fn_inout_in` |
 | `testing` | `Recorder.of(bytes)` | `Recorder.of_in(allocator, bytes)` |
+| `io` | `BufferedReader.open(capacity, reader)`, `BufferedWriter.open(capacity, writer)` | `open_in(allocator, capacity, ...)` |
+| `fs` | `File.open(path)`, `File.create(path, policy)` | `File.open_in`, `File.create_in` |
+| `log` | `Logger.open(output, minimum)` | `Logger.open_in(allocator, output, minimum)` |
+| `mem` | `Closure.open(callback)` | `Closure.open_in(allocator, callback)` |
+| `json` | `ObjectDecoder.open(value)` | `ObjectDecoder.open_in(allocator, value)` |
 
 `fs.read_text` and `io.read_text` already had this shape and keep it.
 
-Three kinds of allocator parameter stay as they are, because the allocator is
+`Logger.open_in` and `ObjectDecoder.open_in` move the allocator from second
+to first place, so every `_in` form reads alike. `mem.Closure.open` and
+`open_in` share one private routine that stores the callable, and the checker
+holds both to the closure's signature.
+
+Two kinds of allocator parameter stay as they are, because the allocator is
 not incidental to them:
 
-- **A constructor named `new_in` or `open`.** `new_in` is already the second
-  half of a pair. An `open` constructor (`fs.File.open` and `create`,
-  `io.BufferedReader.open`, `io.BufferedWriter.open`, `mem.Closure.open`,
-  `log.Logger.open`) acquires a resource and keeps its allocator argument; the
-  constructor rule decides its name, and doubling it is a separate decision.
 - **An allocator built over a backing.** `mem.Arena.open(backing, size)`,
   `mem.AllocationLog.open(backing, refuse_at)` and
   `testing.each_allocation_failure(backing, body, is_refusal)` each build an
@@ -79,10 +89,10 @@ not incidental to them:
 
 ## Consequences
 
-- About 580 calls lose an argument that said nothing; the rest, which pass an
+- About 720 calls lose an argument that said nothing; the rest, which pass an
   arena, a refusing allocator, a test allocator or a generic `A`, now say
   `_in` at the call, so a reader sees where the allocator matters.
-- The library has two names for each allocating function. The `_in` form is
+- The library has two names for each allocating constructor and function. The `_in` form is
   the one generic code calls, since a default is refused in an
   allocator-generic declaration ([T-DefaultedAllocator]).
 - A system form's signature no longer says that it allocates; the name of its
@@ -91,7 +101,9 @@ not incidental to them:
 - `json.Value.null()`, `Value.array()` and `Value.object()` read like the
   `new()` constructors of the owning types they sit beside.
 - A function of a program, not of the library, is free to follow the same
-  convention; nothing in the compiler knows the suffix.
+  convention. The compiler knows the names only where it already knew
+  `Closure.open`: it finds `open` and `open_in` on `mem.Closure` to hold each
+  callback to the closure's signature.
 
 ## Alternatives considered
 
@@ -114,7 +126,13 @@ the constructors had already stopped writing it.
 can predict it: a reader who has met `to_owned_in` should find `filled_in` and
 `read_all_in` without looking.
 
-**Rename `Recorder.of` to `open`, which would make it an excluded
-constructor.** Rejected: it would keep `mem.system()` at every test that
-records output, the call this record removes, and `of` with `of_in` follows
-the rule without a second rename.
+**Rename `Recorder.of` to `open`.** Rejected: a recorder acquires nothing a
+test must close, and `of` with `of_in` follows the rule without a second
+rename.
+
+**Leave `open` constructors taking the allocator.** The constructor rule
+decides `open`'s name, and pairing it was first weighed as a separate decision.
+Rejected because the same `mem.system()` argument sat at most of their calls
+(every buffered reader and writer over standard input and output, every kept
+closure in the system allocator), and a reader who has learned `new_in` and
+`to_owned_in` would look for `open_in`.

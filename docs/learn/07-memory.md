@@ -244,17 +244,21 @@ An arena has a fixed size. When it runs out, allocating from it fails like any
 other allocation: change `size: 4096` to `size: 32` and the program prints
 `the arena is full` and exits with status 1.
 
-### `new`, `new_in` and `open`
+### `new`, `open` and the `_in` form
 
-You have now met three ways to start a value, and the name says which one you
-are calling:
+A constructor or function that allocates has two forms. The plain name uses
+the system allocator, and the name ending in `_in` takes the allocator as its
+first argument. The constructor's own name says what it does:
 
-- `T.new()` builds an empty value in the system allocator. It cannot fail.
-- `T.new_in(allocator)` builds the same value in the allocator you pass, such
-  as an arena's handle. It cannot fail either.
-- `T.open(...)` is for a constructor that can fail or that acquires something
-  that must be given back: `mem.Arena.open` takes a block of memory, and a
-  buffered reader, a file and a logger acquire a resource in the same way.
+- `T.new()` builds an empty value and cannot fail; `T.new_in(allocator)` builds
+  the same value in the allocator you pass, such as an arena's handle.
+- `T.open(...)` can fail or acquires something that must be given back, as a
+  buffered reader, a file, a logger or a kept closure does;
+  `T.open_in(allocator, ...)` does the same with the allocator you pass.
+
+An allocator built on top of another one is the exception: `mem.Arena.open`
+takes the allocator its block comes from, because that is what the arena is
+made of, so it has no `_in` form.
 
 This program builds one vector with `new` and one with `new_in`:
 
@@ -294,9 +298,7 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ### A function's `_in` form takes the allocator
 
-Functions that allocate follow the same rule as `new` and `new_in`. The plain
-name uses the system allocator, and the name ending in `_in` takes the
-allocator as its first argument. `"Lisbon".to_owned()` copies text into the
+Functions that allocate follow the same rule as constructors. `"Lisbon".to_owned()` copies text into the
 system allocator, and `"Lisbon".to_owned_in(arena.handle())` copies it into an
 arena. `fmt.render_owned` and `fmt.render_owned_in`, `json.parse` and
 `json.parse_in`, and `Vec.filled` and `Vec.filled_in` are pairs in the same
@@ -579,8 +581,8 @@ alias Rules = Vec[mem.Closure[Pricing]]
 // moves a closure into memory from the heap and answers a value of one type,
 // whatever the closure captured, so one vector holds them all.
 fn add_rules(inout rules: Rules, percent: UInt64, fee: UInt64) -> Result[(), mem.Oom] {
-    &rules.push(mem.Closure.open(mem.system(), [sink percent] |cents: UInt64| cents - cents * percent / 100)?).settled()?
-    &rules.push(mem.Closure.open(mem.system(), [sink fee] |cents: UInt64| cents + fee)?).settled()?
+    &rules.push(mem.Closure.open([sink percent] |cents: UInt64| cents - cents * percent / 100)?).settled()?
+    &rules.push(mem.Closure.open([sink fee] |cents: UInt64| cents + fee)?).settled()?
     .Ok(())
 }
 
@@ -607,9 +609,9 @@ A 6000-cent cart costs 5899 cents.
 
 The 10% discount takes 6000 cents to 5400, and shipping adds 499. `Pricing`
 names the rule's signature once and `Rules` names the vector's type once
-([Calling things](02-calling-things.md#a-name-for-a-long-type-alias)), while
-`mem.system()` stays written where the rules are stored. `open` can fail when memory runs
-out, so it answers a `Result`, and a refused `push` hands the closure back,
+([Calling things](02-calling-things.md#a-name-for-a-long-type-alias)), and
+`mem.Closure.open` keeps each closure in memory from the system allocator, as
+`Vec.new()` does for the vector. `open` can fail when memory runs out, so it answers a `Result`, and a refused `push` hands the closure back,
 which `settled()` releases
 ([Errors](03-errors.md#failures-that-hand-a-value-back)). The [pricing rules
 example](../../examples/pricing_rules.lin) builds a checkout this way.
@@ -628,7 +630,7 @@ use mem.Owner
 fn main() -> Result[UInt8, io.IoError] {
     let fee = 499
     // Kept in memory from the heap, the closure must be released.
-    let shipping = mem.Closure.open(mem.system(), [sink fee] |cents: UInt64| cents + fee) else |_| {
+    let shipping = mem.Closure.open([sink fee] |cents: UInt64| cents + fee) else |_| {
         return .Ok(1)
     }
     defer shipping.release()
@@ -637,7 +639,7 @@ fn main() -> Result[UInt8, io.IoError] {
     defer arena.release()
     let percent = 10
     // Kept in an arena, the closure goes when the arena does: nothing releases it.
-    let discount = mem.Closure.open(arena.handle(), [sink percent] |cents: UInt64| cents - cents * percent / 100) else |_| {
+    let discount = mem.Closure.open_in(arena.handle(), [sink percent] |cents: UInt64| cents - cents * percent / 100) else |_| {
         return .Ok(1)
     }
     io.println("6000 cents become {shipping(discount(6000))}.")?
@@ -658,7 +660,7 @@ fn main() -> Result[UInt8, io.IoError] {
   error[O-Leak]: `shipping` (a linear `mem.Closure[fn(read UInt64) -> UInt64, mem.SystemAllocator]`) is still owned when this path leaves
     --> kept_leak.lin:18:9
      |
-  9  |     let shipping = mem.Closure.open(mem.system(), [sink fee] |cents: UInt64| cents + fee) else |_| {
+  9  |     let shipping = mem.Closure.open([sink fee] |cents: UInt64| cents + fee) else |_| {
      |         -------- acquired here
   18 |         return .Ok(1)
      |         ^^^^^^ still owned here
@@ -680,8 +682,8 @@ fn main() -> Result[UInt8, io.IoError] {
   error[T-Bound]: this closure captures `guests`, a `Vec[Str, mem.SystemAllocator]` that must be released, and a closure kept in memory from `mem.Handle[mem.SystemAllocator]` may be dropped without releasing it
     --> kept_arena_vec.lin:14:29
      |
-  14 |     let count = mem.Closure.open(arena.handle(), [sink guests] || -> UInt64 { guests.length() }) else |_| {
-     |                             ^^^^ capture `guests` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`
+  14 |     let count = mem.Closure.open_in(arena.handle(), [sink guests] || -> UInt64 { guests.length() }) else |_| {
+     |                             ^^^^^^^ capture `guests` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`
   ```
 
   The help names both ways out: look at the vector instead of owning it, or
@@ -702,7 +704,7 @@ fn main() -> Result[UInt8, io.IoError] {
         return .Ok(1)
     }
     // `[seen = guests]` looks at `guests` where it is, under the name `seen`.
-    let count = mem.Closure.open(mem.system(), [seen = guests] || -> UInt64 { seen.length() }) else |_| {
+    let count = mem.Closure.open([seen = guests] || -> UInt64 { seen.length() }) else |_| {
         guests.release()
         return .Ok(1)
     }
@@ -725,8 +727,9 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
    |                                ----- the observation is still used here
 ```
 
-`open` is declared `where carries(.Ok: callback, allocator)`: the kept closure
-points wherever the lambda pointed, and wherever the allocator did
+`open` is declared `where carries(.Ok: callback)`: the kept closure points
+wherever the lambda pointed. `open_in` adds `allocator` to the clause, so a
+closure kept in an arena also points into the arena
 ([Borrowing](06-borrowing.md) explains `carries`). Move `guests.release()`
 after `count.release()` and the program prints `1 guests`.
 
@@ -742,7 +745,7 @@ import std.mem
 
 // Build a check that counts every parcel it weighs in the caller's `seen`.
 fn counting_check(inout seen: UInt64) -> Result[mem.Closure[inout fn(grams: UInt64) -> Bool], mem.Oom] {
-    mem.Closure.open(mem.system(), inout [inout seen] |grams: UInt64| {
+    mem.Closure.open(inout [inout seen] |grams: UInt64| {
         seen += 1
         grams <= 5000
     })
@@ -764,9 +767,9 @@ fn main() -> Result[UInt8, io.IoError] {
 error[O-Escapes]: a value holding a place lent `inout` cannot leave the function that lends it
  --> counting_check.lin:6:5
   |
-6 |     mem.Closure.open(mem.system(), inout [inout seen] |grams: UInt64| {
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this value holds the lend
-  |                                                 ---- lent `inout` here
+6 |     mem.Closure.open(inout [inout seen] |grams: UInt64| {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this value holds the lend
+  |                                   ---- lent `inout` here
   |
   = help: finish with the value inside this function, or give the closure its own state with a `sink` capture
 ```
@@ -810,7 +813,7 @@ drives these steps with a real handler once handlers have been introduced.
 | a value with a life of its own: a configuration, a cache, a table that grows | `mem.system()`, and `release()` or `defer … .release()` |
 | many values that die together: one request, one line of input, one pass of a loop | a `mem.Arena`, released once, or rewound between passes |
 | a library function that allocates | take `A: Allocator` as a parameter and let the caller choose; name it `x_in`, and add `x` for the system allocator |
-| a closure kept for later | `mem.Closure.open(allocator, closure)`, settled like that allocator's memory |
+| a closure kept for later | `mem.Closure.open(closure)`, or `mem.Closure.open_in(allocator, closure)`, settled like that allocator's memory |
 | a test that must check every allocation failure is handled | `mem.AllocationLog`, which refuses a chosen allocation; [Testing](10-testing.md#every-allocation-can-fail) shows it |
 
 Collections follow the same rules. `Vec[T, A]` is a growable list that
