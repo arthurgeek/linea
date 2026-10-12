@@ -1,0 +1,191 @@
+import std.fs
+import std.mem
+import std.testing
+
+// ParseFileError says whether loading a JSON document from a file failed to
+// read the file or to parse its text. It owns nothing: the text that was read
+// is released before the error is returned.
+@(copyable, derive(Debug, Release, From[fs.ReadTextError], From[ParseError]))
+pub enum ParseFileError {
+    Read(fs.ReadTextError),
+    Parse(ParseError),
+}
+
+impl Display for ParseFileError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Read(error) => error.fmt(&w),
+            Parse(error) => error.fmt(&w),
+        }
+    }
+}
+
+// Read the file at `path` as UTF-8 text and parse it within `limits`. The read
+// is capped at `limits.max_input_bytes`, the most the parser accepts, and the
+// text is released before the document is returned, so the document never
+// borrows it.
+pub fn read_file_in[A: Allocator](allocator: A, path: fs.Path, limits: ParseLimits = standard_limits) -> Result[Value[A], ParseFileError] where carries(.Ok: allocator) {
+    defer let source = fs.read_text_in(allocator, path, max_bytes: limits.max_input_bytes)?
+    .Ok(parse_in(allocator, source.view(), limits: limits)?)
+}
+
+// Read and parse the file at `path` into a document in the system allocator.
+// See `read_file_in`.
+pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result[Value, ParseFileError] where carries() {
+    read_file_in(mem.system(), path, limits: limits)
+}
+
+// DecodeFileError says whether loading a typed value from a file failed to read
+// the file or to decode its text. `Decode` keeps the release obligation of
+// `DecodeError`, which can hold the path of the failing field.
+@derive(Release)
+pub enum DecodeFileError[A: Allocator = mem.SystemAllocator] {
+    Read(fs.ReadTextError),
+    Decode(DecodeError[A]),
+}
+
+impl[A: Allocator] Display for DecodeFileError[A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Read(error) => error.fmt(&w),
+            Decode(error) => error.fmt(&w),
+        }
+    }
+}
+
+// Read the file at `path` as UTF-8 text and decode it as a T, as `decode_in`
+// does, with the read capped at `limits.max_input_bytes`. The text is released
+// before the value is returned.
+pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+    defer let source = match fs.read_text_in(allocator, path, max_bytes: limits.max_input_bytes) {
+        Ok(text) => text,
+        Err(error) => return .Err(.Read(error)),
+    }
+    match decode_in[A, T](allocator, source.view(), limits: limits) {
+        Ok(value) => .Ok(value),
+        Err(error) => .Err(.Decode(error)),
+    }
+}
+
+// Read and decode the file at `path` into a T in the system allocator. See
+// `decode_file_in`.
+pub fn decode_file[T: Decode[mem.SystemAllocator]](path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError] where carries() {
+    decode_file_in(mem.system(), path, limits: limits)
+}
+
+// FileSettings derives Decode for the file tests.
+struct FileSettings[A: Allocator] {
+    name: String[A],
+    port: UInt16,
+}
+
+derive[A: Allocator] Release for FileSettings[A]
+
+derive[A: Allocator] Decode[A] for FileSettings[A]
+
+// Write `text` to a new scratch file and return its path owner.
+fn scratch_file_with(text: Str) -> String {
+    let owned = fs.scratch_path()
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    let _written = fs.write_file(path, text.as_bytes(), policy: .CreateNew).unwrap()
+    owned
+}
+
+// Return whether a load failed at reading the file rather than parsing it.
+fn failed_at_read(sink result: Result[Value, ParseFileError]) -> Bool {
+    match result {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(reason) => match read reason {
+            Read(_) => true,
+            Parse(_) => false,
+        },
+    }
+}
+
+// Return whether a load failed at parsing the text rather than reading it.
+fn failed_at_parse(sink result: Result[Value, ParseFileError]) -> Bool {
+    match result {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(reason) => match read reason {
+            Parse(_) => true,
+            Read(_) => false,
+        },
+    }
+}
+
+test fn a_file_is_read_and_parsed_into_a_document() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","ports":[1,2]}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    defer let document = read_file(path).unwrap()
+    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "the parsed document changed")?
+}
+
+test fn a_file_that_is_missing_or_malformed_names_the_step_that_failed() {
+    defer let owned = scratch_file_with(r"{")
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    testing.assert(failed_at_parse(read_file(path)), "a malformed document was not a parse failure")?
+    fs.remove_scratch(path)
+    testing.assert(failed_at_read(read_file(path)), "a missing file was not a read failure")?
+}
+
+test fn a_file_larger_than_the_parse_limits_is_refused_at_the_read() {
+    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    let limits = ParseLimits { max_input_bytes = 4, ..ParseLimits.default() }
+    testing.assert(failed_at_read(read_file(path, limits: limits)), "a file past the input limit was read")?
+}
+
+test fn a_file_is_decoded_into_a_typed_value() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    defer let settings: FileSettings[mem.SystemAllocator] = decode_file(path).unwrap()
+    testing.assert_eq(settings.name.view(), "tea", "the decoded name changed")?
+    testing.assert_eq(settings.port, 8080, "the decoded port changed")?
+}
+
+test fn decoding_a_file_keeps_read_and_decode_failures_distinct() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","port":"high"}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    let wrong: Result[FileSettings[mem.SystemAllocator], DecodeFileError] = decode_file(path)
+    let decode_failed = match wrong {
+        Ok(settings) => {
+            settings.release()
+            false
+        },
+        Err(reason) => {
+            defer reason.release()
+            match read reason {
+                Decode(_) => true,
+                Read(_) => false,
+            }
+        },
+    }
+    testing.assert(decode_failed, "a wrongly typed field was not a decode failure")?
+    fs.remove_scratch(path)
+    let missing: Result[FileSettings[mem.SystemAllocator], DecodeFileError] = decode_file(path)
+    let read_failed = match missing {
+        Ok(settings) => {
+            settings.release()
+            false
+        },
+        Err(reason) => {
+            defer reason.release()
+            match read reason {
+                Read(_) => true,
+                Decode(_) => false,
+            }
+        },
+    }
+    testing.assert(read_failed, "a missing file was not a read failure")?
+}

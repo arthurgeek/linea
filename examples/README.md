@@ -37,11 +37,11 @@ Strings, collections, parsing, and files.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.
 - [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest; `filter`, `collect`, and lent counters.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.
-- [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; counting with a `Map` and sorting with `Vec.sort_by`.
-- [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; files and `let ... else`.
+- [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; reading `lines()`, counting with a `Map`, and sorting with `Vec.sort_by`.
+- [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
 - [form_letters.lin](form_letters.lin): fills a letter template per order; JSON decoding and string building.
-- [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode` and `json.encode`.
-- [json_inventory.lin](json_inventory.lin): totals an inventory and adds a summary; editing a `json.Value` document.
+- [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode`, `json.decode_file`, and `json.encode`.
+- [json_inventory.lin](json_inventory.lin): totals an inventory and adds a summary; loading with `json.read_file` and editing a `json.Value` document.
 - [discounts](discounts/main.lin): applies a validated discount; newtypes with `where` checks and opaque types.
 
 ## Resource-aware code

@@ -1358,6 +1358,10 @@ could not read the missing file: file read failed: file operation failed after 0
 `read_text` uses the system allocator; `fs.read_text_in(allocator, path,
 max_bytes)` takes one, as `new_in` does.
 
+To load a JSON document or a typed value from a file, `json.read_file(path)`
+and `json.decode_file(path)` read the text, parse or decode it, and release it
+in one call; their errors say whether reading or parsing failed.
+
 `fs.read_file` and `String.from_bytes` remain for a program that wants the
 bytes, or that wants them back when decoding fails. `io.read_text` and
 `io.read_text_in` do the same for any reader, such as standard input.

@@ -19,7 +19,7 @@ import std.testing
 enum InventoryError {
     Usage,
     Path(fs.PathError),
-    File(fs.ReadFileReason),
+    File(json.ParseFileError),
     Json(json.ParseError),
     Products,
     Product,
@@ -37,7 +37,7 @@ derive (
     Debug,
     Release,
     From[fs.PathError],
-    From[fs.ReadFileReason],
+    From[json.ParseFileError],
     From[json.ParseError],
     From[json.NumberAccessError],
     From[json.MutationReason],
@@ -150,14 +150,10 @@ fn load_inventory() -> Result[json.Value, InventoryError] {
         return .Err(.Usage)
     }
     let path = fs.Path.from_bytes(args.bytes_at(1).unwrap())?
-    // Read no more than the parser's default input limit accepts.
-    let limits = json.ParseLimits.default()
-    // A failed read owns the bytes read before the failure; `settled()`
-    // releases them and keeps why reading or closing the file failed.
-    let bytes = fs.read_file(path, max_bytes: limits.max_input_bytes).settled()?
-    let parsed = json.parse_bytes(bytes.as_slice())
-    bytes.release()
-    .Ok(parsed?)
+    // `read_file` reads the file no further than the parser accepts, parses
+    // it and releases the text. Its error says whether reading or parsing
+    // failed.
+    .Ok(json.read_file(path)?)
 }
 
 // `json.write` writes the whole document, the members this program never read
