@@ -3019,7 +3019,22 @@ declared trait named Integer shadows the built-in bound and supplies only that
 trait's ordinary promises. Inline, trailing and inherited Integer bounds provide
 the same evidence. Every member is Copyable and Discardable, so the bound
 entails those capabilities without changing the explicit-copy rule for authored
-symbolic types.
+symbolic types. They are also Owned, so a value of an Integer-bounded parameter
+carries no dependency (§5.3).
+
+The `Owned` bound admits a type whose values can carry no dependency (§5.3). A
+type argument for an Owned parameter must carry nothing, which is decided by the
+type's representation, private fields included; a type parameter passed on
+meets it only when it is itself bounded Owned. The refusal names a path from the
+argument to what it carries, such as a field holding a `Str` or a `borrow`.
+`Owned` is written on a type parameter, inline or in its declaration's own
+`where` clause. On a `where` subject that is not one of the declaration's own
+parameters, in a trait's bound list or on an associated type it is [T-Bound].
+
+`Copyable`, `Discardable`, `Linear`, `Integer` and `Owned` are decided by the
+compiler, and an implementation of one, such as `impl Owned for Label`, is
+[T-Bound]. A program that declares a trait of one of those names implements its
+own trait.
 
 An implementation head that applies arguments must supply exactly the number its
 constructor declares. A head with no arguments on a generic type supplies none
@@ -4865,6 +4880,23 @@ an identity that forwards borrowed data.
 Allocator handles obey these same rules: copying an allocator preserves its owner
 dependencies, and a handle that borrows an arena conflicts with moving or
 releasing the arena while it is live.
+
+**Owned values.** A type is **Owned** when none of its values can carry a
+dependency: nothing reachable through its fields, variant payloads, array
+elements, newtype base, closure environment or stored container elements is an
+observation, a view, or a value holding one. Built-in scalars, a struct of them,
+a linear file owner and `Vec[UInt8]` over the system allocator are Owned; `Str`,
+`mem.Slice[T]`, `borrow T`, a closure holding a lent place and
+`Vec[UInt8, mem.Handle]`, whose allocator borrows its arena, are not. Being Owned
+is independent of copying and settlement. A type parameter carries dependencies
+unless it is bounded `Owned` or `Integer` ([T-Bound]); inside the declaration
+that bounds it, a value of that parameter is never an eligible contract source
+and adds nothing to a result or to an `inout` destination, so copying an element
+of `items: mem.Slice[T]` into a vector needs no `retains` clause when `T` is
+Owned. The bound narrows only that parameter: another source the body stores
+must still be declared ([O-Escapes]). A dependency never comes from an Owned
+type, so substituting any admitted argument keeps a body checked with the
+parameter unseeded correct.
 
 Dependencies form conservative sets. A collection can retain views from several
 independent owners. Removing an element transfers its contained observations

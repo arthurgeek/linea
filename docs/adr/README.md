@@ -143,9 +143,10 @@ true of a different implementation.
 | [0145](0145-closed-attributes-attach-ordinary-derive-requests.md) | Closed attributes attach ordinary derive requests | Accepted; extends 0056 and 0113; extended by 0209; generic constraint clause superseded by 0165 |
 | [0165](0165-an-attached-derive-requires-each-field-type.md) | An attached derive requires each field type | Accepted; partially supersedes 0142, 0145 and 0148 |
 | [0122](0122-a-traversal-may-read-its-receiver.md) | A traversal may read its receiver | Accepted; extended by 0135 |
-| [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md) | Observations carry owner dependencies through callable contracts | Accepted; supersedes 0069 and parts of 0025 and 0121; refines 0046; refined by 0124 and 0175; projection syntax superseded by 0126; extended by 0128, 0131, 0137, 0178 and 0193; source-clause spelling superseded by 0132; mandatory backing-buffer shape superseded by 0133 |
-| [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131 and 0193 |
+| [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md) | Observations carry owner dependencies through callable contracts | Accepted; supersedes 0069 and parts of 0025 and 0121; refines 0046; refined by 0124 and 0175; projection syntax superseded by 0126; extended by 0128, 0131, 0137, 0178, 0193 and 0221; source-clause spelling superseded by 0132; mandatory backing-buffer shape superseded by 0133 |
+| [0124](0124-copyability-and-settlement-are-independent-capabilities.md) | Copyability and settlement are independent capabilities | Accepted; supersedes classification in 0034, 0046, and 0051; extends 0103; refines 0123; extended by 0125, 0131, 0193 and 0221 |
 | [0125](0125-scalar-value-positions-take-snapshots.md) | Scalar value positions take snapshots | Accepted; supersedes universal explicit-copy clause of 0034; extends 0124 |
+| [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157 and 0183; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
@@ -386,6 +387,10 @@ a value sent to another task must be owned and moved whole, never an
 observation of the sender's storage; what tasks may share read-only; and
 whether the state `http.with_state` lends to every request is shared under a
 rule or partitioned per task.
+
+Whether **a contract may be gated on a type**, so that `iter.extend` drops
+its retention for an instantiation whose `Item` is `Owned`; recorded in
+[0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md#open-questions).
 
 None of them is answered here. The third came close: a buffered writer, `slice`, and building text from
 computed bytes appeared to reach it together, and on inspection only the last
