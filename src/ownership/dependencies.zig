@@ -901,6 +901,11 @@ const Analysis = struct {
     /// Lends already reported as escaping, keyed by the capture that made
     /// them. Sized by the function's `inout` captures.
     escaped_lends: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Sites already reported as escaping. A dependency written into an
+    /// `inout` parameter is checked at every exit and reported where it was
+    /// written, so each exit after that write would repeat one report. Sized
+    /// by the function's escapes.
+    escaped_sites: std.AutoHashMapUnmanaged(EscapeSite, void) = .empty,
     /// The capture sources that lent a place `inout`, each of which ended
     /// the earlier observations of that place. Sized likewise.
     lend_sites: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
@@ -914,6 +919,7 @@ const Analysis = struct {
         self.exits.deinit(self.gpa);
         self.reported_temporaries.deinit(self.gpa);
         self.escaped_lends.deinit(self.gpa);
+        self.escaped_sites.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
@@ -1921,6 +1927,7 @@ const Analysis = struct {
     fn escape(self: *Analysis, at: ExprId, site: EscapeSite, escaped: Escaped, origin: ?Origin) !void {
         if (self.reported.contains(at)) return;
         try self.reported.put(self.gpa, at, {});
+        if ((try self.escaped_sites.getOrPut(self.gpa, site)).found_existing) return;
         const arena = self.sink.arena;
         switch (escaped) {
             .observation => {},

@@ -1,0 +1,29 @@
+import std.mem
+
+// Each `return` and the end of the body is an exit where `values` must hold
+// only what the signature declares; the push that stored the element is the
+// one mistake, so it is reported once.
+fn copy_all[T: Copyable, A: Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> Result[(), mem.Oom] {
+    for item in copy(items) {
+        match &values.push(copy(*item)) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Exhausted),
+        }
+    }
+    if values.length() > 8 {
+        return .Ok(())
+    }
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    var values: Vec[UInt8] = Vec.new()
+    let bytes = [UInt8(1), 2]
+    let copied = copy_all(&values, bytes.as_slice()).is_ok()
+    values.release()
+    if copied {
+        0
+    } else {
+        1
+    }
+}

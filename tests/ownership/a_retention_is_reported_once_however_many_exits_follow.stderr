@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/a_retention_is_reported_once_however_many_exits_follow.lin:8:15
+  |
+8 |         match &values.push(copy(*item)) {
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
