@@ -8651,6 +8651,15 @@ pub const Typing = struct {
             return self.dependency_facts.values.items[@intFromEnum(t)];
         }
 
+        /// Records that `t`, a type parameter or the stand-in for an
+        /// associated type read through one, admits only `Owned` types, so it
+        /// seeds no dependency. Answers already computed are dropped.
+        pub fn promiseOwned(self: *Builder, t: TypeId) void {
+            self.pool.items[@intFromEnum(t)].parameter.owned = true;
+            self.borrow_facts.invalidate(t);
+            self.dependency_facts.invalidate(t);
+        }
+
         /// Why a value of `t` may carry a dependency: the parts walked from
         /// `t` to a type that holds one directly, over the edges the
         /// containment table is built from. Null where `t` carries nothing.

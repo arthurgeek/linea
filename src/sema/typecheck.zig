@@ -5753,6 +5753,10 @@ const Checker = struct {
                 const constraint = self.constraints.records[at];
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
+                switch (constraint.subject) {
+                    .written => |written| if (self.ownedBoundIn(requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound),
+                    .parameter => {},
+                }
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };
                 const traits = try self.traitsBounding(context, requirements);
                 errdefer types_mod.freeBoundTraits(self.gpa, traits);
@@ -5828,6 +5832,9 @@ const Checker = struct {
                 self.constraint_subjects[at] = settled;
                 items[item].subject = settled;
                 changed = true;
+                // A promise holds for what the subject now reads as.
+                if (self.ownedBoundIn(self.constraints.requirementsOf(constraint)) != null and self.ownsSubject(d, settled))
+                    self.builder.promiseOwned(settled);
             }
         }
         if (changed) self.builder.setContextualConstraints(self.contextual_constraints);
@@ -26866,25 +26873,42 @@ const Checker = struct {
             for (self.ast.declTypeParams(d), 0..) |p, k| {
                 try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
             }
-            // The seed reads `Owned` from the parameter's own record, so a
-            // promise made about any other subject would be checked at every
-            // call and relied on nowhere.
-            for (self.constraints.ofDeclaration(d)) |constraint| {
-                const written = switch (constraint.subject) {
-                    .written => |written| written,
-                    .parameter => continue,
-                };
-                const bound = self.ownedBoundIn(self.constraints.requirementsOf(constraint)) orelse continue;
-                try self.sink.addErrorFmt(
-                    .t_bound,
-                    self.ast.fileOf(bound),
-                    self.ast.tokenSpan(bound),
-                    "write `Owned` where the type parameter is declared",
-                    "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
-                    .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
-                );
-            }
         }
+    }
+
+    /// Whether `subject` is a parameter of `d`, or the stand-in for an
+    /// associated type read through one.
+    fn ownsSubject(self: *const Checker, d: node.DeclId, subject: TypeId) bool {
+        if (self.builder.get(subject) != .parameter) return false;
+        var root = subject;
+        while (self.builder.standinOf(root)) |standin| root = standin.held;
+        return switch (self.builder.get(root)) {
+            .parameter => |p| self.builder.standinOf(root) == null and p.owner == d.index(),
+            else => false,
+        };
+    }
+
+    /// Records an `Owned` promise a declaration's `where` clause makes about a
+    /// written subject, or refuses it.
+    ///
+    /// The seed reads `Owned` from the record of the parameter a type stands
+    /// for, so a promise holds only for a subject whose record belongs to the
+    /// declaration that writes it: one of its own parameters, or an associated
+    /// type read through one, `I.Item` under `[I: Iterator]`, whose stand-in
+    /// no other declaration can name. An enclosing implementation's
+    /// parameter, or `Self.Item` in a trait signature, is shared with other
+    /// declarations, and a promise there would be relied on where nothing
+    /// checked it.
+    fn promiseWrittenOwned(self: *Checker, d: node.DeclId, written: node.TypeRef, subject: TypeId, bound: TokenId) std.mem.Allocator.Error!void {
+        if (self.ownsSubject(d, subject)) return self.builder.promiseOwned(subject);
+        try self.sink.addErrorFmt(
+            .t_bound,
+            self.ast.fileOf(bound),
+            self.ast.tokenSpan(bound),
+            "write `Owned` where the type parameter is declared",
+            "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
+            .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
+        );
     }
 
     /// The first bound in a run that names `Owned`.

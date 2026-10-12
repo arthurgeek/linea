@@ -60,13 +60,19 @@ the answer the compiler already computes; the bound lets source ask for it.
   neither implies nor is implied by `Copyable`, `Discardable` or `Linear`.
 - **`Integer` implies it.** Every member of the closed integer family carries
   nothing, so a parameter bounded `Integer` is not seeded either.
-- **Scope of this step.** `Owned` is written on a type parameter, inline or in
-  the declaring declaration's own `where` clause. Written on a `where` subject
-  that is not one of the declaration's own parameters (an enclosing
-  implementation's parameter, or a projection such as `I.Item`), in a trait's
-  bound list, or on an associated type, it is [T-Bound]: the seed is read from
-  the parameter's own record, and a contextual promise would need containment
-  computed per scope, which does not exist.
+- **Where it may be written.** On a type parameter, inline or in its
+  declaration's own `where` clause, and in that clause on an associated type
+  read through one of the declaration's own parameters: `where I.Item: Owned`
+  under `[I: Iterator]`, or `where Self.Item: Owned` on a trait signature,
+  whose symbolic `Self` is its own. The seed is read from the record of the
+  parameter a type stands for, and the stand-in for `I.Item` is a parameter
+  record keyed by `I`, which no other declaration can name, so the promise is
+  relied on exactly where it was made and checked at every call. Written on a
+  parameter of an enclosing declaration, such as an implementation's `T` in a
+  method's `where`, in a trait's bound list, or on an associated type's
+  declaration, it is [T-Bound]: that record is shared by declarations that
+  never made the promise, and a promise scoped to one of them would need
+  containment computed per scope, which does not exist.
 
 Soundness: the containment answer is monotone in its seeds. Substituting an
 argument that seeds nothing for a parameter that seeded nothing marks no new
@@ -85,9 +91,10 @@ public fact: the hazard Rust's auto traits are known for. A library type that
 starts holding a view stops satisfying every `Owned` bound it met.
 
 `Owned` does not help an operation that must accept both borrowing and owned
-elements, such as `iter.extend` over an arbitrary `Item`. It still retains the
-iterator. An `Owned` sibling serves the owned case; a contract that disappears
-for an instantiation whose element is `Owned` is the open question below.
+elements, such as `iter.extend` over an arbitrary `Item`, which still retains
+the iterator. A sibling bounded `where I.Item: Owned` serves the owned case; a
+contract that disappears for an instantiation whose element is `Owned` is the
+open question below.
 
 Making `Integer` imply `Owned` changes what an `Integer`-bounded body may
 return or store without a clause: a value of the parameter is no longer a

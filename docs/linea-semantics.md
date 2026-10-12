@@ -3028,8 +3028,13 @@ type's representation, private fields included; a type parameter passed on
 meets it only when it is itself bounded Owned. The refusal names a path from the
 argument to what it carries, such as a field holding a `Str` or a `borrow`.
 `Owned` is written on a type parameter, inline or in its declaration's own
-`where` clause. On a `where` subject that is not one of the declaration's own
-parameters, in a trait's bound list or on an associated type it is [T-Bound].
+`where` clause, or in that clause on an associated type read through one of the
+declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
+`where Self.Item: Owned` on a trait signature, whose `Self` is its own. On a
+parameter of an enclosing declaration, such as an implementation's `T` written
+in a method's `where`, in a trait's bound list or on an associated type's
+declaration it is [T-Bound]: the promise would hold in declarations that never
+made it.
 
 `Copyable`, `Discardable`, `Linear`, `Integer` and `Owned` are decided by the
 compiler, and an implementation of one, such as `impl Owned for Label`, is
@@ -4890,7 +4895,9 @@ a linear file owner and `Vec[UInt8]` over the system allocator are Owned; `Str`,
 `mem.Slice[T]`, `borrow T`, a closure holding a lent place and
 `Vec[UInt8, mem.Handle]`, whose allocator borrows its arena, are not. Being Owned
 is independent of copying and settlement. A type parameter carries dependencies
-unless it is bounded `Owned` or `Integer` ([T-Bound]); inside the declaration
+unless it is bounded `Owned` or `Integer` ([T-Bound]), and so does an
+associated type read through one unless the declaration bounds it `Owned`;
+inside the declaration
 that bounds it, a value of that parameter is never an eligible contract source
 and adds nothing to a result or to an `inout` destination, so copying an element
 of `items: mem.Slice[T]` into a vector needs no `retains` clause when `T` is
