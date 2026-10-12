@@ -993,7 +993,7 @@ fn typecheckInternal(
                 &.{},
             );
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
-            c.builder.pool.items[row[k].index()].parameter.owned = ownedDemandedBy(ast, resolution, bounds);
+            c.builder.pool.items[row[k].index()].parameter.owned = ownedBound(ast, resolution, bounds) != null;
         }
     }
 
@@ -1822,13 +1822,13 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
     return false;
 }
 
-/// Whether a run of bounds writes `Owned`. Only the run itself is read: a
-/// trait cannot require `Owned`, so no trait it reaches adds the demand.
-fn ownedDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) bool {
+/// The first bound in a run that names `Owned`. Only the run itself is read:
+/// a trait cannot require `Owned`, so no trait it reaches adds the demand.
+fn ownedBound(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
     for (bounds) |bound| {
-        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .owned) return true;
+        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .owned) return bound.named.name;
     }
-    return false;
+    return null;
 }
 
 /// A written type spelled as the program wrote it, appended to `out`.
@@ -5754,7 +5754,7 @@ const Checker = struct {
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
                 switch (constraint.subject) {
-                    .written => |written| if (self.ownedBoundIn(requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound),
+                    .written => |written| if (ownedBound(self.ast, self.res, requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound),
                     .parameter => {},
                 }
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };
@@ -5769,7 +5769,7 @@ const Checker = struct {
                         .callables = callables,
                         .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                         .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
-                        .owned = ownedDemandedBy(self.ast, self.res, requirements),
+                        .owned = ownedBound(self.ast, self.res, requirements) != null,
                     },
                 });
             }
@@ -5833,7 +5833,7 @@ const Checker = struct {
                 items[item].subject = settled;
                 changed = true;
                 // A promise holds for what the subject now reads as.
-                if (self.ownedBoundIn(self.constraints.requirementsOf(constraint)) != null and self.ownsSubject(d, settled))
+                if (ownedBound(self.ast, self.res, self.constraints.requirementsOf(constraint)) != null and self.ownsSubject(d, settled))
                     self.builder.promiseOwned(settled);
             }
         }
@@ -10560,7 +10560,7 @@ const Checker = struct {
             try self.sink.addErrorFmt(.t_bound, self.ast.fileOf(at), span, "supply a built-in integer type or an Integer-constrained parameter", "`{s}` requires `Integer`, and `{s}` is not a built-in integer type", .{ subject, (try self.typeName(held)) });
             return true;
         }
-        if (ownedDemandedBy(self.ast, self.res, bounds) and held != .poison and try self.builder.mayCarryDependencies(held)) {
+        if (ownedBound(self.ast, self.res, bounds) != null and held != .poison and try self.builder.mayCarryDependencies(held)) {
             if (mode == .ask) return true;
             if (self.builder.view().mentionsOpenType(held)) return true;
             try self.noteRefused(at);
@@ -26125,7 +26125,7 @@ const Checker = struct {
                     .callables = callables,
                     .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                     .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
-                    .owned = ownedDemandedBy(self.ast, self.res, requirements),
+                    .owned = ownedBound(self.ast, self.res, requirements) != null,
                 },
             };
             filled += 1;
@@ -26861,7 +26861,7 @@ const Checker = struct {
             const own = self.ast.declBounds(d);
             if (own.len > 0) {
                 try self.reportCapabilityDemand(own, self.ast.declName(d));
-                if (self.ownedBoundIn(own)) |bound| try self.sink.addErrorFmt(
+                if (ownedBound(self.ast, self.res, own)) |bound| try self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(bound),
                     self.ast.tokenSpan(bound),
@@ -26894,11 +26894,11 @@ const Checker = struct {
     /// The seed reads `Owned` from the record of the parameter a type stands
     /// for, so a promise holds only for a subject whose record belongs to the
     /// declaration that writes it: one of its own parameters, or an associated
-    /// type read through one, `I.Item` under `[I: Iterator]`, whose stand-in
-    /// no other declaration can name. An enclosing implementation's
-    /// parameter, or `Self.Item` in a trait signature, is shared with other
-    /// declarations, and a promise there would be relied on where nothing
-    /// checked it.
+    /// type read through one, `I.Item` under `[I: Iterator]` or `Self.Item`
+    /// under a trait signature's own `Self`, whose stand-in no other
+    /// declaration can name. An enclosing implementation's parameter is
+    /// shared with that implementation's other members, and a promise there
+    /// would be relied on where nothing checked it.
     fn promiseWrittenOwned(self: *Checker, d: node.DeclId, written: node.TypeRef, subject: TypeId, bound: TokenId) std.mem.Allocator.Error!void {
         if (self.ownsSubject(d, subject)) return self.builder.promiseOwned(subject);
         try self.sink.addErrorFmt(
@@ -26911,13 +26911,6 @@ const Checker = struct {
         );
     }
 
-    /// The first bound in a run that names `Owned`.
-    fn ownedBoundIn(self: *const Checker, bounds: []const node.TraitBound) ?TokenId {
-        for (bounds) |bound| {
-            if (bound.kind == .named and resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) == .owned) return bound.named.name;
-        }
-        return null;
-    }
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
     fn reportCapabilityDemand(
@@ -26933,7 +26926,7 @@ const Checker = struct {
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
 
-        if (self.ownedBoundIn(bounds)) |first| {
+        if (ownedBound(self.ast, self.res, bounds)) |first| {
             for (bounds) |bound| {
                 if (bound.kind != .named or bound.named.name == first) continue;
                 if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != .owned) continue;
