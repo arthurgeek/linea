@@ -254,7 +254,7 @@ import std.mem
 import std.testing
 
 // The caller passes the allocator, so the caller decides where the banner lives.
-fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
     var line = String.new_in(allocator)
     // Release the line if a `?` leaves early; returning it skips this.
     defer line.release()
@@ -265,7 +265,7 @@ fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] 
 }
 
 test fn a_banner_frames_its_title() {
-    defer let heading = banner(mem.system(), "Daily report").unwrap()
+    defer let heading = banner_in(mem.system(), "Daily report").unwrap()
     testing.assert_eq(heading.view(), "== Daily report ==", "the banner changed")?
 }
 
@@ -276,7 +276,7 @@ test fn every_allocation_the_banner_asks_for_can_fail() {
     let attempts = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
-            let heading = banner(allocator, "Daily report")?
+            let heading = banner_in(allocator, "Daily report")?
             heading.release()
             .Ok(())
         },
@@ -286,7 +286,7 @@ test fn every_allocation_the_banner_asks_for_can_fail() {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let heading = banner(mem.system(), "Daily report") else |_| {
+    defer let heading = banner_in(mem.system(), "Daily report") else |_| {
         return .Ok(1)
     }
     io.println(heading.view())?
@@ -318,7 +318,7 @@ It runs the body once to count the allocations it asks for, then once more for
 each of them, with that one refused. The run with nothing refused must
 succeed; every other run must pass the refusal up or succeed without that
 allocation. It answers how many allocations it tried, so the test can check
-that too: `banner` allocates three times, so the body runs four times. `banner`
+that too: `banner_in` allocates three times, so the body runs four times. `banner_in`
 needed no change to be tested this way: it takes its allocator as an argument
 ([Memory](07-memory.md)).
 
@@ -335,7 +335,7 @@ test fn every_banner_that_is_built_reads_right() {
     let _attempts = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), testing.Failure] {
-            let heading = banner(allocator, "Daily report") else |_| {
+            let heading = banner_in(allocator, "Daily report") else |_| {
                 return .Err(testing.refused("the banner was refused"))
             }
             let reads_right = heading.view() == "== Daily report =="
@@ -358,7 +358,7 @@ ok    every_banner_that_is_built_reads_right
 The heading is released before the assertion, because a failed assertion
 returns from the lambda, and the heading must not be left behind on that path.
 
-Break `banner` by writing `&line.append(title).unwrap()` in place of
+Break `banner_in` by writing `&line.append(title).unwrap()` in place of
 `&line.append(title)?`, and the run that refuses the second allocation stops
 the program:
 
@@ -372,7 +372,7 @@ FAIL  every_allocation_the_banner_asks_for_can_fail
 ```
 
 The location is the line inside the standard library's `unwrap` that stopped
-the program; the `unwrap` to look for is the one in `banner`.
+the program; the `unwrap` to look for is the one in `banner_in`.
 
 `each_allocation_failure` is built on `mem.AllocationLog`, which you can use
 directly to refuse one chosen allocation. `mem.AllocationLog.open(backing, n)`
@@ -385,11 +385,11 @@ memory from `backing` too, so `open` answers a `Result`. Add this test to
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
 // `AllocationLog.open(mem.system(), 2)` refuses the second allocation its
-// allocator is asked for. The test checks that `banner` passes the refusal up,
+// allocator is asked for. The test checks that `banner_in` passes the refusal up,
 // and that the first allocation was given back on the way out.
 test fn a_refused_second_allocation_leaves_nothing_behind() {
     defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
-    let refused = match banner(log.allocator(), "Daily report") {
+    let refused = match banner_in(log.allocator(), "Daily report") {
         Ok(heading) => {
             heading.release()
             false
@@ -411,7 +411,7 @@ ok    every_allocation_the_banner_asks_for_can_fail
 ```
 
 The log is linear, so it is released like any other owner, and the result of
-`banner` is matched rather than tested with `is_err()`, because on success it
+`banner_in` is matched rather than tested with `is_err()`, because on success it
 holds a `String` that must be released.
 
 ## Testing a server

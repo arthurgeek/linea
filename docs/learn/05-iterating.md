@@ -717,7 +717,6 @@ it whenever what `filter` would drop needs a decision.
 
 ```linea
 import std.io
-import std.mem
 
 struct Line {
     item: Str,
@@ -735,7 +734,7 @@ fn main() -> Result[UInt8, io.IoError] {
     let { values: names, iterator: _ } = order
         .as_slice()
         .map(|sink line| copy(line.item))
-        .collect(mem.system())
+        .collect()
         .settled() else |_| {
         return .Ok(1)
     }
@@ -1153,7 +1152,7 @@ operation they offer, and not a protocol the language asks of every type.
 | to keep some items and deal with the rest | `xs.filter_map(\|sink x\| …)`, answering `.Some` or `.None` |
 | one value from all the items | `xs.fold(start, \|sink value, sink x\| …)` |
 | to ask about the items | `any`, `all`, `find`, `find_map` |
-| the items in a new `Vec` | `xs.collect(allocator).settled()` |
+| the items in a new `Vec` | `xs.collect().settled()`, or `xs.collect_in(allocator).settled()` |
 | a search that continues, with a count of the items inspected | `&it.find_counted(\|x\| …)` on an iterator you keep |
 | a fold or search whose callback keeps its state | `fold_inout`, `find_inout`, `find_counted_inout` |
 | a chain across several lines | one step per line, each opening with `.` |

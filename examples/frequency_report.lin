@@ -13,8 +13,10 @@ use mem.Owner
 alias LineCounts[A: Allocator] = collections.Map[String[A], UInt64, A]
 
 // Each key is a copy of its line made with `allocator`, so the counts outlive
-// `input`; `carries(.Ok: allocator)` says they still need the allocator.
-fn count_lines[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], mem.Oom] where carries(.Ok: allocator) {
+// `input`; `carries(.Ok: allocator)` says they still need the allocator. As in
+// the standard library, `count_lines_in` takes the allocator first and
+// `count_lines` uses the system allocator.
+fn count_lines_in[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], mem.Oom] where carries(.Ok: allocator) {
     defer var counts = LineCounts.new_in(allocator)
     for record in input.split("\n").unwrap() {
         // Trim Unicode whitespace; preserve case and whitespace within each line.
@@ -41,23 +43,27 @@ fn count_lines[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], 
     .Ok(counts)
 }
 
+fn count_lines(input: Str) -> Result[LineCounts[mem.SystemAllocator], mem.Oom] where carries() {
+    count_lines_in(mem.system(), input)
+}
+
 test fn frequencies_count_trimmed_lines_and_repeated_text() {
-    defer let counts = count_lines(mem.system(), " tea \ncoffee\ntea\n\tcoffee\r\ntea\n").unwrap()
+    defer let counts = count_lines(" tea \ncoffee\ntea\n\tcoffee\r\ntea\n").unwrap()
     testing.assert_eq(counts.length(), 2, "whitespace created another key")?
     testing.assert_eq(*counts.get("tea").unwrap(), 3, "repeated tea lines were lost")?
     testing.assert_eq(*counts.get("coffee").unwrap(), 2, "repeated coffee lines were lost")?
 }
 
 test fn empty_and_whitespace_only_inputs_have_no_frequencies() {
-    defer let empty = count_lines(mem.system(), "").unwrap()
-    defer let blanks = count_lines(mem.system(), " \n\t\r\n　\n").unwrap()
+    defer let empty = count_lines("").unwrap()
+    defer let blanks = count_lines(" \n\t\r\n　\n").unwrap()
     testing.assert_eq(empty.length(), 0, "empty input created a key")?
     testing.assert_eq(blanks.length(), 0, "blank lines created a key")?
 }
 
 test fn frequency_keys_own_unicode_text_after_input_is_released() {
     let input = "　café　\n東京\ncafé\n".to_owned().unwrap()
-    defer let counts = count_lines(mem.system(), input.view()).unwrap()
+    defer let counts = count_lines(input.view()).unwrap()
     input.release()
     testing.assert_eq(*counts.get("café").unwrap(), 2, "owned Unicode key lost its count")?
     testing.assert_eq(*counts.get("東京").unwrap(), 1, "owned multibyte key changed")?
@@ -89,7 +95,7 @@ fn main() -> Result[UInt8, io.IoError] {
         return .Ok(1)
     }
     let counted = if args.count() <= 1 {
-        count_lines(mem.system(), sample)
+        count_lines(sample)
     } else {
         // Paths use the original argument bytes; file contents must be UTF-8.
         let argument = args.bytes_at(1) else {
@@ -106,7 +112,7 @@ fn main() -> Result[UInt8, io.IoError] {
             io.eprintln("{error}")
             return .Ok(1)
         }
-        let counted = count_lines(mem.system(), input.view())
+        let counted = count_lines(input.view())
         input.release()
         counted
     }
@@ -128,7 +134,7 @@ test fn arena_frequencies_outlive_the_separate_input_owner() {
     // carved from the arena's 4096-byte block rather than from the input.
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let input = "café\n茶\ncafé\n".to_owned().unwrap()
-    defer let counts = count_lines(arena.handle(), input.view()).unwrap()
+    defer let counts = count_lines_in(arena.handle(), input.view()).unwrap()
     input.release()
     testing.assert_eq(*counts.get("café").unwrap(), 2, "arena count retained its input owner")?
     testing.assert_eq(*counts.get("茶").unwrap(), 1, "arena count lost its owned key")?

@@ -1024,7 +1024,6 @@ change to `inspected` until the vector's last use:
 
 ```linea
 import std.io
-import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
     let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
@@ -1037,7 +1036,7 @@ fn main() -> Result[UInt8, io.IoError] {
             inspected += 1
             *parcel <= limit
         })
-        .collect(mem.system())
+        .collect()
         .settled() else |_| {
         return .Ok(1)
     }
@@ -1052,11 +1051,11 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> kept_weights.lin:22:5
+  --> kept_weights.lin:21:5
    |
-22 |     inspected = 0
+21 |     inspected = 0
    |     ^^^^^^^^^ keep this place available until the last use of its observation
-23 |     io.println("{kept.length()} parcels to ship")?
+22 |     io.println("{kept.length()} parcels to ship")?
    |                  ---- the observation is still used here
 ```
 

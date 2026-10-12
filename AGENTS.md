@@ -471,7 +471,7 @@ APIs.
   it. Records still on an unmerged branch are rewritten, not superseded.
 - A constructor or function that allocates has a system form and an `_in`
   form: `x(...)` uses the system allocator and `x_in(allocator, ...)` takes
-  one. A constructor's base name says what it does: `new` builds and cannot
+  one, first after the receiver for a method. A constructor's base name says what it does: `new` builds and cannot
   fail, and `open` can fail or acquires a resource. An allocator built over a
   backing (`mem.Arena.open`) keeps its backing argument.
 - Branch names are semantic and describe the code, never a milestone or plan.

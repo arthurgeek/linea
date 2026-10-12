@@ -6,10 +6,13 @@ when the size is only known while the program runs — text you build, a list
 that grows, a request that arrives over the network. This chapter answers who
 provides that memory, who gives it back, and how.
 
-The short answer: **the caller always chooses.** Nothing in Linea allocates
-behind your back. A function that needs memory takes an allocator as an
-argument, or says in its name that it uses the system allocator, and the value
-it builds keeps that allocator to give the memory back.
+The short answer: **the caller always chooses.** Every call that allocates
+either passes the allocator or calls a form that uses the system allocator. A
+constructor or function that allocates comes in two forms: the one whose name
+ends in `_in` takes the allocator as its first argument (after the value a
+method is called on), and the one without the suffix uses the system allocator.
+Whichever is called, the value it builds keeps that allocator to give the
+memory back.
 
 ## An allocator is an argument
 
@@ -21,7 +24,7 @@ import std.io
 import std.mem
 
 // The caller passes the allocator, so the caller decides where the banner lives.
-fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
     var line = String.new_in(allocator)
     // Release the line if a `?` leaves early; returning it skips this.
     defer line.release()
@@ -32,7 +35,7 @@ fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] 
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let heading = banner(mem.system(), "Daily report") else |_| {
+    let heading = banner_in(mem.system(), "Daily report") else |_| {
         io.eprintln("out of memory")
         return .Ok(1)
     }
@@ -48,7 +51,8 @@ fn main() -> Result[UInt8, io.IoError] {
 
 Four things to notice:
 
-- `banner` is generic over `A: Allocator`, so it works with any allocator,
+- `banner_in` takes the allocator first, and its name ends in `_in` to say so.
+  It is generic over `A: Allocator`, so it works with any allocator,
   and `String.new_in(allocator)` makes an empty string that will allocate from
   it. `Allocator` and `String` are in the prelude. `where carries(.Ok:
   allocator)` says the string depends on the allocator you passed
@@ -58,7 +62,7 @@ Four things to notice:
 - Allocation can fail. `append` returns `Result[(), mem.Oom]`, and `?` passes
   an out-of-memory error up. No allocation in Linea aborts the program on its
   own.
-- `defer line.release()` inside `banner` frees the half-built line if a `?`
+- `defer line.release()` inside `banner_in` frees the half-built line if a `?`
   leaves early. On the path that returns the line, the line is handed to the
   caller instead, so the `defer` does not run there
   ([Copying, settling and sealing](04-copying-settling-and-sealing.md#a-defer-and-a-move)
@@ -66,7 +70,8 @@ Four things to notice:
   schedule the cleanup first, and return the value when it is done.
 
 If you know Zig, this is Zig's rule. If you know Rust, it is as if every `Vec`
-and `String` took its allocator as a parameter, and there were no global one.
+and `String` took its allocator as a parameter, and `Vec::new()` were a short
+way of passing the global one.
 
 ## Memory from the system is given back by hand
 
@@ -80,7 +85,7 @@ sealing](04-copying-settling-and-sealing.md#linear-values-you-must-not-forget).
 error[O-Leak]: `heading` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
   --> banner_leak.lin:20:31
    |
-16 |     let heading = banner(mem.system(), "Daily report") else |_| {
+16 |     let heading = banner_in(mem.system(), "Daily report") else |_| {
    |         ------- acquired here
 20 |     io.println(heading.view())?
    |                               ^ still owned here
@@ -140,7 +145,7 @@ vector in an arena: `Vec[Str, mem.Handle]` names the handle of an arena over
 the system allocator ([below](#arenas-allocate-many-things-give-them-back-at-once)),
 and the compiler prints the allocator it filled in when the two meet.
 
-A function that is generic over an allocator is another matter. `banner` above
+A function that is generic over an allocator is another matter. `banner_in` above
 takes `A: Allocator` to work with any allocator, and a result written
 `String` would quietly be a system string whatever `A` is. So a declaration that
 declares an allocator parameter must write the allocator of every type that
@@ -149,10 +154,10 @@ has one, either the parameter or the system allocator spelled out:
 <!-- guide: unchecked the error an edit of the program above produces -->
 ```
 error[T-DefaultedAllocator]: `String` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
-  --> banner_default.lin:5:81
+  --> banner_default.lin:5:84
    |
- 5 | fn banner[A: Allocator](allocator: A, title: Str) -> Result[String, mem.Oom] where carries(.Ok: allocator) {
-   |                                                             ^^^^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant
+ 5 | fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String, mem.Oom] where carries(.Ok: allocator) {
+   |                                                                ^^^^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant
 ```
 
 Write `String[A]` to return the string from the allocator the caller chose, or
@@ -172,7 +177,7 @@ import std.mem
 use mem.Owner
 
 // The caller passes the allocator, so the caller decides where the banner lives.
-fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
     var line = String.new_in(allocator)
     // Release the line if a `?` leaves early; returning it skips this.
     defer line.release()
@@ -190,7 +195,7 @@ fn main() -> Result[UInt8, io.IoError] {
     let titles = ["Morning", "Afternoon", "Evening"]
     for title in titles {
         // Nothing here is released by hand: the arena takes it all back at once.
-        let heading = banner(arena.handle(), title) else |_| {
+        let heading = banner_in(arena.handle(), title) else |_| {
             io.eprintln("the arena is full")
             return .Ok(1)
         }
@@ -208,7 +213,7 @@ fn main() -> Result[UInt8, io.IoError] {
 
 `mem.Arena.open(mem.system(), size: 4096)` takes 4096 bytes from the system
 allocator. `arena.handle()` answers a `mem.Handle`, an allocator that hands out
-pieces of those bytes, so `banner(arena.handle(), title)` builds its string
+pieces of those bytes, so `banner_in(arena.handle(), title)` builds its string
 inside the arena.
 
 `handle` is the one operation of the `Owner` trait, which is why the program
@@ -237,7 +242,7 @@ from an arena does not have to be settled, because the arena gives all of it
 back at once. The arena itself is the one thing that must be released, and
 `defer arena.release()`, written right after it is opened, does that on every
 way out of `main`: the normal end, the `return .Ok(1)` when the arena is full,
-and every `?`. `banner` did not change at all — the same function builds system
+and every `?`. `banner_in` did not change at all — the same function builds system
 strings for one caller and arena strings for another.
 
 An arena has a fixed size. When it runs out, allocating from it fails like any
@@ -298,9 +303,10 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ### A function's `_in` form takes the allocator
 
-Functions that allocate follow the same rule as constructors. `"Lisbon".to_owned()` copies text into the
-system allocator, and `"Lisbon".to_owned_in(arena.handle())` copies it into an
-arena. `fmt.render_owned` and `fmt.render_owned_in`, `json.parse` and
+Functions that allocate follow the same rule as constructors. A method's
+allocator comes first after the value it is called on:
+`"Lisbon".to_owned()` copies text into the system allocator, and
+`"Lisbon".to_owned_in(arena.handle())` copies it into an arena. `fmt.render_owned` and `fmt.render_owned_in`, `json.parse` and
 `json.parse_in`, and `Vec.filled` and `Vec.filled_in` are pairs in the same
 way:
 
@@ -357,19 +363,21 @@ error[T-Arity]: expected 0 argument(s), found 1
   ::: std/text/str.lin
 36 |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
    |            -------- declared here
+   |
+   = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
 ```
 
 Write `"Lisbon".to_owned()` for the system allocator, and
 `"Lisbon".to_owned_in(allocator)` when the allocator is one you were given. A
-function of your own that allocates can follow the same rule: take the
-allocator first in the `_in` form, and let the plain form pass `mem.system()`
-to it.
+function of your own that allocates follows the same rule, as `banner_in`
+does: take the allocator first in the `_in` form, and where callers want the
+system allocator, add a plain form that passes `mem.system()` to it.
 
 ### An arena outlives everything built in it
 
 Every string built from `arena.handle()` points into the arena, so the compiler
 holds the arena in place while any of them is still used. The programs in
-this section keep `banner` and the imports from the arena program in
+this section keep `banner_in` and the imports from the arena program in
 [Arenas](#arenas-allocate-many-things-give-them-back-at-once), and change only
 `main`. Release the arena too early:
 
@@ -377,7 +385,7 @@ this section keep `banner` and the imports from the arena program in
 ```linea
 fn main() -> Result[UInt8, io.IoError] {
     let arena = mem.Arena.open(mem.system(), size: 4096)
-    let heading = banner(arena.handle(), "Morning") else |_| {
+    let heading = banner_in(arena.handle(), "Morning") else |_| {
         arena.release()
         return .Ok(1)
     }
@@ -441,7 +449,7 @@ import std.mem
 use mem.Owner
 
 // The caller passes the allocator, so the caller decides where the banner lives.
-fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
     var line = String.new_in(allocator)
     // Release the line if a `?` leaves early; returning it skips this.
     defer line.release()
@@ -454,7 +462,7 @@ fn banner[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] 
 fn main() -> Result[UInt8, io.IoError] {
     let report = mem.Arena.open(mem.system(), size: 4096)
     defer report.release()
-    let title = banner(report.handle(), "Daily report") else |_| {
+    let title = banner_in(report.handle(), "Daily report") else |_| {
         return .Ok(1)
     }
     // The scratch arena's 256 bytes come out of the report's arena, which
@@ -462,7 +470,7 @@ fn main() -> Result[UInt8, io.IoError] {
     var scratch = mem.Arena.open(report.handle(), size: 256)
     for section in ["Morning", "Evening"] {
         &scratch.rewind()
-        let heading = banner(scratch.handle(), section) else |_| {
+        let heading = banner_in(scratch.handle(), section) else |_| {
             return .Ok(1)
         }
         io.println(heading.view())?
@@ -496,7 +504,7 @@ fn main() -> Result[UInt8, io.IoError] {
     for title in titles {
         // Each pass reuses the same 64 bytes: `rewind` takes back what the last pass used.
         &arena.rewind()
-        let heading = banner(arena.handle(), title) else |_| {
+        let heading = banner_in(arena.handle(), title) else |_| {
             io.eprintln("the arena is full")
             return .Ok(1)
         }
@@ -528,14 +536,14 @@ still be in use. Keep one heading from before the loop and print it afterwards:
 fn main() -> Result[UInt8, io.IoError] {
     var arena = mem.Arena.open(mem.system(), size: 64)
     defer arena.release()
-    let first = banner(arena.handle(), "Dawn") else |_| {
+    let first = banner_in(arena.handle(), "Dawn") else |_| {
         return .Ok(1)
     }
     let titles = ["Morning", "Afternoon", "Evening", "Night"]
     for title in titles {
         // Each pass reuses the same 64 bytes: `rewind` takes back what the last pass used.
         &arena.rewind()
-        let heading = banner(arena.handle(), title) else |_| {
+        let heading = banner_in(arena.handle(), title) else |_| {
             io.eprintln("the arena is full")
             return .Ok(1)
         }
@@ -683,7 +691,7 @@ fn main() -> Result[UInt8, io.IoError] {
     --> kept_arena_vec.lin:14:29
      |
   14 |     let count = mem.Closure.open_in(arena.handle(), [sink guests] || -> UInt64 { guests.length() }) else |_| {
-     |                             ^^^^^^^ capture `guests` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`
+     |                             ^^^^^^^ capture `guests` by `read`, or keep the closure with `mem.Closure.open(closure)`, whose memory is released
   ```
 
   The help names both ways out: look at the vector instead of owning it, or
@@ -797,7 +805,7 @@ from one arena:
 
 The rewinding loop above has exactly this shape. The loop is `serve`: it
 rewinds the arena at the start of each pass, which is step 4 for the pass
-before. `banner(arena.handle(), title)` is the handler: it builds its answer in
+before. `banner_in(arena.handle(), title)` is the handler: it builds its answer in
 the arena and releases nothing. And the `[O-Borrow]` that refused to keep
 `first` across a rewind is what stops a handler keeping a request's text, or a
 response, past the request it belongs to.
@@ -826,9 +834,9 @@ allocator.
 
 ## What you have seen
 
-- A function that allocates takes an allocator, and the caller chooses it.
-- `x(...)` uses the system allocator and `x_in(allocator, ...)` takes one, as
-  `new` and `new_in` do for constructors.
+- A constructor or function that allocates has two forms: `x(...)` uses the
+  system allocator and `x_in(allocator, ...)` takes the allocator the caller
+  chooses, as `new` and `new_in` do.
 - Allocation can fail, and says so with a `Result`.
 - Memory from `mem.system()` is released by hand; `defer` schedules the release
   on every way out, and a path that returns the value skips it.

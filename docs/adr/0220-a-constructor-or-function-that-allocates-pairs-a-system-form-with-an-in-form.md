@@ -31,15 +31,20 @@ two conventions for one decision.
 
 **A standard-library constructor, function or method that takes the allocator
 its result or its scratch storage comes from is a pair: `x(...)` uses the system
-allocator, and `x_in(allocator, ...)` takes the allocator first.** The
+allocator, and `x_in(allocator, ...)` takes the allocator first, or first
+after the receiver for a method (`text.to_owned_in(allocator)`).** The
 constructor rule still decides the base name: `new` builds and cannot fail, and
 `open` (or `create`) can fail or acquires a resource, so a resource constructor
 is `open` with `open_in`, as a plain one is `new` with `new_in`.
 
-The system form calls the `_in` form with `mem.system()` and nothing else, so the two cannot drift; its result names the system allocator in its
-type (`String`, `Vec[UInt8]`, `json.Value`), and its contract drops the
-allocator from the `_in` form's (`where carries()` where the `_in` form wrote
-`carries(.Ok: allocator)`).
+The system form calls the `_in` form with `mem.system()` and nothing else, so
+the two cannot drift. The one exception is `mem.Closure.open`: it calls the
+private routine `open_in` calls, with `mem.system()`, because forwarding a
+callback whose type is still a parameter to `open_in` would be refused where
+the closure's signature has to be settled. The system form's result names the
+system allocator in its type (`String`, `Vec[UInt8]`, `json.Value`), and its
+contract is the `_in` form's without the allocator: what the `_in` form
+carries from `allocator`, the system form carries from nothing.
 
 ```linea
 let name = "Ada".to_owned()                          // String
@@ -87,6 +92,21 @@ not incidental to them:
 - **A parameter that is not any allocator.** `http.new_request(memory, ...)`
   takes a request arena's `mem.Handle[P]`; a system form has no arena to name.
 
+Two more keep their allocator where it is, for reasons of their own:
+
+- **The `json.Decode` protocol.** `Decode.decode(value, allocator)`,
+  `missing(allocator)` and `DecodeKey.from_name(name, allocator)` are trait
+  methods a program implements for its own types, and the decoder calls them
+  with the allocator it was given. Callers reach them through `json.decode` and
+  `decode_in`, which follow the rule; the protocol's signature is what an
+  implementation writes, and it takes the allocator last so the value being
+  decoded leads.
+- **A server's parent allocator.** `http.serve` and `http.listen_and_serve`
+  take `parent:` as a defaulted named argument
+  ([0219](0219-a-function-type-parameter-and-its-parameter-may-default.md)),
+  beside the other settings a server is tuned with, so leaving it out is the
+  system form.
+
 ## Consequences
 
 - About 720 calls lose an argument that said nothing; the rest, which pass an
@@ -112,10 +132,10 @@ not incidental to them:
 makes it expressible). One name per operation, but the allocator moves from
 the first position to the last at every call that passes one, every
 `where carries(allocator)` clause keeps naming a parameter most calls never
-write, and the constructors already chose the pair. `http.listen_and_serve`
-keeps its defaulted `parent:` argument: the parent arena there is a tuning
-knob beside other named settings, not the place the result's memory comes
-from.
+write, and the constructors already chose the pair. `http.serve` and
+`http.listen_and_serve` keep a defaulted `parent:` argument: the parent there
+is a tuning knob beside other named settings, not the place the result's
+memory comes from.
 
 **Keep the allocator argument and change nothing** (0191's rule). Rejected for
 the census above: the argument was the same value at almost every call, and
