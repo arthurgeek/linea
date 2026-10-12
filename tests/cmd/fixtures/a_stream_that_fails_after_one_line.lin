@@ -4,7 +4,6 @@ import std.env
 import std.http
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.text
 
@@ -44,7 +43,7 @@ fn main() -> UInt8 {
     var server = http.logged(logger, router)
     defer server.release()
     let limits = http.Limits { connections = .Some(1), ..Default.default() }
-    match http.serve(listener, &server, mem.system(), limits) {
+    match http.serve(listener, &server, limits: limits) {
         Ok(_) => 0,
         Err(_) => 1,
     }

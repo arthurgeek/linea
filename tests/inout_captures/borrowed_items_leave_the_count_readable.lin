@@ -1,5 +1,4 @@
 import std.io
-import std.mem
 
 // `values` holds borrowed weights, and nothing in a vector of borrowed
 // numbers can change `inspected`, so `main` may read the count while the
@@ -14,7 +13,7 @@ fn main() -> Result[UInt8, io.IoError] {
             *parcel <= limit
         },
     )
-    let { values, iterator: _ } = accepted.collect(mem.system()).settled() else |_| {
+    let { values, iterator: _ } = accepted.collect().settled() else |_| {
         io.println("Unable to allocate the manifest")?
         return .Ok(1)
     }

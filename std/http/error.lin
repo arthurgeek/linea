@@ -114,7 +114,7 @@ fn set_kept_header[A: Allocator](inout kept: Option[ResponseHeaders[A]], allocat
     let previous = kept
     var headers = match previous {
         Some(headers) => headers,
-        None => ResponseHeaders.open(allocator),
+        None => ResponseHeaders.new_in(allocator),
     }
     let set = &headers.set(name, value)
     kept = .Some(headers)

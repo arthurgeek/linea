@@ -1,5 +1,4 @@
 import std.io
-import std.mem
 
 // The filter's predicate counts every parcel it inspects in `inspected`,
 // which stays in `main`. `[inout inspected]` lends it to the predicate until
@@ -19,7 +18,7 @@ fn main() -> Result[UInt8, io.IoError] {
             *parcel + 100
         },
     )
-    let { values, iterator: _ } = shipping.collect(mem.system()).settled() else |_| {
+    let { values, iterator: _ } = shipping.collect().settled() else |_| {
         io.println("Unable to allocate the manifest")?
         return .Ok(1)
     }

@@ -323,20 +323,6 @@ impl[T, A: Allocator] Vec[T, A] {
     }
 }
 
-test fn from_fn_takes_an_initializer_that_changes_a_lent_count() {
-    var calls = UInt64(0)
-    let built: Result[Vec[UInt64], Oom] = Vec.from_fn(
-        count: 3,
-        initializer: inout [inout calls] |index| {
-            calls += 1
-            index * 10
-        },
-    )
-    defer let values = built.unwrap()
-    testing.assert_eq(values.as_slice(), [UInt64(0), 10, 20].as_slice(), "from_fn built the wrong elements")?
-    testing.assert_eq(calls, UInt64(3), "from_fn did not call its initializer once per index")?
-}
-
 impl[T] Vec[T] {
     // Build a vector in the system allocator by calling the initializer once
     // per index, as `from_fn_in` does.
@@ -352,6 +338,20 @@ test fn from_fn_builds_a_vector_in_the_system_allocator() {
     let built: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 3, initializer: |index| index + 1)
     defer let values = built.unwrap()
     testing.assert_eq(values.as_slice(), [UInt64(1), 2, 3].as_slice(), "from_fn built the wrong elements")?
+}
+
+test fn from_fn_takes_an_initializer_that_changes_a_lent_count() {
+    var calls = UInt64(0)
+    let built: Result[Vec[UInt64], Oom] = Vec.from_fn(
+        count: 3,
+        initializer: inout [inout calls] |index| {
+            calls += 1
+            index * 10
+        },
+    )
+    defer let values = built.unwrap()
+    testing.assert_eq(values.as_slice(), [UInt64(0), 10, 20].as_slice(), "from_fn built the wrong elements")?
+    testing.assert_eq(calls, UInt64(3), "from_fn did not call its initializer once per index")?
 }
 
 test fn vec_constructors_reserve_exact_capacity_once() {

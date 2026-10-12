@@ -1,5 +1,4 @@
 import std.http
-import std.mem
 import std.net
 
 fn health[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
@@ -14,6 +13,6 @@ fn main() -> Result[UInt8, http.ServeError] {
         Ok(_) => {},
         Err(_) => return .Ok(1),
     }
-    http.serve(listener, &router, mem.system())?
+    http.serve(listener, &router)?
     return .Ok(0)
 }

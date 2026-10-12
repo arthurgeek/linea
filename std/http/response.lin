@@ -134,7 +134,7 @@ test fn a_status_response_has_no_body() {
 // body was cut short, and is logged. A HEAD request does not run it.
 pub fn stream[P: Allocator, F: Produce[P] + Release + Discardable](request: Request[P], sink produce: F) -> Result[Response[P], Error[P]] where carries(request, produce) {
     let kept = Closure.open_in(request.allocator(), produce)?
-    .Ok(.{ answer = .Ok, headers = ResponseHeaders.open(request.allocator()), content = .Streamed(.{ request = copy(request), produce = kept }) })
+    .Ok(.{ answer = .Ok, headers = ResponseHeaders.new_in(request.allocator()), content = .Streamed(.{ request = copy(request), produce = kept }) })
 }
 
 test fn a_streamed_response_has_no_held_body() {
@@ -188,7 +188,7 @@ test fn a_bytes_response_holds_its_body_as_built() {
 
 // `held` builds a 200 response whose body is `body`.
 fn held[P: Allocator](request: Request[P], sink body: Vec[UInt8, mem.Handle[P]]) -> Response[P] where carries(request, body) {
-    .{ answer = .Ok, headers = ResponseHeaders.open(request.allocator()), content = .Held(body) }
+    .{ answer = .Ok, headers = ResponseHeaders.new_in(request.allocator()), content = .Held(body) }
 }
 
 impl[P: Allocator] Response[P] {
@@ -737,7 +737,7 @@ fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_on
     let head = match read error.headers {
         Some(headers) => write_head(&body, error.status(), headers),
         None => {
-            let empty: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.open(body.answering.allocator())
+            let empty: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(body.answering.allocator())
             write_head(&body, error.status(), empty)
         },
     }

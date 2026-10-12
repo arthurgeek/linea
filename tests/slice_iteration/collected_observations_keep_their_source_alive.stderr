@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/slice_iteration/collected_observations_keep_their_source_alive.lin:8:5
+ --> tests/slice_iteration/collected_observations_keep_their_source_alive.lin:6:5
   |
-8 |     source.release()
+6 |     source.release()
   |     ^^^^^^ keep this place available until the last use of its observation
-9 |     *values[0]
+7 |     *values[0]
   |     ---------- the observation is still used here

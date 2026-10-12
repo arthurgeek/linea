@@ -148,7 +148,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] Release for CollectFailure
 test fn a_failed_collection_can_be_released_whole() {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let released = match (UInt64(0)..3).collect(arena.handle()) {
+    let released = match (UInt64(0)..3).collect_in(arena.handle()) {
         Ok(collected) => {
             let Collected { values, iterator: _ } = collected
             values.release()
@@ -180,7 +180,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] release.Settle for Collect
 test fn settling_a_failed_collection_keeps_the_allocation_reason() {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let settled = (UInt64(0)..3).collect(arena.handle()).settled()
+    let settled = (UInt64(0)..3).collect_in(arena.handle()).settled()
     let refused = match settled {
         Ok(collected) => {
             let Collected { values, iterator: _ } = collected
@@ -203,7 +203,7 @@ test fn collect_preserves_result_items_and_returns_exhausted_state() {
             }
         },
     )
-    let { values, iterator } = source.collect(mem.system()).unwrap()
+    let { values, iterator } = source.collect().unwrap()
     defer values.release()
     let (_remaining, callback) = iterator.into_parts()
     let { calls } = callback.into_captures()
@@ -214,7 +214,7 @@ test fn collect_preserves_result_items_and_returns_exhausted_state() {
 
 test fn collect_empty_input_succeeds_with_an_exhausted_allocator() {
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let { values, iterator } = (UInt64(0)..0).collect(arena.handle()).unwrap()
+    let { values, iterator } = (UInt64(0)..0).collect_in(arena.handle()).unwrap()
     var iterator = iterator
     testing.assert_eq(values.length(), UInt64(0), "empty collection produced an item")?
     testing.assert(&iterator.next().is_none(), "empty source gained an item")?
@@ -231,7 +231,7 @@ test fn collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
             item
         },
     )
-    let refused = match source.collect(arena.handle()) {
+    let refused = match source.collect_in(arena.handle()) {
         Err(refused) => refused,
         Ok(_) => panic("an exhausted arena accepted an item"),
     }
@@ -270,7 +270,7 @@ test fn collect_returns_linear_elements_and_captures_after_success_or_refusal() 
         )
         var total: UInt64 = 0
         var refused = false
-        let completed = match source.collect(arena.handle()) {
+        let completed = match source.collect_in(arena.handle()) {
             Ok(completed) => completed,
             Err(failed) => {
                 refused = true
@@ -318,7 +318,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_collection() -> Re
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
-            let collected = (UInt64(0)..40).collect(allocator).settled()?
+            let collected = (UInt64(0)..40).collect_in(allocator).settled()?
             let Collected { values, iterator: _ } = collected
             values.release()
             return .Ok(())

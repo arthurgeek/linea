@@ -29,7 +29,7 @@ fn build_manifest(sink arrivals: mem.Slice[UInt64], limit: UInt64) -> Result[Man
     // `.settled()` turns a refused allocation into its `Oom` for `?` to return.
     // `iterator: _` drops the finished chain, after which `inspected` holds
     // the final count.
-    let { values, iterator: _ } = accepted.map(shipping_weight).collect(mem.system()).settled()?
+    let { values, iterator: _ } = accepted.map(shipping_weight).collect().settled()?
     .Ok(.{ weights = values, inspected })
 }
 

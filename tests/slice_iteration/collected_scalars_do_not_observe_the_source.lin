@@ -1,10 +1,8 @@
-import std.mem
-
 fn main() -> UInt8 {
     var source = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     defer source.release()
     let transformed = source.as_slice().map(|sink item| -> UInt64 where carries() *item * 2)
-    let { values, iterator } = transformed.collect(mem.system()).unwrap()
+    let { values, iterator } = transformed.collect().unwrap()
     defer values.release()
     iterator.release()
     source[0] = 9

@@ -213,7 +213,7 @@ test fn owned_text_copies_into_another_allocator() {
 impl[A: Allocator] String[A] {
     // Copy the text into storage owned by the system allocator.
     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], Oom] where carries() {
-        self.view().to_owned()
+        self.to_owned_in(mem.system())
     }
 }
 

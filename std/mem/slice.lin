@@ -360,7 +360,7 @@ test fn slice_iteration_early_exit_leaves_the_source_mutable() {
 
 test fn slice_iteration_collects_observations_and_transformed_values() {
     defer let source = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
-    let { values: observations, iterator: observed } = source.as_slice().collect(system()).unwrap()
+    let { values: observations, iterator: observed } = source.as_slice().collect().unwrap()
     observed.release()
     let first = *observations[0]
     let last = *observations[2]
@@ -368,7 +368,7 @@ test fn slice_iteration_collects_observations_and_transformed_values() {
     testing.assert_eq(first, UInt64(1), "collection changed its first observation")?
     testing.assert_eq(last, UInt64(3), "collection changed its final observation")?
     let transformed = source.as_slice().map(|sink item| -> UInt64 where carries() *item * 2)
-    let { values, iterator } = transformed.collect(system()).unwrap()
+    let { values, iterator } = transformed.collect().unwrap()
     defer values.release()
     iterator.release()
     testing.assert_eq(values[0], UInt64(2), "transformation changed the first value")?
