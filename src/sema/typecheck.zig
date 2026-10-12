@@ -475,6 +475,7 @@ fn typecheckInternal(
     defer c.carried_places.deinit(gpa);
     defer c.borrowed_temporaries.deinit(gpa);
     defer c.interpolation_positions.deinit(gpa);
+    defer c.receivers_checked.deinit(gpa);
     defer c.refused.deinit(gpa);
     defer c.folded_indices.deinit(gpa);
     defer c.constant_values.deinit(gpa);
@@ -5242,6 +5243,13 @@ const Checker = struct {
     carried_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     interpolation_positions: std.AutoHashMapUnmanaged(ExprId, types_mod.PiecePosition) = .empty,
+    /// The receivers of `receiver.name` whose type `checkReceiver` has
+    /// recorded, one entry per receiver expression. A call is tried as several
+    /// forms -- a built-in operation, a declared or trait operation, then the
+    /// selection that reports what is missing -- and each reads the type the
+    /// first recorded instead of checking the receiver again, which would
+    /// report its mistakes twice and record its pieces twice.
+    receivers_checked: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The expression the last mismatch report poisoned. That poison is a
@@ -17092,25 +17100,22 @@ const Checker = struct {
             const postfix = isPostfixCallee(self.ast, self.res, c.callee);
             if (postfix) {
                 const field = c.callee;
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), types_mod.array_view_name)) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
+                const receiver = self.ast.unaryOperand(field);
+                const name = self.ast.tokenText(self.ast.exprMain(field));
+                // Checked once here; `postfixCall` and the selection below
+                // read what this recorded.
+                const receiver_type = try self.checkReceiver(id, receiver, self.ast.tokenName(self.ast.exprMain(field)), expected);
+                if (std.mem.eql(u8, name, types_mod.array_view_name)) {
                     if (self.builder.view().arrayViewReceiver(receiver_type)) |adjustment|
                         return self.checkArrayView(id, receiver, adjustment, expected, invocation_marked);
                 }
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), types_mod.array_length_name)) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
+                if (std.mem.eql(u8, name, types_mod.array_length_name)) {
                     const adjustment = self.builder.view().observedReceiver(receiver_type);
                     if (self.builder.get(adjustment.receiver) == .array)
                         return self.checkArrayLength(id, receiver, adjustment, expected, invocation_marked);
                 }
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), "into_captures")) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
-                    if (self.builder.get(receiver_type) == .closure)
-                        return self.checkClosureRecovery(id, receiver, receiver_type, expected, invocation_marked);
-                }
+                if (std.mem.eql(u8, name, "into_captures") and self.builder.get(receiver_type) == .closure)
+                    return self.checkClosureRecovery(id, receiver, receiver_type, expected, invocation_marked);
                 switch (try self.postfixCall(id, c.callee, c.args, expected)) {
                     .settled => |settled| return self.checkCallOf(id, settled.sig, settled.args, .postfix, expected, &.{}),
                     .absent => {},
@@ -18069,22 +18074,9 @@ const Checker = struct {
         given: []const ExprId,
         expected: ?Expected,
     ) std.mem.Allocator.Error!Postfixed {
-        const base = self.ast.withoutGroups(receiver);
-
         // The receiver decides which implementations are in play, so it is
-        // checked before anything is looked for. What this call is expected to produce
-        // reaches the receiver through the operation's result, so a generic
-        // call as the receiver can settle what its arguments left open.
-        const held = blk: {
-            const previous = self.method_expected;
-            defer self.method_expected = previous;
-            const success = self.successExpectationAt(id);
-            self.method_expected = if (expected != null or success != null)
-                .{ .target = base, .name = wanted, .expected = expected, .success = success }
-            else
-                null;
-            break :blk self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
-        };
+        // checked before anything is looked for.
+        const held = try self.checkReceiver(id, receiver, wanted, expected);
         if (held == .poison) {
             // Whether the call reaches an operation cannot be decided, so a
             // free function its name reaches counts as named rather than as
@@ -18122,25 +18114,55 @@ const Checker = struct {
             return .refused;
         };
 
-        // The parentheses a reader wrote around the receiver are nodes of their
-        // own, and this is the one path that reaches a receiver without walking
-        // them: the argument the call takes is the expression inside them. A
-        // group is worth what is inside it here as everywhere else, and a node
-        // left with no type at all is a poisoned one nothing reported.
-        var group = receiver;
-        while (self.ast.exprTag(group) == .grouped) : (group = self.ast.unaryOperand(group)) {
-            _ = self.record(group, held);
-        }
-
         const args = try self.gpa.alloc(ExprId, given.len + 1);
         errdefer self.gpa.free(args);
-        args[0] = base;
+        args[0] = self.ast.withoutGroups(receiver);
         @memcpy(args[1..], given);
         try self.postfix.append(self.gpa, .{
             .call = @intCast(id.index()),
             .args = args,
         });
         return .{ .settled = .{ .sig = sig, .args = args } };
+    }
+
+    /// The type of `receiver` where `receiver.wanted` is written, checked
+    /// once.
+    ///
+    /// A postfix call is tried as several forms -- an array's or a closure's
+    /// built-in operation, a declared or trait operation, then the selection
+    /// that reports a name the type lacks -- and every one reads its receiver
+    /// through here. The first records the type and the rest read it: a
+    /// receiver checked again would report its mistakes again and record each
+    /// value of an interpolated literal again.
+    ///
+    /// What the call `id` is expected to produce reaches the receiver through
+    /// the operation's result, so a generic call as the receiver can settle
+    /// what its arguments left open. A selection that is not called passes
+    /// `.none` and expects nothing.
+    ///
+    /// The parentheses a reader wrote around the receiver are nodes of their
+    /// own, and the receiver is checked inside them: the argument a call takes
+    /// is the expression the parentheses hold. A group is worth what is inside
+    /// it here as everywhere else, so each records the receiver's type.
+    fn checkReceiver(self: *Checker, id: ExprId, receiver: ExprId, wanted: StringId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+        const base = self.ast.withoutGroups(receiver);
+        if ((try self.receivers_checked.getOrPut(self.gpa, base)).found_existing) return self.builder.exprType(base);
+
+        const held = blk: {
+            const previous = self.method_expected;
+            defer self.method_expected = previous;
+            const success = if (id == ExprId.none) null else self.successExpectationAt(id);
+            self.method_expected = if (id != ExprId.none and (expected != null or success != null))
+                .{ .target = base, .name = wanted, .expected = expected, .success = success }
+            else
+                null;
+            break :blk self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
+        };
+        var group = receiver;
+        while (self.ast.exprTag(group) == .grouped) : (group = self.ast.unaryOperand(group)) {
+            _ = self.record(group, held);
+        }
+        return held;
     }
 
     /// One key for a declaration and a name, so one table serves the program.
@@ -20389,7 +20411,7 @@ const Checker = struct {
             }
         }
 
-        var of = self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
+        var of = try self.checkReceiver(ExprId.none, base, self.ast.tokenName(self.ast.exprMain(id)), null);
         if (of == .poison) {
             // Whether a call on a value of no known type reaches an
             // operation cannot be decided, so a free function its name

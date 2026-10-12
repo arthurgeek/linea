@@ -1,0 +1,26 @@
+// Each mistake in a receiver that holds an interpolated literal is reported
+// once: an operation the receiver's type does not have, and a value that
+// cannot be written into text.
+import std.fmt
+
+struct Plain {
+    x: UInt8,
+}
+
+fn show[T: fmt.Display](sink value: T) -> T {
+    return value
+}
+
+fn label[T](value: T) -> UInt8 {
+    let _labelled = "x{value}".trim()
+    return 0
+}
+
+fn main() -> UInt8 {
+    let count: UInt8 = 3
+    let _shown = show("x{count}").trim()
+    let _measured = show("x{count}").length()
+    let plain = Plain { x = 1 }
+    let _unwritable = "x{plain}".trim()
+    return label(count)
+}
