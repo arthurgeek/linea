@@ -101,7 +101,7 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 }
 
 fn main() -> UInt8 {
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     var router: http.Router[()] = http.Router.new()
     let _ = routes(&router) else |error| {
         logger.error("cannot register a route", log.field("error", error))

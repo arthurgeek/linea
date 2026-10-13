@@ -1729,7 +1729,6 @@ environment and standard input instead of a connection.
 import std.http
 import std.io
 import std.log
-import std.mem
 
 // `Visitor` is the name a query or a form gives, such as `name=Ada`.
 @derive(http.Params, Release)
@@ -1760,7 +1759,7 @@ fn main() -> UInt8 {
         return 2
     }
     // `http.logged` writes one line for the request to standard error.
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     // `serve_cgi` reads the request this process was started for from its
     // environment and standard input, answers it on standard output, and
     // returns.

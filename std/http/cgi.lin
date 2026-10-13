@@ -78,8 +78,8 @@ impl Display for CgiError {
 }
 
 test fn a_cgi_error_displays_its_cause() {
-    defer let not_cgi = fmt.render_owned(mem.system(), CgiError.NotCgi).unwrap()
-    defer let small = fmt.render_owned(mem.system(), CgiError.ArenaTooSmall).unwrap()
+    defer let not_cgi = fmt.render_owned(CgiError.NotCgi).unwrap()
+    defer let small = fmt.render_owned(CgiError.ArenaTooSmall).unwrap()
     testing.assert_eq(not_cgi.view(), "REQUEST_METHOD is not set, so no web server started this program to answer a request", "the missing request changed")?
     testing.assert_eq(small.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
     .Ok(())
@@ -123,7 +123,7 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
         return .Err(.ArenaTooSmall)
     }
     let arena = mem.Arena.open(parent, limits.request_arena_bytes)
-    let answered = match io.BufferedWriter.open(arena.handle(), capacity: response_buffer_bytes, writer: io.stdout()) {
+    let answered = match io.BufferedWriter.open_in(arena.handle(), capacity: response_buffer_bytes, writer: io.stdout()) {
         Ok(writer) => {
             var variables = env.entries()
             var standard = StandardOutput {}
@@ -132,7 +132,7 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
         Err(failure) => {
             let BufferOpenFailure { resource, reason: _ } = failure
             var standard = resource
-            let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.open(arena.handle())
+            let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(arena.handle())
             let wrote = write_head(&standard, .ServiceUnavailable, headers, .Cgi)
             headers.release()
             observe_unanswered(&server, .ServiceUnavailable, wrote, .Memory)
@@ -150,9 +150,10 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
 }
 
 test fn an_arena_too_small_for_the_limits_is_refused_with_a_parent() {
+    defer let parent = mem.Arena.open(mem.system(), size: 65536)
     let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
-    let router: Router[()] = Router.new()
-    testing.assert_eq(serve_cgi_in(mem.system(), router, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
+    let router: Router[(), mem.Handle] = Router.new_in(parent.handle())
+    testing.assert_eq(serve_cgi_in(parent.handle(), router, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
     .Ok(())
 }
 
@@ -549,7 +550,7 @@ fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Hand
             return outcome
         },
     }
-    var reader = io.BufferedReader.open(memory, capacity: request_buffer_bytes, reader: input) else |failure| {
+    var reader = io.BufferedReader.open_in(memory, capacity: request_buffer_bytes, reader: input) else |failure| {
         let BufferOpenFailure { resource: _, reason: _ } = failure
         let wrote = refuse_cgi(&unanswered, .ServiceUnavailable, memory)
         observe_unanswered(&handler, .ServiceUnavailable, wrote, .Memory)
@@ -625,7 +626,7 @@ fn refuse_unread[H: Observer, P: Allocator](inout output: Output[P], sink error:
 // Write the head of an answer that is `status` alone to `output` and flush
 // it.
 fn refuse_cgi[P: Allocator](inout output: Output[P], status: Status, memory: mem.Handle[P]) -> Result[UInt64, io.WriteFailure[io.IoError]] {
-    let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.open(memory)
+    let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(memory)
     let wrote = write_head(&output, status, headers, .Cgi)
     headers.release()
     let _head = wrote?
