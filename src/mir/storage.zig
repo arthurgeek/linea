@@ -1484,9 +1484,11 @@ pub const Phase = struct {
     // -- The transfer function. --
 
     /// A fresh definition of an instruction value: whatever a previous pass of
-    /// a loop left on it is gone.
+    /// a loop left on it is gone. A value that cannot hold a dependency
+    /// defines none, whatever its operands carried.
     fn define(self: *Phase, id: InstId, deps: SetId, stale: MarkId) !void {
-        try self.set(self.instEntity(id), .{ .deps = deps, .stale = stale });
+        const holds = (deps == empty_set and stale == empty_set) or self.holdsDependencies(self.mir.typeOf(id));
+        try self.set(self.instEntity(id), .{ .deps = if (holds) deps else empty_set, .stale = if (holds) stale else empty_set });
     }
 
     fn refuse(self: *Phase, kind: @FieldType(Refusal, "kind"), at: InstId, entity: Entity, cause: InstId) !void {
@@ -1504,6 +1506,17 @@ pub const Phase = struct {
     fn mayCarry(self: *const Phase, ty: TypeId) bool {
         std.debug.assert(ty.index() < self.module.types.dependency_containment.len);
         return self.module.types.mayCarryDependencies(ty);
+    }
+
+    /// Whether a value of this type, defined or written, keeps what its source
+    /// carried. A type no observation can be held in keeps nothing: the error
+    /// payload of a result whose success payload borrows overlaps that
+    /// payload's bytes, and carries nothing of what they held. An integer
+    /// keeps what it carries whatever its type, because the address bits
+    /// `address_bits` makes of an array are an integer, and storing them is
+    /// how a view over the array reaches the slot that holds it.
+    fn holdsDependencies(self: *const Phase, ty: TypeId) bool {
+        return self.mayCarry(ty) or self.module.representationOf(ty).computation == .integer;
     }
 
     /// A read of `ty` through an address, or of a carrier's value itself:
@@ -1615,9 +1628,13 @@ pub const Phase = struct {
     /// initialised part by part -- which is what a `let` of a literal is,
     /// and what a loop does with it on every pass -- from one field assigned
     /// into a value holding a stale view elsewhere. Ownership accepts the
-    /// first, so this accepts both.
-    fn writeFrom(self: *Phase, at: InstId, dst: Base, ty: TypeId, from: SetId, from_marks: MarkId) !void {
+    /// first, so this accepts both. A written type that cannot hold a
+    /// dependency brings none.
+    fn writeFrom(self: *Phase, at: InstId, dst: Base, ty: TypeId, written: SetId, written_marks: MarkId) !void {
         if (dst.root == no_entity) return;
+        const holds = (written == empty_set and written_marks == empty_set) or self.holdsDependencies(ty);
+        const from = if (holds) written else empty_set;
+        const from_marks = if (holds) written_marks else empty_set;
         const a = self.accessOf(dst, ty);
         try self.invalidate(dst.root, a, at);
         var v = self.valuesOf(dst.root);
@@ -1716,13 +1733,10 @@ pub const Phase = struct {
                 // The source is taken before the destination is written, so
                 // a self-assignment leaves its place holding the value. The
                 // parts the source holds in the copied bytes land at the same
-                // places in the destination, unless the copied type is one no
-                // observation can be held in: the error payload of a result
-                // whose success payload borrows overlaps that payload's bytes,
-                // and carries nothing of what they held.
+                // places in the destination.
                 var carried: SetId = empty_set;
                 var carried_marks: MarkId = empty_set;
-                if (src.carrier != no_entity and dst.root != no_entity and self.mayCarry(ty)) {
+                if (src.carrier != no_entity and dst.root != no_entity) {
                     const from = self.accessOf(src, ty);
                     const to = self.accessOf(dst, ty).first();
                     const placement: Placement = .{ .at = .{ .off = to.off, .len = to.len, .structure = true } };
@@ -1877,7 +1891,7 @@ pub const Phase = struct {
         }
 
         if (mir.tagOf(id) == .call or mir.tagOf(id) == .call_indirect) {
-            try self.set(self.instEntity(id), .{ .deps = result_deps, .stale = result_marks });
+            try self.define(id, result_deps, result_marks);
         }
     }
 
