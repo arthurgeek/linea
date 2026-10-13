@@ -1,4 +1,4 @@
-# 220. A route pattern matches its own path
+# 222. A route pattern matches its own path
 
 Status: Accepted — 2026-10-13. Supersedes the subtree clause of
 [0154](0154-sockets-and-http-follow-go.md).

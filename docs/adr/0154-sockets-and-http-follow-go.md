@@ -10,7 +10,7 @@ Status: Accepted — 2026-09-24. Builds on
 [0162](0162-question-mark-converts-an-error-through-from.md).
 Extended by [0180](0180-state-is-lent-down-through-every-handler.md).
 Its subtree clause, that a path ending in `/` matches every path beneath it,
-is superseded by [0220](0220-a-route-pattern-matches-its-own-path.md).
+is superseded by [0222](0222-a-route-pattern-matches-its-own-path.md).
 
 ## Context
 
