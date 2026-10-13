@@ -73,7 +73,7 @@ Reading input that may be malformed or never ends, and recovering from bad recor
 
 Sockets, connections, and what a server owes each one.
 
-- [tcp_echo.lin](tcp_echo.lin): echoes text over TCP; a server, a client, and `defer let` for connections.
+- [tcp_echo.lin](tcp_echo.lin): echoes text over TCP; a server, a client, `io.read_text`, and `defer let` for connections.
 - [visitor_counter.lin](visitor_counter.lin): numbers visitors across connections; state shared by a server.
 - [bounded_echo.lin](bounded_echo.lin): an echo server a slow client cannot hold up; timeouts, deadlines, and size caps.
 

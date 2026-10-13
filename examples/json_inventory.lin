@@ -149,7 +149,7 @@ fn load_inventory() -> Result[json.Value, InventoryError] {
     if args.count() != 2 {
         return .Err(.Usage)
     }
-    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap())?
+    let path = fs.Path.from_arg(args, 1).unwrap()?
     // `read_file` reads the file no further than the parser accepts, parses
     // it and releases the text. Its error says whether reading or parsing
     // failed.

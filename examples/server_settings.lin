@@ -48,7 +48,7 @@ fn load(args: env.Args) -> Option[String] {
         }
         return .Some(copied)
     }
-    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap()) else |error| {
+    let path = fs.Path.from_arg(args, 1).unwrap() else |error| {
         io.eprintln("the settings path cannot name a file: {error:?}")
         return .None
     }

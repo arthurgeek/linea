@@ -1355,6 +1355,11 @@ read 0 bytes
 could not read the missing file: file read failed: file operation failed after 0 bytes: Open failed (NotFound) after 0 bytes; errno 2
 ```
 
+A path named on the command line is made with `fs.Path.from_arg(args, 1)`. It
+reads the argument's exact bytes, so a file name that is not valid UTF-8 still
+works, and it answers `None` when there is no such argument and an error when
+the argument holds a NUL byte.
+
 `read_text` uses the system allocator; `fs.read_text_in(allocator, path,
 max_bytes)` takes one, as `new_in` does.
 

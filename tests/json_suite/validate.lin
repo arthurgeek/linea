@@ -8,7 +8,7 @@ fn main() -> UInt8 {
     if args.count() != 2 {
         return 64
     }
-    let path = match fs.Path.from_bytes(args.bytes_at(1).unwrap()) {
+    let path = match fs.Path.from_arg(args, 1).unwrap() {
         Ok(path) => path,
         Err(_) => return 64,
     }

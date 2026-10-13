@@ -173,17 +173,13 @@ fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
         io.eprintln("cannot finish sending: {error}")
         return false
     }
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
-        io.eprintln("cannot read the echo: {failure}")
-        failure.release()
+    // `read_text` reads until the server stops writing and checks that the
+    // bytes are UTF-8; its error says which of the two failed.
+    defer let echoed = io.read_text(&connection, max_bytes: 4096) else |error| {
+        io.eprintln("cannot read the echo: {error}")
         return false
     }
-    let echoed = Str.from_bytes(received.as_slice()) else |_| {
-        io.eprintln("the echo was not text")
-        return false
-    }
-    io.print(echoed).is_ok()
+    io.print(echoed.view()).is_ok()
 }
 
 // `echo_text` connects a client to a fresh listener, sends `text`, echoes it

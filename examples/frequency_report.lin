@@ -124,12 +124,9 @@ fn main() -> Result[UInt8, io.IoError] {
     let counted = if args.count() <= 1 {
         count_lines(sample)
     } else {
-        // Paths use the original argument bytes; file contents must be UTF-8.
-        let argument = args.bytes_at(1) else {
-            io.eprintln("could not read the input path argument")
-            return .Ok(1)
-        }
-        let path = fs.Path.from_bytes(argument) else |reason| {
+        // `from_arg` makes the path from the argument's original bytes, which
+        // need not be UTF-8, though file contents must be.
+        let path = fs.Path.from_arg(args, 1).unwrap() else |reason| {
             io.eprintln("invalid input path: {reason:?}")
             return .Ok(1)
         }

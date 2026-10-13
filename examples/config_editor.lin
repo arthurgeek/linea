@@ -290,7 +290,7 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
     if args.count() < first + 2 || args.count() > first + 3 || (batch && args.count() != first + 3) {
         return .Err(.Usage)
     }
-    let path_bytes = args.bytes_at(first) else {
+    let located = fs.Path.from_arg(args, first) else {
         return .Err(.Arguments)
     }
     let key = args.at(first + 1) else {
@@ -299,7 +299,7 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
     if key.length() == 0 || key.trim_ascii() != key || key.starts_with("#") || key.find("=").is_some() || key.find("\n").is_some() || key.find("\r").is_some() {
         return .Err(.Key)
     }
-    let path = fs.Path.from_bytes(path_bytes)?
+    let path = located?
     // `read_text` reads all the input and decodes it as UTF-8. Its error is
     // converted into a `ConfigFailure` by `?`.
     defer let input = if batch {

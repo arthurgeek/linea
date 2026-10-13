@@ -47,7 +47,7 @@ fn main() -> UInt8 {
     let loaded: Result[Settings, json.DecodeFileError] = if args.count() == 1 {
         json.decode(sample).map_err(.Decode)
     } else {
-        let path = fs.Path.from_bytes(args.bytes_at(1).unwrap()) else |_| {
+        let path = fs.Path.from_arg(args, 1).unwrap() else |_| {
             io.eprintln("invalid settings path")
             return 1
         }

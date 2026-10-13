@@ -45,20 +45,17 @@ use net.Acceptor
 fn print_all(label: Str, inout connection: net.Connection) -> Result[(), io.IoError] {
     let arena = mem.Arena.open(mem.system(), size: 4096)
     defer arena.release()
-    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 1024) else |failure| {
-        // The failure owns any bytes read before it, so it is released.
-        failure.release()
-        return io.println("{label}: the read failed")
+    // `read_text_in` reads until the other side stops writing and checks that
+    // the bytes are UTF-8. The text lives in the arena, and the error owns
+    // nothing, so a failure needs no release.
+    let message = io.read_text_in(arena.handle(), &connection, max_bytes: 1024) else |error| {
+        return io.println("{label}: the read failed: {error}")
     }
-    // `Str.from_bytes` reads the bytes as text, or fails when they are not UTF-8.
-    let message = Str.from_bytes(received.as_slice()) else |_| {
-        return io.println("{label}: that was not text")
-    }
-    io.println("{label} received: {message}")
+    io.println("{label} received: {message.view()}")
 }
 
 // The client says ping, the server answers pong. `shutdown_write` tells the
-// other side that nothing more is coming, which ends its `read_all`.
+// other side that nothing more is coming, which ends its `read_text_in`.
 fn exchange(inout client: net.Connection, inout server: net.Connection) -> Result[(), io.IoError] {
     &client.write_str("ping")?
     &client.shutdown_write()?
@@ -129,6 +126,11 @@ client received: pong
   listener's own and needs no `use`.
 - `write_str` sends text; `shutdown_write` tells the other side nothing more
   is coming, which is what lets `io.read_all` on the far end finish.
+- `io.read_text_in(arena.handle(), &connection, max_bytes: 1024)` reads until
+  the other side stops writing and decodes the bytes as UTF-8, answering the
+  text or a `ReadTextError` that says which step failed and owns nothing.
+  `io.read_all_in` answers the raw bytes instead, which a server echoing what
+  it received wants. Both refuse input past `max_bytes`.
 - Every early `return` closes what is open so far, and the end of `main`
   closes both connections and the listener. Leave any of those out and the
   program does not compile.
@@ -252,17 +254,11 @@ fn print_greeting(label: Str, sink client: net.Connection) {
     var visitor = client
     let arena = mem.Arena.open(mem.system(), size: 4096)
     defer arena.release()
-    match io.read_all_in(arena.handle(), &visitor, max_bytes: 64) {
-        Ok(bytes) => match Str.from_bytes(bytes.as_slice()) {
-            Ok(text) => {
-                let _printed = io.print("{label}: {text}")
-            },
-            Err(_) => io.eprintln("{label}: that was not text"),
+    match io.read_text_in(arena.handle(), &visitor, max_bytes: 64) {
+        Ok(text) => {
+            let _printed = io.print("{label}: {text.view()}")
         },
-        Err(failure) => {
-            failure.release()
-            io.eprintln("{label}: the read failed")
-        },
+        Err(error) => io.eprintln("{label}: the read failed: {error}"),
     }
     let _closed = visitor.close()
 }
@@ -602,17 +598,13 @@ fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
         io.eprintln("cannot finish sending: {error}")
         return false
     }
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
-        io.eprintln("cannot read the echo: {failure}")
-        failure.release()
+    // `read_text` reads until the server stops writing and checks that the
+    // bytes are UTF-8; its error says which of the two failed.
+    defer let echoed = io.read_text(&connection, max_bytes: 4096) else |error| {
+        io.eprintln("cannot read the echo: {error}")
         return false
     }
-    let echoed = Str.from_bytes(received.as_slice()) else |_| {
-        io.eprintln("the echo was not text")
-        return false
-    }
-    io.print(echoed).is_ok()
+    io.print(echoed.view()).is_ok()
 }
 ```
 
