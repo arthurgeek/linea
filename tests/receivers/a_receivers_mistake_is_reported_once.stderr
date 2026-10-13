@@ -1,0 +1,15 @@
+error[T-UnknownOperation]: `[UInt64; 3]` has no operation `bogus`
+ --> tests/receivers/a_receivers_mistake_is_reported_once.lin:7:17
+  |
+7 |     let _view = xs.bogus().view()
+  |                 ^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `[UInt64; 3]` has no operation `bogus`
+ --> tests/receivers/a_receivers_mistake_is_reported_once.lin:8:19
+  |
+8 |     let _length = xs.bogus().length()
+  |                   ^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `[UInt64; 3]` has no operation `bogus`
+ --> tests/receivers/a_receivers_mistake_is_reported_once.lin:9:20
+  |
+9 |     let _missing = xs.bogus().absent()
+  |                    ^^^^^^^^ no operation of this name is declared for this type

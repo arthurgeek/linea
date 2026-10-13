@@ -1,0 +1,19 @@
+// A variant's payload settles a generic enum's parameters and is then held to
+// them, and each mistake inside the payload is reported once: an operation its
+// receiver's type does not have, one an interpolated literal's type does not
+// have, and a generic structure built without the arguments it declares.
+struct Box[T] {
+    v: T,
+}
+
+fn ident[T](sink v: T) -> T {
+    v
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    let _missing = Option.Some(n.bogus())
+    let _rendered = Option.Some(ident("x{n}".fmt_text()))
+    let _boxed = Option.Some(Box { v = "x{n}" })
+    return 0
+}

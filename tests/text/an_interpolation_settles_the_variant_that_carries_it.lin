@@ -1,0 +1,50 @@
+// An interpolated literal is a value, so a generic variant can carry it and
+// takes its type parameter from it. The literal settles `Option`'s `T` in
+// every position a payload can hold it: directly, inside parentheses or a
+// block, through a call, inside another variant, and as what a closure
+// returns. The text it carries is written with `fmt`, the operation its type
+// implements, which a literal can also call directly.
+import std.io
+import std.text
+
+use io.IoError
+use io.println
+
+fn ident[T](sink v: T) -> T {
+    v
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let n: UInt8 = 3
+    var out = text.String.new()
+
+    let direct = Option.Some("a{n} ")
+    let grouped = Option.Some(("b{n} "))
+    let block = Option.Some(
+        {
+            "c{n} "
+        },
+    )
+    let called = Option.Some(ident("d{n} "))
+    let nested = Option.Some(Option.Some("e{n} "))
+    let wrapped = ident(Option.Some("f{n} "))
+    let listed = [Option.Some("g{n} ")]
+    let deferred = Option.Some([n] || "h{n}")
+
+    "<{n}> ".fmt(&out).unwrap()
+    match direct { Some(t) => t.fmt(&out).unwrap(), None => () }
+    match grouped { Some(t) => t.fmt(&out).unwrap(), None => () }
+    match block { Some(t) => t.fmt(&out).unwrap(), None => () }
+    match called { Some(t) => t.fmt(&out).unwrap(), None => () }
+    match nested { Some(inner) => match inner { Some(t) => t.fmt(&out).unwrap(), None => () }, None => () }
+    match wrapped { Some(t) => t.fmt(&out).unwrap(), None => () }
+    for item in listed {
+        match item { Some(t) => t.fmt(&out).unwrap(), None => () }
+    }
+    match deferred { Some(f) => f().fmt(&out).unwrap(), None => () }
+
+    let printed = println("{out}")
+    out.release()
+    printed?
+    return .Ok(0)
+}

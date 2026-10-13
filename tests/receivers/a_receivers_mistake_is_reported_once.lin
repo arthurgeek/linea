@@ -1,0 +1,11 @@
+// A mistake inside a receiver is reported once, whichever operation the call
+// names: an array's `view` and `length` look at their receiver before any
+// declared operation does, and the selection that reports a missing name
+// reads the same checked receiver.
+fn main() -> UInt8 {
+    let xs: [UInt64; 3] = [1, 2, 3]
+    let _view = xs.bogus().view()
+    let _length = xs.bogus().length()
+    let _missing = xs.bogus().absent()
+    return 0
+}

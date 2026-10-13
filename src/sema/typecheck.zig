@@ -23381,9 +23381,18 @@ const Checker = struct {
         // is not a type. Where nothing expects one, the payload says what the
         // arguments are -- so the expectation is manufactured here and the
         // ordinary path runs against a real instantiation.
-        const inferred = try self.inferConstruct(id, expected);
+        //
+        // The values inference checked are read as it checked them on every
+        // path below. Checking one again would report its mistakes again and
+        // record each value of an interpolated literal again.
+        const walked = try self.gpa.alloc(bool, c.args.len);
+        defer self.gpa.free(walked);
+        @memset(walked, false);
+        const inferred = try self.inferConstruct(id, expected, walked);
         if (inferred == .reported) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.record(id, .poison);
         }
 
@@ -23405,12 +23414,16 @@ const Checker = struct {
         });
         self.construction_callee = previous_callee;
         if (t == .poison) {
-            for (c.args) |a| _ = try self.check(a, if (unknown) expected else null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, if (unknown) expected else null);
+            };
             return self.record(id, .poison);
         }
 
         if (self.sealedHere(t)) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.reportSealed(id, t, "only its own module can build one");
         }
 
@@ -23418,7 +23431,9 @@ const Checker = struct {
         const k = shape.ordinal;
         const carries: usize = shape.payloads;
         if (c.args.len != carries) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.report(
                 .t_arity,
                 id,
@@ -23431,13 +23446,17 @@ const Checker = struct {
         // Each value's type flows into its argument, so a literal takes it the
         // way an argument to a function takes its parameter's type.
         var argument_diverges = false;
-        for (c.args, 0..) |a, j| {
-            const found = try self.check(a, .{
+        for (c.args, walked, 0..) |a, w, j| {
+            const want: Expected = .{
                 .ty = self.builder.variantFieldType(t, k, @intCast(j)),
                 .at = .{ .file = self.ast.fileOfExpr(c.callee), .span = self.ast.exprSpan(c.callee) },
                 .reason = .payload,
-                .inference = if (expected) |want| want.inference else null,
-            });
+                .inference = if (expected) |e| e.inference else null,
+            };
+            const found = if (w)
+                try self.expect(a, self.builder.exprType(a), want)
+            else
+                try self.check(a, want);
             if (found == .never) argument_diverges = true;
         }
 
@@ -29453,11 +29472,14 @@ const Checker = struct {
     ///
     /// The payload's *checked* type is what settles it, so
     /// `Option.Some(copy(x))` reads `x`'s type rather than the shape of the
-    /// expression that produced it.
+    /// expression that produced it. Each value checked here is marked in
+    /// `walked`, and the caller reads its recorded type rather than checking
+    /// it again.
     fn inferConstruct(
         self: *Checker,
         id: ExprId,
         expected: ?Expected,
+        walked: []bool,
     ) std.mem.Allocator.Error!Inferred {
         if (Expected.typeOf(expected) != null) return .nothing;
 
@@ -29492,6 +29514,11 @@ const Checker = struct {
             };
         };
 
+        // Which parameters a payload was checked to settle. One whose payload
+        // has no type was reported where that payload is written.
+        const tried = try self.gpa.alloc(bool, params.len);
+        defer self.gpa.free(tried);
+        @memset(tried, false);
         for (c.args, 0..) |a, j| {
             const carried = self.builder.variantFieldType(template, k, @intCast(j));
             const p = switch (self.builder.get(carried)) {
@@ -29504,6 +29531,8 @@ const Checker = struct {
             if (p.owner != d.index() or p.index >= found.len) continue;
             if (found[p.index] != .poison) continue;
             found[p.index] = try self.check(a, null);
+            walked[j] = true;
+            tried[p.index] = true;
         }
 
         if (heading) |h| try self.closeAliasHeading(h, found);
@@ -29512,8 +29541,11 @@ const Checker = struct {
         // variant carrying one of two says which is missing. Reporting it here
         // is what keeps that knowledge: the caller sees only that no type was
         // determined, and would have to say so about the whole declaration.
-        for (found, self.ast.declTypeParams(d)) |f, g| {
+        // A payload with no type was reported where it is written, and the
+        // parameter it would have settled is that mistake's consequence.
+        for (found, tried, self.ast.declTypeParams(d)) |f, t, g| {
             if (f != .poison) continue;
+            if (t) return .reported;
             _ = self.report(
                 .t_infer,
                 id,

@@ -1,0 +1,15 @@
+error[T-UnknownOperation]: `UInt8` has no operation `bogus`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:15:32
+   |
+15 |     let _missing = Option.Some(n.bogus())
+   |                                ^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `fmt_text`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:16:39
+   |
+16 |     let _rendered = Option.Some(ident("x{n}".fmt_text()))
+   |                                       ^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-Bound]: `Box` takes 1 type argument(s), and was given 0
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:17:30
+   |
+17 |     let _boxed = Option.Some(Box { v = "x{n}" })
+   |                              ^^^ give it the arguments it declares
