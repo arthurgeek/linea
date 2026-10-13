@@ -5113,6 +5113,11 @@ pub const Purpose = enum { program, tests };
 /// last. The root module contributes nothing, which is what makes a test in a
 /// program of one file known by its bare name.
 ///
+/// A `.` inside a directory's name is written `\.`, and a `\` is written
+/// `\\`, so the one directory `a.b` names its tests `a\.b.name` and the two
+/// directories `a/b` name theirs `a.b.name`. Every other byte is the path as
+/// written, so a reader still recognises the directory.
+///
 /// Not the emitted symbol. That one is mangled and carries type arguments,
 /// because it identifies an instantiation to a linker; this one identifies a
 /// test to a reader, who copies it out of a transcript and back onto a command
@@ -5142,7 +5147,11 @@ pub fn qualifiedTestName(
     if (beneath) {
         var rest = module_dir[root.len..];
         while (rest.len > 0 and rest[0] == '/') rest = rest[1..];
-        for (rest) |c| try out.append(gpa, if (c == '/') '.' else c);
+        for (rest) |c| switch (c) {
+            '/' => try out.append(gpa, '.'),
+            '.', '\\' => try out.appendSlice(gpa, &.{ '\\', c }),
+            else => try out.append(gpa, c),
+        };
         if (rest.len > 0) try out.append(gpa, '.');
     }
 
@@ -17488,6 +17497,15 @@ test "a test is named by the module it sits in, beneath the root" {
     const nested = try qualifiedTestName(gpa, "/p", "/p/text/str", "a_thing_holds");
     defer gpa.free(nested);
     try testing.expectEqualStrings("text.str.a_thing_holds", nested);
+
+    // A `.` in one directory's name is not the separator between two.
+    const dotted = try qualifiedTestName(gpa, "/p", "/p/a.b", "a_thing_holds");
+    defer gpa.free(dotted);
+    try testing.expectEqualStrings("a\\.b.a_thing_holds", dotted);
+
+    const slashed = try qualifiedTestName(gpa, "/p", "/p/a\\b", "a_thing_holds");
+    defer gpa.free(slashed);
+    try testing.expectEqualStrings("a\\\\b.a_thing_holds", slashed);
 
     // A root written with a trailing separator names the same module as one
     // without, so neither may leave an empty component in front of the name.

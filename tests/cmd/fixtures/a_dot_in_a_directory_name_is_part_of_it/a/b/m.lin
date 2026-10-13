@@ -1,0 +1,15 @@
+// The module in `a/b`. Its test has the same name as the other module's.
+import std.io
+
+use io.IoError
+
+pub fn size() -> UInt8 {
+    7
+}
+
+test fn holds_seven() -> Result[(), IoError] {
+    if size() != 7 {
+        return .Err(IoError.from_os(.Write, 1))
+    }
+    return .Ok({})
+}

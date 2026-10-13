@@ -131,23 +131,25 @@ fn appendEscape(gpa: std.mem.Allocator, out: *std.ArrayList(u8), c: u8) std.mem.
     try out.appendSlice(gpa, &.{ '$', hex_digits[c >> 4], hex_digits[c & 0xf] });
 }
 
-/// Appends a module's route as a symbol carries it: the dotted path from the
-/// root to the module's directory, with every byte of a directory name that
-/// an identifier does not hold written as `$` and its two hexadecimal digits.
+/// Appends a module's route: the path from the root to the module's
+/// directory, `/`-separated, written with a `.` between directory names and
+/// every byte of a name that an identifier does not hold written as `$` and
+/// its two hexadecimal digits.
 ///
-/// A directory whose name is not an identifier, such as `my-lib`, is a module
-/// no import can name, and it is still part of its program: its tests run and
-/// its functions need symbols. A symbol reads its route back as the longest
-/// prefix of letters, digits, `_`, `.` and `$`, so a `-` or a `;` carried
-/// plainly would end that prefix inside the route. `$` is escaped as well,
-/// for the reason `appendEscaped` escapes it.
+/// A directory whose name is not an identifier, such as `my-lib` or `a.b`, is
+/// a module no import can name, and it is still part of its program: its tests
+/// run and its functions need symbols. A `.` inside a name is escaped like any
+/// other such byte, so `a.b` is `a$2eb` and stays apart from the two
+/// directories `a/b`, which are `a.b`. `$` is escaped as well, for the reason
+/// `appendEscaped` escapes it, so the route is one spelling of one path.
 pub fn appendRoute(
     gpa: std.mem.Allocator,
     out: *std.ArrayList(u8),
-    route: []const u8,
+    relative_dir: []const u8,
 ) std.mem.Allocator.Error!void {
-    for (route) |c| switch (c) {
-        'A'...'Z', 'a'...'z', '0'...'9', '_', '.' => try out.append(gpa, c),
+    for (relative_dir) |c| switch (c) {
+        'A'...'Z', 'a'...'z', '0'...'9', '_' => try out.append(gpa, c),
+        '/' => try out.append(gpa, '.'),
         else => try appendEscape(gpa, out, c),
     };
 }
@@ -156,12 +158,20 @@ test "a route keeps a directory an identifier names, and escapes one it does not
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(testing.allocator);
 
-    try symbol.appendRoute(testing.allocator, &out, "app.util_2");
+    try symbol.appendRoute(testing.allocator, &out, "app/util_2");
     try testing.expectEqualStrings("app.util_2", out.items);
 
     out.clearRetainingCapacity();
-    try symbol.appendRoute(testing.allocator, &out, "my-lib.led;ger$");
+    try symbol.appendRoute(testing.allocator, &out, "my-lib/led;ger$");
     try testing.expectEqualStrings("my$2dlib.led$3bger$24", out.items);
+
+    // One directory with a dot in its name, and two directories.
+    out.clearRetainingCapacity();
+    try symbol.appendRoute(testing.allocator, &out, "a.b");
+    try testing.expectEqualStrings("a$2eb", out.items);
+    out.clearRetainingCapacity();
+    try symbol.appendRoute(testing.allocator, &out, "a/b");
+    try testing.expectEqualStrings("a.b", out.items);
 }
 
 /// How long the escaped form of a spelling is, without writing it.

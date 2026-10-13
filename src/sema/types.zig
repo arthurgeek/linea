@@ -5304,9 +5304,11 @@ pub const Typing = struct {
     ///
     /// The path a reader writes, dotted: `std.text`, with each byte of a
     /// directory name that no identifier holds escaped as `$` and two hex
-    /// digits, so `my-lib` is `my$2dlib`. Filled by the pass that holds the
-    /// program, because a type pool does not -- and a path rather than the
-    /// module's index, because an index says which module was loaded first.
+    /// digits, so `my-lib` is `my$2dlib` and the one directory `a.b` is
+    /// `a$2eb`, apart from the two directories `a/b`. Filled by the pass that
+    /// holds the program, because a type pool does not -- and a path rather
+    /// than the module's index, because an index says which module was loaded
+    /// first.
     /// Adding an import renumbered every symbol below it, which is a name
     /// nobody can predict and an emitted module the outcome cache had never
     /// seen.

@@ -1,5 +1,6 @@
 const std = @import("std");
 const tracy = @import("../support/tracy.zig");
+const symbol_names = @import("../support/symbol.zig");
 const testing = std.testing;
 const library = @import("library.zig");
 
@@ -1478,13 +1479,13 @@ const Loader = struct {
         return self.spelledRoute(relative);
     }
 
-    /// A directory path written with the dots an import path uses.
+    /// A directory path written with the dots an import path uses, and a byte
+    /// of a directory name no identifier holds escaped by `symbol.appendRoute`.
     fn spelledRoute(self: *Loader, relative: []const u8) std.mem.Allocator.Error![]const u8 {
-        const route = try self.gpa.dupe(u8, relative);
-        for (route) |*c| {
-            if (c.* == '/') c.* = '.';
-        }
-        return route;
+        var route: std.ArrayList(u8) = .empty;
+        errdefer route.deinit(self.gpa);
+        try symbol_names.appendRoute(self.gpa, &route, relative);
+        return route.toOwnedSlice(self.gpa);
     }
 
     /// Resolves one `import` against its independently loaded root.
