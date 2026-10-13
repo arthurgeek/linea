@@ -291,22 +291,15 @@ fn read_request_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader
     if &parts.next().is_some() || !is_token(method) || !is_target(target) {
         return .Err(.Status(.BadRequest))
     }
-    supported_version(version)?
+    if version != "HTTP/1.1" && version != "HTTP/1.0" {
+        if is_version(version) {
+            return .Err(.Status(.HttpVersionNotSupported))
+        }
+        return .Err(.Status(.BadRequest))
+    }
     let method_token = stored_or_refused(&stored, method)?
     let target_span = stored_or_refused(&stored, target)?
     .Ok(.{ method = method_of(method), method_token = method_token, target = target_span })
-}
-
-// `supported_version` accepts HTTP/1.1 and HTTP/1.0. Another well-formed
-// version answers 505, and anything else 400.
-fn supported_version(version: Str) -> Result[(), RequestError] {
-    if version == "HTTP/1.1" || version == "HTTP/1.0" {
-        return .Ok(())
-    }
-    if is_version(version) {
-        return .Err(.Status(.HttpVersionNotSupported))
-    }
-    .Err(.Status(.BadRequest))
 }
 
 // A `HeaderTally` is what a request's headers have said so far: how many

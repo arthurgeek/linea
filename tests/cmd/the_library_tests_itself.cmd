@@ -127,6 +127,7 @@ The library tests itself.
   ok    env.an_entry_splits_at_its_first_equals_sign
   ok    env.args_start_with_the_executable_path
   ok    env.at_reads_an_argument_as_text_and_refuses_an_index_past_the_end
+  ok    env.every_entry_has_a_name
   ok    env.every_variable_has_a_name_and_no_equals_sign_in_it
   ok    env.raw_arguments_preserve_existing_storage_and_missing_indices
   ok    fmt.a_default_spec_adds_no_padding
@@ -258,6 +259,7 @@ The library tests itself.
   ok    http.a_bytes_response_holds_its_body_as_built
   ok    http.a_cgi_error_displays_its_cause
   ok    http.a_cgi_head_request_is_answered_with_the_head_alone
+  ok    http.a_cgi_request_answers_each_limits_status_one_past_the_bound
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
   ok    http.a_client_sent_number_is_never_logged
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
@@ -278,6 +280,7 @@ The library tests itself.
   ok    http.a_form_of_one_pair_too_many_is_refused_with_413
   ok    http.a_form_of_the_most_pairs_is_answered_in_the_smallest_arena
   ok    http.a_get_is_answered_with_a_status_header
+  ok    http.a_handler_cannot_set_the_status_as_a_header
   ok    http.a_handler_error_before_headers_answers_its_status
   ok    http.a_handler_error_is_answered_with_its_status_and_message
   ok    http.a_handlers_own_number_is_replaced
@@ -327,7 +330,6 @@ The library tests itself.
   ok    http.a_path_value_is_found_by_its_exact_name
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
-  ok    http.a_process_without_a_request_answers_nothing
   ok    http.a_query_answers_a_refusal_of_a_params_of_its_own
   ok    http.a_query_decodes_into_its_pairs
   ok    http.a_query_follows_the_first_question_mark
@@ -401,6 +403,7 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
+  ok    http.a_variable_that_is_not_utf8_is_read_as_its_bytes
   ok    http.a_walk_of_the_headers_shows_one_number
   ok    http.a_wrong_method_is_405_with_allow
   ok    http.add_header_keeps_the_values_a_name_already_has
@@ -408,6 +411,7 @@ The library tests itself.
   ok    http.an_announced_server_answers_the_connection_queued_for_it
   ok    http.an_arena_below_the_body_limit_is_refused_before_serving
   ok    http.an_arena_parent_serves_every_exchange_from_one_request_arena
+  ok    http.an_arena_too_small_for_the_limits_is_refused
   ok    http.an_arena_too_small_for_the_limits_is_refused_with_a_parent
   ok    http.an_error_displays_its_status_and_message
   ok    http.an_error_is_answered_with_its_headers
@@ -424,6 +428,7 @@ The library tests itself.
   ok    http.an_unknown_version_is_refused
   ok    http.an_upsert_reason_answers_with_its_cause
   ok    http.arena_arithmetic_stops_at_the_largest_integer
+  ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.count_includes_every_value_a_repeated_name_holds
   ok    http.decoding_appends_the_bytes_escapes_spell
@@ -432,7 +437,6 @@ The library tests itself.
   ok    http.each_allocation_failure_covers_every_buffer_the_numbering_grows
   ok    http.each_allocation_failure_covers_every_table_a_route_grows
   ok    http.each_limit_answers_its_status_at_one_past_the_bound
-  ok    http.each_limit_answers_its_status_one_past_the_bound
   ok    http.each_request_is_numbered_for_the_handler_and_the_response
   ok    http.every_connection_is_answered_503_while_the_parent_refuses_the_arena
   ok    http.every_exchange_returns_its_arena_to_the_parent
@@ -441,6 +445,7 @@ The library tests itself.
   ok    http.header_compares_names_under_ascii_case_folding
   ok    http.header_lists_held_in_a_vector_release_in_generic_code
   ok    http.header_reads_the_first_value_under_ascii_case_folding
+  ok    http.headers_added_one_at_a_time_are_checked_together
   ok    http.headers_go_out_in_order_before_the_default_content_type
   ok    http.headers_walk_in_arrival_order
   ok    http.identical_shapes_are_a_duplicate
@@ -464,8 +469,10 @@ The library tests itself.
   ok    http.the_bound_address_is_logged_as_listening
   ok    http.the_default_arena_holds_every_request_the_default_limits_admit
   ok    http.the_default_limits_bound_lines_headers_and_bodies
+  ok    http.the_first_of_a_repeated_variable_is_read
   ok    http.the_first_refusing_extractor_answers_the_request
   ok    http.the_library_extractors_and_a_type_that_reads_itself_are_arguments
+  ok    http.the_protocol_the_client_spoke_is_not_the_programs
   ok    http.the_state_is_returned_when_serving_ends
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
@@ -1223,4 +1230,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1220 passed, 0 failed
+  1227 passed, 0 failed

@@ -1793,9 +1793,12 @@ because the web server writes the status line and frames the connection
 itself. The last line is `http.logged`'s, on standard error, which a web
 server keeps in its error log.
 
-That is the other half of what CGI buys you: a single web server calls your
-business logic directly; debug it as an ordinary program: pipe it a request,
-watch stderr. A form's body goes to standard input, and `CONTENT_LENGTH` says
+That is the other half of what CGI buys you: the web server calls your
+handler directly, so you debug it as an ordinary program by piping it a
+request and watching standard error. Standard error is also where a handler's
+own output belongs: standard output is the response, so a line a handler
+writes there with `io.println` lands before the `Status` header, and the web
+server refuses the whole answer. A form's body goes to standard input, and `CONTENT_LENGTH` says
 how much of it to read:
 
 <!-- guide: unchecked the program reads its request from environment variables and standard input the gate does not set -->
@@ -1827,13 +1830,20 @@ These are the variables `serve_cgi` reads:
 | `REQUEST_METHOD` | the method; without it there is no request |
 | `PATH_INFO` | the path after the program's own address, `/` when empty |
 | `QUERY_STRING` | the query, as the client encoded it |
-| `CONTENT_TYPE`, `CONTENT_LENGTH` | the `Content-Type` and `Content-Length` headers; the body is that many bytes of standard input |
+| `CONTENT_TYPE`, `CONTENT_LENGTH` | the `Content-Type` and `Content-Length` headers; the body is that many bytes of standard input, and without a length there is no body |
 | `HTTP_*` | every other header: `HTTP_USER_AGENT` is `User-Agent` |
-| `SERVER_PROTOCOL` | when set, must be `HTTP/1.0` or `HTTP/1.1` |
+
+`SERVER_PROTOCOL`, such as `HTTP/2.0`, is how the browser spoke to the web
+server, which your program never speaks, so it is not read. Nor are
+`HTTP_TRANSFER_ENCODING` and `HTTP_CONTENT_LENGTH`: the web server has already
+taken apart however the browser framed the body, and `CONTENT_LENGTH` alone
+says how long it is. When a variable appears twice, the first is read.
 
 The request is held to the same `http.Limits` as one read from a connection,
 and refused with the same statuses: 413 for a body past `max_body_bytes`, as
-above, 431 for too many headers, 400 for a malformed method or length. The
+above, 431 for too many headers, 400 for a malformed method or length, and 400
+for a method, query or header that is not UTF-8. A path that is not UTF-8 is
+encoded byte by byte, as a browser would send it. The
 timeouts do not apply, since the web server decides how long a program may
 run. `serve_cgi(handler, state: app, limits: limits)` takes the same
 `state:` and `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
@@ -1850,7 +1860,17 @@ build greet.lin -o greet` and point the server at the executable: Apache's
 `mod_cgi`, lighttpd's `mod_cgi`, OpenBSD's `httpd` with `slowcgi`, or nginx
 through a CGI wrapper such as `fcgiwrap`. A request for
 `/cgi-bin/greet/hello?name=Ada` then runs `greet` with `PATH_INFO=/hello` and
-`QUERY_STRING=name=Ada`, and the router sees `/hello`.
+`QUERY_STRING=name=Ada`, and the router sees `/hello`. The server also sets
+`SCRIPT_NAME=/cgi-bin/greet`, the program's own address, so
+`env.variable("SCRIPT_NAME")` is how a page builds a link or a form that leads
+back to the program, as the party RSVP example below does.
+
+Two rules come from CGI rather than HTTP. A response cannot set a `Status`
+header, which the response's own status writes; `set_header` refuses it as it
+refuses `Content-Length`. And a 200 response whose `Location` is a path on the
+same server, such as `/thanks`, is a local redirect: the web server answers
+the browser with that path's response instead and drops yours. To send the
+browser elsewhere, answer a redirect status such as 303 with the `Location`.
 
 ### CGI or `listen_and_serve`
 

@@ -4,8 +4,8 @@ import std.io
 import std.mem
 import std.testing
 
-use env.Variable
-use env.Variables
+use env.Entries
+use env.Entry
 
 // A CGI program answers one request and exits. The web server starts it for
 // each request, describes the request in environment variables, sends the
@@ -18,25 +18,45 @@ use env.Variables
 // - `REQUEST_METHOD` is the method. A process started without it was not
 //   started by a web server to answer a request.
 // - `PATH_INFO` is the path after the program's own location, which the web
-//   server has decoded; it is encoded again into the request's target, so
-//   routes and path values read it as they read a path a client sent. An
-//   empty or missing path is `/`.
+//   server has decoded; it is encoded again into the request's target, byte
+//   by byte, so routes and path values read it as they read a path a client
+//   sent, whether or not it is UTF-8. An empty or missing path is `/`.
 // - `QUERY_STRING` is the query, as the client encoded it.
 // - `CONTENT_TYPE` and `CONTENT_LENGTH` become the `Content-Type` and
 //   `Content-Length` headers, and the body is that many bytes of standard
-//   input. An empty or missing length means the request has no body.
-// - Every `HTTP_` variable is a header the client sent: `HTTP_USER_AGENT` is
-//   `User-Agent`.
-// - `SERVER_PROTOCOL`, when it is set, must be HTTP/1.0 or HTTP/1.1.
+//   input. An empty or missing length means the request has no body: the web
+//   server has already taken apart however the client framed the body, so
+//   `HTTP_TRANSFER_ENCODING` and `HTTP_CONTENT_LENGTH` are not read, and a
+//   chunked upload a web server passes on without `CONTENT_LENGTH` arrives
+//   with no body.
+// - Every other `HTTP_` variable is a header the client sent:
+//   `HTTP_USER_AGENT` is `User-Agent`.
 //
-// The request is held to `Limits` exactly as `serve` holds a request read
-// from a connection, and is refused with the same status: 400 for a method
-// that is not a token, a malformed header or a length that is not digits,
+// `SERVER_PROTOCOL` is the protocol between the client and the web server,
+// such as HTTP/2.0, which the program never speaks, so it is not read. Nor is
+// `SCRIPT_NAME`, the program's own location: `env.variable("SCRIPT_NAME")`
+// reads it, to build a link or a form's action that leads back to the
+// program. When a variable appears more than once, the first is the one read,
+// as `env.variable` reads it.
+//
+// The request is held to `Limits` as `serve` holds a request read from a
+// connection, and is refused with the same status: 400 for a method that is
+// not a token, a malformed header, a length that is not digits, or a method,
+// query or header that is not UTF-8, as `serve` refuses a line that is not;
 // 413 for a body past `max_body_bytes`, 414 for a target longer than a
 // request line may be, and 431 for too many headers or one longer than a
 // header line may be. A standard input that ends before the body does is
 // refused with 400. The timeouts do not apply: the web server bounds how long
 // a program may take.
+//
+// The program's standard output is the response, so anything else written to
+// it, such as `io.println` in a handler, lands before the `Status` header and
+// the web server refuses the whole answer; write to standard error instead. A
+// response whose status is 200 and whose `Location` is a path on the same
+// server, such as `/thanks`, is a local redirect: the web server answers the
+// client with that path's response in its place and drops the body. A
+// `Status` header is refused like the framing headers, since the response's
+// own status writes it.
 
 // `serve_cgi` answers nothing and returns `NotCgi` when `REQUEST_METHOD` is
 // not set, so no web server started the program to answer a request, and
@@ -83,10 +103,9 @@ pub fn serve_cgi[H: Handler[S, mem.SystemAllocator] + Observer + Release, S: Rel
     serve_cgi_in(mem.system(), handler, state: state, limits: limits)
 }
 
-// The test process was not started by a web server.
-test fn a_process_without_a_request_answers_nothing() {
-    let router: Router[()] = Router.new()
-    testing.assert_eq(serve_cgi(router), .Err(.NotCgi), "a process without REQUEST_METHOD answered a request")?
+// Limits whose arena cannot hold a request are refused before the
+// environment is read, whatever variables the test process was started with.
+test fn an_arena_too_small_for_the_limits_is_refused() {
     let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
     let refused: Router[()] = Router.new()
     testing.assert_eq(serve_cgi(refused, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
@@ -106,7 +125,7 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
     let arena = mem.Arena.open(parent, limits.request_arena_bytes)
     let answered = match io.BufferedWriter.open(arena.handle(), capacity: response_buffer_bytes, writer: io.stdout()) {
         Ok(writer) => {
-            var variables = env.variables()
+            var variables = env.entries()
             var standard = StandardOutput {}
             answer_cgi(&variables, io.stdin(), .Standard(writer), &standard, &server, arena.handle(), limits)
         },
@@ -163,26 +182,26 @@ impl CgiOutput for StandardOutput {
     }
 }
 
-// `CgiVariables` walks the variables a CGI request is described by: the
-// process environment, or the variables a test gives.
+// `CgiVariables` walks the variables a CGI request is described by, as the
+// bytes they hold: the process environment, or the variables a test gives.
 trait CgiVariables {
-    fn next_variable(inout self: Self) -> Option[Variable] where carries(.Some: self)
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self)
 }
 
-impl CgiVariables for Variables {
-    fn next_variable(inout self: Self) -> Option[Variable] where carries(.Some: self) {
+impl CgiVariables for Entries {
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
         &self.next()
     }
 }
 
 // `Given` walks variables a test lists.
 struct Given {
-    variables: mem.Slice[Variable],
+    variables: mem.Slice[Entry],
     index: UInt64,
 }
 
 impl CgiVariables for Given {
-    fn next_variable(inout self: Self) -> Option[Variable] where carries(.Some: self) {
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
         if self.index == self.variables.length() {
             return .None
         }
@@ -225,36 +244,50 @@ fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: m
     var tally = no_headers
     // `name` holds the name of the header an `HTTP_` variable carries.
     var name: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
-    var method: Option[Str] = .None
-    var path_info = ""
-    var query = ""
-    var protocol: Option[Str] = .None
+    var method: Option[mem.Slice[UInt8]] = .None
+    var path_info: Option[mem.Slice[UInt8]] = .None
+    var query: Option[mem.Slice[UInt8]] = .None
+    var typed = false
+    var sized = false
     var refused: Option[RequestError] = .None
     loop {
         let variable = &variables.next_variable() else {
             break
         }
-        let header: Option[Str] = if variable.name == "REQUEST_METHOD" {
-            method = .Some(copy(variable.value))
-            .None
-        } else if variable.name == "PATH_INFO" {
-            path_info = copy(variable.value)
-            .None
-        } else if variable.name == "QUERY_STRING" {
-            query = copy(variable.value)
-            .None
-        } else if variable.name == "SERVER_PROTOCOL" {
-            protocol = .Some(copy(variable.value))
-            .None
-        } else if variable.name == "CONTENT_TYPE" {
-            .Some("Content-Type")
-        } else if variable.name == "CONTENT_LENGTH" {
-            if variable.value.length() == 0 {
-                .None
-            } else {
-                .Some("Content-Length")
+        let header: Option[Str] = if variable.name == "REQUEST_METHOD".as_bytes() {
+            if method.is_none() {
+                method = .Some(copy(variable.value))
             }
-        } else if variable.name.starts_with("HTTP_") {
+            .None
+        } else if variable.name == "PATH_INFO".as_bytes() {
+            if path_info.is_none() {
+                path_info = .Some(copy(variable.value))
+            }
+            .None
+        } else if variable.name == "QUERY_STRING".as_bytes() {
+            if query.is_none() {
+                query = .Some(copy(variable.value))
+            }
+            .None
+        } else if variable.name == "CONTENT_TYPE".as_bytes() {
+            let first = !typed
+            typed = true
+            if first {
+                .Some("Content-Type")
+            } else {
+                .None
+            }
+        } else if variable.name == "CONTENT_LENGTH".as_bytes() {
+            let first = !sized
+            sized = true
+            if first && variable.value.length() > 0 {
+                .Some("Content-Length")
+            } else {
+                .None
+            }
+        } else if variable.name == "HTTP_TRANSFER_ENCODING".as_bytes() || variable.name == "HTTP_CONTENT_LENGTH".as_bytes() {
+            .None
+        } else if is_header_variable(variable.name) {
             match header_name(&name, variable.name) {
                 Ok(spelled) => .Some(spelled),
                 Err(error) => {
@@ -269,7 +302,11 @@ fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: m
         }
         match header {
             Some(field) => if refused.is_none() {
-                match add_cgi_header(&head, &header_fields, &tally, field, variable.value, limits) {
+                let added = match Str.from_bytes(variable.value) {
+                    Ok(value) => add_cgi_header(&head, &header_fields, &tally, field, value, limits),
+                    Err(_) => .Err(.Status(.BadRequest)),
+                }
+                match added {
                     Ok(_) => {},
                     Err(error) => refused = .Some(error),
                 }
@@ -277,19 +314,42 @@ fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: m
             None => {},
         }
     }
-    let method_token = method else {
+    let method_bytes = method else {
         return .Err(.NotCgi)
     }
     match refused {
         Some(error) => return .Err(.Refused(error)),
         None => {},
     }
-    match described_line(&head, method_token, path_info, query, protocol, limits) {
+    let method_token = Str.from_bytes(method_bytes) else |_| {
+        return .Err(.Refused(.Status(.BadRequest)))
+    }
+    let query_text = match query {
+        Some(bytes) => match Str.from_bytes(bytes) {
+            Ok(text) => text,
+            Err(_) => return .Err(.Refused(.Status(.BadRequest))),
+        },
+        None => "",
+    }
+    let path = path_info.unwrap_or("".as_bytes())
+    match described_line(&head, method_token, path, query_text, limits) {
         Ok(line) => match body_length(tally) {
             Ok(length) => .Ok(.{ head, line, header_fields, length }),
             Err(error) => .Err(.Refused(error)),
         },
         Err(error) => .Err(.Refused(error)),
+    }
+}
+
+// The ASCII bytes of `HTTP_`, which starts the name of a variable holding a
+// header.
+let header_prefix: Str = "HTTP_"
+
+// `is_header_variable` says whether the variable named `name` holds a header.
+fn is_header_variable(name: mem.Slice[UInt8]) -> Bool {
+    match name.subspan(start: 0, count: header_prefix.length()) {
+        Some(start) => start == header_prefix.as_bytes(),
+        None => false,
     }
 }
 
@@ -305,15 +365,10 @@ fn add_cgi_header[A: Allocator](inout head: String[A], inout header_fields: Vec[
 
 // `described_line` stores the request line the variables describe in `head`:
 // the method, and the target `PATH_INFO` and `QUERY_STRING` make. The method
-// must be a token, the target visible ASCII, and the protocol, when the web
-// server names one, HTTP/1.0 or HTTP/1.1.
-fn described_line[A: Allocator](inout head: String[A], method: Str, path_info: Str, query: Str, protocol: Option[Str], limits: Limits) -> Result[RequestLine, RequestError] {
+// must be a token and the target visible ASCII.
+fn described_line[A: Allocator](inout head: String[A], method: Str, path_info: mem.Slice[UInt8], query: Str, limits: Limits) -> Result[RequestLine, RequestError] {
     if !is_token(method) {
         return .Err(.Status(.BadRequest))
-    }
-    match read protocol {
-        Some(version) => supported_version(version)?,
-        None => {},
     }
     let method_token = stored_or_refused(&head, method)?
     let target = stored_target(&head, path_info, query)?
@@ -331,23 +386,24 @@ fn described_line[A: Allocator](inout head: String[A], method: Str, path_info: S
 // `query` in `head` and returns its range there. The web server decoded the
 // path, so each byte a target cannot hold as it is, and each `%`, `?` and
 // `#`, is encoded again as `%XX`; decoding the stored path gives `path_info`
-// back. The query is stored as it is, after a `?`, when it is not empty.
-fn stored_target[A: Allocator](inout head: String[A], path_info: Str, query: Str) -> Result[Span, RequestError] {
+// back, whether or not it is UTF-8. The query is stored as it is, after a
+// `?`, when it is not empty.
+fn stored_target[A: Allocator](inout head: String[A], path_info: mem.Slice[UInt8], query: Str) -> Result[Span, RequestError] {
     let start = head.length()
     let path = if path_info.length() == 0 {
-        "/"
+        "/".as_bytes()
     } else {
         copy(path_info)
     }
     var run: UInt64 = 0
     for at in 0..path.length() {
-        let byte = path.byte(at).unwrap()
+        let byte = path[at]
         if is_encoded_in_path(byte) {
-            // A run of plain bytes is ASCII and so starts and ends on
-            // character boundaries; an empty one is skipped, since it may lie
-            // inside an encoded character.
+            // Every byte from 127 up is encoded, so a run of plain bytes is
+            // ASCII, which is UTF-8.
             if run < at {
-                let _plain = stored_or_refused(&head, path.slice(run, at).unwrap())?
+                let plain = Str.from_bytes(path.subspan(start: run, count: at - run).unwrap()).unwrap()
+                let _plain = stored_or_refused(&head, plain)?
             }
             let _escape = stored_or_refused(&head, "%")?
             let _high = stored_or_refused(&head, hex_digit(byte / 16))?
@@ -356,7 +412,8 @@ fn stored_target[A: Allocator](inout head: String[A], path_info: Str, query: Str
         }
     }
     if run < path.length() {
-        let _rest = stored_or_refused(&head, path.slice(run, path.length()).unwrap())?
+        let rest = Str.from_bytes(path.subspan(start: run, count: path.length() - run).unwrap()).unwrap()
+        let _rest = stored_or_refused(&head, rest)?
     }
     if query.length() > 0 {
         let _mark = stored_or_refused(&head, "?")?
@@ -368,14 +425,18 @@ fn stored_target[A: Allocator](inout head: String[A], path_info: Str, query: Str
 test fn a_decoded_path_is_encoded_again_into_the_target() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var head = String.new_in(arena.handle())
-    let plain = stored_target(&head, "/notes/7", "").unwrap()
-    let spaced = stored_target(&head, "/notes/Ada López", "sort=new").unwrap()
-    let marked = stored_target(&head, "/a%b?c#d", "").unwrap()
-    let empty = stored_target(&head, "", "x=1").unwrap()
+    let plain = stored_target(&head, "/notes/7".as_bytes(), "").unwrap()
+    let spaced = stored_target(&head, "/notes/Ada López".as_bytes(), "sort=new").unwrap()
+    let marked = stored_target(&head, "/a%b?c#d".as_bytes(), "").unwrap()
+    let empty = stored_target(&head, "".as_bytes(), "x=1").unwrap()
+    // 233 is `é` in Latin-1, a byte UTF-8 never holds alone.
+    let latin = [UInt8(47), 99, 97, 102, 233]
+    let undecodable = stored_target(&head, latin.as_slice(), "").unwrap()
     testing.assert_eq(stored_part(head.view(), plain), "/notes/7", "a plain path changed")?
     testing.assert_eq(stored_part(head.view(), spaced), "/notes/Ada%20L%C3%B3pez?sort=new", "a path outside visible ASCII was not encoded")?
     testing.assert_eq(stored_part(head.view(), marked), "/a%25b%3Fc%23d", "a path's %, ? or # was not encoded")?
     testing.assert_eq(stored_part(head.view(), empty), "/?x=1", "an empty path was not /")?
+    testing.assert_eq(stored_part(head.view(), undecodable), "/caf%E9", "a path that is not UTF-8 was not encoded")?
     .Ok(())
 }
 
@@ -419,12 +480,13 @@ let ascii_case_offset: UInt8 = 32
 // variable's name after `HTTP_`, with each `_` a `-` and each word
 // capitalised, so `HTTP_USER_AGENT` is `User-Agent`. Header names compare
 // under ASCII case folding, so the spelling only changes how the headers
-// read. Running out of memory answers 500.
-fn header_name[A: Allocator](inout name: Vec[UInt8, A], variable: Str) -> Result[Str, RequestError] where borrows(.Ok: name) {
+// read. A name that is not UTF-8 answers 400, as a header line that is not
+// does, and running out of memory answers 500.
+fn header_name[A: Allocator](inout name: Vec[UInt8, A], variable: mem.Slice[UInt8]) -> Result[Str, RequestError] where borrows(.Ok: name) {
     &name.clear()
     var word_start = true
-    for at in 5..variable.length() {
-        let byte = variable.byte(at).unwrap()
+    for at in header_prefix.length()..variable.length() {
+        let byte = variable[at]
         let spelled = if byte == ascii_underscore {
             ascii_hyphen
         } else if word_start && byte >= ascii_lower_a && byte <= ascii_lower_z {
@@ -441,16 +503,21 @@ fn header_name[A: Allocator](inout name: Vec[UInt8, A], variable: Str) -> Result
         }
     }
     // Every byte is the variable's own or an ASCII replacement for one, so
-    // the name is UTF-8 whenever the variable's is.
-    .Ok(Str.from_bytes(name.as_slice()).unwrap())
+    // the name is UTF-8 exactly when the variable's is.
+    match Str.from_bytes(name.as_slice()) {
+        Ok(spelled) => .Ok(spelled),
+        Err(_) => .Err(.Status(.BadRequest)),
+    }
 }
 
 test fn a_header_is_spelled_from_its_variable() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var name: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
-    testing.assert_eq(header_name(&name, "HTTP_USER_AGENT").unwrap(), "User-Agent", "a two-word name changed")?
-    testing.assert_eq(header_name(&name, "HTTP_X_REQUEST_ID").unwrap(), "X-Request-Id", "a three-word name changed")?
-    testing.assert_eq(header_name(&name, "HTTP_").unwrap(), "", "an empty name changed")?
+    testing.assert_eq(header_name(&name, "HTTP_USER_AGENT".as_bytes()).unwrap(), "User-Agent", "a two-word name changed")?
+    testing.assert_eq(header_name(&name, "HTTP_X_REQUEST_ID".as_bytes()).unwrap(), "X-Request-Id", "a three-word name changed")?
+    testing.assert_eq(header_name(&name, "HTTP_".as_bytes()).unwrap(), "", "an empty name changed")?
+    let latin = [UInt8(72), 84, 84, 80, 95, 88, 233]
+    testing.assert_eq(header_name(&name, latin.as_slice()), .Err(.Status(.BadRequest)), "a name that is not UTF-8 was spelled")?
     .Ok(())
 }
 
@@ -614,7 +681,7 @@ impl CgiOutput for Recording {
 // `cgi_exchange` answers the request `variables` describe, with `input` on
 // standard input, through `handler` and `limits`, and returns what the web
 // server would read.
-fn cgi_exchange[H: Handler[(), mem.SystemAllocator] + Observer](variables: mem.Slice[Variable], input: Str, inout handler: H, limits: Limits = standard_limits) -> CgiAnswer {
+fn cgi_exchange[H: Handler[(), mem.SystemAllocator] + Observer](variables: mem.Slice[Entry], input: Str, inout handler: H, limits: Limits = standard_limits) -> CgiAnswer {
     let arena = mem.Arena.open(mem.system(), limits.request_arena_bytes)
     var given = Given { variables = copy(variables), index = 0 }
     var recording = Recording { text = String.new() }
@@ -625,23 +692,26 @@ fn cgi_exchange[H: Handler[(), mem.SystemAllocator] + Observer](variables: mem.S
     .{ outcome, written = text }
 }
 
+// `given` is the variable `name` holding `value`, as a test lists it.
+fn given(name: Str, value: Str) -> Entry where carries(name, value) {
+    .{ name = name.as_bytes(), value = value.as_bytes() }
+}
+
 // A test describes a request with these variables.
-fn described(method: Str, path: Str, query: Str = "") -> [Variable; 4] where carries(method, path, query) {
-    [
-        Variable { name = "REQUEST_METHOD", value = copy(method) },
-        Variable { name = "PATH_INFO", value = copy(path) },
-        Variable { name = "QUERY_STRING", value = copy(query) },
-        Variable { name = "SERVER_PROTOCOL", value = "HTTP/1.1" },
-    ]
+fn described(method: Str, path: Str, query: Str = "") -> [Entry; 3] where carries(method, path, query) {
+    [given("REQUEST_METHOD", method), given("PATH_INFO", path), given("QUERY_STRING", query)]
 }
 
 // The routes a test answers: a greeting by name and query, the request's
-// `User-Agent`, and a note posted as a form.
+// `User-Agent`, a note posted as a form, a response setting its status as a
+// header, and the path as the target holds it.
 fn cgi_router() -> Router[()] {
     var router: Router[()] = Router.new()
     &router.route_raw(r"GET /greet/{name}", greet).unwrap()
     &router.route_raw("GET /agent", agent).unwrap()
     &router.route_raw("POST /notes", post_note).unwrap()
+    &router.route_raw("GET /moved", moved).unwrap()
+    &router.route_raw(r"GET /echo/{rest...}", echo).unwrap()
     router
 }
 
@@ -669,6 +739,18 @@ fn post_note[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[
     .Ok(response)
 }
 
+fn echo[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, request.path())
+}
+
+// `moved` tries to set the CGI status as a header, which only the answer's
+// status may set.
+fn moved[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    var response = text(request, "moved")?
+    &response.set_header("Status", "302 Found")?
+    .Ok(response)
+}
+
 test fn a_get_is_answered_with_a_status_header() {
     var router = cgi_router()
     let variables = described("GET", "/greet/Ada López", query: "mood=glad")
@@ -682,10 +764,10 @@ test fn a_get_is_answered_with_a_status_header() {
 test fn an_http_variable_is_a_header() {
     var router = cgi_router()
     let variables = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "PATH_INFO", value = "/agent" },
-        Variable { name = "HTTP_USER_AGENT", value = "curl/8.0" },
-        Variable { name = "PATH", value = "/bin" },
+        given("REQUEST_METHOD", "GET"),
+        given("PATH_INFO", "/agent"),
+        given("HTTP_USER_AGENT", "curl/8.0"),
+        given("PATH", "/bin"),
     ]
     defer let answer = cgi_exchange(variables.as_slice(), "", &router)
     router.release()
@@ -696,10 +778,10 @@ test fn an_http_variable_is_a_header() {
 test fn a_form_body_is_read_from_standard_input() {
     var router = cgi_router()
     let variables = [
-        Variable { name = "REQUEST_METHOD", value = "POST" },
-        Variable { name = "PATH_INFO", value = "/notes" },
-        Variable { name = "CONTENT_TYPE", value = "application/x-www-form-urlencoded" },
-        Variable { name = "CONTENT_LENGTH", value = "13" },
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
     ]
     // Standard input holds more than the body; only the length is read.
     defer let answer = cgi_exchange(variables.as_slice(), "note=buy+milkEXTRA", &router)
@@ -729,9 +811,9 @@ test fn a_handler_error_is_answered_with_its_status_and_message() {
     .Ok(())
 }
 
-// `refused_with` returns the head a request described by `variables`, with
-// `input` as its body, is refused with, under `limits`.
-fn refused_with(variables: mem.Slice[Variable], input: Str, limits: Limits = standard_limits) -> String {
+// `answered_with` returns what a request described by `variables`, with
+// `input` as its body, is answered under `limits`.
+fn answered_with(variables: mem.Slice[Entry], input: Str, limits: Limits = standard_limits) -> String {
     var router = cgi_router()
     let answer = cgi_exchange(variables, input, &router, limits)
     router.release()
@@ -740,69 +822,158 @@ fn refused_with(variables: mem.Slice[Variable], input: Str, limits: Limits = sta
 }
 
 test fn a_malformed_request_is_refused_before_the_handler() {
-    let bad_method = [Variable { name = "REQUEST_METHOD", value = "G T" }]
-    defer let method = refused_with(bad_method.as_slice(), "")
+    let bad_method = [given("REQUEST_METHOD", "G T")]
+    defer let method = answered_with(bad_method.as_slice(), "")
     let lettered = [
-        Variable { name = "REQUEST_METHOD", value = "POST" },
-        Variable { name = "CONTENT_LENGTH", value = "12a" },
+        given("REQUEST_METHOD", "POST"),
+        given("CONTENT_LENGTH", "12a"),
     ]
-    defer let length = refused_with(lettered.as_slice(), "")
+    defer let length = answered_with(lettered.as_slice(), "")
     let short = [
-        Variable { name = "REQUEST_METHOD", value = "POST" },
-        Variable { name = "CONTENT_LENGTH", value = "10" },
+        given("REQUEST_METHOD", "POST"),
+        given("CONTENT_LENGTH", "10"),
     ]
-    defer let ended = refused_with(short.as_slice(), "abc")
-    let versioned = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "SERVER_PROTOCOL", value = "HTTP/2.0" },
-    ]
-    defer let version = refused_with(versioned.as_slice(), "")
+    defer let ended = answered_with(short.as_slice(), "abc")
     let spaced = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "QUERY_STRING", value = "a b" },
+        given("REQUEST_METHOD", "GET"),
+        given("QUERY_STRING", "a b"),
     ]
-    defer let query = refused_with(spaced.as_slice(), "")
+    defer let query = answered_with(spaced.as_slice(), "")
     let controlled = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "HTTP_X_NOTE", value = "a\u{1}b" },
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_X_NOTE", "a\u{1}b"),
     ]
-    defer let header = refused_with(controlled.as_slice(), "")
+    defer let header = answered_with(controlled.as_slice(), "")
     let bad_request = "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
     testing.assert_eq(method.view(), bad_request, "a method that is not a token was accepted")?
     testing.assert_eq(length.view(), bad_request, "a length with a letter was accepted")?
     testing.assert_eq(ended.view(), bad_request, "a body shorter than its length was accepted")?
-    testing.assert_eq(version.view(), "Status: 505 HTTP Version Not Supported\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "HTTP/2.0 was accepted")?
     testing.assert_eq(query.view(), bad_request, "a query holding a space was accepted")?
     testing.assert_eq(header.view(), bad_request, "a header holding a control byte was accepted")?
     .Ok(())
 }
 
-test fn each_limit_answers_its_status_one_past_the_bound() {
+test fn the_protocol_the_client_spoke_is_not_the_programs() {
+    for protocol in ["HTTP/1.1", "HTTP/2.0", "HTTP/2", "INCLUDED"] {
+        let variables = [
+            given("REQUEST_METHOD", "GET"),
+            given("PATH_INFO", "/greet/Ada"),
+            given("SERVER_PROTOCOL", protocol),
+        ]
+        defer let answer = answered_with(variables.as_slice(), "")
+        testing.assert_eq(answer.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, well", "a request was refused for the protocol the client spoke")?
+    }
+    .Ok(())
+}
+
+test fn content_length_alone_frames_the_body() {
+    let chunked = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
+        given("HTTP_TRANSFER_ENCODING", "chunked"),
+        given("HTTP_CONTENT_LENGTH", "99"),
+    ]
+    defer let framed = answered_with(chunked.as_slice(), "note=buy+milk")
+    let unframed = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("HTTP_TRANSFER_ENCODING", "chunked"),
+    ]
+    defer let empty = answered_with(unframed.as_slice(), "note=buy+milk")
+    testing.assert_eq(framed.view(), "Status: 201 Created\r\nLocation: /notes/1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnoted: buy milk", "a client's framing headers framed the body")?
+    testing.assert_eq(empty.view(), "Status: 201 Created\r\nLocation: /notes/1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnoted: ", "a body without CONTENT_LENGTH was read")?
+    .Ok(())
+}
+
+test fn a_handler_cannot_set_the_status_as_a_header() {
+    let variables = described("GET", "/moved")
+    defer let answer = answered_with(variables.as_slice(), "")
+    testing.assert_eq(answer.view(), "Status: 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nInternal Server Error\n", "a Status header was sent")?
+    .Ok(())
+}
+
+// A web server passes on whatever bytes the client sent, so a variable may
+// not be UTF-8. The path is encoded byte by byte, so routes and path values
+// read it as they read the same path from a client, and a method, query or
+// header that is not UTF-8 is refused with 400, as `serve` refuses a line
+// that is not.
+test fn a_variable_that_is_not_utf8_is_read_as_its_bytes() {
+    // 233 is `é` in Latin-1, a byte UTF-8 never holds alone.
+    let path = [UInt8(47), 101, 99, 104, 111, 47, 99, 97, 102, 233]
+    let latin = [UInt8(97), 61, 233]
+    let method = [UInt8(71), 233, 84]
+    let encoded = [Entry { name = "REQUEST_METHOD".as_bytes(), value = "GET".as_bytes() }, Entry { name = "PATH_INFO".as_bytes(), value = path.as_slice() }]
+    defer let echoed = answered_with(encoded.as_slice(), "")
+    let queried = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "QUERY_STRING".as_bytes(), value = latin.as_slice() }]
+    defer let query = answered_with(queried.as_slice(), "")
+    let headed = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "HTTP_X_NOTE".as_bytes(), value = latin.as_slice() }]
+    defer let header = answered_with(headed.as_slice(), "")
+    let typed = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "CONTENT_TYPE".as_bytes(), value = latin.as_slice() }]
+    defer let content_type = answered_with(typed.as_slice(), "")
+    let named = [Entry { name = "REQUEST_METHOD".as_bytes(), value = method.as_slice() }, given("PATH_INFO", "/greet/Ada")]
+    defer let request_method = answered_with(named.as_slice(), "")
+    // A variable the request is not described by is not read at all.
+    let unrelated = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "LANG".as_bytes(), value = latin.as_slice() }]
+    defer let other = answered_with(unrelated.as_slice(), "")
+    let bad_request = "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+    // The path reaches the router as `/echo/caf%E9`, and a path value that
+    // does not decode to UTF-8 is refused, as when a client sends it.
+    testing.assert_eq(echoed.view(), "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\na path value is not percent-encoded UTF-8\n", "a path that is not UTF-8 was not encoded")?
+    testing.assert_eq(query.view(), bad_request, "a query that is not UTF-8 was accepted")?
+    testing.assert_eq(header.view(), bad_request, "a header that is not UTF-8 was accepted")?
+    testing.assert_eq(content_type.view(), bad_request, "a content type that is not UTF-8 was accepted")?
+    testing.assert_eq(request_method.view(), bad_request, "a method that is not UTF-8 was accepted")?
+    testing.assert_eq(other.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, well", "a variable the request is not described by was read")?
+    .Ok(())
+}
+
+// A variable named twice is read where it first appears, as `env.variable`
+// reads it.
+test fn the_first_of_a_repeated_variable_is_read() {
+    let variables = [
+        given("REQUEST_METHOD", "GET"),
+        given("PATH_INFO", "/greet/Ada"),
+        given("QUERY_STRING", "mood=glad"),
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("QUERY_STRING", "mood=low"),
+        given("CONTENT_LENGTH", "0"),
+        given("CONTENT_LENGTH", "5"),
+    ]
+    defer let answer = answered_with(variables.as_slice(), "")
+    testing.assert_eq(answer.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, glad", "a repeated variable was read where it last appears")?
+    .Ok(())
+}
+
+test fn a_cgi_request_answers_each_limits_status_one_past_the_bound() {
     let limits = Limits { max_line_bytes = 32, max_headers = 2, max_body_bytes = 4, ..Limits.default() }
     let posted = [
-        Variable { name = "REQUEST_METHOD", value = "POST" },
-        Variable { name = "PATH_INFO", value = "/notes" },
-        Variable { name = "CONTENT_LENGTH", value = "5" },
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_LENGTH", "5"),
     ]
-    defer let body = refused_with(posted.as_slice(), "hello", limits: limits)
+    defer let body = answered_with(posted.as_slice(), "hello", limits: limits)
     // `GET`, two spaces, `HTTP/1.1` and the CRLF leave 17 bytes for the
     // target, and this one is 18.
     let long_target = described("GET", "/aaaaaaaaaaaaaaaaa")
-    defer let target = refused_with(long_target.as_slice(), "", limits: limits)
+    defer let target = answered_with(long_target.as_slice(), "", limits: limits)
     // `X-Note: ` and the CRLF leave 22 bytes for the value, and this one is
     // 23.
     let long_header = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "HTTP_X_NOTE", value = "aaaaaaaaaaaaaaaaaaaaaaa" },
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_X_NOTE", "aaaaaaaaaaaaaaaaaaaaaaa"),
     ]
-    defer let header = refused_with(long_header.as_slice(), "", limits: limits)
+    defer let header = answered_with(long_header.as_slice(), "", limits: limits)
     let many = [
-        Variable { name = "REQUEST_METHOD", value = "GET" },
-        Variable { name = "HTTP_A", value = "1" },
-        Variable { name = "HTTP_B", value = "2" },
-        Variable { name = "HTTP_C", value = "3" },
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_A", "1"),
+        given("HTTP_B", "2"),
+        given("HTTP_C", "3"),
     ]
-    defer let headers = refused_with(many.as_slice(), "", limits: limits)
+    defer let headers = answered_with(many.as_slice(), "", limits: limits)
     testing.assert_eq(body.view(), "Status: 413 Content Too Large\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a body past the limit was accepted")?
     testing.assert_eq(target.view(), "Status: 414 URI Too Long\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a target past the line limit was accepted")?
     testing.assert_eq(header.view(), "Status: 431 Request Header Fields Too Large\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a header past the line limit was accepted")?
@@ -813,10 +984,10 @@ test fn each_limit_answers_its_status_one_past_the_bound() {
 test fn a_request_at_the_header_and_body_limits_is_answered() {
     let limits = Limits { max_line_bytes = 64, max_headers = 2, max_body_bytes = 13, ..Limits.default() }
     let at_limits = [
-        Variable { name = "REQUEST_METHOD", value = "POST" },
-        Variable { name = "PATH_INFO", value = "/notes" },
-        Variable { name = "CONTENT_TYPE", value = "application/x-www-form-urlencoded" },
-        Variable { name = "CONTENT_LENGTH", value = "13" },
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
     ]
     var router = cgi_router()
     defer let answer = cgi_exchange(at_limits.as_slice(), "note=buy+milk", &router, limits: limits)
@@ -829,8 +1000,8 @@ test fn a_missing_request_method_answers_nothing() {
     var router = cgi_router()
     // A refusal elsewhere in the variables does not make a request of them.
     let variables = [
-        Variable { name = "PATH_INFO", value = "/greet/Ada" },
-        Variable { name = "CONTENT_LENGTH", value = "x" },
+        given("PATH_INFO", "/greet/Ada"),
+        given("CONTENT_LENGTH", "x"),
     ]
     defer let answer = cgi_exchange(variables.as_slice(), "", &router)
     router.release()
