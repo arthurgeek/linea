@@ -144,12 +144,12 @@ and twenty thousand runs would take hours.
 CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
 request merges into `main` once `merge-ready`, the one required status, is
 green on its final commit. A draft pull request runs nothing. A ready pull
-request runs `check`, `sanitize`, `optimised` and, when the change touches
-`src/mir`, `src/ownership`, `src/sema` (which holds the type tables),
+request runs `check`, `sanitize`, `optimised`, `sweep` and, when the change
+touches `src/mir`, `src/ownership`, `src/sema` (which holds the type tables),
 `src/driver/loader.zig` or the program generator, `fuzz-mir`, which fuzzes
 the MIR verifier. A push to `main` runs `check`. A manual run and the weekly
-schedule run every lane, `sweep` and `fuzz`, which runs every `fuzz:` target
-and keeps the inputs each clean search reached for the next. `optimised` also
+schedule run every lane and `fuzz`, which runs every `fuzz:` target and keeps
+the inputs each clean search reached for the next. `optimised` also
 runs soundness, over the default seeds and over sixteen more: a fixed window
 on a pull request, and one that moves with the run number on a weekly or
 manual run.

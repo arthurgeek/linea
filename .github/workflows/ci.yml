@@ -531,12 +531,12 @@ jobs:
   # linear, about four is quadratic, and a slow runner divides out of both
   # sides. Nothing else runs in this job, and a failure names a dimension.
   sweep:
-    # Manual runs and the weekly schedule run it beside the other lanes. No
-    # other lane waits for it and `merge-ready` does not read it: it times
-    # passes against a clock, and a slow shared runner can fail it without a
-    # regression. A failure stays visible on the run.
+    # A ready pull request, manual runs and the weekly schedule run it beside
+    # the other lanes. No other lane waits for it and `merge-ready` does not
+    # read it: it times passes against a clock, and a slow shared runner can
+    # fail it without a regression. A failure stays visible on the run.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
