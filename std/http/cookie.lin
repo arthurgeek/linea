@@ -39,9 +39,9 @@ impl Display for CookieError {
 }
 
 test fn a_cookie_error_displays_its_reason() {
-    defer let name = fmt.render_owned(mem.system(), CookieError.NotAToken).unwrap()
-    defer let insecure = fmt.render_owned(mem.system(), CookieError.InsecureSameSiteNone).unwrap()
-    defer let header = fmt.render_owned(mem.system(), CookieError.Header(.ControlByte)).unwrap()
+    defer let name = fmt.render_owned(CookieError.NotAToken).unwrap()
+    defer let insecure = fmt.render_owned(CookieError.InsecureSameSiteNone).unwrap()
+    defer let header = fmt.render_owned(CookieError.Header(.ControlByte)).unwrap()
     testing.assert_eq(name.view(), "the cookie name is not an HTTP token", "the name reason changed")?
     testing.assert_eq(insecure.view(), "a cookie that allows cross-site use must also be secure", "the secure reason changed")?
     testing.assert_eq(header.view(), "the header value holds a control byte", "the header reason changed")?
@@ -333,7 +333,7 @@ impl[P: Allocator] Response[P] {
     ) -> Result[(), CookieError] where carries() {
         let cookie = SetCookie { name = copy(name), value = copy(value), path = copy(path), domain = copy(domain), max_age = copy(max_age), expires = copy(expires), secure, http_only, same_site = copy(same_site) }
         cookie.check()?
-        defer let line = fmt.render_owned(self.headers.allocator, cookie)?
+        defer let line = fmt.render_owned_in(self.headers.allocator, cookie)?
         &self.headers.add("Set-Cookie", line.view())?
         .Ok(())
     }
@@ -437,7 +437,7 @@ test fn cross_site_use_requires_secure() {
 // A 1 KiB arena holds the response but not the room for a cookie value.
 test fn a_cookie_refused_for_memory_leaves_no_header() {
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    defer let long = Vec.filled(mem.system(), 2048, UInt8(120)).unwrap()
+    defer let long = Vec.filled(2048, UInt8(120)).unwrap()
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var response = text(sent.request(), "ok").unwrap()
     let refused = &response.set_cookie("n", Str.from_bytes(long.as_slice()).unwrap())

@@ -256,7 +256,7 @@ test fn an_http_date_displays_in_the_form_header_fields_use() {
 // `http_date_is` checks that the timestamp `seconds` after the epoch displays
 // as the HTTP date `expected`.
 fn http_date_is(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
-    let written = fmt.render_owned(mem.system(), Timestamp.from_unix(seconds, 0).unwrap().http_date()).unwrap()
+    let written = fmt.render_owned(Timestamp.from_unix(seconds, 0).unwrap().http_date()).unwrap()
     let checked = testing.assert_eq(written.view(), expected, said)
     written.release()
     checked

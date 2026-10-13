@@ -1316,7 +1316,7 @@ import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
     // Nothing changes `title` after it is built, so `defer let`.
-    defer let title = "Weekly plan".to_owned(mem.system()) else |_| {
+    defer let title = "Weekly plan".to_owned() else |_| {
         return .Ok(1)
     }
     // The loop appends to `tasks`, so `defer var`.

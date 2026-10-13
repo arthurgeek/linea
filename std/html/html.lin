@@ -1,5 +1,4 @@
 import std.fmt
-import std.mem
 import std.testing
 
 // The entity that stands for `byte` in HTML text and in a quoted attribute
@@ -43,7 +42,7 @@ pub fn escape[W: Writer](inout w: W, text: Str) -> Result[(), W.Error] where car
 }
 
 test fn special_characters_are_written_as_entities() {
-    defer let rendered = fmt.render_owned(mem.system(), escaped("<a href=\"x\">Tom & 'Jerry'</a>")).unwrap()
+    defer let rendered = fmt.render_owned(escaped("<a href=\"x\">Tom & 'Jerry'</a>")).unwrap()
     testing.assert_eq(rendered.view(), "&lt;a href=&quot;x&quot;&gt;Tom &amp; &#39;Jerry&#39;&lt;/a&gt;", "a special character was left bare")?
     .Ok(())
 }
@@ -69,45 +68,45 @@ pub fn escaped(text: Str) -> Escaped where carries(text) {
 
 test fn escaped_text_reads_in_an_interpolation() {
     let name = "<script>alert('x')</script>"
-    defer let page = fmt.render_owned(mem.system(), "<p>Hello, {escaped(name)}!</p>").unwrap()
+    defer let page = fmt.render_owned("<p>Hello, {escaped(name)}!</p>").unwrap()
     testing.assert_eq(page.view(), "<p>Hello, &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;!</p>", "the name was not escaped")?
     .Ok(())
 }
 
 test fn text_without_special_characters_is_written_unchanged() {
-    defer let plain = fmt.render_owned(mem.system(), escaped("café 🚀 plain, text; = ok")).unwrap()
-    defer let empty = fmt.render_owned(mem.system(), escaped("")).unwrap()
+    defer let plain = fmt.render_owned(escaped("café 🚀 plain, text; = ok")).unwrap()
+    defer let empty = fmt.render_owned(escaped("")).unwrap()
     testing.assert_eq(plain.view(), "café 🚀 plain, text; = ok", "plain text changed")?
     testing.assert_eq(empty.view(), "", "empty text gained characters")?
     .Ok(())
 }
 
 test fn text_that_is_already_escaped_is_escaped_again() {
-    defer let rendered = fmt.render_owned(mem.system(), escaped("&amp; &lt;b&gt; &#39;")).unwrap()
+    defer let rendered = fmt.render_owned(escaped("&amp; &lt;b&gt; &#39;")).unwrap()
     testing.assert_eq(rendered.view(), "&amp;amp; &amp;lt;b&amp;gt; &amp;#39;", "an entity was taken for markup")?
     .Ok(())
 }
 
 test fn every_special_character_in_a_row_is_replaced() {
-    defer let rendered = fmt.render_owned(mem.system(), escaped("&&<<>>\"\"''")).unwrap()
+    defer let rendered = fmt.render_owned(escaped("&&<<>>\"\"''")).unwrap()
     testing.assert_eq(rendered.view(), "&amp;&amp;&lt;&lt;&gt;&gt;&quot;&quot;&#39;&#39;", "a repeated character was missed")?
     .Ok(())
 }
 
 test fn special_characters_beside_multi_byte_text_keep_the_text_whole() {
-    defer let rendered = fmt.render_owned(mem.system(), escaped("é<ü>🚀&")).unwrap()
+    defer let rendered = fmt.render_owned(escaped("é<ü>🚀&")).unwrap()
     testing.assert_eq(rendered.view(), "é&lt;ü&gt;🚀&amp;", "a multi-byte scalar was split")?
     .Ok(())
 }
 
 test fn an_attribute_value_cannot_end_its_quotes() {
     let hostile = "\" onmouseover=\"alert(1)"
-    defer let double = fmt.render_owned(mem.system(), "<a title=\"{escaped(hostile)}\">").unwrap()
-    defer let single = fmt.render_owned(mem.system(), "<a title='{escaped(hostile)}'>").unwrap()
+    defer let double = fmt.render_owned("<a title=\"{escaped(hostile)}\">").unwrap()
+    defer let single = fmt.render_owned("<a title='{escaped(hostile)}'>").unwrap()
     testing.assert_eq(double.view(), "<a title=\"&quot; onmouseover=&quot;alert(1)\">", "a double quote ended the attribute")?
     testing.assert_eq(single.view(), "<a title='&quot; onmouseover=&quot;alert(1)'>", "a quote ended the single-quoted attribute")?
     let apostrophe = "' onmouseover='alert(1)"
-    defer let quoted = fmt.render_owned(mem.system(), "<a title='{escaped(apostrophe)}'>").unwrap()
+    defer let quoted = fmt.render_owned("<a title='{escaped(apostrophe)}'>").unwrap()
     testing.assert_eq(quoted.view(), "<a title='&#39; onmouseover=&#39;alert(1)'>", "an apostrophe ended the attribute")?
     .Ok(())
 }

@@ -43,7 +43,7 @@ fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, h
     &response.set_header("Content-Type", "text/html; charset=utf-8")?
     // The cookie lasts a year. `http_only` keeps scripts on the page from
     // reading it, and `Lax` withholds it from requests other sites trigger.
-    let count = fmt.render_owned(request.allocator(), visits)?
+    let count = fmt.render_owned_in(request.allocator(), visits)?
     &response.set_cookie("visits", count.view(), path: "/", max_age: .Some(31536000), http_only: true, same_site: .Some(.Lax))?
     .Ok(response)
 }
