@@ -476,6 +476,7 @@ fn typecheckInternal(
     defer c.borrowed_temporaries.deinit(gpa);
     defer c.interpolation_positions.deinit(gpa);
     defer c.receivers_checked.deinit(gpa);
+    defer c.array_lengths.deinit(gpa);
     defer c.refused.deinit(gpa);
     defer c.folded_indices.deinit(gpa);
     defer c.constant_values.deinit(gpa);
@@ -5250,6 +5251,9 @@ const Checker = struct {
     /// first recorded instead of checking the receiver again, which would
     /// report its mistakes twice and record its pieces twice.
     receivers_checked: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// What each array type's written length counts, keyed by the length
+    /// expression; null where it was refused. `arrayLength` fills it.
+    array_lengths: std.AutoHashMapUnmanaged(ExprId, ?u32) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The expression the last mismatch report poisoned. That poison is a
@@ -8593,7 +8597,29 @@ const Checker = struct {
     fn arrayTypeWithElement(self: *Checker, ref: node.TypeRef, element: TypeId) std.mem.Allocator.Error!TypeId {
         if (ref.inferred_length != .none) return self.refuseArrayInference(ref, false);
         if (ref.length == ExprId.none) return .poison;
-        const written_as = try self.check(ref.length, null);
+        const length = try self.arrayLength(ref.length) orelse return .poison;
+        return self.builder.arrayOf(element, length);
+    }
+
+    /// What the length written in an array type counts, or null where it was
+    /// refused.
+    ///
+    /// Checked once per written length. A written type is read again wherever
+    /// it is named -- a structure's field types are read each time it is laid
+    /// out -- and checking the length again would report each mistake in it
+    /// again and record each value of an interpolated literal again.
+    fn arrayLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+        if (self.array_lengths.get(length)) |counted| return counted;
+        // Null until counted, so a length whose own check reads it again
+        // reads a refusal rather than counting itself.
+        try self.array_lengths.put(self.gpa, length, null);
+        const counted = try self.countLength(length);
+        try self.array_lengths.put(self.gpa, length, counted);
+        return counted;
+    }
+
+    fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+        const written_as = try self.check(length, null);
 
         // The routine that folds a constant expression wherever one is read,
         // and not this pass's own table of what it has folded so far: which
@@ -8606,42 +8632,53 @@ const Checker = struct {
         // text constants are different domains. A length that is not a
         // constant at all is told which of the two it failed, since a form the
         // definition does not admit may be no number either.
-        const folded = switch (try self.worth(ref.length)) {
+        const folded = switch (try self.worth(length)) {
             // A newtype's constant folds to the integer it holds, and is still
             // its own type rather than a number.
-            .integer => |v| if (written_as != .poison and self.builder.get(written_as) == .newtype)
-                return self.refuseUncountedLength(ref.length)
-            else
-                v,
-            .truth, .string, .aggregate => return self.refuseUncountedLength(ref.length),
-            .not_constant, .absent => return if (written_as != .poison and written_as.integerInfo() == null)
-                self.refuseUncountedLength(ref.length)
-            else
-                self.report(
+            .integer => |v| if (written_as != .poison and self.builder.get(written_as) == .newtype) {
+                _ = self.refuseUncountedLength(length);
+                return null;
+            } else v,
+            .truth, .string, .aggregate => {
+                _ = self.refuseUncountedLength(length);
+                return null;
+            },
+            .not_constant, .absent => {
+                if (written_as != .poison and written_as.integerInfo() == null) {
+                    _ = self.refuseUncountedLength(length);
+                } else _ = self.report(
                     .t_array_size,
-                    ref.length,
+                    length,
                     "an array's length is part of its type, so it is settled where the type is written",
                     .{},
                     "this is not a constant",
-                ),
+                );
+                return null;
+            },
         };
-        if (folded < 0) return self.report(
-            .t_array_size,
-            ref.length,
-            "an array's length is a count, and a count is not negative",
-            .{},
-            "this is negative",
-        );
+        if (folded < 0) {
+            _ = self.report(
+                .t_array_size,
+                length,
+                "an array's length is a count, and a count is not negative",
+                .{},
+                "this is negative",
+            );
+            return null;
+        }
 
-        if (folded > std.math.maxInt(u32)) return self.report(
-            .t_array_size,
-            ref.length,
-            "an array's length is part of its type, and this one is too wide to be",
-            .{},
-            "no array holds this many elements",
-        );
+        if (folded > std.math.maxInt(u32)) {
+            _ = self.report(
+                .t_array_size,
+                length,
+                "an array's length is part of its type, and this one is too wide to be",
+                .{},
+                "no array holds this many elements",
+            );
+            return null;
+        }
 
-        return self.builder.arrayOf(element, @intCast(folded));
+        return @intCast(folded);
     }
 
     /// A written type, resolved with `owner`'s parameters in scope.

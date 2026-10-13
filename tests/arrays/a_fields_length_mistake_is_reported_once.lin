@@ -1,0 +1,15 @@
+// [T-ArraySize]. A structure's field types are read wherever the structure is
+// laid out or built, and a length written in one is checked where it is
+// written: each mistake in it is reported once.
+let count: UInt64 = 3
+
+struct Shelf {
+    truth: [UInt8; true],
+    text: ([UInt8; "x{count}"], UInt8),
+    called: [UInt8; count.min(2)],
+}
+
+fn main() -> UInt8 {
+    let _shelf: Option[Shelf] = .None
+    0
+}
