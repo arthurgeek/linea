@@ -1,0 +1,162 @@
+// Collect replies to a party invitation as a CGI program. A web server runs
+// this program once for each request: it describes the request in
+// environment variables, sends a form's body on standard input, and sends
+// what the program writes on standard output back to the browser.
+//
+// GET / answers the invitation, an HTML form. POST /reply reads the form,
+// refuses a reply without a name or bringing more than four guests, and
+// confirms the reply as JSON. The router answers another method at those
+// paths 405, and any other path 404. Every request is logged to standard error, which the web server keeps in its
+// error log.
+import std.env
+import std.http
+import std.io
+import std.json
+import std.log
+import std.mem
+import std.testing
+
+use http.Handler
+use mem.Owner
+
+// The most guests one reply may bring.
+let most_guests: UInt32 = 4
+
+// The invitation page holds a form, which a browser posts as
+// `application/x-www-form-urlencoded`. The address the form posts to goes
+// between these two parts.
+let page_start: Str =
+    \\<!doctype html>
+    \\<title>Party</title>
+    \\<form method="post" action="
+
+let page_end: Str =
+    \\">
+    \\  <label>Name <input name="name"></label>
+    \\  <label>Guests <input name="guests" type="number" value="0"></label>
+    \\  <button>Reply</button>
+    \\</form>
+
+// `invitation` answers the page as HTML. The web server names the program's
+// own address in `SCRIPT_NAME`, such as `/cgi-bin/party_rsvp`, and runs the
+// program for every path beneath it, so the form posts to
+// `/cgi-bin/party_rsvp/reply`, which reaches the program with `PATH_INFO` set
+// to `/reply`. The address is the web server's own setting; run without one,
+// the form posts to `/reply`.
+fn invitation(request: http.Request) -> Result[http.Response, http.Error] {
+    let script = env.variable("SCRIPT_NAME").unwrap_or("")
+    // The page is built in the request's arena, which lives until the answer
+    // has been written.
+    var html = String.new_in(request.allocator())
+    "{page_start}{script}/reply{page_end}".fmt(&html)?
+    var page = http.text(request, html.view())?
+    &page.set_header("Content-Type", "text/html; charset=utf-8")?
+    .Ok(page)
+}
+
+// `Reply` is the form POST /reply expects, such as `name=Ada&guests=2`.
+// `derive(http.Params)` reads each field by its name, and refuses a form
+// missing one or holding a number that is not one with 400.
+@derive(http.Params, Release)
+struct Reply {
+    name: Str,
+    guests: UInt32,
+}
+
+// `Confirmed` is the answer, such as
+// `{"name":"Ada","guests":2,"message":"see you on Saturday"}`.
+@derive(json.Encode)
+struct Confirmed {
+    name: Str,
+    guests: UInt32,
+    message: Str,
+}
+
+// `reply` checks the form and confirms it. The web server may name the
+// party's date in the `PARTY_DATE` variable; `env.variable` reads it, and
+// the answer says "soon" when the server sets none.
+fn reply(form: http.Form[Reply], request: http.Request) -> Result[http.Response, http.Error] {
+    let name = form.value.name.trim_ascii()
+    if name.length() == 0 {
+        return .Err(http.error(request, .UnprocessableContent, "a reply needs a name"))
+    }
+    let guests = form.value.guests
+    if guests > most_guests {
+        return .Err(http.error(request, .UnprocessableContent, "a reply may bring at most {most_guests} guests"))
+    }
+    let date = env.variable("PARTY_DATE").unwrap_or("soon")
+    // The message is built in the request's arena, which lives until the
+    // answer has been written.
+    var message = String.new_in(request.allocator())
+    "see you {date}".fmt(&message)?
+    http.json(request, Confirmed { name, guests, message = message.view() })
+}
+
+// Register both routes; `?` stops at the first refused pattern. A pattern
+// matches its own path alone, so `GET /` answers the root and a path no route
+// names is answered 404.
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route("GET /", invitation)?
+    &router.route("POST /reply", reply)
+}
+
+fn main() -> UInt8 {
+    let logger = log.to_stderr(minimum: .Info)
+    var router: http.Router[()] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `serve_cgi` answers the one request this process was started for and
+    // returns. `http.logged` writes one line for it to standard error.
+    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
+        // Run from a shell without `REQUEST_METHOD`, there is no request.
+        io.eprintln("party_rsvp: {error}")
+        io.eprintln("run it from a web server, or describe a request: REQUEST_METHOD=GET party_rsvp")
+        return 64
+    }
+    0
+}
+
+// Each test builds a request in an arena, as `serve_cgi` does, and hands it
+// to the router.
+test fn the_invitation_is_an_html_form() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    var nothing = ()
+    let page = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the page is not HTML")?
+    testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find("<form").is_some(), "the page holds no form")?
+    // The test process has no `SCRIPT_NAME`, so the form posts to `/reply`.
+    testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find(r#"action="/reply""#).is_some(), "the form posts elsewhere")?
+}
+
+test fn a_reply_is_confirmed_as_json() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/reply", body: "name=+Ada+&guests=2", content_type: "application/x-www-form-urlencoded").unwrap()
+    var nothing = ()
+    let confirmed = &router.serve_http(&nothing, sent.request()).unwrap()
+    let body = Str.from_bytes(confirmed.body().unwrap()).unwrap()
+    testing.assert(body.starts_with(r#"{"name":"Ada","guests":2,"message":"see you "#), "the confirmation changed")?
+}
+
+test fn a_reply_without_a_name_or_with_too_many_guests_is_refused() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let unnamed = http.new_request(arena.handle(), "POST", "/reply", body: "name=&guests=1", content_type: "application/x-www-form-urlencoded").unwrap()
+    let crowded = http.new_request(arena.handle(), "POST", "/reply", body: "name=Ada&guests=9", content_type: "application/x-www-form-urlencoded").unwrap()
+    var nothing = ()
+    for sent in [unnamed, crowded] {
+        let refused = match &router.serve_http(&nothing, sent.request()) {
+            Ok(_) => return testing.assert(false, "a reply that breaks a rule was confirmed"),
+            Err(error) => error,
+        }
+        testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status changed")?
+    }
+}

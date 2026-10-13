@@ -19,7 +19,8 @@ let default_content_type: Str = "text/plain; charset=utf-8"
 // A handler answers with a `Response`: a status, headers, and a body that is
 // either held in the request's arena or streamed by a closure once the head is
 // sent. Every response ends where its connection closes, so the server sends
-// `Connection: close` and no length, and a response sets neither. With no
+// `Connection: close` and no length, and a response sets neither; a CGI
+// answer sends neither, since the web server frames the connection. With no
 // `Content-Type`, the server sends `text/plain; charset=utf-8`. A HEAD request
 // is answered with the head alone.
 @opaque
@@ -333,15 +334,16 @@ impl[P: Allocator] Response[P] {
             Streamed(stream) => stream,
         }
         let recorded: Vec[UInt8, mem.Handle[P]] = Vec.new_in(stream.request.allocator())
-        var body: BodyWriter[P] = .{ output = .Recorded(recorded), answering = copy(stream.request), failure = .None, in_body = true, body_bytes = 0 }
+        var body: BodyWriter[P] = .{ output = .Recorded(recorded), answering = copy(stream.request), failure = .None, in_body = true, body_bytes = 0, framing = .Http }
         let produced = produce_into(&body, stream)
-        let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _ } = body
+        let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = body
         let bytes = match output {
             Recorded(bytes) => bytes,
             Connection(writer) => {
                 let _closed = writer.abort().close()
                 panic("a recording wrote to a connection")
             },
+            Standard(_) => panic("a recording wrote to standard output"),
             Taken => panic("a body's output was not put back"),
         }
         produced?
@@ -364,11 +366,12 @@ test fn a_recorded_body_is_what_a_client_would_read() {
     .Ok(())
 }
 
-// A `BodyWriter` writes a response to its connection through a buffer in the
-// exchange's arena. A streamed body is written through it, with `Writer` for
-// text, interpolation and `json_format.write`; the first write that fails is
-// reported by every later one. Once `in_body` is set, after the head, it counts
-// the bytes it accepts in `body_bytes`.
+// A `BodyWriter` writes a response to its connection, or to standard output
+// for a CGI request, through a buffer in the exchange's arena. A streamed body
+// is written through it, with `Writer` for text, interpolation and
+// `json_format.write`; the first write that fails is reported by every later
+// one. Once `in_body` is set, after the head, it counts the bytes it accepts
+// in `body_bytes`. `framing` says how the head is written.
 @(opaque, linear)
 struct BodyWriter[P: Allocator = mem.SystemAllocator] {
     output: Output[P],
@@ -376,13 +379,26 @@ struct BodyWriter[P: Allocator = mem.SystemAllocator] {
     failure: Option[io.IoError],
     in_body: Bool,
     body_bytes: UInt64,
+    framing: Framing,
 }
 
-// A body goes to its connection through a buffer, or, when a test records it,
-// into bytes in the request's arena. A write takes the output out, leaving
-// `Taken` in its place, and puts it back through `put_output`.
+// A response's head starts with an HTTP status line and `Connection: close`
+// when the server writes it to a connection (`Http`), and with a `Status`
+// header when a web server reads it from a CGI program (`Cgi`), which frames
+// the connection itself.
+@copyable
+enum Framing {
+    Http,
+    Cgi,
+}
+
+// A body goes to its connection through a buffer, to standard output through
+// a buffer for a CGI request, or, when a test records it, into bytes in the
+// request's arena. A write takes the output out, leaving `Taken` in its place,
+// and puts it back through `put_output`.
 enum Output[P: Allocator] {
     Connection(io.BufferedWriter[net.Connection, mem.Handle[P]]),
+    Standard(io.BufferedWriter[io.Descriptor, mem.Handle[P]]),
     Recorded(Vec[UInt8, mem.Handle[P]]),
     Taken,
 }
@@ -397,7 +413,69 @@ fn put_output[P: Allocator](inout slot: Output[P], sink next: Output[P]) -> () w
             let _closed = writer.abort().close()
             panic("a body's output was put back twice")
         },
+        Standard(_) => panic("a body's output was put back twice"),
         Recorded(_) => panic("a body's output was put back twice"),
+    }
+}
+
+// An output is written as each of its destinations is: a buffered connection
+// or standard output through its buffer, and a recording by appending to it.
+impl[P: Allocator] io.ByteWriter for Output[P] {
+    type Error = io.IoError
+
+    fn pending_bytes(self: Self) -> UInt64 {
+        match read self {
+            Connection(writer) => writer.pending_bytes(),
+            Standard(writer) => writer.pending_bytes(),
+            Recorded(_) => 0,
+            Taken => 0,
+        }
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
+        match mem.exchange(&self, .Taken) {
+            Connection(buffered) => {
+                var writer = buffered
+                let written = &writer.write_some(bytes)
+                put_output(&self, .Connection(writer))
+                written
+            },
+            Standard(buffered) => {
+                var writer = buffered
+                let written = &writer.write_some(bytes)
+                put_output(&self, .Standard(writer))
+                written
+            },
+            Recorded(recorded) => {
+                var kept = recorded
+                let written = record(&kept, bytes)
+                put_output(&self, .Recorded(kept))
+                written
+            },
+            Taken => panic("a body's output was not put back"),
+        }
+    }
+
+    fn flush(inout self: Self) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
+        match mem.exchange(&self, .Taken) {
+            Connection(buffered) => {
+                var writer = buffered
+                let flushed = &writer.flush()
+                put_output(&self, .Connection(writer))
+                flushed
+            },
+            Standard(buffered) => {
+                var writer = buffered
+                let flushed = &writer.flush()
+                put_output(&self, .Standard(writer))
+                flushed
+            },
+            Recorded(recorded) => {
+                put_output(&self, .Recorded(recorded))
+                .Ok(0)
+            },
+            Taken => panic("a body's output was not put back"),
+        }
     }
 }
 
@@ -420,13 +498,13 @@ impl[P: Allocator] BodyWriter[P] {
     // connection.
     fn open(sink connection: net.Connection, request: Request[P]) -> Result[BodyWriter[P], io.BufferOpenFailure[net.Connection]] where carries(.Ok: request), carries(.Err.resource: connection) {
         let output = io.BufferedWriter.open_in(request.allocator(), capacity: response_buffer_bytes, writer: connection)?
-        .Ok(.{ output = .Connection(output), answering = copy(request), failure = .None, in_body = false, body_bytes = 0 })
+        .Ok(.{ output = .Connection(output), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Http })
     }
 
     // Send what is buffered and return the connection, which the caller
     // closes. A write that failed earlier is reported rather than repeated.
     fn finish(sink self: Self) -> Result[net.Connection, ResponseFailure] {
-        let BodyWriter { output: target, answering: _, failure, in_body: _, body_bytes: _ } = self
+        let BodyWriter { output: target, answering: _, failure, in_body: _, body_bytes: _, framing: _ } = self
         let output = connection_of(target)
         match failure {
             Some(error) => .Err(.{ connection = output.abort(), error }),
@@ -443,7 +521,7 @@ impl[P: Allocator] BodyWriter[P] {
     // Drop what is buffered and return the connection, which the caller
     // resets so the client sees the body was cut short.
     fn abandon(sink self: Self) -> net.Connection {
-        let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _ } = self
+        let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = self
         connection_of(output).abort()
     }
 
@@ -454,10 +532,12 @@ impl[P: Allocator] BodyWriter[P] {
 }
 
 // `connection_of` returns the buffered connection a body is written to; only
-// `serve` finishes or abandons a body, and its bodies write to a connection.
+// `serve` finishes or abandons a body this way, and its bodies write to a
+// connection.
 fn connection_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[net.Connection, mem.Handle[P]] where carries(output) {
     match output {
         Connection(writer) => writer,
+        Standard(_) => panic("a CGI body has no connection"),
         Recorded(_) => panic("a recorded body has no connection"),
         Taken => panic("a body's output was not put back"),
     }
@@ -488,11 +568,7 @@ impl[P: Allocator] io.ByteWriter for BodyWriter[P] {
     type Error = io.IoError
 
     fn pending_bytes(self: Self) -> UInt64 {
-        match read self.output {
-            Connection(writer) => writer.pending_bytes(),
-            Recorded(_) => 0,
-            Taken => 0,
-        }
+        self.output.pending_bytes()
     }
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[io.IoError]] where carries() {
@@ -500,22 +576,7 @@ impl[P: Allocator] io.ByteWriter for BodyWriter[P] {
             Some(error) => return .Err(.{ kind = .Underlying, reason = .Some(copy(error)), written = 0 }),
             None => {},
         }
-        let written = match mem.exchange(&self.output, .Taken) {
-            Connection(buffered) => {
-                var writer = buffered
-                let written = &writer.write_some(bytes)
-                put_output(&self.output, .Connection(writer))
-                written
-            },
-            Recorded(recorded) => {
-                var kept = recorded
-                let written = record(&kept, bytes)
-                put_output(&self.output, .Recorded(kept))
-                written
-            },
-            Taken => panic("a body's output was not put back"),
-        }
-        match written {
+        match &self.output.write_some(bytes) {
             Ok(count) => {
                 if self.in_body {
                     self.body_bytes += count
@@ -534,20 +595,7 @@ impl[P: Allocator] io.ByteWriter for BodyWriter[P] {
             Some(error) => return .Err(.{ kind = .Underlying, reason = .Some(copy(error)), written = 0 }),
             None => {},
         }
-        let flushed = match mem.exchange(&self.output, .Taken) {
-            Connection(buffered) => {
-                var writer = buffered
-                let flushed = &writer.flush()
-                put_output(&self.output, .Connection(writer))
-                flushed
-            },
-            Recorded(recorded) => {
-                put_output(&self.output, .Recorded(recorded))
-                Result.Ok(UInt64(0))
-            },
-            Taken => panic("a body's output was not put back"),
-        }
-        match flushed {
+        match &self.output.flush() {
             Ok(count) => .Ok(count),
             Err(failure) => {
                 &self.fail(failure)
@@ -620,7 +668,8 @@ enum WriteError[P: Allocator] {
 // none, and the body. For a HEAD request the head is written alone.
 fn write_response[P: Allocator](inout body: BodyWriter[P], sink response: Response[P], head_only: Bool) -> Result[(), WriteError[P]] where carries(.Err: body, response), retains(body: response) {
     let Response { answer, headers, content } = response
-    let _written = write_head(&body, answer, headers) else |failure| {
+    let framing = body.framing
+    let _written = write_head(&body, answer, headers, framing) else |failure| {
         return .Err(.Io(failure.into()))
     }
     body.in_body = true
@@ -734,11 +783,12 @@ test fn a_stream_that_fails_stops_where_it_stands() {
 // with a newline as a plain-text body. For a HEAD request the head is written
 // alone.
 fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_only: Bool) -> Result[(), WriteError[P]] where carries() {
+    let framing = body.framing
     let head = match read error.headers {
-        Some(headers) => write_head(&body, error.status(), headers),
+        Some(headers) => write_head(&body, error.status(), headers, framing),
         None => {
             let empty: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(body.answering.allocator())
-            write_head(&body, error.status(), empty)
+            write_head(&body, error.status(), empty, framing)
         },
     }
     let _written = head else |failure| {
@@ -757,18 +807,27 @@ fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_on
     }
 }
 
-// Write the status line and headers, ending with the empty line, and answer
-// how many bytes that was. A failure counts every byte the head accepted.
-fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, headers: ResponseHeaders[A]) -> Result[UInt64, WriteFailure[W.Error]] where carries(.Err: writer) {
+// Write the head, ending with the empty line, and answer how many bytes that
+// was: for `Http` the status line and `Connection: close`, for `Cgi` the
+// status as a `Status` header, and then the headers in order and a plain-text
+// `Content-Type` when they name none. A failure counts every byte the head
+// accepted.
+fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, headers: ResponseHeaders[A], framing: Framing) -> Result[UInt64, WriteFailure[W.Error]] where carries(.Err: writer) {
     var written: UInt64 = 0
-    put(&writer, &written, "HTTP/1.1 ")?
+    match read framing {
+        Http => put(&writer, &written, "HTTP/1.1 ")?,
+        Cgi => put(&writer, &written, "Status: ")?,
+    }
     let code = status.code()
     put(&writer, &written, digit(code / 100))?
     put(&writer, &written, digit(code / 10 % 10))?
     put(&writer, &written, digit(code % 10))?
     put(&writer, &written, " ")?
     put(&writer, &written, status.reason())?
-    put(&writer, &written, "\r\nConnection: close\r\n")?
+    match read framing {
+        Http => put(&writer, &written, "\r\nConnection: close\r\n")?,
+        Cgi => put(&writer, &written, "\r\n")?,
+    }
     for header in headers.fields.as_slice() {
         put(&writer, &written, header.name.view())?
         put(&writer, &written, ": ")?

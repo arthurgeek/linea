@@ -1,0 +1,1012 @@
+import std.env
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+
+use env.Entries
+use env.Entry
+
+// A CGI program answers one request and exits. The web server starts it for
+// each request, describes the request in environment variables, sends the
+// body on standard input, and reads the response from standard output. The
+// response starts with a `Status` header instead of an HTTP status line, and
+// the web server frames the connection itself.
+//
+// `serve_cgi` builds the request from these variables:
+//
+// - `REQUEST_METHOD` is the method. A process started without it was not
+//   started by a web server to answer a request.
+// - `PATH_INFO` is the path after the program's own location, which the web
+//   server has decoded; it is encoded again into the request's target, byte
+//   by byte, so routes and path values read it as they read a path a client
+//   sent, whether or not it is UTF-8. An empty or missing path is `/`.
+// - `QUERY_STRING` is the query, as the client encoded it.
+// - `CONTENT_TYPE` and `CONTENT_LENGTH` become the `Content-Type` and
+//   `Content-Length` headers, and the body is that many bytes of standard
+//   input. An empty or missing length means the request has no body: the web
+//   server has already taken apart however the client framed the body, so
+//   `HTTP_TRANSFER_ENCODING` and `HTTP_CONTENT_LENGTH` are not read, and a
+//   chunked upload a web server passes on without `CONTENT_LENGTH` arrives
+//   with no body.
+// - Every other `HTTP_` variable is a header the client sent:
+//   `HTTP_USER_AGENT` is `User-Agent`.
+//
+// `SERVER_PROTOCOL` is the protocol between the client and the web server,
+// such as HTTP/2.0, which the program never speaks, so it is not read. Nor is
+// `SCRIPT_NAME`, the program's own location: `env.variable("SCRIPT_NAME")`
+// reads it, to build a link or a form's action that leads back to the
+// program. When a variable appears more than once, the first is the one read,
+// as `env.variable` reads it.
+//
+// The request is held to `Limits` as `serve` holds a request read from a
+// connection, and is refused with the same status: 400 for a method that is
+// not a token, a malformed header, a length that is not digits, or a method,
+// query or header that is not UTF-8, as `serve` refuses a line that is not;
+// 413 for a body past `max_body_bytes`, 414 for a target longer than a
+// request line may be, and 431 for too many headers or one longer than a
+// header line may be. A standard input that ends before the body does is
+// refused with 400. The timeouts do not apply: the web server bounds how long
+// a program may take.
+//
+// The program's standard output is the response, so anything else written to
+// it, such as `io.println` in a handler, lands before the `Status` header and
+// the web server refuses the whole answer; write to standard error instead. A
+// response whose status is 200 and whose `Location` is a path on the same
+// server, such as `/thanks`, is a local redirect: the web server answers the
+// client with that path's response in its place and drops the body. A
+// `Status` header is refused like the framing headers, since the response's
+// own status writes it.
+
+// `serve_cgi` answers nothing and returns `NotCgi` when `REQUEST_METHOD` is
+// not set, so no web server started the program to answer a request, and
+// `ArenaTooSmall` when `limits.request_arena_bytes` cannot hold every request
+// the limits admit.
+@(copyable, derive(Equatable, Debug))
+pub enum CgiError {
+    NotCgi,
+    ArenaTooSmall,
+}
+
+impl Display for CgiError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            NotCgi => &w.write_str("REQUEST_METHOD is not set, so no web server started this program to answer a request"),
+            ArenaTooSmall => &w.write_str("the request arena cannot hold every request the limits admit"),
+        }
+    }
+}
+
+test fn a_cgi_error_displays_its_cause() {
+    defer let not_cgi = fmt.render_owned(CgiError.NotCgi).unwrap()
+    defer let small = fmt.render_owned(CgiError.ArenaTooSmall).unwrap()
+    testing.assert_eq(not_cgi.view(), "REQUEST_METHOD is not set, so no web server started this program to answer a request", "the missing request changed")?
+    testing.assert_eq(small.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
+    .Ok(())
+}
+
+// Answer the one request this process was started for through `handler`, as
+// a CGI program: read the request from the environment and standard input,
+// and write the response to standard output. `state` is what the routes
+// share, wrapped around `handler` as `with_state` does; a program that shares
+// nothing leaves it out. The request's arena is carved from the system
+// allocator; `serve_cgi_in` takes another.
+//
+// Once the response is written, `handler` is told how the exchange ended
+// through `observe`, as `serve` tells it, so `http.logged` writes its line to
+// standard error, which the web server keeps in its error log. A streamed
+// body that fails after the head was written stops where it stands: standard
+// output cannot be reset, so the web server cannot tell the body was cut
+// short. `handler` and `state` are released on every failure; on success the
+// handler is released and the state is returned.
+pub fn serve_cgi[H: Handler[S, mem.SystemAllocator] + Observer + Release, S: Release = ()](sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, CgiError] where carries(state, handler) {
+    serve_cgi_in(mem.system(), handler, state: state, limits: limits)
+}
+
+// Limits whose arena cannot hold a request are refused before the
+// environment is read, whatever variables the test process was started with.
+test fn an_arena_too_small_for_the_limits_is_refused() {
+    let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
+    let refused: Router[()] = Router.new()
+    testing.assert_eq(serve_cgi(refused, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
+    .Ok(())
+}
+
+// Answer the request as `serve_cgi` does, with the request's arena carved
+// from `parent`. When `parent` refuses the arena's storage, the request is
+// answered 503 and `handler` is told so.
+pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Release = ()](parent: P, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, CgiError] where carries(state, handler) {
+    var server = with_state(state, handler)
+    let needed = smallest_arena(limits)
+    if needed == UInt64.max || limits.request_arena_bytes < needed {
+        server.release()
+        return .Err(.ArenaTooSmall)
+    }
+    let arena = mem.Arena.open(parent, limits.request_arena_bytes)
+    let answered = match io.BufferedWriter.open_in(arena.handle(), capacity: response_buffer_bytes, writer: io.stdout()) {
+        Ok(writer) => {
+            var variables = env.entries()
+            var standard = StandardOutput {}
+            answer_cgi(&variables, io.stdin(), .Standard(writer), &standard, &server, arena.handle(), limits)
+        },
+        Err(failure) => {
+            let BufferOpenFailure { resource, reason: _ } = failure
+            var standard = resource
+            let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(arena.handle())
+            let wrote = write_head(&standard, .ServiceUnavailable, headers, .Cgi)
+            headers.release()
+            observe_unanswered(&server, .ServiceUnavailable, wrote, .Memory)
+            .Ok(())
+        },
+    }
+    arena.release()
+    match answered {
+        Ok(_) => .Ok(server.into_state()),
+        Err(error) => {
+            server.release()
+            .Err(error)
+        },
+    }
+}
+
+test fn an_arena_too_small_for_the_limits_is_refused_with_a_parent() {
+    defer let parent = mem.Arena.open(mem.system(), size: 65536)
+    let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
+    let router: Router[(), mem.Handle] = Router.new_in(parent.handle())
+    testing.assert_eq(serve_cgi_in(parent.handle(), router, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
+    .Ok(())
+}
+
+// A `CgiOutput` takes the output an answer was written to once it has been
+// flushed: standard output's buffer is dropped with the arena, and a test
+// keeps the text it recorded.
+trait CgiOutput {
+    fn settle[P: Allocator](inout self: Self, sink output: Output[P]) -> ()
+}
+
+// `StandardOutput` is where a CGI program's answer goes.
+struct StandardOutput {}
+
+impl CgiOutput for StandardOutput {
+    fn settle[P: Allocator](inout _self: Self, sink output: Output[P]) -> () {
+        match output {
+            Standard(buffered) => {
+                let _standard = buffered.abort()
+            },
+            Connection(buffered) => {
+                let _closed = buffered.abort().close()
+                panic("a CGI answer was written to a connection")
+            },
+            Recorded(_) => panic("a CGI answer was recorded"),
+            Taken => panic("a CGI answer's output was not put back"),
+        }
+    }
+}
+
+// `CgiVariables` walks the variables a CGI request is described by, as the
+// bytes they hold: the process environment, or the variables a test gives.
+trait CgiVariables {
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self)
+}
+
+impl CgiVariables for Entries {
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
+        &self.next()
+    }
+}
+
+// `Given` walks variables a test lists.
+struct Given {
+    variables: mem.Slice[Entry],
+    index: UInt64,
+}
+
+impl CgiVariables for Given {
+    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
+        if self.index == self.variables.length() {
+            return .None
+        }
+        let variable = copy(self.variables[self.index])
+        self.index += 1
+        .Some(variable)
+    }
+}
+
+// A request described by CGI variables is refused with a status, or was not
+// described at all because `REQUEST_METHOD` is missing.
+enum CgiRefusal {
+    NotCgi,
+    Refused(RequestError),
+}
+
+// A `Described` request holds what the variables said, before the body is
+// read: the text `line` and `header_fields` range over, and the body's
+// length.
+struct Described[P: Allocator] {
+    head: String[mem.Handle[P]],
+    line: RequestLine,
+    header_fields: Vec[Field, mem.Handle[P]],
+    length: Option[UInt64],
+}
+
+// The bytes a request line adds to its method and target: two spaces, the
+// eight bytes of `HTTP/1.1` and the CRLF.
+let request_line_framing_bytes: UInt64 = 12
+
+// The bytes a header line adds to its name and value: `: ` and the CRLF.
+let header_line_framing_bytes: UInt64 = 4
+
+// `describe_request` reads the request `variables` describe into `memory`.
+// A missing `REQUEST_METHOD` is `NotCgi` however else the variables are
+// refused.
+fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: mem.Handle[P], limits: Limits) -> Result[Described[P], CgiRefusal] where carries(.Ok: memory) {
+    var head = String.new_in(memory)
+    var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
+    var tally = no_headers
+    // `name` holds the name of the header an `HTTP_` variable carries.
+    var name: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
+    var method: Option[mem.Slice[UInt8]] = .None
+    var path_info: Option[mem.Slice[UInt8]] = .None
+    var query: Option[mem.Slice[UInt8]] = .None
+    var typed = false
+    var sized = false
+    var refused: Option[RequestError] = .None
+    loop {
+        let variable = &variables.next_variable() else {
+            break
+        }
+        let header: Option[Str] = if variable.name == "REQUEST_METHOD".as_bytes() {
+            if method.is_none() {
+                method = .Some(copy(variable.value))
+            }
+            .None
+        } else if variable.name == "PATH_INFO".as_bytes() {
+            if path_info.is_none() {
+                path_info = .Some(copy(variable.value))
+            }
+            .None
+        } else if variable.name == "QUERY_STRING".as_bytes() {
+            if query.is_none() {
+                query = .Some(copy(variable.value))
+            }
+            .None
+        } else if variable.name == "CONTENT_TYPE".as_bytes() {
+            let first = !typed
+            typed = true
+            if first {
+                .Some("Content-Type")
+            } else {
+                .None
+            }
+        } else if variable.name == "CONTENT_LENGTH".as_bytes() {
+            let first = !sized
+            sized = true
+            if first && variable.value.length() > 0 {
+                .Some("Content-Length")
+            } else {
+                .None
+            }
+        } else if variable.name == "HTTP_TRANSFER_ENCODING".as_bytes() || variable.name == "HTTP_CONTENT_LENGTH".as_bytes() {
+            .None
+        } else if is_header_variable(variable.name) {
+            match header_name(&name, variable.name) {
+                Ok(spelled) => .Some(spelled),
+                Err(error) => {
+                    if refused.is_none() {
+                        refused = .Some(error)
+                    }
+                    .None
+                },
+            }
+        } else {
+            .None
+        }
+        match header {
+            Some(field) => if refused.is_none() {
+                let added = match Str.from_bytes(variable.value) {
+                    Ok(value) => add_cgi_header(&head, &header_fields, &tally, field, value, limits),
+                    Err(_) => .Err(.Status(.BadRequest)),
+                }
+                match added {
+                    Ok(_) => {},
+                    Err(error) => refused = .Some(error),
+                }
+            },
+            None => {},
+        }
+    }
+    let method_bytes = method else {
+        return .Err(.NotCgi)
+    }
+    match refused {
+        Some(error) => return .Err(.Refused(error)),
+        None => {},
+    }
+    let method_token = Str.from_bytes(method_bytes) else |_| {
+        return .Err(.Refused(.Status(.BadRequest)))
+    }
+    let query_text = match query {
+        Some(bytes) => match Str.from_bytes(bytes) {
+            Ok(text) => text,
+            Err(_) => return .Err(.Refused(.Status(.BadRequest))),
+        },
+        None => "",
+    }
+    let path = path_info.unwrap_or("".as_bytes())
+    match described_line(&head, method_token, path, query_text, limits) {
+        Ok(line) => match body_length(tally) {
+            Ok(length) => .Ok(.{ head, line, header_fields, length }),
+            Err(error) => .Err(.Refused(error)),
+        },
+        Err(error) => .Err(.Refused(error)),
+    }
+}
+
+// The ASCII bytes of `HTTP_`, which starts the name of a variable holding a
+// header.
+let header_prefix: Str = "HTTP_"
+
+// `is_header_variable` says whether the variable named `name` holds a header.
+fn is_header_variable(name: mem.Slice[UInt8]) -> Bool {
+    match name.subspan(start: 0, count: header_prefix.length()) {
+        Some(start) => start == header_prefix.as_bytes(),
+        None => false,
+    }
+}
+
+// `add_cgi_header` adds the header `name: value` as a header line holding it
+// is added, and refuses with 431 a header longer than a header line may be.
+fn add_cgi_header[A: Allocator](inout head: String[A], inout header_fields: Vec[Field, A], inout tally: HeaderTally, name: Str, value: Str, limits: Limits) -> Result[(), RequestError] where carries() {
+    let trimmed = trim_optional_whitespace(value)
+    if name.length() + trimmed.length() + header_line_framing_bytes > limits.max_line_bytes {
+        return .Err(.Status(.RequestHeaderFieldsTooLarge))
+    }
+    add_header_field(&head, &header_fields, &tally, name, trimmed, limits)
+}
+
+// `described_line` stores the request line the variables describe in `head`:
+// the method, and the target `PATH_INFO` and `QUERY_STRING` make. The method
+// must be a token and the target visible ASCII.
+fn described_line[A: Allocator](inout head: String[A], method: Str, path_info: mem.Slice[UInt8], query: Str, limits: Limits) -> Result[RequestLine, RequestError] {
+    if !is_token(method) {
+        return .Err(.Status(.BadRequest))
+    }
+    let method_token = stored_or_refused(&head, method)?
+    let target = stored_target(&head, path_info, query)?
+    let target_text = stored_part(head.view(), target)
+    if !is_target(target_text) {
+        return .Err(.Status(.BadRequest))
+    }
+    if method.length() + target_text.length() + request_line_framing_bytes > limits.max_line_bytes {
+        return .Err(.Status(.UriTooLong))
+    }
+    .Ok(.{ method = method_of(method), method_token, target })
+}
+
+// `stored_target` stores the target a client sent for `path_info` and
+// `query` in `head` and returns its range there. The web server decoded the
+// path, so each byte a target cannot hold as it is, and each `%`, `?` and
+// `#`, is encoded again as `%XX`; decoding the stored path gives `path_info`
+// back, whether or not it is UTF-8. The query is stored as it is, after a
+// `?`, when it is not empty.
+fn stored_target[A: Allocator](inout head: String[A], path_info: mem.Slice[UInt8], query: Str) -> Result[Span, RequestError] {
+    let start = head.length()
+    let path = if path_info.length() == 0 {
+        "/".as_bytes()
+    } else {
+        copy(path_info)
+    }
+    var run: UInt64 = 0
+    for at in 0..path.length() {
+        let byte = path[at]
+        if is_encoded_in_path(byte) {
+            // Every byte from 127 up is encoded, so a run of plain bytes is
+            // ASCII, which is UTF-8.
+            if run < at {
+                let plain = Str.from_bytes(path.subspan(start: run, count: at - run).unwrap()).unwrap()
+                let _plain = stored_or_refused(&head, plain)?
+            }
+            let _escape = stored_or_refused(&head, "%")?
+            let _high = stored_or_refused(&head, hex_digit(byte / 16))?
+            let _low = stored_or_refused(&head, hex_digit(byte % 16))?
+            run = at + 1
+        }
+    }
+    if run < path.length() {
+        let rest = Str.from_bytes(path.subspan(start: run, count: path.length() - run).unwrap()).unwrap()
+        let _rest = stored_or_refused(&head, rest)?
+    }
+    if query.length() > 0 {
+        let _mark = stored_or_refused(&head, "?")?
+        let _query = stored_or_refused(&head, query)?
+    }
+    .Ok(.{ start, end = head.length() })
+}
+
+test fn a_decoded_path_is_encoded_again_into_the_target() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var head = String.new_in(arena.handle())
+    let plain = stored_target(&head, "/notes/7".as_bytes(), "").unwrap()
+    let spaced = stored_target(&head, "/notes/Ada López".as_bytes(), "sort=new").unwrap()
+    let marked = stored_target(&head, "/a%b?c#d".as_bytes(), "").unwrap()
+    let empty = stored_target(&head, "".as_bytes(), "x=1").unwrap()
+    // 233 is `é` in Latin-1, a byte UTF-8 never holds alone.
+    let latin = [UInt8(47), 99, 97, 102, 233]
+    let undecodable = stored_target(&head, latin.as_slice(), "").unwrap()
+    testing.assert_eq(stored_part(head.view(), plain), "/notes/7", "a plain path changed")?
+    testing.assert_eq(stored_part(head.view(), spaced), "/notes/Ada%20L%C3%B3pez?sort=new", "a path outside visible ASCII was not encoded")?
+    testing.assert_eq(stored_part(head.view(), marked), "/a%25b%3Fc%23d", "a path's %, ? or # was not encoded")?
+    testing.assert_eq(stored_part(head.view(), empty), "/?x=1", "an empty path was not /")?
+    testing.assert_eq(stored_part(head.view(), undecodable), "/caf%E9", "a path that is not UTF-8 was not encoded")?
+    .Ok(())
+}
+
+// The ASCII codes of `#`, `%` and `?`, which a path holds only encoded.
+let ascii_hash: UInt8 = 35
+
+let ascii_percent: UInt8 = 37
+
+let ascii_question: UInt8 = 63
+
+// `is_encoded_in_path` says whether a target's path holds `byte` only as
+// `%XX`: a space, a control byte, a byte above ASCII, `#`, `%` or `?`.
+fn is_encoded_in_path(byte: UInt8) -> Bool {
+    byte <= ascii_space || byte >= ascii_delete || byte == ascii_hash || byte == ascii_percent || byte == ascii_question
+}
+
+// `hex_digit` spells `value`, which is below 16, as one uppercase
+// hexadecimal digit.
+fn hex_digit(value: UInt8) -> Str {
+    "0123456789ABCDEF".slice(UInt64(value), UInt64(value) + 1).unwrap()
+}
+
+// The ASCII codes of `_`, `-` and the letters' ranges, which spelling a
+// header's name from its variable's name reads.
+let ascii_underscore: UInt8 = 95
+
+let ascii_hyphen: UInt8 = 45
+
+let ascii_upper_a: UInt8 = 65
+
+let ascii_upper_z: UInt8 = 90
+
+let ascii_lower_a: UInt8 = 97
+
+let ascii_lower_z: UInt8 = 122
+
+// The distance from an uppercase ASCII letter to its lowercase one.
+let ascii_case_offset: UInt8 = 32
+
+// `header_name` spells the header an `HTTP_` variable holds into `name`: the
+// variable's name after `HTTP_`, with each `_` a `-` and each word
+// capitalised, so `HTTP_USER_AGENT` is `User-Agent`. Header names compare
+// under ASCII case folding, so the spelling only changes how the headers
+// read. A name that is not UTF-8 answers 400, as a header line that is not
+// does, and running out of memory answers 500.
+fn header_name[A: Allocator](inout name: Vec[UInt8, A], variable: mem.Slice[UInt8]) -> Result[Str, RequestError] where borrows(.Ok: name) {
+    &name.clear()
+    var word_start = true
+    for at in header_prefix.length()..variable.length() {
+        let byte = variable[at]
+        let spelled = if byte == ascii_underscore {
+            ascii_hyphen
+        } else if word_start && byte >= ascii_lower_a && byte <= ascii_lower_z {
+            byte - ascii_case_offset
+        } else if !word_start && byte >= ascii_upper_a && byte <= ascii_upper_z {
+            byte + ascii_case_offset
+        } else {
+            byte
+        }
+        word_start = byte == ascii_underscore
+        match &name.push(spelled) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Status(.InternalServerError)),
+        }
+    }
+    // Every byte is the variable's own or an ASCII replacement for one, so
+    // the name is UTF-8 exactly when the variable's is.
+    match Str.from_bytes(name.as_slice()) {
+        Ok(spelled) => .Ok(spelled),
+        Err(_) => .Err(.Status(.BadRequest)),
+    }
+}
+
+test fn a_header_is_spelled_from_its_variable() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var name: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    testing.assert_eq(header_name(&name, "HTTP_USER_AGENT".as_bytes()).unwrap(), "User-Agent", "a two-word name changed")?
+    testing.assert_eq(header_name(&name, "HTTP_X_REQUEST_ID".as_bytes()).unwrap(), "X-Request-Id", "a three-word name changed")?
+    testing.assert_eq(header_name(&name, "HTTP_".as_bytes()).unwrap(), "", "an empty name changed")?
+    let latin = [UInt8(72), 84, 84, 80, 95, 88, 233]
+    testing.assert_eq(header_name(&name, latin.as_slice()), .Err(.Status(.BadRequest)), "a name that is not UTF-8 was spelled")?
+    .Ok(())
+}
+
+// `read_described` reads the body a described request announced from
+// `reader` and makes the request of it.
+fn read_described[R: io.Reader, P: Allocator](sink described: Described[P], inout reader: io.BufferedReader[R, mem.Handle[P]], memory: mem.Handle[P], limits: Limits) -> Result[Message[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory, described), retains(reader: reader) {
+    let Described { head, line, header_fields, length } = described
+    let payload = read_body(&reader, memory, length, limits)?
+    assembled(memory, head, line, header_fields, payload, limits)
+}
+
+// Answer the request `variables` describe, whose body is `input`, through
+// `handler`, writing the response to `output`, which `destination` settles
+// once it is flushed, and tell `handler` how the exchange ended. Nothing this
+// allocates in `memory` outlives the call.
+fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Handler[(), P] + Observer, P: Allocator](inout variables: V, sink input: R, sink output: Output[P], inout destination: D, inout handler: H, memory: mem.Handle[P], limits: Limits) -> Result[(), CgiError] where R.Error: Into[io.IoError] {
+    var unanswered = output
+    let described = match describe_request(&variables, memory, limits) {
+        Ok(described) => described,
+        Err(refusal) => {
+            let outcome: Result[(), CgiError] = match refusal {
+                NotCgi => .Err(.NotCgi),
+                Refused(error) => {
+                    refuse_unread(&unanswered, error, memory, &handler)
+                    .Ok(())
+                },
+            }
+            &destination.settle(unanswered)
+            return outcome
+        },
+    }
+    var reader = io.BufferedReader.open_in(memory, capacity: request_buffer_bytes, reader: input) else |failure| {
+        let BufferOpenFailure { resource: _, reason: _ } = failure
+        let wrote = refuse_cgi(&unanswered, .ServiceUnavailable, memory)
+        observe_unanswered(&handler, .ServiceUnavailable, wrote, .Memory)
+        &destination.settle(unanswered)
+        return .Ok(())
+    }
+    let received = read_described(described, &reader, memory, limits)
+    let _input = reader.abandon()
+    let message = received else |error| {
+        refuse_unread(&unanswered, error, memory, &handler)
+        &destination.settle(unanswered)
+        return .Ok(())
+    }
+    let request = message.request()
+    let head_only = request.method() == Method.Head
+    // As in `serve`, the answer is written and flushed before `observe` runs,
+    // and a message the report quotes is first copied into the arena.
+    var note = String.new_in(memory)
+    var body: BodyWriter[P] = .{ output = unanswered, answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Cgi }
+    var nothing = ()
+    let answered: Answered = match &handler.serve_http(&nothing, request) {
+        Ok(response) => {
+            let status = response.status()
+            let written = write_response(&body, response, head_only)
+            Answered { status, refused = false, noted = .Absent, sent = settle_cgi(body, written, &note, &destination) }
+        },
+        Err(error) => {
+            let written = write_error(&body, error, head_only)
+            let status = error.status()
+            let noted = copy_message(&note, error.message())
+            Answered { status, refused = true, noted, sent = settle_cgi(body, written, &note, &destination) }
+        },
+    }
+    let failure = answer_failure(answered, note)
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, failure })
+    &handler.observe(event)
+    .Ok(())
+}
+
+// Flush what `body` still buffers and give its output to `destination`. The
+// message of a failed stream is appended to `note`. Standard output cannot be
+// reset, so a body cut short by a failed stream ends where it stands.
+fn settle_cgi[P: Allocator, D: CgiOutput](sink body: BodyWriter[P], sink written: Result[(), WriteError[P]], inout note: String[mem.Handle[P]], inout destination: D) -> Sent {
+    var settling = body
+    let flushed = &settling.flush()
+    let body_bytes = settling.body_bytes
+    let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = settling
+    &destination.settle(output)
+    match written {
+        Ok(_) => match flushed {
+            Ok(_) => .{ delivery = .Whole, body_bytes },
+            Err(failure) => .{ delivery = .Write(io.IoError.from(failure)), body_bytes },
+        },
+        Err(error) => match error {
+            Io(reason) => .{ delivery = .Write(reason), body_bytes },
+            Stream(stopped) => {
+                let noted = copy_message(&note, stopped.message())
+                Sent { delivery = .Stream(stopped.status(), noted), body_bytes }
+            },
+        },
+    }
+}
+
+// Answer a request that was not read with the status `error` names, and tell
+// `handler`. A web server is always there to read the answer, so a failure
+// that names no status, such as standard input failing, answers 500.
+fn refuse_unread[H: Observer, P: Allocator](inout output: Output[P], sink error: RequestError, memory: mem.Handle[P], inout handler: H) -> () {
+    let status = error.status().unwrap_or(.InternalServerError)
+    let wrote = refuse_cgi(&output, status, memory)
+    observe_unanswered(&handler, status, wrote, .Unread(error))
+}
+
+// Write the head of an answer that is `status` alone to `output` and flush
+// it.
+fn refuse_cgi[P: Allocator](inout output: Output[P], status: Status, memory: mem.Handle[P]) -> Result[UInt64, io.WriteFailure[io.IoError]] {
+    let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(memory)
+    let wrote = write_head(&output, status, headers, .Cgi)
+    headers.release()
+    let _head = wrote?
+    &output.flush()
+}
+
+// Tell `handler` that a request was answered `status` without it, because of
+// `cause`, unless writing the answer failed, which is then the failure.
+fn observe_unanswered[H: Observer](inout handler: H, status: Status, sink wrote: Result[UInt64, io.WriteFailure[io.IoError]], sink cause: Failure) -> () {
+    let failure: Failure = match wrote {
+        Ok(_) => cause,
+        Err(reason) => .Write(io.IoError.from(reason)),
+    }
+    let event: Event = .Exchanged(.{ request = .None, status = .Some(copy(status)), body_bytes = 0, failure = .Some(failure) })
+    &handler.observe(event)
+}
+
+// A test reads a CGI answer as text.
+struct CgiAnswer {
+    outcome: Result[(), CgiError],
+    written: String,
+}
+
+impl Release for CgiAnswer {
+    fn release(sink self: Self) -> () {
+        let CgiAnswer { outcome: _, written } = self
+        written.release()
+    }
+}
+
+// `Recording` keeps the text a test's answer recorded.
+struct Recording {
+    text: String,
+}
+
+impl CgiOutput for Recording {
+    fn settle[P: Allocator](inout self: Self, sink output: Output[P]) -> () {
+        match output {
+            Recorded(bytes) => &self.text.append(Str.from_bytes(bytes.as_slice()).unwrap()).unwrap(),
+            Connection(buffered) => {
+                let _closed = buffered.abort().close()
+                panic("a test's answer was written to a connection")
+            },
+            Standard(buffered) => {
+                let _standard = buffered.abort()
+                panic("a test's answer was written to standard output")
+            },
+            Taken => panic("a test's answer was not put back"),
+        }
+    }
+}
+
+// `cgi_exchange` answers the request `variables` describe, with `input` on
+// standard input, through `handler` and `limits`, and returns what the web
+// server would read.
+fn cgi_exchange[H: Handler[(), mem.SystemAllocator] + Observer](variables: mem.Slice[Entry], input: Str, inout handler: H, limits: Limits = standard_limits) -> CgiAnswer {
+    let arena = mem.Arena.open(mem.system(), limits.request_arena_bytes)
+    var given = Given { variables = copy(variables), index = 0 }
+    var recording = Recording { text = String.new() }
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 5, failure = .None }
+    let outcome = answer_cgi(&given, source, .Recorded(Vec.new_in(arena.handle())), &recording, &handler, arena.handle(), limits)
+    arena.release()
+    let Recording { text } = recording
+    .{ outcome, written = text }
+}
+
+// `given` is the variable `name` holding `value`, as a test lists it.
+fn given(name: Str, value: Str) -> Entry where carries(name, value) {
+    .{ name = name.as_bytes(), value = value.as_bytes() }
+}
+
+// A test describes a request with these variables.
+fn described(method: Str, path: Str, query: Str = "") -> [Entry; 3] where carries(method, path, query) {
+    [given("REQUEST_METHOD", method), given("PATH_INFO", path), given("QUERY_STRING", query)]
+}
+
+// The routes a test answers: a greeting by name and query, the request's
+// `User-Agent`, a note posted as a form, a response setting its status as a
+// header, and the path as the target holds it.
+fn cgi_router() -> Router[()] {
+    var router: Router[()] = Router.new()
+    &router.route_raw(r"GET /greet/{name}", greet).unwrap()
+    &router.route_raw("GET /agent", agent).unwrap()
+    &router.route_raw("POST /notes", post_note).unwrap()
+    &router.route_raw("GET /moved", moved).unwrap()
+    &router.route_raw(r"GET /echo/{rest...}", echo).unwrap()
+    router
+}
+
+fn greet[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let name = request.path_value("name").unwrap_or("nobody")
+    let mood = match request.query_params() {
+        Some(params) => params.get("mood").unwrap_or(.None).unwrap_or("well"),
+        None => "well",
+    }
+    text(request, "hello {name}, {mood}")
+}
+
+fn agent[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let agent = request.header("user-agent").unwrap_or("unknown")
+    text(request, agent)
+}
+
+fn post_note[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let note = match request.form_params() {
+        Some(params) => params.get("note").unwrap_or(.None).unwrap_or(""),
+        None => return .Err(error(request, .UnsupportedMediaType, "send the note as a form")),
+    }
+    var response = text(request, "noted: {note}")?.with_status(.Created)
+    &response.set_header("Location", "/notes/1")?
+    .Ok(response)
+}
+
+fn echo[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, request.path())
+}
+
+// `moved` tries to set the CGI status as a header, which only the answer's
+// status may set.
+fn moved[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    var response = text(request, "moved")?
+    &response.set_header("Status", "302 Found")?
+    .Ok(response)
+}
+
+test fn a_get_is_answered_with_a_status_header() {
+    var router = cgi_router()
+    let variables = described("GET", "/greet/Ada López", query: "mood=glad")
+    defer let answer = cgi_exchange(variables.as_slice(), "", &router)
+    router.release()
+    testing.assert_eq(answer.outcome, .Ok(()), "the request was not answered")?
+    testing.assert_eq(answer.written.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada López, glad", "the answer changed")?
+    .Ok(())
+}
+
+test fn an_http_variable_is_a_header() {
+    var router = cgi_router()
+    let variables = [
+        given("REQUEST_METHOD", "GET"),
+        given("PATH_INFO", "/agent"),
+        given("HTTP_USER_AGENT", "curl/8.0"),
+        given("PATH", "/bin"),
+    ]
+    defer let answer = cgi_exchange(variables.as_slice(), "", &router)
+    router.release()
+    testing.assert_eq(answer.written.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\ncurl/8.0", "the header was not read")?
+    .Ok(())
+}
+
+test fn a_form_body_is_read_from_standard_input() {
+    var router = cgi_router()
+    let variables = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
+    ]
+    // Standard input holds more than the body; only the length is read.
+    defer let answer = cgi_exchange(variables.as_slice(), "note=buy+milkEXTRA", &router)
+    router.release()
+    testing.assert_eq(answer.written.view(), "Status: 201 Created\r\nLocation: /notes/1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnoted: buy milk", "the form was not read")?
+    .Ok(())
+}
+
+test fn a_cgi_head_request_is_answered_with_the_head_alone() {
+    var router = cgi_router()
+    let variables = described("HEAD", "/greet/Ada")
+    defer let answer = cgi_exchange(variables.as_slice(), "", &router)
+    router.release()
+    testing.assert_eq(answer.written.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a HEAD answer had a body")?
+    .Ok(())
+}
+
+test fn a_handler_error_is_answered_with_its_status_and_message() {
+    var router = cgi_router()
+    let variables = described("POST", "/notes")
+    defer let answer = cgi_exchange(variables.as_slice(), "", &router)
+    let unrouted = described("GET", "/nowhere")
+    defer let missing = cgi_exchange(unrouted.as_slice(), "", &router)
+    router.release()
+    testing.assert_eq(answer.written.view(), "Status: 415 Unsupported Media Type\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nsend the note as a form\n", "the error changed")?
+    testing.assert_eq(missing.written.view(), "Status: 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnot found\n", "an unrouted path was answered")?
+    .Ok(())
+}
+
+// `answered_with` returns what a request described by `variables`, with
+// `input` as its body, is answered under `limits`.
+fn answered_with(variables: mem.Slice[Entry], input: Str, limits: Limits = standard_limits) -> String {
+    var router = cgi_router()
+    let answer = cgi_exchange(variables, input, &router, limits)
+    router.release()
+    let CgiAnswer { outcome: _, written } = answer
+    written
+}
+
+test fn a_malformed_request_is_refused_before_the_handler() {
+    let bad_method = [given("REQUEST_METHOD", "G T")]
+    defer let method = answered_with(bad_method.as_slice(), "")
+    let lettered = [
+        given("REQUEST_METHOD", "POST"),
+        given("CONTENT_LENGTH", "12a"),
+    ]
+    defer let length = answered_with(lettered.as_slice(), "")
+    let short = [
+        given("REQUEST_METHOD", "POST"),
+        given("CONTENT_LENGTH", "10"),
+    ]
+    defer let ended = answered_with(short.as_slice(), "abc")
+    let spaced = [
+        given("REQUEST_METHOD", "GET"),
+        given("QUERY_STRING", "a b"),
+    ]
+    defer let query = answered_with(spaced.as_slice(), "")
+    let controlled = [
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_X_NOTE", "a\u{1}b"),
+    ]
+    defer let header = answered_with(controlled.as_slice(), "")
+    let bad_request = "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+    testing.assert_eq(method.view(), bad_request, "a method that is not a token was accepted")?
+    testing.assert_eq(length.view(), bad_request, "a length with a letter was accepted")?
+    testing.assert_eq(ended.view(), bad_request, "a body shorter than its length was accepted")?
+    testing.assert_eq(query.view(), bad_request, "a query holding a space was accepted")?
+    testing.assert_eq(header.view(), bad_request, "a header holding a control byte was accepted")?
+    .Ok(())
+}
+
+test fn the_protocol_the_client_spoke_is_not_the_programs() {
+    for protocol in ["HTTP/1.1", "HTTP/2.0", "HTTP/2", "INCLUDED"] {
+        let variables = [
+            given("REQUEST_METHOD", "GET"),
+            given("PATH_INFO", "/greet/Ada"),
+            given("SERVER_PROTOCOL", protocol),
+        ]
+        defer let answer = answered_with(variables.as_slice(), "")
+        testing.assert_eq(answer.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, well", "a request was refused for the protocol the client spoke")?
+    }
+    .Ok(())
+}
+
+test fn content_length_alone_frames_the_body() {
+    let chunked = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
+        given("HTTP_TRANSFER_ENCODING", "chunked"),
+        given("HTTP_CONTENT_LENGTH", "99"),
+    ]
+    defer let framed = answered_with(chunked.as_slice(), "note=buy+milk")
+    let unframed = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("HTTP_TRANSFER_ENCODING", "chunked"),
+    ]
+    defer let empty = answered_with(unframed.as_slice(), "note=buy+milk")
+    testing.assert_eq(framed.view(), "Status: 201 Created\r\nLocation: /notes/1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnoted: buy milk", "a client's framing headers framed the body")?
+    testing.assert_eq(empty.view(), "Status: 201 Created\r\nLocation: /notes/1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nnoted: ", "a body without CONTENT_LENGTH was read")?
+    .Ok(())
+}
+
+test fn a_handler_cannot_set_the_status_as_a_header() {
+    let variables = described("GET", "/moved")
+    defer let answer = answered_with(variables.as_slice(), "")
+    testing.assert_eq(answer.view(), "Status: 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nInternal Server Error\n", "a Status header was sent")?
+    .Ok(())
+}
+
+// A web server passes on whatever bytes the client sent, so a variable may
+// not be UTF-8. The path is encoded byte by byte, so routes and path values
+// read it as they read the same path from a client, and a method, query or
+// header that is not UTF-8 is refused with 400, as `serve` refuses a line
+// that is not.
+test fn a_variable_that_is_not_utf8_is_read_as_its_bytes() {
+    // 233 is `é` in Latin-1, a byte UTF-8 never holds alone.
+    let path = [UInt8(47), 101, 99, 104, 111, 47, 99, 97, 102, 233]
+    let latin = [UInt8(97), 61, 233]
+    let method = [UInt8(71), 233, 84]
+    let encoded = [Entry { name = "REQUEST_METHOD".as_bytes(), value = "GET".as_bytes() }, Entry { name = "PATH_INFO".as_bytes(), value = path.as_slice() }]
+    defer let echoed = answered_with(encoded.as_slice(), "")
+    let queried = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "QUERY_STRING".as_bytes(), value = latin.as_slice() }]
+    defer let query = answered_with(queried.as_slice(), "")
+    let headed = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "HTTP_X_NOTE".as_bytes(), value = latin.as_slice() }]
+    defer let header = answered_with(headed.as_slice(), "")
+    let typed = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "CONTENT_TYPE".as_bytes(), value = latin.as_slice() }]
+    defer let content_type = answered_with(typed.as_slice(), "")
+    let named = [Entry { name = "REQUEST_METHOD".as_bytes(), value = method.as_slice() }, given("PATH_INFO", "/greet/Ada")]
+    defer let request_method = answered_with(named.as_slice(), "")
+    // A variable the request is not described by is not read at all.
+    let unrelated = [given("REQUEST_METHOD", "GET"), given("PATH_INFO", "/greet/Ada"), Entry { name = "LANG".as_bytes(), value = latin.as_slice() }]
+    defer let other = answered_with(unrelated.as_slice(), "")
+    let bad_request = "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+    // The path reaches the router as `/echo/caf%E9`, and a path value that
+    // does not decode to UTF-8 is refused, as when a client sends it.
+    testing.assert_eq(echoed.view(), "Status: 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\n\r\na path value is not percent-encoded UTF-8\n", "a path that is not UTF-8 was not encoded")?
+    testing.assert_eq(query.view(), bad_request, "a query that is not UTF-8 was accepted")?
+    testing.assert_eq(header.view(), bad_request, "a header that is not UTF-8 was accepted")?
+    testing.assert_eq(content_type.view(), bad_request, "a content type that is not UTF-8 was accepted")?
+    testing.assert_eq(request_method.view(), bad_request, "a method that is not UTF-8 was accepted")?
+    testing.assert_eq(other.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, well", "a variable the request is not described by was read")?
+    .Ok(())
+}
+
+// A variable named twice is read where it first appears, as `env.variable`
+// reads it.
+test fn the_first_of_a_repeated_variable_is_read() {
+    let variables = [
+        given("REQUEST_METHOD", "GET"),
+        given("PATH_INFO", "/greet/Ada"),
+        given("QUERY_STRING", "mood=glad"),
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("QUERY_STRING", "mood=low"),
+        given("CONTENT_LENGTH", "0"),
+        given("CONTENT_LENGTH", "5"),
+    ]
+    defer let answer = answered_with(variables.as_slice(), "")
+    testing.assert_eq(answer.view(), "Status: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello Ada, glad", "a repeated variable was read where it last appears")?
+    .Ok(())
+}
+
+test fn a_cgi_request_answers_each_limits_status_one_past_the_bound() {
+    let limits = Limits { max_line_bytes = 32, max_headers = 2, max_body_bytes = 4, ..Limits.default() }
+    let posted = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_LENGTH", "5"),
+    ]
+    defer let body = answered_with(posted.as_slice(), "hello", limits: limits)
+    // `GET`, two spaces, `HTTP/1.1` and the CRLF leave 17 bytes for the
+    // target, and this one is 18.
+    let long_target = described("GET", "/aaaaaaaaaaaaaaaaa")
+    defer let target = answered_with(long_target.as_slice(), "", limits: limits)
+    // `X-Note: ` and the CRLF leave 22 bytes for the value, and this one is
+    // 23.
+    let long_header = [
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_X_NOTE", "aaaaaaaaaaaaaaaaaaaaaaa"),
+    ]
+    defer let header = answered_with(long_header.as_slice(), "", limits: limits)
+    let many = [
+        given("REQUEST_METHOD", "GET"),
+        given("HTTP_A", "1"),
+        given("HTTP_B", "2"),
+        given("HTTP_C", "3"),
+    ]
+    defer let headers = answered_with(many.as_slice(), "", limits: limits)
+    testing.assert_eq(body.view(), "Status: 413 Content Too Large\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a body past the limit was accepted")?
+    testing.assert_eq(target.view(), "Status: 414 URI Too Long\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a target past the line limit was accepted")?
+    testing.assert_eq(header.view(), "Status: 431 Request Header Fields Too Large\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a header past the line limit was accepted")?
+    testing.assert_eq(headers.view(), "Status: 431 Request Header Fields Too Large\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "headers past the limit were accepted")?
+    .Ok(())
+}
+
+test fn a_request_at_the_header_and_body_limits_is_answered() {
+    let limits = Limits { max_line_bytes = 64, max_headers = 2, max_body_bytes = 13, ..Limits.default() }
+    let at_limits = [
+        given("REQUEST_METHOD", "POST"),
+        given("PATH_INFO", "/notes"),
+        given("CONTENT_TYPE", "application/x-www-form-urlencoded"),
+        given("CONTENT_LENGTH", "13"),
+    ]
+    var router = cgi_router()
+    defer let answer = cgi_exchange(at_limits.as_slice(), "note=buy+milk", &router, limits: limits)
+    router.release()
+    testing.assert(answer.written.view().starts_with("Status: 201 Created\r\n"), "a request at the limits was refused")?
+    .Ok(())
+}
+
+test fn a_missing_request_method_answers_nothing() {
+    var router = cgi_router()
+    // A refusal elsewhere in the variables does not make a request of them.
+    let variables = [
+        given("PATH_INFO", "/greet/Ada"),
+        given("CONTENT_LENGTH", "x"),
+    ]
+    defer let answer = cgi_exchange(variables.as_slice(), "", &router)
+    router.release()
+    testing.assert_eq(answer.outcome, .Err(.NotCgi), "variables without a method were answered")?
+    testing.assert_eq(answer.written.view(), "", "a process without a request wrote an answer")?
+    .Ok(())
+}

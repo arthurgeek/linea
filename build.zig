@@ -1619,7 +1619,7 @@ pub fn build(b: *std.Build) void {
     checked_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     if (sanitize == .none) checked_flags.append(b.allocator, "-DLINEA_CHECK_STORAGE=1") catch @panic("OOM");
 
-    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments and aborts");
+    const native_runtime_step = b.step("test-native-runtime", "Check the generated-code runtime's allocation, arguments, environment and aborts");
     inline for (.{ false, true }) |checked| {
         const flags = if (checked) checked_flags.items else runtime_flags.items;
         const native_runtime_module = b.createModule(.{

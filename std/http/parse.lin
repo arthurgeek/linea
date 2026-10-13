@@ -105,7 +105,15 @@ fn read_request[R: io.Reader, P: Allocator](inout reader: io.BufferedReader[R, m
     var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
     let length = read_headers(&reader, &head, &header_fields, limits)?
     let payload = read_body(&reader, memory, length, limits)?
-    let RequestLine { method, method_token, target } = line
+    assembled(memory, head, line, header_fields, payload, limits)
+}
+
+// `assembled` makes a `Message` of a request's parts, however they arrived:
+// `head` holds the text `line` and `header_fields` range over, and `payload`
+// is the body. It decodes the query of the target, and the body when the
+// `Content-Type` header names a form, each bounded by `limits`.
+fn assembled[P: Allocator](memory: mem.Handle[P], sink head: String[mem.Handle[P]], line: RequestLine, sink header_fields: Vec[Field, mem.Handle[P]], sink payload: Vec[UInt8, mem.Handle[P]], limits: Limits) -> Result[Message[P], RequestError] where carries(.Ok: memory, head, header_fields, payload) {
+    let RequestLine { method, method_token, target } = copy(line)
     var query_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
     let query_fields = query_of(&query_text, stored_part(head.view(), target), memory, limits.max_query_pairs)?
     let is_form = is_form_content_type(header_value(head.view(), header_fields.as_slice(), "Content-Type"))
@@ -294,12 +302,64 @@ fn read_request_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader
     .Ok(.{ method = method_of(method), method_token = method_token, target = target_span })
 }
 
+// A `HeaderTally` is what a request's headers have said so far: how many
+// there were, the body length `Content-Length` gave, and whether a
+// `Transfer-Encoding` was sent.
+@copyable
+struct HeaderTally {
+    count: UInt64,
+    length: Option[UInt64],
+    transfer_coded: Bool,
+}
+
+// `no_headers` is the tally before the first header.
+let no_headers: HeaderTally = .{ count = 0, length = .None, transfer_coded = false }
+
+// `add_header_field` stores the header `name: value` in `stored` and records
+// its ranges in `header_fields`. A header past `limits.max_headers` answers
+// 431, a name that is not a token or a value holding a control byte 400, and
+// a `Content-Length` that is not digits or disagrees with an earlier one 400.
+fn add_header_field[A: Allocator](inout stored: String[A], inout header_fields: Vec[Field, A], inout tally: HeaderTally, name: Str, value: Str, limits: Limits) -> Result[(), RequestError] where carries() {
+    tally.count += 1
+    if tally.count > limits.max_headers {
+        return .Err(.Status(.RequestHeaderFieldsTooLarge))
+    }
+    // A name is a token, which holds no whitespace, so this also refuses
+    // a folded line continuing the previous header with a space or tab.
+    if !is_token(name) || !is_field_value(value) {
+        return .Err(.Status(.BadRequest))
+    }
+    if name.equals_ascii_folded("Content-Length") {
+        tally.length = .Some(content_length(value, tally.length)?)
+    }
+    if name.equals_ascii_folded("Transfer-Encoding") {
+        tally.transfer_coded = true
+    }
+    let name_span = stored_or_refused(&stored, name)?
+    let value_span = stored_or_refused(&stored, value)?
+    match &header_fields.push(.{ name = name_span, value = value_span }) {
+        Ok(_) => .Ok(()),
+        Err(_) => .Err(.Status(.InternalServerError)),
+    }
+}
+
+// `body_length` answers the body's length the headers framed: `.None` when no
+// `Content-Length` was sent. A body framed two ways is ambiguous, and chunked
+// framing alone is unsupported.
+fn body_length(tally: HeaderTally) -> Result[Option[UInt64], RequestError] {
+    if tally.transfer_coded {
+        return match read tally.length {
+            Some(_) => .Err(.Status(.BadRequest)),
+            None => .Err(.Status(.NotImplemented)),
+        }
+    }
+    .Ok(copy(tally.length))
+}
+
 // Read `name: value` lines up to an empty line and answer the body's length:
 // `.None` when no `Content-Length` was sent.
 fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[A], inout header_fields: Vec[Field, A], limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
-    var count: UInt64 = 0
-    var length: Option[UInt64] = .None
-    var transfer_coded = false
+    var tally = no_headers
     loop {
         let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
             return .Err(line_failure(error, .RequestHeaderFieldsTooLarge))
@@ -311,41 +371,14 @@ fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A
         if line.length() == 0 {
             break
         }
-        count += 1
-        if count > limits.max_headers {
-            return .Err(.Status(.RequestHeaderFieldsTooLarge))
-        }
         let colon = line.find(":") else {
             return .Err(.Status(.BadRequest))
         }
         let name = line.slice(0, colon).unwrap()
         let value = trim_optional_whitespace(line.slice(colon + 1, line.length()).unwrap())
-        // A name is a token, which holds no whitespace, so this also refuses
-        // a folded line continuing the previous header with a space or tab.
-        if !is_token(name) || !is_field_value(value) {
-            return .Err(.Status(.BadRequest))
-        }
-        if name.equals_ascii_folded("Content-Length") {
-            length = .Some(content_length(value, length)?)
-        }
-        if name.equals_ascii_folded("Transfer-Encoding") {
-            transfer_coded = true
-        }
-        let name_span = stored_or_refused(&stored, name)?
-        let value_span = stored_or_refused(&stored, value)?
-        match &header_fields.push(.{ name = name_span, value = value_span }) {
-            Ok(_) => {},
-            Err(_) => return .Err(.Status(.InternalServerError)),
-        }
+        add_header_field(&stored, &header_fields, &tally, name, value, limits)?
     }
-    // A body framed two ways is ambiguous; chunked framing alone is unsupported.
-    if transfer_coded {
-        return match length {
-            Some(_) => .Err(.Status(.BadRequest)),
-            None => .Err(.Status(.NotImplemented)),
-        }
-    }
-    .Ok(length)
+    body_length(tally)
 }
 
 // Refuse a length that is not decimal digits or disagrees with an earlier one.

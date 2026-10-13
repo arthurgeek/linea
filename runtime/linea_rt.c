@@ -496,9 +496,28 @@ static void checked_free(unsigned long at, unsigned long size) {
 static int linea_argc = 0;
 static char **linea_argv = 0;
 
+/* The environment the process was started with: the `NAME=value` strings C's
+ * startup placed beside the arguments, ended by a null pointer.
+ *
+ * The array and its length are recorded when the arguments are, before any
+ * Linea code runs, so reading one entry's address or length never walks the
+ * array again. Linea code has no operation that changes the environment, so
+ * the array and its strings stay as they were until the process exits, which
+ * is what a view of text asks. Only a trusted `extern` can call C's setenv,
+ * putenv or unsetenv; such a call voids this, since C may overwrite or shift
+ * entries of the recorded array and free a string it put there. */
+extern char **environ;
+static char **linea_envp = 0;
+static unsigned long linea_envc = 0UL;
+
 void linea_set_args(int argc, char **argv) {
     linea_argc = argc;
     linea_argv = argv;
+    linea_envp = environ;
+    linea_envc = 0UL;
+    if (linea_envp != 0) {
+        while (linea_envp[linea_envc] != 0) linea_envc += 1UL;
+    }
 }
 
 unsigned long linea_arg_count(void) {
@@ -530,6 +549,29 @@ unsigned long linea_arg_len(unsigned long i) {
     if (i >= linea_arg_count()) return 0UL;
 
     const char *s = linea_argv[i];
+    unsigned long n = 0UL;
+    while (s[n] != '\0') n += 1UL;
+    return n;
+}
+
+/* How many entries the environment held at startup, and where entry `i`
+ * starts and how many bytes it holds. Like the argument calls above, an index
+ * at or past the end answers zero, and the bytes are passed on unexamined.
+ * The count was taken once at startup, so a walk over every entry reads each
+ * string once: its cost is the environment's size in bytes. */
+unsigned long linea_env_count(void) {
+    return linea_envc;
+}
+
+unsigned long linea_env_at(unsigned long i) {
+    if (i >= linea_envc) return 0UL;
+    return (unsigned long)linea_envp[i];
+}
+
+unsigned long linea_env_len(unsigned long i) {
+    if (i >= linea_envc) return 0UL;
+
+    const char *s = linea_envp[i];
     unsigned long n = 0UL;
     while (s[n] != '\0') n += 1UL;
     return n;

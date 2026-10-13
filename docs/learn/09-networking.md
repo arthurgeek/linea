@@ -4,7 +4,8 @@ This chapter puts the earlier ones to work on a network. `std.net` gives you
 TCP: listening, accepting and connecting. `std.http` builds an HTTP/1.1 server
 on top of it: handlers that return responses, a router that picks the handler,
 extractors that read a request's inputs, state that every handler shares,
-logging, and bodies streamed as they are written.
+logging, bodies streamed as they are written, and the same handlers run as CGI
+programs.
 
 Three ideas from earlier chapters carry most of the weight here. Sockets are
 **linear** ([Copying, settling and
@@ -1130,6 +1131,12 @@ router's, not an interpolation:
 | `{city}` | any one segment, percent-decoded |
 | `{rest...}` | the rest of the path, slashes included |
 
+A pattern without `{rest...}` matches its own path and nothing beneath it:
+`GET /` answers the root alone, and `GET /static/` answers `/static/` but not
+`/static/site.css`. To answer every path beneath one, end the pattern with
+`{rest...}`: `GET /static/{file...}` answers `/static/site.css` and
+`/static/css/print.css`, and `/static/` too, with an empty `file`.
+
 When several patterns match, the most specific wins: at the first segment
 where two patterns differ, a literal beats `{name}`, which beats `{name...}`.
 That is why `/forecast/today` reached `today` although `{city}` matches it
@@ -1704,6 +1711,189 @@ these hold for `serve`, and for `listen_and_serve` with the handler released too
   listener cannot be closed, when `limits.connections` is reached, or when
   the arena is too small for the limits you set.
 
+## Running a handler as a CGI program
+
+`listen_and_serve` makes your program the server. CGI turns that around: a web
+server you already run starts your program once for each request, and the
+program answers that one request and exits. CGI is serverless, minus the
+vendor (and surprise bills): a supervisor invokes your code per request, hands
+it a bag of environment variables, and collects the result. The variables
+describe the request, a body arrives on standard input, and the response goes
+to standard output.
+
+`http.serve_cgi` runs any handler that way: the same routers, extractors,
+middleware and limits as `listen_and_serve`, with the request read from the
+environment and standard input instead of a connection.
+
+```linea
+import std.http
+import std.io
+import std.log
+
+// `Visitor` is the name a query or a form gives, such as `name=Ada`.
+@derive(http.Params, Release)
+struct Visitor {
+    name: Str,
+}
+
+// GET /hello?name=Ada greets the name in the query.
+fn hello(visitor: http.Query[Visitor], request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "Hello, {visitor.value.name}!\n")
+}
+
+// POST /hello greets the name a form sends on standard input.
+fn sign(visitor: http.Form[Visitor], request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "Welcome, {visitor.value.name}.\n")
+}
+
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route("GET /hello", hello)?
+    &router.route("POST /hello", sign)
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    if routes(&router).is_err() {
+        router.release()
+        io.eprintln("a route pattern was refused")
+        return 2
+    }
+    // `http.logged` writes one line for the request to standard error.
+    let logger = log.to_stderr(minimum: .Info)
+    // `serve_cgi` reads the request this process was started for from its
+    // environment and standard input, answers it on standard output, and
+    // returns.
+    let _ = http.serve_cgi(http.logged(logger, router)) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
+}
+```
+
+```sh
+linea run greet.lin
+```
+
+```
+REQUEST_METHOD is not set, so no web server started this program to answer a request
+```
+
+Run from a shell with nothing set, there is no request to answer, so
+`serve_cgi` returns `NotCgi` and writes nothing to standard output. A web
+server always sets `REQUEST_METHOD`, and so can you:
+
+<!-- guide: unchecked the program reads its request from environment variables the gate does not set -->
+```
+$ REQUEST_METHOD=GET PATH_INFO=/hello QUERY_STRING=name=Ada linea run greet.lin
+Status: 200 OK
+Content-Type: text/plain; charset=utf-8
+
+Hello, Ada!
+2026-10-12T22:47:51Z INFO request method=GET path=/hello status=200 bytes=12 duration=7µs
+```
+
+The answer starts with a `Status` header instead of an HTTP status line,
+because the web server writes the status line and frames the connection
+itself. The last line is `http.logged`'s, on standard error, which a web
+server keeps in its error log.
+
+That is the other half of what CGI buys you: the web server calls your
+handler directly, so you debug it as an ordinary program by piping it a
+request and watching standard error. Standard error is also where a handler's
+own output belongs: standard output is the response, so a line a handler
+writes there with `io.println` lands before the `Status` header, and the web
+server refuses the whole answer. A form's body goes to standard input, and `CONTENT_LENGTH` says
+how much of it to read:
+
+<!-- guide: unchecked the program reads its request from environment variables and standard input the gate does not set -->
+```
+$ printf 'name=Grace' | REQUEST_METHOD=POST PATH_INFO=/hello \
+    CONTENT_TYPE=application/x-www-form-urlencoded CONTENT_LENGTH=10 linea run greet.lin
+Status: 200 OK
+Content-Type: text/plain; charset=utf-8
+
+Welcome, Grace.
+2026-10-12T22:48:15Z INFO request method=POST path=/hello status=200 bytes=16 duration=7µs
+$ REQUEST_METHOD=GET PATH_INFO=/hello linea run greet.lin
+Status: 400 Bad Request
+Content-Type: text/plain; charset=utf-8
+
+missing query value "name"
+2026-10-12T22:48:48Z WARN request method=GET path=/hello status=400 bytes=27 duration=9µs error="the handler refused the request: missing query value \"name\""
+$ REQUEST_METHOD=POST PATH_INFO=/hello CONTENT_LENGTH=2000000 linea run greet.lin < /dev/null
+Status: 413 Content Too Large
+Content-Type: text/plain; charset=utf-8
+
+2026-10-12T22:49:22Z WARN request status=413 bytes=0 error="reading the request failed: the request was refused with 413 Content Too Large"
+```
+
+These are the variables `serve_cgi` reads:
+
+| Variable | What it becomes |
+| --- | --- |
+| `REQUEST_METHOD` | the method; without it there is no request |
+| `PATH_INFO` | the path after the program's own address, `/` when empty |
+| `QUERY_STRING` | the query, as the client encoded it |
+| `CONTENT_TYPE`, `CONTENT_LENGTH` | the `Content-Type` and `Content-Length` headers; the body is that many bytes of standard input, and without a length there is no body |
+| `HTTP_*` | every other header: `HTTP_USER_AGENT` is `User-Agent` |
+
+`SERVER_PROTOCOL`, such as `HTTP/2.0`, is how the browser spoke to the web
+server, which your program never speaks, so it is not read. Nor are
+`HTTP_TRANSFER_ENCODING` and `HTTP_CONTENT_LENGTH`: the web server has already
+taken apart however the browser framed the body, and `CONTENT_LENGTH` alone
+says how long it is. When a variable appears twice, the first is read.
+
+The request is held to the same `http.Limits` as one read from a connection,
+and refused with the same statuses: 413 for a body past `max_body_bytes`, as
+above, 431 for too many headers, 400 for a malformed method or length, and 400
+for a method, query or header that is not UTF-8. A path that is not UTF-8 is
+encoded byte by byte, as a browser would send it. The
+timeouts do not apply, since the web server decides how long a program may
+run. `serve_cgi(handler, state: app, limits: limits)` takes the same
+`state:` and `limits:` as `listen_and_serve`, and `serve_cgi_in(allocator,
+handler)` carves the request's arena from another allocator. Any other variable, such as one your server sets for the program's
+configuration, is yours to read with `env.variable`, which returns
+`Option[Str]`: `env.variable("PARTY_DATE").unwrap_or("soon")`. The text it
+returns views the environment the process started with, so it allocates
+nothing and lives until the process exits.
+
+### Behind a web server
+
+Any web server that speaks CGI can run the program. Build it once with `linea
+build greet.lin -o greet` and point the server at the executable: Apache's
+`mod_cgi`, lighttpd's `mod_cgi`, OpenBSD's `httpd` with `slowcgi`, or nginx
+through a CGI wrapper such as `fcgiwrap`. A request for
+`/cgi-bin/greet/hello?name=Ada` then runs `greet` with `PATH_INFO=/hello` and
+`QUERY_STRING=name=Ada`, and the router sees `/hello`. The server also sets
+`SCRIPT_NAME=/cgi-bin/greet`, the program's own address, so
+`env.variable("SCRIPT_NAME")` is how a page builds a link or a form that leads
+back to the program, as the party RSVP example below does.
+
+Two rules come from CGI rather than HTTP. A response cannot set a `Status`
+header, which the response's own status writes; `set_header` refuses it as it
+refuses `Content-Length`. And a 200 response whose `Location` is a path on the
+same server, such as `/thanks`, is a local redirect: the web server answers
+the browser with that path's response instead and drops yours. To send the
+browser elsewhere, answer a redirect status such as 303 with the `Location`.
+
+### CGI or `listen_and_serve`
+
+Both run the same handler; what differs is who owns the process.
+
+- `listen_and_serve` is one long-lived process that answers one connection
+  at a time. State in `state:` lives between requests, and nothing is paid to
+  start each one; a slow request holds up the ones queued behind it.
+- CGI starts a process per request, so the web server runs as many at once as
+  it lets programs run: concurrency comes from processes, and the operating
+  system keeps each one's memory apart. Every request starts fresh, so state
+  that must outlive it goes in a file or a database, and each request pays for
+  starting a process.
+
+The [party RSVP](../../examples/party_rsvp.lin) example is a complete CGI
+program: an HTML form, a reply checked and confirmed as JSON, and a date read
+with `env.variable`.
+
 ## What you have seen
 
 - A TCP listener and connection are linear and `@opaque`: `close` them on every
@@ -1731,6 +1921,9 @@ these hold for `serve`, and for `listen_and_serve` with the handler released too
   program that opens the listener itself.
 - `http.Limits`, passed as `limits:`, bounds what a request may send and how
   many connections are answered.
+- `http.serve_cgi(handler)` answers the one request a web server started the
+  program for, read from the environment and standard input, on standard
+  output; `env.variable(name)` reads any other variable the server sets.
 
 Handlers are ordinary functions, so they are tested by calling them:
 [Testing](10-testing.md#testing-a-server) shows how. The [JSON echo

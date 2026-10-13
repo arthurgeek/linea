@@ -32,6 +32,34 @@ extern fn linea_arg_at(i: UInt64) -> UInt64
 
 extern fn linea_arg_len(i: UInt64) -> UInt64
 
+// Environment spans refer to the runtime's record of the environment the
+// process was started with, which is immutable storage as arguments are. Each
+// entry is the bytes of one `NAME=value` string.
+extern fn environment_span(i: UInt64) -> Slice[UInt8]
+
+// The runtime reports how many entries the environment holds, and each
+// entry's address and length in bytes.
+extern fn linea_env_count() -> UInt64
+
+extern fn linea_env_at(i: UInt64) -> UInt64
+
+extern fn linea_env_len(i: UInt64) -> UInt64
+
+// Return how many entries the environment the process was started with holds.
+internal fn environment_count() -> UInt64 {
+    linea_env_count()
+}
+
+// Return the bytes of environment entry `i`, or None when there is no such
+// entry.
+internal fn environment_bytes(i: UInt64) -> Option[Slice[UInt8]] {
+    if i >= environment_count() {
+        .None
+    } else {
+        .Some(environment_span(i))
+    }
+}
+
 // Return how many arguments the process was started with, its name included.
 internal fn argument_count() -> UInt64 {
     linea_arg_count()

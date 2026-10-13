@@ -15,6 +15,9 @@ void linea_set_args(int argc, char **argv);
 unsigned long linea_arg_count(void);
 unsigned long linea_arg_at(unsigned long i);
 unsigned long linea_arg_len(unsigned long i);
+unsigned long linea_env_count(void);
+unsigned long linea_env_at(unsigned long i);
+unsigned long linea_env_len(unsigned long i);
 void linea_trap(int kind, const char *file, int line, int col);
 void linea_panic(unsigned long at, unsigned long len, const char *file, int line, int col);
 void linea_storage_extent(unsigned long at, unsigned long len);
@@ -77,6 +80,27 @@ static void arguments(void) {
     assert(linea_arg_at(1) == (unsigned long)b);
     assert(linea_arg_len(1) == 9);
     assert(linea_arg_at(2) == 0 && linea_arg_len(2) == 0);
+}
+
+extern char **environ;
+
+static void environment(void) {
+    /* The environment is recorded with the arguments, entry for entry. */
+    assert(setenv("LINEA_RT_TEST", "a=b", 1) == 0);
+    char a[] = "prog";
+    char *argv[] = {a, NULL};
+    linea_set_args(1, argv);
+    unsigned long count = 0;
+    while (environ[count] != NULL) count += 1;
+    assert(linea_env_count() == count);
+    int found = 0;
+    for (unsigned long i = 0; i < count; i += 1) {
+        assert(linea_env_at(i) == (unsigned long)environ[i]);
+        assert(linea_env_len(i) == strlen(environ[i]));
+        if (strcmp(environ[i], "LINEA_RT_TEST=a=b") == 0) found = 1;
+    }
+    assert(found);
+    assert(linea_env_at(count) == 0 && linea_env_len(count) == 0);
 }
 
 #if LINEA_CHECK_STORAGE
@@ -260,6 +284,7 @@ static void fault_handler_is_one_shot_and_informative(void) {
 int main(void) {
     allocation();
     arguments();
+    environment();
 #if LINEA_CHECK_STORAGE
     checked_allocation();
     fault_handler_is_one_shot_and_informative();
@@ -286,9 +311,9 @@ int main(void) {
     aborts_saying(trap_overflow, "linea: integer overflow at t.lin:3:7\n");
     aborts_saying(panic_message, "linea: panic: boom at t.lin:1:2\n");
 #if LINEA_CHECK_STORAGE
-    puts("native runtime: checked allocation, arguments and aborts passed");
+    puts("native runtime: checked allocation, arguments, environment and aborts passed");
 #else
-    puts("native runtime: allocation, arguments and aborts passed");
+    puts("native runtime: allocation, arguments, environment and aborts passed");
 #endif
     return 0;
 }

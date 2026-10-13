@@ -5298,7 +5298,7 @@ const Lowerer = struct {
                 @panic("compiler defect: an erased closure's generated body was never discovered");
             return self.b.addFunctionAddr(self.block, ty, span, FunctionId.at(generated.index()));
         }
-        if (d == self.library.raw.span or d == self.library.raw.buffer_span or d == self.library.raw.subspan or d == self.library.raw.slice_place or d == self.library.raw.argument_span)
+        if (d == self.library.raw.span or d == self.library.raw.buffer_span or d == self.library.raw.subspan or d == self.library.raw.slice_place or self.library.raw.processText(d) != null)
             return self.spanIntrinsic(d, ty, settled, args.items, span);
         if (d == self.library.raw.take or d == self.library.raw.put or d == self.library.raw.place) {
             const element = settled[0];
@@ -5341,12 +5341,12 @@ const Lowerer = struct {
 
     fn spanIntrinsic(self: *Lowerer, d: DeclId, ty: TypeId, type_args: []const TypeId, args: []const InstId, span: Span) !InstId {
         const raw = self.library.raw;
-        if (d == raw.argument_span) {
-            const count = try self.directCall(.u64, span, self.mono.idFor(raw.argument_count, &.{}, .poison, &.{}), &.{});
+        if (raw.processText(d)) |source| {
+            const count = try self.directCall(.u64, span, self.mono.idFor(source.count, &.{}, .poison, &.{}), &.{});
             const fits = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = args[0], .rhs = count } });
             _ = try self.check(fits, .bool_, span, .index_out_of_bounds);
-            const address = try self.directCall(.u64, span, self.mono.idFor(raw.argument_at, &.{}, .poison, &.{}), args);
-            const len = try self.directCall(.u64, span, self.mono.idFor(raw.argument_len, &.{}, .poison, &.{}), args);
+            const address = try self.directCall(.u64, span, self.mono.idFor(source.at, &.{}, .poison, &.{}), args);
+            const len = try self.directCall(.u64, span, self.mono.idFor(source.len, &.{}, .poison, &.{}), args);
             return self.buildSpan(ty, address, len, span);
         }
         const element = if (d == raw.buffer_span) TypeId.u8 else type_args[0];

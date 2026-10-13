@@ -66,23 +66,21 @@ impl MethodTable {
 }
 
 // A `Node` is one node of the segment trie. It holds the children reached by
-// the next segment and the handlers of the patterns that end here: `exact`
-// answers a path that ends at this node, and `subtree` a path continuing past
-// it.
+// the next segment, and in `exact` the handlers of the patterns whose path
+// ends here.
 @linear
 struct Node[A: Allocator] {
     literals: collections.Map[String[A], UInt64, A],
     parameter: Option[UInt64],
     remainder: Option[UInt64],
     exact: MethodTable,
-    subtree: MethodTable,
 }
 
 derive[A: Allocator] Release for Node[A]
 
 // Return a node with no children and no handlers.
 fn new_node[A: Allocator](allocator: A) -> Node[A] where carries(allocator) {
-    .{ literals = collections.Map.new_in(allocator), parameter = .None, remainder = .None, exact = empty_table, subtree = empty_table }
+    .{ literals = collections.Map.new_in(allocator), parameter = .None, remainder = .None, exact = empty_table }
 }
 
 // A walk of the trie finds a route, nothing, or a path other methods answer,
@@ -104,11 +102,12 @@ struct Walk {
 // A `Router` dispatches requests by method and path pattern.
 //
 // A pattern is `[METHOD ]PATH`. A path segment is a literal, `{name}` (one
-// non-empty segment) or `{name...}` (the rest of the path, last only), and a
-// path ending in `/` matches every path beneath it. The pattern that answers
-// is the most specific one matching both path and method: at the first
-// segment where two differ, a literal before `{name}`, before `{name...}`,
-// before a subtree; at one shape, the method's own pattern, then `GET`'s for
+// non-empty segment) or `{name...}` (the rest of the path, last only, which
+// may be empty). A pattern matches its own path and no other: `/` is the root
+// alone, and `/static/` matches `/static/` but not `/static/app.css`, which
+// `/static/{file...}` matches. The pattern that answers is the most specific
+// one matching both path and method: at the first segment where two differ,
+// a literal before `{name}`, before `{name...}`; at one shape, the method's own pattern, then `GET`'s for
 // `HEAD`, then one naming no method. A path some pattern matches under other
 // methods only answers 405 with `Allow` naming them; no match answers 404.
 //
@@ -235,11 +234,7 @@ impl[S, P: Allocator] Router[S, P] {
         }
         let kept = Closure.open_in(self.allocator, handler)?
         let index = &self.add_handler(slot.path, kept)?
-        if slot.subtree {
-            &self.nodes[slot.node].subtree.register(slot.method, index)
-        } else {
-            &self.nodes[slot.node].exact.register(slot.method, index)
-        }
+        &self.nodes[slot.node].exact.register(slot.method, index)
         .Ok(())
     }
 }
@@ -263,14 +258,14 @@ test fn identical_shapes_are_a_duplicate() {
     let renamed = &router.route_raw(r"/a/{y}", second_handler)
     let method = &router.route_raw(r"GET /a/{x}", second_handler)
     let again = &router.route_raw(r"GET /a/{z}", second_handler)
-    let subtree = &router.route_raw("/a/", second_handler)
-    let subtree_again = &router.route_raw("/a/", second_handler)
+    let slashed = &router.route_raw("/a/", second_handler)
+    let slashed_again = &router.route_raw("/a/", second_handler)
     testing.assert_ok_eq(first, (), "registering failed")?
     testing.assert_eq(renamed, .Err(.Duplicate), "a renamed parameter was a new shape")?
     testing.assert_ok_eq(method, (), "a method pattern at a methodless shape was refused")?
     testing.assert_eq(again, .Err(.Duplicate), "a repeated method pattern was accepted")?
-    testing.assert_ok_eq(subtree, (), "a subtree was refused")?
-    testing.assert_eq(subtree_again, .Err(.Duplicate), "a repeated subtree was accepted")?
+    testing.assert_ok_eq(slashed, (), "a pattern ending in / was refused")?
+    testing.assert_eq(slashed_again, .Err(.Duplicate), "a repeated pattern ending in / was accepted")?
     defer let received = served(&router, "GET", "/a/1")
     testing.assert_eq(received.view(), "200 second", "a refused pattern replaced a registered one")?
     .Ok(())
@@ -324,31 +319,30 @@ impl[S, P: Allocator] Router[S, P] {
     fn claim(inout self: Self, pattern: Str) -> Result[Slot, RouteError] where carries(.Ok: pattern), retains(self: self) {
         let parsed = parse_pattern(pattern, self.allocator)?
         var node = &self.root()?
+        // Every path has at least one segment, which may be empty, as the
+        // segments of a request's path are walked.
         var start: UInt64 = 0
-        while start < parsed.path.length() {
+        loop {
             let end = segment_end(parsed.path, start)
             let segment = segment_of(parsed.path.slice(start, end).unwrap()).unwrap()
             node = &self.child_or_new(node, segment)?
+            if end == parsed.path.length() {
+                break
+            }
             start = end + 1
         }
-        let table = if parsed.subtree {
-            copy(self.nodes[node].subtree)
-        } else {
-            copy(self.nodes[node].exact)
-        }
-        if table.handler(parsed.method).is_some() {
+        if self.nodes[node].exact.handler(parsed.method).is_some() {
             return .Err(.Duplicate)
         }
-        .Ok(.{ path = copy(parsed.path), node, subtree = parsed.subtree, method = copy(parsed.method) })
+        .Ok(.{ path = copy(parsed.path), node, method = copy(parsed.method) })
     }
 }
 
 // A `Slot` is where a pattern's handler is registered: the node its path ends
-// at, whether it answers the subtree below it, and its method.
+// at, and its method.
 struct Slot {
     path: Str,
     node: UInt64,
-    subtree: Bool,
     method: Option[Method],
 }
 
@@ -477,7 +471,7 @@ test fn a_match_visits_only_nodes_whose_prefix_matches() {
 impl[S, P: Allocator] Router[S, P] {
     // Search beneath node `at` for the segments of `path` from `start`, which
     // is past the end when none remain. The literal child is tried first, then
-    // `{name}`, then `{name...}`, then this node's subtree, so the first
+    // `{name}`, then `{name...}`, so the first
     // pattern found is the most specific at the first segment where two
     // differ. A pattern whose path matches but whose method does not is passed
     // over, and its methods are added to `search.allowed`.
@@ -507,14 +501,10 @@ impl[S, P: Allocator] Router[S, P] {
         match copy(self.nodes[at].remainder) {
             Some(child) => {
                 search.visited += 1
-                match considered(&search, self.nodes[child].exact, method) {
-                    Some(index) => return .Some(index),
-                    None => {},
-                }
+                considered(&search, self.nodes[child].exact, method)
             },
-            None => {},
+            None => .None,
         }
-        considered(&search, self.nodes[at].subtree, method)
     }
 }
 
@@ -756,20 +746,37 @@ test fn no_match_is_404() {
     .Ok(())
 }
 
-test fn a_subtree_matches_beneath_it() {
+test fn a_pattern_ending_in_a_slash_matches_that_path_alone() {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("/static/", first_handler), (), "registering failed")?
-    testing.assert_ok_eq(&router.route_raw(r"/static/css/{name}", second_handler), (), "registering failed")?
-    defer let beneath = served(&router, "GET", "/static/a/b")
+    testing.assert_ok_eq(&router.route_raw(r"/files/{rest...}", second_handler), (), "registering failed")?
     defer let itself = served(&router, "GET", "/static/")
+    defer let beneath = served(&router, "GET", "/static/abc")
     defer let bare = served(&router, "GET", "/static")
-    defer let deeper = served(&router, "GET", "/static/css/site.css")
-    defer let past = served(&router, "GET", "/static/css/site.css/x")
-    testing.assert_eq(beneath.view(), "200 first", "the subtree did not match beneath it")?
-    testing.assert_eq(itself.view(), "200 first", "the subtree did not match its own path")?
-    testing.assert_eq(bare.view(), not_found, "the subtree matched its path without the slash")?
-    testing.assert_eq(deeper.view(), "200 second", "the subtree beat a longer pattern")?
-    testing.assert_eq(past.view(), "200 first", "the subtree did not answer past a longer pattern")?
+    defer let files = served(&router, "GET", "/files/")
+    defer let deep = served(&router, "GET", "/files/a/b")
+    testing.assert_eq(itself.view(), "200 first", "a pattern ending in / did not match its own path")?
+    testing.assert_eq(beneath.view(), not_found, "a pattern ending in / matched a path beneath it")?
+    testing.assert_eq(bare.view(), not_found, "a pattern ending in / matched its path without the slash")?
+    // `{name...}` is how a pattern matches every path beneath it, the empty
+    // rest included.
+    testing.assert_eq(files.view(), "200 second", "a remainder did not match an empty rest")?
+    testing.assert_eq(deep.view(), "200 second", "a remainder did not match beneath it")?
+    .Ok(())
+}
+
+test fn the_root_pattern_matches_the_root_alone() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("GET /", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("POST /reply", second_handler), (), "registering failed")?
+    defer let root = served(&router, "GET", "/")
+    defer let wrong = served(&router, "DELETE", "/")
+    defer let nowhere = served(&router, "GET", "/nowhere/deep")
+    defer let elsewhere = served(&router, "DELETE", "/nowhere/deep")
+    testing.assert_eq(root.view(), "200 first", "the root pattern did not match the root")?
+    testing.assert_eq(wrong.view(), "405 method not allowed\n (Allow: GET, HEAD)", "the root did not answer 405 for another method")?
+    testing.assert_eq(nowhere.view(), not_found, "the root pattern matched a path beneath it")?
+    testing.assert_eq(elsewhere.view(), not_found, "a path beneath the root answered 405")?
     .Ok(())
 }
 

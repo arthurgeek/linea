@@ -1484,9 +1484,11 @@ pub const Phase = struct {
     // -- The transfer function. --
 
     /// A fresh definition of an instruction value: whatever a previous pass of
-    /// a loop left on it is gone.
+    /// a loop left on it is gone. A value that cannot hold a dependency
+    /// defines none, whatever its operands carried.
     fn define(self: *Phase, id: InstId, deps: SetId, stale: MarkId) !void {
-        try self.set(self.instEntity(id), .{ .deps = deps, .stale = stale });
+        const holds = (deps == empty_set and stale == empty_set) or self.holdsDependencies(self.mir.typeOf(id));
+        try self.set(self.instEntity(id), .{ .deps = if (holds) deps else empty_set, .stale = if (holds) stale else empty_set });
     }
 
     fn refuse(self: *Phase, kind: @FieldType(Refusal, "kind"), at: InstId, entity: Entity, cause: InstId) !void {
@@ -1504,6 +1506,17 @@ pub const Phase = struct {
     fn mayCarry(self: *const Phase, ty: TypeId) bool {
         std.debug.assert(ty.index() < self.module.types.dependency_containment.len);
         return self.module.types.mayCarryDependencies(ty);
+    }
+
+    /// Whether a value of this type, defined or written, keeps what its source
+    /// carried. A type no observation can be held in keeps nothing: the error
+    /// payload of a result whose success payload borrows overlaps that
+    /// payload's bytes, and carries nothing of what they held. An integer
+    /// keeps what it carries whatever its type, because the address bits
+    /// `address_bits` makes of an array are an integer, and storing them is
+    /// how a view over the array reaches the slot that holds it.
+    fn holdsDependencies(self: *const Phase, ty: TypeId) bool {
+        return self.mayCarry(ty) or self.module.representationOf(ty).computation == .integer;
     }
 
     /// A read of `ty` through an address, or of a carrier's value itself:
@@ -1615,9 +1628,13 @@ pub const Phase = struct {
     /// initialised part by part -- which is what a `let` of a literal is,
     /// and what a loop does with it on every pass -- from one field assigned
     /// into a value holding a stale view elsewhere. Ownership accepts the
-    /// first, so this accepts both.
-    fn writeFrom(self: *Phase, at: InstId, dst: Base, ty: TypeId, from: SetId, from_marks: MarkId) !void {
+    /// first, so this accepts both. A written type that cannot hold a
+    /// dependency brings none.
+    fn writeFrom(self: *Phase, at: InstId, dst: Base, ty: TypeId, written: SetId, written_marks: MarkId) !void {
         if (dst.root == no_entity) return;
+        const holds = (written == empty_set and written_marks == empty_set) or self.holdsDependencies(ty);
+        const from = if (holds) written else empty_set;
+        const from_marks = if (holds) written_marks else empty_set;
         const a = self.accessOf(dst, ty);
         try self.invalidate(dst.root, a, at);
         var v = self.valuesOf(dst.root);
@@ -1800,11 +1817,6 @@ pub const Phase = struct {
         // destination's bytes by `retains`.
         var result_deps: SetId = empty_set;
         var result_marks: MarkId = empty_set;
-        // A result whose type holds no dependency carries none, whatever the
-        // signature promises: a generic signature's clause names what `T`
-        // might hold, and ownership reads an instance that cannot hold a view
-        // as independent.
-        const result_carries = self.mayCarry(s.result);
         for (s.contracts) |contract| {
             if (contract.source.root != .parameter or contract.source.fields.len != 0) continue;
             const p = contract.source.root.parameter;
@@ -1850,7 +1862,7 @@ pub const Phase = struct {
             }
             switch (contract.kind) {
                 .borrows, .carries => {
-                    if (!result_carries or !targetCarriesWhole(contract.target)) continue;
+                    if (!targetCarriesWhole(contract.target)) continue;
                     result_deps = try self.unionOf(result_deps, carried);
                     result_marks = try self.markUnion(result_marks, carried_marks);
                 },
@@ -1874,7 +1886,7 @@ pub const Phase = struct {
         }
 
         if (mir.tagOf(id) == .call or mir.tagOf(id) == .call_indirect) {
-            try self.set(self.instEntity(id), .{ .deps = result_deps, .stale = result_marks });
+            try self.define(id, result_deps, result_marks);
         }
     }
 
@@ -2765,6 +2777,45 @@ fn copyThroughBorrow(gpa: std.mem.Allocator, copy_after_write: bool) ![]Mir {
     const used = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads, &.{into});
     try ret(&b, entry, used);
     return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+/// Stores the address bits of `x` in the `Plain` of a holder, copies that
+/// `Plain` into the `Plain` of another holder, writes `x`, and copies the
+/// other holder whole. `Plain` is a type no observation can be held in, so its
+/// bytes carry none, whatever was stored in them.
+fn copyOfPlainPart(gpa: std.mem.Allocator, tag: mir_mod.Inst.Tag) ![]Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const x = try b.addLocal(Harness.big, .value);
+    const source = try b.addLocal(Harness.holder, .value);
+    const outer = try b.addLocal(Harness.holder, .value);
+    const copied = try b.addLocal(Harness.holder, .value);
+    const entry = try b.addBlock();
+    const a = try addrOf(&b, entry, x);
+    const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
+    const zero = try constant(&b, entry, 0);
+    const eight = try constant(&b, entry, 8);
+    const s = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = source } });
+    const held = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = s, .rhs = eight } } });
+    const word = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = held, .rhs = zero } } });
+    _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = word, .rhs = bits } } });
+    const o = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = outer } });
+    const into = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = o, .rhs = eight } } });
+    _ = try b.addInst(entry, .{ .tag = tag, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = held } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
+    _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
+    const c = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = copied } });
+    _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.holder, .span = Span.empty, .data = .{ .binary = .{ .lhs = c, .rhs = o } } });
+    try ret(&b, entry, zero);
+    return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+test "a copy of a part no observation can be held in carries none into its new place" {
+    for ([_]mir_mod.Inst.Tag{ .copy_value, .move_value }) |tag| {
+        try expectAccepted(try copyOfPlainPart(testing.allocator, tag));
+    }
 }
 
 test "a copy of the bytes a borrow points at does not observe the place they were copied from" {

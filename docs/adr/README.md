@@ -151,10 +151,11 @@ true of a different implementation.
 | [0188](0188-the-unit-value-is-written-as-its-type.md) | The unit value is written as its type is, `()` | Accepted; supersedes the unit-expression clause of 0140 |
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted |
-| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185 |
+| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
+| [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |
@@ -306,7 +307,7 @@ that settles it**:
   generics, ownership facts and monomorphisation state; "Semantic IR" is the
   working name.
 
-Eight further questions have been identified but not yet scheduled.
+Nine further questions have been identified but not yet scheduled.
 
 How **incremental compilation** interacts with
 [0012](0012-immutable-representations.md), which a rebuild-and-swap model
@@ -369,6 +370,19 @@ which is why printing it was enough; the cost is that
 everything the compiler emits except one function. What settles it is whether
 the wrapper ever varies — a program with no `main`, which the test runner needs,
 is the first thing that would make it.
+
+How **one process serves requests concurrently**, and how ownership governs
+what concurrent tasks share and send. `http.listen_and_serve` answers one
+connection at a time ([0154](0154-sockets-and-http-follow-go.md)), so today
+concurrency comes from processes: `http.serve_cgi` runs once per request under
+a web server, or several server processes share the load. Threads, asynchronous
+I/O and a pre-forked pool of worker processes are the candidates. A worker pool
+needs no new rule, since processes share nothing; threads and asynchronous
+tasks need one. What settles it is how ownership extends across tasks: whether
+a value sent to another task must be owned and moved whole, never an
+observation of the sender's storage; what tasks may share read-only; and
+whether the state `http.with_state` lends to every request is shared under a
+rule or partitioned per task.
 
 None of them is answered here. The third came close: a buffered writer, `slice`, and building text from
 computed bytes appeared to reach it together, and on inspection only the last
