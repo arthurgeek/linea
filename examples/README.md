@@ -23,7 +23,7 @@ Values, functions, control flow, and ordinary errors.
 - [loyalty_points.lin](loyalty_points.lin): awards points under two reward plans; structs holding functions.
 - [print_orders.lin](print_orders.lin): prices print jobs; structs, defaults, and `..base` updates.
 - [shipping_quotes.lin](shipping_quotes.lin): quotes delivery from a rate card; enums and explicit `copy`.
-- [tournament_board.lin](tournament_board.lin): updates scores and prints standings; arrays and indexing.
+- [tournament_board.lin](tournament_board.lin): updates scores and prints standings; arrays, indexing and a stable `sort_by`.
 - [office_directory.lin](office_directory.lin): updates and looks up contacts; `Index` and `^1` indexing.
 - [accounts](accounts/main.lin): withdraws from an account; modules, named arguments, and errors.
 
@@ -37,7 +37,7 @@ Strings, collections, parsing, and files.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.
 - [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest; `filter`, `collect`, and lent counters.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.
-- [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file; reading text and counting with a `Map`.
+- [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; counting with a `Map` and sorting with `Vec.sort_by`.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; files and `let ... else`.
 - [form_letters.lin](form_letters.lin): fills a letter template per order; JSON decoding and string building.
 - [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode` and `json.encode`.
