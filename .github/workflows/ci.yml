@@ -117,6 +117,12 @@ jobs:
           - schedule: j4-parallel
             flags: -j4
     steps:
+      - name: Runner size
+        run: |
+          nproc
+          free -g
+          df -h
+
       - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
@@ -149,12 +155,6 @@ jobs:
           restore-keys: |
             outcomes-${{ github.job }}-${{ matrix.schedule }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
             outcomes-${{ github.job }}-${{ matrix.schedule }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
-
-      - name: Runner size
-        run: |
-          nproc
-          free -g
-          df -h
 
       # A runner that stops answering the server takes its job log with it, so
       # the memory, disk and largest processes are sampled every 20 seconds
