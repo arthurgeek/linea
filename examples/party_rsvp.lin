@@ -3,10 +3,10 @@
 // environment variables, sends a form's body on standard input, and sends
 // what the program writes on standard output back to the browser.
 //
-// A GET answers the invitation, an HTML form. POST /reply reads the form,
+// GET / answers the invitation, an HTML form. POST /reply reads the form,
 // refuses a reply without a name or bringing more than four guests, and
-// confirms the reply as JSON. The router answers any other method 405. Every
-// request is logged to standard error, which the web server keeps in its
+// confirms the reply as JSON. The router answers another method at those
+// paths 405, and any other path 404. Every request is logged to standard error, which the web server keeps in its
 // error log.
 import std.env
 import std.http
@@ -93,8 +93,8 @@ fn reply(form: http.Form[Reply], request: http.Request) -> Result[http.Response,
 }
 
 // Register both routes; `?` stops at the first refused pattern. A pattern
-// ending in `/` matches every path beneath it, so `GET /` answers a GET of
-// any path the other route does not name.
+// matches its own path alone, so `GET /` answers the root and a path no route
+// names is answered 404.
 fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route("GET /", invitation)?
     &router.route("POST /reply", reply)

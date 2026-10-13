@@ -769,8 +769,10 @@ fn main() -> UInt8 {
 the next request counts 2. The most specific
 pattern matching the method and path answers: at the first segment where two
 patterns differ, a literal wins over `{name}`, which wins over `{name...}`. A
-path matched only under other methods is answered 405 with `Allow`, and no
-match 404.
+pattern matches its own path alone, so `/` answers only the root and
+`/static/` only `/static/`; `/static/{file...}` answers every path beneath it,
+`/static/` included. A path matched only under other methods is answered 405
+with `Allow`, and no match 404.
 
 Requests are served from one arena of `limits.request_arena_bytes` (48 MiB by
 default) carved from the `parent:` allocator given to `serve`, which defaults

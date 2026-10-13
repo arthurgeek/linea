@@ -151,10 +151,11 @@ true of a different implementation.
 | [0188](0188-the-unit-value-is-written-as-its-type.md) | The unit value is written as its type is, `()` | Accepted; supersedes the unit-expression clause of 0140 |
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted |
-| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185 |
+| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0220 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
+| [0220](0220-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |

@@ -61,13 +61,12 @@ A path that is not UTF-8 is encoded byte by byte, as a browser would send it,
 so the router and the log see `/reply%E9`, the path it is, and not `/reply`.
 
   $ env -i REQUEST_METHOD=POST PATH_INFO="$(printf '/reply\351')" CONTENT_LENGTH=0 ./rsvp 2> log | tr -d '\r'
-  Status: 405 Method Not Allowed
-  Allow: GET, HEAD
+  Status: 404 Not Found
   Content-Type: text/plain; charset=utf-8
   
-  method not allowed
+  not found
   $ sed -E -e 's/^[0-9T:-]+Z /TIME /' -e 's/duration=[^ ]+/duration=D/' log
-  TIME WARN request method=POST path=/reply%E9 status=405 bytes=19 duration=D
+  TIME WARN request method=POST path=/reply%E9 status=404 bytes=10 duration=D error="the handler refused the request: not found"
 
 A reply bringing too many guests is refused with 422 and the rule it broke.
 
@@ -95,3 +94,17 @@ A method no route names is answered 405, with the methods the path allows.
   Content-Type: text/plain; charset=utf-8
   
   method not allowed
+
+`GET /` names the root alone, so a path no route names is answered 404,
+whatever its method.
+
+  $ env -i REQUEST_METHOD=GET PATH_INFO=/nowhere/deep ./rsvp 2> /dev/null | tr -d '\r'
+  Status: 404 Not Found
+  Content-Type: text/plain; charset=utf-8
+  
+  not found
+  $ env -i REQUEST_METHOD=DELETE PATH_INFO=/nowhere/deep ./rsvp 2> /dev/null | tr -d '\r'
+  Status: 404 Not Found
+  Content-Type: text/plain; charset=utf-8
+  
+  not found

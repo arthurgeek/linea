@@ -1131,6 +1131,12 @@ router's, not an interpolation:
 | `{city}` | any one segment, percent-decoded |
 | `{rest...}` | the rest of the path, slashes included |
 
+A pattern without `{rest...}` matches its own path and nothing beneath it:
+`GET /` answers the root alone, and `GET /static/` answers `/static/` but not
+`/static/site.css`. To answer every path beneath one, end the pattern with
+`{rest...}`: `GET /static/{file...}` answers `/static/site.css` and
+`/static/css/print.css`, and `/static/` too, with an empty `file`.
+
 When several patterns match, the most specific wins: at the first segment
 where two patterns differ, a literal beats `{name}`, which beats `{name...}`.
 That is why `/forecast/today` reached `today` although `{city}` matches it

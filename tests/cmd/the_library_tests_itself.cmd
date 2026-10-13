@@ -328,6 +328,7 @@ The library tests itself.
   ok    http.a_path_reads_its_fields_from_the_path_values
   ok    http.a_path_value_decodes_escapes_after_matching
   ok    http.a_path_value_is_found_by_its_exact_name
+  ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
   ok    http.a_query_answers_a_refusal_of_a_params_of_its_own
@@ -399,7 +400,6 @@ The library tests itself.
   ok    http.a_streamed_body_reads_its_request
   ok    http.a_streamed_body_uses_what_its_handler_captured
   ok    http.a_streamed_response_has_no_held_body
-  ok    http.a_subtree_matches_beneath_it
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
@@ -473,6 +473,7 @@ The library tests itself.
   ok    http.the_first_refusing_extractor_answers_the_request
   ok    http.the_library_extractors_and_a_type_that_reads_itself_are_arguments
   ok    http.the_protocol_the_client_spoke_is_not_the_programs
+  ok    http.the_root_pattern_matches_the_root_alone
   ok    http.the_state_is_returned_when_serving_ends
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
@@ -1230,4 +1231,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1227 passed, 0 failed
+  1228 passed, 0 failed
