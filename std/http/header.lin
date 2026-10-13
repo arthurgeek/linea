@@ -3,8 +3,8 @@ import std.mem
 import std.testing
 
 // A header is refused with `NotAToken` when its name is not an HTTP token, with
-// `Framing` when it names `Connection`, `Content-Length` or `Transfer-Encoding`,
-// which the server alone decides, with `ControlByte` when its value holds a
+// `Framing` when it names `Connection`, `Content-Length`, `Transfer-Encoding`
+// or `Status`, which the server alone decides, with `ControlByte` when its value holds a
 // control byte other than a tab, and with `Allocation` when the list could not
 // grow to hold it. `?` turns a refused allocation into `HeaderError.Allocation`.
 @(copyable, derive(Equatable, Debug, From[mem.Oom]))
@@ -69,6 +69,9 @@ derive[A: Allocator] Release for PendingHeader[A]
 // header can end a line early and smuggle another header or a body into the
 // response. `Connection`, `Content-Length` and `Transfer-Encoding` are refused:
 // the server alone frames a response, which ends where its connection closes.
+// `Status` is refused too: a CGI program's answer names its status in that
+// header, which the response's own status writes, and a second one would let
+// the web server send a status other than the one the response holds.
 struct ResponseHeaders[A: Allocator] {
     allocator: A,
     fields: Vec[PendingHeader[A], A],
@@ -174,10 +177,12 @@ test fn adding_a_header_keeps_earlier_values() {
     let empty = &headers.add("", "x")
     let length = &headers.add("Content-Length", "3")
     let coding = &headers.add("TRANSFER-ENCODING", "chunked")
+    let status = &headers.add("status", "302 Found")
     testing.assert_eq(bad_name, .Err(HeaderError.NotAToken), "a name with a space was accepted")?
     testing.assert_eq(connection, .Err(HeaderError.Framing), "a Connection header was accepted")?
     testing.assert_eq(length, .Err(HeaderError.Framing), "a Content-Length header was accepted")?
     testing.assert_eq(coding, .Err(HeaderError.Framing), "a Transfer-Encoding header was accepted")?
+    testing.assert_eq(status, .Err(HeaderError.Framing), "a Status header was accepted")?
     testing.assert_eq(empty, .Err(HeaderError.NotAToken), "an empty name was accepted")?
     testing.assert_eq(headers.get("Bad Name"), .None, "a refused name was kept")?
     testing.assert_eq(headers.get("Connection"), .None, "a refused Connection header was kept")?
@@ -244,13 +249,13 @@ fn empty_header[A: Allocator](allocator: A) -> PendingHeader[A] where carries(al
     .{ name = String.new_in(allocator), value = String.new_in(allocator) }
 }
 
-// Refuse a header whose name is not a token, whose name frames the response,
-// or whose value holds a control byte other than a tab.
+// Refuse a header whose name is not a token, whose name frames the response
+// or names its status, or whose value holds a control byte other than a tab.
 fn refuse_invalid(name: Str, value: Str) -> Result[(), HeaderError] {
     if !is_token(name) {
         return .Err(.NotAToken)
     }
-    if name.equals_ascii_folded("Connection") || name.equals_ascii_folded("Content-Length") || name.equals_ascii_folded("Transfer-Encoding") {
+    if name.equals_ascii_folded("Connection") || name.equals_ascii_folded("Content-Length") || name.equals_ascii_folded("Transfer-Encoding") || name.equals_ascii_folded("Status") {
         return .Err(.Framing)
     }
     if !is_field_value(value) {

@@ -384,9 +384,17 @@ impl[P: Allocator] Message[P] {
     // `add_header` adds the header `name: value` to a request a test built
     // with `new_request`, after the headers it has, as a client sends one. A
     // name that is not a token, or a value holding a control byte, is refused
-    // with 400, as a header line holding them is.
+    // with 400, as a header line holding them is. The headers it already has
+    // count toward `max_headers`, and a `Content-Length` disagreeing with an
+    // earlier one is refused with 400, as in a request read whole.
     pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), RequestError] where carries() {
-        var tally = no_headers
+        // Every `Content-Length` already held agrees with the first, which
+        // was checked to be digits when it was added.
+        let length: Option[UInt64] = match header_value(self.head.view(), self.header_fields.as_slice(), "Content-Length") {
+            Some(earlier) => .Some(content_length(earlier, .None)?),
+            None => .None,
+        }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false }
         add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 }
@@ -402,6 +410,24 @@ test fn a_test_request_carries_the_headers_added_to_it() {
     testing.assert_eq(request.path(), "/orders", "adding a header disturbed the path")?
     testing.assert_eq(spaced, .Err(.Status(.BadRequest)), "a name holding a space was accepted")?
     testing.assert_eq(broken, .Err(.Status(.BadRequest)), "a value holding a line break was accepted")?
+    .Ok(())
+}
+
+// The headers added one call at a time are held to what a request's header
+// lines are held to together.
+test fn headers_added_one_at_a_time_are_checked_together() {
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = new_request(arena.handle(), "POST", "/orders", body: "abc").unwrap()
+    &sent.add_header("Content-Length", "3").unwrap()
+    let agreeing = &sent.add_header("Content-Length", "3")
+    let disagreeing = &sent.add_header("Content-Length", "4")
+    testing.assert_eq(agreeing, .Ok(()), "a second length that agrees was refused")?
+    testing.assert_eq(disagreeing, .Err(.Status(.BadRequest)), "a second length that disagrees was accepted")?
+    var many = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    for _ in 0..standard_limits.max_headers {
+        &many.add_header("X-Note", "a").unwrap()
+    }
+    testing.assert_eq(&many.add_header("X-Note", "a"), .Err(.Status(.RequestHeaderFieldsTooLarge)), "a header past max_headers was accepted")?
     .Ok(())
 }
 
