@@ -45,6 +45,7 @@ const Type = types_mod.Type;
 const Typing = types_mod.Typing;
 const literal_text = @import("../support/text.zig");
 const article = @import("../support/article.zig");
+const symbol_names = @import("../support/symbol.zig");
 const constfold = @import("constfold.zig");
 const open_types_mod = @import("open_types.zig");
 const RawAccesses = @import("intrinsics.zig").RawAccesses;
@@ -1482,8 +1483,10 @@ fn typecheckInternal(
         gpa.free(module_paths);
     }
     for (0..c.program.modules.len) |i| {
-        const dotted = try gpa.dupe(u8, c.program.modulePath(ModuleId.from(i)));
-        module_paths[i] = dotted;
+        var dotted: std.ArrayList(u8) = .empty;
+        errdefer dotted.deinit(gpa);
+        try symbol_names.appendRoute(gpa, &dotted, c.program.modulePath(ModuleId.from(i)));
+        module_paths[i] = try dotted.toOwnedSlice(gpa);
         filled = i + 1;
     }
 
