@@ -22,20 +22,34 @@ use mem.Owner
 // The most guests one reply may bring.
 let most_guests: UInt32 = 4
 
-// The invitation page. A browser posts its form to `reply`, beside the
-// program's own address, as `application/x-www-form-urlencoded`.
-let invitation_page: Str =
+// The invitation page holds a form, which a browser posts as
+// `application/x-www-form-urlencoded`. The address the form posts to goes
+// between these two parts.
+let page_start: Str =
     \\<!doctype html>
     \\<title>Party</title>
-    \\<form method="post" action="reply">
+    \\<form method="post" action="
+
+let page_end: Str =
+    \\">
     \\  <label>Name <input name="name"></label>
     \\  <label>Guests <input name="guests" type="number" value="0"></label>
     \\  <button>Reply</button>
     \\</form>
 
-// `invitation` answers the page as HTML.
+// `invitation` answers the page as HTML. The web server names the program's
+// own address in `SCRIPT_NAME`, such as `/cgi-bin/party_rsvp`, and runs the
+// program for every path beneath it, so the form posts to
+// `/cgi-bin/party_rsvp/reply`, which reaches the program with `PATH_INFO` set
+// to `/reply`. The address is the web server's own setting; run without one,
+// the form posts to `/reply`.
 fn invitation(request: http.Request) -> Result[http.Response, http.Error] {
-    var page = http.text(request, invitation_page)?
+    let script = env.variable("SCRIPT_NAME").unwrap_or("")
+    // The page is built in the request's arena, which lives until the answer
+    // has been written.
+    var html = String.new_in(request.allocator())
+    "{page_start}{script}/reply{page_end}".fmt(&html)?
+    var page = http.text(request, html.view())?
     &page.set_header("Content-Type", "text/html; charset=utf-8")?
     .Ok(page)
 }
@@ -116,6 +130,8 @@ test fn the_invitation_is_an_html_form() {
     let page = &router.serve_http(&nothing, sent.request()).unwrap()
     testing.assert_eq(page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the page is not HTML")?
     testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find("<form").is_some(), "the page holds no form")?
+    // The test process has no `SCRIPT_NAME`, so the form posts to `/reply`.
+    testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find(r#"action="/reply""#).is_some(), "the form posts elsewhere")?
 }
 
 test fn a_reply_is_confirmed_as_json() {
