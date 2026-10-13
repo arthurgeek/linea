@@ -195,11 +195,31 @@ struct HttpDate {
     stamp: Timestamp,
 }
 
+// `http_date_is` checks that the timestamp `seconds` after the epoch displays
+// as the HTTP date `expected`.
+fn http_date_is(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    let written = fmt.render_owned(Timestamp.from_unix(seconds, 0).unwrap().http_date()).unwrap()
+    let checked = testing.assert_eq(written.view(), expected, said)
+    written.release()
+    checked
+}
+
 impl Timestamp {
     // `http_date` makes the `HttpDate` form of the timestamp.
     pub fn http_date(self: Self) -> HttpDate {
         .{ stamp = copy(self) }
     }
+}
+
+test fn an_http_date_displays_in_the_form_header_fields_use() {
+    http_date_is(784111777, "Sun, 06 Nov 1994 08:49:37 GMT", "the RFC 9110 example changed")?
+    http_date_is(0, "Thu, 01 Jan 1970 00:00:00 GMT", "the epoch changed")?
+    http_date_is(951782400, "Tue, 29 Feb 2000 00:00:00 GMT", "a leap day changed")?
+    http_date_is(-1, "Wed, 31 Dec 1969 23:59:59 GMT", "the second before the epoch changed")?
+    http_date_is(-11644473600, "Mon, 01 Jan 1601 00:00:00 GMT", "the earliest date a cookie can expire changed")?
+    http_date_is(-62167219200, "Sat, 01 Jan 0000 00:00:00 GMT", "the first moment changed")?
+    http_date_is(253402300799, "Fri, 31 Dec 9999 23:59:59 GMT", "the last moment changed")?
+    .Ok(())
 }
 
 // The count of days from 0000-01-01 to the Unix epoch is 719,528, and the
@@ -241,25 +261,6 @@ impl Display for HttpDate {
         let month_text = month_name(month)
         "{weekday}, {day:02} {month_text} {year:04} {hour:02}:{minute:02}:{second:02} GMT".fmt(&w)
     }
-}
-
-test fn an_http_date_displays_in_the_form_header_fields_use() {
-    http_date_is(784111777, "Sun, 06 Nov 1994 08:49:37 GMT", "the RFC 9110 example changed")?
-    http_date_is(0, "Thu, 01 Jan 1970 00:00:00 GMT", "the epoch changed")?
-    http_date_is(951782400, "Tue, 29 Feb 2000 00:00:00 GMT", "a leap day changed")?
-    http_date_is(-1, "Wed, 31 Dec 1969 23:59:59 GMT", "the second before the epoch changed")?
-    http_date_is(-62167219200, "Sat, 01 Jan 0000 00:00:00 GMT", "the first moment changed")?
-    http_date_is(253402300799, "Fri, 31 Dec 9999 23:59:59 GMT", "the last moment changed")?
-    .Ok(())
-}
-
-// `http_date_is` checks that the timestamp `seconds` after the epoch displays
-// as the HTTP date `expected`.
-fn http_date_is(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
-    let written = fmt.render_owned(Timestamp.from_unix(seconds, 0).unwrap().http_date()).unwrap()
-    let checked = testing.assert_eq(written.view(), expected, said)
-    written.release()
-    checked
 }
 
 // `displays_as` checks that the timestamp `seconds` after the epoch displays
