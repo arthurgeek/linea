@@ -1,0 +1,41 @@
+import std.mem
+import std.testing
+
+// A `Handler` answers requests, given the application's state `S` to read and
+// change while it answers. A `Router` implements it by dispatching to the
+// route registered for the request's method and path, and passes the state on
+// to that route. `serve` calls `serve_http` once per request with `P`, the
+// allocator each exchange's arena is carved from, and a `()` state: a program
+// that shares state wraps its handler in `http.with_state`, which owns the
+// state and lends it down. `serve` answers one request at a time, so each
+// handler changes the state in turn.
+//
+// The response may view the request and what is stored in its arena, and what
+// `self` owns, such as the names of the path values a router matched: it is
+// written before the arena is rewound and before `self` answers again. It may
+// not view the state, which the next request changes.
+//
+// A handler that holds another handler, a middleware, takes the state as
+// every handler does and passes `&state` on with the request. `serve` also
+// tells its handler what happened to each exchange, through `Observer`, which
+// every type implements by ignoring the events; a middleware implements both
+// traits and passes each call on: `http.logged` is one.
+pub trait Handler[S, P: Allocator] {
+    fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where borrows(self), carries(request)
+}
+
+fn greeting[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, "hello")
+}
+
+test fn a_route_returning_a_response_is_registered_and_answers() {
+    defer var router: Router[()] = Router.new()
+    &router.route_raw("GET /hello", greeting).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
+    let answered: Result[Response, Error] = &router.serve_http(&nothing, sent.request())
+    let response = answered.unwrap()
+    testing.assert_eq(Str.from_bytes(response.body().unwrap()).unwrap(), "hello", "the answer changed")?
+    .Ok(())
+}

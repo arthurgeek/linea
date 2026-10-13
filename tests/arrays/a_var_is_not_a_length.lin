@@ -1,0 +1,9 @@
+// [T-ArraySize]. A `var` may be assigned again, so what it was initialised
+// with is not what it holds: it is not a constant expression however its
+// initialiser looks, and a length may not name one.
+fn main() -> UInt8 {
+    var n: UInt8 = 3
+    n = 2
+    let _xs: [UInt8; n] = [1, 2, 3]
+    n
+}

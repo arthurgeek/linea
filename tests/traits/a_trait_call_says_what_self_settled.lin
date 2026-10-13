@@ -1,0 +1,42 @@
+// A call through a trait settles `Self`, and this is the dump that says what
+// the checker settled. Without it the two calls below are the same three
+// tokens twice and the dump answers nothing: which implementation each runs is
+// the whole of what a reader consults it for.
+//
+// The call inside `twice` is the case the source cannot be read for. It is one
+// call in the program and one per instantiation once the body is copied, so
+// what `Self` is there is a question about the call and not about the text.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+    each: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+impl Measure for Notes {
+    fn of(x: Self) -> UInt8 {
+        x.count * x.each
+    }
+}
+
+fn twice[T: Measure](v: T) -> UInt8 {
+    Measure.of(v) + Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ count = 3 }
+    let fives: Notes = .{ count = 2, each = 5 }
+    Measure.of(coppers) + twice(fives)
+}

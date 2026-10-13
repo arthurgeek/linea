@@ -1,0 +1,39 @@
+import std.mem
+
+fn increment(value: UInt64) -> UInt64 {
+    value + 1
+}
+
+fn double(value: UInt64) -> UInt64 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    var functions: Vec[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = Vec.new()
+    for position in UInt64(0)..12 {
+        let operation: fn(value: UInt64) -> UInt64 = if position % 2 == 0 {
+            increment
+        } else {
+            double
+        }
+        match Vec.push(&functions, operation) { Ok(_) => {}, Err(_) => panic("push failed") }
+    }
+    var position: UInt64 = 0
+    while functions.length() > 0 {
+        let operation = match Vec.remove(&functions, 0) { Some(f) => f, None => panic("missing function") }
+        let expected: UInt64 = if position % 2 == 0 {
+            8
+        } else {
+            14
+        }
+        if operation(7) != expected {
+            panic("function changed during storage transfer")
+        }
+        position += 1
+    }
+    match Vec.finish(functions) { Ok(_) => {}, Err(_) => panic("vector did not drain") }
+    if position != 12 {
+        panic("wrong function count")
+    }
+    0
+}

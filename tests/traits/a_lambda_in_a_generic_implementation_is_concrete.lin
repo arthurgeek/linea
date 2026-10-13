@@ -1,0 +1,15 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    pub fn apply(_self: Holder[T], sink value: T) -> T where carries(value) {
+        let identity = |sink item: T| item
+        identity(value)
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 1 }
+    Holder.apply(holder, 7)
+}

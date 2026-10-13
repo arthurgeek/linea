@@ -1,0 +1,10 @@
+error[T-Impl]: a settled reference selects `Item` through a bound, and `W` carries none
+  --> tests/traits/a_settled_reference_off_a_parameter_needs_a_bound.lin:23:26
+   |
+23 | fn _unbounded[W](sink v: W.Item) -> W.Item {
+   |                          ^^^^^^ bound it by the trait that declares the name
+error[T-Impl]: a settled reference selects `Item` through a bound, and `W` carries none
+  --> tests/traits/a_settled_reference_off_a_parameter_needs_a_bound.lin:23:37
+   |
+23 | fn _unbounded[W](sink v: W.Item) -> W.Item {
+   |                                     ^^^^^^ bound it by the trait that declares the name

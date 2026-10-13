@@ -1,0 +1,5 @@
+error[O-Copy]: this closure cannot be copied, because it captures `count`, a place lent `inout` that cannot be copied
+ --> tests/inout_captures/a_closure_holding_a_lend_is_not_copied.lin:6:17
+  |
+6 |     var again = copy(tick)
+  |                 ^^^^^^^^^^ move the closure, or capture a copyable value instead

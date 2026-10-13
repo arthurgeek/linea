@@ -1,0 +1,422 @@
+import std.mem
+import std.testing
+
+// The runtime writes the shortest text that reads back as the same Float64
+// into four integers, eight ASCII bytes each with the first byte least
+// significant, and returns the text's length. No temporary text view escapes
+// the call, and each byte reaches the caller's Writer through a literal.
+extern fn linea_float64_debug(bits: UInt64, inout first: UInt64, inout second: UInt64, inout third: UInt64, inout fourth: UInt64) -> UInt64
+
+// A value is negative when its sign is set: below zero, or negative zero,
+// which compares equal to zero and is told apart by the sign of 1 / value.
+// NaN is never negative.
+fn is_negative(value: Float64) -> Bool {
+    value < 0.0 || (value == 0.0 && 1.0 / value < 0.0)
+}
+
+// Recover the IEEE representation using exact powers of two. The foreign
+// interface accepts integers, so the float itself stays in Linea.
+fn float64_bits(value: Float64) -> UInt64 {
+    // IEEE 754 stores a sign bit (2^63), an 11-bit exponent biased by 1023,
+    // and a 52-bit fraction scaled by 2^52.
+    let sign_bit: UInt64 = 9223372036854775808
+    let fraction_scale: UInt64 = 4503599627370496
+    let exponent_bias = 1023
+    // An all-ones exponent denotes infinity or NaN. infinity_bits is that
+    // exponent with a zero fraction (0x7FF0000000000000); quiet_nan_bits also
+    // sets the top fraction bit (0x7FF8000000000000). Every NaN payload prints
+    // as "NaN", so one canonical NaN stands for all of them.
+    let infinity_bits: UInt64 = 9218868437227405312
+    let quiet_nan_bits: UInt64 = 9221120237041090560
+    if value != value {
+        return quiet_nan_bits
+    }
+    let sign = if is_negative(value) {
+        sign_bit
+    } else {
+        0
+    }
+    var magnitude = if value < 0.0 {
+        -value
+    } else {
+        value
+    }
+    if magnitude == 0.0 {
+        return sign
+    }
+    let positive_infinity = 1.0 / 0.0
+    if magnitude == positive_infinity {
+        return sign + infinity_bits
+    }
+
+    // The normal range starts at 2^-1022. Subnormals are integer multiples
+    // of 2^-1074, the smallest positive Float64.
+    let smallest_normal = 2.2250738585072014e-308
+    let smallest_subnormal = 5e-324
+    if magnitude < smallest_normal {
+        return sign + UInt64(magnitude / smallest_subnormal)
+    }
+
+    // Normalize to [1, 2). Powers of two preserve every significant bit.
+    var exponent = exponent_bias
+    while magnitude >= 2.0 {
+        magnitude /= 2.0
+        exponent += 1
+    }
+    while magnitude < 1.0 {
+        magnitude *= 2.0
+        exponent -= 1
+    }
+    // Remove the implicit leading 1, then shift the fraction into 52 bits.
+    // The biased exponent occupies the bits immediately above that fraction.
+    let fraction = UInt64((magnitude - 1.0) * Float64(fraction_scale))
+    sign + UInt64(exponent) * fraction_scale + fraction
+}
+
+// Return the one-character text for an ASCII byte the runtime emitted.
+// Writers receive slices of immutable literals, never a view of runtime storage.
+fn float_character(byte: UInt64) -> Str {
+    // The runtime emits ASCII: digits occupy codes 48 through 57.
+    if byte >= 48 && byte <= 57 {
+        let start = byte - 48
+        let digit = "0123456789".slice(start, start + 1) else {
+            panic("invalid float digit")
+        }
+        return digit
+    }
+    // The remaining ASCII codes cover signs, decimal points, exponents, and
+    // the letters of NaN and inf.
+    match read byte {
+        45 => "-",
+        46 => ".",
+        78 => "N",
+        97 => "a",
+        101 => "e",
+        102 => "f",
+        105 => "i",
+        110 => "n",
+        _ => panic("invalid character in float output"),
+    }
+}
+
+impl Debug for Float64 {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        var first: UInt64 = 0
+        var second: UInt64 = 0
+        var third: UInt64 = 0
+        var fourth: UInt64 = 0
+        var remaining = linea_float64_debug(float64_bits(self), &first, &second, &third, &fourth)
+        // Four UInt64 words hold at most 32 ASCII bytes, eight bytes per word.
+        if remaining == 0 || remaining > 32 {
+            panic("invalid float output length")
+        }
+        let words = [first, second, third, fourth]
+        for word in words {
+            var packed = word
+            var count = if remaining < 8 {
+                remaining
+            } else {
+                8
+            }
+            while count > 0 {
+                // Each base-256 digit is one byte, least-significant byte first.
+                &w.write_str(float_character(packed % 256))?
+                packed /= 256
+                count -= 1
+                remaining -= 1
+            }
+        }
+        .Ok(())
+    }
+}
+
+test fn float_debug_preserves_fractions_and_signed_zero() {
+    testing.assert(debug_text_equals(2.5, "2.5"), "fractional digits changed")?
+    testing.assert(debug_text_equals(0.1, "0.1"), "one tenth is not concise")?
+    testing.assert(debug_text_equals(2.0, "2.0"), "an integral float lost its decimal point")?
+    testing.assert(debug_text_equals(0.0, "0.0"), "positive zero changed")?
+    testing.assert(debug_text_equals(-0.0, "-0.0"), "negative zero lost its sign")?
+    .Ok(())
+}
+
+test fn float_debug_names_infinities_and_canonical_nan() {
+    let infinity = 1.0 / 0.0
+    let nan = 0.0 / 0.0
+    testing.assert(debug_text_equals(infinity, "inf"), "positive infinity changed")?
+    testing.assert(debug_text_equals(-infinity, "-inf"), "negative infinity lost its sign")?
+    testing.assert(debug_text_equals(nan, "NaN"), "NaN spelling changed")?
+    testing.assert(debug_text_equals(-nan, "NaN"), "NaN spelling depends on its sign")?
+    .Ok(())
+}
+
+test fn float_debug_preserves_extremes_and_subnormals() {
+    testing.assert(debug_text_equals(5e-324, "5e-324"), "smallest subnormal changed")?
+    testing.assert(debug_text_equals(-5e-324, "-5e-324"), "negative subnormal changed")?
+    testing.assert(debug_text_equals(2.2250738585072014e-308, "2.2250738585072014e-308"), "smallest normal changed")?
+    testing.assert(debug_text_equals(1.7976931348623157e308, "1.7976931348623157e308"), "largest finite value changed")?
+    .Ok(())
+}
+
+test fn float_debug_switches_notation_at_the_documented_thresholds() {
+    testing.assert(debug_text_equals(1e-6, "0.000001"), "lower fixed-notation boundary changed")?
+    testing.assert(debug_text_equals(-1e-6, "-0.000001"), "negative fixed-notation boundary changed")?
+    testing.assert(debug_text_equals(1e-7, "1e-7"), "small magnitudes should use scientific notation")?
+    testing.assert(debug_text_equals(9999999999999998.0, "9999999999999998.0"), "largest float below the upper boundary changed")?
+    testing.assert(debug_text_equals(1e16, "1e16"), "upper scientific-notation boundary changed")?
+    testing.assert(debug_text_equals(-1e16, "-1e16"), "negative scientific-notation boundary changed")?
+    .Ok(())
+}
+
+test fn float_debug_distinguishes_adjacent_values() {
+    testing.assert(debug_text_equals(0.9999999999999999, "0.9999999999999999"), "value below one rounded to one")?
+    testing.assert(debug_text_equals(1.0000000000000002, "1.0000000000000002"), "value above one rounded to one")?
+    testing.assert(debug_text_equals(0.10000000000000002, "0.10000000000000002"), "value above one tenth lost precision")?
+    testing.assert(debug_text_equals(2.225073858507201e-308, "2.225073858507201e-308"), "largest subnormal rounded to a normal value")?
+    .Ok(())
+}
+
+@(copyable, derive(Debug))
+struct FloatDebugReading { value: Float64 }
+
+@(copyable, derive(Debug))
+struct FloatDebugEnvelope { reading: FloatDebugReading }
+
+test fn float_debug_composes_with_nested_derivation() {
+    let reading = FloatDebugReading { value = 2.5 }
+    let envelope = FloatDebugEnvelope { reading }
+    testing.assert(debug_text_equals(envelope, r"FloatDebugEnvelope { reading: FloatDebugReading { value: 2.5 } }"), "nested Debug lost its floating-point field")?
+    .Ok(())
+}
+
+test fn float_debug_supports_complete_value_assertions() {
+    testing.assert_eq(2.5, 2.5, "equal floats differ")?
+    testing.assert_eq(0.0, -0.0, "signed zeros should compare equal")?
+    let present: Option[Float64] = .Some(2.5)
+    let different: Option[Float64] = .Some(3.5)
+    testing.assert_eq(present, present, "equal floating-point payloads differ")?
+    match testing.assert_eq(present, different, "floating-point payload differs") {
+        Ok(_) => testing.assert(false, "different floating-point payloads compared equal")?,
+        Err(failure) => testing.assert(display_text_equals(failure, "floating-point payload differs"), "failed equality lost its message")?,
+    }
+    let nan = 0.0 / 0.0
+    match testing.assert_eq(nan, nan, "NaN is unequal to itself") {
+        Ok(_) => testing.assert(false, "NaN compared equal to itself")?,
+        Err(failure) => testing.assert(display_text_equals(failure, "NaN is unequal to itself"), "NaN comparison lost its message")?,
+    }
+    .Ok(())
+}
+
+test fn float_debug_propagates_the_first_writer_failure() {
+    testing.assert(debug_preserves_writer_failure(2.5), "finite Debug lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(-0.0), "zero Debug lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(1.0 / 0.0), "infinity Debug lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(0.0 / 0.0), "NaN Debug lost a writer failure")?
+    .Ok(())
+}
+
+// Display writes the same digits as Debug: the shortest decimal that reads
+// back as the same Float64. Zero and magnitudes from 1e-6 inclusive to 1e16
+// exclusive use fixed notation with at least one fractional digit; other
+// finite values use an exponent, as in 1e16 or 5e-324. Signed zero keeps its
+// sign, infinities print as inf and -inf, and every NaN prints as NaN. `0.1`
+// prints as `0.1` and `0.1 + 0.2` as `0.30000000000000004`; a fixed integral
+// value keeps its `.0`. Formatting propagates the writer's first error.
+impl Display for Float64 {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.debug(&w)
+    }
+}
+
+test fn float_display_renders_the_shortest_round_trip_decimal() {
+    testing.assert(display_text_equals(0.1, "0.1"), "one tenth is not concise")?
+    testing.assert(display_text_equals(0.2, "0.2"), "one fifth is not concise")?
+    testing.assert(display_text_equals(0.3, "0.3"), "three tenths is not concise")?
+    testing.assert(display_text_equals(0.1 + 0.2, "0.30000000000000004"), "the sum of 0.1 and 0.2 rounded to 0.3")?
+    testing.assert(display_text_equals(1.0 / 3.0, "0.3333333333333333"), "one third lost or gained digits")?
+    testing.assert(display_text_equals(2.0 / 3.0, "0.6666666666666666"), "two thirds lost or gained digits")?
+    testing.assert(display_text_equals(0.9999999999999999, "0.9999999999999999"), "value below one rounded to one")?
+    testing.assert(display_text_equals(1.0000000000000002, "1.0000000000000002"), "value above one rounded to one")?
+    testing.assert(display_text_equals(-2.5, "-2.5"), "a negative fraction changed")?
+    testing.assert(display_text_equals(-1.25e-3, "-0.00125"), "a small negative value changed")?
+    .Ok(())
+}
+
+test fn float_display_keeps_a_decimal_point_on_integral_values() {
+    testing.assert(display_text_equals(20.0, "20.0"), "twenty lost its decimal point")?
+    testing.assert(display_text_equals(1629.0, "1629.0"), "an integral reading lost its decimal point")?
+    testing.assert(display_text_equals(-7.0, "-7.0"), "a negative integral value lost its decimal point")?
+    testing.assert(display_text_equals(9007199254740992.0, "9007199254740992.0"), "two to the 53rd changed")?
+    .Ok(())
+}
+
+test fn float_display_preserves_signed_zero() {
+    testing.assert(display_text_equals(0.0, "0.0"), "positive zero changed")?
+    testing.assert(display_text_equals(-0.0, "-0.0"), "negative zero lost its sign")?
+    .Ok(())
+}
+
+test fn float_display_names_infinities_and_nan() {
+    let infinity = 1.0 / 0.0
+    let nan = 0.0 / 0.0
+    testing.assert(display_text_equals(infinity, "inf"), "positive infinity changed")?
+    testing.assert(display_text_equals(-infinity, "-inf"), "negative infinity lost its sign")?
+    testing.assert(display_text_equals(nan, "NaN"), "NaN spelling changed")?
+    testing.assert(display_text_equals(-nan, "NaN"), "NaN spelling depends on its sign")?
+    .Ok(())
+}
+
+test fn float_display_uses_an_exponent_outside_the_fixed_range() {
+    testing.assert(display_text_equals(1e-6, "0.000001"), "the smallest fixed magnitude changed")?
+    testing.assert(display_text_equals(-1e-6, "-0.000001"), "the smallest negative fixed magnitude changed")?
+    testing.assert(display_text_equals(1e-7, "1e-7"), "a magnitude below 1e-6 kept fixed notation")?
+    testing.assert(display_text_equals(1e15, "1000000000000000.0"), "a fixed magnitude below 1e16 changed")?
+    testing.assert(display_text_equals(9999999999999998.0, "9999999999999998.0"), "the largest value below 1e16 changed")?
+    testing.assert(display_text_equals(1e16, "1e16"), "a magnitude of 1e16 kept fixed notation")?
+    testing.assert(display_text_equals(-1e16, "-1e16"), "a negative magnitude of 1e16 kept fixed notation")?
+    testing.assert(display_text_equals(1e21, "1e21"), "1e21 changed")?
+    testing.assert(display_text_equals(1.5e300, "1.5e300"), "a large exponent lost its digits")?
+    .Ok(())
+}
+
+test fn float_display_preserves_extremes_and_subnormals() {
+    testing.assert(display_text_equals(5e-324, "5e-324"), "the smallest subnormal changed")?
+    testing.assert(display_text_equals(-5e-324, "-5e-324"), "the smallest negative subnormal changed")?
+    testing.assert(display_text_equals(2.225073858507201e-308, "2.225073858507201e-308"), "the largest subnormal changed")?
+    testing.assert(display_text_equals(2.2250738585072014e-308, "2.2250738585072014e-308"), "the smallest normal value changed")?
+    testing.assert(display_text_equals(1.7976931348623157e308, "1.7976931348623157e308"), "the largest finite value changed")?
+    testing.assert(display_text_equals(-1.7976931348623157e308, "-1.7976931348623157e308"), "the most negative finite value changed")?
+    .Ok(())
+}
+
+test fn float_display_composes_with_interpolation_and_wrappers() {
+    let celsius = 21.5
+    let present: Option[Float64] = .Some(0.1)
+    let measured: Result[Float64, Str] = .Ok(-0.0)
+    // The 64-byte recorder holds the whole interpolated line.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = "{celsius}°C, {present}, {measured}".fmt(&writer).is_ok()
+    let rendered = writer.holds("21.5°C, 0.1, -0.0")
+    writer.release()
+    testing.assert(wrote && rendered, "interpolated floats changed")?
+    .Ok(())
+}
+
+test fn float_display_propagates_the_first_writer_failure() {
+    testing.assert(display_preserves_writer_failure(2.5), "finite Display lost a writer failure")?
+    testing.assert(display_preserves_writer_failure(-0.0), "zero Display lost a writer failure")?
+    testing.assert(display_preserves_writer_failure(1.0 / 0.0), "infinity Display lost a writer failure")?
+    testing.assert(display_preserves_writer_failure(0.0 / 0.0), "NaN Display lost a writer failure")?
+    .Ok(())
+}
+
+// The runtime returns the shortest decimal that reads back as a finite
+// nonzero magnitude, as a significand and a power of ten: 0.125 is 125 with
+// exponent -3. These are the digits Display prints.
+extern fn linea_float64_shortest(bits: UInt64, inout exponent: Int64) -> UInt64
+
+// Write a non-negative Float64, or NaN, without a sign. With no precision the
+// digits are Display's. With one, Display's digits are rounded half away from
+// zero to `places` digits after the point; infinity and NaN keep their names.
+fn write_float_magnitude[W: Writer](magnitude: Float64, precision: Option[UInt64], inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let places = match read precision {
+        Some(places) => places,
+        None => return magnitude.fmt(&w),
+    }
+    if magnitude != magnitude || magnitude == 1.0 / 0.0 {
+        return magnitude.fmt(&w)
+    }
+    if magnitude == 0.0 {
+        return write_fixed(0, 0, places, &w)
+    }
+    var exponent: Int64 = 0
+    let significand = linea_float64_shortest(float64_bits(magnitude), &exponent)
+    write_fixed(significand, exponent, places, &w)
+}
+
+// Write significand * 10^exponent with exactly `places` digits after the
+// point, rounding half away from zero when the significand holds more.
+fn write_fixed[W: Writer](significand: UInt64, exponent: Int64, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    if exponent >= 0 {
+        format_unsigned(significand, &w)?
+        if significand != 0 {
+            write_repeated("0", UInt64(exponent), &w)?
+        }
+        return write_point_and_zeros(places, &w)
+    }
+    // `digits` * 10^-`scale` is the value once it holds no more than `places`
+    // fractional digits.
+    var digits = significand
+    var scale = UInt64(0 - exponent)
+    if scale > places {
+        let dropped = scale - places
+        if dropped > decimal_digits(significand) {
+            // Every digit lies below half of the last place kept.
+            digits = 0
+        } else {
+            let unit = power_of_ten(dropped)
+            let rest = significand % unit
+            digits = significand / unit
+            if rest * 2 >= unit {
+                digits += 1
+            }
+        }
+        scale = places
+    }
+    let length = decimal_digits(digits)
+    if length > scale {
+        let unit = power_of_ten(scale)
+        format_unsigned(digits / unit, &w)?
+        if places > 0 {
+            &w.write_str(".")?
+            if scale > 0 {
+                let fraction = digits % unit
+                write_repeated("0", scale - decimal_digits(fraction), &w)?
+                format_unsigned(fraction, &w)?
+            }
+            write_repeated("0", places - scale, &w)?
+        }
+        return .Ok(())
+    }
+    // Every digit is fractional, so the whole part is zero and the digits
+    // follow the zeros that place them.
+    &w.write_str("0.")?
+    write_repeated("0", scale - length, &w)?
+    format_unsigned(digits, &w)?
+    write_repeated("0", places - scale, &w)
+}
+
+// Write a decimal point followed by `places` zeros. Zero places writes
+// nothing, not even the point.
+fn write_point_and_zeros[W: Writer](places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    if places == 0 {
+        return .Ok(())
+    }
+    &w.write_str(".")?
+    write_repeated("0", places, &w)
+}
+
+test fn fixed_digits_round_half_away_from_zero() {
+    testing.assert(fixed_text_equals(2675, -3, 2, "2.68"), "a half did not round up")?
+    testing.assert(fixed_text_equals(2674, -3, 2, "2.67"), "less than half rounded up")?
+    testing.assert(fixed_text_equals(9999, -3, 2, "10.00"), "rounding did not carry")?
+    testing.assert(fixed_text_equals(5, -3, 2, "0.01"), "a half in the first dropped place rounded down")?
+    testing.assert(fixed_text_equals(4, -3, 2, "0.00"), "a small value did not round to zero")?
+    testing.assert(fixed_text_equals(5, -324, 2, "0.00"), "a subnormal kept digits")?
+    testing.assert(fixed_text_equals(125, -9, 12, "0.000000125000"), "leading fractional zeros changed")?
+    testing.assert(fixed_text_equals(1, 22, 1, "10000000000000000000000.0"), "a positive exponent lost zeros")?
+    testing.assert(fixed_text_equals(0, 0, 3, "0.000"), "zero lost its places")?
+    testing.assert(fixed_text_equals(0, 0, 0, "0"), "zero without places kept a point")?
+    testing.assert(fixed_text_equals(5, -1, 0, "1"), "a half without places did not round up")?
+    .Ok(())
+}
+
+// A 64-byte recorder holds every fixed-point fixture.
+fn fixed_text_equals(significand: UInt64, exponent: Int64, places: UInt64, expected: Str) -> Bool {
+    var writer = testing.Recorder.of(mem.system(), 64) else |_| {
+        return false
+    }
+    let wrote = write_fixed(significand, exponent, places, &writer).is_ok()
+    let equal = writer.holds(expected)
+    writer.release()
+    wrote && equal
+}

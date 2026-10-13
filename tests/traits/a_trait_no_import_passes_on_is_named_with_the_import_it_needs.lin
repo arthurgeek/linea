@@ -1,0 +1,13 @@
+// Nothing this file imports passes `ByteWriter` on. It is declared in
+// `std.io.core`, which `std.io` encloses and passes on, so the help names
+// `std.io` and the import that reaches it.
+import std.fs
+
+fn waiting(file: fs.File) -> UInt64 {
+    file.pending_bytes()
+}
+
+fn main() -> UInt8 {
+    let _count = waiting
+    0
+}

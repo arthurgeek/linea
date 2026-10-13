@@ -1,0 +1,7 @@
+error[O-Move]: `xs` has already been moved
+  --> tests/iter/a_for_consumes_what_it_walks.lin:11:13
+   |
+8  |     for x in xs {
+   |              -- it was taken here
+11 |     total + xs.lo
+   |             ^^^^^ it was already taken, and a value is taken once

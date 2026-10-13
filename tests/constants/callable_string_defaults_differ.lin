@@ -1,0 +1,11 @@
+fn size(value: Str = "one") -> UInt64 {
+    value.length()
+}
+
+fn invoke[F: fn(read value: Str = "two") -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    UInt8(invoke(size))
+}

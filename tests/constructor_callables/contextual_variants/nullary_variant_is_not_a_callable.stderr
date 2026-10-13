@@ -1,0 +1,5 @@
+error[T-Call]: a callable enum constructor must carry exactly one payload
+ --> tests/constructor_callables/contextual_variants/nullary_variant_is_not_a_callable.lin:4:54
+  |
+4 |     let _wrap: fn(sink code: UInt8) -> RenderError = .Allocation
+  |                                                      ^^^^^^^^^^^ use a closure for this variant

@@ -1,0 +1,28 @@
+// Nothing in `pick`'s call says which `Chooser[K]` it reaches, since `K`
+// appears only in `flag`'s result. That is the one report: with `K`
+// unknown, the `where` clause has nothing to be judged at.
+trait Chooser[K] {
+    fn flag(self: Self) -> K
+
+    fn pick(self: Self, first: UInt8, second: UInt8) -> UInt8 where K: Equatable + Copyable {
+        if self.flag() == self.flag() {
+            first
+        } else {
+            second
+        }
+    }
+}
+
+struct Switch {
+    on: Bool,
+}
+
+impl Chooser[Bool] for Switch {
+    fn flag(self: Self) -> Bool {
+        self.on
+    }
+}
+
+fn main() -> UInt8 {
+    Switch { on = true }.pick(1, 9)
+}

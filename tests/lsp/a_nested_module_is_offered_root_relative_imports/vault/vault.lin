@@ -1,0 +1,5 @@
+// `ledger` is a sibling of this module and beneath their shared source root,
+// so completion offers the root-relative import that names it.
+pub fn open() -> UInt8 {
+    3
+}

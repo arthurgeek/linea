@@ -1,0 +1,6 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/types/literal_out_of_range.lin:2:20
+  |
+2 |     let x: UInt8 = 300
+  |            ----- expected because of this annotation
+  |                    ^^^ literal is out of range for its type

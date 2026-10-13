@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let identity = |read value: UInt8| value
+    identity(0)
+}

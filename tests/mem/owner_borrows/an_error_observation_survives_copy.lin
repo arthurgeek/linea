@@ -1,0 +1,16 @@
+fn fail(value: UInt64) -> Result[UInt8, borrow UInt64] where borrows(.Err: value) {
+    .Err(borrow value)
+}
+
+fn work(owner: UInt64) -> Result[UInt8, borrow UInt64] where borrows(.Err: owner) {
+    let initial = fail(owner)
+    let forwarded = copy(initial)
+    let _first = match initial { Ok(value) => value, Err(view) => UInt8(*view) }
+    let answer = forwarded?
+    return .Ok(answer)
+}
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 7
+    match work(owner) { Ok(value) => value, Err(view) => UInt8(*view) }
+}

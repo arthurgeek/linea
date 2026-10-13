@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Measure`, and `Plain` does not implement it
+  --> tests/traits/a_settled_reference_needs_a_bound_the_argument_discharges.lin:35:5
+   |
+35 |     measured(p)
+   |     ^^^^^^^^ implement it for that type, or drop the bound

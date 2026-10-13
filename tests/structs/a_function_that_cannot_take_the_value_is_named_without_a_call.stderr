@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `start` is a function, not an operation of `UInt8`
+  --> tests/structs/a_function_that_cannot_take_the_value_is_named_without_a_call.lin:10:5
+   |
+10 |     n.start()
+   |     ^^^^^^^ a dot calls an operation of the value, and a free function is not one

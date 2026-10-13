@@ -1,0 +1,22 @@
+struct Holder[UInt8] {
+    v: UInt8,
+}
+
+struct Holder[Bool] {
+    v: Bool,
+}
+
+fn ;main() -> UInt8 {
+    let a: Holder[UInt8] = .{ v = 9 }
+    let b: Holder[Bool] = .{ v = false }
+    let n: UInt8 = 1
+    Holder[UInt8];;Give[UInt8].give(a, n) + Holder[Bool];;Give[Bool].give(b, true)
+}
+
+fn Holder[UInt8];;Give[UInt8].give(_self: Holder[UInt8], _u: UInt8) -> UInt8 {
+    3
+}
+
+fn Holder[Bool];;Give[Bool].give(_self: Holder[Bool], _u: Bool) -> UInt8 {
+    3
+}

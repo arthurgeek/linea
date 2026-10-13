@@ -1,0 +1,25 @@
+// A generic body lays out each value by the type it is given: the same
+// `{value:5}` puts a number on the right of its width and text on the left. A
+// parameter bounded by `Integer` is known to be a number, so its spec may ask
+// for zero padding.
+import std.io
+
+use io.IoError
+use io.println
+
+fn cell[T: Copyable + Display](value: T) -> Result[(), IoError] {
+    println("[{value:5}] [{value:^7}]")
+}
+
+fn code[T: Copyable + Integer](value: T) -> Result[(), IoError] {
+    println("#{value:04}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    cell(42)?
+    cell("ab")?
+    cell(2.5)?
+    code(UInt8(7))?
+    code(-12)?
+    return .Ok(0)
+}

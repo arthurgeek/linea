@@ -1,0 +1,47 @@
+// A value no place names, yielded into a position that only observes it.
+// Nothing will ever consume it: no place names it, so no position after this
+// one can name it, and there is no scope end where it would be asked for -- a
+// binding's [O-Leak] is asked where the binding dies, and this has none.
+//
+// Three ways to reach it. A field read out of a temporary, a temporary lent
+// to a `read` parameter, and a part moved out of one. The first two look like
+// ordinary code and were accepted in silence.
+@linear
+struct Inner {
+    n: UInt8,
+}
+
+@linear
+struct Outer {
+    a: Inner,
+    b: UInt8,
+}
+
+fn mko() -> Outer {
+    .{ a = .{ n = 1 }, b = 2 }
+}
+
+fn observes(_o: Outer) -> UInt8 {
+    1
+}
+
+fn takes(sink i: Inner) -> UInt8 {
+    let Inner { n } = i
+    n
+}
+
+fn a_field_of_a_temporary() -> UInt8 {
+    mko().b
+}
+
+fn lent_to_a_reader() -> UInt8 {
+    observes(mko())
+}
+
+fn a_part_moved_out_of_one() -> UInt8 {
+    takes(mko().a)
+}
+
+fn main() -> UInt8 {
+    a_field_of_a_temporary() + lent_to_a_reader() + a_part_moved_out_of_one()
+}

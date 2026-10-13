@@ -1,0 +1,63 @@
+error[N-Immutable]: `limit` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:31:5
+   |
+18 | let limit: Int64 = 3
+   |     ----- declared here
+31 |     limit = 4
+   |     ^^^^^ this binding cannot be assigned
+error[N-Immutable]: `config` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:32:5
+   |
+16 | let config: Config = .{ limit = 7, sizes = [1, 2] }
+   |     ------ declared here
+32 |     config.limit = 8
+   |     ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `limits` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:33:5
+   |
+20 | let limits = [Int64(4), Int64(9)]
+   |     ------ declared here
+33 |     limits[1] = 10
+   |     ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `config` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:34:5
+   |
+16 | let config: Config = .{ limit = 7, sizes = [1, 2] }
+   |     ------ declared here
+34 |     config.sizes[0] += 1
+   |     ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `limit` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:35:11
+   |
+18 | let limit: Int64 = 3
+   |     ----- declared here
+35 |     bump(&limit)
+   |           ^^^^^ this binding cannot be assigned
+error[N-Immutable]: `config` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:36:11
+   |
+16 | let config: Config = .{ limit = 7, sizes = [1, 2] }
+   |     ------ declared here
+36 |     bump(&config.limit)
+   |           ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `limits` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:37:11
+   |
+20 | let limits = [Int64(4), Int64(9)]
+   |     ------ declared here
+37 |     bump(&limits[0])
+   |           ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `config` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:38:12
+   |
+16 | let config: Config = .{ limit = 7, sizes = [1, 2] }
+   |     ------ declared here
+38 |     reset(&config)
+   |            ^^^^^^ this binding cannot be assigned
+error[N-Immutable]: `config` is a constant
+  --> tests/constants/borrowed/a_constant_cannot_be_written.lin:39:6
+   |
+16 | let config: Config = .{ limit = 7, sizes = [1, 2] }
+   |     ------ declared here
+39 |     &config.grow()
+   |      ^^^^^^ this binding cannot be assigned

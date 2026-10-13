@@ -1,0 +1,13 @@
+struct Missing {
+    key: UInt8,
+}
+
+@derive(From[Missing])
+struct Failure {
+    cause: Missing,
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure { cause = Missing { key = 1 } }
+    0
+}

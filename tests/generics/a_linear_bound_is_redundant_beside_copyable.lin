@@ -1,0 +1,10 @@
+// Linear grants no capability requirement. Writing it beside an existing
+// Copyable requirement is redundant, including through inherited trait bounds.
+fn _twice[T: Copyable + Linear](x: T) -> UInt8 {
+    let _a = copy(x)
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

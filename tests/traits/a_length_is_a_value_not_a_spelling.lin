@@ -1,0 +1,27 @@
+// A length is what it is worth, not how it was written: `[UInt8; 4]` and
+// `[UInt8; 2 + 2]` are one type, so the second of these implementations is the
+// first written twice.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; 4]] for Holder {
+    fn give(self: Self, _u: [UInt8; 4]) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; 2 + 2]] for Holder {
+    fn give(self: Self, _u: [UInt8; 2 + 2]) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    h.n
+}

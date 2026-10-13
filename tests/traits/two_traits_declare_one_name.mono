@@ -1,0 +1,16 @@
+struct Account {
+    balance: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Account;;Measure.of(a) + Account;;Weigh.of(a)
+}
+
+fn Account;;Measure.of(x: Account) -> UInt8 {
+    x.balance
+}
+
+fn Account;;Weigh.of(x: Account) -> UInt8 {
+    x.balance + 1
+}

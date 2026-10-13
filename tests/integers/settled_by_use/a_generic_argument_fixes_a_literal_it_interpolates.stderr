@@ -1,0 +1,9 @@
+error[T-Mismatch]: expected `UInt8`, found `Int64`
+  --> tests/integers/settled_by_use/a_generic_argument_fixes_a_literal_it_interpolates.lin:12:12
+   |
+5  | fn narrow(value: UInt8) -> UInt8 {
+   |           ----- expected because of this parameter
+11 |     let _kept = keep("{k}")
+   |                 ----------- fell back to `Int64` here, where an operation needed a type
+12 |     narrow(k)
+   |            ^ expected `UInt8`, found `Int64`

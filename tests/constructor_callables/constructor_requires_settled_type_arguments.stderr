@@ -1,0 +1,5 @@
+error[T-Infer]: the callback's inputs do not select its result type
+ --> tests/constructor_callables/constructor_requires_settled_type_arguments.lin:5:33
+  |
+5 |     let _mapped = input.map_err(Failure.Refused)
+  |                                 ^^^^^^^^^^^^^^^ supply a callable with a determined result

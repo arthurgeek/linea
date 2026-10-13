@@ -1,0 +1,6 @@
+// `UInt8.max` is declared in the standard library and the program never wrote
+// it, so what a cursor on it reaches is a file the compiler carries rather
+// than one of the program's own.
+fn main() -> UInt8 {
+    UInt8.max
+}

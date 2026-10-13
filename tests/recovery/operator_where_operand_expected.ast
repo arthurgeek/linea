@@ -1,0 +1,7 @@
+program decls=1
+  decl function "main" tokens 0..12
+    returns UInt8
+    expr %3 block tokens 6..12
+      expr %2 add tokens 7..11
+        expr %0 name_ref tokens 7..8 "a"
+        expr %1 err tokens 9..11

@@ -1,0 +1,5 @@
+error[T-Derive]: this derive entry is not supported
+ --> tests/traits/attached_derives/trait_arguments_are_not_silently_ignored.lin:1:9
+  |
+1 | @derive(Equatable[UInt8])
+  |         ^^^^^^^^^ supply exactly the type arguments the trait declares

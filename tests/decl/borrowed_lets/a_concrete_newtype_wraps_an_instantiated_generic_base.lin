@@ -1,0 +1,14 @@
+struct Cell[T] { value: T }
+
+type Wrapped = Cell[UInt8]
+
+fn main() -> UInt8 {
+    let wrapped = Wrapped(Cell[UInt8] { value = 21 })
+    let read Wrapped(cell) = wrapped
+    let read Cell { value } = cell
+    if value == 21 && cell.value == 21 {
+        0
+    } else {
+        1
+    }
+}

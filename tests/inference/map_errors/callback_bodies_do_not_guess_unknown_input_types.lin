@@ -1,0 +1,7 @@
+fn invoke[S, U, F: fn(sink error: S) -> U](_transform: F) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    invoke(|sink error| UInt16(error))
+}

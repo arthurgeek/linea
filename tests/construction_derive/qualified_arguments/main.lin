@@ -1,0 +1,9 @@
+import model
+
+fn main() -> UInt8 {
+    if model.run() == 7 {
+        0
+    } else {
+        1
+    }
+}

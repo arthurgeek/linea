@@ -1,0 +1,10 @@
+error[N-Unused]: `RenderError` is never used
+ --> tests/constructor_callables/contextual_variants/constructor_needs_an_expected_enum.lin:1:6
+  |
+1 | enum RenderError { Allocation(UInt8) }
+  |      ^^^^^^^^^^^ name it in an annotation, or remove it
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/constructor_callables/contextual_variants/constructor_needs_an_expected_enum.lin:5:34
+  |
+5 |     let _mapped = source.map_err(.Allocation)
+  |                                  ^^^^^^^^^^^ settle every input type before this callable value

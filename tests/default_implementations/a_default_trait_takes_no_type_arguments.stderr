@@ -1,0 +1,10 @@
+error[T-Impl]: a default implementation requires one bare parameter head and a zero-argument trait
+ --> tests/default_implementations/a_default_trait_takes_no_type_arguments.lin:5:36
+  |
+5 | default impl[T] Selected[Bool] for T {
+  |                                    ^ use one parameter as the whole head of a zero-argument trait
+error[T-Bound]: `UInt8` does not implement `Selected[Bool]`
+  --> tests/default_implementations/a_default_trait_takes_no_type_arguments.lin:12:5
+   |
+12 |     Selected.selected(UInt8(1), false)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are

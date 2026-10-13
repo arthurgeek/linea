@@ -1,0 +1,21 @@
+// Brackets after a trait's operation named through a type hold the
+// operation's own type arguments, and the call runs the implementation for
+// the type before the dot: `Crate.packed[UInt8](7)` packs one crate.
+trait Pack {
+    fn packed[T](_item: T) -> Self
+}
+
+struct Crate {
+    items: UInt8,
+}
+
+impl Pack for Crate {
+    fn packed[T](_item: T) -> Crate {
+        .{ items = 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    let crate = Crate.packed[UInt8](7)
+    crate.items
+}

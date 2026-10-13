@@ -1,0 +1,5 @@
+error[T-Mismatch]: the call names `T` as `UInt8` in its brackets, and this is a `Bool`
+ --> tests/type_arguments/an_argument_disagrees_with_a_named_type_argument.lin:8:29
+  |
+8 |     let _flag = same[UInt8](true)
+  |                             ^^^^ one type parameter, two types

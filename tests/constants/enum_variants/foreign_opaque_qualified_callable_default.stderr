@@ -1,0 +1,5 @@
+error[M-Opaque]: `Mode` is opaque outside `vault`
+ --> tests/constants/enum_variants/foreign_opaque_qualified_callable_default/main.lin:7:40
+  |
+7 | impl Select[fn(read mode: vault.Mode = vault.Mode.Preserve) -> UInt8] for Holder {}
+  |                                        ^^^^^^^^^^^^^^^^^^^ only its own module can build one

@@ -1,0 +1,6 @@
+alias Chain = Option[Chain]
+
+fn main() -> UInt8 {
+    let _unused: Chain = .None
+    0
+}

@@ -1,0 +1,11 @@
+import labels
+
+default impl[T: Copyable] labels.Label for T {
+    fn label(_self: T) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    labels.Label.label(3)
+}

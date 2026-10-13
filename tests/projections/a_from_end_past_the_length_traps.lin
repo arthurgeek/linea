@@ -1,0 +1,9 @@
+// The length is part of the type and the count back from it is a `var`, so
+// the comparison happens where the program runs. A count past the length traps
+// at the bracket: it is held against the length before anything is subtracted,
+// so no unsigned subtraction wraps round into a place inside the array.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    var k: UInt64 = 9
+    a[^k]
+}

@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `First`, found `Second`
+ --> tests/constants/enum_variants/same_ordinal_does_not_erase_enum_type.lin:5:25
+  |
+5 | fn select(mode: First = Second.Preserve) -> UInt8 {
+  |           ---- expected because of this parameter
+  |                         ^^^^^^^^^^^^^^^ expected `First`, found `Second`

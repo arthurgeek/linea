@@ -1,0 +1,5 @@
+error[T-Lend]: a forwarded traversal has no applicable integer indexing key
+ --> tests/delegation/traversal_delegation_requires_an_integer_projection.lin:8:24
+  |
+8 |     trav positions via values
+  |                        ^^^^^^ write an ordinary traversal with an explicitly typed range

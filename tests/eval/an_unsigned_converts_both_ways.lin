@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let top: UInt64 = 18446744073709551615
+    let wide = Float64(top)
+    let nine = 9.5
+    if wide == 18446744073709551616.0 && UInt64(nine) == 9 {
+        0
+    } else {
+        1
+    }
+}

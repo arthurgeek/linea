@@ -1,0 +1,27 @@
+// `?` threads a refusal outward, and the status says both of its edges ran:
+// the small request answers its length through the continuing edge, and the
+// impossible one leaves through the failing edge as the caller's own Err.
+import std.mem
+
+use mem.Oom
+use mem.system
+
+fn grab(n: UInt64) -> Result[UInt64, Oom] {
+    let a = system()
+    let b = a.acquire(n)?
+    let len = b.length()
+    b.release()
+    Result.Ok(len)
+}
+
+fn main() -> UInt8 {
+    let held: UInt8 = match grab(5) {
+        Ok(n) => UInt8(n),
+        Err(_) => 0,
+    }
+    let refused: UInt8 = match grab(9223372036854775808) {
+        Ok(_) => 0,
+        Err(_) => 9,
+    }
+    held + refused
+}

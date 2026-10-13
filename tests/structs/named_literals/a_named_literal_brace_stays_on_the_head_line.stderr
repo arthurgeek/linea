@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `value`
+ --> tests/structs/named_literals/a_named_literal_brace_stays_on_the_head_line.lin:6:9
+  |
+6 |         value = 1
+  |         ^^^^^ no binding with this name is in scope
+error[N-NotAValue]: `Cell` is a type, and a type is not a value
+ --> tests/structs/named_literals/a_named_literal_brace_stays_on_the_head_line.lin:4:17
+  |
+4 |     let _cell = Cell
+  |                 ^^^^ name a value of that type

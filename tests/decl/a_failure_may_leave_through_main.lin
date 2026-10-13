@@ -1,0 +1,19 @@
+// An entry point may answer `Result[UInt8, E]`, and a failure it did not deal
+// with leaves the program through it.
+//
+// Where the answer is `Ok`, its payload is the exit status and nothing is
+// rendered -- so this program is indistinguishable from one that answered a
+// bare `UInt8`, which is the point: the spelling costs nothing until something
+// fails.
+import std.io
+
+use io.eprintln
+use io.IoError
+
+fn main() -> Result[UInt8, IoError] {
+    // Standard error rather than output, because the corpus keeps a status and
+    // discards what a program printed -- and a case that only printed would
+    // assert nothing.
+    eprintln("working")
+    .Ok(9)
+}

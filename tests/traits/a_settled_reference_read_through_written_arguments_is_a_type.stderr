@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Bool`, found `UInt8`
+  --> tests/traits/a_settled_reference_read_through_written_arguments_is_a_type.lin:26:5
+   |
+25 | fn wrap(c: Coins, a: UInt8) -> Bool {
+   |                                ---- expected because of this return type
+26 |     Holds.of(c, a)
+   |     ^^^^^^^^^^^^^^ expected `Bool`, found `UInt8`

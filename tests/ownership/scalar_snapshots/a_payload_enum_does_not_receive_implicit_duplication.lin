@@ -1,0 +1,10 @@
+@copyable
+enum Item { Number(UInt8), Empty }
+
+fn main() -> UInt8 {
+    let original: Item = .Number(7)
+    let moved = original
+    let first = match read original { Number(value) => value + 0, Empty => 0 }
+    let second = match moved { Number(value) => value, Empty => 0 }
+    first + second
+}

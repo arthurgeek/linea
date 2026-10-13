@@ -1,0 +1,15 @@
+// A literal pattern is a range whose ends are the same value: `0` covers
+// nothing `1..=9` also covers, and both leave `_` to close what neither
+// names. Three calls, three arms, one status apiece, summed so each has to
+// have run for the total to come out right.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0 => 1,
+        1..=9 => 2,
+        _ => 3,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(0) + classify(5) + classify(200)
+}

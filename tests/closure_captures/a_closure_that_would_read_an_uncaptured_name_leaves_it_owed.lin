@@ -1,0 +1,18 @@
+// A closure that only reads `ticket` would capture it with `[ticket]`, which
+// takes nothing, so `ticket` is still owned where `main` ends.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn peek(ticket: Ticket) -> UInt8 {
+    match read ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    let look = || peek(ticket)
+    look()
+}

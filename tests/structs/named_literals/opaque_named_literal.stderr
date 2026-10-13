@@ -1,0 +1,5 @@
+error[M-Opaque]: `Key` is opaque outside `vault`
+ --> tests/structs/named_literals/opaque_named_literal/main.lin:4:16
+  |
+4 |     let _key = vault.Key { value = 7 }
+  |                ^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

@@ -1,0 +1,16 @@
+@copyable
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn measure() -> Size {
+    .{ width = 1, height = 2 }
+}
+
+// A constant cannot run a function to find the fields it does not write.
+let wide: Size = .{ width = 8, ..measure() }
+
+fn main() -> UInt8 {
+    wide.width
+}

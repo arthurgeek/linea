@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":true}}}}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"struct List { n: UInt8 }\n\nimpl List {\n    fn push(inout self: Self, value: UInt8) -> () {\n        self.n += value\n    }\n\n    fn clear(inout self: Self) -> () {\n        self.n = 0\n    }\n\n    fn truncate(inout self: Self, count: UInt8) -> () {\n        self.n = count\n    }\n\n    fn length(self: Self) -> UInt8 {\n        self.n\n    }\n}\n\nfn main() -> UInt8 {\n    var list: List = .{ n = 0 }\n    list.length()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":22,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

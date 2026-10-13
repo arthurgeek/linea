@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A module's files see each other's declarations, so a rename of a name one\n// file declares edits that file and every file that uses it.\nfn main() -> UInt8 {\n    size() + twice()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sizes.lin","languageId":"linea","version":1,"text":"fn size() -> UInt8 {\n    1\n}\n\nfn twice() -> UInt8 {\n    size() + size()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":5},"newName":"width"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

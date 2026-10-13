@@ -1,0 +1,24 @@
+// An implementation supplies what its trait declares, and a trait's type
+// arguments are part of that. This supplies none, so there is nothing for the
+// signature's `T` to be read as.
+//
+// Refused for the arguments and not for the member, which is the mistake
+// rather than a consequence of it: `T` is not a type any implementation can
+// take, so a message asking for one says nothing that can be acted on.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+impl Holds for Coins {
+    fn held(x: Self, _t: UInt8) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

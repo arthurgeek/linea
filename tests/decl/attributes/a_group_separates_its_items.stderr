@@ -1,0 +1,5 @@
+error[S-Params]: expected `,` between attributes
+ --> tests/decl/attributes/a_group_separates_its_items.lin:1:12
+  |
+1 | @(copyable derive(Equatable))
+  |            ^^^^^^ separate grouped attributes with commas

@@ -1,0 +1,27 @@
+import std.mem
+
+use mem.Allocator
+
+trait Pool: Allocator {}
+
+fn _from_where[A](_names: Vec[Str], _allocator: A) -> UInt8 where A: Allocator {
+    0
+}
+
+fn _from_supertrait[A: Pool](_names: Vec[Str], _allocator: A) -> UInt8 {
+    0
+}
+
+struct Holder[A] where A: Allocator {
+    allocator: A,
+}
+
+impl[A] Holder[A] where A: Allocator {
+    fn _count(_self: Self, _names: Vec[Str]) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

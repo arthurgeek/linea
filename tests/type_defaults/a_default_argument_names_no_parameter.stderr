@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: a default is a type that names no type parameter
+ --> tests/type_defaults/a_default_argument_names_no_parameter.lin:1:21
+  |
+1 | struct _Pair[A, B = A] {
+  |                     ^ this names a parameter of the same list

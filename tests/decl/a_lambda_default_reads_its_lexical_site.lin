@@ -1,0 +1,6 @@
+let value: UInt8 = 5
+
+fn main() -> UInt8 {
+    let read_value = |input: UInt8 = value| input
+    read_value()
+}

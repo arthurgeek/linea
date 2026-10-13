@@ -1,0 +1,5 @@
+error[T-Operands]: `Bool` is not a number
+ --> tests/types/a_bool_is_not_a_number.lin:8:21
+  |
+8 |     let c: Bool = a + b
+  |                     ^ arithmetic is defined over integers

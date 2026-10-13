@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    // linea fmt: off
+    let   a   =   1;
+    // linea fmt: on
+    let b = 2
+    a + b
+}

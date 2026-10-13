@@ -1,0 +1,21 @@
+struct Inner {
+    a: UInt8,
+    b: UInt8,
+}
+
+struct Outer {
+    inner: Inner,
+    c: UInt8,
+}
+
+fn make() -> Inner {
+    .{ a = 1, b = 2 }
+}
+
+fn main() -> UInt8 {
+    let o: Outer = .{ inner = .{ a = 1, b = 2 }, c = 3 }
+    // A field's value and the base may each be an update of their own.
+    let n = Outer { inner = Inner { a = 40, ..make() }, ..Outer { c = 7, ..o } }
+    // 40 + 2 + 7
+    n.inner.a + n.inner.b + n.c
+}

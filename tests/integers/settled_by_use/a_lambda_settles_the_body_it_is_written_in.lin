@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let offset = 0
+    let shift = [offset] |value: UInt8| value + offset
+    shift(4) - 4
+}

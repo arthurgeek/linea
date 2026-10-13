@@ -1,0 +1,6 @@
+import vault
+
+fn main() -> UInt8 {
+    let _key = vault.Key { value = 7 }
+    0
+}

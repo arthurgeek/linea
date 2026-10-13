@@ -1,0 +1,10 @@
+error[T-UnknownOperation]: `Counter` has no operation `missing`
+  --> tests/decl/a_call_reaching_nothing_still_reads_its_marks.lin:12:5
+   |
+12 |     counter.missing(&other)
+   |     ^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[N-NotCallable]: this name names a constant, which is a value and is read rather than called
+  --> tests/decl/a_call_reaching_nothing_still_reads_its_marks.lin:13:5
+   |
+13 |     limit(&other)
+   |     ^^^^^ only a function can be called

@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let a: UInt8 = 9
+    let b: UInt8 = 4
+    let bigger = a > b
+    let _ = bigger
+    a
+}

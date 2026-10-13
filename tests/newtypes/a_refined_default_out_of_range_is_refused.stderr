@@ -1,0 +1,5 @@
+error[T-Refine]: 101 is not in 0..=100 for Percent
+ --> tests/newtypes/a_refined_default_out_of_range_is_refused.lin:6:38
+  |
+6 | fn scale(value: UInt8, by: Percent = Percent(101)) -> UInt8 {
+  |                                      ^^^^^^^^^^^^ this value is outside the type's range

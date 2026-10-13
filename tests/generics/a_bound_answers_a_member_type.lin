@@ -1,0 +1,34 @@
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+
+    fn get(self: Box) -> UInt8 {
+        self.n
+    }
+}
+
+// The bound declares Item, so C.Item names whatever the implementation
+// discharging the bound bound it to -- in return position, in a local
+// annotation, and as a type argument.
+fn first[C: Holder](c: C) -> C.Item {
+    let held: C.Item = Holder.get(c)
+    let wrapped: Option[C.Item] = .Some(held)
+    match wrapped {
+        Some(item) => item,
+        None => Holder.get(c),
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Box = .{ n = 9 }
+    first(b)
+}

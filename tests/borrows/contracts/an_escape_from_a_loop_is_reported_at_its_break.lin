@@ -1,0 +1,20 @@
+// A `for` loop's value is what its `break` carries, so a view of a local
+// that leaves through the loop is reported at the value that `break` passes
+// on, not at the loop's first line.
+fn first_large(limit: UInt8) -> Option[borrow UInt8] {
+    let small: UInt8 = 3
+    let large: UInt8 = 12
+    let views = [borrow small, borrow large]
+    for read view in views {
+        if *view > limit {
+            break copy(view)
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    match first_large(5) {
+        None => 0,
+        Some(view) => *view,
+    }
+}

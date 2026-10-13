@@ -1,0 +1,5 @@
+error[T-RangePlace]: a range place is copied out of or assigned into whole
+ --> tests/ownership/selection_recovery/invalid_range_place.lin:3:18
+  |
+3 |     let _wrong = values[0..1]
+  |                  ^^^^^^^^^^^^ this use is neither, and a part of a range place names nothing

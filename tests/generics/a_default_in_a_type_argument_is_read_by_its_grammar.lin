@@ -1,0 +1,30 @@
+// A function value's type carries its parameters' defaults, so instantiating
+// `id` at `greet` and at `hail` spells each default into a symbol. A string
+// default's text may hold `;`, `[` and `]`, and an aggregate's is written with
+// a `;` after every part; the two symbols still differ, because a type is
+// read back by its own grammar rather than by counting those characters.
+@copyable
+struct P {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn greet(n: Str = "];x;[", p: P = P { a = 1, b = 2 }) -> UInt8 {
+    let _n = n.length()
+    p.a + p.b
+}
+
+fn hail(n: Str = "]", p: P = P { a = 1, b = 2 }) -> UInt8 {
+    let _n = n.length()
+    p.a + p.b
+}
+
+fn id[T](sink t: T) -> T {
+    t
+}
+
+fn main() -> UInt8 {
+    let f = id(greet)
+    let g = id(hail)
+    f() + g() - 6
+}

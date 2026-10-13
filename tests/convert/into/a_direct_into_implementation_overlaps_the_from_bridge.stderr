@@ -1,0 +1,10 @@
+error[T-Impl]: these two both answer `Into[Kelvin]` for `Celsius`
+ --> tests/convert/into/a_direct_into_implementation_overlaps_the_from_bridge.lin:5:6
+  |
+5 | impl Into[Kelvin] for Celsius {
+  |      ^^^^ no instantiation may answer to two implementations of one trait
+ ::: std/convert/into.lin
+L | impl[T, U: From[T]] Into[U] for T {
+  |                     ---- the other implementation
+  |
+  = help: implement `From[Celsius]` for `Kelvin` instead: each `From` implementation supplies the matching `Into`

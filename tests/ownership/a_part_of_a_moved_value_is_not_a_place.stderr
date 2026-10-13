@@ -1,0 +1,7 @@
+error[O-Move]: `h` has already been moved
+  --> tests/ownership/a_part_of_a_moved_value_is_not_a_place/main.lin:22:5
+   |
+21 |     let g = h
+   |             - it was taken here
+22 |     h.k = j
+   |     ^^^ it was already taken, and a value is taken once

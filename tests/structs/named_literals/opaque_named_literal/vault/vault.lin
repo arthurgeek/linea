@@ -1,0 +1,2 @@
+@opaque
+struct Key { value: UInt8 }

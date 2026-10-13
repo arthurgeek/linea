@@ -1,0 +1,928 @@
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+@(copyable, derive(Equatable, Debug, Release))
+pub enum WriteFailureKind {
+    Underlying,
+    NoProgress,
+    InvalidProgress,
+}
+
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum IoOperation {
+    Read,
+    Write,
+    Flush,
+    Close,
+    Open,
+    Metadata,
+    Permissions,
+    Publish,
+    Remove,
+    Random,
+    Listen,
+    Accept,
+    Connect,
+    Configure,
+}
+
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum IoCategory {
+    Other,
+    NotFound,
+    PermissionDenied,
+    AlreadyExists,
+    WouldBlock,
+    BrokenPipe,
+    Interrupted,
+    InvalidInput,
+    NotDirectory,
+    IsDirectory,
+    Unsupported,
+    NoSpace,
+    ResourceExhausted,
+    Symlink,
+    InvalidDescriptor,
+    NoProgress,
+    InvalidProgress,
+    TimedOut,
+    ConnectionReset,
+    ConnectionRefused,
+    AddressInUse,
+}
+
+@(copyable, derive(Equatable, Equivalent, Debug, Release))
+pub struct IoError {
+    operation: std.io.core.IoOperation,
+    category: std.io.core.IoCategory,
+    code: std.option.Option[Int32],
+    progress: UInt64,
+}
+
+@(opaque, copyable)
+struct Str {
+    bytes: std.mem.Slice[UInt8],
+}
+
+@(opaque, copyable, derive(Release))
+struct Slice[UInt8] {
+    at: UInt64,
+    len: UInt64,
+}
+
+@copyable
+pub enum Option[Int32] {
+    None,
+    Some(Int32),
+}
+
+@copyable
+pub enum Option[Str] {
+    None,
+    Some(std.text.Str),
+}
+
+@copyable
+pub struct WriteFailure[IoError] {
+    kind: std.io.core.WriteFailureKind,
+    reason: std.option.Option[std.io.core.IoError],
+    written: UInt64,
+}
+
+@copyable
+pub enum Option[IoError] {
+    None,
+    Some(std.io.core.IoError),
+}
+
+@copyable
+pub enum Result[UInt8,IoError] {
+    Ok(UInt8),
+    Err(std.io.core.IoError),
+}
+
+@copyable
+pub enum Option[Slice[UInt8]] {
+    None,
+    Some(std.mem.Slice[UInt8]),
+}
+
+@copyable
+pub enum Option[UInt8] {
+    None,
+    Some(UInt8),
+}
+
+@copyable
+pub enum Result[UInt64,WriteFailure[IoError]] {
+    Ok(UInt64),
+    Err(std.io.core.WriteFailure[std.io.core.IoError]),
+}
+
+@copyable
+pub enum Result[(),IoError] {
+    Ok(()),
+    Err(std.io.core.IoError),
+}
+
+fn ;main() -> std.result.Result[UInt8,std.io.core.IoError] {
+    let p: Point = .{ x = 1, y = 2 }
+    match std.io.core;println[Point](p) {
+        Ok(_) => .Ok(0),
+        Err(e) => .Err(e),
+    }
+}
+
+pub fn std.io.core;println[Point](x: Point) -> std.result.Result[(),std.io.core.IoError] {
+    var w = std.io.core;stdout()
+    std.io.core;line[Point,std.io.core.Descriptor](x, &w)
+}
+
+fn std.io.core;report[std.io.core.IoError](e: std.io.core.IoError) -> UInt8 {
+    std.io.core;eprint[std.text.Str]("error: ")
+    std.io.core;eprintln[std.io.core.IoError](e)
+    1
+}
+
+pub fn std.io.core;stdout() -> std.io.core.Descriptor {
+    std.io.core;descriptor(1)
+}
+
+pub fn std.io.core;line[Point,std.io.core.Descriptor](x: Point, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    Point;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w)?
+    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "\n")
+}
+
+pub fn std.io.core;eprint[std.text.Str](x: std.text.Str) -> () {
+    var w = std.io.core;stderr()
+    std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x, &w)
+}
+
+pub fn std.io.core;eprintln[std.io.core.IoError](x: std.io.core.IoError) -> () {
+    var w = std.io.core;stderr()
+    std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x, &w)
+}
+
+pub fn std.io.core;descriptor(fd: Int32) -> std.io.core.Descriptor {
+    Descriptor(fd)
+}
+
+fn Point;std.fmt;Display.fmt[std.io.core.Descriptor](self: Point, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    "{self.x},{;double(self.y)}".fmt(&w)
+}
+
+fn std.io.core.Descriptor;std.io.core;Writer.write_str(inout self: std.io.core.Descriptor, s: std.text.Str) -> std.result.Result[(),std.io.core.IoError] where carries() {
+    let _written = std.io.core;write_all[std.io.core.Descriptor](&self, std.text;Str.as_bytes(s))?
+    .Ok(())
+}
+
+pub fn std.io.core;stderr() -> std.io.core.Descriptor {
+    std.io.core;descriptor(2)
+}
+
+fn std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x: std.text.Str, inout w: std.io.core.Descriptor) -> () where std.io.core.IoError: Discardable {
+    match std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w) {
+        _ => {},
+    }
+}
+
+fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) -> () where std.io.core.IoError: Discardable {
+    match std.io.core;line[std.io.core.IoError,std.io.core.Descriptor](x, &w) {
+        _ => {},
+    }
+}
+
+fn ;double(n: UInt8) -> UInt8 {
+    n + n
+}
+
+fn std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.text.Str, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, self)
+}
+
+fn UInt8;std.fmt;Display.fmt[std.io.core.Descriptor](self: UInt8, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    if self < T(0) {
+        std.fmt;format_signed[std.io.core.Descriptor](Int64(self), &w)
+    } else {
+        std.fmt;format_unsigned[std.io.core.Descriptor](UInt64(self), &w)
+    }
+}
+
+pub fn std.text;Str.as_bytes(self: std.text.Str) -> std.mem.Slice[UInt8] where carries(self) {
+    copy(self.bytes)
+}
+
+pub fn std.io.core;write_all[std.io.core.Descriptor](inout writer: std.io.core.Descriptor, bytes: std.mem.Slice[UInt8]) -> std.result.Result[UInt64,std.io.core.WriteFailure[std.io.core.IoError]] where carries(.Err: writer) {
+    var written: UInt64 = 0
+    while written < std.mem;Slice[UInt8].length(bytes) {
+        let remaining = std.mem;Slice[UInt8].length(bytes) - written
+        let part = std.option;Option[std.mem.Slice[UInt8]].unwrap(std.mem;Slice[UInt8].subspan(bytes, start: written, count: remaining))
+        match std.io.core.Descriptor;std.io.core;ByteWriter.write_some(&writer, part) {
+            Ok(count) => {
+                if count == 0 {
+                    return .Err(.{ kind = .NoProgress, reason = .None, written = written })
+                }
+                if count > remaining {
+                    return .Err(.{ kind = .InvalidProgress, reason = .None, written = written })
+                }
+                written += count
+            },
+            Err(failure) => {
+                let WriteFailure { kind: kind, reason: reason, written: count } = failure
+                if count > remaining {
+                    return .Err(.{ kind = .InvalidProgress, reason = reason, written = written })
+                }
+                return .Err(.{ kind = kind, reason = reason, written = written + count })
+            },
+        }
+    }
+    .Ok(written)
+}
+
+fn std.io.core.IoError;std.convert;From[std.io.core.WriteFailure[std.io.core.IoError]].from(sink source: std.io.core.WriteFailure[std.io.core.IoError]) -> std.io.core.IoError {
+    let WriteFailure { kind: kind, reason: reason, written: written } = source
+    var error: std.io.core.IoError = match reason {
+        Some(error) => error,
+        None => .{ operation = .Write, category = .Other, code = .None, progress = 0 },
+    }
+    error.progress = written
+    match kind {
+        Underlying => {},
+        NoProgress => error.category = .NoProgress,
+        InvalidProgress => error.category = .InvalidProgress,
+    }
+    error
+}
+
+pub fn std.io.core;line[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w)?
+    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "\n")
+}
+
+fn std.fmt;format_signed[std.io.core.Descriptor](value: Int64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    if value < 0 {
+        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "-")?
+    }
+    var p = std.fmt;scale(value)
+    var leading = true
+    while p > 0 {
+        let whole = value / p
+        // A remainder modulo 100 selects one pair from decimal_pairs.
+        let d = whole % 100
+        // Only the two-digit remainder is negated; Int64.min itself
+        // cannot be made positive in Int64.
+        let shown = if d < 0 {
+            0 - d
+        } else {
+            d
+        }
+        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, std.fmt;digits(shown, leading))?
+        leading = false
+        p = p / 100
+    }
+    .Ok(())
+}
+
+fn std.fmt;format_unsigned[std.io.core.Descriptor](value: UInt64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] where carries(.Err: w) {
+    var p = std.fmt;scale_unsigned(value)
+    var leading = true
+    while p > 0 {
+        let whole = value / p
+        // A remainder modulo 100 selects one pair from decimal_pairs.
+        let d = whole % 100
+        std.io.core.Descriptor;std.io.core;Writer.write_str(&w, std.fmt;digits(Int64(d), leading))?
+        leading = false
+        p = p / 100
+    }
+    .Ok(())
+}
+
+pub fn std.mem;Slice[UInt8].length(self: std.mem.Slice[UInt8]) -> UInt64 {
+    self.len
+}
+
+pub fn std.mem;Slice[UInt8].subspan(self: std.mem.Slice[UInt8], start: UInt64, count: UInt64) -> std.option.Option[std.mem.Slice[UInt8]] where carries(self) {
+    if start > self.len {
+        .None
+    } else if count > self.len - start {
+        .None
+    } else {
+        .Some(slice_subspan(self, start, count))
+    }
+}
+
+pub fn std.option;Option[std.mem.Slice[UInt8]].unwrap(sink self: std.option.Option[std.mem.Slice[UInt8]]) -> std.mem.Slice[UInt8] where carries(self) {
+    match self {
+        Some(value) => value,
+        None => panic("called Option.unwrap on None"),
+    }
+}
+
+fn std.io.core.Descriptor;std.io.core;ByteWriter.write_some(inout self: std.io.core.Descriptor, bytes: std.mem.Slice[UInt8]) -> std.result.Result[UInt64,std.io.core.WriteFailure[std.io.core.IoError]] where carries() {
+    if std.mem;Slice[UInt8].length(bytes) == 0 {
+        return .Ok(0)
+    }
+    let read Descriptor(fd) = self
+    let answer = std.mem;write_slice_fd(bytes, fd)
+    if answer < 0 {
+        let error = std.io.core;IoError.from_os(.Write, Int32(0 - answer))
+        return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+    } else {
+        return .Ok(UInt64(answer))
+    }
+}
+
+fn std.io.core.IoError;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoError, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    "{self.operation} failed ({self.category}) after {self.progress} bytes".fmt(&w)?
+    match read self.code {
+        Some(code) => "; errno {code}".fmt(&w),
+        None => .Ok(()),
+    }
+}
+
+fn std.fmt;scale(n: Int64) -> Int64 {
+    var p = 1
+    while (n / p) / 100 != 0 {
+        p = p * 100
+    }
+    p
+}
+
+fn std.fmt;digits(d: Int64, leading: Bool) -> std.text.Str {
+    let start = UInt64(d) * 2
+    let first = if leading && d < 10 {
+        start + 1
+    } else {
+        start
+    }
+    std.option;Option[std.text.Str].unwrap_or(std.text;Str.slice(decimal_pairs, first, start + 2), "0")
+}
+
+fn std.fmt;scale_unsigned(n: UInt64) -> UInt64 {
+    var p: UInt64 = 1
+    while (n / p) / 100 != 0 {
+        p = p * 100
+    }
+    p
+}
+
+internal fn std.mem;write_slice_fd(bytes: std.mem.Slice[UInt8], fd: Int32) -> Int64 {
+    linea_write_some(fd, bytes.at, bytes.len)
+}
+
+pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int32, progress: UInt64 = 0) -> std.io.core.IoError {
+    // These tags are the runtime's portable category ABI, not OS errno values.
+    let category: std.io.core.IoCategory = match linea_io_category(code) {
+        1 => .NotFound,
+        2 => .PermissionDenied,
+        3 => .AlreadyExists,
+        4 => .WouldBlock,
+        5 => .BrokenPipe,
+        6 => .Interrupted,
+        7 => .InvalidInput,
+        8 => .NotDirectory,
+        9 => .IsDirectory,
+        10 => .Unsupported,
+        11 => .NoSpace,
+        12 => .ResourceExhausted,
+        13 => .Symlink,
+        14 => .InvalidDescriptor,
+        15 => .TimedOut,
+        16 => .ConnectionReset,
+        17 => .ConnectionRefused,
+        18 => .AddressInUse,
+        _ => .Other,
+    }
+    .{ operation = operation, category = category, code = .Some(code), progress = progress }
+}
+
+fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoOperation, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    match read self {
+        Read => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Read")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Write => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Write")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Flush => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Flush")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Close => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Close")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Open => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Open")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Metadata => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Metadata")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Permissions => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Permissions")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Publish => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Publish")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Remove => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Remove")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Random => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Random")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Listen => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Listen")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Accept => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Accept")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Connect => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Connect")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Configure => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Configure")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+    }
+}
+
+fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Descriptor](self: std.io.core.IoCategory, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    match read self {
+        Other => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Other")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        NotFound => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotFound")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        PermissionDenied => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "PermissionDenied")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        AlreadyExists => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AlreadyExists")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        WouldBlock => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "WouldBlock")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        BrokenPipe => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "BrokenPipe")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Interrupted => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Interrupted")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        InvalidInput => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidInput")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        NotDirectory => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NotDirectory")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        IsDirectory => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "IsDirectory")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Unsupported => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Unsupported")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        NoSpace => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoSpace")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        ResourceExhausted => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ResourceExhausted")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        Symlink => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "Symlink")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        InvalidDescriptor => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidDescriptor")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        NoProgress => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "NoProgress")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        InvalidProgress => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "InvalidProgress")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        TimedOut => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "TimedOut")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        ConnectionReset => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionReset")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        ConnectionRefused => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "ConnectionRefused")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+        AddressInUse => {
+            std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "AddressInUse")?
+            var wrote_component = false
+            {}
+            if wrote_component {
+                if false {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, r" }")?
+                } else {
+                    std.io.core.Descriptor;std.io.core;Writer.write_str(&w, ")")?
+                }
+            }
+            return .Ok(())
+        },
+    }
+}
+
+fn UInt64;std.fmt;Display.fmt[std.io.core.Descriptor](self: UInt64, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    if self < T(0) {
+        std.fmt;format_signed[std.io.core.Descriptor](Int64(self), &w)
+    } else {
+        std.fmt;format_unsigned[std.io.core.Descriptor](UInt64(self), &w)
+    }
+}
+
+fn Int32;std.fmt;Display.fmt[std.io.core.Descriptor](self: Int32, inout w: std.io.core.Descriptor) -> std.result.Result[(),std.io.core.IoError] {
+    if self < T(0) {
+        std.fmt;format_signed[std.io.core.Descriptor](Int64(self), &w)
+    } else {
+        std.fmt;format_unsigned[std.io.core.Descriptor](UInt64(self), &w)
+    }
+}
+
+pub fn std.text;Str.slice(self: std.text.Str, from: UInt64, to: UInt64) -> std.option.Option[std.text.Str] where carries(.Some: self) {
+    if from > to || to > std.text;Str.length(self) {
+        .None
+    } else if !std.text;starts_a_character(self, from) || !std.text;starts_a_character(self, to) {
+        .None
+    } else {
+        .Some(.{ bytes = std.option;Option[std.mem.Slice[UInt8]].unwrap(std.mem;Slice[UInt8].subspan(self.bytes, start: from, count: to - from)) })
+    }
+}
+
+pub fn std.option;Option[std.text.Str].unwrap_or(sink self: std.option.Option[std.text.Str], sink fallback: std.text.Str) -> std.text.Str where
+    carries(self, fallback),
+    std.text.Str: Discardable
+{
+    match self {
+        Some(value) => value,
+        None => fallback,
+    }
+}
+
+extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_io_category(code: Int32) -> UInt8
+
+pub fn std.text;Str.length(self: std.text.Str) -> UInt64 {
+    std.mem;Slice[UInt8].length(self.bytes)
+}
+
+fn std.text;starts_a_character(s: std.text.Str, at: UInt64) -> Bool {
+    if at >= std.text;Str.length(s) {
+        at == std.text;Str.length(s)
+    } else {
+        match std.text;Str.byte(s, at) {
+            Some(b) => b < 128 || b > 191,
+            // This arm never runs, because the offset is below the length.
+            None => false,
+        }
+    }
+}
+
+pub fn std.text;Str.byte(self: std.text.Str, i: UInt64) -> std.option.Option[UInt8] where carries() {
+    if i >= std.text;Str.length(self) {
+        .None
+    } else {
+        .Some(self.bytes[i])
+    }
+}

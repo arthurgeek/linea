@@ -1,0 +1,13 @@
+// The closure names the local `shapes` without capturing it. In its body
+// `shapes` is still the local, not the module, so `shapes.make()` is also
+// refused, and that error says which `shapes` the name reached.
+import shapes
+
+fn main() -> UInt8 {
+    let made = shapes.make()
+    let shapes: Str = "abc"
+    let back = || {
+        shapes.make().size
+    }
+    back() + made.size + UInt8.try_from(shapes.length()).unwrap_or(0)
+}

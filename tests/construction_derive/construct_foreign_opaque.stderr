@@ -1,0 +1,9 @@
+error[M-Opaque]: `Token` is opaque outside `vault`
+  --> tests/construction_derive/construct_foreign_opaque/main.lin:22:8
+   |
+11 |             |component| {
+   |                         - generated from this template code for `Holder.token`
+20 | struct Holder { token: vault.Token }
+   |                 ----- the code was generated for this field
+22 | derive Build for Holder
+   |        ^^^^^ only its own module can build one

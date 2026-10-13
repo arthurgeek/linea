@@ -1,0 +1,24 @@
+// An alias of a function type bounds a type parameter as the function type
+// written out would, generic arguments included.
+alias Step = fn(value: UInt8) -> UInt8
+alias Fold[T] = fn(total: T, next: T) -> T where carries()
+
+fn run[F: Step](f: F) -> UInt8 {
+    f(10)
+}
+
+fn combine[G: Fold[UInt8]](g: G, a: UInt8, b: UInt8) -> UInt8 {
+    g(a, b)
+}
+
+fn down(value: UInt8) -> UInt8 {
+    value - 1
+}
+
+fn add(total: UInt8, next: UInt8) -> UInt8 {
+    total + next
+}
+
+fn main() -> UInt8 {
+    run(down) + combine(add, 1, 2)
+}

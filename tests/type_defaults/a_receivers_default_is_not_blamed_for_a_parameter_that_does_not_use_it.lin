@@ -1,0 +1,22 @@
+struct Box[T = UInt8] {
+    value: T,
+}
+
+impl[T] Box[T] {
+    fn empty() -> Self {
+        panic("x")
+    }
+
+    fn count(_self: Self, n: UInt8) -> UInt8 {
+        n
+    }
+
+    fn put(inout _self: Self, _v: T) -> () {
+        panic("x")
+    }
+}
+
+fn main() -> UInt8 {
+    let b = Box.empty()
+    b.count("s")
+}

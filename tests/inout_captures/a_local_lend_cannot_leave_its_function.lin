@@ -1,0 +1,24 @@
+import std.mem
+
+fn ticker() -> Result[mem.Closure[inout fn() -> UInt8, mem.SystemAllocator], mem.Oom] {
+    var count: UInt8 = 0
+    mem.Closure.open(
+        mem.system(),
+        inout [inout count] || {
+            count += 1
+            count
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    match ticker() {
+        Ok(tick) => {
+            var kept = tick
+            let seen = &kept()
+            kept.release()
+            seen
+        },
+        Err(_) => 0,
+    }
+}

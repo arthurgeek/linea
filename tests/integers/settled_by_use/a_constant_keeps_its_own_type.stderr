@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Int64`
+ --> tests/integers/settled_by_use/a_constant_keeps_its_own_type.lin:8:12
+  |
+3 | fn narrow(value: UInt8) -> UInt8 {
+  |           ----- expected because of this parameter
+8 |     narrow(limit)
+  |            ^^^^^ expected `UInt8`, found `Int64`

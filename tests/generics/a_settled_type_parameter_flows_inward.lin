@@ -1,0 +1,51 @@
+// A type parameter another argument settled is a type, and it flows inward like
+// any other.
+//
+// `[T-Literal]` says a literal takes the type that flows into it. A concrete
+// parameter has always flowed: `concrete(UInt8(1), 6)` types the literal as a
+// `UInt8` and nothing about that is remarkable. A type parameter that an earlier
+// argument settled is equally a type at that position, and this is that.
+//
+// Every form here determines no type of its own -- a literal, arithmetic over
+// literals, a structure's shorthand -- so each takes what `T` was settled to,
+// and none of them is a conversion: the value is that type from the start, which
+// is what keeps [ADR 0018] out of this.
+struct Point {
+    x: UInt8,
+}
+
+impl Equatable for Point {
+    fn equals(self: Point, other: Point) -> Bool {
+        self.x == other.x
+    }
+}
+
+fn same[T: Equatable](a: T, b: T) -> Bool {
+    a == b
+}
+
+fn main() -> UInt8 {
+    let one: UInt8 = 1
+
+    // A literal, where `T` is already `UInt8`.
+    let bare = same(one, 1)
+
+    // Arithmetic over literals, which determines no type of its own either: the
+    // fix is not about literals but about what flows into the position.
+    let summed = same(UInt8(3), 1 + 2)
+
+    // A structure written as its shorthand, which has no type without one
+    // flowing in.
+    let p: Point = .{ x = 4 }
+    let shaped = same(p, .{ x = 4 })
+
+    // And nothing settling it at all still defaults, which is what a literal
+    // has always done where nothing flows.
+    let defaulted = same(6, 6)
+
+    if bare && summed && shaped && defaulted {
+        0
+    } else {
+        1
+    }
+}

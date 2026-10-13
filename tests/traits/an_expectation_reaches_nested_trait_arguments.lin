@@ -1,0 +1,27 @@
+// The expected result constrains a trait parameter inside both Option
+// constructors, while the receiver determines the implementation head.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> Option[Option[U]]
+}
+
+impl Innermost[UInt8] for Envelope[UInt8] {
+    fn of(x: Self) -> Option[Option[UInt8]] {
+        .Some(.Some(x.v))
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Envelope[UInt8] = .{ v = 3 }
+    let r: Option[Option[UInt8]] = Innermost.of(a)
+    match r {
+        Some(inner) => match inner {
+            Some(n) => n,
+            None => 0,
+        },
+        None => 0,
+    }
+}

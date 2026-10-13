@@ -1,0 +1,9 @@
+error[O-Leak]: `badge` (a linear `Badge`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/binding_to_underscore_does_not_settle.lin:15:9
+   |
+15 |     let _ = badge
+   |         ^ `_` does not settle it
+17 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Badge { number: _ } = badge`, or give it to something that takes it

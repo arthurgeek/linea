@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Duplicable`, and `Owned` does not implement it
+  --> tests/traits/a_copyable_requirement_through_a_trait_refuses_a_linear_argument.lin:18:20
+   |
+18 |     let p: Owned = twice(o)
+   |                    ^^^^^ implement it for that type, or drop the bound

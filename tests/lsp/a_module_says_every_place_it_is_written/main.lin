@@ -1,0 +1,11 @@
+// A `use` path names a module with a token rather than an expression, and the
+// qualified call below names the same module as one.
+// The import that bound it and both are places this module is used.
+import sizes
+
+use sizes.Width
+
+fn main() -> UInt8 {
+    let w: Width = .{ of = 2 }
+    sizes.twice(w.of)
+}

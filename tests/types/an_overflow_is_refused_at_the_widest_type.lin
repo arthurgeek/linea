@@ -1,0 +1,9 @@
+// [T-Overflow]. An operation over constant expressions is folded where it is
+// written and refused there when its result is not representable, whatever its
+// operands are as wide as: the widest integer type is no exception, and a
+// product of two of its values is refused rather than carried.
+fn main() -> UInt8 {
+    let a: UInt64 = 18446744073709551615
+    let _b: UInt64 = a * a
+    0
+}

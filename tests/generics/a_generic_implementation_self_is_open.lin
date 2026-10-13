@@ -1,0 +1,11 @@
+trait Marked {}
+
+struct Holder[T] { value: T }
+
+impl[T: Discardable] Marked for Holder[T]
+where Self: Discardable {}
+
+fn main() -> UInt8 {
+    let _holder: Holder[UInt8] = .{ value = 0 }
+    0
+}

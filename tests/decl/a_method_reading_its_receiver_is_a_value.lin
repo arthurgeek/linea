@@ -1,0 +1,16 @@
+struct Rectangle {
+    width: UInt64,
+    height: UInt64,
+}
+
+impl Rectangle {
+    fn area(self: Rectangle) -> UInt64 {
+        self.width * self.height
+    }
+}
+
+fn main() -> UInt8 {
+    let area: fn(rectangle: Rectangle) -> UInt64 = Rectangle.area
+    let floor: Rectangle = .{ width = 3, height = 4 }
+    UInt8(area(floor) - 12)
+}

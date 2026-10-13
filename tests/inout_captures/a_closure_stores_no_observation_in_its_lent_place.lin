@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let short: UInt8 = 4
+    var view = borrow short
+    var point = inout [inout view] |sink to: borrow UInt8| {
+        view = to
+    }
+    let local: UInt8 = 9
+    &point(borrow local)
+    *view
+}

@@ -1,0 +1,5 @@
+error[T-Lend]: `Int64` implements no `Iterator`
+ --> tests/iter/a_traversal_is_walked_by_an_iterator.lin:9:22
+  |
+9 |     trav positions = 4
+  |                      ^ a traversal is the positions a walk asks for one at a time

@@ -1,0 +1,18 @@
+// Exclusivity is about one call's arguments and everything they contain. The
+// check looked only at the top of each argument, so a mark one level down was
+// invisible: `pair(bump(&x), x)` passed, and what `pair` receives for its
+// second argument depends on the order the two are evaluated in -- the one
+// thing the rule exists to stop being observable.
+fn bump(inout n: UInt8) -> UInt8 {
+    n = n + 1
+    0
+}
+
+fn pair(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    pair(bump(&x), x)
+}

@@ -1,0 +1,21 @@
+trait Ordinal {
+    fn ordinal(value: Self) -> UInt64
+}
+
+template impl Ordinal {
+    fn ordinal(value: Self) -> UInt64 {
+        match read value {
+            reflect.case => reflect.ordinal_of(value),
+        }
+    }
+}
+
+struct Item {}
+
+derive Ordinal for Item
+
+fn _holds(_item: Item) -> () {}
+
+fn main() -> UInt8 {
+    0
+}

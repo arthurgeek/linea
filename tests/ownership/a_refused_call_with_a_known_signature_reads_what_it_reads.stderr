@@ -1,0 +1,14 @@
+error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capability
+  --> tests/ownership/a_refused_call_with_a_known_signature_reads_what_it_reads.lin:15:5
+   |
+15 |     show(ticket)
+   |     ^^^^ use a type meeting the capability requirement, or relax the bound
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_refused_call_with_a_known_signature_reads_what_it_reads.lin:14:9
+   |
+14 |     let ticket = Ticket.Seat(4)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+16 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

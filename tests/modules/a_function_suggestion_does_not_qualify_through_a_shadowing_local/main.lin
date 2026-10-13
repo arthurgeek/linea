@@ -1,0 +1,17 @@
+// `double` is a function of `shapes`, not an operation of `UInt8`. Inside
+// `twice` and `again` the name `shapes` is a local, so the call cannot be
+// written through it there; importing `shapes` under an alias can.
+import shapes
+
+fn twice(n: UInt8) -> UInt8 {
+    let shapes: UInt8 = 1
+    n.double() + shapes
+}
+
+fn again(shapes: UInt8) -> UInt8 {
+    shapes.double()
+}
+
+fn main() -> UInt8 {
+    twice(2) + again(3) + shapes.make().size
+}

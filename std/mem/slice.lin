@@ -1,0 +1,376 @@
+import std.hash
+import std.testing
+
+use hash.Hash
+
+// A Slice observes an initialized contiguous extent without owning its
+// storage. Only checked storage primitives can introduce a backing address.
+// Releasing a view releases neither its elements nor the allocation it
+// observes. An empty view observes no fictitious element, subspans keep the
+// original backing dependencies, and copying a view keeps them too. `Str` holds
+// a certified `Slice[UInt8]` and additionally requires valid UTF-8. A scalar
+// read through an indexed Slice checks its backing observation even though the
+// resulting scalar carries no dependency.
+@(opaque, copyable, derive(Release))
+struct Slice[phantom T] {
+    at: UInt64,
+    len: UInt64,
+}
+
+extern fn slice_place[T](owner: Slice[T], i: UInt64) -> T where carries(owner)
+
+extern fn slice_subspan[T](owner: Slice[T], start: UInt64, count: UInt64) -> Slice[T] where carries(owner)
+
+// Process argument spans refer to runtime-owned immutable storage.
+extern fn argument_span(i: UInt64) -> Slice[UInt8]
+
+// The runtime reports the process argument count, and each argument's address
+// and length in bytes.
+extern fn linea_arg_count() -> UInt64
+
+extern fn linea_arg_at(i: UInt64) -> UInt64
+
+extern fn linea_arg_len(i: UInt64) -> UInt64
+
+// Return how many arguments the process was started with, its name included.
+internal fn argument_count() -> UInt64 {
+    linea_arg_count()
+}
+
+// Return the bytes of argument `i`, or None when there is no such argument.
+internal fn argument_bytes(i: UInt64) -> Option[Slice[UInt8]] {
+    if i >= argument_count() {
+        .None
+    } else {
+        .Some(argument_span(i))
+    }
+}
+
+impl[T] Slice[T] {
+    // Return how many elements the view holds.
+    pub fn length(self: Self) -> UInt64 {
+        self.len
+    }
+}
+
+test fn length_counts_the_viewed_elements() {
+    let values = [UInt64(3), 5, 8]
+    testing.assert_eq(values.as_slice().length(), UInt64(3), "a view miscounted its elements")?
+    .Ok(())
+}
+
+impl[T] Slice[T] {
+    // Borrow element `i`, or answer None when `i` is past the end.
+    pub fn get(self: Self, i: UInt64) -> Option[borrow T] where carries(self) {
+        if i >= self.len {
+            .None
+        } else {
+            .Some(borrow self[i])
+        }
+    }
+}
+
+test fn get_borrows_an_element_or_answers_none_past_the_end() {
+    let values = [UInt64(3), 5]
+    let view = values.as_slice()
+    testing.assert_eq(*view.get(1).unwrap(), UInt64(5), "get borrowed the wrong element")?
+    testing.assert(view.get(2).is_none(), "get reached past the end")?
+    .Ok(())
+}
+
+impl[T] Slice[T] {
+    // Return the `count` elements from `start`, or None when they do not all
+    // lie within the view. An empty span at the end of the view is accepted.
+    pub fn subspan(self: Self, start: UInt64, count: UInt64) -> Option[Slice[T]] where carries(self) {
+        if start > self.len {
+            .None
+        } else if count > self.len - start {
+            .None
+        } else {
+            .Some(slice_subspan(self, start, count))
+        }
+    }
+}
+
+test fn a_slice_observes_only_its_initialized_extent() {
+    defer var values: Vec[UInt64] = Vec.new()
+    &values.reserve(100).unwrap()
+    &values.push(11).unwrap()
+    &values.push(22).unwrap()
+    let view = values.as_slice()
+    testing.assert_eq(view.length(), UInt64(2), "slice exposed spare capacity")?
+    testing.assert_eq(*view.get(1).unwrap(), UInt64(22), "slice observed another element")?
+    testing.assert(view.get(2).is_none(), "slice exposed an uninitialized slot")?
+    let tail = view.subspan(start: 1, count: 1).unwrap()
+    testing.assert_eq(*tail.get(0).unwrap(), UInt64(22), "subspan changed the element")?
+    testing.assert(view.subspan(start: 2, count: 1).is_none(), "subspan exceeded the initialized extent")?
+    .Ok(())
+}
+
+test fn an_empty_slice_accepts_its_empty_subspan() {
+    defer let values: Vec[UInt8] = Vec.new()
+    let view = values.as_slice()
+    testing.assert_eq(view.length(), UInt64(0), "empty slice gained an element")?
+    testing.assert_eq(view.subspan(start: 0, count: 0).unwrap().length(), UInt64(0), "empty subspan failed")?
+    testing.assert(view.get(0).is_none(), "empty slice yielded an element")?
+    testing.assert(view.subspan(start: UInt64.max, count: 1).is_none(), "extreme subspan wrapped its extent")?
+    .Ok(())
+}
+
+// Indexing a view names element `i` in place; an index past the end traps.
+impl[T] Index[UInt64] for Slice[T] {
+    type Elem = T
+
+    proj at(self: Self, i: UInt64) -> T where carries(self) {
+        slice_place(self, i)
+    }
+}
+
+test fn releasing_a_slice_leaves_its_storage_owned() {
+    var values = Vec.filled(system(), count: 3, value: UInt64(7)).unwrap()
+    let view = values.as_slice()
+    view.release()
+    values[0] = 8
+    let changed = values[0] == 8 && values.length() == 3
+    values.release()
+    testing.assert(changed, "slice release disposed of its backing storage")?
+    .Ok(())
+}
+
+// Two views are equal when they hold equal elements in the same order. Where
+// they sit in memory does not matter.
+impl[T: Equatable] Equatable for Slice[T] {
+    fn equals(self: Self, other: Self) -> Bool {
+        if self.length() != other.length() {
+            return false
+        }
+        for index in 0..self.length() {
+            if !self[index].equals(other[index]) {
+                return false
+            }
+        }
+        true
+    }
+}
+
+test fn slices_equal_by_their_elements() {
+    let first = [UInt64(3), 5, 8]
+    let same = [UInt64(3), 5, 8]
+    let changed = [UInt64(3), 5, 9]
+    let shorter = [UInt64(3), 5]
+    testing.assert_eq(first.as_slice(), same.as_slice(), "equal elements compared unequal")?
+    testing.assert(first.as_slice() != changed.as_slice(), "a changed element compared equal")?
+    testing.assert(first.as_slice() != shorter.as_slice(), "a prefix compared equal")?
+    .Ok(())
+}
+
+impl[T: Equivalent] Equivalent for Slice[T] {}
+
+// Order by the first element that differs; a view that is a prefix of another
+// comes first. An incomparable element pair leaves the views unordered, as it
+// does for derived structures.
+impl[T: Comparable] Comparable for Slice[T] {
+    fn less(self: Self, other: Self) -> Bool {
+        let shared = if self.length() < other.length() {
+            self.length()
+        } else {
+            other.length()
+        }
+        for index in 0..shared {
+            if self[index].less(other[index]) {
+                return true
+            }
+            if other[index].less(self[index]) {
+                return false
+            }
+            if !self[index].equals(other[index]) {
+                return false
+            }
+        }
+        self.length() < other.length()
+    }
+}
+
+test fn slices_order_by_their_first_different_element() {
+    let low = [UInt8(1), 9]
+    let high = [UInt8(2), 0]
+    let prefix = [UInt8(1)]
+    testing.assert(low.as_slice() < high.as_slice(), "the first element did not decide")?
+    testing.assert(prefix.as_slice() < low.as_slice(), "a prefix did not come first")?
+    testing.assert(!(low.as_slice() < low.as_slice()), "a view came before itself")?
+    let unordered = [Float64(0.0) / 0.0, 1.0]
+    let other = [Float64(0.0) / 0.0, 0.0]
+    testing.assert(!(unordered.as_slice() < other.as_slice()) && !(other.as_slice() < unordered.as_slice()), "an incomparable element ordered the views")?
+    .Ok(())
+}
+
+impl[T: Ordered] Ordered for Slice[T] {}
+
+// The hash covers the length and each element's hash in order, so equal views
+// hash equally and a view is not confused with its prefix.
+impl[T: hash.Hash] hash.Hash for Slice[T] {
+    fn hash(self: Self) -> UInt64 {
+        var state = hash.Hasher.new()
+        &state.write_u64(self.length())
+        for index in 0..self.length() {
+            &state.write_u64(self[index].hash())
+        }
+        state.finish()
+    }
+}
+
+test fn equal_slices_hash_equally() {
+    let first = [UInt16(4), 2]
+    let same = [UInt16(4), 2]
+    let reordered = [UInt16(2), 4]
+    let prefix = [UInt16(4)]
+    testing.assert_eq(first.as_slice().hash(), same.as_slice().hash(), "equal views hashed differently")?
+    testing.assert(first.as_slice().hash() != reordered.as_slice().hash(), "element order was lost")?
+    testing.assert(first.as_slice().hash() != prefix.as_slice().hash(), "a prefix hashed like the whole")?
+    .Ok(())
+}
+
+// Debug lists the elements between brackets, as an array literal is written.
+impl[T: Debug] Debug for Slice[T] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("[")?
+        for index in 0..self.length() {
+            if index != 0 {
+                &w.write_str(", ")?
+            }
+            self[index].debug(&w)?
+        }
+        &w.write_str("]")
+    }
+}
+
+test fn a_slice_debugs_as_its_elements_in_brackets() {
+    let words = ["tea", "jam"]
+    let empty: [Bool; _] = []
+    var rendered = testing.Recorder.of(system(), 32).unwrap()
+    let wrote = words.as_slice().debug(&rendered).is_ok() && empty.as_slice().debug(&rendered).is_ok()
+    let listed = rendered.holds(r#"["tea", "jam"][]"#)
+    rendered.release()
+    testing.assert(wrote && listed, "the elements were not listed")?
+    .Ok(())
+}
+
+// A SliceIter yields borrowed elements in order while the source storage stays
+// with its owner. `Slice.iterate` consumes the descriptor and returns it; each
+// yielded observation carries the backing owner's dependencies rather than
+// borrowing the iterator, and an exhausted iterator keeps returning None.
+// Discarding or releasing it leaves the elements and their storage with the
+// caller and requires neither Copyable nor Release of the element type. Arrays
+// and Slice subspans use this iterator, and a Vec is walked through
+// `values.as_slice().iterate()`.
+@(opaque, derive(Release))
+struct SliceIter[T] {
+    view: Slice[T],
+    at: UInt64,
+}
+
+impl[T] Sequence for Slice[T] {
+    type Iter = SliceIter[T]
+
+    fn iterate(sink self: Self) -> SliceIter[T] {
+        .{ view = self, at = 0 }
+    }
+}
+
+impl[T] Iterator for SliceIter[T] {
+    type Item = borrow T
+
+    fn next(inout self: Self) -> Option[borrow T] {
+        if self.at == self.view.length() {
+            return .None
+        }
+        let index = self.at
+        self.at += 1
+        self.view.get(index)
+    }
+}
+
+test fn slice_iteration_retains_order_and_independent_observations() {
+    defer let values = Vec.from_fn(system(), count: 3, initializer: |index| index + 11).unwrap()
+    var iterator = values.as_slice().iterate()
+    let first = &iterator.next().unwrap()
+    let second = &iterator.next().unwrap()
+    let third = &iterator.next().unwrap()
+    testing.assert(&iterator.next().is_none(), "iteration exceeded the initialized extent")?
+    testing.assert(&iterator.next().is_none(), "exhausted iteration restarted")?
+    iterator.release()
+    testing.assert_eq(*first, UInt64(11), "advancing the iterator changed its first observation")?
+    testing.assert_eq(*second, UInt64(12), "iteration changed the second element")?
+    testing.assert_eq(*third, UInt64(13), "iteration changed the final element")?
+}
+
+test fn slice_iteration_handles_empty_and_single_element_subspans() {
+    defer let empty: Vec[UInt64] = Vec.new()
+    var empty_iterator = empty.as_slice().iterate()
+    testing.assert(&empty_iterator.next().is_none(), "empty source yielded an item")?
+    testing.assert(&empty_iterator.next().is_none(), "empty source restarted")?
+    defer let values = Vec.from_fn(system(), count: 3, initializer: |index| index + 21).unwrap()
+    var middle = values.as_slice().subspan(start: 1, count: 1).unwrap().iterate()
+    let selected = &middle.next().unwrap()
+    testing.assert_eq(*selected, UInt64(22), "subspan iteration selected the wrong element")?
+    testing.assert(&middle.next().is_none(), "subspan iteration escaped its boundary")?
+    testing.assert(&middle.next().is_none(), "subspan iteration restarted")?
+}
+
+// SliceRecord is an affine element and SliceTicket a linear one, so iteration
+// can be seen to neither copy nor settle either.
+struct SliceRecord { number: UInt64 }
+
+@linear
+struct SliceTicket { number: UInt64 }
+
+test fn slice_iteration_observes_affine_and_linear_elements_without_copying_or_settling() {
+    var records: Vec[SliceRecord] = Vec.new()
+    &records.push(.{ number = 7 }).unwrap()
+    var tickets: Vec[SliceTicket] = Vec.new()
+    &tickets.push(.{ number = 11 }).unwrap()
+    var record_iterator = records.as_slice().iterate()
+    var ticket_iterator = tickets.as_slice().iterate()
+    let observed_record = &record_iterator.next().unwrap().number
+    let observed_ticket = &ticket_iterator.next().unwrap().number
+    record_iterator.release()
+    ticket_iterator.release()
+    let record = &records.pop().unwrap()
+    let { number } = &tickets.pop().unwrap()
+    records.finish().unwrap()
+    tickets.finish().unwrap()
+    testing.assert_eq(observed_record, UInt64(7), "iteration changed an affine record")?
+    testing.assert_eq(observed_ticket, UInt64(11), "iteration changed a linear ticket")?
+    testing.assert_eq(record.number + number, UInt64(18), "iteration consumed a source element")?
+}
+
+test fn slice_iteration_early_exit_leaves_the_source_mutable() {
+    defer var values = Vec.from_fn(system(), count: 3, initializer: |index| index + 1).unwrap()
+    var selected: UInt64 = 0
+    for item in values.as_slice().iterate() {
+        selected = *item
+        break
+    }
+    values[0] = 9
+    testing.assert_eq(selected, UInt64(1), "early iteration selected the wrong item")?
+    testing.assert_eq(values[0], UInt64(9), "finished iteration retained a source observation")?
+    testing.assert_eq(values[1], UInt64(2), "early iteration changed an unread element")?
+    testing.assert_eq(values.length(), UInt64(3), "early iteration removed source elements")?
+}
+
+test fn slice_iteration_collects_observations_and_transformed_values() {
+    defer let source = Vec.from_fn(system(), count: 3, initializer: |index| index + 1).unwrap()
+    let { values: observations, iterator: observed } = source.as_slice().collect(system()).unwrap()
+    observed.release()
+    let first = *observations[0]
+    let last = *observations[2]
+    observations.release()
+    testing.assert_eq(first, UInt64(1), "collection changed its first observation")?
+    testing.assert_eq(last, UInt64(3), "collection changed its final observation")?
+    let transformed = source.as_slice().map(|sink item| -> UInt64 where carries() *item * 2)
+    let { values, iterator } = transformed.collect(system()).unwrap()
+    defer values.release()
+    iterator.release()
+    testing.assert_eq(values[0], UInt64(2), "transformation changed the first value")?
+    testing.assert_eq(values[2], UInt64(6), "transformation changed input order")?
+}

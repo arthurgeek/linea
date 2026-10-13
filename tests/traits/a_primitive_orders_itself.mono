@@ -1,0 +1,19 @@
+fn ;main() -> UInt8 {
+    let wide: Int64 = 2
+    let other: Int64 = 9
+    let narrow: UInt8 = 3
+    let beside: UInt8 = 1
+    if ;smaller[Int64](wide, other) && !;smaller[UInt8](narrow, beside) {
+        6
+    } else {
+        0
+    }
+}
+
+fn ;smaller[Int64](a: Int64, b: Int64) -> Bool {
+    Comparable.less(a, b)
+}
+
+fn ;smaller[UInt8](a: UInt8, b: UInt8) -> Bool {
+    Comparable.less(a, b)
+}

@@ -1,0 +1,44 @@
+// `?` over a `Result` whose error differs from the function's converts the
+// error with the function's `From` implementation before returning it.
+enum ParseError {
+    Malformed(UInt8),
+}
+
+enum LoadError {
+    Parse(UInt8),
+    Missing,
+}
+
+impl From[ParseError] for LoadError {
+    fn from(sink source: ParseError) -> LoadError {
+        match source {
+            Malformed(column) => .Parse(column + 40),
+        }
+    }
+}
+
+fn parse(text: Str) -> Result[UInt8, ParseError] {
+    if text.length() == 0 {
+        return .Err(.Malformed(2))
+    }
+    return .Ok(UInt8(text.length()))
+}
+
+fn load(text: Str) -> Result[UInt8, LoadError] {
+    let length = parse(text)?
+    return .Ok(length)
+}
+
+fn main() -> UInt8 {
+    let loaded = match load("abc") {
+        Ok(length) => length,
+        Err(_) => 0,
+    }
+    match load("") {
+        Ok(_) => 1,
+        Err(failure) => match failure {
+            Parse(column) => column + loaded,
+            Missing => 2,
+        },
+    }
+}

@@ -1,0 +1,26 @@
+// `for (a, b) in &it` advances a lent iterator whose items are pairs, taking
+// each pair apart; the iterator is still there after the loop.
+struct Doubles {
+    next: UInt8,
+}
+
+impl Iterator for Doubles {
+    type Item = (UInt8, UInt8)
+
+    fn next(inout self: Doubles) -> Option[(UInt8, UInt8)] {
+        if self.next == 3 {
+            return .None
+        }
+        self.next += 1
+        .Some((self.next, self.next * 2))
+    }
+}
+
+fn main() -> UInt8 {
+    var doubles = Doubles { next = 0 }
+    var total: UInt8 = 0
+    for (a, b) in &doubles {
+        total += a * 10 + b
+    }
+    total - 72 + doubles.next - 3
+}

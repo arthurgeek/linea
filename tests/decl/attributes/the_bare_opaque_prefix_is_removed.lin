@@ -1,0 +1,7 @@
+opaque struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { value = 0 }
+    let Point { value } = point
+    value
+}

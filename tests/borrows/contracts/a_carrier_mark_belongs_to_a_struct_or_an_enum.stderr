@@ -1,0 +1,15 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/borrows/contracts/a_carrier_mark_belongs_to_a_struct_or_an_enum.lin:3:1
+  |
+3 | @carrier
+  | ^ place them before a struct, enum, or newtype
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/borrows/contracts/a_carrier_mark_belongs_to_a_struct_or_an_enum.lin:8:1
+  |
+8 | @carrier
+  | ^ place them before a struct, enum, or newtype
+error[S-Entry]: a carrier is a struct or an enum
+  --> tests/borrows/contracts/a_carrier_mark_belongs_to_a_struct_or_an_enum.lin:11:2
+   |
+11 | @carrier
+   |  ^^^^^^^ a newtype names one existing type; mark a struct or an enum instead

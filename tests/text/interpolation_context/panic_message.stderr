@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/panic_message.lin:2:11
+  |
+2 |     panic("hello {1}")
+  |     ------------------ a panic message has type `Str`
+  |           ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`

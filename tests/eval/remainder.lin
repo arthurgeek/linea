@@ -1,0 +1,14 @@
+// What a truncating division leaves. `a % b` is exactly `a - (a / b) * b`, so
+// the sign follows the dividend rather than the divisor: `-17 % 5` is `-2` and
+// not `3`. That is the pairing `/` already chose, and a remainder disagreeing
+// with the division beside it would be two answers to one question.
+fn main() -> UInt8 {
+    let positive: Int64 = 17 % 5
+    let negative: Int64 = -17 % 5
+    let divisor_negative: Int64 = 17 % -5
+    let exact: Int64 = 20 % 5
+
+    // 2, then 2 back from the negative, then 2 again, and nothing for the
+    // exact one: 2 + 2 + 2 + 0.
+    UInt8(positive + (0 - negative) + divisor_negative + exact)
+}

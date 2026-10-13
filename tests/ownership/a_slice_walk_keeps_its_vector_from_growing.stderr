@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_slice_walk_keeps_its_vector_from_growing.lin:13:19
+   |
+10 |     for _ in values.as_slice() {
+   |              ----------------- the loop's next pass still walks the observation here
+13 |             match &values.push(walked) {
+   |                   ^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation

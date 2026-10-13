@@ -1,0 +1,15 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/aliases/an_alias_takes_no_representation_modifier.lin:4:1
+  |
+4 | @linear alias Tokens = UInt8
+  | ^ place them before a struct, enum, or newtype
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/aliases/an_alias_takes_no_representation_modifier.lin:5:1
+  |
+5 | @opaque
+  | ^ place them before a struct, enum, or newtype
+error[M-Export]: only a function designates a foreign entry point
+ --> tests/aliases/an_alias_takes_no_representation_modifier.lin:3:14
+  |
+3 | export alias Meters = UInt64
+  |              ^^^^^^ export a function, which is what a caller calls

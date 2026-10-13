@@ -1,0 +1,20 @@
+// A temporary array lives until the end of its statement, so a view of it is
+// walked or summed there. `copy(values)` walks a copy of the view, which
+// leaves the parameter it was given where it is.
+import std.mem
+
+fn total(values: mem.Slice[UInt8]) -> UInt8 {
+    var sum: UInt8 = 0
+    for value in copy(values) {
+        sum += *value
+    }
+    sum
+}
+
+fn main() -> UInt8 {
+    var walked: UInt8 = 0
+    for value in [UInt8(1), UInt8(2), UInt8(3)].as_slice() {
+        walked += *value
+    }
+    walked + total([UInt8(10), UInt8(20)].as_slice())
+}

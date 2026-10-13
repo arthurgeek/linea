@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `handle` is declared by `Owner`, which is not in scope here
+  --> tests/inference/a_refused_argument_leaves_its_parameter_unsaid.lin:18:22
+   |
+18 |     let text = label(arena.handle()) else |_| {
+   |                      ^^^^^^^^^^^^ write `use mem.Owner`: an operation is reached through the trait that declares it

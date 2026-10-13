@@ -1,0 +1,31 @@
+trait Echo[A: Copyable] {
+    fn echo(_self: Self, input: A) -> A where carries(input)
+}
+
+impl[A: Copyable] Echo[A] for UInt64 {
+    fn echo(_self: UInt64, input: A) -> A where carries(input) {
+        copy(input)
+    }
+}
+
+struct Holder[T] {
+    value: T,
+}
+
+impl[A: Copyable, T] Echo[A] for Holder[T] {
+    fn echo(_self: Self, input: A) -> A where carries(input) {
+        copy(input)
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt16] = .{ value = 9 }
+    let first = Echo.echo(UInt64(1), UInt8(7))
+    let second = Echo.echo(UInt64(2), true)
+    let third = Echo.echo(holder, UInt16(11))
+    if first == 7 && second && third == 11 {
+        0
+    } else {
+        1
+    }
+}

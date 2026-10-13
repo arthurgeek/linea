@@ -1,0 +1,14 @@
+fn show(value: UInt8) -> Str {
+//      ^ variable.parameter
+    "{value} {value:?} {{"
+//    ^ variable
+//            ^ variable
+//                 ^^ operator
+//                    ^^ string.escape
+}
+
+fn cell(price: Float64) -> Str {
+    "[{price:>8.2}]"
+//     ^ variable
+//           ^^^^ operator
+}

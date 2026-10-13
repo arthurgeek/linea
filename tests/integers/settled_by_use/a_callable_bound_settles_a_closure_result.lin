@@ -1,0 +1,8 @@
+fn call[F: fn() -> Int64](make: F) -> Int64 {
+    make()
+}
+
+fn main() -> UInt8 {
+    let make = || 5
+    UInt8(call(make) - 5)
+}

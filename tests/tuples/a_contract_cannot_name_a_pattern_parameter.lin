@@ -1,0 +1,27 @@
+// A pattern parameter has no name, so a lambda's contract names neither the
+// parameter nor a binder of its pattern as a source.
+fn apply[F: fn(read pair: (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn by_binder() -> UInt8 {
+    apply(
+        (1, 2),
+        |(a, b)| -> UInt8 where carries(a) {
+            a + b
+        },
+    )
+}
+
+fn by_parameter_label() -> UInt8 {
+    apply(
+        (1, 2),
+        |(a, b)| -> UInt8 where carries(pair) {
+            a + b
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    by_binder() + by_parameter_label()
+}

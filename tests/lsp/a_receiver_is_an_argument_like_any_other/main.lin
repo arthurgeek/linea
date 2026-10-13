@@ -1,0 +1,33 @@
+// `(a).of(2)` and `Measure.of(a, 3)` are one call written two ways, so the
+// receiver sits in an ordinary parameter position with an ordinary convention
+// and is hinted where it is written -- between the receiver and the dot, which
+// is after the parentheses a reader put around it and not inside them.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self, since: UInt8) -> UInt8
+}
+
+trait Spend {
+    fn all(sink x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self, since: UInt8) -> UInt8 {
+        x.balance + since
+    }
+}
+
+impl Spend for Account {
+    fn all(sink x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    let b: Account = .{ balance = 1 }
+    Measure.of(a, 3) + (a).of(2) + b.all()
+}

@@ -1,0 +1,200 @@
+==================
+Internal declarations
+==================
+
+internal struct Token { value: UInt8 }
+internal fn make(value: UInt8) -> Token { .{ value = value } }
+internal let zero: UInt8 = 0
+struct Box { value: UInt8 }
+impl Box {
+    internal fn value(read self: Box) -> UInt8 { self.value }
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (visibility)
+    name: (type_identifier)
+    (field_list
+      (field
+        name: (identifier)
+        type: (type_identifier))))
+  (function_declaration
+    (visibility)
+    name: (identifier)
+    (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (expression_statement
+        (struct_literal
+          (field_initialiser
+            name: (identifier)
+            (identifier))))))
+  (constant_declaration
+    (visibility)
+    name: (identifier)
+    type: (type_identifier)
+    value: (integer_literal))
+  (struct_declaration
+    name: (type_identifier)
+    (field_list
+      (field
+        name: (identifier)
+        type: (type_identifier))))
+  (impl_block
+    type: (type_identifier)
+    (function_declaration
+      (visibility)
+      name: (identifier)
+      (parameter_list
+        (parameter
+          (convention)
+          name: (identifier)
+          type: (type_identifier)))
+      return_type: (type_identifier)
+      body: (block
+        (expression_statement
+          (field_expression
+            (identifier)
+            field: (identifier)))))))
+
+==================
+Unit implementation heads
+==================
+
+impl Value for () {}
+impl () {}
+
+---
+
+(source_file
+  (impl_block
+    trait: (trait_reference
+      name: (type_identifier))
+    type: (unit_type))
+  (impl_block
+    type: (unit_type)))
+
+==================
+Qualified trait references
+==================
+
+trait Child: protocol.Parent {}
+template impl protocol.Marker {}
+derive protocol.Marker for Item
+impl protocol.Parent for Item {}
+fn accepts[T: protocol.Parent](read _value: T) -> () {}
+fn open(read _item: Item) -> () where Item: protocol.Parent {}
+struct Item {}
+
+---
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (bound
+      (trait_reference
+        module: (identifier)
+        name: (type_identifier))))
+  (template_impl_block
+    trait: (trait_reference
+      module: (identifier)
+      name: (type_identifier)))
+  (derive_declaration
+    (derive_trait
+      trait: (trait_reference
+        module: (identifier)
+        name: (type_identifier)))
+    type: (type_identifier))
+  (impl_block
+    trait: (trait_reference
+      module: (identifier)
+      name: (type_identifier))
+    type: (type_identifier))
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            module: (identifier)
+            name: (type_identifier)))))
+    (parameter_list
+      (parameter
+        (convention)
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (unit_type)
+    body: (block))
+  (function_declaration
+    name: (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (unit_type)
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            module: (identifier)
+            name: (type_identifier)))))
+    body: (block))
+  (struct_declaration
+    name: (type_identifier)
+    (field_list)))
+
+==================
+Inferred constants
+==================
+
+let count = 3
+pub let greeting = "hello"
+impl UInt8 {
+    pub let answer = UInt8(42)
+}
+
+---
+
+(source_file
+  (constant_declaration
+    (identifier)
+    (integer_literal))
+  (constant_declaration
+    (visibility)
+    (identifier)
+    (string_literal))
+  (impl_block
+    (type_identifier)
+    (constant_declaration
+      (visibility)
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list
+          (integer_literal))))))
+
+================================================================================
+Inferred numeric and boolean constants
+================================================================================
+
+let answer = 42
+pub let ready = true
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (constant_declaration
+    (identifier)
+    (integer_literal))
+  (constant_declaration
+    (visibility)
+    (identifier)
+    (boolean_literal)))

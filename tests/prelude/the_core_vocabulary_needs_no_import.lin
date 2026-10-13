@@ -1,0 +1,87 @@
+// The core vocabulary is in every module's scope: Release, Allocator, Writer,
+// Equivalent, Ordered, From, Into, TryFrom, TryInto, Default, Vec and String
+// are written here without an import. `std.mem` is imported only for the
+// system allocator.
+import std.mem
+
+// A bakery order: how many loaves of one kind to bake.
+@(copyable, derive(Equatable, Equivalent, Comparable, Ordered, Debug, Default, Release))
+struct Loaves {
+    count: UInt64,
+}
+
+impl From[UInt64] for Loaves {
+    fn from(sink source: UInt64) -> Loaves {
+        .{ count = source }
+    }
+}
+
+// An oven holds at most twelve loaves at a time.
+struct OvenLoad {
+    loaves: UInt8,
+}
+
+impl TryFrom[Loaves] for OvenLoad {
+    fn try_from(x: Loaves) -> Option[OvenLoad] {
+        if x.count > 12 {
+            return .None
+        }
+        return .Some(.{ loaves = UInt8(x.count) })
+    }
+}
+
+// A tray releases nothing, but says so through the one ordinary operation.
+struct Tray {
+    loaves: Loaves,
+}
+
+impl Release for Tray {
+    fn release(sink self: Tray) -> () {
+        let Tray { loaves: _loaves } = self
+    }
+}
+
+fn bakes_more[T: Ordered](a: T, b: T) -> Bool {
+    b < a
+}
+
+fn record[A: Allocator](allocator: A, sink loaves: Loaves) -> Vec[Loaves, A] where carries(allocator) {
+    var batches: Vec[Loaves, A] = Vec.new_in(allocator)
+    &batches.push(loaves).unwrap()
+    batches
+}
+
+fn label[W: Writer](inout out: W, loaves: Loaves) -> Result[(), W.Error] where carries(.Err: out) {
+    Writer.write_str(&out, "loaves: ")?
+    loaves.fmt(&out)
+}
+
+impl Display for Loaves {
+    fn fmt[W: Writer](self: Loaves, inout w: W) -> Result[(), W.Error] {
+        Display.fmt(self.count, &w)
+    }
+}
+
+fn main() -> UInt8 {
+    let morning: Loaves = UInt64(5).into()
+    let evening: Loaves = From.from(UInt64(9))
+    let empty: Loaves = Default.default()
+    let most = if bakes_more(morning, evening) {
+        morning
+    } else {
+        evening
+    }
+    let batches = record(mem.system(), copy(most))
+    let in_oven: Option[OvenLoad] = most.try_into()
+    var note: String[mem.SystemAllocator] = String.new()
+    label(&note, most).unwrap()
+    let written = note.view().length()
+    note.release()
+    let recorded = batches.length()
+    batches.release()
+    Tray { loaves = empty }.release()
+    match in_oven {
+        Some(load) => load.loaves + UInt8(recorded) + UInt8(written),
+        None => 0,
+    }
+}

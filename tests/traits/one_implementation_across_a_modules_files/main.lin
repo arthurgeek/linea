@@ -1,0 +1,26 @@
+// The files of one module share one namespace, so an `impl` may sit in a file
+// other than the one declaring the type -- and two files may each write the
+// same implementation without either one being readable as wrong.
+//
+// Coherence is asked of the whole program rather than of a file, which is what
+// catches it. [M-Impl] confines a trait implementation to the module that
+// declares the trait or the one that declares the type, and imports reach only
+// downwards, so this is the shape a conflict can actually take.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+struct Account {
+    balance: UInt8,
+}
+
+impl Measure for Account {
+    fn of(x: Account) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

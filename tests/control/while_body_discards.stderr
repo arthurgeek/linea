@@ -1,0 +1,5 @@
+error[T-Discard]: this body produces an `Int64` that is discarded
+ --> tests/control/while_body_discards.lin:3:9
+  |
+3 |         1
+  |         ^ a `while` runs its body for its effect

@@ -1,0 +1,6 @@
+// An import writes the path down to a directory, one identifier per element.
+// A directory whose name is not one is a module no import can name, so there
+// is no import to offer.
+fn main() -> UInt8 {
+    ledger.size()
+}

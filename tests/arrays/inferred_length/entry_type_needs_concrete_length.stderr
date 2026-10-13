@@ -1,0 +1,10 @@
+error[S-Entry]: the entry point answers with `UInt8`, which is the exit status
+ --> tests/arrays/inferred_length/entry_type_needs_concrete_length.lin:1:14
+  |
+1 | fn main() -> [UInt8; _] {
+  |              ^ this is not `UInt8`
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/entry_type_needs_concrete_length.lin:1:22
+  |
+1 | fn main() -> [UInt8; _] {
+  |                      ^ write an explicit length in this type

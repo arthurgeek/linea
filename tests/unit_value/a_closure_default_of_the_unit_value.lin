@@ -1,0 +1,5 @@
+// A closure's parameter may default to the unit value `()`.
+fn main() -> UInt8 {
+    let settle = |_value: () = ()| UInt8(0)
+    settle()
+}

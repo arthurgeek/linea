@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/vec/constructors/repeated_observations_keep_their_backing_alive.lin:6:5
+  |
+6 |     number = 9
+  |     ^^^^^^ keep this place available until the last use of its observation
+7 |     let answer = *repeated[1]
+  |                  ------------ the observation is still used here

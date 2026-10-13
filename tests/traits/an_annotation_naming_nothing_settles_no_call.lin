@@ -1,0 +1,6 @@
+// An annotation that names no type is the mistake to report. The call it was
+// to settle is not reported as well, because nothing here could have.
+fn main() -> UInt8 {
+    let _value: Missing = Default.default()
+    0
+}

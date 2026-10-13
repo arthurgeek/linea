@@ -1,0 +1,12 @@
+@linear
+enum Permit { Preserve }
+
+let granted = Permit.Preserve
+
+fn settle(sink permit: Permit) -> UInt8 {
+    match permit { Preserve => 0 }
+}
+
+fn main() -> UInt8 {
+    settle(granted)
+}

@@ -1,0 +1,11 @@
+error[N-Unused]: `c` is never used
+  --> tests/type_defaults/a_mismatch_about_another_type_is_not_blamed_on_a_default.lin:12:9
+   |
+12 |     let c: UInt16 = Box.empty()
+   |         ^ bind it as `_` if the value is not wanted
+error[T-Mismatch]: expected `UInt16`, found `Box[UInt8]`
+  --> tests/type_defaults/a_mismatch_about_another_type_is_not_blamed_on_a_default.lin:12:21
+   |
+12 |     let c: UInt16 = Box.empty()
+   |            ------ expected because of this annotation
+   |                     ^^^^^^^^^^^ expected `UInt16`, found `Box[UInt8]`

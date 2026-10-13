@@ -1,0 +1,11 @@
+// There is no `Percent?(x)` pattern: reading a proven value has nothing to
+// decline. The spelling is refused where a pattern parses, not read as some
+// other production.
+type Percent = UInt8 where it in 0..=99
+
+fn main() -> UInt8 {
+    let p = Percent(50)
+    match p {
+        Percent?(n) => n,
+    }
+}

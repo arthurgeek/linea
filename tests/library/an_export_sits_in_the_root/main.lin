@@ -1,0 +1,5 @@
+import inner
+
+export fn published(num: Int32) -> Int32 {
+    inner.buried(num)
+}

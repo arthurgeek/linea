@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `P[P[P[P[P[P[P[P[P[P[UInt64]]]]]]]]]]` is wider
+  --> tests/generics/a_width_reached_only_inside_a_body_is_held_to_the_limit.lin:13:6
+   |
+13 | enum P[T] {
+   |      ^ hold fewer parts, or nest them less deeply

@@ -1,0 +1,12 @@
+fn invoke[F: fn() -> borrow UInt8 where carries()](callback: F) -> borrow UInt8 where carries() {
+    callback()
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let callback = [number] || -> where borrows(number) {
+        borrow number
+    }
+    let observation = invoke(callback)
+    *observation
+}

@@ -1,0 +1,8 @@
+fn duplicate[T](_marker: T, number: UInt8) -> UInt8 {
+    let saved = copy(number)
+    number + saved
+}
+
+fn main() -> UInt8 {
+    duplicate(true, UInt8(7))
+}

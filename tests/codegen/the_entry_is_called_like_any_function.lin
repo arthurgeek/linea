@@ -1,0 +1,12 @@
+// The entry is a function like any other: a program may call it, and what
+// the C runtime is handed is the wrapper's business -- the status narrows
+// there, not in the entry's own signature. A signature special-cased for the
+// entry is a signature its own callers cannot spell.
+fn main() -> UInt8 {
+    let x: UInt8 = 3
+    if x == 0 {
+        main()
+    } else {
+        x
+    }
+}

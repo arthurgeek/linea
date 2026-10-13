@@ -1,0 +1,7 @@
+// A binding whose initialiser the checker could not type is left unhinted, as
+// hover and completion leave it, and a settled binding is hinted as usual.
+fn main() -> UInt8 {
+    let settled = 7
+    let unsettled = nope()
+    settled
+}

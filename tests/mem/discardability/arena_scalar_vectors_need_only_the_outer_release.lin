@@ -1,0 +1,16 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    defer arena.release()
+    let values = Vec.filled(arena.handle(), count: 3, value: UInt64(7)).unwrap()
+    if values[2] == 7 {
+        0
+    } else {
+        1
+    }
+}

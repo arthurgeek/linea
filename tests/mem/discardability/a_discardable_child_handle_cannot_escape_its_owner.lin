@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Owner
+use mem.SystemAllocator
+use mem.system
+
+fn child_handle(outer: Arena[SystemAllocator]) -> Handle[Handle[SystemAllocator]] {
+    let child = Arena.open(outer.handle(), 32)
+    child.handle()
+}
+
+fn main() -> UInt8 {
+    let outer = Arena.open(system(), 128)
+    defer outer.release()
+    let _handle = child_handle(outer)
+    0
+}

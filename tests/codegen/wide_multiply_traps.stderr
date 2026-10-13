@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `Int64`
+ --> tests/codegen/wide_multiply_traps.lin:4:13
+  |
+4 |     UInt8(a * b)
+  |             ^ the result is not representable

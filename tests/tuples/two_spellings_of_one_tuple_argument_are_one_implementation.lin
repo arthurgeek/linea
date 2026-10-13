@@ -1,0 +1,25 @@
+// `(A, B)` and `Tuple2[A, B]` name one type, so implementing a trait for both
+// spellings implements it twice.
+struct P[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[A, B] From[(A, B)] for P[A, B] {
+    fn from(sink source: (A, B)) -> Self {
+        let (first, second) = source
+        .{ first, second }
+    }
+}
+
+impl[A, B] From[Tuple2[A, B]] for P[A, B] {
+    fn from(sink source: Tuple2[A, B]) -> Self {
+        let (first, second) = source
+        .{ first, second }
+    }
+}
+
+fn main() -> UInt8 {
+    let p: P[UInt8, UInt8] = From.from((1, 2))
+    p.first + p.second - 3
+}

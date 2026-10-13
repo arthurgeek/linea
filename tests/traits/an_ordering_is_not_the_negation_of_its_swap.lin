@@ -1,0 +1,39 @@
+// `>` is `less` with its operands swapped, and reaches `equals` never. `>=` is
+// that order or equality, and reaches `equals` exactly when `less` was false.
+import std.io
+
+use io.eprint
+
+struct Counted {
+    n: UInt8,
+}
+
+impl Equatable for Counted {
+    fn equals(self: Counted, other: Counted) -> Bool {
+        eprint("e")
+        self.n == other.n
+    }
+}
+
+impl Comparable for Counted {
+    fn less(self: Counted, other: Counted) -> Bool {
+        eprint("l")
+        self.n < other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let big: Counted = .{ n = 2 }
+    let small: Counted = .{ n = 1 }
+    let same: Counted = .{ n = 2 }
+
+    let greater = big > small
+    let at_least = big >= small
+    let equal = big >= same
+
+    if greater && at_least && equal {
+        0
+    } else {
+        1
+    }
+}

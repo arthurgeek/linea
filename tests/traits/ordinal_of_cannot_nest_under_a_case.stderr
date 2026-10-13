@@ -1,0 +1,5 @@
+error[T-Reflection]: call `reflect.ordinal_of(value)` outside reflected cases and component loops
+ --> tests/traits/ordinal_of_cannot_nest_under_a_case.lin:8:29
+  |
+8 |             reflect.case => reflect.ordinal_of(value),
+  |                             ^^^^^^^^^^^^^^^^^^^^^^^^^ this ordinal operation cannot expand at one source point

@@ -1,0 +1,30 @@
+// A literal's type is named by what it holds, and inside a generic body one of
+// the pieces is a type that body does not know. It is the one structure
+// carrying a type parameter that is not an instantiation, so substitution had
+// nothing to take apart and every question below was asked of a type no
+// instantiation ever supplied: which offset a piece sits at, which
+// implementation renders it, and which symbol the call names.
+//
+// The family this is written against exists for exactly this. `impl[T:
+// Display] Display for Option[T]` is what lets a body print an `Option` without
+// knowing what is inside it, and printing one is the first thing anything built
+// on the library does.
+import std.io
+
+use io.IoError
+use io.println
+
+fn show[T: Copyable + Display](o: Option[T]) -> Result[(), IoError] {
+    println("{o}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let some: Option[Str] = .Some("hi")
+    let none: Option[Str] = .None
+    let n: Option[UInt8] = .Some(7)
+
+    show(some)?
+    show(none)?
+    show(n)?
+    return .Ok(0)
+}

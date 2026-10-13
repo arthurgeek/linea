@@ -1,0 +1,5 @@
+error[T-Reflection]: a reflected component loop binds one name
+  --> tests/traits/a_component_loop_binds_one_name.lin:10:21
+   |
+10 |                 for (_first, _second) in reflect.components {
+   |                     ^^^^^^^^^^^^^^^^^ a component is not a tuple to take apart

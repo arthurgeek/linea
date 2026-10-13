@@ -1,0 +1,43 @@
+==================
+Transparent observation projections
+==================
+
+fn inspect(read view: borrow Holder) -> UInt8 where carries(*view.item, (*view).item, **view) {
+    *view.item + (*view).value
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (borrow_type
+          (type_identifier))))
+    (type_identifier)
+    (where_clause
+      (source_contract
+        (source_path
+          (identifier)
+          (identifier))
+        (source_path
+          (source_path
+            (identifier))
+          (identifier))
+        (source_path
+          (identifier))))
+    (block
+      (expression_statement
+        (binary_expression
+          (unary_expression
+            (field_expression
+              (identifier)
+              (identifier)))
+          (field_expression
+            (parenthesised_expression
+              (unary_expression
+                (identifier)))
+            (identifier)))))))

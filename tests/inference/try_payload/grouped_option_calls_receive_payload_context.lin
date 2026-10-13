@@ -1,0 +1,12 @@
+fn some[T](sink value: T) -> Option[T] where carries(.Some: value) {
+    .Some(value)
+}
+
+fn value() -> Option[UInt8] {
+    let value: UInt8 = (some(7))?
+    return .Some(value)
+}
+
+fn main() -> UInt8 {
+    value().unwrap()
+}

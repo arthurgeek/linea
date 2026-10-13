@@ -1,0 +1,15 @@
+program decls=4
+  decl function "of" tokens 10..19
+    in _Measure
+    param read "x" : Self
+    returns UInt8
+  decl function "scaled" tokens 19..32
+    in _Measure
+    param read "x" : Self
+    param read "by" : UInt8
+    returns UInt8
+  decl trait_ "_Measure" tokens 7..33
+  decl function "main" tokens 33..42
+    returns UInt8
+    expr %1 block tokens 39..42
+      expr %0 int_literal tokens 40..41 "0"

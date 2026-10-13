@@ -1,0 +1,13 @@
+fn fail(value: UInt64) -> Result[(), borrow UInt64] where borrows(.Err: value) {
+    .Err(borrow value)
+}
+
+fn escape() -> Result[UInt8, borrow UInt64] {
+    let local: UInt64 = 7
+    fail(local)?
+    return .Ok(0)
+}
+
+fn main() -> UInt8 {
+    match escape() { Ok(value) => value, Err(view) => UInt8(*view) }
+}

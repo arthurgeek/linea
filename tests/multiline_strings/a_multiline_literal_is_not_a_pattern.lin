@@ -1,0 +1,11 @@
+fn describe(byte: UInt8) -> Str {
+    match byte {
+        \\\
+        => "a backslash",
+        _ => "another byte",
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(describe(92).length())
+}

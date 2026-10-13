@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking a `Counter` builds a `Steps` and abandons it where the walk ends, and it is linear
+  --> tests/iter/a_linear_iterator_is_refused.lin:34:15
+   |
+34 |     for _x in c {}
+   |               ^ `Steps` is linear, and nothing settles it here
+   |
+   = help: bind it, `var pending = c.iterate()`, walk it lent with `for _x in &pending`, then settle `pending` after the loop

@@ -1,0 +1,9 @@
+error[O-Leak]: `arena` (a linear `Arena[mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/mem/discardability/a_system_arena_still_requires_release.lin:8:9
+   |
+8  |     let arena = Arena.open(system(), 128)
+   |         ^^^^^ never settled on the path that reaches the end of this block
+11 | }
+   | - the block ends here
+   |
+   = help: settle it first with `arena.release()`

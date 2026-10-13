@@ -1,0 +1,24 @@
+// A ledger must be closed. The closure borrows it `inout` to record entries,
+// and once the closure's last call is made, `main` closes the ledger itself.
+@linear
+struct Ledger {
+    entries: UInt8,
+}
+
+impl Ledger {
+    fn close(sink self: Self) -> UInt8 {
+        let Ledger { entries } = self
+        entries
+    }
+}
+
+fn main() -> UInt8 {
+    var ledger = Ledger { entries = 0 }
+    var record = inout [inout ledger] || {
+        ledger.entries += 1
+    }
+    &record()
+    &record()
+    &record()
+    ledger.close()
+}

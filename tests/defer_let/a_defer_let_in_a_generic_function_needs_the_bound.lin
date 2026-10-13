@@ -1,0 +1,29 @@
+// A type parameter bounded by `Release` has the operation `defer let` schedules,
+// wherever the function is instantiated.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn hold[T: Release](sink value: T) -> UInt8 {
+    defer let held = value
+    1
+}
+
+fn main() -> UInt8 {
+    hold(Lamp { id = 7 }) + hold(3)
+}

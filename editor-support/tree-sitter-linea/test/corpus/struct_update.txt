@@ -1,0 +1,58 @@
+==================
+Structure literals end with a base
+==================
+
+fn tuned(limits: Limits) -> Limits {
+    let quick = Limits { timeout = 5, ..limits }
+    let same: Limits = .{ ..Limits.default() }
+    Limits {
+        timeout = 9,
+        retries = 2,
+        ..copy(quick),
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (struct_literal
+          (literal_type
+            (type_identifier))
+          (field_initialiser
+            (identifier)
+            (integer_literal))
+          (struct_base
+            (identifier))))
+      (let_statement
+        (identifier)
+        (type_identifier)
+        (struct_literal
+          (struct_base
+            (call_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (argument_list)))))
+      (expression_statement
+        (struct_literal
+          (literal_type
+            (type_identifier))
+          (field_initialiser
+            (identifier)
+            (integer_literal))
+          (field_initialiser
+            (identifier)
+            (integer_literal))
+          (struct_base
+            (copy_expression
+              (identifier))))))))

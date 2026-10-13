@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Counter`, and `borrow State` does not implement it
+  --> tests/borrows/transparent/readonly_forwarding_does_not_grant_a_mixed_trait_bound.lin:26:5
+   |
+26 |     inspect(view)
+   |     ^^^^^^^ implement it for that type, or drop the bound

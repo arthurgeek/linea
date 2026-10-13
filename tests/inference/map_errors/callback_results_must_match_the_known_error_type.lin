@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt8] = .Err(9)
+    let mapped: Result[UInt8, UInt16] = failure.map_err(|sink error| error == 0)
+    match mapped {
+        Ok(value) => value,
+        Err(error) => UInt8(error),
+    }
+}

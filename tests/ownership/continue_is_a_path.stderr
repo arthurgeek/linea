@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/continue_is_a_path.lin:24:13
+   |
+22 |         let k: Key = .Forged(1)
+   |             - acquired here
+24 |             continue
+   |             ^^^^^^^^ still owned here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

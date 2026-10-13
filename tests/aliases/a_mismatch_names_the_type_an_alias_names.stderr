@@ -1,0 +1,13 @@
+error[T-Mismatch]: expected `UInt64`, found `Str`
+ --> tests/aliases/a_mismatch_names_the_type_an_alias_names.lin:4:5
+  |
+3 | fn far() -> Meters {
+  |             ------ expected because of this return type; `Meters` is an alias of `UInt64`
+4 |     "far"
+  |     ^^^^^ expected `UInt64`, found `Str`
+error[T-Mismatch]: expected `UInt64`, found `Bool`
+ --> tests/aliases/a_mismatch_names_the_type_an_alias_names.lin:8:28
+  |
+8 |     let distance: Meters = true
+  |                   ------ expected because of this annotation; `Meters` is an alias of `UInt64`
+  |                            ^^^^ expected `UInt64`, found `Bool`

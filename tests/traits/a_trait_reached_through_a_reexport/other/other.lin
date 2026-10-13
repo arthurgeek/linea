@@ -1,0 +1,10 @@
+// A second trait of the same name, declared where this module can see it and
+// implemented for nothing. Reaching it instead of the re-exported one is the
+// mistake this case exists to refuse.
+pub trait Measure {
+    fn weigh(x: Self) -> UInt8
+}
+
+pub fn label() -> UInt8 {
+    1
+}

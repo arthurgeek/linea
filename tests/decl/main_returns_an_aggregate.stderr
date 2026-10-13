@@ -1,0 +1,5 @@
+error[S-Entry]: a program's `main` answers `UInt8`, or `Result[UInt8, E]` to let a failure leave
+  --> tests/decl/main_returns_an_aggregate.lin:15:14
+   |
+15 | fn main() -> Big {
+   |              ^^^ returns `Big`

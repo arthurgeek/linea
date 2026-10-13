@@ -1,0 +1,22 @@
+// `&ticker.counters[at]()` invokes the function the field's element holds,
+// which changes what it captured: `counters` is a field, so the bracket
+// indexes it, and `&` marks the invocation.
+struct Ticker[F: inout fn() -> UInt8] {
+    counters: [F; 1],
+}
+
+fn start[F: inout fn() -> UInt8](sink counter: F) -> Ticker[F] {
+    .{ counters = [counter] }
+}
+
+fn main() -> UInt8 {
+    var ticker = start(
+        inout [sink count = UInt8(0)] || {
+            count += 1
+            count
+        },
+    )
+    let at = 0
+    let first = &ticker.counters[at]()
+    first + &ticker.counters[at]() - 3
+}

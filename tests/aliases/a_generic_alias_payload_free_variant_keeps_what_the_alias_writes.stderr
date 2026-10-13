@@ -1,0 +1,5 @@
+error[T-Mismatch]: `Boxed` writes `Slot[A, UInt8]` here, and this is a `Slot[UInt16, UInt32]`
+  --> tests/aliases/a_generic_alias_payload_free_variant_keeps_what_the_alias_writes.lin:11:42
+   |
+11 |     let _differs: Slot[UInt16, UInt32] = Boxed.Empty
+   |                                          ^^^^^^^^^^^ the alias fixes this type

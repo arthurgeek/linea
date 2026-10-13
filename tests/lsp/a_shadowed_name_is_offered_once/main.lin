@@ -1,0 +1,12 @@
+// A name declared again inside a scope that already had one is offered once,
+// and the one offered is the one a reference there would reach. The chain
+// records both and searches from the inside out, so which of them leads is
+// already decided.
+fn shadow(n: UInt8) -> UInt8 {
+    let n: UInt16 = UInt16(n) + 1
+    UInt8(n)
+}
+
+fn main() -> UInt8 {
+    shadow(4)
+}

@@ -1,0 +1,8 @@
+error[T-Mismatch]: each closure has its own type, so this closure is not the one expected
+ --> tests/erased_closures/two_closures_in_one_array_have_two_types.lin:4:58
+  |
+4 |     let rules = [[sink fee] |cents: UInt64| cents + fee, [sink percent] |cents: UInt64| cents - cents * percent / 100]
+  |                  -------------------------------------- this element settles what the array holds
+  |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a different closure
+  |
+  = help: closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(allocator, closure)`; closures that capture nothing also convert to a written `fn` type

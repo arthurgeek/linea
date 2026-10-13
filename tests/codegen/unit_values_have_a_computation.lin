@@ -1,0 +1,14 @@
+fn consume[T](_value: T) -> () {}
+
+fn empty() -> () {}
+
+fn bare() -> () {
+    return
+}
+
+fn main() -> UInt8 {
+    consume(())
+    empty()
+    bare()
+    0
+}

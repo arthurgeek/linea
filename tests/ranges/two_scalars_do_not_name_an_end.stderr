@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Str`, found `Int64`
+ --> tests/ranges/two_scalars_do_not_name_an_end.lin:4:19
+  |
+4 |     let r = "ab".."z"
+  |             ---- expected because of this end
+  |                   ^^^ expected `Str`, found `Int64`

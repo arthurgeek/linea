@@ -1,0 +1,13 @@
+// The only call naming `double` is written where the local `shapes` shadows
+// the import, so nothing in this file reaches the module and the import is
+// unused.
+import shapes
+
+fn twice(n: UInt8) -> UInt8 {
+    let shapes: UInt8 = 1
+    n.double() + shapes
+}
+
+fn main() -> UInt8 {
+    twice(2)
+}

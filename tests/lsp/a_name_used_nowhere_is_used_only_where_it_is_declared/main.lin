@@ -1,0 +1,11 @@
+// A parameter the body does not read is deliberately unused, which the
+// language spells with a leading underscore. Nothing reaches it, so the only
+// place it is written is where it was declared -- and a client that asked for
+// the uses alone is sent none.
+fn keep(_spare: UInt8) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    keep(2)
+}

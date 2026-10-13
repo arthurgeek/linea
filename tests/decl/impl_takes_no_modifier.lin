@@ -1,0 +1,22 @@
+// An implementation has neither a name to export nor an ownership policy.
+struct P {
+    x: UInt8,
+}
+
+pub impl P {
+    pub fn get(p: P) -> UInt8 {
+        p.x
+    }
+}
+
+@linear
+impl P {
+    pub fn twice(p: P) -> UInt8 {
+        p.x + p.x
+    }
+}
+
+fn main() -> UInt8 {
+    let p: P = .{ x = 1 };
+    P.get(p) + P.twice(p)
+}

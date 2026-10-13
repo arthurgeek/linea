@@ -1,0 +1,17 @@
+fn wrap[F: fn() -> borrow UInt8](callback: F) -> Result[borrow UInt8, UInt8] where carries(.Ok: callback) {
+    .Ok(callback())
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let result = {
+        let callback = [number] || -> where borrows(number) {
+            borrow number
+        }
+        wrap(callback)
+    }
+    match result {
+        Ok(value) => *value,
+        Err(code) => code,
+    }
+}

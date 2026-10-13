@@ -1,0 +1,53 @@
+// A call through a type parameter's bound reads the trait's arguments from
+// that bound. `H: Watch[P]` names the one implementation a call on a `H` can
+// reach, so `P` is settled before any argument is read: a variant written
+// without its enum takes its type from the parameter, and an operation whose
+// parameters do not mention `P` at all is still a call at `Watch[P]`.
+enum Event[P] {
+    Happened(P),
+    Retried(UInt8),
+}
+
+@copyable
+enum Plain {
+    Once,
+    Twice,
+}
+
+trait Watch[P] {
+    fn observe(inout self: Self, event: Event[P]) -> ()
+
+    fn tally(inout self: Self, plain: Plain) -> ()
+}
+
+struct Counter {
+    seen: UInt64,
+}
+
+impl[P] Watch[P] for Counter {
+    fn observe(inout self: Self, event: Event[P]) -> () {
+        match read event {
+            Happened(_) => self.seen += 100,
+            Retried(times) => self.seen += UInt64(times),
+        }
+    }
+
+    fn tally(inout self: Self, plain: Plain) -> () {
+        match read plain {
+            Once => self.seen += 10,
+            Twice => self.seen += 20,
+        }
+    }
+}
+
+fn report[H: Watch[P], P: Discardable](inout watcher: H, sink value: P) -> () {
+    &watcher.observe(.Retried(3))
+    &watcher.tally(.Twice)
+    &watcher.observe(.Happened(value))
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { seen = 0 }
+    report(&counter, true)
+    UInt8(counter.seen)
+}

@@ -1,0 +1,31 @@
+// An `Option` renders through the value it holds, so what a reader sees is the
+// thing itself rather than the box around it. The implementation is one
+// `impl[T: Display] Display for Option[T]`, and this call binds `T` to `Str`.
+//
+// `Display` and `Debug` part here exactly as they do for a `Str`: output meant
+// for whoever runs the program says `none` where there is nothing, and output
+// meant for whoever reads the program names the constructor and shows what is
+// inside it the same way.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+
+    let some: Option[Str] = .Some("hi")
+    let none: Option[Str] = .None
+
+    Display.fmt(some, &w)?
+    Writer.write_str(&w, "\n")?
+    Display.fmt(none, &w)?
+    Writer.write_str(&w, "\n")?
+
+    Debug.debug(some, &w)?
+    Writer.write_str(&w, "\n")?
+    Debug.debug(none, &w)?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

@@ -1,0 +1,28 @@
+// The other direction. `;` separates two declarations that share a line and is
+// written nowhere else, and a declared type is separated by it like every
+// other member -- on both sides of the relation, since a trait asks for the
+// type and an implementation settles it.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    type Held
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+    type Held = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

@@ -1,0 +1,9 @@
+// Declared in the other file of the same module, and called from it without
+// being announced there. A file is not a boundary.
+fn quarter(n: UInt8) -> UInt8 {
+    n / 4
+}
+
+fn offset() -> UInt8 {
+    7
+}

@@ -1,0 +1,1 @@
+pub struct Celsius { value: Float64 }

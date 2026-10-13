@@ -1,0 +1,5 @@
+error[T-Impl]: `Render` bounds `draw`'s `W` `unrestricted`, and this bounds it `copyable`
+  --> tests/traits/an_impl_bounds_a_type_parameter_the_way_the_signature_does.lin:27:8
+   |
+27 |     fn draw[W: Sink + Copyable](self: Tag, inout w: W) -> UInt8 {
+   |        ^^^^ bound it the way the signature bounds it

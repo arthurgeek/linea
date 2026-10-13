@@ -1,0 +1,14 @@
+error[S-Mutation]: this argument is not mutated, so it takes no `&`
+  --> tests/decl/a_refused_argument_list_rechecks_nothing.lin:21:11
+   |
+15 | fn twice(n: UInt8) -> UInt8 {
+   |          - declared `read`
+21 |     twice(&x).between()
+   |           ^^ unexpected `&`
+error[T-MissingArgument]: `low` receives no argument
+  --> tests/decl/a_refused_argument_list_rechecks_nothing.lin:21:5
+   |
+6  |     fn between(x: Self, low: UInt8) -> UInt8
+   |                         --- declared here
+21 |     twice(&x).between()
+   |     ^^^^^^^^^^^^^^^^^^^ every parameter receives one

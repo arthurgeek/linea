@@ -1,0 +1,22 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn identity[T](sink value: T) -> T where carries(value) {
+    value
+}
+
+fn forward[T](sink value: T) -> T where carries(value) {
+    identity(value)
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 64)
+    let handle = forward(arena.handle())
+    arena.release()
+    let bytes = handle.acquire(8).unwrap()
+    bytes.release()
+    0
+}

@@ -1,0 +1,29 @@
+import std.io
+import std.mem
+
+// Every payment reaches the body, which commits it, and `finish` confirms the
+// drain handed all of them over before it releases the storage.
+@linear
+struct Payment {
+    cents: UInt64,
+}
+
+fn commit(sink payment: Payment) -> UInt64 {
+    let Payment { cents } = payment
+    cents
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(mem.system(), count: 3, initializer: |index| Payment { cents = (index + 1) * 100 })
+    var pending = built.unwrap().drain()
+    var committed: UInt64 = 0
+    for payment in &pending {
+        committed += commit(payment)
+    }
+    match pending.finish() {
+        Ok(_) => {},
+        Err(_) => panic("payments were left undecided"),
+    }
+    io.println("committed {committed}")?
+    .Ok(0)
+}

@@ -1,0 +1,17 @@
+trait Source {
+    type Item
+}
+
+trait Measure[A] {
+    fn measure(_self: Self, _input: A) -> UInt64
+}
+
+impl[A: Source] Measure[A.Item] for UInt64 {
+    fn measure(_self: UInt64, _input: A.Item) -> UInt64 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,22 @@
+import std.io
+
+struct Pair { first: UInt8, second: UInt8 }
+
+fn mark(value: UInt8, inout count: UInt8) -> Result[UInt8, io.IoError] {
+    count += 1
+    io.println("{value}")?
+    return .Ok(value)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var first_count: UInt8 = 0
+    var second_count: UInt8 = 0
+    let pair = Pair { second = mark(2, &second_count)?, first = mark(1, &first_count)? }
+    return .Ok(
+        if first_count == 1 && second_count == 1 && pair.second == 2 && pair.first == 1 {
+            0
+        } else {
+            1
+        },
+    )
+}

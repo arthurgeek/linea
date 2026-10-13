@@ -1,0 +1,9 @@
+error[T-Derive]: `Item` cannot derive `Law` because its `Base` implementation is handwritten
+  --> tests/traits/a_structural_supertrait_requires_a_derive.lin:13:8
+   |
+3  | trait Law: Base {}
+   |            ---- this is a direct supertrait
+7  | template impl Law where reflect.supertraits: derived {}
+   |                                 ----------- the template requires derived evidence for every direct supertrait
+13 | derive Law for Item
+   |        ^^^ replace the handwritten prerequisite with a derive, or write this implementation by hand

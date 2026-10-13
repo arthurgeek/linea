@@ -1,0 +1,11 @@
+struct _Holder[T: Integer] {
+    value: T,
+}
+
+impl[T: Integer] _Holder[T] {
+    pub let maximum: T = T.max
+}
+
+fn main() -> UInt8 {
+    0
+}

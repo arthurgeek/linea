@@ -1,0 +1,7 @@
+enum _Mapped { Wrapped(UInt16) }
+
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt8] = .Err(9)
+    let _mapped = failure.map_err(|sink error| .Wrapped(UInt16(error)))
+    0
+}

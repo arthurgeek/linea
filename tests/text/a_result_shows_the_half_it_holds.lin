@@ -1,0 +1,27 @@
+// A `Result` renders the half it holds and nothing around it. Both halves are
+// bounded, because either one is what there is to render and which one is
+// present is not known until it is -- so the two bind separately, and this
+// `Result[UInt8, Str]` reaches the number's implementation through one arm and
+// the text's through the other.
+//
+// The arm a value arrived in is not in the output. How a program carries an
+// outcome is not how a reader is told one, and where the distinction has to
+// reach the reader it is the caller's to make.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+
+    let landed: Result[UInt8, Str] = .Ok(7)
+    let lost: Result[UInt8, Str] = .Err("no route to host")
+
+    Display.fmt(landed, &w)?
+    Writer.write_str(&w, "\n")?
+    Display.fmt(lost, &w)?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

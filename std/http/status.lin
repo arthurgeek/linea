@@ -1,0 +1,203 @@
+import std.testing
+
+// Code is a status code a status line can carry: three decimal digits, 100
+// through 999.
+@(copyable, derive(Equatable, Debug, Release))
+pub type Code = UInt16 where it in 100..=999
+
+// Status is a response status. The common statuses have names; any other
+// three-digit code is `Other`. Two statuses are equal when their codes are, so
+// `NotFound == Other(Code(404))`.
+@(copyable, derive(Debug, Release))
+pub enum Status {
+    Ok,
+    Created,
+    Accepted,
+    NoContent,
+    MovedPermanently,
+    Found,
+    NotModified,
+    BadRequest,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    MethodNotAllowed,
+    RequestTimeout,
+    ContentTooLarge,
+    UriTooLong,
+    UnsupportedMediaType,
+    UnprocessableContent,
+    RequestHeaderFieldsTooLarge,
+    InternalServerError,
+    NotImplemented,
+    ServiceUnavailable,
+    HttpVersionNotSupported,
+    Other(Code),
+}
+
+impl Status {
+    // Return the named status for `code`, or `Other` when it has no name.
+    pub fn of(code: Code) -> Status {
+        let Code(value) = copy(code)
+        match read value {
+            200 => .Ok,
+            201 => .Created,
+            202 => .Accepted,
+            204 => .NoContent,
+            301 => .MovedPermanently,
+            302 => .Found,
+            304 => .NotModified,
+            400 => .BadRequest,
+            401 => .Unauthorized,
+            403 => .Forbidden,
+            404 => .NotFound,
+            405 => .MethodNotAllowed,
+            408 => .RequestTimeout,
+            413 => .ContentTooLarge,
+            414 => .UriTooLong,
+            415 => .UnsupportedMediaType,
+            422 => .UnprocessableContent,
+            431 => .RequestHeaderFieldsTooLarge,
+            500 => .InternalServerError,
+            501 => .NotImplemented,
+            503 => .ServiceUnavailable,
+            505 => .HttpVersionNotSupported,
+            _ => .Other(copy(code)),
+        }
+    }
+}
+
+test fn a_named_code_finds_its_variant() {
+    let named = [Status.Ok, Status.Created, Status.Accepted, Status.NoContent, Status.MovedPermanently, Status.Found, Status.NotModified, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.MethodNotAllowed, Status.RequestTimeout, Status.ContentTooLarge, Status.UriTooLong, Status.UnsupportedMediaType, Status.UnprocessableContent, Status.RequestHeaderFieldsTooLarge, Status.InternalServerError, Status.NotImplemented, Status.ServiceUnavailable, Status.HttpVersionNotSupported]
+    for status in named {
+        let found = Status.of(Code?(status.code()).unwrap())
+        testing.assert(found == status && is_named(found), "a named code did not find its variant")?
+    }
+    testing.assert(match read Status.of(Code(299)) { Other(code) => code == Code(299), _ => false }, "an unnamed code found a variant")?
+    .Ok(())
+}
+
+// Return whether a status is one of the named variants rather than `Other`.
+fn is_named(status: Status) -> Bool {
+    match read status {
+        Other(_) => false,
+        _ => true,
+    }
+}
+
+impl Status {
+    // Return the three-digit code this status sends.
+    pub fn code(self: Self) -> UInt16 {
+        match read self {
+            Ok => 200,
+            Created => 201,
+            Accepted => 202,
+            NoContent => 204,
+            MovedPermanently => 301,
+            Found => 302,
+            NotModified => 304,
+            BadRequest => 400,
+            Unauthorized => 401,
+            Forbidden => 403,
+            NotFound => 404,
+            MethodNotAllowed => 405,
+            RequestTimeout => 408,
+            ContentTooLarge => 413,
+            UriTooLong => 414,
+            UnsupportedMediaType => 415,
+            UnprocessableContent => 422,
+            RequestHeaderFieldsTooLarge => 431,
+            InternalServerError => 500,
+            NotImplemented => 501,
+            ServiceUnavailable => 503,
+            HttpVersionNotSupported => 505,
+            Other(code) => {
+                let Code(value) = copy(code)
+                value
+            },
+        }
+    }
+}
+
+test fn a_status_has_its_code() {
+    let statuses = [Status.Ok, Status.Created, Status.Accepted, Status.NoContent, Status.MovedPermanently, Status.Found, Status.NotModified, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.MethodNotAllowed, Status.RequestTimeout, Status.ContentTooLarge, Status.UriTooLong, Status.UnsupportedMediaType, Status.UnprocessableContent, Status.RequestHeaderFieldsTooLarge, Status.InternalServerError, Status.NotImplemented, Status.ServiceUnavailable, Status.HttpVersionNotSupported, Status.Other(Code(418))]
+    let codes: [UInt16; 23] = [200, 201, 202, 204, 301, 302, 304, 400, 401, 403, 404, 405, 408, 413, 414, 415, 422, 431, 500, 501, 503, 505, 418]
+    for index in 0..codes.length() {
+        testing.assert_eq(statuses[index].code(), codes[index], "a status changed its code")?
+    }
+    .Ok(())
+}
+
+impl Status {
+    // Return the reason phrase sent after the code, as RFC 9110 names it. A
+    // code without a standard phrase gets an empty one, which a status line
+    // permits.
+    pub fn reason(self: Self) -> Str {
+        match read self.code() {
+            200 => "OK",
+            201 => "Created",
+            202 => "Accepted",
+            204 => "No Content",
+            301 => "Moved Permanently",
+            302 => "Found",
+            303 => "See Other",
+            304 => "Not Modified",
+            307 => "Temporary Redirect",
+            308 => "Permanent Redirect",
+            400 => "Bad Request",
+            401 => "Unauthorized",
+            403 => "Forbidden",
+            404 => "Not Found",
+            405 => "Method Not Allowed",
+            408 => "Request Timeout",
+            409 => "Conflict",
+            410 => "Gone",
+            413 => "Content Too Large",
+            414 => "URI Too Long",
+            415 => "Unsupported Media Type",
+            422 => "Unprocessable Content",
+            429 => "Too Many Requests",
+            431 => "Request Header Fields Too Large",
+            500 => "Internal Server Error",
+            501 => "Not Implemented",
+            502 => "Bad Gateway",
+            503 => "Service Unavailable",
+            505 => "HTTP Version Not Supported",
+            _ => "",
+        }
+    }
+}
+
+test fn a_status_has_its_reason_phrase() {
+    testing.assert_eq(Status.Ok.reason(), "OK", "200")?
+    testing.assert_eq(Status.NotFound.reason(), "Not Found", "404")?
+    testing.assert_eq(Status.MethodNotAllowed.reason(), "Method Not Allowed", "405")?
+    testing.assert_eq(Status.BadRequest.reason(), "Bad Request", "400")?
+    testing.assert_eq(Status.RequestTimeout.reason(), "Request Timeout", "408")?
+    testing.assert_eq(Status.ContentTooLarge.reason(), "Content Too Large", "413")?
+    testing.assert_eq(Status.UriTooLong.reason(), "URI Too Long", "414")?
+    testing.assert_eq(Status.RequestHeaderFieldsTooLarge.reason(), "Request Header Fields Too Large", "431")?
+    testing.assert_eq(Status.InternalServerError.reason(), "Internal Server Error", "500")?
+    testing.assert_eq(Status.NotImplemented.reason(), "Not Implemented", "501")?
+    testing.assert_eq(Status.HttpVersionNotSupported.reason(), "HTTP Version Not Supported", "505")?
+    testing.assert_eq(Status.UnsupportedMediaType.reason(), "Unsupported Media Type", "415")?
+    testing.assert_eq(Status.UnprocessableContent.reason(), "Unprocessable Content", "422")?
+    testing.assert_eq(Status.Other(Code(409)).reason(), "Conflict", "an unnamed code lost its standard phrase")?
+    testing.assert_eq(Status.Other(Code(299)).reason(), "", "a code without a standard phrase had one")?
+    .Ok(())
+}
+
+// Statuses compare by code, so a named status equals `Other` of its code.
+impl Equatable for Status {
+    fn equals(self: Self, other: Status) -> Bool {
+        self.code() == other.code()
+    }
+}
+
+test fn a_status_equals_the_same_code_spelled_as_other() {
+    testing.assert_eq(Status.NotFound, Status.Other(Code(404)), "a named status differed from its code")?
+    testing.assert_eq(Status.Other(Code(404)), Status.NotFound, "equality was one-sided")?
+    testing.assert(Status.NotFound != Status.Other(Code(405)), "different codes compared equal")?
+    testing.assert(Status.Ok != Status.Created, "different named statuses compared equal")?
+    .Ok(())
+}

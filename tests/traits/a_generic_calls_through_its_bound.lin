@@ -1,0 +1,43 @@
+// What a bound is for. The body calls an operation it cannot see an
+// implementation of, because the bound promises one exists for whatever
+// settles the parameter -- and the promise is discharged at the call that
+// supplies the argument, not here.
+//
+// Which implementation runs is decided per instantiation: `Self` settles to
+// the type parameter while the body is checked, and to the argument's type
+// once the body is instantiated. Two types implement the trait here, so a
+// single answer shared by both instantiations would give one of them the
+// other's body.
+struct Account {
+    balance: UInt8,
+}
+
+struct Ledger {
+    total: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+impl Measure for Ledger {
+    fn of(x: Self) -> UInt8 {
+        x.total
+    }
+}
+
+fn twice[T: Measure](v: T) -> UInt8 {
+    Measure.of(v) + Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 3 }
+    let l: Ledger = .{ total = 20 }
+    twice(a) + twice(l)
+}

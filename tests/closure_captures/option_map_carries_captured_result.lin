@@ -1,0 +1,15 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let observation = {
+        let callback = [number] |sink value: UInt8| -> where borrows(number) {
+            let _ = value
+            borrow number
+        }
+        let input: Option[UInt8] = .Some(1)
+        input.map(callback)
+    }
+    match observation {
+        Some(value) => *value,
+        None => 0,
+    }
+}

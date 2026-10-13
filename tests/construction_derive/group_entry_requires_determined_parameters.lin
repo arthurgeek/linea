@@ -1,0 +1,22 @@
+trait Marker {}
+
+template impl Marker {}
+
+trait Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64
+}
+
+template impl[A] Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64 {
+        0
+    }
+}
+
+struct Holder[T] { value: T }
+
+derive[A, T] (Marker, Count[A]) for Holder[T]
+
+fn main() -> UInt8 {
+    let value: Holder[UInt64] = .{ value = 1 }
+    UInt8(Count.count(value, false))
+}

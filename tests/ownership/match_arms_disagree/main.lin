@@ -1,0 +1,19 @@
+// The same question `merge_arms_disagree` asks of an `if`, asked of a `match`.
+// One rule covers both because a join is a join whatever produced it: the arms
+// of a `match` sit where the `match` sits, exactly as the branches of an `if`
+// do, so nothing about the construct decides the answer.
+//
+// Two arms rather than two branches, and three of them rather than two, so a
+// disagreement between arms the reader has to line up is still one report.
+enum Pick { First, Second, Third }
+
+fn main() -> UInt8 {
+    let k = mint(7)
+    let c = tag(k)
+    match Pick.Second {
+        First => release(k),
+        Second => {},
+        Third => release(k),
+    }
+    c
+}

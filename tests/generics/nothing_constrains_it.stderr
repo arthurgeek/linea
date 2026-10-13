@@ -1,0 +1,10 @@
+error[T-Infer]: nothing here says what `T` is
+  --> tests/generics/nothing_constrains_it.lin:19:20
+   |
+19 |     let _nothing = Maybe.None
+   |                    ^^^^^^^^^^ give the binding a type, or annotate the signature it comes from
+error[T-Infer]: nothing here says what `E` is
+  --> tests/generics/nothing_constrains_it.lin:20:20
+   |
+20 |     let _partial = Either.Ok(3)
+   |                    ^^^^^^^^^^^^ no argument of this variant determines it

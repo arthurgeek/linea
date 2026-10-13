@@ -1,0 +1,11 @@
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_value_held_across_a_question_is_reported_once.lin:20:29
+   |
+19 |     let ticket = Ticket { seat = 14 }
+   |         ------ acquired here
+20 |     let seat = seat_for(row)?
+   |                             ^ still owned here
+21 |     return .Some(seat + ticket.seat)
+   |     ------ also still owned here
+   |
+   = help: take it apart with `let Ticket { seat: _ } = ticket`, or give it to something that takes it

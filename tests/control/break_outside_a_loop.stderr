@@ -1,0 +1,5 @@
+error[S-Break]: `break` is outside a loop
+ --> tests/control/break_outside_a_loop.lin:2:5
+  |
+2 |     break
+  |     ^^^^^ there is no loop for this to leave

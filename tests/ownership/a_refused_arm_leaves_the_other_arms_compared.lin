@@ -1,0 +1,22 @@
+// Nothing declares `lookup`, so whether its arm takes `ticket` is unknown.
+// The other two arms still disagree: one takes `ticket` and one does not.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(1)
+    let choice: UInt8 = 2
+    match choice {
+        0 => lookup(ticket),
+        1 => redeem(ticket),
+        _ => 0,
+    }
+}

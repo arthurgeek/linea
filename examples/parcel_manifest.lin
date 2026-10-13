@@ -1,0 +1,99 @@
+// Build a shipping manifest in arrival order. Weights and limits are in grams.
+import std.io
+import std.iter
+import std.mem
+import std.testing
+
+use mem.Oom
+
+struct Manifest {
+    weights: Vec[UInt64],
+    inspected: UInt64,
+}
+
+// Parcels at the limit are accepted. The manifest records each parcel's
+// shipping weight, which includes 100 grams of packaging.
+fn build_manifest(sink arrivals: mem.Slice[UInt64], limit: UInt64) -> Result[Manifest, Oom] {
+    // `inspected` counts every arrival the filter looks at, including the
+    // parcels it rejects. `[limit, inout inspected]` reads `limit` and lends
+    // `inspected` to the filter, and the `inout` before the list lets each
+    // call change it.
+    var inspected: UInt64 = 0
+    let accepted = arrivals.filter(
+        inout [limit, inout inspected] |parcel| {
+            inspected += 1
+            *parcel <= limit
+        },
+    )
+    // `collect` gathers the shipping weights into a new vector, and
+    // `.settled()` turns a refused allocation into its `Oom` for `?` to return.
+    // `iterator: _` drops the finished chain, after which `inspected` holds
+    // the final count.
+    let { values, iterator: _ } = accepted.map(shipping_weight).collect(mem.system()).settled()?
+    .Ok(.{ weights = values, inspected })
+}
+
+// `*parcel` reads the weight the walk points at.
+fn shipping_weight(sink parcel: borrow UInt64) -> UInt64 {
+    let packaging_grams: UInt64 = 100
+    *parcel + packaging_grams
+}
+
+// Late parcels already include packaging. `iter.extend` appends them in
+// order; if memory runs out, the manifest keeps the parcels appended so far.
+fn append_late(inout manifest: Vec[UInt64], late: [UInt64; 2]) -> Result[(), Oom] {
+    var arrivals = late.as_slice().map(|sink parcel| *parcel)
+    iter.extend(&manifest, &arrivals).settled()
+}
+
+fn print_manifest(weights: Vec[UInt64], inspected: UInt64) -> Result[(), io.IoError] {
+    io.println("Shipping manifest: {weights.length()} parcels; {inspected} arrivals inspected")?
+    var number: UInt64 = 0
+    for read parcel in weights {
+        number += 1
+        io.println("Parcel {number}: {parcel} g")?
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
+    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000) else |_| {
+        io.eprintln("Unable to allocate the shipping manifest")
+        return .Ok(1)
+    }
+    // A pattern binds with `let`; `var manifest` takes the vector so the late
+    // parcels can be appended to it.
+    defer var manifest = weights
+    if append_late(&manifest, [750, 1600]).is_err() {
+        io.eprintln("Unable to append the late parcels")
+        return .Ok(1)
+    }
+    print_manifest(manifest, inspected)?
+    .Ok(0)
+}
+
+test fn manifest_filters_and_transforms_in_arrival_order() {
+    let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
+    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer weights.release()
+    testing.assert_eq(weights.length(), 4, "overweight parcel entered the manifest")?
+    testing.assert_eq([weights[0], weights[1], weights[2], weights[3]], [UInt64(1300), 3600, 5100, 1000], "manifest order, limit boundary, or packaging weight changed")?
+    testing.assert_eq(inspected, 5, "not every arrival was inspected")?
+}
+
+test fn an_empty_batch_builds_an_empty_manifest() {
+    let arrivals: [UInt64; 0] = []
+    let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer weights.release()
+    testing.assert_eq(weights.length(), 0, "empty batch added a parcel")?
+    testing.assert_eq(inspected, 0, "empty batch invoked the predicate")?
+}
+
+test fn late_parcels_follow_the_existing_manifest() {
+    let arrivals = [UInt64(1200)]
+    let { weights, inspected: _ } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
+    defer var manifest = weights
+    append_late(&manifest, [750, 1600]).unwrap()
+    testing.assert_eq([manifest[0], manifest[1], manifest[2]], [UInt64(1300), 750, 1600], "extension replaced or reordered an existing parcel")?
+}

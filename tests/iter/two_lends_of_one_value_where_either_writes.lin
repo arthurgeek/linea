@@ -1,0 +1,15 @@
+// Readers share and writers do not. Two walks of one value, either of them
+// lending writably, are two paths to every place both reach -- so one has to
+// end before the other begins. The exclusivity belongs to the lend rather than
+// to any operation performed through it, which is why this is refused with no
+// write between the two heads.
+fn main() -> UInt8 {
+    var xs: [UInt64; 3] = [1, 2, 3]
+    for inout x in xs {
+        for inout y in xs {
+            y += 1
+        }
+        x += 1
+    }
+    UInt8(xs[0])
+}

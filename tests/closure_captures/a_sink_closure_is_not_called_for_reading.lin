@@ -1,0 +1,10 @@
+// `apply` calls its callback for reading, and may call it again, so the
+// callback cannot be a `sink` closure, which is called once and gives its
+// captures away.
+fn apply[F: fn() -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    apply(sink [sink seen = UInt8(0)] || seen)
+}

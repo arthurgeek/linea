@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Ticket` does not have that capability
+  --> tests/iter/operations/filter_drops_items_so_it_needs_them_discardable.lin:42:28
+   |
+42 |     let _refused = dropped.filter(|ticket| ticket.seat % 2 == 0)
+   |                            ^^^^^^ `filter` may dispose of a `Ticket`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause

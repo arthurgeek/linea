@@ -1,0 +1,17 @@
+type Label = Str
+
+fn text(label: Label) -> Str {
+    let read Label(raw) = label
+    copy(raw)
+}
+
+fn main() -> UInt8 {
+    let label = Label("Ada")
+    let first = text(label)
+    let second = text(label)
+    if first == "Ada" && second == first {
+        0
+    } else {
+        1
+    }
+}

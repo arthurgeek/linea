@@ -1,0 +1,19 @@
+// A type parameter answers before a module's type of the same name, so a
+// parameter spelled like a generic structure takes no arguments.
+struct Wrap[T] {
+    inner: T,
+}
+
+struct Other[U] {
+    inner: U,
+}
+
+struct S[Other] {
+    v: Wrap[Other],
+}
+
+fn main() -> UInt8 {
+    let s: S[UInt8] = .{ v = .{ inner = 4 } }
+    let _o: Other[UInt8] = .{ inner = 1 }
+    s.v.inner - 4
+}

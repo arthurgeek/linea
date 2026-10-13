@@ -1,0 +1,13 @@
+@derive(Equatable)
+enum Choice { Empty, Value(UInt8) }
+
+@derive(Equatable)
+type Meters = UInt8
+
+fn main() -> UInt8 {
+    if Choice.Value(7) == Choice.Value(7) && Choice.Empty != Choice.Value(7) && Meters(3) == Meters(3) {
+        0
+    } else {
+        1
+    }
+}

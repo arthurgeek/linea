@@ -1,0 +1,20 @@
+error[N-Undefined]: undefined name `refill`
+  --> tests/inference/a_refused_call_asks_nothing_of_its_callbacks.lin:18:20
+   |
+18 |     let refilled = refill(tank, |sink litres| litres + 1)
+   |                    ^^^^^^ no binding with this name is in scope
+error[N-Variant]: this name refers to a type, and a type has no parts to select
+  --> tests/inference/a_refused_call_asks_nothing_of_its_callbacks.lin:19:18
+   |
+19 |     let filled = Tank.fill(|sink litres| litres, |sink litres| litres)
+   |                  ^^^^ only an enum has variants
+error[T-UnknownOperation]: `Tank` has no operation `drain`
+  --> tests/inference/a_refused_call_asks_nothing_of_its_callbacks.lin:16:19
+   |
+16 |     let drained = tank.drain(|sink litres| litres * 2)
+   |                   ^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `double` is a function, not an operation of `Tank`
+  --> tests/inference/a_refused_call_asks_nothing_of_its_callbacks.lin:17:19
+   |
+17 |     let doubled = tank.double(|sink litres| litres * 2)
+   |                   ^^^^^^^^^^^ call it as `double(tank, …)`

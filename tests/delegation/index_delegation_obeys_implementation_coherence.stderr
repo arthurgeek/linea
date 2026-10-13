@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Index` is already implemented for `_Board` with the same arguments
+ --> tests/delegation/index_delegation_obeys_implementation_coherence.lin:5:6
+  |
+3 | impl Index[UInt64] for _Board via values
+  |      ----- already implemented here
+5 | impl Index[UInt64] for _Board via values
+  |      ^^^^^ a trait is implemented once per arguments and type

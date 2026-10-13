@@ -1,0 +1,23 @@
+trait Factory[T] {
+    fn make(self: Self, sink value: T) -> Result[T, UInt8] where carries(.Ok: value)
+}
+
+struct Builder {}
+
+impl Factory[UInt64] for Builder {
+    fn make(_self: Self, sink value: UInt64) -> Result[UInt64, UInt8] {
+        .Ok(value)
+    }
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let builder: Builder = .{}
+    let value: UInt64 = Factory.make(builder, 7)?
+    return .Ok(
+        if value == 7 {
+            0
+        } else {
+            1
+        },
+    )
+}

@@ -1,0 +1,5 @@
+error[T-Template]: `Generic` takes 1 type argument(s), and was given 0
+  --> tests/traits/a_malformed_template_requirement_argument_is_reported_once.lin:20:58
+   |
+20 | template impl Inspect where reflect.components: Required[Generic] + Other[Constrained[Bool]] {
+   |                                                          ^^^^^^^ give it the arguments it declares

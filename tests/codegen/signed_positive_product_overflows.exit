@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/codegen/signed_positive_product_overflows.lin:2:9

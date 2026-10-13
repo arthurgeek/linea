@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let a = 1;   // trails
+    a
+}

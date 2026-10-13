@@ -1,0 +1,12 @@
+// No import can reach a test, so exporting one names an export nothing uses.
+import std.io
+
+use io.IoError
+use io.println
+
+pub test fn a_thing_holds() -> Result[(), IoError] {
+    println("visible to nobody")?
+    return .Ok({})
+}
+
+fn main() -> UInt8 { 0 }

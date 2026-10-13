@@ -1,0 +1,24 @@
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    let Ticket { seat } = ticket
+    seat
+}
+
+struct Booking {
+    ticket: Ticket,
+    row: UInt8,
+}
+
+fn main() -> UInt8 {
+    let booking: Booking = .{ ticket = .{ seat = 4 }, row = 2 }
+    // Only the row is replaced; the ticket moves from the base into `moved`,
+    // which settles it.
+    let moved = Booking { row = 7, ..booking }
+    let Booking { ticket, row } = moved
+    // 4 + 7
+    redeem(ticket) + row
+}

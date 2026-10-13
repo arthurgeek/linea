@@ -1,0 +1,7 @@
+struct Tree {
+    children: [Tree; 2],
+}
+
+fn main() -> UInt8 {
+    0
+}

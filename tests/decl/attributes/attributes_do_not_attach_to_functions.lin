@@ -1,0 +1,4 @@
+@copyable
+fn answer() -> UInt8 { 0 }
+
+fn main() -> UInt8 { answer() }

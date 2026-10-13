@@ -1,0 +1,12 @@
+import std.mem
+
+use mem.Arena
+use mem.system
+
+fn main() -> UInt8 {
+    let owner = Arena.open(system(), 64)
+    let duplicate = copy(owner)
+    duplicate.release()
+    owner.release()
+    0
+}

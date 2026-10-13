@@ -1,0 +1,34 @@
+// `Comparable` is a strict partial order, so a pair may be ordered by neither
+// `less` nor `equals`. `<=` is the order or the equality, and both are false
+// for such a pair -- where the negation of the swap would answer true, because
+// nothing precedes anything here.
+//
+// The answer is the exit status rather than a trace, so what says the two
+// readings differ is the program's own result.
+struct Extent {
+    wide: UInt8,
+    tall: UInt8,
+}
+
+impl Equatable for Extent {
+    fn equals(self: Extent, other: Extent) -> Bool {
+        self.wide == other.wide && self.tall == other.tall
+    }
+}
+
+impl Comparable for Extent {
+    fn less(self: Extent, other: Extent) -> Bool {
+        self.wide < other.wide && self.tall < other.tall
+    }
+}
+
+fn main() -> UInt8 {
+    let flat: Extent = .{ wide = 3, tall = 1 }
+    let narrow: Extent = .{ wide = 1, tall = 3 }
+
+    if flat <= narrow || narrow >= flat {
+        1
+    } else {
+        0
+    }
+}

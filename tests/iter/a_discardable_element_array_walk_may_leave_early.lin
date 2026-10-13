@@ -1,0 +1,13 @@
+// A consuming array walk may abandon its remaining discardable elements
+// when the body exits early.
+fn main() -> UInt8 {
+    let xs: [UInt8; 5] = [1, 2, 4, 8, 16]
+    var total: UInt8 = 0
+    for x in xs {
+        total += x
+        if total > 5 {
+            break
+        }
+    }
+    total
+}

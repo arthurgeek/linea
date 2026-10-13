@@ -1,0 +1,9 @@
+error[O-Leak]: `transaction` (a linear `Transaction`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_value_left_at_the_end_of_a_block.lin:30:9
+   |
+30 |     let transaction = Transaction.open(250)
+   |         ^^^^^^^^^^^ never settled on the path that reaches the end of this block
+32 | }
+   | - the block ends here
+   |
+   = help: settle it first with `transaction.commit()` or `transaction.rollback()`, or take it apart with `let Transaction { cents: _ } = transaction`

@@ -1,0 +1,33 @@
+// Every declaration that introduces an open type may spell its constraints in
+// a trailing clause, and each spelling is checked by the same bound machinery.
+struct Box[T]
+where T: Discardable {
+    value: T,
+}
+
+enum Maybe[T]
+where T: Discardable {
+    None,
+    Some(T),
+}
+
+trait Convert[T]
+where T: Discardable {
+    fn convert(self: Self, sink value: T) -> T where carries(value)
+}
+
+impl Convert[UInt8] for UInt8 {
+    fn convert(_self: UInt8, sink value: UInt8) -> UInt8 {
+        value
+    }
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 3 }
+    let maybe: Maybe[UInt8] = .Some(box.value)
+    let zero: UInt8 = 0
+    match maybe {
+        Some(value) => Convert.convert(zero, value),
+        None => 0,
+    }
+}

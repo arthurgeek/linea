@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `()`
+ --> tests/traits/an_inherent_unit_implementation_names_no_owner.lin:3:6
+  |
+3 | impl () {}
+  |      ^^ an inherent `impl` goes in the module that declares the type

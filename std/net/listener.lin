@@ -1,0 +1,250 @@
+import std.io
+import std.mem
+import std.testing
+
+// The runtime listens on a packed address, accepts a connection, and reports
+// a socket's packed local address. Each returns its answer, or a negated
+// errno.
+extern fn linea_net_listen(address: UInt64, backlog: UInt64) -> Int64
+
+extern fn linea_net_accept(listener: Int32) -> Int64
+
+extern fn linea_net_local_address(fd: Int32) -> Int64
+
+// Listener owns one listening socket. Explicit close reports failure and
+// consumes it; release makes one best-effort close.
+@(opaque, linear)
+struct Listener {
+    fd: Int32,
+}
+
+// Accepted holds an accepted connection and the address of the peer that
+// opened it.
+@linear
+pub struct Accepted {
+    connection: Connection,
+    address: Address,
+}
+
+// A Backlog is how many connections the kernel queues before `accept` takes
+// them. The runtime refuses a backlog over 4096, and a backlog of 0 would
+// leave the queue's length to the kernel.
+@(copyable, derive(Equatable, Debug))
+pub type Backlog = UInt64 where it in 1..=4096
+
+test fn a_backlog_holds_one_to_4096_connections() {
+    testing.assert_eq(Backlog?(0), .None, "a backlog of 0 was accepted")?
+    testing.assert_eq(Backlog?(4097), .None, "a backlog over 4096 was accepted")?
+    testing.assert_eq(Backlog?(4096), .Some(Backlog(4096)), "a backlog of 4096 was refused")?
+    .Ok(())
+}
+
+// Bind with SO_REUSEADDR and listen, queueing 128 connections unless told
+// otherwise.
+pub fn listen(address: Address, backlog: Backlog = Backlog(128)) -> Result[Listener, NetError] {
+    let Backlog(queued) = copy(backlog)
+    let answer = linea_net_listen(address.packed(), queued)
+    if answer < 0 {
+        return .Err(failure(.Listen, answer))
+    }
+    .Ok(Listener { fd = Int32(answer) })
+}
+
+test fn listen_queues_the_default_backlog_or_the_one_given() {
+    let default_listened = match listen(loopback(0)) {
+        Ok(listener) => listener.close().is_ok(),
+        Err(_) => false,
+    }
+    let given_listened = match listen(loopback(0), backlog: Backlog(1024)) {
+        Ok(listener) => listener.close().is_ok(),
+        Err(_) => false,
+    }
+    testing.assert(default_listened, "listening with the default backlog failed")?
+    testing.assert(given_listened, "listening with a backlog of 1024 failed")?
+    .Ok(())
+}
+
+test fn a_second_listener_on_one_address_is_in_use() {
+    let first = listen(loopback(0)).unwrap()
+    let bound = first.local_address().unwrap()
+    let refused = match listen(bound) {
+        Ok(second) => {
+            let _closed = second.close()
+            false
+        },
+        Err(error) => match read error { AddressInUse => true, _ => false },
+    }
+    let closed = first.close().is_ok()
+    testing.assert(refused, "a second listener bound an address in use")?
+    testing.assert(closed, "closing the listener failed")?
+    .Ok(())
+}
+
+// An Acceptor accepts connections. It is a listening socket, or anything that
+// stands in for one, such as a listener whose failures a test scripts.
+// `http.serve` takes one. `accept` waits for the next connection; `close`,
+// from `io.Close`, consumes it and reports whether it closed.
+pub trait Acceptor: io.Close {
+    fn accept(inout self: Self) -> Result[Accepted, NetError]
+}
+
+impl Acceptor for Listener {
+    // Wait for the next connection. The socket blocks until one arrives.
+    fn accept(inout self: Self) -> Result[Accepted, NetError] {
+        let answer = linea_net_accept(self.fd)
+        if answer < 0 {
+            return .Err(failure(.Accept, answer))
+        }
+        let connection = adopt(Int32(answer))
+        match connection.peer_address() {
+            Ok(address) => .Ok(Accepted { connection = connection, address = address }),
+            Err(reason) => {
+                let _closed = connection.close()
+                return .Err(reason)
+            },
+        }
+    }
+}
+
+test fn a_connection_reaches_its_own_listener() {
+    var listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    // The backlog queues the connection before accept is called.
+    var client = connect(bound).unwrap()
+    let sent = io.write_all(&client, "ping".as_bytes()).is_ok()
+    let client_closed = client.close().is_ok()
+    let Accepted { connection: connection, address: peer } = &listener.accept().unwrap()
+    let from_loopback = peer == loopback(peer.port)
+    var reader = io.BufferedReader.open(mem.system(), capacity: 16, reader: connection) else |_| {
+        panic("the reader was refused its buffer")
+    }
+    // The client closed after writing, so the line ends at end of input.
+    let received = match &reader.read_line_borrowed(max_bytes: 16) {
+        Ok(line) => match line { Some(text) => text == "ping", None => false },
+        Err(_) => false,
+    }
+    let connection_closed = reader.abandon().close().is_ok()
+    let listener_closed = listener.close().is_ok()
+    testing.assert(sent, "the client could not send")?
+    testing.assert(received, "the listener's connection did not receive the bytes sent")?
+    testing.assert(from_loopback, "the peer address was not the loopback address")?
+    testing.assert(client_closed && connection_closed && listener_closed, "a close failed")?
+    .Ok(())
+}
+
+test fn a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted() {
+    var listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    connect(bound).unwrap().reset().unwrap()
+    let next = connect(bound).unwrap()
+    // The reset reaches the listener before or after the queued connection
+    // is handed out: either accepting it reports the reset, or it is
+    // accepted and its first read does.
+    let reset = match &listener.accept() {
+        Ok(accepted) => {
+            let Accepted { connection: connection, address: _ } = accepted
+            var torn = connection
+            var buffer = mem.system().acquire(8).unwrap()
+            let received = &torn.read_some(&buffer, offset: 0, count: 8)
+            buffer.release()
+            torn.close().unwrap()
+            match read received {
+                Ok(_) => Option.None,
+                Err(error) => Option.Some(error.category),
+            }
+        },
+        Err(error) => match read error {
+            Io(reason) => Option.Some(reason.category),
+            _ => Option.None,
+        },
+    }
+    let Accepted { connection: served, address: _ } = &listener.accept().unwrap()
+    served.close().unwrap()
+    next.close().unwrap()
+    listener.close().unwrap()
+    testing.assert_eq(reset, Option.Some(io.IoCategory.ConnectionReset), "a torn-down connection was not reported as reset")?
+    .Ok(())
+}
+
+impl Listener {
+    // Close the socket, reporting a failed close, which `Release` ignores.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let Listener { fd: fd } = self
+        close_descriptor(fd)
+    }
+}
+
+test fn a_listener_close_reports_success() {
+    let listener = listen(loopback(0)).unwrap()
+    testing.assert_ok_eq(listener.close(), (), "closing the listener failed")?
+    .Ok(())
+}
+
+test fn a_listener_close_consumes_a_failed_descriptor() {
+    let listener = Listener { fd = -1 }
+    // EBADF is 9 on every platform the runtime targets.
+    let invalid = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .Some(9), progress = 0 }
+    testing.assert_eq(listener.close(), .Err(invalid), "close lost the native error")?
+    .Ok(())
+}
+
+// Generic code, such as `http.serve`, closes a listener through `io.Close`;
+// this forwards to `Listener.close`.
+impl io.Close for Listener {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        self.close()
+    }
+}
+
+// Accept one connection through any `Acceptor` and close both.
+fn accept_once[L: Acceptor](sink acceptor: L) -> Result[Address, NetError] {
+    var accepting = acceptor
+    let accepted = &accepting.accept()
+    let _closed = accepting.close()
+    let Accepted { connection, address } = accepted?
+    connection.close().unwrap()
+    .Ok(address)
+}
+
+test fn a_listener_accepts_through_the_acceptor_trait() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let accepted = accept_once(listener).unwrap()
+    client.close().unwrap()
+    testing.assert_eq(accepted, loopback(accepted.port), "the acceptor did not accept the loopback client")?
+    .Ok(())
+}
+
+impl Listener {
+    // Report the bound address, including the port chosen for port 0.
+    pub fn local_address(self: Self) -> Result[Address, NetError] {
+        let answer = linea_net_local_address(self.fd)
+        if answer < 0 {
+            return .Err(failure(.Metadata, answer))
+        }
+        .Ok(Address.unpacked(answer))
+    }
+}
+
+test fn a_listener_reports_the_port_it_was_given() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address()
+    let closed = listener.close().is_ok()
+    let port = match read bound {
+        Ok(address) => address.port,
+        Err(_) => 0,
+    }
+    testing.assert(port != 0, "port 0 was not replaced by a free port")?
+    testing.assert_ok_eq(bound, loopback(port), "the bound address is not loopback")?
+    testing.assert(closed, "closing the listener failed")?
+    .Ok(())
+}
+
+impl Release for Listener {
+    fn release(sink self: Self) -> () {
+        let Listener { fd: fd } = self
+        let _closed = close_descriptor(fd)
+    }
+}

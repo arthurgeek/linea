@@ -1,0 +1,8 @@
+// The caret counts back from an end, and an end is what a bracket has. It is
+// read where an index is written and nowhere else, so anywhere else it begins
+// no expression and is answered by the rule every token that begins none is
+// answered by.
+fn main() -> UInt8 {
+    let _k: UInt64 = ^1
+    3
+}

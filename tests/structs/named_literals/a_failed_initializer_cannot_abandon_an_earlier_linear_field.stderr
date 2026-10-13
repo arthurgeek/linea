@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `Parcel` has not been given this value yet, and control leaves here
+  --> tests/structs/named_literals/a_failed_initializer_cannot_abandon_an_earlier_linear_field.lin:14:63
+   |
+14 |     let parcel = Parcel { token = Token { value = 7 }, code = refused()? }
+   |                                   ------------------- it was given up here
+   |                                                               ^^^^^^^^^^ give the value up after this, not before it

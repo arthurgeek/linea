@@ -1,0 +1,11 @@
+struct Entry { value: UInt8 }
+
+fn again(sink view: borrow Entry) -> borrow Entry where borrows(*view) {
+    borrow *view
+}
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ value = 7 }
+    let view = again(borrow entry)
+    view.value
+}

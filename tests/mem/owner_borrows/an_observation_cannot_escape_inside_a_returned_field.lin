@@ -1,0 +1,10 @@
+struct Box { view: borrow UInt64 }
+
+fn escape() -> Box {
+    let local: UInt64 = 7
+    return .{ view = borrow local }
+}
+
+fn main() -> UInt8 {
+    UInt8(*escape().view)
+}

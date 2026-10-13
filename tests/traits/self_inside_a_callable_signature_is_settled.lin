@@ -1,0 +1,11 @@
+trait Apply {
+    fn apply(_callback: fn(read value: Self) -> UInt8) -> UInt8
+}
+
+fn _invoke[F: fn(read value: UInt8) -> UInt8](callback: F) -> UInt8 {
+    Apply.apply(callback)
+}
+
+fn main() -> UInt8 {
+    0
+}

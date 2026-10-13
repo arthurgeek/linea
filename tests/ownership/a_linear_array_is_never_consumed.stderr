@@ -1,0 +1,9 @@
+error[O-Leak]: `_ks` (a linear `[Key; 2]`) is still owned when this path leaves
+  --> tests/ownership/a_linear_array_is_never_consumed.lin:14:9
+   |
+14 |     let _ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+   |         ^^^ never settled on the path that reaches the end of this block
+16 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

@@ -1,0 +1,107 @@
+import std.testing
+import std.mem
+
+// A ScalarPosition is a Unicode scalar value and the byte offset its encoding
+// starts at.
+pub struct ScalarPosition {
+    value: UInt32,
+    offset: UInt64,
+}
+
+// Scalars yields the Unicode scalars of a text in order.
+@opaque
+struct Scalars {
+    text: Str,
+    at: UInt64,
+}
+
+impl Iterator for Scalars {
+    type Item = ScalarPosition
+
+    fn next(inout self: Self) -> Option[ScalarPosition] where carries() {
+        if self.at == self.text.length() {
+            return .None
+        }
+        let offset = self.at
+        // Str guarantees complete, valid UTF-8 scalars within its extent.
+        let lead = self.text.byte(self.at).unwrap()
+        // ASCII ends at 127; lead ranges 194..223 and 224..239 encode
+        // two and three bytes. Valid remaining leads (240..244) use four.
+        let width: UInt64 = match read lead {
+            0..=127 => 1,
+            194..=223 => 2,
+            224..=239 => 3,
+            _ => 4,
+        }
+        var value = UInt32(lead)
+        if width > 1 {
+            // Remove the 110, 1110, or 11110 leading-bit prefix.
+            let prefix: UInt32 = match read width {
+                2 => 192,
+                3 => 224,
+                _ => 240,
+            }
+            value -= prefix
+            let remaining: Range[UInt64] = 1..width
+            for i in remaining {
+                let next = self.text.byte(self.at + i).unwrap()
+                // A continuation byte has prefix 10 (128) and six payload bits.
+                value = value * 64 + UInt32(next) - 128
+            }
+        }
+        self.at += width
+        .Some(.{ value = value, offset = offset })
+    }
+}
+
+impl Str {
+    // Return an iterator over the text's scalars. It runs in linear time and
+    // keeps each scalar's byte offset for slicing.
+    pub fn scalars(self: Self) -> Scalars where carries(self) {
+        .{ text = copy(self), at = 0 }
+    }
+}
+
+test fn scalar_iteration_reports_values_and_byte_positions() {
+    var cursor = "aá€😀".scalars()
+    // Code points for a, á, €, and 😀; offsets count their UTF-8 bytes.
+    let values: [UInt32; _] = [97, 225, 8364, 128512]
+    let offsets: [UInt64; _] = [0, 1, 3, 6]
+    for i in 0..values.length() {
+        match &cursor.next() {
+            None => testing.assert(false, "scalar traversal stopped early")?,
+            Some(item) => {
+                testing.assert_eq(item.value, values[i], "scalar was decoded incorrectly")?
+                testing.assert_eq(item.offset, offsets[i], "scalar byte position was incorrect")?
+            },
+        }
+    }
+    testing.assert(&cursor.next().is_none(), "scalar traversal exceeded the text")?
+    testing.assert(&cursor.next().is_none(), "finished scalar traversal restarted")?
+    .Ok(())
+}
+
+test fn scalar_iteration_preserves_nul_bom_and_scalar_extrema() {
+    var empty = "".scalars()
+    testing.assert(&empty.next().is_none(), "empty text yielded a scalar")?
+    let text = "\u{0}\u{7f}\u{80}\u{7ff}\u{800}\u{d7ff}\u{e000}\u{feff}\u{ffff}\u{10000}\u{10ffff}"
+    // Decimal code points correspond to the escaped boundary scalars above.
+    let expected: [UInt32; _] = [0, 127, 128, 2047, 2048, 55295, 57344, 65279, 65535, 65536, 1114111]
+    var i: UInt64 = 0
+    for item in text.scalars() {
+        testing.assert_eq(item.value, expected[i], "scalar boundary value changed")?
+        i += 1
+    }
+    testing.assert_eq(i, expected.length(), "scalar traversal removed a value")?
+    .Ok(())
+}
+
+test fn a_scalar_value_outlives_the_text_that_encoded_it() {
+    let source = "á".to_owned(mem.system()).unwrap()
+    var scalars = source.view().scalars()
+    let first = &scalars.next().unwrap()
+    source.release()
+    testing.assert_eq(first.value, UInt32(225), "decoded scalar depended on released text")?
+    testing.assert_eq(first.offset, UInt64(0), "decoded scalar lost its byte offset")?
+    .Ok(())
+}

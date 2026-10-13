@@ -1,0 +1,15 @@
+struct Missing {
+    key: UInt8,
+}
+
+@derive(From[Missing], From[Missing])
+enum Failure {
+    Absent(Missing),
+}
+
+fn main() -> UInt8 {
+    let failure: Failure = Missing { key = 1 }.into()
+    match failure {
+        Absent(missing) => missing.key - 1,
+    }
+}

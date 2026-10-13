@@ -1,0 +1,25 @@
+// The `let` inside the deferred block takes `key` when the function exits, so
+// the exit hands the place over instead of copying it.
+struct Key {
+    n: UInt8,
+}
+
+fn spend(sink key: Key, inout total: UInt8) -> () {
+    let Key { n } = key
+    total = total + n
+}
+
+fn go(inout total: UInt8) -> UInt8 {
+    let key: Key = .{ n = 3 }
+    defer {
+        let moved = key
+        spend(moved, &total)
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    let _ = go(&total)
+    total
+}

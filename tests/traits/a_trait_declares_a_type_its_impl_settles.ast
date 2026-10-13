@@ -1,0 +1,35 @@
+program decls=8
+  decl struct_ "Counter" tokens 4..12
+    field "at" : UInt8
+  decl associated_type "Item" tokens 15..17
+    in Measure
+  decl function "of" tokens 17..26
+    in Measure
+    param read "x" : Self
+    returns UInt8
+  decl trait_ "Measure" tokens 12..27
+  decl associated_type "Item" tokens 32..36
+    in Counter
+    of trait Measure
+    settles UInt8
+  decl function "of" tokens 36..50
+    in Counter
+    of trait Measure
+    param read "x" : Self
+    returns UInt8
+    expr %2 block tokens 45..50
+      expr %1 field tokens 46..49 "at"
+        expr %0 name_ref tokens 46..47 "x"
+  decl impl_ "Counter" tokens 27..51
+    of trait Measure
+  decl function "main" tokens 51..76
+    returns UInt8
+    expr %10 block tokens 57..76
+      stmt %0 let_decl tokens 58..69 "c" : Counter
+        expr %5 struct_literal tokens 63..69
+          expr %3 name_ref tokens 65..66 "at"
+          expr %4 int_literal tokens 67..68 "7"
+      expr %9 call tokens 69..75
+        expr %7 field tokens 69..72 "of"
+          expr %6 name_ref tokens 69..70 "Measure"
+        expr %8 name_ref tokens 73..74 "c"

@@ -1,0 +1,11 @@
+import std.mem
+
+fn invalid() -> mem.Slice[UInt64] {
+    let values = [UInt64(1), UInt64(2)]
+    values.as_slice()
+}
+
+fn main() -> UInt8 {
+    let values = invalid()
+    UInt8(values.length())
+}

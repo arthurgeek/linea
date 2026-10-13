@@ -1,0 +1,7 @@
+error[O-Leak]: this linear `Ticket` is never settled
+  --> tests/text/a_linear_value_computed_in_braces_must_be_settled.lin:24:20
+   |
+24 |     println("seat {issue()}")?
+   |                    ^^^^^^^ nothing can take what this yields
+   |
+   = help: bind it with `let`, or give it to something that takes it

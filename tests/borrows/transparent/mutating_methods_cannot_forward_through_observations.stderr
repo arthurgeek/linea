@@ -1,0 +1,10 @@
+error[T-UnknownOperation]: `State` has no operation `advance`
+  --> tests/borrows/transparent/mutating_methods_cannot_forward_through_observations.lin:22:5
+   |
+22 |     view.advance()
+   |     ^^^^^^^^^^^^ `Counter` declares it, but not for this receiver
+error[T-Bound]: `Counter` requires `Self` to implement it, and `borrow State` does not
+  --> tests/borrows/transparent/mutating_methods_cannot_forward_through_observations.lin:23:22
+   |
+23 |     Counter.advance(&view)
+   |                      ^^^^ implement it for that type, or reach the operation on one that does

@@ -1,0 +1,27 @@
+// A bound is a trait and the arguments it is written at, so a member bounding
+// its type parameter on the same trait at another argument asks something the
+// signature never asked. What every call is checked against is the signature,
+// and the body would reach an implementation no argument was held to.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Tag {
+    at: UInt8,
+}
+
+trait Render {
+    fn draw[W: Lookup[UInt64]](self: Self, w: W) -> UInt8
+}
+
+impl Render for Tag {
+    fn draw[W: Lookup[Bool]](self: Tag, w: W) -> UInt8 {
+        Lookup.at(w, true) + self.at
+    }
+}
+
+fn main() -> UInt8 {
+    let t: Tag = .{ at = 3 }
+    let Tag { at: n } = t
+    n
+}

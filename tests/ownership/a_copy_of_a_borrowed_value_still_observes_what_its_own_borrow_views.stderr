@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_copy_of_a_borrowed_value_still_observes_what_its_own_borrow_views.lin:22:5
+   |
+22 |     bump(&x)
+   |     ^^^^^^^^ keep this place available until the last use of its observation
+23 |     UInt8(*c.cell)
+   |           ------- the observation is still used here

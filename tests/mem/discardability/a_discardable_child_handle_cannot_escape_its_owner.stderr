@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/mem/discardability/a_discardable_child_handle_cannot_escape_its_owner.lin:11:5
+   |
+11 |     child.handle()
+   |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

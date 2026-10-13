@@ -1,0 +1,27 @@
+import std.mem
+
+fn main() -> Result[UInt8, mem.Oom] {
+    var kept: Vec[mem.Closure[inout fn() -> (), mem.SystemAllocator], mem.SystemAllocator] = Vec.new()
+    var count: UInt8 = 0
+    var round: UInt8 = 0
+    while round < 2 {
+        let tick = mem.Closure.open(
+            mem.system(),
+            inout [inout count] || {
+                count += 1
+            },
+        )
+        match tick {
+            Ok(closure) => {
+                match &kept.push(closure) {
+                    Ok(_) => {},
+                    Err(failure) => failure.release(),
+                }
+            },
+            Err(_) => {},
+        }
+        round += 1
+    }
+    kept.release()
+    .Ok(count)
+}

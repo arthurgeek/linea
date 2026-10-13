@@ -1,0 +1,11 @@
+fn sum[T: Integer](_witness: T) -> T {
+    T(127) + T(1)
+}
+
+fn main() -> UInt8 {
+    if sum(UInt16(0)) == UInt16(128) {
+        0
+    } else {
+        1
+    }
+}

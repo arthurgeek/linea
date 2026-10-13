@@ -1,0 +1,30 @@
+// A trait's identity is its declaration together with its type arguments, and a
+// trait that takes them relates two types rather than one. An implementation
+// supplies them and the signature is read through what it supplied, so `to`
+// below returns `UInt8` and this implementation is what the trait asked for.
+//
+// The call settles the same argument from the other side. `T` stands only in
+// the return type, so no argument reaches it and what the call is asked for is
+// what settles it -- `main` returns `UInt8`, so `T` is `UInt8` and the
+// implementation the call reaches is the one that supplied it.
+//
+// The same two mechanisms that settle `Self`, asked of the list the trait
+// declares rather than the list the signature does.
+trait Widen[T] {
+    fn to(x: Self) -> T
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Widen[UInt8] for Coins {
+    fn to(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    Widen.to(c)
+}

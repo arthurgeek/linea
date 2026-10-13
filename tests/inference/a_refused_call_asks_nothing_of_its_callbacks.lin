@@ -1,0 +1,21 @@
+// Each call below is refused for its callee: an operation `Tank` does not
+// declare, a free function written as an operation, a name nothing declares,
+// and a type with no parts to select. No parameter then says what a
+// callback's inputs are, so each call reports its callee and nothing about
+// the lambdas passed to it.
+struct Tank {
+    litres: UInt16,
+}
+
+fn double(sink tank: Tank, convert: fn(sink litres: UInt16) -> UInt16) -> UInt16 {
+    convert(tank.litres)
+}
+
+fn main() -> UInt8 {
+    let tank = Tank { litres = 7 }
+    let drained = tank.drain(|sink litres| litres * 2)
+    let doubled = tank.double(|sink litres| litres * 2)
+    let refilled = refill(tank, |sink litres| litres + 1)
+    let filled = Tank.fill(|sink litres| litres, |sink litres| litres)
+    UInt8(drained + doubled + refilled + filled)
+}

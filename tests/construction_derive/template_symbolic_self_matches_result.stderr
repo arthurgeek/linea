@@ -1,0 +1,5 @@
+error[T-Template]: `Measure` declares `measure` returning `UInt64`, and this returns `Self`
+ --> tests/construction_derive/template_symbolic_self_matches_result.lin:6:8
+  |
+6 |     fn measure(self: Self, _context: A) -> Self {
+  |        ^^^^^^^ return the type the signature declares

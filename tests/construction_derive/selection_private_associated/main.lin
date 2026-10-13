@@ -1,0 +1,6 @@
+import hidden
+
+fn main() -> UInt8 {
+    let value: hidden.Box.Item = 7
+    value - 7
+}

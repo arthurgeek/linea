@@ -1,0 +1,7 @@
+error[T-Bound]: `I.Item` requires `Discardable`, and `Token` does not have that capability
+  --> tests/generics/a_projected_where_bound_is_checked_at_the_call.lin:23:5
+   |
+19 | where I.Item: Discardable {}
+   |       ------ required by this `where` clause
+23 |     discard_item(tokens, .One)
+   |     ^^^^^^^^^^^^ `discard_item` may dispose of a `Token`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before

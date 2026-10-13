@@ -1,0 +1,10 @@
+// `nope` is not declared, so nothing is known about `A`. `B` is mentioned by
+// no argument at all, so the call still cannot say what it is.
+fn convert[A, B: Default](_from: A) -> B {
+    B.default()
+}
+
+fn main() -> UInt8 {
+    let _made = convert(nope)
+    0
+}

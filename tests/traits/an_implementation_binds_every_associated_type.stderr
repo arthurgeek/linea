@@ -1,0 +1,5 @@
+error[T-Impl]: `Holder` declares `Item`, and this implementation does not supply it
+  --> tests/traits/an_implementation_binds_every_associated_type.lin:16:6
+   |
+16 | impl Holder for Box {
+   |      ^^^^^^ settle it, or drop it from the trait

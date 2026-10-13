@@ -1,0 +1,20 @@
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+alias Fixed[T] = Pair[T, UInt8]
+
+fn first(sink pair: Pair[UInt8, UInt8]) -> UInt8 {
+    let Fixed { a, b: _ } = pair
+    a
+}
+
+fn mixed(sink pair: Pair[UInt16, UInt16]) -> UInt16 {
+    let Fixed { a, b: _ } = pair
+    a
+}
+
+fn main() -> UInt8 {
+    UInt8(mixed(.{ a = 1, b = 2 })) + first(.{ a = 1, b = 2 })
+}

@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let original = borrow number
+    let moved = original
+    return *original + *moved
+}

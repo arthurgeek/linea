@@ -1,0 +1,27 @@
+// A block that completes supplies the value instead, so it has the type the
+// success carries.
+enum Fault {
+    Empty,
+}
+
+fn parse(digits: UInt8) -> Result[UInt16, Fault] {
+    if digits == 0 {
+        Result.Err(Fault.Empty)
+    } else {
+        Result.Ok(3)
+    }
+}
+
+fn main() -> UInt8 {
+    let port = parse(0) else |_| {
+        8080
+    }
+    let other = parse(4) else |_| {
+        1
+    }
+    if port == 8080 && other == 3 {
+        0
+    } else {
+        1
+    }
+}

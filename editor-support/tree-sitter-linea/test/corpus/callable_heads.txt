@@ -1,0 +1,88 @@
+==================
+A callable type heads a trait implementation
+==================
+
+impl[S] Handle[S] for fn(inout state: S, input: UInt64) -> UInt64 {
+    fn handle(self: Self, inout state: S, input: UInt64) -> UInt64 { self(&state, input) }
+}
+
+impl Pick for fn(text: Str) -> Str where carries(text) {
+    fn pick(self: Self, text: Str) -> Str where carries(text) { self(text) }
+}
+
+---
+
+(source_file
+  (impl_block
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (trait_reference
+      (type_identifier)
+      (type_arguments
+        (type_identifier)))
+    (callable_type
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (type_identifier))
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (type_identifier))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (self_type))
+        (parameter
+          (convention)
+          (identifier)
+          (type_identifier))
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (type_identifier)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (marked_expression
+                (identifier))
+              (identifier)))))))
+  (impl_block
+    (trait_reference
+      (type_identifier))
+    (callable_type
+      (parameter_list
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (type_identifier)
+      (contract_clause
+        (source_contract
+          (source_path
+            (identifier)))))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (self_type))
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (type_identifier)
+      (where_clause
+        (source_contract
+          (source_path
+            (identifier))))
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (identifier))))))))

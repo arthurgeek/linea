@@ -1,0 +1,5 @@
+error[M-Vis]: `secret` is private to `bank`
+ --> tests/modules/sealed_type_private_member/main.lin:4:18
+  |
+4 |     bank.Account.secret()
+  |                  ^^^^^^ declare it `pub` in its own module, or do not name it here

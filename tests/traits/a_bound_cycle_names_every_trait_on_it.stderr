@@ -1,0 +1,5 @@
+error[T-Bound]: `R` requires `P`, `P` requires `Q`, and `Q` requires `R`
+  --> tests/traits/a_bound_cycle_names_every_trait_on_it.lin:14:10
+   |
+14 | trait R: P {
+   |          ^ drop one of the bounds on the cycle

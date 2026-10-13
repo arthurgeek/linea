@@ -1,0 +1,32 @@
+// A bound's argument may name another parameter of its own declaration --
+// `[I, C: Lookup[I]]` -- and what the bound is discharged at is whatever
+// that call settled `I` to, not the parameter itself: a receiver
+// implementing `Lookup` at one argument does not discharge a bound settled
+// to another, even where the body never reaches the trait at all.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+struct Marker {
+    v: UInt8,
+}
+
+fn reach[I, C: Lookup[I]](_c: C, _i: I) -> UInt8 {
+    4
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let m: Marker = .{ v = 1 }
+    reach(b, m)
+}

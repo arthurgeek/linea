@@ -1,0 +1,5 @@
+error[S-Args]: a positional argument follows a named one
+ --> tests/decl/position_stops_meaning_after_a_name.lin:9:15
+  |
+9 |     add(b: 2, 40)
+  |               ^^ name this argument, or move it before the names

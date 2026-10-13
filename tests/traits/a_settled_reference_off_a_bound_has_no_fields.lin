@@ -1,0 +1,30 @@
+// The bound says the type exists and says nothing else about it, so the body
+// checked once may not look inside a value of it. Which type it is, is decided
+// per instantiation, and a field read here would be a read of whatever that
+// one happens to hold.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _reads_a_part[W: Measure](v: W.Item) -> UInt8 {
+    v.at
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

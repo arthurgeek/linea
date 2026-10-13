@@ -1,0 +1,10 @@
+import protocol
+
+struct Item {}
+
+derive (protocol.First, protocol.Second) for Item
+
+fn main() -> UInt8 {
+    let _item: Item = .{}
+    0
+}

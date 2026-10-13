@@ -1,0 +1,9 @@
+error[O-Leak]: `tickets` (a linear `Vec[Ticket, Handle[SystemAllocator]]`) is still owned when this path leaves
+  --> tests/mem/discardability/an_empty_arena_vector_of_resources_still_requires_settlement.lin:15:9
+   |
+15 |     let tickets: Vec[Ticket, Handle[SystemAllocator]] = Vec.new_in(arena.handle())
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: end it with `tickets.finish()`, and settle what its `Err` hands back

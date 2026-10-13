@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `make` with more than it was given
+  --> tests/construction_derive/mutual_trait_only_arguments_cannot_grow.lin:17:29
+   |
+17 |         let _right: Right = Make.make(wrapped)
+   |                             ^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

@@ -1,0 +1,105 @@
+// This program reads where a server listens from `key = value` lines and
+// prints it. With no argument it reads the sample below; with one it reads
+// that file. Each step that can fail uses `let … else`: on success the value is
+// bound to the name, and on failure the `else` block reports why and returns.
+import std.env
+import std.fs
+import std.io
+import std.mem
+import std.testing
+
+let sample =
+    \\# where the service listens
+    \\host = 127.0.0.1
+    \\port = 8080
+    \\
+
+// Accept at most 64 KiB of settings.
+let max_settings_bytes: UInt64 = 65536
+
+// Return the value on the first line that names `key`, with the spaces around
+// it trimmed. The value is a view into `settings`, which `carries` states.
+fn setting(settings: Str, key: Str) -> Option[Str] where carries(.Some: settings) {
+    for line in settings.split("\n").unwrap() {
+        // `find` returns `None` for a comment or a blank line, which has no
+        // `=`. The `else` block then runs `continue` to skip to the next line.
+        let separator = line.find("=") else {
+            continue
+        }
+        if line.slice(0, separator).unwrap().trim_ascii() == key {
+            return .Some(line.slice(separator + 1, line.length()).unwrap().trim_ascii())
+        }
+    }
+    .None
+}
+
+test fn a_setting_is_read_from_the_line_that_names_it() {
+    testing.assert_eq(setting(sample, "port"), .Some("8080"), "the port line")?
+    testing.assert_eq(setting(sample, "host"), .Some("127.0.0.1"), "the host line")?
+    testing.assert_eq(setting(sample, "workers"), .None, "a key no line names")?
+}
+
+// Read the named file, or copy the sample when no file is given. On a failure
+// each `else` block prints the reason and returns `None`.
+fn load(args: env.Args) -> Option[String] {
+    if args.count() == 1 {
+        let copied = sample.to_owned(mem.system()) else |_| {
+            io.eprintln("cannot allocate the sample settings")
+            return .None
+        }
+        return .Some(copied)
+    }
+    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap()) else |error| {
+        io.eprintln("the settings path cannot name a file: {error:?}")
+        return .None
+    }
+    // `read_text` reads the file and decodes it as UTF-8; its error says which
+    // step failed.
+    let settings = fs.read_text(path, max_bytes: max_settings_bytes) else |error| {
+        io.eprintln("cannot load the settings file: {error}")
+        return .None
+    }
+    .Some(settings)
+}
+
+// `main` returns an exit status in `Ok`. The `?` after `io.println` returns
+// the printing error instead when writing to standard output fails.
+fn main() -> Result[UInt8, io.IoError] {
+    let args = env.args()
+    if args.count() > 2 {
+        io.eprintln("usage: server_settings [settings-file]")
+        return .Ok(2)
+    }
+    // `load` has already printed why it failed, so this `else` block only
+    // chooses the exit status.
+    defer let settings = load(args) else {
+        return .Ok(1)
+    }
+    let view = settings.view()
+
+    let host = setting(view, "host") else {
+        io.eprintln("the settings name no host")
+        return .Ok(1)
+    }
+    let written_port = setting(view, "port") else {
+        io.eprintln("the settings name no port")
+        return .Ok(1)
+    }
+    // The annotation `UInt16` tells `parse` which type to read.
+    let port: UInt16 = written_port.parse() else |error| {
+        io.eprintln("the port `{written_port}` is not a number from 0 to 65535: {error:?}")
+        return .Ok(1)
+    }
+    // This `else` block yields "4" instead of returning, so settings without a
+    // `workers` line start four workers.
+    let written_workers = setting(view, "workers") else {
+        "4"
+    }
+    // `parse[UInt8]()` names the type in brackets instead of an annotation.
+    let workers = written_workers.parse[UInt8]() else |error| {
+        io.eprintln("the worker count `{written_workers}` is not a number from 0 to 255: {error:?}")
+        return .Ok(1)
+    }
+    io.println("listening on {host}:{port} with {workers} workers")?
+    .Ok(0)
+}

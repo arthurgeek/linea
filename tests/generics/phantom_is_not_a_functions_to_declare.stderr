@@ -1,0 +1,10 @@
+error[T-Phantom]: `phantom` is not a function's to declare
+ --> tests/generics/phantom_is_not_a_functions_to_declare.lin:4:19
+  |
+4 | fn tagged[phantom Tag](x: UInt8) -> UInt8 {
+  |                   ^^^ a body can read no parameter for identity alone
+error[T-Infer]: nothing here says what `Tag` is
+ --> tests/generics/phantom_is_not_a_functions_to_declare.lin:9:5
+  |
+9 |     tagged(1)
+  |     ^^^^^^^^^ no argument determines it, and nothing expects a type of it

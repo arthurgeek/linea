@@ -1,0 +1,5 @@
+error[T-Infer]: the type of this variant cannot be determined
+ --> tests/constants/enum_variants/context_free_variant_cannot_infer_an_enum.lin:3:16
+  |
+3 | let selected = .Preserve
+  |                ^^^^^^^^^ name its enum, or give the binding a type

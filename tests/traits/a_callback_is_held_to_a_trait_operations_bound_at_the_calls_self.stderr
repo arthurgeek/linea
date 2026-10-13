@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(sink UInt16) -> Bool`, found `fn(sink Bool) -> Bool`
+  --> tests/traits/a_callback_is_held_to_a_trait_operations_bound_at_the_calls_self.lin:28:24
+   |
+7  |     fn reading_as[U, F: fn(sink reading: Self.Reading) -> U](self: Self, convert: F) -> U where carries(convert)
+   |                                                                          ------- expected because of this parameter
+28 |     if tank.reading_as(flip) {
+   |                        ^^^^ expected `fn(sink UInt16) -> Bool`, found `fn(sink Bool) -> Bool`

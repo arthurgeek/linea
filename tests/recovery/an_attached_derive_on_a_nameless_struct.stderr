@@ -1,0 +1,5 @@
+error[S-Name]: expected a name after `struct`
+ --> tests/recovery/an_attached_derive_on_a_nameless_struct.lin:2:8
+  |
+2 | struct { x: UInt8 }
+  |        ^ a struct needs a name

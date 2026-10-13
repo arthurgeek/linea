@@ -1,0 +1,15 @@
+import std.mem
+
+// A `sink` closure is consumed by its call, and a kept closure is called
+// through a place it stays in, so a consuming closure cannot be kept.
+fn main() -> Result[UInt8, mem.Oom] {
+    let bonus: UInt8 = 2
+    let finish = mem.Closure.open(
+        mem.system(),
+        sink [sink bonus] || -> UInt8 {
+            bonus
+        },
+    )?
+    finish.release()
+    return .Ok(0)
+}

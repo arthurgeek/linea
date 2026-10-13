@@ -1,0 +1,14 @@
+// A `Vec` and an array are not sequences themselves: each offers its elements
+// as a slice, and the report names `as_slice()` as the step to take.
+import std.mem
+
+fn main() -> UInt8 {
+    let scores = [UInt64(4), 8, 15]
+    let doubled = scores.map(|sink score| score * 2)
+    let kept = Vec.from_fn(mem.system(), count: 3, initializer: |index| index + 1).unwrap()
+    let total = kept.fold(0, |sink sum, sink value| sum + value)
+    kept.release()
+    let _unused = doubled
+    let _also = total
+    0
+}

@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+ --> tests/constructor_callables/contextual_variants/payload_type_must_match_exactly.lin:4:54
+  |
+4 |     let _wrap: fn(sink code: UInt8) -> RenderError = .Allocation
+  |                                                      ^^^^^^^^^^^ expected `UInt8`, found `UInt16`
+  |                                                      ----------- expected because of what this variant carries

@@ -1,0 +1,2 @@
+trap
+linea: panic: á stopped at tests/control/panic_reports_a_utf8_subslice.lin:3:5

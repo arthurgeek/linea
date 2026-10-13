@@ -1,0 +1,5 @@
+error[T-Infer]: the type of this literal cannot be determined
+ --> tests/struct_update/a_contextual_update_needs_a_type.lin:9:16
+  |
+9 |     let wide = .{ width = 8, ..small }
+  |                ^^^^^^^^^^^^^^^^^^^^^^^ give the binding a type, or name one

@@ -1,0 +1,8 @@
+fn applied(_value: Wrapper[UInt8].Item) -> () {}
+//                 ^ type
+//                         ^ type.builtin
+//                                ^ type
+fn grouped(_value: (Wrapper[UInt8]).Item.Next) -> () {}
+//                  ^ type
+//                                  ^ type
+//                                       ^ type

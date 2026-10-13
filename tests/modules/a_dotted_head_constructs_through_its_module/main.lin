@@ -1,0 +1,16 @@
+// A newtype is built through the module that declares it, in both forms. A
+// construction's head is a name however it is spelled, so `?` declines the
+// construction a dotted head builds exactly where it declines a bare one.
+import pct
+
+fn declined(sink k: UInt8) -> UInt8 {
+    match pct.Score?(k) {
+        Some(_p) => 1,
+        None => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    let _s = pct.Score(4)
+    declined(0) * 8 + declined(200)
+}

@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `10..=99`
+ --> tests/ranges/a_gap_between_ranges_is_named.lin:5:5
+  |
+5 |     match read b {
+  |     ^^^^^^^^^^^^^^ add the missing arms, or a `_`

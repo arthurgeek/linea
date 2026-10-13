@@ -1,0 +1,8 @@
+error[O-Leak]: `b` (a linear `mem.Buffer[mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/mem/a_buffer_nothing_disposes.lin:12:12
+   |
+12 |         Ok(b) => UInt8(b.length()),
+   |            ^ never settled on the path that reaches the end of its scope
+   |                  ----------------- its scope ends here
+   |
+   = help: settle it first with `b.release()`

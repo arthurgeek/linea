@@ -1,0 +1,21 @@
+// An enum is its tag, so negating one produces a number no variant has. The
+// `match` below covers every variant and is still exhaustive, so nothing
+// checks the fallthrough -- and the value it returns comes from a slot no path
+// ever wrote to. A well-formed program reading uninitialised memory is what
+// ADR 0013 exists to forbid.
+enum Colour {
+    Red,
+    Green,
+}
+
+fn mk() -> Colour {
+    Colour.Green
+}
+
+fn main() -> UInt8 {
+    let c: Colour = -mk()
+    match c {
+        Red => 1,
+        Green => 2,
+    }
+}

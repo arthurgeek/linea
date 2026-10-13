@@ -1,0 +1,5 @@
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/two_defers_of_one_value.lin:18:11
+   |
+18 |     defer take(k)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it

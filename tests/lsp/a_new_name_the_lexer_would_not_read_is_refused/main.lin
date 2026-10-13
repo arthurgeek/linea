@@ -1,0 +1,6 @@
+// A rename to something the lexer does not read as one name produces a program
+// that does not parse, so it is refused rather than applied.
+fn main() -> UInt8 {
+    let total: UInt8 = 1
+    total
+}

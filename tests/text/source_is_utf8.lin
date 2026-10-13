@@ -1,0 +1,7 @@
+// A source file is UTF-8, and `Str`'s invariant rests on it: a literal holds
+// text by construction only if the file it came from was text.
+//
+// The byte below begins no UTF-8 sequence.
+fn main() -> UInt8 {
+    UInt8(Str.length("ÿ"))
+}

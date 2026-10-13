@@ -1,0 +1,36 @@
+import std.env
+import std.fs
+import std.io
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    let args = env.args()
+    if args.count() != 2 {
+        return 64
+    }
+    let path = match fs.Path.from_bytes(args.bytes_at(1).unwrap()) {
+        Ok(path) => path,
+        Err(_) => return 64,
+    }
+    let limits = json.ParseLimits.default()
+    let bytes = match fs.read_file(mem.system(), path, max_bytes: limits.max_input_bytes) {
+        Ok(bytes) => bytes,
+        Err(failure) => {
+            failure.release()
+            return 70
+        },
+    }
+    let parsed = json.parse_bytes(mem.system(), bytes.as_slice())
+    bytes.release()
+    match parsed {
+        Ok(document) => {
+            document.release()
+            0
+        },
+        Err(error) => {
+            io.eprintln("{error.kind:?} at {error.offset}")
+            1
+        },
+    }
+}

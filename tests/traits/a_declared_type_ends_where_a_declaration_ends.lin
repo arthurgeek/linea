@@ -1,0 +1,26 @@
+// A declared type is a member like a signature is, so it ends where every
+// bodiless declaration ends: at the newline, or at the `;` that separates two
+// sharing a line. Two written side by side with neither between them are two
+// declarations on one line and nothing said so.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item type Held
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+    type Held = UInt8
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

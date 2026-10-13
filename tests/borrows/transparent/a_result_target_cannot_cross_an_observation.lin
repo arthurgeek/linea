@@ -1,0 +1,13 @@
+struct Holder { item: borrow UInt8 }
+
+fn rejected(item: borrow UInt8) -> Result[borrow Holder, UInt8] where carries(.Ok.item: item) {
+    .Err(*item)
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    match rejected(borrow number) {
+        Ok(_) => 0,
+        Err(code) => code,
+    }
+}

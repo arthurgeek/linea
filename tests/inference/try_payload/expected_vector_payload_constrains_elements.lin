@@ -1,0 +1,13 @@
+import std.mem
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let vector: Vec[UInt64, mem.SystemAllocator] = Vec.filled(mem.system(), count: 3, value: 0)?
+    defer vector.release()
+    return .Ok(
+        if vector.length() == 3 && vector[0] == 0 {
+            0
+        } else {
+            1
+        },
+    )
+}

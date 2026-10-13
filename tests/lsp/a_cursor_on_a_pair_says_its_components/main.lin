@@ -1,0 +1,7 @@
+// Hover on a pair answers with the tuple type, spelled the way the source
+// writes it.
+fn main() -> UInt8 {
+    let pair: (UInt64, Str) = (1, "a")
+    let (_n, _s) = pair
+    0
+}

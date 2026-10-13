@@ -1,0 +1,44 @@
+// A declaration declares each type parameter once, and an implementation's
+// head is where the second one costs something. Two positions spelled alike
+// are one parameter, and a head binds each parameter it names once -- so the
+// second position settles rather than binding again, and the head names a
+// family a receiver applying two different types is no member of.
+//
+// The underscore is what makes the shape worth a rule of its own. A repeated
+// parameter is otherwise reported for being unused, which is a rule about
+// disuse and not about the name -- and the prefix waives exactly that.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Get {
+    fn get(self: Self) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl Show for UInt8 {
+    fn show(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl Show for UInt64 {
+    fn show(_self: UInt64) -> UInt8 {
+        1
+    }
+}
+
+impl[_T: Show, _T: Show] Get for Pair[_T, _T] {
+    fn get(self: Self) -> UInt8 {
+        Show.show(self.b)
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt64, UInt8] = .{ a = 72623859790382856, b = 200 }
+    Get.get(p)
+}

@@ -1,0 +1,10 @@
+error[T-Bound]: `Coins` takes 1 type argument(s), and was given 2
+  --> tests/traits/an_implementations_head_supplies_what_its_constructor_declares.lin:18:15
+   |
+18 | impl Show for Coins[UInt8, UInt8] {}
+   |               ^^^^^ give it the arguments it declares
+error[T-Bound]: `Account` takes 0 type argument(s), and was given 1
+  --> tests/traits/an_implementations_head_supplies_what_its_constructor_declares.lin:20:15
+   |
+20 | impl Show for Account[UInt8] {}
+   |               ^^^^^^^ this type takes no arguments

@@ -1,0 +1,20 @@
+struct Quad {
+    a: UInt64,
+    b: UInt64,
+    c: UInt64,
+    d: UInt64,
+}
+
+// The result is built where the caller wants it, and `t.b` and `t.a` are read
+// from the base before the base is taken, so the swap sees the old values.
+fn swap_first_two(sink t: Quad) -> Quad {
+    Quad { a = t.b, b = t.a, ..t }
+}
+
+fn main() -> UInt8 {
+    var q: Quad = .{ a = 1, b = 2, c = 3, d = 4 }
+    q = swap_first_two(q)
+    let fresh = swap_first_two(Quad { a = 5, b = 6, c = 7, d = 8 })
+    // 21 + 34 + 65
+    UInt8(q.a * 10 + q.b + q.c * 10 + q.d + fresh.a * 10 + fresh.b)
+}

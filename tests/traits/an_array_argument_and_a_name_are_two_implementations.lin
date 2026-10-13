@@ -1,0 +1,30 @@
+// A trait argument is the type that was written, not the name it starts at.
+// `[UInt8; 2]` names nothing and `UInt8` names a type, so two implementations
+// supplying them to one head are two keys, and each call reaches the one its
+// argument names.
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Holds[[UInt8; 2]] for Coins {
+    fn held(x: Self, t: [UInt8; 2]) -> UInt8 {
+        x.count + t[0]
+    }
+}
+
+impl Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count * t
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let pair: [UInt8; 2] = [1, 2]
+    let n: UInt8 = 2
+    Holds.held(c, pair) + Holds.held(c, n)
+}

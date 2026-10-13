@@ -1,0 +1,9 @@
+// Reading a scalar component takes a snapshot and leaves the tuple whole, so
+// it can be read again; a text component is duplicated with `copy`.
+fn main() -> UInt8 {
+    let t: (UInt8, Str) = (2, "ab")
+    let n = t._0
+    let again = t._0
+    let s = copy(t._1)
+    n + again + UInt8(s.length()) - 6
+}

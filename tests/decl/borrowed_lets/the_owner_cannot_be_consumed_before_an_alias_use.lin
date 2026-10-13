@@ -1,0 +1,13 @@
+@linear
+struct Owner { value: UInt8 }
+
+fn close(sink owner: Owner) -> () {
+    let Owner { value: _ } = owner
+}
+
+fn main() -> UInt8 {
+    let owner = Owner { value = 23 }
+    let read Owner { value } = owner
+    close(owner)
+    value
+}

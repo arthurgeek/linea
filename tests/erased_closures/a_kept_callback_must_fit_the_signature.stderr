@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `fn(read UInt64) -> UInt64`, found `fn(read UInt8) -> Bool`
+  --> tests/erased_closures/a_kept_callback_must_fit_the_signature.lin:10:110
+   |
+10 |     let kept: mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = mem.Closure.open(mem.system(), describe)?
+   |                                                                                                              ^^^^^^^^ expected `fn(read UInt64) -> UInt64`, found `fn(read UInt8) -> Bool`
+  ::: std/mem/closure.lin
+L  |     pub fn open[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) ...
+   |                                                -------- expected because of this parameter

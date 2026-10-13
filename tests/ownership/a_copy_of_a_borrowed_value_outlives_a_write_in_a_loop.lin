@@ -1,0 +1,23 @@
+// Each pass copies the borrowed room, writes the owner, and reads the copy
+// made before the write.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 1 }
+    var total: UInt8 = 0
+    var round: UInt8 = 0
+    while round < 3 {
+        let big = borrow hall
+        let booked = copy(*big)
+        hall.seats = booked.seats + 1
+        if booked.name == "hall" {
+            total = total + booked.seats
+        }
+        round = round + 1
+    }
+    total + hall.seats
+}

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Label` already has a default implementation
+  --> tests/default_impl_ownership/one_default_per_trait.lin:11:26
+   |
+5  | default impl[T: Copyable] Label for T {
+   |                           ----- already implemented here
+11 | default impl[T: Integer] Label for T {
+   |                          ^^^^^ a trait has at most one default implementation

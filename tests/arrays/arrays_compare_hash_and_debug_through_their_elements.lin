@@ -1,0 +1,29 @@
+import std.hash
+import std.io
+
+use hash.Hash
+use io.IoError
+use io.println
+
+// An array compares, orders, hashes and prints through its elements, in
+// index order: `==` needs `Equatable` elements, `<` `Comparable` ones, `:?`
+// `Debug` ones.
+fn same[T: Equatable](first: T, second: T) -> Bool {
+    first == second
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let scores = [3, 5, 8]
+    let copied = [3, 5, 8]
+    let raised = [3, 5, 9]
+    let grid = [[1, 2], [3, 4]]
+    let words = ["tea", "jam"]
+    println("{scores:?} {grid:?} {words:?}")?
+    let equal = scores == copied && scores != raised && same(grid, [[1, 2], [3, 4]])
+    let ordered = scores < raised && !(raised < scores) && scores <= copied && raised >= scores
+    let hashed = Hash.hash(scores) == Hash.hash(copied) && Hash.hash(scores) != Hash.hash(raised)
+    if equal && ordered && hashed {
+        return .Ok(0)
+    }
+    return .Ok(1)
+}

@@ -1,0 +1,17 @@
+struct List { n: UInt8 }
+
+impl List {
+    fn push(inout self: Self, value: UInt8) -> List {
+        self.n += value
+        .{ n = self.n }
+    }
+
+    fn length(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    var list: List = .{ n = 0 }
+    &list.push(1).length()
+}

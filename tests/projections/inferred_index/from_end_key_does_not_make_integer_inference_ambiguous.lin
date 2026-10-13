@@ -1,0 +1,16 @@
+struct Board { values: [UInt8; 3] }
+
+impl Index[Int64] for Board via values
+
+impl Index[FromEnd] for Board via values
+
+fn main() -> UInt8 {
+    var board = Board { values = [2, 3, 4] }
+    board[0] += 1
+    board[^1] += 1
+    if board[0] == 3 && board[^1] == 5 {
+        0
+    } else {
+        1
+    }
+}

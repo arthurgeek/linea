@@ -1,0 +1,33 @@
+// `mid` re-exports the `Pair` that `a` declares, so `a.Pair` and `mid.Pair`
+// name one type: a parameter bounded by `Lookup[a.Pair]` and `Lookup[mid.Pair]`
+// carries one bound and reads `Elem` through it.
+import a
+import mid
+
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: UInt8,
+}
+
+impl Lookup[a.Pair] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: a.Pair) -> UInt8 {
+        self.cells + i.value
+    }
+}
+
+fn pass[C: Lookup[a.Pair] + Lookup[mid.Pair]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let board: Board = .{ cells = 1 }
+    let pair: a.Pair = .{ value = 2 }
+    pass[Board](Lookup.at(board, pair))
+}

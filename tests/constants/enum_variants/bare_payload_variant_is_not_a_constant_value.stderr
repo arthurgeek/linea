@@ -1,0 +1,5 @@
+error[T-Arity]: `Exact` carries 1 value(s), and this builds it with none
+ --> tests/constants/enum_variants/bare_payload_variant_is_not_a_constant_value.lin:3:24
+  |
+3 | fn select(mode: Mode = .Exact) -> UInt8 {
+  |                        ^^^^^^ supply its values, such as `Variant(value)`

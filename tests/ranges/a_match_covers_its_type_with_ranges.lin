@@ -1,0 +1,14 @@
+// Two ranges, `0..=9` and `10..=255`, are every value `UInt8` holds: no `_`
+// is written and none is needed. Each call names one arm and the sum of the
+// two statuses says both ran, since neither arm alone nor the other one
+// twice would add to the same number.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=9 => 1,
+        10..=255 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(3) + classify(200)
+}

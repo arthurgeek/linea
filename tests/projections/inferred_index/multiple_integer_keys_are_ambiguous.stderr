@@ -1,0 +1,5 @@
+error[T-Infer]: `Choice` is indexed by more than one integer type, including `Int8` and `UInt16`
+  --> tests/projections/inferred_index/multiple_integer_keys_are_ambiguous.lin:21:12
+   |
+21 |     choice[0]
+   |            ^ write the key with the type you mean

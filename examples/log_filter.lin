@@ -1,0 +1,145 @@
+// Read severity-prefixed log records from stdin and emit selected records.
+import std.io
+import std.mem
+import std.env
+import std.testing
+
+// The first space separates a strict decimal severity from the message.
+// A malformed number has no severity, which keeps it apart from a well-formed
+// record below the threshold.
+fn severity(line: Str) -> Option[UInt64] {
+    // `?` on an Option returns None from `severity` when the line has no space.
+    let separator = line.find(" ")?
+    let field = line.slice(0, separator)?
+    // `parse[UInt64]()` names the type to read in brackets. `else |_|` drops
+    // the parse error and returns None from `severity` instead.
+    let value = field.parse[UInt64]() else |_| {
+        return .None
+    }
+    .Some(value)
+}
+
+test fn log_severity_requires_a_complete_numeric_field() {
+    testing.assert_eq(severity("42 service ready"), .Some(42), "severity was not parsed")?
+    testing.assert_eq(severity("4x bad field"), .None, "a partial number was accepted")?
+    testing.assert_eq(severity("42"), .None, "a record without a message separator was accepted")?
+    testing.assert_eq(severity(" service ready"), .None, "an empty severity was accepted")?
+}
+
+// Each line is bounded independently; recovery also has a byte budget so one
+// oversized record cannot make the filter consume an unbounded amount of input.
+// Accept at most 4 KiB per record.
+let max_line_bytes: UInt64 = 4096
+
+// Spend at most 64 KiB looking for the boundary after a rejected record.
+let max_discard_bytes: UInt64 = 65536
+
+// Buffer reads and writes in 1 KiB chunks, independently of the record limit.
+let stream_capacity: UInt64 = 1024
+
+// Standard input and output, each read or written through a buffer.
+alias Input = io.BufferedReader[io.Descriptor]
+alias Output = io.BufferedWriter[io.Descriptor]
+
+// Each failure is reported where it happens, before the stream is settled, so
+// a later flush failure cannot replace the message.
+enum LogFailure {
+    Record,
+    Recovery,
+    Output,
+}
+
+fn main() -> UInt8 {
+    let args = env.args()
+    // Count the executable name plus the required severity argument.
+    if args.count() != 2 {
+        io.eprintln("usage: log_filter <minimum-severity>")
+        return 1
+    }
+    // Each setup step reports its own problem and ends the program with
+    // status 1.
+    let given = args.at(1) else {
+        io.eprintln("minimum severity must be UTF-8")
+        return 1
+    }
+    let minimum = given.parse[UInt64]() else |_| {
+        io.eprintln("minimum severity must be an unsigned decimal integer")
+        return 1
+    }
+    var input = io.BufferedReader.open(mem.system(), capacity: stream_capacity, reader: io.stdin()) else |_| {
+        io.eprintln("could not allocate the input buffer")
+        return 1
+    }
+    // abandon releases buffered storage without closing the borrowed stdin handle.
+    defer {
+        let _stdin = input.abandon()
+    }
+    var output = io.BufferedWriter.open(mem.system(), capacity: stream_capacity, writer: io.stdout()) else |_| {
+        io.eprintln("could not allocate the output buffer")
+        return 1
+    }
+    let result = filter_lines(&input, &output, minimum)
+    let output_failed = match read result {
+        Err(error) => match read error { Output => true, _ => false },
+        Ok(_) => false,
+    }
+    if output_failed {
+        let _stdout = output.abort()
+        return 1
+    }
+    // Input and recovery failures still deliver the records already accepted.
+    // finish drains and flushes. When it fails, `settled()` abandons the unsent
+    // suffix and keeps only the write failure.
+    let _stdout = output.finish().settled() else |failure| {
+        io.eprintln("log output failed: {failure:?}")
+        return 1
+    }
+    if result.is_ok() {
+        0
+    } else {
+        1
+    }
+}
+
+fn filter_lines(inout input: Input, inout output: Output, minimum: UInt64) -> Result[(), LogFailure] {
+    loop {
+        let line = match &input.read_line_borrowed(max_bytes: max_line_bytes) {
+            Ok(line) => match line {
+                None => return .Ok(()),
+                Some(value) => value,
+            },
+            Err(error) => {
+                let recoverable = match read error {
+                    Limit => true,
+                    Encoding(_) => true,
+                    _ => false,
+                }
+                io.eprintln("log record rejected: {error:?}")
+                if !recoverable {
+                    return .Err(.Record)
+                }
+                // Skip the rest of the rejected record. `map` reads whether the
+                // skip reached the next record, and a failed skip did not.
+                let recovered = &input.discard_pending(max_bytes: max_discard_bytes).map(|sink progress| progress.boundary).unwrap_or(false)
+                if !recovered {
+                    io.eprintln("could not reach the next record within the discard budget")
+                    return .Err(.Recovery)
+                }
+                continue
+            },
+        }
+        let level = severity(line) else {
+            io.eprintln("log record has no valid severity field")
+            continue
+        }
+        if level >= minimum {
+            // `map_err` reports a failed write and turns it into `Output`.
+            io.line(line, &output).map_err(
+                |sink error| {
+                    io.eprintln("log output failed: {error:?}")
+                    LogFailure.Output
+                },
+            )?
+        }
+    }
+}

@@ -1,0 +1,5 @@
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/generic_arguments_need_concrete_lengths.lin:4:29
+  |
+4 |     let _cell: Cell[[UInt8; _]] = .{ value = [1, 2] }
+  |                             ^ write an explicit length in this type

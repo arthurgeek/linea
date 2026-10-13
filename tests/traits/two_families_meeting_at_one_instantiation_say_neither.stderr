@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Give[Bool]` for `Holder[Bool]`
+  --> tests/traits/two_families_meeting_at_one_instantiation_say_neither.lin:22:9
+   |
+16 | impl[T] Give[T] for Holder[T] {
+   |         ---- the other implementation
+22 | impl[U] Give[Bool] for Holder[U] {
+   |         ^^^^ no instantiation may answer to two implementations of one trait

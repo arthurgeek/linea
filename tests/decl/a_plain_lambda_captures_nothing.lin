@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let value: UInt8 = 7
+    let read_value = || value
+    read_value()
+}

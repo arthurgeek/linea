@@ -1,0 +1,13 @@
+import std.mem
+
+fn describe(value: UInt8) -> Bool {
+    value > 1
+}
+
+// The closure is called with a `UInt64` and answers one; `describe` takes a
+// `UInt8` and answers a `Bool`.
+fn main() -> Result[UInt8, mem.Oom] {
+    let kept: mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = mem.Closure.open(mem.system(), describe)?
+    kept.release()
+    return .Ok(0)
+}

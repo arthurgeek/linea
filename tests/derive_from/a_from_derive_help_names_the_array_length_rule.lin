@@ -1,0 +1,10 @@
+@derive(From[[UInt8; 1 + 1]])
+enum Frame {
+    Pair([UInt8; 2]),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _frame = Frame.Unknown
+    0
+}

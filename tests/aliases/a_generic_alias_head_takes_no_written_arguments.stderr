@@ -1,0 +1,5 @@
+error[N-NotAValue]: `SysVec` is an alias of a type, and an alias of a type is not a value
+ --> tests/aliases/a_generic_alias_head_takes_no_written_arguments.lin:8:17
+  |
+8 |     let names = SysVec[UInt8].new_in(mem.system())
+  |                 ^^^^^^ name a value of the type it names

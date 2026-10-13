@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/struct_update/an_unwritten_field_keeps_its_observation.lin:11:5
+   |
+11 |     Pair { left = copy(shared), ..first }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

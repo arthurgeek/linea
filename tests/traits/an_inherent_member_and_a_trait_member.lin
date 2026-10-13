@@ -1,0 +1,34 @@
+// One type, one member name, two namespaces. `Coins.of` is what the type's own
+// module wrote; `Measure.of` is what the implementation supplies. Neither is
+// the other, and both are written here so nothing that renders the two alike
+// can call itself correct.
+//
+// The tree dump is what this case pins. An `impl Trait for Type` and an
+// inherent `impl Type` differ only in the trait, a binding's type is carried
+// only by its annotation where a `.{ … }` literal names none, and a signature
+// is half return type -- so a dump printing none of the three would render this
+// program identically to several that do not compile.
+struct Coins {
+    count: UInt8,
+}
+
+impl Coins {
+    pub fn of(x: Coins) -> UInt8 {
+        x.count
+    }
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count * 2
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ count = 3 }
+    Coins.of(coppers) + Measure.of(coppers)
+}

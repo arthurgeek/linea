@@ -1,0 +1,33 @@
+// A bound promises an implementation exists for whatever settles the
+// parameter, and the argument is what names it. Inside the body `Self` is the
+// type parameter and `Self.Item` is opaque: every type the bound admits
+// settles `Item` its own way, so the body may hand one along and may inspect
+// nothing. At the call the parameter is settled, and the settled reference is
+// settled with it -- through the implementation the argument's type has of the
+// bounding trait, which is the lookup the call itself goes through.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn measured[T: Measure](v: T) -> T.Item {
+    Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    measured(c)
+}

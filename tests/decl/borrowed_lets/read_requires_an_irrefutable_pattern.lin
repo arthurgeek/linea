@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let value: UInt8 = 3
+    let read other = value
+    other
+}

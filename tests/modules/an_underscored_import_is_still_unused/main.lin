@@ -1,0 +1,9 @@
+// A leading `_` says a value is deliberately unused, and an import binds no
+// value: it names a module so something can be reached through it. There is
+// nothing for the prefix to be about, so an import nothing names is removed
+// whatever it is called.
+import a as _a
+
+fn main() -> UInt8 {
+    1
+}

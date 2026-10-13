@@ -1,0 +1,41 @@
+error[S-Bracket]: expected `;`
+ --> tests/arrays/a_bracket_says_where_it_closes.lin:8:20
+  |
+8 |     let xs: [UInt8 3] = [1, 2, 3]
+  |                    ^ an array type is written `[T; N]`
+error[S-Equals]: expected `=`
+ --> tests/arrays/a_bracket_says_where_it_closes.lin:8:20
+  |
+8 |     let xs: [UInt8 3] = [1, 2, 3]
+  |                    ^ a binding needs an initialiser
+error[S-Separator]: expected `;` or a newline
+ --> tests/arrays/a_bracket_says_where_it_closes.lin:8:21
+  |
+8 |     let xs: [UInt8 3] = [1, 2, 3]
+  |                     ^ this binding ends here
+error[S-Bracket]: expected `]`
+  --> tests/arrays/a_bracket_says_where_it_closes.lin:14:5
+   |
+14 |     xs[0]
+   |     ^^ an array literal is written `[a, b, c]`
+error[S-Bracket]: expected `]`
+  --> tests/arrays/a_bracket_says_where_it_closes.lin:19:9
+   |
+19 |     xs[0)
+   |         ^ an index is written `a[i]`
+error[S-Separator]: expected `;` or a newline
+  --> tests/arrays/a_bracket_says_where_it_closes.lin:19:9
+   |
+19 |     xs[0)
+   |         ^ this statement ends here
+error[T-Discard]: this expression produces a `UInt8` that is discarded
+  --> tests/arrays/a_bracket_says_where_it_closes.lin:19:5
+   |
+19 |     xs[0)
+   |     ^^^^ bind it with `let _ =` to discard it deliberately
+error[T-Mismatch]: expected `UInt8`, found `()`
+  --> tests/arrays/a_bracket_says_where_it_closes.lin:17:23
+   |
+17 | fn indexed() -> UInt8 {
+   |                 ----- expected because of this return type
+   |                       ^ this body produces nothing

@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/control/bool_is_not_an_integer.lin:2:20
+  |
+2 |     let n: UInt8 = true
+  |            ----- expected because of this annotation
+  |                    ^^^^ expected `UInt8`, found `Bool`

@@ -1,0 +1,5 @@
+error[T-Bound]: `Coins` does not implement `Holds[Bool]`
+  --> tests/traits/a_call_needs_the_implementation_its_arguments_name.lin:26:5
+   |
+26 |     Holds.held(c, true)
+   |     ^^^^^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are

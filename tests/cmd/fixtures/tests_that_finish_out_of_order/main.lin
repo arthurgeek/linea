@@ -1,0 +1,40 @@
+// Two tests declared in one order and presented in another.
+//
+// `z_quick_one` is declared first and sorts last; `a_slow_one` is declared last
+// and sorts first. That is what makes the ordering observable: results are
+// collected at fixed positions, so what reaches the transcript arrives in
+// declaration order, and only sorting puts it in the order below.
+//
+// The durations differ too -- the slow one spends time in a loop written
+// against a count the process supplied, so nothing folds it away -- but that is
+// not what this case rests on. Completion order is never recorded anywhere, so
+// no arrangement of it could change the transcript; declaration order is the
+// one that can, and it is the one this fixture bends.
+import std.env
+import std.io
+
+use env.Args
+use env.args
+use io.IoError
+
+fn main() -> UInt8 {
+    0
+}
+
+test fn z_quick_one() -> Result[(), IoError] {
+    return .Ok({})
+}
+
+test fn a_slow_one() -> Result[(), IoError] {
+    let a: Args = args()
+    var seen: UInt64 = 0
+    var i: UInt64 = 0
+    while i < 1000000 {
+        seen = seen + a.count()
+        i = i + 1
+    }
+    if seen == 0 {
+        return .Err(IoError.from_os(.Write, 1))
+    }
+    return .Ok({})
+}

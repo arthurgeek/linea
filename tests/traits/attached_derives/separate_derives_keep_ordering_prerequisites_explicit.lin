@@ -1,0 +1,13 @@
+@derive(Equatable, Equivalent)
+@derive(Comparable, Ordered)
+struct Version { major: UInt8, minor: UInt8 }
+
+fn main() -> UInt8 {
+    let before = Version { major = 1, minor = 8 }
+    let after = Version { major = 1, minor = 9 }
+    if before < after && before != after {
+        0
+    } else {
+        1
+    }
+}

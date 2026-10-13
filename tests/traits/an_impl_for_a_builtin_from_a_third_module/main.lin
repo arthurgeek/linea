@@ -1,0 +1,20 @@
+// A builtin's side is owned by nobody, so the trait side is the only one an
+// implementation for one can be written from. This module owns neither: it
+// imports the trait rather than declaring it, and nobody declares `UInt8`.
+//
+// So the rule that admits `impl Measure for UInt8` in the trait's own module
+// refuses it here, and for the same reason -- what it asks is which of the two
+// sides this module owns, and the answer is neither.
+import measure
+
+use measure.Measure
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

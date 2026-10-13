@@ -1,0 +1,31 @@
+// A transfer ends by being committed or rolled back, and the compiler picks
+// neither. `defer let` needs a type that implements `Release`.
+@linear
+struct Transfer {
+    cents: UInt64,
+}
+
+impl Transfer {
+    fn commit(sink self: Self) -> UInt64 {
+        let Transfer { cents } = self
+        cents
+    }
+
+    fn rollback(sink self: Self) -> () {
+        let Transfer { cents: _ } = self
+    }
+}
+
+fn settle(sink transfer: Transfer, approved: Bool) -> UInt64 {
+    if approved {
+        return transfer.commit()
+    }
+    transfer.rollback()
+    0
+}
+
+fn main() -> UInt8 {
+    let _paid = settle(Transfer { cents = 100 }, true)
+    defer let transfer = Transfer { cents = 300 }
+    0
+}

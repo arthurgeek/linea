@@ -1,0 +1,25 @@
+// A parameter whose type is a type parameter admits no default: which type
+// the parameter stands for is settled by the call, and there is no value of it
+// to work out where the declaration is written.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn weighed[T: Measure](x: T = 1) -> UInt8 {
+    Measure.of(x)
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 3 }
+    weighed(a)
+}

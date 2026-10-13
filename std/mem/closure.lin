@@ -1,0 +1,194 @@
+import std.testing
+
+// A Closure keeps any callable behind one type. Closures with different
+// captures, named functions and function values all become a `Closure[S, A]`
+// when they can be called as `S`, which is a `fn` or `inout fn` type. The
+// captures move into bytes from `A`, so the closure can be stored in a field or
+// a vector and called later. Releasing it releases what it captured and returns
+// the bytes. It must be released where `A`'s buffers must be, as over
+// `mem.system()`; in an arena it may be dropped with the arena, so a callback
+// kept there may capture nothing that must be released.
+//
+// `S` must be a `fn` or `inout fn` type; a `sink fn` is refused because a
+// closure called once would have to be consumed by its call. The callback must
+// be callable as `S` in the sense of a callable bound: the same parameter types
+// and conventions, a read callable where `S` is `inout`, result dependencies
+// within `S`'s `carries` bound together with what the callback itself carries,
+// and the same retention. A lambda or function is checked with `S` as its
+// context; where no context supplies `S` it is the callback's own signature
+// without its capture contracts, so a lambda written without context must name
+// its parameter types. A closure that stores an argument in one of its captures
+// cannot be kept, because no `fn` type can state that. `S` must be settled where
+// `open` is called, since the callback's type is erased there. The callback must
+// implement `Release`, because releasing is all that is left to do with it once
+// its type is erased.
+//
+// A call through the closure, `closure(args)` or `&closure(args)` for `inout fn`,
+// is checked as a call through a callable bound whose signature is `S`: the
+// result may carry what the closure carries and never borrows the closure's own
+// storage. A Closure is never Copyable. Its settlement follows its allocator,
+// as a vector's does: it is linear where `A`'s buffers must be released, and it
+// may be dropped with an arena whose handle it was opened with. The captures its
+// type no longer shows cannot owe anything a drop would lose, so a callback that
+// must be released is refused unless the closure is linear and `A` names no type
+// parameter; through a generic allocator the callback must be Discardable. A
+// Closure is not itself a callable meeting a bound; a lambda that calls it,
+// `[kept] |x: UInt64| kept(x)`, is one, and may be kept in turn.
+@opaque
+struct Closure[S, A: Allocator = SystemAllocator] {
+    /// Runs the stored callable: `S`'s arguments, then `at` and `len`.
+    entry: ClosureEntry[S],
+    /// Releases the stored callable in place.
+    settle: fn(at: UInt64, len: UInt64) -> (),
+    /// The stored callable's bytes. Both are zero when it has no size.
+    at: UInt64,
+    len: UInt64,
+    storage: Option[Buffer[A]],
+}
+
+// A ClosureEntry is the code address a closure is entered through. For a
+// callable `S` the compiler makes this `S` with two more parameters, the
+// address and length of the stored callable, which the generated entry checks
+// before reading it.
+struct ClosureEntry[phantom S] {}
+
+// The compiler replaces these declarations with the entry and release
+// addresses it generates for the callable type `F`, and with its size.
+extern fn closure_entry[S, F](shape: SlotType[F]) -> ClosureEntry[S]
+
+extern fn closure_settle[F](shape: SlotType[F]) -> fn(at: UInt64, len: UInt64) -> ()
+
+extern fn closure_size[F](shape: SlotType[F]) -> UInt64
+
+impl[S, A: Allocator] Closure[S, A] {
+    // Move `callback` into bytes from `allocator` and return the closure that
+    // calls it. A callable with no size, such as a lambda that captures
+    // nothing, allocates nothing. When the allocator refuses, `callback` is
+    // released and `Oom` returned. The contract `carries(.Ok: callback,
+    // allocator)` gives the closure the callback's external dependencies and the
+    // allocator's, so a read capture still pins the place it observes and a place
+    // lent `inout` stays lent until the closure is released. Captures keep their
+    // conventions.
+    pub fn open[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
+        let shape: SlotType[F] = .Type
+        let size = closure_size(shape)
+        var storage: Storage[F, A] = if size == 0 {
+            .{ buffer = .None, allocator = copy(allocator), at = 0, len = 0 }
+        } else {
+            match allocator.acquire(size) {
+                Ok(buffer) => Storage.from_buffer(buffer),
+                Err(reason) => {
+                    callback.release()
+                    return .Err(reason)
+                },
+            }
+        }
+        let at = storage.at
+        let len = storage.len
+        slot_put(&storage, at, len, 0, callback)
+        let Storage { buffer, allocator: _, at: _, len: _ } = storage
+        .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at, len, storage = buffer })
+    }
+}
+
+test fn a_closure_calls_what_it_captured() {
+    let rate: UInt64 = 10
+    let discount = Closure.open(
+        system(),
+        [sink rate] |cents: UInt64| -> UInt64 {
+            cents - cents * rate / 100
+        },
+    ).unwrap()
+    let paid = discount(2000)
+    discount.release()
+    testing.assert_eq(paid, 1800, "the closure lost its rate")?
+    .Ok(())
+}
+
+test fn a_closure_keeps_its_captures_in_an_arena() {
+    defer let arena = Arena.open(system(), 64)
+    let rate: UInt64 = 10
+    // Arena storage is reclaimed with the arena, so this closure is dropped
+    // rather than released.
+    let discount = Closure.open(
+        arena.handle(),
+        [sink rate] |cents: UInt64| -> UInt64 {
+            cents - cents * rate / 100
+        },
+    ).unwrap()
+    testing.assert_eq(discount(2000), 1800, "the closure lost its rate in an arena")?
+    .Ok(())
+}
+
+test fn a_refused_allocation_releases_the_callback() {
+    let log = AllocationLog.open(system(), 0).unwrap()
+    var kept: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
+    let pushed = match &kept.push(7) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+    log.refuse_attempt(2)
+    let opened = Closure.open(
+        log.allocator(),
+        [sink kept] || -> UInt64 {
+            kept.length()
+        },
+    )
+    let refused = match opened {
+        Ok(closure) => {
+            closure.release()
+            false
+        },
+        Err(_) => true,
+    }
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert(pushed, "the captured vector could not grow")?
+    testing.assert(refused, "the allocator's refusal was not reported")?
+    testing.assert(settled, "a refused closure left an allocation behind")?
+    .Ok(())
+}
+
+test fn a_lambda_that_captures_nothing_allocates_nothing() {
+    let log = AllocationLog.open(system(), 0).unwrap()
+    let doubling = Closure.open(
+        log.allocator(),
+        |value: UInt64| -> UInt64 {
+            value * 2
+        },
+    ).unwrap()
+    let doubled = doubling(21)
+    doubling.release()
+    let attempts = log.attempts()
+    log.release()
+    testing.assert_eq(doubled, 42, "the closure did not double")?
+    testing.assert_eq(attempts, 0, "a closure with no captures allocated")?
+    .Ok(())
+}
+
+impl[S, A: Allocator] Release for Closure[S, A] {
+    // Release the stored callable in place, then return its bytes.
+    fn release(sink self: Self) -> () {
+        let Closure { entry: _, settle, at, len, storage } = self
+        settle(at, len)
+        storage.release()
+    }
+}
+
+test fn releasing_a_closure_returns_its_bytes() {
+    let log = AllocationLog.open(system(), 0).unwrap()
+    let offset: UInt64 = 5
+    let shifted = Closure.open(
+        log.allocator(),
+        [sink offset] |value: UInt64| -> UInt64 {
+            value + offset
+        },
+    ).unwrap()
+    let answer = shifted(1)
+    shifted.release()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_eq(answer, 6, "the closure lost its offset")?
+    testing.assert(settled, "releasing the closure kept its bytes")?
+    .Ok(())
+}

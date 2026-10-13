@@ -1,0 +1,5 @@
+error[T-MissingField]: `enabled` is not given a value
+ --> tests/constants/aggregates/missing_field.lin:4:22
+  |
+4 | let config: Config = .{ amount = 7 }
+  |                      ^^^^^^^^^^^^^^^ every field is given one

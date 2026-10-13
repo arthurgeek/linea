@@ -1,0 +1,5 @@
+error[T-UnknownField]: `UInt8` has no fields
+ --> tests/structs/named_literals/a_named_literal_head_must_name_a_struct.lin:2:18
+  |
+2 |     let _value = UInt8 { value = 1 }
+  |                  ^^^^^^^^^^^^^^^^^^^ only a struct is built this way

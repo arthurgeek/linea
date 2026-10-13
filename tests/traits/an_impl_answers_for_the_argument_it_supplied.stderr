@@ -1,0 +1,5 @@
+error[T-Impl]: `Holds` declares `held`'s `t` as `UInt8`, and this takes `Int64`
+  --> tests/traits/an_impl_answers_for_the_argument_it_supplied.lin:18:8
+   |
+18 |     fn held(x: Self, _t: Int64) -> UInt8 {
+   |        ^^^^ take the type the signature declares

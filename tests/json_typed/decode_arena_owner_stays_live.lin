@@ -1,0 +1,13 @@
+import std.json
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 4096)
+    let result: Result[String[mem.Handle[mem.SystemAllocator]], json.DecodeError[mem.Handle[mem.SystemAllocator]]] = json.decode(arena.handle(), r#""tea""#)
+    let value = result.unwrap()
+    arena.release()
+    value.release()
+    return 0
+}

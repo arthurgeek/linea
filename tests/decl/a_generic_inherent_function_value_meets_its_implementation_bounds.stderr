@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Equatable`, and `Plain` does not implement it
+  --> tests/decl/a_generic_inherent_function_value_meets_its_implementation_bounds.lin:16:72
+   |
+16 |     let same: fn(holder: Holder[Plain], other: Plain) -> Bool = Holder.same
+   |                                                                        ^^^^ implement it for that type, or drop the bound

@@ -1,0 +1,6 @@
+error[T-Condition]: expected `Bool`, found `UInt8`
+ --> tests/logic/operand_is_bool.lin:5:8
+  |
+5 |     if n && true {
+  |        ^ expected `Bool`, found `UInt8`
+  |          -- a condition must be a `Bool`

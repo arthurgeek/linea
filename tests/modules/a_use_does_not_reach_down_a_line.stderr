@@ -1,0 +1,30 @@
+note[S-Continuation]: the next line begins with `.`, which could have continued the expression above
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:16:1
+   |
+16 | .thing
+   | ^ end the previous line with it if that was meant
+error[S-Entry]: a program is a list of declarations
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:16:1
+   |
+16 | .thing
+   | ^ expected `fn` here
+error[N-Duplicate]: `mm` is already declared
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:15:9
+   |
+15 | pub use mm
+   |         ^^ a name is declared once
+error[M-Import]: `use` takes a path of two elements
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:15:9
+   |
+15 | pub use mm
+   |         ^^ a re-export names a module and a declaration in it
+error[N-Undefined]: undefined name `thing`
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:19:5
+   |
+19 |     thing()
+   |     ^^^^^ no binding with this name is in scope
+error[M-Unused]: `mm` is never used
+  --> tests/modules/a_use_does_not_reach_down_a_line/main.lin:14:8
+   |
+14 | import mm
+   |        ^^ remove the import

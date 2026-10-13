@@ -1,0 +1,31 @@
+// A statement inside a block argument completes where it is written. `held`
+// owns what `e` held from the `let` onwards, and the call around the block is
+// waiting on nothing, so the `return` after it crosses no open transfer.
+//
+// Only a construct's own operand can be pending on it. Reading the whole of a
+// block argument as part of the construct refuses this program for a transfer
+// that closed before the `return` was reached.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn go(sink d: Key, sink e: Key) -> UInt8 {
+    use2(
+        {
+            let held = e
+            return use2(held, d)
+        },
+        .{ n = 3 },
+    )
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 }, .{ n = 3 })
+}

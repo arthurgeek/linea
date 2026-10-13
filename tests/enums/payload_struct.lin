@@ -1,0 +1,29 @@
+// A variant carrying a structure. `payload_aggregate.lin` carries an enum, so
+// the two together are what say that a payload holds *a value* rather than one
+// particular shape of one.
+//
+// What this catches: a payload whose value lives in memory is the value, not
+// its address. Storing the address writes a pointer into the payload and
+// leaves the bytes in a frame that is about to end, which reads back as
+// whatever is there afterwards.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+enum Held {
+    Holds(Point),
+    Empty,
+}
+
+fn sum(p: Point) -> UInt8 {
+    p.x + p.y
+}
+
+fn main() -> UInt8 {
+    let held: Held = .Holds(.{ x = 2, y = 3 })
+    match held {
+        Holds(p) => sum(p),
+        Empty => 0,
+    }
+}

@@ -1,0 +1,9 @@
+enum Empty { Value(Never) }
+
+fn accept[F: fn(sink value: Never) -> Empty](_make: F) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    accept(Empty.Value)
+}

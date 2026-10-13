@@ -1,0 +1,21 @@
+// An implementation declares type parameters in the grammar a function's use,
+// and applies its head to them. Both are written before the members, and both
+// are printed back where they were written.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Show for Holder[T] {
+    fn show(self: Holder[T]) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 1 }
+    Show.show(h)
+}

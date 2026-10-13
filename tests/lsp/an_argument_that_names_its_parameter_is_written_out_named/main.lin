@@ -1,0 +1,33 @@
+// An argument names the parameter it fills, so the written order and the
+// declared order are two orders. Two traits declare the operation, so the
+// postfix form is [N-Ambiguous] and what the offer writes is the whole call
+// written out -- carrying every name across, because dropping one leaves the
+// values to be paired by position and that is a different call.
+trait Measure {
+    fn between(self: Self, low: UInt8, high: UInt8) -> UInt8
+}
+
+trait Weigh {
+    fn between(self: Self, low: UInt8, high: UInt8) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn between(self: Self, low: UInt8, high: UInt8) -> UInt8 {
+        self.n + low + high
+    }
+}
+
+impl Weigh for Coins {
+    fn between(self: Self, low: UInt8, high: UInt8) -> UInt8 {
+        self.n + low + high
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.between(high: 5, low: 2)
+}

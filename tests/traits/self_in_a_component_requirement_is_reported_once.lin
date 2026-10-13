@@ -1,0 +1,19 @@
+trait Required[phantom T] {}
+
+trait Ready {}
+
+template impl Ready where reflect.components: Required[Self] {}
+
+struct First {}
+
+struct Second {}
+
+derive Ready for First
+
+derive Ready for Second
+
+fn main() -> UInt8 {
+    let _first: First = .{}
+    let _second: Second = .{}
+    0
+}

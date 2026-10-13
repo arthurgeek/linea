@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+ --> tests/tuples/an_arm_after_a_catch_all_is_unreachable_whatever_it_names.lin:7:9
+  |
+7 |         (c, d) => c + d,
+  |         ^^^^^^ an earlier arm already takes every value

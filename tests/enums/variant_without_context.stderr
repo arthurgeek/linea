@@ -1,0 +1,10 @@
+error[N-Unused]: `Colour` is never used
+ --> tests/enums/variant_without_context.lin:1:6
+  |
+1 | enum Colour { Red }
+  |      ^^^^^^ name it in an annotation, or remove it
+error[T-Infer]: the type of this variant cannot be determined
+ --> tests/enums/variant_without_context.lin:4:13
+  |
+4 |     let _ = .Red
+  |             ^^^^ name its enum, or give the binding a type

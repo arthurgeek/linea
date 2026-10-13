@@ -1,0 +1,14 @@
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/a_refused_call_leaves_other_paths_owing.lin:12:22
+   |
+12 |         let _found = lookup(ticket)
+   |                      ^^^^^^ no binding with this name is in scope
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_refused_call_leaves_other_paths_owing.lin:9:9
+   |
+9  |     let ticket = Ticket.Seat(4)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+15 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

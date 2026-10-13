@@ -1,0 +1,19 @@
+// A `&` cannot sit at the top of a value a variant carries -- the marker
+// belongs at a call site -- but it sits inside one as readily as inside an
+// argument, and what a variant carries is one list evaluated in some order.
+// Written this way, the second value is `2` or `9` depending on which value
+// ran first, and nothing said so.
+enum Shape {
+    Round(UInt8, UInt8),
+}
+
+fn bump(inout n: UInt8) -> UInt8 {
+    n = 9
+    1
+}
+
+fn main() -> UInt8 {
+    var p: UInt8 = 2
+    let s: Shape = Shape.Round(bump(&p), p)
+    match s { Round(a, b) => a + b }
+}

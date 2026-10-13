@@ -1,0 +1,11 @@
+struct Box[T] {
+    values: [T; 2],
+}
+
+impl[T] Index[UInt64] for Box[T] via values
+
+fn main() -> UInt8 {
+    var box: Box[UInt8] = .{ values = [2, 3] }
+    box[1] += 1
+    return box[0] + box[1] - 6
+}

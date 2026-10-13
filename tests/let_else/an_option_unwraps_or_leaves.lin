@@ -1,0 +1,22 @@
+// An `Option` carries nothing when it fails, so its `else` binds nothing.
+fn first_even(limit: UInt8) -> Option[UInt8] {
+    var n: UInt8 = 1
+    while n < limit {
+        if n % 2 == 0 {
+            return Option.Some(n)
+        }
+        n += 1
+    }
+    Option.None
+}
+
+fn count(limit: UInt8) -> UInt8 {
+    let even = first_even(limit) else {
+        return 0
+    }
+    even * 10
+}
+
+fn main() -> UInt8 {
+    count(1) + count(5)
+}

@@ -1,0 +1,37 @@
+// A bound names the trait, so a settled reference written off a bounded
+// parameter is read through the bound rather than through an implementation in
+// hand. The body is checked once, for every type the bound admits, and there
+// `W.Item` is a type nothing further is known of: a value of it may be bound,
+// moved and handed back, which is the whole of what an unbounded parameter's
+// value admits.
+//
+// A signature is where one stands. It is read where the declaration that wrote
+// it stands, and its parameters are supplied per call rather than substituted
+// into a template the way a declared type's parts are.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _passed_along[W: Measure](sink v: W.Item) -> W.Item {
+    let held: W.Item = v
+    held
+}
+
+fn main() -> UInt8 {
+    let c: Counter = Counter { at = 7 }
+    Measure[Counter].of(c)
+}

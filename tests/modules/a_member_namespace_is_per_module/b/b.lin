@@ -1,0 +1,9 @@
+pub struct Thing {
+    w: UInt8,
+}
+
+impl Thing {
+    pub fn make() -> Thing {
+        .{ w = 2 }
+    }
+}

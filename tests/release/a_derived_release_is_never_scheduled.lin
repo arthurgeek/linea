@@ -1,0 +1,22 @@
+// A Release implementation offers an explicit terminal operation. It does not
+// make ownership schedule one when source omits the call.
+@linear
+enum Leaf { Value }
+
+impl Release for Leaf {
+    fn release(sink self: Leaf) -> () {
+        match self { Value => {} }
+    }
+}
+
+@linear
+struct Holder {
+    leaf: Leaf,
+}
+
+derive Release for Holder
+
+fn main() -> UInt8 {
+    let _value: Holder = .{ leaf = .Value }
+    0
+}

@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `hash` is declared by `Hash`, which is not in scope here
+ --> tests/traits/a_trait_operation_through_a_type_needs_its_trait_in_scope.lin:8:8
+  |
+8 |     if UInt64.hash(seat) == hash.Hash.hash(seat) {
+  |        ^^^^^^^^^^^ write `use hash.Hash`: an operation is reached through the trait that declares it

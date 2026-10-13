@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let contextual: Range[UInt8] = 0..4
+    let ordinary = 0..4
+    let signed: Int8 = 4
+    let negative = (-2)..signed
+    let default_end: Int64 = ordinary.hi
+    if contextual.hi == 4 && negative.lo == -2 && default_end == 4 {
+        0
+    } else {
+        1
+    }
+}

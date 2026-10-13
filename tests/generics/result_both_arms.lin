@@ -1,0 +1,25 @@
+// `Result` carries the value or what went wrong, and both arms are reachable.
+// Its two parameters are settled by the type each side is written against
+// rather than by either variant, which is why the signature carries them.
+fn halve(n: UInt8) -> Result[UInt8, UInt8] {
+    if n > 1 {
+        .Ok(n / 2)
+    } else {
+        .Err(n)
+    }
+}
+
+fn main() -> UInt8 {
+    let big: UInt8 = 10
+    let small: UInt8 = 1
+
+    let a: UInt8 = match halve(big) {
+        Ok(v) => v,
+        Err(e) => e,
+    }
+    let b: UInt8 = match halve(small) {
+        Ok(v) => v,
+        Err(e) => e,
+    }
+    a + b
+}

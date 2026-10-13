@@ -1,0 +1,17 @@
+struct Pair[UInt64,UInt8] {
+    a: UInt64,
+    b: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let p: Pair[UInt64,UInt8] = .{ a = 72623859790382856, b = 200 }
+    Pair[UInt64,UInt8];;Get.get(p)
+}
+
+fn Pair[UInt64,UInt8];;Get.get(self: Pair[UInt64,UInt8]) -> UInt8 {
+    UInt8;;Show.show(self.b)
+}
+
+fn UInt8;;Show.show(self: UInt8) -> UInt8 {
+    self
+}

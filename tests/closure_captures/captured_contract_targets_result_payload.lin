@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let callback = [sink saved = borrow number] || -> where carries(.Some: saved) {
+        let result: Option[borrow UInt8] = .Some(copy(saved))
+        result
+    }
+    let result = callback()
+    match result {
+        Some(observation) => *observation,
+        None => 0,
+    }
+}

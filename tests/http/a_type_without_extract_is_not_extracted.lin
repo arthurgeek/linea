@@ -1,0 +1,22 @@
+// `request.extract` reads only a type that implements `http.Extract`.
+import std.http
+
+struct Visitor {
+    name: Str,
+}
+
+fn greet[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let visitor = request.extract[Visitor]()?
+    http.text(request, "hello {visitor.name}")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route_raw("GET /", greet)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

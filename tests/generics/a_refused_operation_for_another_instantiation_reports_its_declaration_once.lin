@@ -1,0 +1,17 @@
+// `get` names a type that does not exist, which is reported where it is
+// written. A postfix call on a `Box[Bool]` cannot take an operation declared
+// for `Box[UInt8]`, and adds nothing to what the declaration already said.
+struct Box[T] {
+    item: T,
+}
+
+impl Box[UInt8] {
+    fn get(_self: Nope) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Box[Bool] = .{ item = true }
+    flag.get()
+}

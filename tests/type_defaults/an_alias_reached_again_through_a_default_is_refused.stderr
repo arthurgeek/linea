@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: `Wrapped` reaches itself through the default of a type it names
+ --> tests/type_defaults/an_alias_reached_again_through_a_default_is_refused.lin:1:7
+  |
+1 | alias Wrapped = Boxed[UInt8]
+  |       ^^^^^^^ write the arguments the type takes, so its default does not name this alias

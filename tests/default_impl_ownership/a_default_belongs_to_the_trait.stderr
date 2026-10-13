@@ -1,0 +1,5 @@
+error[M-Impl]: a default implementation belongs to the trait's declaring module
+ --> tests/default_impl_ownership/a_default_belongs_to_the_trait/main.lin:3:44
+  |
+3 | default impl[T: Copyable] labels.Label for T {
+  |                                            ^ write the default where the trait is declared

@@ -1,0 +1,10 @@
+error[O-Lent]: this lends a place something is already lending
+ --> tests/iter/two_lends_of_one_value_where_either_writes.lin:9:9
+  |
+9 |         for inout y in xs {
+  |         ^^^^^^^^^^^^^^^^^^^ one of them has to end before the other begins
+error[O-Lent]: this reads a place the walk around it lends writably
+ --> tests/iter/two_lends_of_one_value_where_either_writes.lin:8:23
+  |
+8 |     for inout x in xs {
+  |                       ^ read it through the binder, or lend it with `for read`

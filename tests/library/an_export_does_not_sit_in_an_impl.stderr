@@ -1,0 +1,5 @@
+error[S-Export]: an export does not sit in an impl
+ --> tests/library/an_export_does_not_sit_in_an_impl/main.lin:4:5
+  |
+4 |     export fn value(self: Self) -> Int32 {
+  |     ^^^^^^ an impl holds what its type or its trait declares, and an export names a module's own entry point

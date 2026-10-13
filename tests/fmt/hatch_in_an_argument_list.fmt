@@ -1,0 +1,15 @@
+// A region inside a list is copied once. The walk has to step over the nodes
+// that begin inside it -- otherwise the list writes them again after the copy,
+// and the call grows an argument every time the file is formatted.
+fn f(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    f(
+        // linea fmt: off
+        1,
+        // linea fmt: on
+        2,
+    )
+}

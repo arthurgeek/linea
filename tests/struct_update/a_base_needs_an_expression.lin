@@ -1,0 +1,9 @@
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let moved = Point { x = 5, .. }
+    moved.x
+}

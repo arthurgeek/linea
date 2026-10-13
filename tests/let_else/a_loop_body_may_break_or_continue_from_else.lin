@@ -1,0 +1,27 @@
+// `break` and `continue` leave the `else` block as they leave any block in a
+// loop body.
+fn digit(n: UInt8) -> Option[UInt8] {
+    if n < 10 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    var n: UInt8 = 0
+    loop {
+        n += 1
+        if n == 3 {
+            let _skipped = digit(40) else {
+                continue
+            }
+        }
+        let d = digit(n) else {
+            break
+        }
+        total += d
+    }
+    total
+}

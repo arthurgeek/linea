@@ -1,0 +1,27 @@
+// A generic body may use every promise in a projected trailing predicate, not
+// only its ownership capability requirement.
+trait HasItem {
+    type Item
+}
+
+struct Source {
+    marker: UInt8,
+}
+
+impl HasItem for Source {
+    type Item = UInt8
+}
+
+fn equal_items[I: HasItem](_source: I, left: I.Item, right: I.Item) -> Bool
+where I.Item: Equatable {
+    left == right
+}
+
+fn main() -> UInt8 {
+    let source: Source = .{ marker = 0 }
+    if equal_items(source, 7, 7) {
+        0
+    } else {
+        1
+    }
+}

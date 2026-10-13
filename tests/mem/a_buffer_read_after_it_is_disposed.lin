@@ -1,0 +1,18 @@
+// A load after the disposal is the same mistake as a second one: the value is
+// gone, and reaching it is reaching a place already taken. That use-after-free
+// and double-free are one rule is the ownership design's claim, and here it
+// carries real memory.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(8) {
+        Ok(b) => {
+            b.release()
+            UInt8(b.load(0))
+        },
+        Err(_) => 1,
+    }
+}

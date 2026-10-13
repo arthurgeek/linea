@@ -1,0 +1,10 @@
+// An unbounded parameter may require mandatory consumption. A generic
+// body cannot discard it merely because one caller supplies a scalar.
+fn take[T](sink a: T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    take(n)
+}

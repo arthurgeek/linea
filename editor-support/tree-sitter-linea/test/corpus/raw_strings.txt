@@ -1,0 +1,30 @@
+===================
+Raw literals are one string token and open no interpolation
+===================
+
+fn route() -> Str {
+    let r = r"GET /echo/{name}\n"
+    let body = r#"{"ok":true}"#
+    let nested = r##"a "# b"##
+    r
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (string_literal))
+      (let_statement
+        (identifier)
+        (string_literal))
+      (let_statement
+        (identifier)
+        (string_literal))
+      (expression_statement
+        (identifier)))))

@@ -1,0 +1,5 @@
+error[T-Projection]: the delegated name is not a stored field of this type
+ --> tests/delegation/index_delegation_requires_a_stored_field.lin:5:35
+  |
+5 | impl Index[UInt64] for _Board via absent
+  |                                   ^^^^^^ delegate to a stored field with a valid indexing projection

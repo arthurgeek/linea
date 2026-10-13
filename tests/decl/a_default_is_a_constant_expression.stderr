@@ -1,0 +1,10 @@
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/decl/a_default_is_a_constant_expression.lin:8:27
+  |
+8 | fn f(a: UInt8, b: UInt8 = zero()) -> UInt8 {
+  |                           ^^^^^^ this is not a constant
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+  --> tests/decl/a_default_is_a_constant_expression.lin:12:27
+   |
+12 | fn g(a: UInt8, b: UInt8 = a) -> UInt8 {
+   |                           ^ this is not a constant

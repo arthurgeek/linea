@@ -1,0 +1,5 @@
+error[T-Arity]: `Exact` carries 1 value(s), and this builds it with none
+ --> tests/enums/payload_variant_values/a_returned_payload_variant_needs_its_payload.lin:7:5
+  |
+7 |     .Exact
+  |     ^^^^^^ supply its values, such as `Variant(value)`

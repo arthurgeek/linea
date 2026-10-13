@@ -1,0 +1,28 @@
+// A projection body that builds a delegating wrapper around a larger instance
+// of its own type is refused for its body: a projection names a place reached
+// from its receiver, and a local of the body is not one. Indexing through the
+// refused body reaches no implementation, however large the wrapper's type.
+struct Wrapper[C] {
+    inner: C,
+}
+
+impl[C: Index[UInt64]] Index[UInt64] for Wrapper[C] via inner
+
+struct Y[T] {
+    n: [UInt8; 1],
+    rest: Option[T],
+}
+
+impl[T] Index[UInt64] for Y[T] {
+    type Elem = UInt8
+
+    proj at(inout _self: Y[T], i: UInt64) -> UInt8 {
+        var w: Wrapper[Y[Y[T]]] = .{ inner = .{ n = [0], rest = .None } }
+        w[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var y: Y[UInt8] = .{ n = [1], rest = .None }
+    y[0]
+}

@@ -1,0 +1,11 @@
+@linear
+enum Key { Forged(UInt8) }
+
+// Owned linear fields require settlement even without a linear modifier.
+// Discarding the wrapper would abandon its key.
+struct Holder { k: Key }
+
+fn main() -> UInt8 {
+    let _h: Holder = .{ k = Key.Forged(1) }
+    0
+}

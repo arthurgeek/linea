@@ -1,0 +1,19 @@
+// The annotation settles Parse's `Self` through `?`: `parse`'s result is the
+// success `?` propagates, so `Result[T, ParseError]` meets `Result[UInt32, _]`.
+import std.text
+
+fn year_from(input: Str) -> Result[UInt32, text.ParseError] {
+    let year: UInt32 = input.parse()?
+    return .Ok(year)
+}
+
+fn main() -> UInt8 {
+    match year_from("1900") {
+        Ok(year) => if year == 1900 {
+            0
+        } else {
+            1
+        },
+        Err(_) => 1,
+    }
+}

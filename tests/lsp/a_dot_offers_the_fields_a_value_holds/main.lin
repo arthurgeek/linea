@@ -1,0 +1,13 @@
+// After a dot the answer is what may follow it, and nothing else: the scope's
+// own names are not offered there, because none of them can be written after a
+// dot. What may follow it is a field of the value and an operation applicable
+// to it, and a type nothing implements still holds its fields.
+struct Coins {
+    n: UInt8,
+    mark: UInt8,
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3, mark = 1 }
+    coppers.n
+}

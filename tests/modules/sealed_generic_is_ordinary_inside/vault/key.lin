@@ -1,0 +1,15 @@
+// Boundary-relative, still. Inside the module that declares it a sealed
+// generic is an ordinary one, which is what stops the seal being a way to
+// forbid a type's own code from touching it.
+@(opaque, linear)
+enum Key[T] {
+    Forged(T),
+}
+
+pub fn mint(id: UInt8) -> Key[UInt8] {
+    Key.Forged(id)
+}
+
+pub fn tag(sink k: Key[UInt8]) -> UInt8 {
+    match k { Forged(n) => n }
+}

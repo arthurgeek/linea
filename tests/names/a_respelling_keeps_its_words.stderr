@@ -1,0 +1,40 @@
+error[N-Case]: variants start with a capital letter
+ --> tests/names/a_respelling_keeps_its_words.lin:9:5
+  |
+9 |     x86_64,
+  |     ^^^^^^ rename it `X86_64`
+error[N-Case]: variants start with a capital letter
+  --> tests/names/a_respelling_keeps_its_words.lin:10:5
+   |
+10 |     not_found,
+   |     ^^^^^^^^^ rename it `NotFound`
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/a_respelling_keeps_its_words.lin:13:4
+   |
+13 | fn IPv4Addr() -> UInt8 {
+   |    ^^^^^^^^ rename it `ipv4_addr`
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/a_respelling_keeps_its_words.lin:17:4
+   |
+17 | fn XMLHttpRequest() -> UInt8 {
+   |    ^^^^^^^^^^^^^^ rename it `xml_http_request`
+error[N-Case]: type parameters start with a capital letter
+  --> tests/names/a_respelling_keeps_its_words.lin:21:9
+   |
+21 | fn pick[self](_value: self) -> UInt8 {
+   |         ^^^^ rename it: `Self` is not a name a program declares
+error[N-Case]: constants start with a lowercase letter
+  --> tests/names/a_respelling_keeps_its_words.lin:29:5
+   |
+29 | let LIMIT: UInt8 = 2
+   |     ^^^^^ rename it: `limit` would be declared twice
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/a_respelling_keeps_its_words.lin:31:4
+   |
+31 | fn Text() -> UInt8 {
+   |    ^^^^ rename it: `text` would be declared twice
+error[N-Case]: type parameters start with a capital letter
+  --> tests/names/a_respelling_keeps_its_words.lin:38:11
+   |
+38 | enum Wrap[held] {
+   |           ^^^^ rename it `Held`

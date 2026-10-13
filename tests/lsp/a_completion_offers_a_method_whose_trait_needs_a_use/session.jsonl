@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// The trait is not in scope, so the postfix call below does not resolve. An\n// editor offers what a `use` would make writable, and writes the `use` along\n// with it.\nimport std.hash\n\nfn main() -> UInt8 {\n    let seat = UInt64(12)\n    let digest = seat.hash()\n    if digest == hash.Hash.hash(seat) {\n        0\n    } else {\n        1\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":7,"character":22}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

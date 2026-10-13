@@ -1,0 +1,27 @@
+// A newline after a name ends what was being written, and a settled reference
+// is written with names. The return type here ends at `Self`, and the line
+// below it cannot begin a declaration, so the break is refused once rather
+// than joined into a program the author did not write.
+@copyable
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    fn of(x: Self) -> Self
+    .Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self {
+        copy(x)
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c).at
+}

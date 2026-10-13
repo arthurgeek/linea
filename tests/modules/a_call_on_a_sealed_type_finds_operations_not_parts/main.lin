@@ -1,0 +1,19 @@
+// A call looks for an operation, so a call on a sealed type that finds none
+// says which operation is missing rather than that the type's parts are
+// sealed. `refund` needs `use box_office.Refund`; no operation is named
+// `cancel` at all.
+import box_office
+
+use box_office.Ticket
+
+fn refunded(ticket: Ticket) -> UInt8 {
+    ticket.refund()
+}
+
+fn cancelled(ticket: Ticket) -> UInt8 {
+    ticket.cancel()
+}
+
+fn main() -> UInt8 {
+    refunded(Ticket.sell(14)) + cancelled(Ticket.sell(15))
+}

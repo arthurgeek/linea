@@ -1,0 +1,41 @@
+trait Number {
+    fn number(self: Self) -> UInt8
+}
+
+impl Number for UInt8 {
+    fn number(self: Self) -> UInt8 {
+        self
+    }
+}
+
+impl Number for borrow UInt8 {
+    fn number(_self: Self) -> UInt8 {
+        9
+    }
+}
+
+fn observed[T: Number](value: T) -> UInt8 {
+    Number.number(borrow value)
+}
+
+trait Inspect {
+    fn view(self: Self) -> borrow borrow UInt8 where borrows(self)
+}
+
+impl Inspect for borrow UInt8 {
+    fn view(self: Self) -> borrow borrow UInt8 where borrows(self) {
+        borrow self
+    }
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 3
+    let view = borrow number
+    let descriptor = Inspect.view(view)
+    let total = observed(view) + Number.number(borrow view) + Number.number(view) + Number.number(number) + **descriptor
+    if total == 33 {
+        0
+    } else {
+        1
+    }
+}

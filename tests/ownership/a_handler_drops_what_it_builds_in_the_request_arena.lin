@@ -1,0 +1,40 @@
+// What a handler builds in its request's arena is dropped without a release,
+// and the response it returns is read before the arena is released.
+import std.http
+import std.io
+import std.mem
+
+use mem.Owner
+
+// Answer the words of the query, `+` between them, in reverse order.
+fn reverse[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let query = request.query().unwrap_or("")
+    // `words` lives in the arena and is dropped when the handler returns.
+    var words: Vec[Str, mem.Handle[P]] = Vec.new_in(request.allocator())
+    for word in Str.split(query, "+").unwrap() {
+        Vec.push(&words, word).settled()?
+    }
+    var reversed = String.new_in(request.allocator())
+    for index in 0..words.length() {
+        if index > 0 {
+            String.append(&reversed, " ")?
+        }
+        String.append(&reversed, words[words.length() - 1 - index])?
+    }
+    http.text(request, reversed.view())
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = http.new_request(arena.handle(), "GET", "/reverse?one+two+three", body: "").unwrap()
+    let answered = match reverse(sent.request()) {
+        Ok(response) => {
+            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            let _printed = io.println("{response.status().code()} {body}")
+            0
+        },
+        Err(_) => 1,
+    }
+    arena.release()
+    answered
+}

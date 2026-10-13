@@ -1,0 +1,11 @@
+// What a variant carries is a written part like a field is, and the two are
+// one run in the same table. A measure that read only a structure's fields
+// would leave the enum form of the same program taking the compiler down.
+enum E[T] {
+    A(E[E[T]]),
+    B,
+}
+
+fn main() -> UInt8 {
+    0
+}

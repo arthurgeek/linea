@@ -1,0 +1,7 @@
+error[O-Move]: `k` has already been moved
+  --> tests/ownership/a_second_take_says_where_the_first_was.lin:21:23
+   |
+17 |     let first = take(k)
+   |                      - it was taken here
+21 |     let second = take(k)
+   |                       ^ it was already taken, and a value is taken once

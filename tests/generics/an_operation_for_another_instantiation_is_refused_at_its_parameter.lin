@@ -1,0 +1,17 @@
+// `get` is declared for `Box[UInt8]` only, so a postfix call on a `Box[Bool]`
+// cannot take it. The call is refused where the parameter says which box it
+// takes, rather than as a field the type does not have.
+struct Box[T] {
+    item: T,
+}
+
+impl Box[UInt8] {
+    fn get(self: Box[UInt8]) -> UInt8 {
+        self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Box[Bool] = .{ item = true }
+    flag.get()
+}

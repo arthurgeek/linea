@@ -1,0 +1,65 @@
+struct Holder {
+//     ^ type
+    n: UInt8,
+//     ^ type.builtin
+    impossible: Never,
+//              ^ type.builtin
+}
+
+fn spin() -> Never {
+    loop {
+        continue
+//      ^ keyword.control.return
+    }
+}
+
+fn kinds() -> () {
+    let _ = reflect
+//          ^ keyword.control
+}
+
+fn nothing() -> Result[(), UInt8] {
+    .Ok(())
+//      ^ constant.builtin
+}
+
+fn apply[F: fn(read value: UInt8) -> UInt8](read f: F, read value: UInt8) -> UInt8 {
+// <- keyword.function
+//       ^ type
+//          ^ keyword.function
+//             ^ keyword.storage.modifier
+//                  ^ variable.parameter
+//                         ^ type.builtin
+    f(value)
+}
+
+fn main() -> Bool {
+// <- keyword.function
+//  ^ function
+//           ^ type.builtin
+    let h: Holder = .{ n = 3 }
+//         ^ type
+    let direct = |value: UInt8| { copy(value) }
+//               ^ operator
+//                ^ variable.parameter
+//                       ^ type.builtin
+//                                ^ keyword.operator
+    let pointer: fn(read input: UInt8) -> UInt8 = |input| input
+//               ^ keyword.function
+//                  ^ keyword.storage.modifier
+//                       ^ variable.parameter
+//                              ^ type.builtin
+//                                                ^ operator
+//                                                 ^ variable.parameter
+    let _called = apply(direct, pointer(value: 1))
+//                                      ^ variable.parameter
+    copy(h.n) == 3
+//  ^ keyword.operator
+}
+
+fn stop() -> Never { panic("stop") }
+//                     ^ keyword.control.return
+
+test trap fn expected_stop() -> Never { panic("stop") }
+// <- keyword.storage.modifier
+//    ^ keyword.storage.modifier

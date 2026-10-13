@@ -1,0 +1,27 @@
+@linear
+struct Token { value: UInt8 }
+
+@linear
+struct Parcel { token: Token, code: UInt8 }
+
+enum Failure { Refused }
+
+fn refused() -> Result[UInt8, Failure] {
+    .Err(.Refused)
+}
+
+fn build() -> Result[Parcel, Failure] {
+    let parcel = Parcel { token = Token { value = 7 }, code = refused()? }
+    return .Ok(parcel)
+}
+
+fn main() -> UInt8 {
+    match build() {
+        Ok(parcel) => {
+            let Parcel { token, code } = parcel
+            let Token { value } = token
+            value + code
+        },
+        Err(_) => 0,
+    }
+}

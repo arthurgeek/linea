@@ -1,0 +1,21 @@
+// An element wider than a register is its address, so a lend of one is that
+// address and nothing is copied into the binder: reading a field of it reads
+// the array, and writing one writes the array.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    var ps: [Point; 2] = [.{ x = 1, y = 2 }, .{ x = 3, y = 4 }]
+
+    for inout q in ps {
+        q.x = q.x + 10
+    }
+
+    var total: UInt8 = 0
+    for read p in ps {
+        total += p.x + p.y
+    }
+    total
+}

@@ -1,0 +1,5 @@
+error[T-Arity]: `Exact` carries 1 value(s), and this builds it with none
+  --> tests/enums/payload_variant_values/a_payload_variant_argument_needs_its_payload.lin:14:16
+   |
+14 |     UInt8(bits(Mode.Exact) % 200)
+   |                ^^^^^^^^^^ supply its values, such as `Variant(value)`

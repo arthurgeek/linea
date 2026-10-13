@@ -1,0 +1,5 @@
+error[M-Opaque]: `Error` is opaque outside `vault`
+ --> tests/constructor_callables/contextual_variants/opaque_constructor_is_not_a_callable/main.lin:4:54
+  |
+4 |     let _wrap: fn(sink code: UInt8) -> vault.Error = .Allocation
+  |                                                      ^^^^^^^^^^^ only its own module can build one

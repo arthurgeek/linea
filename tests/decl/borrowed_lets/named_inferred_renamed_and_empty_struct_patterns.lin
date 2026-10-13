@@ -1,0 +1,17 @@
+struct Point { x: UInt8, y: UInt8 }
+
+struct Empty {}
+
+fn main() -> UInt8 {
+    let point = Point { x = 7, y = 9 }
+    let read Point { x, y: vertical } = point
+    let read { x: horizontal, y: _ } = point
+    let empty = Empty {}
+    let read Empty {} = empty
+    let read {} = empty
+    if x == horizontal && vertical == 9 {
+        0
+    } else {
+        1
+    }
+}

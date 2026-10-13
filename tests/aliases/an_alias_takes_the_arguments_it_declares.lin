@@ -1,0 +1,8 @@
+alias Meters = UInt64
+alias Both[T] = [T; 2]
+
+fn main() -> UInt8 {
+    let _plain: Meters[UInt8] = 0
+    let _bare: Both = [0, 0]
+    0
+}

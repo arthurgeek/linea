@@ -1,0 +1,6 @@
+enum Tree { Leaf(UInt8), Branch(Tree, Tree) }
+
+fn main() -> UInt8 {
+    let _tree: Tree = .Leaf(1)
+    0
+}

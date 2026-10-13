@@ -1,0 +1,28 @@
+import std.json
+import std.mem
+
+fn nested(depth: UInt64) -> json.Value[mem.SystemAllocator] {
+    if depth == 0 {
+        return json.Value.string(mem.system(), "leaf").unwrap()
+    }
+    var parent = json.Value.array(mem.system())
+    json.Value.append(&parent, nested(depth - 1)).unwrap()
+    return parent
+}
+
+fn main() -> UInt8 {
+    let allocator = mem.system()
+    let child = nested(128)
+    var parent = json.Value.array(allocator)
+    let reason = match json.Value.append(&parent, child).settled() {
+        Err(reason) => reason,
+        Ok(_) => panic("accepted a 129th container"),
+    }
+    let unchanged = parent.elements().unwrap().length() == 0
+    parent.release()
+    if reason == json.MutationReason.DepthLimit && unchanged {
+        0
+    } else {
+        1
+    }
+}

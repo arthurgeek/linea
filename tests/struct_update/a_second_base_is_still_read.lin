@@ -1,0 +1,12 @@
+@copyable
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let small: Size = .{ width = 1, height = 1 }
+    // A second base is refused, and its names are still resolved.
+    let wide = Size { width = 8, ..small, ..undefined_size }
+    wide.width
+}

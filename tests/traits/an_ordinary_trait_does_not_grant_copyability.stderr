@@ -1,0 +1,5 @@
+error[O-Copy]: `T` does not permit copying
+  --> tests/traits/an_ordinary_trait_does_not_grant_copyability.lin:18:5
+   |
+18 |     copy(x)
+   |     ^^^^^^^ move the value, or declare a copyable representation

@@ -1,0 +1,7 @@
+// An array type needs a `;` between its element and its length. The binding
+// whose type could not be read is not checked further, so using it reports
+// nothing more.
+fn main() -> UInt8 {
+    let xs: [UInt8 3]
+    xs[0]
+}

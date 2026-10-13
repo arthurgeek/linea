@@ -1,0 +1,39 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+struct Pair[X, Y] {
+    first: X,
+    second: Y,
+}
+
+fn _from_function[A: Allocator](sink shelf: Shelf[UInt8, A]) -> Shelf[UInt8] where carries(shelf) {
+    shelf
+}
+
+struct _Holder[A: Allocator] {
+    handle: A,
+    inner: Shelf[UInt8],
+}
+
+impl[A: Allocator] _Holder[A] {
+    fn _inner_of(sink self: Self) -> Shelf[UInt8] where carries(self) {
+        self.inner
+    }
+}
+
+trait _Keeps[A: Allocator] {
+    fn _keep(self: Self, allocator: A) -> Shelf[UInt8]
+}
+
+alias _Mine[A: Allocator] = Pair[A, Shelf[UInt8]]
+
+fn main() -> UInt8 {
+    0
+}

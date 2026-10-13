@@ -1,0 +1,68 @@
+// One arm of a branch settles what the others left open, exactly as one
+// argument of a call settles what the others left open.
+//
+// A literal takes the type that flows into it and `Int64` where nothing does,
+// so `1` beside a `UInt64` has to be told which it is. A call already answers
+// that: an argument determining its own type settles the parameter, and the
+// ones waiting are checked against it, so `same(n, 1)` and `same(1, n)` mean
+// the same thing rather than one being accepted and the other refused.
+//
+// The arms of a branch ask the same question. `if c { 1 } else { n }` has one
+// arm that knows what it is and one waiting to be told, and which of the two
+// was written first is no more the answer here than it is in a call.
+//
+// So the settling arm is found before the waiting ones are checked, and where
+// no arm settles anything they all fall back together -- `if c { 1 } else { 2 }`
+// is a branch over `Int64`, as `same(6, 6)` is a call over one.
+fn same(a: UInt64, b: UInt64) -> UInt64 {
+    a + b
+}
+
+// A literal settled by its sibling argument, which already worked, and is here
+// so the case says what it is being consistent with.
+fn through_a_call(n: UInt64) -> UInt64 {
+    same(n, 1) + same(1, n)
+}
+
+// The `if` written both ways round. Neither order is the one that works.
+fn through_arms(n: UInt64) -> UInt64 {
+    let settled_late = if n == 0 {
+        1
+    } else {
+        n
+    }
+
+    let settled_early = if n == 0 {
+        n
+    } else {
+        2
+    }
+
+    settled_late + settled_early
+}
+
+// A `match` is the same construct wearing another spelling.
+fn through_match_arms(n: UInt64, m: UInt64) -> UInt64 {
+    match read n {
+        0 => 3,
+        _ => m,
+    }
+}
+
+// Where nothing settles, the arms fall back together rather than disagreeing.
+fn through_nothing() -> Int64 {
+    let neither = if true {
+        4
+    } else {
+        5
+    }
+    neither
+}
+
+fn main() -> UInt8 {
+    let called = through_a_call(1)
+    let armed = through_arms(0)
+    let matched = through_match_arms(0, 1)
+    let fell_back = through_nothing()
+    UInt8(called + armed + matched + UInt64(fell_back))
+}

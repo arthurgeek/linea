@@ -1,0 +1,19 @@
+struct Destination { view: borrow UInt64 }
+
+fn convert(value: borrow UInt64) -> Destination where carries(value) {
+    .{ view = copy(value) }
+}
+
+fn replace(inout target: Destination, value: borrow UInt64) -> () where retains(target: value) {
+    target = convert(value)
+}
+
+fn main() -> UInt8 {
+    var owner: UInt64 = 7
+    let other: UInt64 = 1
+    var target: Destination = .{ view = borrow other }
+    let incoming = borrow owner
+    replace(&target, incoming)
+    owner = 9
+    UInt8(*target.view + owner)
+}

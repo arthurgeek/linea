@@ -1,0 +1,14 @@
+// `true + true` produced a `Bool` holding 2: `if c` took the then-branch and
+// `c == true` was false, for one value. There is no range for [T-Overflow] to
+// test on a two-valued type, so the operation was neither defined nor
+// diagnosed -- which is the one thing ADR 0013 does not allow.
+fn main() -> UInt8 {
+    let a: Bool = true
+    let b: Bool = true
+    let c: Bool = a + b
+    if c {
+        1
+    } else {
+        0
+    }
+}

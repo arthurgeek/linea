@@ -1,0 +1,14 @@
+import std.io
+
+// The deferred print runs when `main` returns, after `tick`'s last call, so
+// it reads the final count.
+fn main() -> Result[UInt8, io.IoError] {
+    var count: UInt8 = 0
+    defer io.println("{count} ticks").unwrap()
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    &tick()
+    &tick()
+    .Ok(0)
+}

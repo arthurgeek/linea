@@ -1,0 +1,65 @@
+==================
+Omitted and explicit test signatures
+==================
+
+test fn succeeds() {}
+test fn returns() { return }
+test fn custom() -> Result[(), Failure] { return .Ok({}) }
+test trap fn traps() { panic("expected") }
+fn ordinary() -> () {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (return_expression))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (unit_type)
+        (type_identifier)))
+    (block
+      (expression_statement
+        (return_expression
+          (call_expression
+            (variant_reference
+              (type_identifier))
+            (argument_list
+              (block)))))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (panic_expression
+          (string_literal)))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block)))
+
+==================
+Ordinary function return types are checked semantically
+==================
+
+fn missing() {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block)))

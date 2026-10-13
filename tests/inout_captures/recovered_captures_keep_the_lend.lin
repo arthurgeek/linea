@@ -1,0 +1,13 @@
+// `into_captures` hands back the lent field as an observation of `count`.
+// `count` stays lent until that observation's last use.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var tick = inout [sink step = UInt8(2), inout count] || {
+        count += step
+    }
+    &tick()
+    &tick()
+    let { step: _step, count: lent } = tick.into_captures()
+    let seen = *lent
+    seen + count
+}

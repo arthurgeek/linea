@@ -1,0 +1,12 @@
+// A function's tail may open a line with `(`: the statement above has ended
+// at its newline, and the tail is read on its own.
+fn bounds() -> (UInt8, UInt8) {
+    let lo = 1
+    let hi = 3
+    (lo, hi)
+}
+
+fn main() -> UInt8 {
+    let (lo, hi) = bounds()
+    hi - lo - 2
+}

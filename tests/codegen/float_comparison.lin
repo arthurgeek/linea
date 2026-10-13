@@ -1,0 +1,25 @@
+fn compare(a: Float64, b: Float64) -> UInt8 {
+    if a < b {
+        return 1
+    }
+    if a <= b {
+        return 2
+    }
+    if a > b {
+        return 3
+    }
+    if a >= b {
+        return 4
+    }
+    if a == b {
+        return 5
+    }
+    if a != b {
+        return 6
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    compare(1.0, 2.0) + compare(2.0, 1.0) + compare(1.0, 1.0)
+}

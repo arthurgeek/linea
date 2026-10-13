@@ -1,0 +1,8 @@
+error[N-Duplicate]: `Measure` is already implemented for `Account`
+  --> tests/traits/one_implementation_across_a_modules_files/second.lin:1:6
+   |
+1  | impl Measure for Account {
+   |      ^^^^^^^ a trait is implemented once for a type
+  ::: tests/traits/one_implementation_across_a_modules_files/main.lin
+17 | impl Measure for Account {
+   |      ------- already implemented here

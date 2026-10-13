@@ -1,0 +1,11 @@
+fn start() -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    var tick = inout [inout count = start()] || {
+        count += 1
+    }
+    &tick()
+    0
+}

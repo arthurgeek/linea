@@ -1,0 +1,18 @@
+// A default is worked out where the parameter is declared, so it is a
+// constant expression: a call runs nothing there, and a parameter of the same
+// declaration stands for whatever the caller passed.
+fn zero() -> UInt8 {
+    0
+}
+
+fn f(a: UInt8, b: UInt8 = zero()) -> UInt8 {
+    a + b
+}
+
+fn g(a: UInt8, b: UInt8 = a) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    f(1) + g(1)
+}

@@ -1,0 +1,22 @@
+// `Crate` has a field named `release`, and a postfix call reaches an
+// operation and never a field, so `crate.release()` runs `Release.release`.
+// The help names it as what settles the crate.
+@linear
+struct Crate {
+    release: UInt8,
+}
+
+impl Release for Crate {
+    fn release(sink self: Self) -> () {
+        let Crate { release: _ } = self
+    }
+}
+
+fn weigh(crate: Crate) -> UInt8 {
+    crate.release
+}
+
+fn main() -> UInt8 {
+    let crate = Crate { release = 40 }
+    weigh(crate)
+}

@@ -1,0 +1,16 @@
+// A tuple pattern is one arm that takes every component of a pair. `match`
+// consumes the pair; `match read` lends its components and leaves the pair
+// whole.
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (1, 2)
+    let sum = match read pair {
+        (a, b) => a + b,
+    }
+    let first = match read pair {
+        (a, _) => a,
+    }
+    let total = match pair {
+        (a, b) => a + b,
+    }
+    total - sum + first - 1
+}

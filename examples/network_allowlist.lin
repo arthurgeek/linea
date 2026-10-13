@@ -1,0 +1,89 @@
+// Check incoming connections against an allow list and report each decision.
+import std.io
+import std.testing
+
+use io.IoError
+use io.println
+
+// `Host` stores an IPv4 address as an array of four octets. An array compares
+// and prints through its elements, so `Host` can derive equality and Debug.
+@(copyable, derive(Equatable, Debug))
+struct Host {
+    octets: [UInt8; 4],
+}
+
+fn host(a: UInt8, b: UInt8, c: UInt8, d: UInt8) -> Host {
+    .{ octets = [a, b, c, d] }
+}
+
+@(copyable, derive(Equatable, Debug))
+enum Service {
+    Web,
+    Mail,
+    Backup,
+}
+
+// One rule pairs a host with what it may reach. `Rule[T]` compares and prints
+// wherever `T` does, so one generic type serves both port numbers and named
+// services without a bound written on `T`.
+@(copyable, derive(Equatable, Debug))
+struct Rule[T] {
+    host: Host,
+    allowed: T,
+}
+
+// A request is allowed when some rule matches it exactly. `T: Equatable` is
+// what `==` on `Rule[T]` needs. `any` stops at the first rule that matches,
+// and `[request]` lets the closure read the request.
+fn permits[T: Equatable](rules: [Rule[T]; 3], request: Rule[T]) -> Bool {
+    rules.as_slice().any([request] |sink rule| *rule == request)
+}
+
+test fn a_request_needs_a_rule_for_its_host_and_port() {
+    let rules: [Rule[UInt16]; _] = [
+        .{ host = host(10, 0, 0, 5), allowed = 443 },
+        .{ host = host(10, 0, 0, 5), allowed = 22 },
+        .{ host = host(10, 0, 0, 9), allowed = 443 },
+    ]
+    testing.assert(permits(rules, .{ host = host(10, 0, 0, 5), allowed = 22 }), "a listed port was refused")?
+    testing.assert(!permits(rules, .{ host = host(10, 0, 0, 5), allowed = 80 }), "an unlisted port was allowed")?
+    testing.assert(!permits(rules, .{ host = host(10, 0, 0, 6), allowed = 443 }), "an unlisted host was allowed")?
+}
+
+test fn hosts_compare_by_every_octet() {
+    testing.assert_eq(host(192, 168, 1, 20), Host { octets = [192, 168, 1, 20] }, "equal addresses compared unequal")?
+    testing.assert(host(192, 168, 1, 20) != host(192, 168, 1, 21), "the last octet was ignored")?
+    testing.assert_eq(host(192, 168, 1, 20).octets, [192, 168, 1, 20], "the octets changed")?
+}
+
+fn decision(allowed: Bool) -> Str {
+    if allowed {
+        "allowed"
+    } else {
+        "denied"
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let ports: [Rule[UInt16]; _] = [
+        .{ host = host(10, 0, 0, 5), allowed = 443 },
+        .{ host = host(10, 0, 0, 5), allowed = 22 },
+        .{ host = host(192, 168, 1, 20), allowed = 873 },
+    ]
+    let shell: Rule[UInt16] = .{ host = host(10, 0, 0, 5), allowed = 22 }
+    let stray: Rule[UInt16] = .{ host = host(192, 168, 1, 20), allowed = 22 }
+    println("{shell:?} {decision(permits(ports, shell))}")?
+    println("{stray:?} {decision(permits(ports, stray))}")?
+
+    // The same rule type now matches named services.
+    let services: [Rule[Service]; _] = [
+        .{ host = host(10, 0, 0, 5), allowed = .Web },
+        .{ host = host(10, 0, 0, 5), allowed = .Mail },
+        .{ host = host(192, 168, 1, 20), allowed = .Backup },
+    ]
+    let nightly: Rule[Service] = .{ host = host(192, 168, 1, 20), allowed = .Backup }
+    let relay: Rule[Service] = .{ host = host(192, 168, 1, 20), allowed = .Mail }
+    println("{nightly:?} {decision(permits(services, nightly))}")?
+    println("{relay:?} {decision(permits(services, relay))}")?
+    .Ok(0)
+}

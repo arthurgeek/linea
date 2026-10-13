@@ -1,0 +1,6 @@
+error[T-Literal]: `I` cannot hold 128
+ --> tests/projections/inferred_index/symbolic_key_rejects_nonuniversal_positive_literal.lin:6:22
+  |
+6 |     borrow container[128]
+  |            -------------- this container is indexed by one integer type, which a bare number takes
+  |                      ^^^ literal is out of range for its type

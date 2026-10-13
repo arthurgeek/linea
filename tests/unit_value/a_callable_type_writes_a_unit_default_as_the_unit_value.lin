@@ -1,0 +1,10 @@
+// A parameter default is part of a callable's type, and a default of the unit
+// value is written `()` wherever the type is printed.
+fn settle(_value: () = ()) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let answer: UInt8 = settle
+    answer
+}

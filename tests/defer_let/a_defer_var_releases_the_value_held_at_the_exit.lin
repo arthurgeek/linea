@@ -1,0 +1,25 @@
+// `defer var` binds a place that may be assigned again, and what it releases is
+// the value it holds when the scope ends.
+import std.io
+
+use io.print
+
+struct Meter {
+    reading: UInt8,
+}
+
+impl Release for Meter {
+    fn release(sink self: Self) -> () {
+        let Meter { reading } = self
+        match print("{reading}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    defer var meter = Meter { reading = 1 }
+    meter = Meter { reading = 2 }
+    0
+}

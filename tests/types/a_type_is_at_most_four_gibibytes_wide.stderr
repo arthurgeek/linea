@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Wide` is wider
+  --> tests/types/a_type_is_at_most_four_gibibytes_wide.lin:25:6
+   |
+25 | enum Wide {
+   |      ^^^^ hold fewer parts, or nest them less deeply

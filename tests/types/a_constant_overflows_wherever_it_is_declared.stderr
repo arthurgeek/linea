@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `UInt8`
+ --> tests/types/a_constant_overflows_wherever_it_is_declared.lin:6:30
+  |
+6 | pub let scaled: UInt8 = base + 200
+  |                              ^ the result is not representable

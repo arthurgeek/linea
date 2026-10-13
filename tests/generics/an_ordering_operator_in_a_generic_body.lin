@@ -1,0 +1,16 @@
+// Concrete operands retain their ordinary ordering inside a generic body.
+// The comparison reads UInt8 values and produces Bool.
+fn pick[T](sink x: T, n: UInt8) -> T {
+    let one: UInt8 = 1
+    if n < one {
+        x
+    } else {
+        x
+    }
+}
+
+fn main() -> UInt8 {
+    let v: UInt8 = 7
+    let z: UInt8 = 0
+    pick(v, z)
+}

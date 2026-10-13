@@ -1,0 +1,23 @@
+// `handle` is an operation of the `mem.Owner` trait, which this module does
+// not bring into scope with `use mem.Owner`. The refused argument says nothing
+// about `A`, and the call does not ask again what it cannot settle. The same
+// holds for `println`, whose argument comes from the refused call.
+import std.io
+import std.mem
+
+fn label[A: Allocator](allocator: A) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    var line = String.new_in(allocator)
+    defer line.release()
+    &line.append("ready")?
+    return .Ok(line)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var arena = mem.Arena.open(mem.system(), size: 4096)
+    defer arena.release()
+    let text = label(arena.handle()) else |_| {
+        return .Ok(1)
+    }
+    io.println(text.view())?
+    return .Ok(0)
+}

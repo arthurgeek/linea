@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/projections/a_from_end_past_the_length_traps.lin:8:5

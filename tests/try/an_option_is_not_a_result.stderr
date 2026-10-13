@@ -1,0 +1,10 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, Bad]`, and the function answers with `Option[UInt8]`
+  --> tests/try/an_option_is_not_a_result.lin:18:13
+   |
+18 |     let n = ok()?
+   |             ^^^^^ `?` returns from the function it is written in
+error[T-TryAnswer]: this `?` may return `Option[UInt8]`, and the function answers with `Result[UInt8, Bad]`
+  --> tests/try/an_option_is_not_a_result.lin:23:13
+   |
+23 |     let n = some()?
+   |             ^^^^^^^ `?` returns from the function it is written in

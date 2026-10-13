@@ -1,0 +1,20 @@
+enum Choice { First, Second }
+
+fn work(choice: Choice) -> UInt8 {
+    var first: UInt64 = 7
+    let second: UInt64 = 9
+    let view = match read choice {
+        First => {
+            let never = borrow first
+            loop {}
+            never
+        },
+        Second => borrow second,
+    }
+    first = 11
+    UInt8(*view + first)
+}
+
+fn main() -> UInt8 {
+    work(Choice.Second)
+}

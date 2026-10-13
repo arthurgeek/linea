@@ -1,0 +1,28 @@
+// The other way a wide value leaves a function: as the body's tail, where the
+// block's type *is* what the function returns. This is the form that worked
+// while the one beside it did not, which is why it has a case of its own --
+// the two agree here and nowhere else, and a fix that took the return type from
+// the wrong place again would still pass this one.
+struct Big {
+    a: Int64,
+    b: Int64,
+    c: Int64,
+}
+
+fn make() -> Big {
+    .{ a = 1, b = 2, c = 3 }
+}
+
+fn noise() -> UInt8 {
+    let p: Big = .{ a = 99, b = 98, c = 97 }
+    UInt8(p.a)
+}
+
+fn take(b: Big, sink n: UInt8) -> UInt8 {
+    let _ = n
+    UInt8(b.a)
+}
+
+fn main() -> UInt8 {
+    take(make(), noise())
+}

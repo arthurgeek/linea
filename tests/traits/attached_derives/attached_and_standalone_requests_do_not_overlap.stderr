@@ -1,0 +1,7 @@
+error[T-Derive]: this derive trait is repeated
+ --> tests/traits/attached_derives/attached_and_standalone_requests_do_not_overlap.lin:8:8
+  |
+5 | @derive(Tagged)
+  |         ------ this trait was already requested here
+8 | derive Tagged for Point
+  |        ^^^^^^ a type derives each trait once

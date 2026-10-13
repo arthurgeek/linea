@@ -1,0 +1,9 @@
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+ --> tests/decl/attributes/linear_policy_still_requires_settlement.lin:5:9
+  |
+5 |     let ticket = Ticket { value = 7 }
+  |         ^^^^^^ never settled on the path that reaches the end of this block
+7 | }
+  | - the block ends here
+  |
+  = help: take it apart with `let Ticket { value: _ } = ticket`, or give it to something that takes it

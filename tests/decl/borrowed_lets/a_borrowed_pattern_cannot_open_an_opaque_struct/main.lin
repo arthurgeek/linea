@@ -1,0 +1,9 @@
+import vault
+
+use vault.Secret
+
+fn main() -> UInt8 {
+    let secret = vault.make()
+    let read Secret { value } = secret
+    value
+}

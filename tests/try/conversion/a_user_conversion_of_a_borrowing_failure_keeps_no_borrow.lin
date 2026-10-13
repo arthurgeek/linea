@@ -1,0 +1,36 @@
+// The failed collection holds a handle that borrows `arena`. `Shortage` is
+// written by the program, releases the failure in its own `from`, and can hold
+// no borrow, so the converted error that `?` returns depends on nothing local.
+import std.iter
+import std.mem
+
+use mem.Owner
+
+enum Shortage {
+    Memory,
+}
+
+impl[I: Iterator + Release, A: Allocator, T: Release] From[iter.CollectFailure[I, A, T]] for Shortage {
+    fn from(sink source: iter.CollectFailure[I, A, T]) -> Shortage {
+        source.release()
+        .Memory
+    }
+}
+
+fn gather(arena: mem.Arena[mem.SystemAllocator]) -> Result[UInt64, Shortage] {
+    let { values, iterator: _ } = (UInt64(0)..3).collect(arena.handle())?
+    let count = values.length()
+    values.release()
+    Result.Ok(count)
+}
+
+fn main() -> UInt8 {
+    defer let roomy = mem.Arena.open(mem.system(), size: 64)
+    defer let cramped = mem.Arena.open(mem.system(), size: 8)
+    let gathered = gather(roomy).unwrap_or(0)
+    let refused = match gather(cramped) {
+        Ok(_) => 0,
+        Err(_) => 10,
+    }
+    UInt8(gathered + refused)
+}

@@ -1,0 +1,12 @@
+@copyable
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { value = 7 }
+    let other = copy(point)
+    if point.value == other.value {
+        0
+    } else {
+        1
+    }
+}

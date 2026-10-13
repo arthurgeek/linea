@@ -1,0 +1,16 @@
+// The runtime reading text from storage that was freed aborts rather than
+// parsing whatever the storage holds.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+
+extern fn linea_float64_parse(at: UInt64, len: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+
+fn main() -> UInt8 {
+    let at = linea_alloc(8, 8)
+    linea_free(at, 8, 8)
+    var bits: UInt64 = 0
+    var offset: UInt64 = 0
+    let parsed = linea_float64_parse(at, 8, &bits, &offset)
+    UInt8(parsed)
+}

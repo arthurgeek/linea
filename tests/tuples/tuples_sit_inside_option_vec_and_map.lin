@@ -1,0 +1,40 @@
+import std.collections
+import std.mem
+
+use mem.Owner
+
+// A tuple is a value like any other, so an option, a vector and a map each
+// hold one as they would hold a struct.
+fn main() -> UInt8 {
+    let found: Option[(UInt8, Bool)] = .Some((4, true))
+    let from_option = match found {
+        Some(pair) => {
+            let (n, _) = pair
+            n
+        },
+        None => 0,
+    }
+
+    let arena = mem.Arena.open(mem.system(), 256)
+    defer arena.release()
+    var values: mem.Vec[(UInt8, UInt8), mem.Handle[mem.SystemAllocator]] = mem.Vec.new_in(arena.handle())
+    &values.push((1, 2)).unwrap()
+    &values.push((3, 4)).unwrap()
+    var from_vec: UInt8 = 0
+    for pair in values.drain() {
+        let (a, b) = pair
+        from_vec += a + b
+    }
+
+    var flags: collections.Map[UInt8, (Bool, Bool), mem.Handle[mem.SystemAllocator]] = collections.Map.new_in(arena.handle())
+    collections.Map.insert(&flags, 5, (true, false)).unwrap().release()
+    let stored = flags.get(5).unwrap()
+    let (on, off) = copy(*stored)
+    flags.release()
+
+    if from_option == 4 && from_vec == 10 && on && !off {
+        0
+    } else {
+        1
+    }
+}

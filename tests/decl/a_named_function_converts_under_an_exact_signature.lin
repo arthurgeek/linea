@@ -1,0 +1,8 @@
+fn increment(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn main() -> UInt8 {
+    let selected: fn(read value: UInt8) -> UInt8 = increment
+    selected(4) + increment(1)
+}

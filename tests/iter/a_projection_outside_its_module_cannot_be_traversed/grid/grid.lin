@@ -1,0 +1,7 @@
+pub struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Grid {
+    trav positions = 0..4
+}

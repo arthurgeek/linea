@@ -1,0 +1,5 @@
+error[O-Copy]: `Vec[UInt64, mem.Handle[mem.SystemAllocator]]` does not permit copying
+  --> tests/mem/discardability/an_arena_vector_cannot_be_copied.lin:11:17
+   |
+11 |     let other = copy(values)
+   |                 ^^^^^^^^^^^^ move the value, or declare a copyable representation

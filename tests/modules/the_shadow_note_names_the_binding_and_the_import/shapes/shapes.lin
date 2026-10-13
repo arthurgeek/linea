@@ -1,0 +1,24 @@
+pub struct Thing {
+    size: UInt8,
+}
+
+pub enum Kind {
+    Small,
+    Big(UInt8),
+}
+
+pub trait Show {
+    fn show(s: Self) -> UInt8
+}
+
+pub fn make() -> Thing {
+    .{ size = 3 }
+}
+
+pub fn big() -> Kind {
+    .Big(5)
+}
+
+pub fn double(n: UInt8) -> UInt8 {
+    n * 2
+}

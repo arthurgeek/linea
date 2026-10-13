@@ -1,0 +1,5 @@
+pub alias Handler = fn(amount: UInt8) -> UInt8
+
+pub fn double(amount: UInt8) -> UInt8 {
+    amount * 2
+}

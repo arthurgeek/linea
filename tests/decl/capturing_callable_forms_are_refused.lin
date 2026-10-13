@@ -1,0 +1,18 @@
+@linear
+enum Token {
+    Held(UInt8),
+}
+
+fn consume(sink token: Token) -> UInt8 {
+    match token {
+        Held(value) => value,
+    }
+}
+
+fn main() -> UInt8 {
+    let value: UInt8 = 3
+    let _free = || value
+    let token: Token = Token.Held(4)
+    let _linear = || consume(token)
+    0
+}

@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+ --> tests/decl/a_closure_call_rejects_overlapping_arguments.lin:6:20
+  |
+6 |     update(&value, value)
+  |            ------ mutated by this argument
+  |                    ^^^^^ already passed `&` here

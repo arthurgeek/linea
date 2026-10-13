@@ -1,0 +1,19 @@
+import std.io
+
+// A function held in a local is called inside an interpolation like any
+// other expression, and a result borrowing a temporary is read there, within
+// the statement that made the temporary.
+fn first(items: [UInt64; 2]) -> borrow UInt64 where borrows(items) {
+    borrow items[0]
+}
+
+fn double(value: UInt64) -> UInt64 {
+    value * 2
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let pick = first
+    let twice = double
+    io.println("{twice(value: 3)} {*pick([4, 5])}")?
+    return .Ok(0)
+}

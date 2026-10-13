@@ -1,0 +1,39 @@
+// A `break` gives its value to the loop, and the loop yields where it was
+// written -- so `e` is owed to `use2` from the `break` onwards, exactly as an
+// argument written there would be. The `return` in the next operand crosses
+// that transfer.
+//
+// Reading a `break`'s operand as received where the `break` stands accepts
+// this: the loop takes the value and the loop is not a construct anything is
+// waiting on, so the transfer closes at a point that owns nothing afterwards.
+// The case beside this one, where the same loop is the last operand, stays
+// legal -- which is what makes the two answers a distinction rather than a
+// stricter rule.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn one(sink a: Key) -> UInt8 {
+    let Key { n: x } = a
+    x
+}
+
+fn go(sink d: Key, sink e: Key) -> UInt8 {
+    use2(
+        loop {
+            break e
+        },
+        return one(d),
+    )
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 1 }, .{ n = 2 })
+}

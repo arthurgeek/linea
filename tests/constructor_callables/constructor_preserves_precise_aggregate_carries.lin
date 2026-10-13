@@ -1,0 +1,15 @@
+struct Holder { value: borrow UInt64 }
+
+enum Wrapped { Value(Holder) }
+
+fn main() -> UInt8 {
+    let make: fn(sink payload: Holder) -> Wrapped where carries(.Value.value: payload) = Wrapped.Value
+    let owner: UInt64 = 37
+    match make(.{ value = borrow owner }) {
+        Value(holder) => if *holder.value == 37 {
+            0
+        } else {
+            1
+        },
+    }
+}

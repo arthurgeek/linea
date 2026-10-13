@@ -1,0 +1,21 @@
+error[N-Undefined]: undefined name `nope`
+  --> tests/ownership/a_refused_initialiser_is_decided_where_it_is_refused.lin:18:14
+   |
+18 |         _ => nope,
+   |              ^^^^ no binding with this name is in scope
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/ownership/a_refused_initialiser_is_decided_where_it_is_refused.lin:14:22
+   |
+9  | fn make(row: UInt8) -> Ticket {
+   |         --- expected because of this parameter
+14 |     let _made = make("one")
+   |                      ^^^^^ expected `UInt8`, found `Str`
+error[O-Leak]: `_kept` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_refused_initialiser_is_decided_where_it_is_refused.lin:16:9
+   |
+16 |     let _kept: Ticket = match choice {
+   |         ^^^^^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

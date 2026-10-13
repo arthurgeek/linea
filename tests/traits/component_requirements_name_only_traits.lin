@@ -1,0 +1,21 @@
+trait CapabilityRequirement {}
+
+template impl CapabilityRequirement where reflect.components: Copyable {}
+
+trait CallableRequirement {}
+
+template impl CallableRequirement where reflect.components: fn(read value: UInt8) -> UInt8 {}
+
+struct Box {
+    value: UInt8,
+}
+
+derive (
+    CapabilityRequirement,
+    CallableRequirement,
+) for Box
+
+fn main() -> UInt8 {
+    let _box: Box = .{ value = 0 }
+    0
+}

@@ -1,0 +1,12 @@
+// Accepting a function writes the call, and a stop per argument. A placeholder
+// is the parameter's declared name, read off the signature rather than guessed
+// at, and the tab order is the order the arguments are written in. A client
+// that advertised snippet support is the one this is written for.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = add(1, 2)
+    total
+}

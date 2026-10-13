@@ -1,0 +1,41 @@
+// A constant is a place, but not a writable one: an assignment, an `inout`
+// argument and a mutating method call are refused on the constant itself, on a
+// field of it and on an element of it.
+@copyable
+struct Config {
+    limit: Int64,
+    sizes: [Int64; 2],
+}
+
+impl Config {
+    fn grow(inout self: Config) -> () {
+        self.limit = self.limit + 1
+    }
+}
+
+let config: Config = .{ limit = 7, sizes = [1, 2] }
+
+let limit: Int64 = 3
+
+let limits = [Int64(4), Int64(9)]
+
+fn bump(inout value: Int64) -> () {
+    value = value + 1
+}
+
+fn reset(inout config: Config) -> () {
+    config.limit = 0
+}
+
+fn main() -> UInt8 {
+    limit = 4
+    config.limit = 8
+    limits[1] = 10
+    config.sizes[0] += 1
+    bump(&limit)
+    bump(&config.limit)
+    bump(&limits[0])
+    reset(&config)
+    &config.grow()
+    UInt8(config.limit + limit + limits[0])
+}

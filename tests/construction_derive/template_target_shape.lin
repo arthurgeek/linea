@@ -1,0 +1,22 @@
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+template impl Label where reflect.target: struct {
+    fn label(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Product {}
+
+derive Label for Product
+
+fn main() -> UInt8 {
+    let product: Product = .{}
+    if Label.label(product) == 7 {
+        0
+    } else {
+        1
+    }
+}

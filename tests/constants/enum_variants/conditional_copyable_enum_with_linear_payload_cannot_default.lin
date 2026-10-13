@@ -1,0 +1,13 @@
+@linear
+enum Ticket { Issued }
+
+@copyable
+enum Choice[T] { Empty, Held(T) }
+
+fn inspect(value: Choice[Ticket] = .Empty) -> UInt8 {
+    match read value { Empty => 0, Held(_) => 1 }
+}
+
+fn main() -> UInt8 {
+    inspect()
+}

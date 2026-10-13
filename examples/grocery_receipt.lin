@@ -1,0 +1,83 @@
+// Print a grocery receipt with its columns lined up. Produce sold by weight
+// shows its kilograms to three decimal places, and the total sits under the
+// prices on the right.
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+
+// One line of the receipt: what was bought, how much of it, in which unit,
+// and what it cost in cents.
+struct Purchase {
+    name: Str,
+    amount: Float64,
+    unit: Str,
+    cents: UInt64,
+}
+
+// Write the receipt to `w`. A format spec after a colon lays a value out:
+// `:>9.3` right-aligns an amount in nine columns with three decimals, `:<3`
+// left-aligns the unit in three columns, `:>6` right-aligns the dollars
+// in six, and `:02` writes the cents as two digits.
+fn write_receipt[W: Writer](inout w: W, purchases: mem.Slice[Purchase]) -> Result[(), W.Error] where carries(.Err: w) {
+    // The name column is as wide as the longest name, which is known only at
+    // run time, so `fmt.write_display` takes a `fmt.Spec` built for it. The
+    // default spec pads with spaces and puts text on the left, and struct
+    // update changes only what differs from it.
+    var widest: UInt64 = 0
+    for purchase in copy(purchases) {
+        if purchase.name.length() > widest {
+            widest = purchase.name.length()
+        }
+    }
+    // A line is the name, a space, nine columns of amount, a space, three of
+    // unit, a space and nine of price.
+    let line_width = widest + 24
+    let heading = fmt.Spec { fill = "=", align = .Some(.Center), width = line_width, ..fmt.Spec.default() }
+    fmt.write_display(" Corner Grocer ", heading, &w)?
+    &w.write_str("\n")?
+    let name_column = fmt.Spec { width = widest, ..fmt.Spec.default() }
+    var total: UInt64 = 0
+    for purchase in copy(purchases) {
+        fmt.write_display(purchase.name, name_column, &w)?
+        let dollars = purchase.cents / 100
+        let cents = purchase.cents % 100
+        io.line(" {purchase.amount:>9.3} {purchase.unit:<3} {dollars:>6}.{cents:02}", &w)?
+        total += purchase.cents
+    }
+    // The label covers the name, amount and unit columns and the spaces
+    // between them, so the total sits under every price.
+    let label_column = fmt.Spec { width = line_width - 9, ..fmt.Spec.default() }
+    fmt.write_display("total", label_column, &w)?
+    io.line("{total / 100:>6}.{total % 100:02}", &w)?
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let purchases: [Purchase; _] = [
+        .{ name = "apples", amount = 1.25, unit = "kg", cents = 436 },
+        .{ name = "sourdough loaf", amount = 1.0, unit = "pc", cents = 525 },
+        .{ name = "coffee beans", amount = 0.5, unit = "kg", cents = 1299 },
+    ]
+    var out = io.stdout()
+    write_receipt(&out, purchases.as_slice())?
+    .Ok(0)
+}
+
+// A `\\` line holds its text exactly, so the expected receipt reads as it
+// prints, spaces and all.
+test fn the_receipt_lines_up_its_columns() {
+    let purchases: [Purchase; _] = [
+        .{ name = "tea", amount = 0.25, unit = "kg", cents = 350 },
+        .{ name = "milk", amount = 2.0, unit = "pc", cents = 178 },
+    ]
+    defer var written = String.new()
+    write_receipt(&written, purchases.as_slice()).unwrap()
+    let expected =
+        \\====== Corner Grocer =======
+        \\tea      0.250 kg       3.50
+        \\milk     2.000 pc       1.78
+        \\total                   5.28
+        \\
+    testing.assert_eq(written.view(), expected, "the receipt changed")?
+}

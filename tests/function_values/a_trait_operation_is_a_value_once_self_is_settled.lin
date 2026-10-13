@@ -1,0 +1,62 @@
+// A trait's operation has one body per implementing type, so as a value it
+// waits for its uses to say which type `Self` is.
+trait Priced {
+    fn cents(self: Self) -> UInt64
+}
+
+struct Pizza {
+    slices: UInt64,
+}
+
+struct Soda {
+    litres: UInt64,
+}
+
+impl Priced for Pizza {
+    fn cents(self: Pizza) -> UInt64 {
+        self.slices * 150
+    }
+}
+
+trait Measure {
+    type Unit
+
+    fn size(self: Self) -> Self.Unit
+}
+
+impl Measure for Pizza {
+    type Unit = UInt64
+
+    fn size(self: Pizza) -> UInt64 {
+        self.slices
+    }
+}
+
+trait Convert[T] {
+    fn convert(self: Self) -> T
+}
+
+impl Convert[UInt64] for Soda {
+    fn convert(self: Soda) -> UInt64 {
+        self.litres * 100
+    }
+}
+
+impl Priced for Soda {
+    fn cents(self: Soda) -> UInt64 {
+        self.litres * 200
+    }
+}
+
+fn main() -> UInt8 {
+    let price_pizza = Priced.cents
+    let price_soda: fn(read soda: Soda) -> UInt64 = Priced.cents
+    // `Self.Unit` is read once the call settles `Self` to `Pizza`, and the
+    // trait's `T` is settled by the annotation on the result.
+    let size = Measure.size
+    let convert = Convert.convert
+    let slices = size(Pizza { slices = 4 })
+    let millilitres: UInt64 = convert(Soda { litres = 2 })
+    let total = price_pizza(Pizza { slices = 2 }) + price_soda(Soda { litres = 1 })
+    UInt8(total / 100 + slices + millilitres / 100)
+}

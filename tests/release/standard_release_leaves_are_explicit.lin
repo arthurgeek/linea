@@ -1,0 +1,22 @@
+// Release is an explicit closed capability even for leaves that own nothing.
+// Inhabited leaves can be handed to the same ordinary trait call.
+
+// Never has no value to pass; a bound checks its release capability.
+struct HasRelease[phantom T: Release] {}
+
+fn main() -> UInt8 {
+    let _never_release: HasRelease[Never] = .{}
+    Release.release({})
+    Release.release(Int8(0))
+    Release.release(Int16(0))
+    Release.release(Int32(0))
+    Release.release(Int64(0))
+    Release.release(UInt8(0))
+    Release.release(UInt16(0))
+    Release.release(UInt32(0))
+    Release.release(UInt64(0))
+    Release.release(false)
+    Release.release(Float64(0.0))
+    Release.release("text")
+    0
+}

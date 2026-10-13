@@ -1,0 +1,10 @@
+error[S-Separator]: expected `;` or a newline
+ --> tests/recovery/missing_separator.lin:6:22
+  |
+6 |     let x: UInt8 = 1 let y: UInt8 = 2
+  |                      ^^^ this binding ends here
+error[N-Unused]: `x` is never used
+ --> tests/recovery/missing_separator.lin:6:9
+  |
+6 |     let x: UInt8 = 1 let y: UInt8 = 2
+  |         ^ bind it as `_` if the value is not wanted

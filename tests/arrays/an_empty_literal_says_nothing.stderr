@@ -1,0 +1,5 @@
+error[T-Infer]: an empty array has no element to say what it holds
+ --> tests/arrays/an_empty_literal_says_nothing.lin:5:15
+  |
+5 |     let _xs = []
+  |               ^^ give the binding a type, or name one

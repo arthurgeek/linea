@@ -1,0 +1,7 @@
+error[N-Immutable]: `callback` is declared with `let`
+ --> tests/closure_captures/inout_invocation_requires_mutable_binding.lin:3:6
+  |
+2 |     let callback = [] || UInt8(0)
+  |         -------- declared with `let` here
+3 |     &callback()
+  |      ^^^^^^^^ this binding cannot be assigned

@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_return_is_where_a_scope_ends/main.lin:12:9
+   |
+10 |     let k = mint(1)
+   |         - acquired here
+12 |         return 0
+   |         ^^^^^^ still owned here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

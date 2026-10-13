@@ -1,0 +1,8 @@
+alias Tagged[T, U] = Option[T]
+alias Brand[phantom T] = UInt8
+
+fn main() -> UInt8 {
+    let _tag: Tagged[UInt8, Bool] = .None
+    let _brand: Brand[Bool] = 0
+    0
+}

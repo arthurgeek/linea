@@ -1,0 +1,36 @@
+// A `defer` written once discharges the value on the path out. Without it the
+// same program leaks, which the case beside this one records -- the two are a
+// pair, and neither says anything alone.
+//
+// `freed` counts the disposal, so the status says the schedule fired rather
+// than only that the program was accepted: the body answers the same number
+// either way.
+//
+// The scheduled expression answers with `()`, because a `defer` evaluates it
+// for its effect exactly as a statement does.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn peek(k: Key) -> UInt8 {
+    k.n
+}
+
+fn take(sink k: Key, inout freed: UInt8) -> () {
+    let Key { n: _n } = k
+    freed = freed + 1
+}
+
+fn go(inout freed: UInt8) -> UInt8 {
+    let k: Key = .{ n = 7 }
+    let seen = peek(k)
+    defer take(k, &freed)
+    seen
+}
+
+fn main() -> UInt8 {
+    var f: UInt8 = 0
+    let answer = go(&f)
+    answer + f
+}

@@ -1,0 +1,10 @@
+// A postfix call checks its receiver to find out what the call reaches. The
+// receiver is then the call's first argument, and it is not checked a second
+// time, so whatever the receiver is wrong about is reported once.
+fn wants(_level: UInt8) -> Option[UInt8] {
+    .Some(1)
+}
+
+fn main() -> UInt8 {
+    wants(true).unwrap()
+}

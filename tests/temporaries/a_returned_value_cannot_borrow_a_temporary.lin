@@ -1,0 +1,17 @@
+// A temporary ends with its statement, and a returned value outlives every
+// statement of the function that returns it.
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+fn answer() -> Reading where carries() {
+    reading(42)
+}
+
+fn main() -> UInt8 {
+    UInt8(*answer().value)
+}

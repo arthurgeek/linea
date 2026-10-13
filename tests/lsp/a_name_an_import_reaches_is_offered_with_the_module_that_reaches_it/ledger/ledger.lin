@@ -1,0 +1,9 @@
+pub let limit: UInt8 = 9
+
+pub fn size() -> UInt8 {
+    7
+}
+
+fn _private() -> UInt8 {
+    1
+}

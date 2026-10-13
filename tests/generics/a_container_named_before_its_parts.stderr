@@ -1,0 +1,14 @@
+error[O-Copy]: `Early` does not permit copying
+  --> tests/generics/a_container_named_before_its_parts.lin:18:16
+   |
+18 |     let twin = copy(e)
+   |                ^^^^^^^ move the value, or declare a copyable representation
+error[O-Leak]: `e` (a linear `Early`) is still owned when this path leaves
+  --> tests/generics/a_container_named_before_its_parts.lin:17:9
+   |
+17 |     let e: Early = .{ o = .{ c = .{ v = 7 } } }
+   |         ^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

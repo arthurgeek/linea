@@ -1,0 +1,13 @@
+struct Token { number: UInt8 }
+
+struct Envelope { token: Token }
+
+fn main() -> UInt8 {
+    let envelope = Envelope { token = Token { number = 7 } }
+    let read Envelope { token } = envelope
+    let take = sink [sink token] || {
+        let Token { number } = token
+        number
+    }
+    take()
+}

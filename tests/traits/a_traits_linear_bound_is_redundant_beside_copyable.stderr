@@ -1,0 +1,5 @@
+error[T-Bound]: Linear adds no capability requirement
+ --> tests/traits/a_traits_linear_bound_is_redundant_beside_copyable.lin:3:7
+  |
+3 | trait _Held: Copyable + Linear {
+  |       ^^^^^ drop the redundant Linear bound

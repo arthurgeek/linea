@@ -1,0 +1,14 @@
+trait Source {
+    type Item
+}
+
+struct Box { value: UInt8 }
+
+impl Source for Box {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let value: Box.Item = 7
+    value - 7
+}

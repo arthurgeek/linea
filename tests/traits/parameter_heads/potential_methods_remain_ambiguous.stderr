@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Deliver` and `Other` both declare `deliver` for `UInt8`
+  --> tests/traits/parameter_heads/potential_methods_remain_ambiguous.lin:26:5
+   |
+26 |     UInt8(0).deliver()
+   |     ^^^^^^^^^^^^^^^^ write `Deliver.deliver(…)` or `Other.deliver(…)`, which says which trait it goes through

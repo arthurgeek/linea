@@ -1,0 +1,6 @@
+enum Colour { Red }
+
+fn main() -> UInt8 {
+    let _ = .Red
+    0
+}

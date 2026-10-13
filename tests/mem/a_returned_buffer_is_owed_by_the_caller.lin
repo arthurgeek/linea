@@ -1,0 +1,20 @@
+// Returning a buffer transfers it, so the debt travels: the function that
+// answers with one owes nothing, and the caller that lets the answer die
+// holding it is where the leak is named.
+import std.mem
+
+use mem.Buffer
+use mem.Oom
+use mem.SystemAllocator
+use mem.system
+
+fn make() -> Result[Buffer[SystemAllocator], Oom] {
+    system().acquire(8)
+}
+
+fn main() -> UInt8 {
+    match make() {
+        Ok(b) => UInt8(b.length()),
+        Err(_) => 0,
+    }
+}

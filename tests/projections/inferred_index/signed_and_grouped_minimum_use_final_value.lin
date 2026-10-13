@@ -1,0 +1,22 @@
+struct Cell { value: UInt8 }
+
+impl Index[Int8] for Cell {
+    type Elem = UInt8
+
+    proj at(inout self: Cell, _i: Int8) -> UInt8 {
+        self.value
+    }
+}
+
+fn main() -> UInt8 {
+    var cell = Cell { value = 1 }
+    cell[-128] += 1
+    cell[(-128)] += 1
+    cell[-(128)] += 1
+    cell[((127))] += 1
+    if cell.value == 5 {
+        0
+    } else {
+        1
+    }
+}

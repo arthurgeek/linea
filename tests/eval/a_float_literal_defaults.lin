@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let x = 1.5
+    let y: Float64 = 2.25
+    let _unused = y
+    let _also = x
+    0
+}

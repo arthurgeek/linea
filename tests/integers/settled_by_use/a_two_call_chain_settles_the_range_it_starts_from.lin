@@ -1,0 +1,14 @@
+// The literals in `0..6` take the type the end of the chain is used at, as
+// they would if `fold` were given `filter`'s result as an argument. Each total
+// is 0 + 2 + 4.
+fn main() -> UInt8 {
+    let narrow: UInt32 = (0..6).filter(|i| i % 2 == 0).fold(0, |sink total, sink i| total + i)
+    let wide: UInt64 = (0..6).filter(|i| i % 2 == 0).fold(0, |sink total, sink i| total + i)
+    let plain = (0..6).filter(|i| i % 2 == 0).fold(0, |sink total, sink i| total + i)
+    let _: Int64 = plain
+    let first: Option[UInt32] = (0..6).filter(|i| i % 2 == 1).find(|i| i > 2)
+    match first {
+        Some(odd) => UInt8(narrow) + UInt8(wide) + UInt8(plain) + UInt8(odd),
+        None => 0,
+    }
+}

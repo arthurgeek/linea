@@ -1,0 +1,27 @@
+// Returning a wrapper preserves the obligation of its concrete linear
+// payload. The caller settles it by destructuring both values.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Box[T] {
+    v: T,
+}
+
+fn wrap(sink k: Key) -> Box[Key] {
+    .{ v = k }
+}
+
+fn burn(sink b: Box[Key]) -> UInt8 {
+    let Box { v: k } = b
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let k = Key.Forged(7)
+    let boxed = wrap(k)
+    burn(boxed)
+}

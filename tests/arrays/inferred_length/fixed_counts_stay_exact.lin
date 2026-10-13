@@ -1,0 +1,8 @@
+fn take(_values: [UInt8; 3]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let values: [UInt8; _] = [1, 2]
+    take(values)
+}

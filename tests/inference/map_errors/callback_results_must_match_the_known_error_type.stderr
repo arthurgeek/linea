@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `UInt16`, found `Bool`
+ --> tests/inference/map_errors/callback_results_must_match_the_known_error_type.lin:3:70
+  |
+3 |     let mapped: Result[UInt8, UInt16] = failure.map_err(|sink error| error == 0)
+  |                                                                      ^^^^^^^^^^ expected `UInt16`, found `Bool`
+ ::: std/result/result.lin
+L |     pub fn map_err[U, F: inout fn(sink error: E) -> U](sink self: Self, sink transform: F) -> Result[T, U] where carries ...
+  |                                                                              --------- expected because of this parameter

@@ -1,0 +1,14 @@
+error[O-Move]: only part of `g` is named here
+  --> tests/projections/an_element_is_not_moved_out.lin:31:10
+   |
+31 |     take(g[0])
+   |          ^^^^ move the whole binding, or `copy` this part out of it
+error[O-Leak]: `g` (a linear `Grid`) is still owned when this path leaves
+  --> tests/projections/an_element_is_not_moved_out.lin:30:9
+   |
+30 |     let g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+   |         ^ never settled on the path that reaches the end of this block
+32 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

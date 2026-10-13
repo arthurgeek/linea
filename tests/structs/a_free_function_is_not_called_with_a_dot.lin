@@ -1,0 +1,11 @@
+// A free function is not an operation of the value before the dot, so
+// `n.double()` does not call `double`. The report says so where the call is
+// written and shows the call that does: `double(n)`.
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 4
+    n.double()
+}

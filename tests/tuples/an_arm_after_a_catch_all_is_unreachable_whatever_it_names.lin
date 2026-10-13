@@ -1,0 +1,9 @@
+// A catch-all arm takes every value, so an arm after it that takes the pair
+// apart can never be chosen.
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (1, 2)
+    match pair {
+        _ => 1,
+        (c, d) => c + d,
+    }
+}

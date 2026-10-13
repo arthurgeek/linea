@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/control/if_arms_disagree.lin:14:9
+   |
+14 |         1
+   |         ^ expected `Bool`, found `Int64`
+16 |         false
+   |         ----- expected because of this arm

@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: `with` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_call_in_an_allocator_generic_declaration_writes_the_allocator_a_function_defaults.lin:13:5
+   |
+13 |     with(8)
+   |     ^^^^ write the allocator: `B`, or `mem.SystemAllocator` where the system allocator is meant

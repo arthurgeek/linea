@@ -1,0 +1,9 @@
+import std.mem
+
+fn main() -> UInt8 {
+    var values: Vec[UInt8, mem.SystemAllocator] = Vec.new()
+    match Vec.push(&values, 7) { Ok(_) => {}, Err(_) => panic("push failed") }
+    let beyond = values[1]
+    values.release()
+    beyond
+}

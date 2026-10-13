@@ -1,0 +1,22 @@
+// A call is held to `[T-PolyRec]` by which declaration it sits in, and an
+// `impl`'s functions sit inside the `impl`'s own extent. A declaration that
+// contains another is the one case where "which declaration is this call in"
+// has two answers, and the innermost is the one that recurses.
+@copyable
+enum Wrap[T] {
+    Only(T),
+}
+
+struct Box {
+    v: UInt8,
+}
+
+impl Box {
+    fn deeper[T: Copyable](a: T) -> UInt8 {
+        Box.deeper(Wrap.Only(copy(a)))
+    }
+}
+
+fn main() -> UInt8 {
+    Box.deeper(1)
+}

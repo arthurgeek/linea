@@ -1,0 +1,9 @@
+error[O-Leak]: this linear `Box` is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_discards_a_temporary_too/main.lin:16:9
+   |
+15 |     match make() {
+   |           ------ taken apart here
+16 |         _ => 3,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: name what it holds in the arm, so something can settle it

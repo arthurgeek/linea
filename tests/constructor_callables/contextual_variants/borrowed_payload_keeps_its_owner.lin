@@ -1,0 +1,17 @@
+enum Failure { Refused(borrow UInt64) }
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 17
+    let input: Result[UInt8, borrow UInt64] = .Err(borrow owner)
+    let mapped: Result[UInt8, Failure] = input.map_err(.Refused)
+    match mapped {
+        Ok(_) => 1,
+        Err(error) => match error {
+            Refused(value) => if *value == 17 {
+                0
+            } else {
+                2
+            },
+        },
+    }
+}

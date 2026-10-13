@@ -1,0 +1,13 @@
+// Fields carry no expression of their own, so the walk over them is the one
+// that most easily forgets to ask whether a region already covered them.
+struct Plan {
+    // linea fmt: off
+    remaining:   UInt8,
+    // linea fmt: on
+    step: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p: Plan = .{ remaining = 1, step = 2 }
+    copy(p.remaining) + copy(p.step)
+}

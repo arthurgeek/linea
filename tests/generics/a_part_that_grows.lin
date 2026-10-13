@@ -1,0 +1,16 @@
+// `S[T]` holds an `S[S[T]]`, which holds an `S[S[S[T]]]`. Every level is a
+// type nobody wrote and nothing closes the set, so substituting the parts
+// minted one type per level until the stack ended -- the compiler died on a
+// seven-line program with no diagnostic at all.
+//
+// The measure is the one a recursive call is held to: an argument written
+// without the declaration's own parameters, or written as one of them exactly,
+// is no larger than what the declaration was given, and anything else puts one
+// of them under a constructor.
+struct S[T] {
+    v: S[S[T]],
+}
+
+fn main() -> UInt8 {
+    0
+}

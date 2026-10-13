@@ -1,0 +1,15 @@
+// A number nothing settles names no particular element, so a bracket holding
+// one is held to name every element of the array it sits over. Which element
+// each of these reaches is a run-time question and this rule is asked of the
+// argument list alone, so the two are held to name one place.
+fn two(inout a: UInt8, b: UInt8) -> UInt8 {
+    a = 9
+    b
+}
+
+fn main() -> UInt8 {
+    var xs: [UInt8; 4] = [1, 2, 3, 4]
+    var i: UInt64 = 0
+    var j: UInt64 = 1
+    two(&xs[i], xs[j])
+}

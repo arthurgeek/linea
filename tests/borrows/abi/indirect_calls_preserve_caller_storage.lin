@@ -1,0 +1,39 @@
+struct Holder {
+    view: borrow UInt8,
+}
+
+fn observe(value: UInt8) -> borrow UInt8 where borrows(value) {
+    borrow value
+}
+
+fn invoke(
+    action: fn(read value: UInt8) -> borrow UInt8 where borrows(value),
+    value: UInt8,
+) -> borrow UInt8 where borrows(value) {
+    action(value)
+}
+
+fn retain(inout holder: Holder, value: UInt8) -> () where retains(holder.view: borrow value) {
+    holder.view = borrow value
+}
+
+fn invoke_retention(
+    action: fn(inout holder: Holder, read value: UInt8) -> () where retains(holder.view: borrow value),
+    inout holder: Holder,
+    value: UInt8,
+) -> () where retains(holder.view: borrow value) {
+    action(&holder, value)
+}
+
+fn main() -> UInt8 {
+    let original: UInt8 = 3
+    let replacement: UInt8 = 17
+    let view = invoke(observe, replacement)
+    var holder: Holder = .{ view = borrow original }
+    invoke_retention(retain, &holder, replacement)
+    if *view + *holder.view == 34 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,74 @@
+// What a failing equality puts in the transcript.
+//
+// `assert_eq` does not carry the two values in its failure -- it writes them to
+// standard error, and the runner keeps a failing test's standard error and
+// prints it under the name of the test that wrote it. So the values arrive
+// beside the test they belong to without the failure holding any rendered text,
+// and this is where that arrangement is read back.
+//
+// A passing test beside them, because a runner that printed every test's output
+// would reproduce the failing lines and not this one: what a test writes while
+// passing is its own and is discarded.
+import std.testing
+
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+derive (Equatable, Debug) for Ticket
+
+enum Delivery { Pending, Sent(Str) }
+
+derive (Equatable, Debug) for Delivery
+
+fn main() -> UInt8 {
+    0
+}
+
+test fn a_number_that_differs_shows_both() -> Result[(), testing.Failure] {
+    testing.assert_eq(UInt8(7), UInt8(6), "seven is not six")?
+    return .Ok({})
+}
+
+test fn text_that_differs_shows_both() -> Result[(), testing.Failure] {
+    testing.assert_eq("olá", "ola", "an accent is a byte of its own")?
+    return .Ok({})
+}
+
+test fn an_equality_that_holds_says_nothing() -> Result[(), testing.Failure] {
+    testing.assert_eq(UInt8(6), UInt8(6), "six is six")?
+    return .Ok({})
+}
+
+test fn option_variants_and_payloads_are_visible() -> Result[(), testing.Failure] {
+    let got: Option[UInt8] = .Some(7)
+    let want: Option[UInt8] = .None
+    testing.assert_eq(got, want, "a present value is not absent")?
+    return .Ok({})
+}
+
+test fn custom_enum_payloads_are_visible() -> Result[(), testing.Failure] {
+    let got: Delivery = .Sent("Ada")
+    let want: Delivery = .Sent("Lin")
+    testing.assert_eq(got, want, "different recipients")?
+    return .Ok({})
+}
+
+test fn assertions_borrow_linear_values_on_both_outcomes() -> Result[(), testing.Failure] {
+    let one: Ticket = .{ number = 1 }
+    let same: Ticket = .{ number = 1 }
+    let two: Ticket = .{ number = 2 }
+    let equal = testing.assert_eq(one, same, "same ticket")
+    let unequal = testing.assert_eq(one, two, "different tickets")
+    let Ticket { number: first } = one
+    let Ticket { number: second } = same
+    let Ticket { number: third } = two
+    equal?
+    match unequal {
+        Ok(_) => testing.assert(false, "different tickets compared equal")?,
+        Err(_) => {},
+    }
+    testing.assert_eq(first + second + third, UInt8(4), "assertions preserve all three tickets")?
+    return .Ok({})
+}

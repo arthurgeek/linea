@@ -1,0 +1,26 @@
+// A binder the arm reads is a lend for as long as the arm can read it, so a
+// write reaching the same place through another path is refused. Which value
+// `x.v` would read is decided by the order the two sides of the `+` run in,
+// and an answer that depends on that is the whole of what the rule is for.
+//
+// The write is not an argument beside `x`, so it is not two places in one call
+// and `N-Aliased` has nothing to say: `&e.a` and `y` name different parts. The
+// lend outlives the call, which is why a second rule answers here.
+struct Inner {
+    v: UInt8,
+}
+
+struct Pair {
+    a: Inner,
+    b: Inner,
+}
+
+fn grow(inout s: Inner, p: Inner) -> UInt8 {
+    s = .{ v = 9 }
+    p.v
+}
+
+fn main() -> UInt8 {
+    var e: Pair = .{ a = .{ v = 1 }, b = .{ v = 2 } }
+    match read e { Pair { a: x, b: y } => grow(&e.a, y) + x.v }
+}

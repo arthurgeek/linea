@@ -1,0 +1,24 @@
+// A borrowed constant is read-only data the program carries. Its parts sit
+// where the record's layout places them, and its text is the address and
+// length of the literal's bytes.
+@copyable
+struct Label {
+    width: UInt8,
+    name: Str,
+    shown: Bool,
+}
+
+let tea_label: Label = .{ shown = true, name = "tea", width = 3 }
+
+fn label() -> borrow Label where carries() {
+    borrow tea_label
+}
+
+fn main() -> UInt8 {
+    let held = label()
+    if held.shown {
+        held.width
+    } else {
+        0
+    }
+}

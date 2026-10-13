@@ -1,0 +1,7 @@
+error[O-Move]: `a` has already been moved
+  --> tests/defer/a_placement_whose_run_a_call_interrupts.lin:44:22
+   |
+44 |     defer take2(hand(a), b, &freed)
+   |                      ^ it was already taken, and a value is taken once
+46 |     take1(a, &freed)
+   |           - it was taken here

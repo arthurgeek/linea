@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Ticket` has no operation `exchange`
+  --> tests/ownership/a_refused_call_says_nothing_about_what_it_was_given.lin:12:5
+   |
+12 |     ticket.exchange(voucher)
+   |     ^^^^^^^^^^^^^^^ no operation of this name is declared for this type

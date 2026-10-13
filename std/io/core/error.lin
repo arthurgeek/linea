@@ -1,0 +1,190 @@
+import std.mem
+import std.testing
+
+// Display renders an operation or category by its case name, as in IoError messages.
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum IoOperation {
+    Read,
+    Write,
+    Flush,
+    Close,
+    Open,
+    Metadata,
+    Permissions,
+    Publish,
+    Remove,
+    Random,
+    Listen,
+    Accept,
+    Connect,
+    Configure,
+}
+
+// IoCategory classifies a failure the same way on every platform; the native
+// errno stays in `IoError.code`.
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum IoCategory {
+    Other,
+    NotFound,
+    PermissionDenied,
+    AlreadyExists,
+    WouldBlock,
+    BrokenPipe,
+    Interrupted,
+    InvalidInput,
+    NotDirectory,
+    IsDirectory,
+    Unsupported,
+    NoSpace,
+    ResourceExhausted,
+    Symlink,
+    InvalidDescriptor,
+    NoProgress,
+    InvalidProgress,
+    TimedOut,
+    ConnectionReset,
+    ConnectionRefused,
+    AddressInUse,
+}
+
+// An IoError describes a failed I/O operation portably, by operation and
+// category, beside the native errno when there is one. `progress` counts bytes
+// accepted or delivered by the operation that failed.
+@(copyable, derive(Equatable, Equivalent, Debug, Release))
+pub struct IoError {
+    operation: IoOperation,
+    category: IoCategory,
+    code: Option[Int32],
+    progress: UInt64,
+}
+
+extern fn linea_io_category(code: Int32) -> UInt8
+
+impl IoError {
+    // Build the error for a failed `operation` from the native error `code`,
+    // which the runtime classifies into a category.
+    pub fn from_os(operation: IoOperation, code: Int32, progress: UInt64 = 0) -> Self {
+        // These tags are the runtime's portable category ABI, not OS errno values.
+        let category: IoCategory = match linea_io_category(code) {
+            1 => .NotFound,
+            2 => .PermissionDenied,
+            3 => .AlreadyExists,
+            4 => .WouldBlock,
+            5 => .BrokenPipe,
+            6 => .Interrupted,
+            7 => .InvalidInput,
+            8 => .NotDirectory,
+            9 => .IsDirectory,
+            10 => .Unsupported,
+            11 => .NoSpace,
+            12 => .ResourceExhausted,
+            13 => .Symlink,
+            14 => .InvalidDescriptor,
+            15 => .TimedOut,
+            16 => .ConnectionReset,
+            17 => .ConnectionRefused,
+            18 => .AddressInUse,
+            _ => .Other,
+        }
+        .{ operation = operation, category = category, code = .Some(code), progress = progress }
+    }
+}
+
+test fn io_errors_preserve_operation_category_and_progress() {
+    let error = IoError.from_os(.Read, 9, progress: 3)
+    testing.assert(match read error.operation { Read => true, _ => false }, "read failure lost its operation")?
+    testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "errno lost its stable category")?
+    testing.assert_eq(error.code, .Some(9), "errno was not retained")?
+    testing.assert_eq(error.progress, 3, "I/O progress was not retained")?
+    .Ok(())
+}
+
+// A failed write becomes the I/O error behind it, or one describing the stall,
+// with the bytes written before the failure as its progress, so `?` passes it
+// on as an `IoError`.
+impl From[WriteFailure[IoError]] for IoError {
+    fn from(sink source: WriteFailure[IoError]) -> IoError {
+        let WriteFailure { kind: kind, reason: reason, written: written } = source
+        var error: IoError = match reason {
+            Some(error) => error,
+            None => .{ operation = .Write, category = .Other, code = .None, progress = 0 },
+        }
+        error.progress = written
+        match kind {
+            Underlying => {},
+            NoProgress => error.category = .NoProgress,
+            InvalidProgress => error.category = .InvalidProgress,
+        }
+        error
+    }
+}
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn io_error_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+test fn derived_io_error_equality_compares_the_code() {
+    let error = IoError.from_os(.Write, 5)
+    let same = IoError.from_os(.Write, 5)
+    let other = IoError.from_os(.Write, 6)
+    testing.assert(error.equals(same), "equal I/O errors differed")?
+    testing.assert(!error.equals(other), "different I/O errors compared equal")?
+    testing.assert(io_error_test_accepts_equivalent(other), "IoError did not derive Equivalent")?
+    .Ok(())
+}
+
+test fn derived_io_error_debug_renders_the_code() {
+    let error = IoError.from_os(.Write, 5)
+    let a = mem.system()
+    var writer = testing.Recorder.of(a, 128).unwrap()
+    let wrote = "{error:?}".fmt(&writer).is_ok()
+    let rendered = writer.holds(r"IoError { operation: Write, category: Other, code: Some(5), progress: 0 }")
+    writer.release()
+    testing.assert(wrote, "rendering IoError failed")?
+    testing.assert(rendered, "IoError.Debug did not render its code")?
+    .Ok(())
+}
+
+test fn derived_io_error_release_consumes_the_code() {
+    let error = IoError.from_os(.Write, 5)
+    error.release()
+    .Ok(())
+}
+
+impl Display for IoError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        "{self.operation} failed ({self.category}) after {self.progress} bytes".fmt(&w)?
+        match read self.code {
+            Some(code) => "; errno {code}".fmt(&w),
+            None => .Ok(()),
+        }
+    }
+}
+
+test fn an_io_error_displays_its_numeric_reason() {
+    let error = IoError.from_os(.Write, 9)
+    let allocator = mem.system()
+    var writer = testing.Recorder.of(allocator, 256) else |_| {
+        return testing.assert(false, "the display recorder was refused")
+    }
+    let wrote = error.fmt(&writer).is_ok()
+    let equal = writer.holds("Write failed (InvalidDescriptor) after 0 bytes; errno 9")
+    writer.release()
+    testing.assert(wrote, "display rendering failed")?
+    testing.assert(equal, "IoError.Display lost its errno")?
+    .Ok(())
+}
+
+test fn io_operations_and_categories_display_their_names() {
+    let operation: IoOperation = .Publish
+    let category: IoCategory = .PermissionDenied
+    let allocator = mem.system()
+    // The 64-byte recorder holds both names and their separator.
+    var writer = testing.Recorder.of(allocator, 64).unwrap()
+    let wrote = "{operation} {category}".fmt(&writer).is_ok()
+    let equal = writer.holds("Publish PermissionDenied")
+    writer.release()
+    testing.assert(wrote && equal, "an I/O operation or category lost its name")?
+    .Ok(())
+}

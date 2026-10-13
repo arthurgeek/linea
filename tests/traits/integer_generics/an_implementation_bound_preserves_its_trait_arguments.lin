@@ -1,0 +1,30 @@
+trait Supplies[S] {
+    fn supply(self: Self) -> S
+}
+
+struct Source {}
+
+impl Supplies[UInt8] for Source {
+    fn supply(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Holder[T] {
+    value: T,
+}
+
+trait Tag {
+    fn tag(self: Self) -> UInt8
+}
+
+impl[T: Supplies[UInt16]] Tag for Holder[T] {
+    fn tag(_self: Self) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Holder[Source] = .{ value = .{} }
+    Tag.tag(held)
+}

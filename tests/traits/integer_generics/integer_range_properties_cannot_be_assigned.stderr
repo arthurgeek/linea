@@ -1,0 +1,5 @@
+error[N-Immutable]: type namespace `UInt8` cannot be mutated
+ --> tests/traits/integer_generics/integer_range_properties_cannot_be_assigned.lin:2:5
+  |
+2 |     UInt8.max = 0
+  |     ^^^^^ type namespaces are immutable

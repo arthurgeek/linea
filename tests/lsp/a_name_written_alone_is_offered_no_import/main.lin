@@ -1,0 +1,6 @@
+// An import binds a module, and a module is reached only through a qualified
+// access. A name written on its own is not one, so an import would leave the
+// name as undefined as it was.
+fn main() -> UInt8 {
+    ledger
+}

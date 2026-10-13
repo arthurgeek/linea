@@ -1,0 +1,9 @@
+import stock
+
+fn main() -> UInt8 {
+    let open: fn(count: UInt8) -> stock.Inventory = stock.Inventory.stocked
+    let restock: fn(inout inventory: stock.Inventory, by: UInt8) -> () = stock.Inventory.restock
+    var shelf = open(2)
+    restock(&shelf, 3)
+    shelf.count - 5
+}

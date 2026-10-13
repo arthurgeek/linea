@@ -1,0 +1,51 @@
+trait Count[A] {
+    fn count(self: Self, _context: A) -> UInt64 where carries()
+}
+
+impl[A] Count[A] for UInt64 {
+    fn count(self: UInt64, _context: A) -> UInt64 where carries() {
+        self
+    }
+}
+
+template impl[A] Count[A] where reflect.components: Count[A] {
+    fn count(self: Self, _context: A) -> UInt64 where carries() {
+        var total: UInt64 = 0
+        match read self {
+            reflect.case => {
+                for component in reflect.components {
+                    total += Count.count(component.of(self), _context)
+                }
+            },
+        }
+        total
+    }
+}
+
+trait At[phantom I] {}
+
+trait Ready {}
+
+template impl Ready where reflect.components: At[UInt8] {}
+
+impl At[UInt8] for UInt64 {}
+
+// Each derived bound is the template's requirement at the entry's arguments:
+// `T: Count[Bool]` and `T: At[UInt8]`.
+@derive(Count[Bool], Ready)
+struct Holder[T] {
+    value: T,
+}
+
+fn ready[T: Ready](_value: T) -> UInt64 {
+    8
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt64] = .{ value = 4 }
+    if Count.count(holder, false) + ready(holder) == 12 {
+        0
+    } else {
+        1
+    }
+}

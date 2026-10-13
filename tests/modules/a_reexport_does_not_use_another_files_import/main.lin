@@ -1,0 +1,11 @@
+// A `pub use` marks the import it reached through as used, and only that one.
+// Marking every binding of the name used meant a file whose import nothing
+// names was silenced by a `use` in another file -- the import below is dead
+// and must be reported.
+import alpha
+
+pub use alpha.pick
+
+fn main() -> UInt8 {
+    pick() + helper()
+}

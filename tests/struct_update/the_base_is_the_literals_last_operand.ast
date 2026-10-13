@@ -1,0 +1,24 @@
+program decls=2
+  decl struct_ "Point" tokens 0..12
+    field "x" : UInt8
+    field "y" : UInt8
+  decl function "main" tokens 12..54
+    returns UInt8
+    expr %14 block tokens 18..54
+      stmt %0 let_decl tokens 19..34 "origin" : Point
+        expr %4 struct_literal tokens 24..34
+          expr %0 name_ref tokens 26..27 "x"
+          expr %1 int_literal tokens 28..29 "0"
+          expr %2 name_ref tokens 30..31 "y"
+          expr %3 int_literal tokens 32..33 "2"
+      stmt %1 let_decl tokens 34..46 "moved"
+        expr %8 struct_literal tokens 37..46 type=Point
+          expr %5 name_ref tokens 39..40 "x"
+          expr %6 int_literal tokens 41..42 "5"
+          base
+            expr %7 name_ref tokens 44..45 "origin"
+      expr %13 add tokens 46..53
+        expr %10 field tokens 46..49 "x"
+          expr %9 name_ref tokens 46..47 "moved"
+        expr %12 field tokens 50..53 "y"
+          expr %11 name_ref tokens 50..51 "moved"

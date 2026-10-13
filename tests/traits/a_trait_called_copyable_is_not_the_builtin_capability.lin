@@ -1,0 +1,27 @@
+// A declared trait named Copyable shadows the built-in capability. Its
+// linear implementation remains valid because the trait grants no duplication.
+trait Copyable {
+    fn of(x: Self) -> UInt8
+}
+
+@linear
+struct Handle {
+    n: UInt8,
+}
+
+impl Copyable for Handle {
+    fn of(x: Self) -> UInt8 {
+        x.n
+    }
+}
+
+fn weigh[T: Copyable](v: T) -> UInt8 {
+    Copyable.of(v)
+}
+
+fn main() -> UInt8 {
+    let h: Handle = .{ n = 3 }
+    let w: UInt8 = weigh(h)
+    let Handle { n: k } = h
+    w + k
+}

@@ -1,0 +1,28 @@
+// `doubled` is offered only where `K` is Copyable, and `Ticket` is not, so a
+// `Booth` priced by tickets has no `doubled` to name as a value.
+trait Priced[K] {
+    fn price(self: Self, sink unit: K) -> UInt8
+
+    fn doubled(self: Self, sink unit: K) -> UInt8 where K: Copyable {
+        self.price(copy(unit)) + self.price(unit)
+    }
+}
+
+struct Ticket {
+    seat: UInt8,
+}
+
+struct Booth {
+    fee: UInt8,
+}
+
+impl Priced[Ticket] for Booth {
+    fn price(self: Self, sink unit: Ticket) -> UInt8 {
+        self.fee + unit.seat
+    }
+}
+
+fn main() -> UInt8 {
+    let doubled: fn(self: Booth, sink unit: Ticket) -> UInt8 = Priced.doubled
+    doubled(Booth { fee = 2 }, Ticket { seat = 3 })
+}

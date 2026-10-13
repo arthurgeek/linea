@@ -1,0 +1,5 @@
+error[T-Const]: `mid` names itself through `inner`
+ --> tests/types/a_name_reaching_a_ring_is_not_refused_again.lin:9:24
+  |
+9 | pub let inner: UInt8 = mid
+  |                        ^^^ a constant's value cannot be worked out from itself

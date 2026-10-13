@@ -1,0 +1,5 @@
+error[T-Convert]: `T` does not convert to `UInt8`
+ --> tests/traits/integer_generics/an_unbounded_parameter_cannot_convert_in_an_uncalled_body.lin:2:5
+  |
+2 |     UInt8(value)
+  |     ^^^^^^^^^^^^ a conversion is between numbers

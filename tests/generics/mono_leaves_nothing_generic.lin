@@ -1,0 +1,39 @@
+// The monomorphised program has no type parameters and no `Self`, and declares
+// every type it names. Three ways of leaving something generic behind, in one
+// program because one dump has to answer for all of them.
+//
+// `Self` stands for the implementing type, so an implementation rendered with
+// it names a type the monomorphised program does not have. A written `Cell[T]`
+// inside a body instantiated at `UInt8` is a `Cell.UInt8`, and rendering the
+// parameter's own spelling is the same mistake one level down. A type that
+// takes no parameters is copied once rather than per instantiation, and a dump
+// that only walks instantiations names it without ever declaring it.
+struct Coins {
+    count: UInt8,
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+impl[T: Copyable] Cell[T] {
+    pub fn get(c: Cell[T]) -> T {
+        copy(c.v)
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ count = 3 }
+    let held: Cell[UInt8] = .{ v = 4 }
+    Measure.of(coppers) + Cell.get(held)
+}

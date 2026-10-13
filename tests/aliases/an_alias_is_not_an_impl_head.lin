@@ -1,0 +1,44 @@
+// An implementation is written against the type's own declaration, so an
+// alias is refused as its head, whether the implementation is inherent,
+// of a trait, or derived. The refusal is the one report: an operation such an
+// implementation declares is not reported missing as well.
+struct Point {
+    x: Int64,
+}
+
+struct Holder[T] {
+    value: T,
+}
+
+alias Spot = Point
+alias Held8 = Holder[UInt8]
+
+trait Area {
+    fn area(self: Self) -> Int64
+}
+
+impl Area for Spot {
+    fn area(self: Self) -> Int64 {
+        self.x
+    }
+}
+
+impl Area for Held8 {
+    fn area(self: Self) -> Int64 {
+        Int64(self.value)
+    }
+}
+
+impl Spot {
+    fn twice(self: Self) -> Int64 {
+        self.x * 2
+    }
+}
+
+derive Debug for Spot
+
+fn main() -> UInt8 {
+    let p = Point { x = 0 }
+    let h: Holder[UInt8] = .{ value = 0 }
+    UInt8(p.area() + p.twice() + h.area())
+}

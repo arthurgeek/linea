@@ -1,0 +1,14 @@
+// `steps` is a field, so its bracket indexes it, and an index is one value.
+// Types in the bracket are type arguments only for a generic method.
+struct Rack {
+    steps: [fn(value: UInt8) -> UInt8; 2],
+}
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let rack = Rack { steps = [double, double] }
+    rack.steps[UInt8, Bool](1)
+}

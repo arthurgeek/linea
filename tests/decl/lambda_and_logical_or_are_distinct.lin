@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let one = || 1
+    if false || true {
+        one()
+    } else {
+        0
+    }
+}

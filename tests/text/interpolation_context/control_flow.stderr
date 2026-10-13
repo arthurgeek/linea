@@ -1,0 +1,35 @@
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/control_flow.lin:3:9
+  |
+2 |     let _conditional: Str = if true {
+  |                       --- expected because of this annotation
+3 |         "hello {1}"
+  |         ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/control_flow.lin:5:9
+  |
+2 |     let _conditional: Str = if true {
+  |                       --- expected because of this annotation
+5 |         "other {2}"
+  |         ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/control_flow.lin:8:14
+  |
+7 |     let _matched: Str = match UInt8(0) {
+  |                   --- expected because of this annotation
+8 |         0 => "hello {3}",
+  |              ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/control_flow.lin:9:14
+  |
+7 |     let _matched: Str = match UInt8(0) {
+  |                   --- expected because of this annotation
+9 |         _ => "other {4}",
+  |              ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+  --> tests/text/interpolation_context/control_flow.lin:12:15
+   |
+11 |     let _looped: Str = loop {
+   |                  --- expected because of this annotation
+12 |         break "hello {5}"
+   |               ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`

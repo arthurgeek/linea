@@ -1,0 +1,15 @@
+error[S-Params]: expected `:`
+ --> tests/recovery/a_name_read_from_a_malformed_parameter_has_no_case.lin:6:14
+  |
+6 | fn pair(UInt8, UInt8) -> UInt8 {
+  |              ^ a parameter is always annotated
+error[S-Params]: expected `:`
+ --> tests/recovery/a_name_read_from_a_malformed_parameter_has_no_case.lin:6:21
+  |
+6 | fn pair(UInt8, UInt8) -> UInt8 {
+  |                     ^ a parameter is always annotated
+error[S-Params]: expected `:`
+  --> tests/recovery/a_name_read_from_a_malformed_parameter_has_no_case.lin:10:24
+   |
+10 | fn apply(step: fn(Count) -> UInt8) -> UInt8 {
+   |                        ^ a parameter is always annotated

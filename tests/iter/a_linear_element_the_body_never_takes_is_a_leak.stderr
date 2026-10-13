@@ -1,0 +1,9 @@
+error[O-Leak]: `t` (a linear `Token`) is still owned when this path leaves
+  --> tests/iter/a_linear_element_the_body_never_takes_is_a_leak.lin:28:9
+   |
+28 |     for t in ts {
+   |         ^ never settled on the path that reaches the end of this block
+30 |     }
+   |     - the block ends here
+   |
+   = help: take it apart with `let Token { n: _ } = t`, or give it to something that takes it

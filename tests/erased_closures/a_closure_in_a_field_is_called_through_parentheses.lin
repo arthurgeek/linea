@@ -1,0 +1,33 @@
+import std.mem
+
+// A reminder keeps the action to run when it fires. `&(reminder.fire)(...)`
+// reads the field, then calls the closure it holds, which adds up the minutes
+// it has been given.
+struct Reminder {
+    minutes: UInt64,
+    fire: mem.Closure[inout fn(minutes: UInt64) -> UInt64, mem.SystemAllocator],
+}
+
+impl Release for Reminder {
+    fn release(sink self: Self) -> () {
+        let Reminder { minutes: _, fire } = self
+        fire.release()
+    }
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    var reminder = Reminder {
+        minutes = 15,
+        fire = mem.Closure.open(
+            mem.system(),
+            inout [sink fired = UInt64(0)] |minutes| {
+                fired += minutes
+                fired
+            },
+        )?,
+    }
+    let _first = &(reminder.fire)(reminder.minutes)
+    let total = &(reminder.fire)(reminder.minutes)
+    reminder.release()
+    return .Ok(UInt8(total))
+}

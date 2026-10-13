@@ -1,0 +1,13 @@
+import std.io
+import std.mem
+
+fn main() -> Result[UInt8, io.IoError] {
+    var input: BufferedReader[Descriptor, SystemAllocator] = io.BufferedReader.open(mem.system(), capacity: 16, reader: io.stdin()).unwrap()
+    var output: BufferedWriter[Descriptor, SystemAllocator] = io.BufferedWriter.open(mem.system(), capacity: 32, writer: io.stderr()).unwrap()
+    let name: String[SystemAllocator] = io.prompt_with[Descriptor, SystemAllocator, BufferedWriter[Descriptor, SystemAllocator]](&input, &output, message: "name: ", max_bytes: 64).unwrap().unwrap()
+    let _stdin: Descriptor = input[BufferedReader[Descriptor, SystemAllocator]].abandon()
+    let _stderr: Descriptor = output[BufferedWriter[Descriptor, SystemAllocator]].finish().unwrap()
+    defer name[String[SystemAllocator]].release()
+    io.println[Str](name[String[SystemAllocator]].view())?
+    return .Ok(0)
+}

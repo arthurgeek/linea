@@ -1,0 +1,21 @@
+// `carries` is an upper bound, so a function whose result depends on fewer
+// parameters than a callable type allows is a value of that type, just as it
+// meets a callable bound with that signature.
+fn first(left: Str, _right: Str) -> Str where carries(left) {
+    copy(left)
+}
+
+fn constant(_left: Str, _right: Str) -> Str where carries() {
+    "fixed"
+}
+
+fn pick[F: fn(left: Str, right: Str) -> Str where carries(left, right)](choose: F) -> UInt64 {
+    choose("ab", "c").length()
+}
+
+fn main() -> UInt8 {
+    let chosen: fn(left: Str, right: Str) -> Str where carries(left, right) = first
+    let fixed: fn(left: Str, right: Str) -> Str where carries(left, right) = constant
+    let total = chosen("abc", "d").length() + fixed("a", "b").length() + pick(first)
+    UInt8(total)
+}

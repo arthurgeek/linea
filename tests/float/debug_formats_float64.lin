@@ -1,0 +1,16 @@
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{0.1:?}")?
+    io.println("{-0.0:?}")?
+    io.println("{-1.0000000000000002e-6:?}")?
+    io.println("{5e-324:?}")?
+    io.println("{1.7976931348623157e308:?}")?
+    let infinity = 1.0 / 0.0
+    let nan = 0.0 / 0.0
+    io.println("{infinity:?}")?
+    io.println("{-infinity:?}")?
+    io.println("{nan:?}")?
+    io.println("{-nan:?}")?
+    return .Ok(0)
+}

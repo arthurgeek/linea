@@ -1,0 +1,23 @@
+// Neither declaration holds itself: an `A` holds a `B` and a `B` holds an
+// `A`, so the cycle is the pair and a reader has to break one of the two
+// edges. The diagnostic names the way round, because the part it is written
+// over says only where the cycle was entered.
+struct Wrap[T] {
+    inner: T,
+}
+
+struct A[T] {
+    y: Wrap[B[T]],
+}
+
+struct B[T] {
+    y: Wrap[A[T]],
+}
+
+fn _keep[T](_a: A[T], _b: B[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

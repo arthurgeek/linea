@@ -1,0 +1,39 @@
+import std.mem
+
+// Keep a pricing rule. A rule may observe what it captured, so the vector
+// retains what the rule carries. If the vector cannot grow, `settled()`
+// releases the rule and returns the allocator's refusal.
+fn keep(inout rules: Vec[mem.Closure[fn(cents: UInt64) -> UInt64, mem.SystemAllocator], mem.SystemAllocator], sink rule: mem.Closure[fn(cents: UInt64) -> UInt64, mem.SystemAllocator]) -> Result[(), mem.Oom] where retains(rules: rule) {
+    &rules.push(rule).settled()
+}
+
+// Each pricing rule captures its own numbers, so the two closures have
+// different types; `mem.Closure` keeps both behind the one type the vector
+// holds. `defer` releases the vector, and the rules in it, on every way out.
+fn main() -> Result[UInt8, mem.Oom] {
+    var rules: Vec[mem.Closure[fn(cents: UInt64) -> UInt64, mem.SystemAllocator], mem.SystemAllocator] = Vec.new()
+    defer rules.release()
+    let threshold: UInt64 = 5000
+    let rate: UInt64 = 10
+    keep(
+        &rules,
+        mem.Closure.open(
+            mem.system(),
+            [sink threshold, sink rate] |cents| {
+                if cents >= threshold {
+                    cents - cents * rate / 100
+                } else {
+                    cents
+                }
+            },
+        )?,
+    )?
+    let shipping: UInt64 = 499
+    keep(&rules, mem.Closure.open(mem.system(), [sink shipping] |cents| cents + shipping)?)?
+    var total: UInt64 = 6000
+    for rule in rules.as_slice() {
+        total = (*rule)(total)
+    }
+    // Ten percent off 6000 is 5400, and postage makes 5899.
+    return .Ok(UInt8(total - 5800))
+}

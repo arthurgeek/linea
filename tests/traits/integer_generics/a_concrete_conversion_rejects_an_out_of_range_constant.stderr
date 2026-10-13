@@ -1,0 +1,5 @@
+error[T-Convert]: `UInt8` cannot hold 256
+ --> tests/traits/integer_generics/a_concrete_conversion_rejects_an_out_of_range_constant.lin:2:5
+  |
+2 |     UInt8(256)
+  |     ^^^^^^^^^^ this conversion cannot succeed

@@ -1,0 +1,45 @@
+// A generic layer forwards its bracket to the value it holds, so a layer
+// holding another layer reaches the innermost place through both.
+@copyable
+struct Key {}
+
+struct Counter {
+    visits: UInt64,
+}
+
+struct Holder {
+    counter: Counter,
+}
+
+impl Index[Key] for Holder {
+    type Elem = Counter
+
+    proj at(inout self: Self, _i: Key) -> Counter where carries(self) {
+        self.counter
+    }
+}
+
+struct Layer[H] {
+    next: H,
+}
+
+impl[H: Index[Key]] Index[Key] for Layer[H] {
+    type Elem = H.Elem
+
+    proj at(inout self: Self, i: Key) -> H.Elem where carries(self) {
+        self.next[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let key: Key = .{}
+    let inner: Layer[Holder] = .{ next = Holder { counter = Counter { visits = 0 } } }
+    var stack: Layer[Layer[Holder]] = .{ next = inner }
+    stack[key].visits += 1
+    stack[key].visits += 1
+    if stack[key].visits == 2 && stack.next.next.counter.visits == 2 {
+        0
+    } else {
+        1
+    }
+}

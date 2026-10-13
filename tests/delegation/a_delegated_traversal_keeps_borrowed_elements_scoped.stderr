@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/delegation/a_delegated_traversal_keeps_borrowed_elements_scoped.lin:13:15
+   |
+13 |         break copy(item)
+   |               ^^^^^^^^^^ escape observations only from the signature's declared sources

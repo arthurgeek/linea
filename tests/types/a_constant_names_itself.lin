@@ -1,0 +1,9 @@
+// A constant is worth its initialiser worked out, so one whose initialiser
+// names it has nothing to be worth. Nothing orders one declaration against
+// another, so this is written rather than caught by a scope, and it is said as
+// what it is: the name comes back to itself. Twice here, and one fault.
+pub let round: UInt8 = round + round
+
+fn main() -> UInt8 {
+    round
+}

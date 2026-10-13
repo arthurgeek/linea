@@ -1,0 +1,5 @@
+// Taking a tuple apart binds with `let`; `var` names one mutable binding.
+fn main() -> UInt8 {
+    var (a, b) = (1, 2)
+    a + b
+}

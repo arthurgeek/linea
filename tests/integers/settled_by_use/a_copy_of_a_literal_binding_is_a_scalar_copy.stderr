@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `Int64` already produces a scalar snapshot when read
+ --> tests/integers/settled_by_use/a_copy_of_a_literal_binding_is_a_scalar_copy.lin:3:13
+  |
+3 |     let y = copy(x)
+  |             ^^^^^^^ remove `copy` and read the value directly

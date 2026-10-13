@@ -1,0 +1,17 @@
+// A report names a discarded value by its type, with the article the type's
+// name is read with: an `Int64`, a `UInt8`, an `Option[UInt8]`.
+fn main() -> UInt8 {
+    var left: UInt8 = 2
+    while left > 0 {
+        left -= 1
+        40 + 2
+    }
+    while left > 0 {
+        left
+    }
+    while left > 0 {
+        let found: Option[UInt8] = .Some(left)
+        found
+    }
+    0
+}

@@ -1,0 +1,10 @@
+error[T-Reflection]: finish the recipe with a directly declared local
+  --> tests/construction_derive/construct_missing_result.lin:15:25
+   |
+15 |             |component| {
+   |                         ^ a construction recipe must yield its completed field binding
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_missing_result.lin:31:22
+   |
+31 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

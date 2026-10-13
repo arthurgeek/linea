@@ -1,0 +1,21 @@
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+struct Grid {
+    cells: [Key; 2],
+}
+
+impl Index[UInt64] for Grid via cells
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+    take(g[0])
+}

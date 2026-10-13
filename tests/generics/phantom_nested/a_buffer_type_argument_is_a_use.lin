@@ -1,0 +1,12 @@
+struct Buffer[phantom A] {
+    byte: UInt8,
+}
+
+struct Storage[phantom A] {
+    buffer: Buffer[A],
+}
+
+fn main() -> UInt8 {
+    let value: Storage[Bool] = .{ buffer = .{ byte = 0 } }
+    value.buffer.byte
+}

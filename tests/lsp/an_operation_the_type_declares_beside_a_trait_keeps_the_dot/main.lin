@@ -1,0 +1,27 @@
+// `Coins` declares `weight` itself and through `Measure`. The postfix form
+// reaches the type's own operation, so its item keeps the dot, and the trait's
+// is offered written out, replacing the whole postfix call.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Coins {
+    fn weight(self: Coins) -> UInt8 {
+        self.n
+    }
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.weight()
+}

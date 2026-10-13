@@ -1,0 +1,15 @@
+// The inner slab retains an observation of the outer arena. Release the
+// inner arena before returning its backing storage to the system.
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let outer = Arena.open(system(), 4096)
+    let inner = Arena.open(outer.handle(), 1024)
+    outer.release()
+    inner.release()
+    0
+}

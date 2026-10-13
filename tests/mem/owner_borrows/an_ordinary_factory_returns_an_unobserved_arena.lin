@@ -1,0 +1,14 @@
+import std.mem
+
+use mem.Arena
+use mem.system
+
+fn make_arena() -> Arena[mem.SystemAllocator] {
+    Arena.open(system(), 64)
+}
+
+fn main() -> UInt8 {
+    let arena = make_arena()
+    arena.release()
+    0
+}

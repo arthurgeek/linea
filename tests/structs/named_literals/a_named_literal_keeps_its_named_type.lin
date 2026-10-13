@@ -1,0 +1,8 @@
+struct Celsius { value: Float64 }
+
+struct Fahrenheit { value: Float64 }
+
+fn main() -> UInt8 {
+    let _reading: Fahrenheit = Celsius { value = 20.0 }
+    0
+}

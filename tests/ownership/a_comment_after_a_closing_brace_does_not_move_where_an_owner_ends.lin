@@ -1,0 +1,25 @@
+// A comment written after a block's closing brace is not part of the block,
+// so the owner ends at the brace.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let greeting = {
+        let name = Name { text = "Ada" }
+        "hello {name}"
+    } // the owner ends before this comment
+    println(greeting)?
+    return .Ok(0)
+}

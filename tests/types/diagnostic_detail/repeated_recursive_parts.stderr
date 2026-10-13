@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Tree contains itself
+ --> tests/types/diagnostic_detail/repeated_recursive_parts.lin:1:6
+  |
+1 | enum Tree { Leaf(UInt8), Branch(Tree, Tree) }
+  |      ^^^^ a value of this type would have to hold one, so it has no size

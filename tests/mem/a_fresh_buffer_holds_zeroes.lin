@@ -1,0 +1,21 @@
+// A load of a byte nothing stored answers zero. A fresh buffer's contents are
+// part of what `alloc` means: an answer that depended on what a previous
+// owner left there would be a result the program cannot account for, and the
+// language admits no such operation.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(16) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store(&b, 0, 41)
+            let untouched = b.load(8)
+            b.release()
+            UInt8(untouched + 3)
+        },
+        Err(_) => 9,
+    }
+}

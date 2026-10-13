@@ -1,0 +1,25 @@
+// A type argument satisfies `C: Lookup[UInt64]` when it implements `Lookup`
+// at `UInt64`.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn reach[C: Lookup[UInt64]](c: C) -> UInt8 {
+    let i: UInt64 = 2
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    reach(b)
+}

@@ -1,0 +1,9 @@
+error[O-Leak]: `_held` (a linear `Coins.Item`) is still owned when this path leaves
+  --> tests/traits/a_settled_reference_settling_a_linear_type_is_owed.lin:34:9
+   |
+34 |     let _held = Holds.of(c, a)
+   |         ^^^^^ never settled on the path that reaches the end of this block
+36 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

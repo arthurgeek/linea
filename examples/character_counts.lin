@@ -1,0 +1,66 @@
+// Count ASCII letters, digits, whitespace, and other bytes in a message.
+import std.testing
+import std.io
+
+use io.IoError
+use io.println
+
+@derive(Equatable, Debug)
+struct Counts {
+    letters: UInt64,
+    digits: UInt64,
+    whitespace: UInt64,
+    other: UInt64,
+}
+
+fn tally(text: Str) -> Counts {
+    var counts = Counts { letters = 0, digits = 0, whitespace = 0, other = 0 }
+    // `as_bytes()` views the text's UTF-8 bytes, and the loop points `byte`
+    // at each one in turn; `*byte` reads it.
+    for byte in text.as_bytes() {
+        match *byte {
+            // Single-character range endpoints denote their character codes.
+            "a"..="z" => counts.letters += 1,
+            "A"..="Z" => counts.letters += 1,
+            "0"..="9" => counts.digits += 1,
+            // ASCII codes 9 through 13 span tab through carriage return.
+            // Code 32 is the separate space character.
+            9..=13 => counts.whitespace += 1,
+            32 => counts.whitespace += 1,
+            _ => counts.other += 1,
+        }
+    }
+    counts
+}
+
+test fn message_bytes_are_counted_in_their_categories() {
+    let mixed = Counts { letters = 4, digits = 2, whitespace = 3, other = 2 }
+    let empty = Counts { letters = 0, digits = 0, whitespace = 0, other = 0 }
+    testing.assert_eq(
+        tally("AZaz09 \t\n!?"),
+        mixed,
+        "letters, digits, whitespace, or punctuation were miscounted",
+    )?
+    testing.assert_eq(
+        tally(""),
+        empty,
+        "an empty message should contain no bytes",
+    )?
+}
+
+test fn non_ascii_text_counts_its_utf8_bytes_as_other() {
+    let counted = Counts { letters = 2, digits = 0, whitespace = 0, other = 2 }
+    testing.assert_eq(
+        tally("olá"),
+        counted,
+        "the two UTF-8 bytes of á should be counted outside ASCII",
+    )?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let message = "Launch A7 at 09:30."
+    let counts = tally(message)
+    println("Message: {message}")?
+    println("{counts.letters} ASCII letters, {counts.digits} digits, {counts.whitespace} whitespace bytes, {counts.other} other bytes")?
+    .Ok(0)
+}

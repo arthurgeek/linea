@@ -1,0 +1,10 @@
+// [S-Separator] is a rule about statements, and an assignment is one. The
+// binding twin of this program has always been refused; this one was accepted,
+// so the rule held for the form that happened to be written in the corpus and
+// not for the form that was not.
+fn main() -> UInt8 {
+    var a: UInt8 = 1
+    var b: UInt8 = 2
+    a = 3 b = 4
+    a + b
+}

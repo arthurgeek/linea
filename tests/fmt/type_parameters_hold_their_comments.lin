@@ -1,0 +1,30 @@
+// A comment written above a type parameter belongs to that parameter. Left
+// pending, it surfaced at the next element's boundary instead -- one slot
+// later on every run, until it had walked out of the brackets and into the
+// declaration below. Formatting is a normal form, so a second run must change
+// nothing.
+//
+// Measuring an element also ran past the `]` that closed the list, because the
+// scan counted braces and parentheses and not brackets, and dragged the
+// comment cursor past the end of the declaration being written.
+struct Pair[
+    // which type the first part is
+    A: Copyable,
+    B: Copyable,
+] {
+    x: A,
+    y: B,
+}
+
+fn first[
+    // the one it hands back
+    A: Copyable,
+    B: Copyable,
+](p: Pair[A, B]) -> A {
+    copy(p.x)
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8, Bool] = .{ x = 1, y = true }
+    first(p)
+}

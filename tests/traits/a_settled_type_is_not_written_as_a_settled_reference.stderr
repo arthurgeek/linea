@@ -1,0 +1,10 @@
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_is_not_written_as_a_settled_reference.lin:20:17
+   |
+20 |     type Item = Self.Item
+   |                 ^^^^^^^^^ write the type itself
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_is_not_written_as_a_settled_reference.lin:21:24
+   |
+21 |     type Held = Option[Self.Item]
+   |                        ^^^^^^^^^ write the type itself

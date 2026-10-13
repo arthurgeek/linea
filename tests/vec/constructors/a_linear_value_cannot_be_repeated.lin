@@ -1,0 +1,16 @@
+import std.mem
+
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+derive Release for Ticket
+
+fn main() -> UInt8 {
+    let ticket: Ticket = .{ number = 7 }
+    let repeated = Vec.filled(mem.system(), count: 2, value: ticket).unwrap()
+    repeated.release()
+    ticket.release()
+    return 0
+}

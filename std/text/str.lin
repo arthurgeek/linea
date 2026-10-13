@@ -1,0 +1,328 @@
+import std.testing
+import std.mem
+
+// A Str observes immutable valid UTF-8 bytes while retaining their backing
+// lifetime.
+@(opaque, copyable)
+struct Str {
+    bytes: mem.Slice[UInt8],
+}
+
+impl Str {
+    // Copy encoded text into storage owned by the supplied allocator.
+    pub fn to_owned[A: Allocator](self: Self, allocator: A) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+        defer var owned = String.new_in(allocator)
+        &owned.append(self)?
+        .Ok(owned)
+    }
+}
+
+test fn an_empty_allocator_refuses_owned_text() {
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    let result = "text".to_owned(arena.handle())
+    let failed = match result {
+        Err(_) => true,
+        Ok(text) => {
+            text.release()
+            false
+        },
+    }
+    testing.assert(failed, "owned text ignored allocator refusal")?
+    .Ok(())
+}
+
+test fn copied_text_outlives_its_source_owner() {
+    let original = "kept á\u{0}".to_owned(mem.system()).unwrap()
+    let copied = original.view().to_owned(mem.system()).unwrap()
+    original.release()
+    defer copied.release()
+    testing.assert_eq(copied.view(), "kept á\u{0}", "explicit text copy retained the source owner")?
+    .Ok(())
+}
+
+test fn initial_copy_refusal_releases_the_empty_owner() {
+    // The cursor fills the arena, leaving no space for content.
+    defer let arena = mem.Arena.open(mem.system(), 8)
+    let refused = match "content".to_owned(arena.handle()) {
+        Err(_) => true,
+        Ok(text) => {
+            text.release()
+            false
+        },
+    }
+    testing.assert(refused, "initial content copy ignored reservation refusal")?
+    .Ok(())
+}
+
+test fn copied_text_outlives_the_source_allocation_owner() {
+    defer let copied = {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        defer let original = "source á".to_owned(arena.handle()).unwrap()
+        original.view().to_owned(mem.system()).unwrap()
+    }
+    testing.assert_eq(copied.view(), "source á", "explicit copy retained the source allocation owner")?
+    .Ok(())
+}
+
+impl Str {
+    // Missing or malformed process arguments do not become public text.
+    internal fn argument(i: UInt64) -> Option[Str] {
+        match mem.argument_bytes(i) {
+            None => .None,
+            Some(bytes) => match Str.from_bytes(bytes) {
+                Ok(text) => .Some(text),
+                Err(_) => .None,
+            },
+        }
+    }
+}
+
+// An argument index beyond the process argument count returns None.
+test fn an_argument_past_the_count_is_nothing() {
+    match Str.argument(1000000) {
+        Some(_) => testing.assert(false, "an index past the count named an argument")?,
+        None => {},
+    }
+
+    .Ok(())
+}
+
+impl Str {
+    // Return the bytes as text, or the reason they are not valid UTF-8. The
+    // text observes the bytes without copying them.
+    pub fn from_bytes(bytes: mem.Slice[UInt8]) -> Result[Str, Utf8Error] where carries(.Ok: bytes) {
+        validate_utf8(bytes)?
+        .Ok(.{ bytes = copy(bytes) })
+    }
+}
+
+test fn from_bytes_accepts_valid_utf8_and_refuses_the_rest() {
+    let text = Str.from_bytes("olá".as_bytes()).unwrap()
+    testing.assert_eq(text, "olá", "valid bytes did not become the same text")?
+    // 195 opens a two-byte character, so on its own it is not UTF-8.
+    let lead = [UInt8(195)]
+    testing.assert(Str.from_bytes(lead.as_slice()).is_err(), "a lone lead byte became text")?
+    .Ok(())
+}
+
+impl Str {
+    // View the encoded bytes of the text.
+    pub fn as_bytes(self: Self) -> mem.Slice[UInt8] where carries(self) {
+        copy(self.bytes)
+    }
+}
+
+test fn as_bytes_views_the_encoded_bytes() {
+    let bytes = "olá".as_bytes()
+    testing.assert_eq(bytes.length(), UInt64(4), "the view lost a byte")?
+    testing.assert_eq(bytes[2], UInt8(195), "the view changed the lead byte of á")?
+    .Ok(())
+}
+
+impl Str {
+    // Return the length in encoded bytes rather than Unicode scalars.
+    pub fn length(self: Self) -> UInt64 {
+        self.bytes.length()
+    }
+}
+
+test fn length_counts_encoded_bytes() {
+    testing.assert_eq("".length(), UInt64(0), "empty text has a length")?
+    testing.assert_eq("olá".length(), UInt64(4), "a two-byte character was counted once")?
+    .Ok(())
+}
+
+impl Str {
+    // Return the byte at offset `i`, or None past the end.
+    pub fn byte(self: Self, i: UInt64) -> Option[UInt8] where carries() {
+        if i >= self.length() {
+            .None
+        } else {
+            .Some(self.bytes[i])
+        }
+    }
+}
+
+// Lengths and indexes count UTF-8 bytes: á occupies two bytes.
+test fn a_length_counts_bytes_and_not_characters() {
+    testing.assert_eq(Str.length(self: "abc"), 3, "a byte per character is not counted one each")?
+
+    // "olá" holds four bytes but three Unicode scalars.
+    testing.assert_eq("olá".length(), 4, "a character of two bytes is counted as one")?
+
+    // Both the lead and continuation bytes of á are addressable.
+    match "olá".byte(2) {
+        Some(b) => testing.assert_eq(b, 195, "the lead byte of a character is not the byte at its offset")?,
+        None => testing.assert(false, "an offset inside the text has no byte")?,
+    }
+
+    match "olá".byte(3) {
+        Some(b) => testing.assert_eq(b, 161, "a continuation byte is not addressable")?,
+        None => testing.assert(false, "the last byte of the text has no byte")?,
+    }
+
+    // Offset four is the first byte beyond this text.
+    match "olá".byte(4) {
+        Some(_) => testing.assert(false, "an offset past the end reads a byte")?,
+        None => {},
+    }
+
+    .Ok(())
+}
+
+impl Str {
+    // Return the text between byte offsets `from` and `to`, or None when they
+    // are out of order, past the end, or inside a character.
+    pub fn slice(self: Self, from: UInt64, to: UInt64) -> Option[Str] where carries(.Some: self) {
+        if from > to || to > self.length() {
+            .None
+        } else if !starts_a_character(self, from) || !starts_a_character(self, to) {
+            .None
+        } else {
+            .Some(.{ bytes = self.bytes.subspan(start: from, count: to - from).unwrap() })
+        }
+    }
+}
+
+// Empty text has no bytes and permits only the empty slice.
+test fn an_empty_str_has_no_bytes() {
+    testing.assert_eq("".length(), 0, "a view of no bytes has a length")?
+
+    match "".byte(0) {
+        Some(_) => testing.assert(false, "a view of no bytes holds one")?,
+        None => {},
+    }
+
+    match "".slice(0, 0) {
+        Some(part) => testing.assert_eq(part.length(), 0, "the whole of an empty view is not empty")?,
+        None => testing.assert(false, "the whole of an empty view is not text")?,
+    }
+
+    .Ok(())
+}
+
+// Slices require ordered, in-bounds offsets at UTF-8 character boundaries.
+test fn a_slice_refuses_what_is_not_text() {
+    match "abc".slice(2, 1) {
+        Some(_) => testing.assert(false, "a slice whose ends are reversed is text")?,
+        None => {},
+    }
+
+    match "abc".slice(0, 4) {
+        Some(_) => testing.assert(false, "a slice reaching past the end is text")?,
+        None => {},
+    }
+
+    // Offset three splits á between its lead and continuation bytes.
+    match "olá".slice(0, 3) {
+        Some(_) => testing.assert(false, "a slice splitting a character is text")?,
+        None => {},
+    }
+
+    // Reject a start inside the same character.
+    match "olá".slice(3, 4) {
+        Some(_) => testing.assert(false, "a slice starting inside a character is text")?,
+        None => {},
+    }
+
+    // Accept the complete text and a character-aligned slice.
+    match "olá".slice(0, 4) {
+        Some(part) => testing.assert_eq(part.length(), 4, "the whole of a view is not the whole of it")?,
+        None => testing.assert(false, "the whole of a view is not text")?,
+    }
+
+    match "olá".slice(0, 2) {
+        Some(part) => testing.assert_eq(part.length(), 2, "a part is not as long as its ends say")?,
+        None => testing.assert(false, "a part ending between characters is not text")?,
+    }
+
+    .Ok(())
+}
+
+// A slice boundary is the end of the text or a non-continuation byte.
+// UTF-8 continuation bytes range from 128 through 191.
+fn starts_a_character(s: Str, at: UInt64) -> Bool {
+    if at >= s.length() {
+        at == s.length()
+    } else {
+        match s.byte(at) {
+            Some(b) => b < 128 || b > 191,
+            // This arm never runs, because the offset is below the length.
+            None => false,
+        }
+    }
+}
+
+// Compare UTF-8 bytes exactly, without Unicode normalization.
+impl Equatable for Str {
+    fn equals(self: Self, other: Str) -> Bool {
+        if self.length() != other.length() {
+            return false
+        }
+        let span: Range[UInt64] = 0..self.length()
+        for i in span {
+            if self.byte(i).unwrap() != other.byte(i).unwrap() {
+                return false
+            }
+        }
+        true
+    }
+}
+
+// Byte equality is reflexive, symmetric, and transitive.
+impl Equivalent for Str {}
+
+// Compare bytes lexicographically, with a prefix before its extension.
+// This follows Unicode scalar order rather than locale-specific collation.
+impl Comparable for Str {
+    fn less(self: Self, other: Str) -> Bool {
+        // Compare the shared prefix, then use length if every compared byte is equal.
+        let shared = if self.length() < other.length() {
+            self.length()
+        } else {
+            other.length()
+        }
+        let span: Range[UInt64] = 0..shared
+        for i in span {
+            let a = self.byte(i).unwrap()
+            let b = other.byte(i).unwrap()
+            if a < b {
+                return true
+            }
+            if b < a {
+                return false
+            }
+        }
+        self.length() < other.length()
+    }
+}
+
+// Every pair of strings has one order, determined by bytes and then length.
+impl Ordered for Str {}
+
+test fn text_equality_and_order_are_total_by_bytes() {
+    let samples = ["", "a", "a", "aa", "b", "á"]
+    for read a in samples {
+        testing.assert(a.equals(a), "text equality is not reflexive")?
+        testing.assert(!a.less(a), "text order is not irreflexive")?
+        for read b in samples {
+            let equal = a.equals(b)
+            let before = a.less(b)
+            let after = b.less(a)
+            testing.assert_eq(equal, b.equals(a), "text equality is not symmetric")?
+            testing.assert((equal || before || after) && !(equal && before) && !(equal && after) && !(before && after), "text order does not choose exactly one relation")?
+            for read c in samples {
+                if equal && b.equals(c) {
+                    testing.assert(a.equals(c), "text equality is not transitive")?
+                }
+                if before && b.less(c) {
+                    testing.assert(a.less(c), "text order is not transitive")?
+                }
+            }
+        }
+    }
+    testing.assert("".less("a"), "empty text did not precede nonempty text")?
+    testing.assert("a".less("aa"), "a prefix did not precede its extension")?
+    testing.assert("b".less("á"), "text did not compare UTF-8 bytes lexicographically")?
+    .Ok(())
+}

@@ -1,0 +1,37 @@
+// A derived enum release enters only the active case and releases only what
+// that case carries.
+import std.io
+
+use io.print
+
+@linear
+enum Left { Value }
+
+@linear
+enum Right { Value }
+
+impl Release for Left {
+    fn release(sink self: Left) -> () {
+        match self { Value => match print("L") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+impl Release for Right {
+    fn release(sink self: Right) -> () {
+        match self { Value => match print("R") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+@linear
+enum Choice {
+    A(Left),
+    B(Right),
+}
+
+derive Release for Choice
+
+fn main() -> UInt8 {
+    let value: Choice = .B(.Value)
+    Release.release(value)
+    0
+}

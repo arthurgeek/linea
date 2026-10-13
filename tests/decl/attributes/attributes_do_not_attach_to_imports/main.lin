@@ -1,0 +1,4 @@
+@copyable
+import helper
+
+fn main() -> UInt8 { helper.answer() }

@@ -1,0 +1,14 @@
+struct Scale {
+    factor: UInt64,
+}
+
+impl Scale {
+    fn double(value: UInt64) -> UInt64 {
+        value * 2
+    }
+}
+
+fn main() -> UInt8 {
+    let operation: fn(value: UInt64) -> UInt64 = Scale.double
+    UInt8(operation(3) - 6)
+}

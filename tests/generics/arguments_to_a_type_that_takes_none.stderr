@@ -1,0 +1,10 @@
+error[T-Bound]: `Plain` takes 0 type argument(s), and was given 1
+  --> tests/generics/arguments_to_a_type_that_takes_none.lin:15:16
+   |
+15 |     let given: Plain[UInt8] = .{ v = 1 }
+   |                ^^^^^ this type takes no arguments
+error[T-Bound]: `Cell` takes 1 type argument(s), and was given 0
+  --> tests/generics/arguments_to_a_type_that_takes_none.lin:16:16
+   |
+16 |     let short: Cell = .{ v = 2 }
+   |                ^^^^ give it the arguments it declares

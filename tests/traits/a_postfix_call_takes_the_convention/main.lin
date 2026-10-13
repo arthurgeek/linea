@@ -1,0 +1,26 @@
+// The dot decides nothing. What a call does with the value is the convention on
+// the parameter it becomes, so a `read` first parameter lends and the receiver
+// is still held afterwards -- twice over, and disposed of at the end.
+//
+// Nothing is implicitly borrowed here and nothing is implicitly copied: a move
+// is decided by position, and the position is the first argument of a call
+// whichever way the call was spelled.
+import key
+
+use key.Key
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Key {
+    fn of(x: Self) -> UInt8 {
+        match read x { Forged(n) => n }
+    }
+}
+
+fn main() -> UInt8 {
+    let k: Key = .Forged(3)
+    let seen: UInt8 = k.of() + k.of()
+    Key.release(k) + seen
+}

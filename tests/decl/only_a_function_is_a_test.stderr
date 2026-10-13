@@ -1,0 +1,10 @@
+error[S-Test]: only a function is a test
+ --> tests/decl/only_a_function_is_a_test.lin:2:1
+  |
+2 | test struct Box { x: UInt8 }
+  | ^^^^ a test is a body the compiler runs, and this declares none
+error[N-Unused]: `Box` is never used
+ --> tests/decl/only_a_function_is_a_test.lin:2:13
+  |
+2 | test struct Box { x: UInt8 }
+  |             ^^^ name it in an annotation, or remove it

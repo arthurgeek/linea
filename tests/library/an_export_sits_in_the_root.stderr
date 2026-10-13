@@ -1,0 +1,5 @@
+error[M-Export]: an `export` sits in a library's root module, and this is a module below it
+ --> tests/library/an_export_sits_in_the_root/inner/inner.lin:1:15
+  |
+1 | pub export fn buried(num: Int32) -> Int32 {
+  |               ^^^^^^ publish it from the root, which is what a library's caller reaches

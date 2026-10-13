@@ -1,0 +1,15 @@
+// An ordinary wrapper inherits mandatory consumption from its array of
+// linear elements. Abandoning the wrapper leaks both element obligations.
+@linear
+struct Token {
+    it: UInt8,
+}
+
+struct Bag {
+    ts: [Token; 2],
+}
+
+fn main() -> UInt8 {
+    let _b: Bag = .{ ts = [.{ it = 1 }, .{ it = 2 }] }
+    0
+}

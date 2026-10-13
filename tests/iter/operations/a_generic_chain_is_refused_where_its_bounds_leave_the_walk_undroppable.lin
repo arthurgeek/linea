@@ -1,0 +1,21 @@
+// `fold` drops the iterator it walks once the walk ends, so it needs
+// `Self.Iter` Discardable. Here `Self` is `Filter[S.Iter, F]`, which is
+// Discardable only where `S.Iter` is, and `count_heavy` does not require that.
+trait Heavy {
+    fn heavy(self: Self) -> Bool
+}
+
+impl Heavy for UInt64 {
+    fn heavy(self: Self) -> Bool {
+        self > 10
+    }
+}
+
+fn count_heavy[S: Sequence](sink values: S) -> UInt64 where S.Iter.Item: Heavy + Discardable {
+    values.filter(|value| value.heavy()).fold(0, |sink total, sink _value| total + 1)
+}
+
+fn main() -> UInt8 {
+    let weights = [UInt64(3), 12, 40, 7]
+    UInt8(count_heavy(weights.as_slice().map(|sink weight| *weight)))
+}

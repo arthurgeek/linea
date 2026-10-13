@@ -1,0 +1,17 @@
+import std.mem
+
+// Each pass takes a fresh view of the readings and a copy of it. Both are last
+// used before the pass pushes, so the vector may grow between passes.
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(4).unwrap()
+    var total: UInt64 = 0
+    for pass in UInt64(0)..3 {
+        let view = readings.as_slice()
+        let kept = copy(view)
+        total += kept[0] + view.length()
+        &readings.push(pass).unwrap()
+    }
+    readings.release()
+    UInt8(total)
+}

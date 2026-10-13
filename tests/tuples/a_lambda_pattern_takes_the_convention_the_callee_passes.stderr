@@ -1,0 +1,5 @@
+error[T-Call]: this lambda takes `(a, b)` as `read`, and the expected callable passes parameter 1 as `sink`
+ --> tests/tuples/a_lambda_pattern_takes_the_convention_the_callee_passes.lin:8:20
+  |
+8 |     apply((3, 4), |(a, b)| a + b)
+  |                    ^^^^^^ write `sink (a, b)`

@@ -1,0 +1,5 @@
+error[O-LinearWalk]: a walk through this traversal builds a `Steps`, which is linear
+  --> tests/iter/a_linear_traversal_is_refused.lin:42:22
+   |
+42 |     trav positions = counting()
+   |                      ^^^^^^^^^^ a walk abandons its positions where it ends, so a traversal is Discardable

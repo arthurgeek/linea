@@ -1,0 +1,5 @@
+error[T-Bound]: `Copyable` is a capability, and capabilities take no type arguments
+ --> tests/traits/a_copyable_bound_accepts_no_type_arguments.lin:2:12
+  |
+2 | fn keep[T: Copyable[UInt8]](_t: T) -> UInt8 {
+  |            ^^^^^^^^ drop the arguments, or bound it by a trait instead

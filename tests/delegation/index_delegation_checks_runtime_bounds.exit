@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/delegation/index_delegation_checks_runtime_bounds.lin:8:12

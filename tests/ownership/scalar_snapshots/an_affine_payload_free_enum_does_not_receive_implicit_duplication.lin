@@ -1,0 +1,13 @@
+enum State { Open, Closed }
+
+fn main() -> UInt8 {
+    let original: State = .Open
+    let moved = original
+    let first = match read original { Open => true, Closed => false }
+    let second = match moved { Open => true, Closed => false }
+    if first && second {
+        0
+    } else {
+        1
+    }
+}

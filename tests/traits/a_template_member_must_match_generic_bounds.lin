@@ -1,0 +1,17 @@
+trait First {}
+
+trait Second {}
+
+trait Structural {
+    fn value[T: First](self: Self, value: T) -> UInt8
+}
+
+template impl Structural {
+    fn value[T: Second](_self: Self, _value: T) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

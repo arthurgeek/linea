@@ -1,0 +1,14 @@
+error[T-Bound]: `H` requires `Handle[()]`, and `fn(read UInt64, read UInt64) -> UInt64` does not implement it
+  --> tests/traits/callable_heads/a_function_of_another_shape_does_not_implement_the_trait.lin:28:17
+   |
+28 |     let _pair = run(&state, pair)
+   |                 ^^^ implement it for that type, or drop the bound
+   |
+   = help: this function's parameters are `(read×2)`, and `Handle` is implemented only for callable types whose parameters are `(read)` (`read×N` is N parameters taken by `read`)
+error[T-Bound]: `H` requires `Handle[()]`, and `fn(sink UInt64) -> UInt64` does not implement it
+  --> tests/traits/callable_heads/a_function_of_another_shape_does_not_implement_the_trait.lin:29:20
+   |
+29 |     let _consume = run(&state, consume)
+   |                    ^^^ implement it for that type, or drop the bound
+   |
+   = help: this function's parameters are `(sink)`, and `Handle` is implemented only for callable types whose parameters are `(read)`

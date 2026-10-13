@@ -1,0 +1,14 @@
+// Write literal UTF-8 bytes through the text Writer interface.
+// `Olá` contains four bytes: the final scalar occupies two bytes.
+import std.io
+
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w = stdout()
+    Writer.write_str(&w, "hello")?
+    Writer.write_str(&w, "Olá")?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

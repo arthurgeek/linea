@@ -1,0 +1,7 @@
+// Parentheses around one expression group it; there is no one-component
+// tuple, so a trailing comma after a single component is refused.
+fn main() -> UInt8 {
+    let g: UInt8 = (7)
+    let _one = (7,)
+    g
+}

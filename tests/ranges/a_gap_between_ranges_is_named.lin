@@ -1,0 +1,13 @@
+// `0..=9` and `100..=255` leave `10..=99` uncovered, and the report says so:
+// naming the interval left out is what tells a reader which arm to add,
+// rather than only that one is missing.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=9 => 1,
+        100..=255 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(3)
+}

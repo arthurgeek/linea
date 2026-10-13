@@ -1,0 +1,5 @@
+// After a dot, a pair offers its positional components.
+fn main() -> UInt64 {
+    let pair: (UInt64, Str) = (1, "a")
+    pair._0
+}

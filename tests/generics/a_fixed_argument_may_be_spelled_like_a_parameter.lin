@@ -1,0 +1,21 @@
+// A fixed argument names a type, not the implementation's parameter: in
+// `Pair[SystemAllocator, mem.SystemAllocator]` the first argument is the
+// parameter `SystemAllocator` and the second is the library's type of that
+// name, reached through `mem`.
+import std.mem
+
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[SystemAllocator] Pair[SystemAllocator, mem.SystemAllocator] {
+    fn first_of(self: Self) -> SystemAllocator where SystemAllocator: Copyable {
+        copy(self.first)
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, mem.SystemAllocator] = .{ first = 7, second = mem.system() }
+    pair.first_of() - 7
+}

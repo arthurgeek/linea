@@ -1,0 +1,10 @@
+error[S-Match]: name what the variant carries, or drop the parentheses
+ --> tests/decl/borrowed_lets/a_missing_pattern_binder_is_diagnosed.lin:5:14
+  |
+5 |     let read Label() = label
+  |              ^^^^^ a pattern's binder list is never empty
+error[T-Arity]: expected 1 name(s), found 0
+ --> tests/decl/borrowed_lets/a_missing_pattern_binder_is_diagnosed.lin:5:14
+  |
+5 |     let read Label() = label
+  |              ^^^^^^^ a newtype's pattern binds exactly the value it wraps

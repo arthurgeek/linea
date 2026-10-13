@@ -1,0 +1,13 @@
+struct Celsius {
+    value: Float64,
+}
+
+impl From[Celsius] for Float64 {
+    fn from(sink source: Celsius) -> Self {
+        source.value
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

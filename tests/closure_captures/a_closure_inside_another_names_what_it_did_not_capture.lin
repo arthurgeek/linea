@@ -1,0 +1,10 @@
+// `inner` uses `count` without capturing it; `outer` fails only because
+// `inner` does, and the error is reported at `count`.
+fn main() -> UInt8 {
+    let count: UInt8 = 3
+    let outer = || {
+        let inner = || count
+        inner()
+    }
+    outer()
+}

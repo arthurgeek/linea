@@ -1,0 +1,17 @@
+// Exclusivity is about places, not about names. Two paths under one root that
+// select different fields name different bytes, and neither can be reached
+// through the other -- so the call is fine, and a rule comparing roots would
+// have refused it.
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+fn replace(inout i: Inner, n: UInt8) -> UInt8 {
+    i.y = 5
+    n
+}
+
+fn main() -> UInt8 {
+    var o: Outer = Outer { inner = Inner { y = 1 }, z = 2 }
+    replace(&o.inner, o.z) + o.inner.y
+}

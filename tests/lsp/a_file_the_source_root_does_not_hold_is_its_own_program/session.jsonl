@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"spare.lin","languageId":"linea","version":1,"text":"fn spare() -> UInt8 {\n    3\n}\n\nfn main() -> UInt8 {\n    spare()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"spare.lin"}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

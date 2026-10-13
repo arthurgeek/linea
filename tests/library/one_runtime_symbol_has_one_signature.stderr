@@ -1,0 +1,10 @@
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/library/one_runtime_symbol_has_one_signature.lin:5:11
+  |
+5 | extern fn linea_close(fd: Int64) -> Int64
+  |           ^^^^^^^^^^^ call it through the standard library, which declares the ones that exist
+error[T-ExternRuntime]: the runtime gives `linea_close` the signature `fn(Int32) -> Int64`
+ --> tests/library/one_runtime_symbol_has_one_signature.lin:5:11
+  |
+5 | extern fn linea_close(fd: Int64) -> Int64
+  |           ^^^^^^^^^^^ declare it with the runtime's parameter types, conventions and result

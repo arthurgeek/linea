@@ -1,0 +1,3 @@
+pub struct Width {
+    of: UInt8,
+}

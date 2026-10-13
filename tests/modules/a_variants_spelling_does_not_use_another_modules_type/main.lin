@@ -1,0 +1,21 @@
+// A pattern head names what the module writing it can see. A variant's
+// spelling is not a type, so matching one marks no type used -- least of all
+// one another module declares privately, which this module could not write
+// the name of if it tried.
+import other
+
+enum Shape {
+    Percent(UInt8),
+    Square(UInt8),
+}
+
+fn area(sink s: Shape) -> UInt8 {
+    match s {
+        Percent(n) => n,
+        Square(n) => n * n,
+    }
+}
+
+fn main() -> UInt8 {
+    area(.Percent(5)) + other.marker()
+}

@@ -1,0 +1,7 @@
+error[T-Const]: a constant is copied wherever it is read, so `Config` must be copyable
+ --> tests/constants/aggregates/affine_record.lin:3:22
+  |
+3 | let config: Config = .{ amount = 7 }
+  |                      ^^^^^^^^^^^^^^^ built from the parts of `Config`, which is not copyable
+  |
+  = help: mark `Config` `@copyable`

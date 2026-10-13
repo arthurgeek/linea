@@ -1,0 +1,44 @@
+// A settled reference is read through the bound whose trait declares the name,
+// and here two of them do: `Measure` declares `Item` and so does `Weigh`, so
+// the reference names two declarations and nothing written here says which.
+// The way out is a parameter bounded by one of them.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+trait Weigh {
+    type Item
+
+    fn heft(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+impl Weigh for Counter {
+    type Item = UInt8
+
+    fn heft(x: Self) -> Self.Item {
+        x.at + 1
+    }
+}
+
+fn _either[W: Measure + Weigh](sink v: W.Item) -> W.Item {
+    v
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c) + Weigh.heft(c)
+}

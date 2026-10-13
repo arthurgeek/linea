@@ -1,0 +1,38 @@
+// A kept closure whose result borrows its argument may be given a computed
+// value: the value lives until the end of the statement that calls it. A
+// kept closure may also write a line that interpolates what it captured.
+import std.io
+import std.mem
+
+use io.IoError
+use io.println
+
+struct Reading {
+    value: borrow UInt64,
+}
+
+fn main() -> UInt8 {
+    let observe = mem.Closure.open(
+        mem.system(),
+        |value: UInt64| -> Reading where borrows(.value: value) {
+            .{ value = borrow value }
+        },
+    ).unwrap()
+    let base: UInt64 = 40
+    let answer = *observe(base + 2).value
+    let name = "Ada"
+    let greet = mem.Closure.open(
+        mem.system(),
+        [who = name, answer] || -> Result[(), IoError] {
+            println("hi {who}, the answer is {answer} ({answer + 1} after)")
+        },
+    ).unwrap()
+    let greeted = greet().is_ok()
+    greet.release()
+    observe.release()
+    if greeted {
+        UInt8(answer)
+    } else {
+        0
+    }
+}

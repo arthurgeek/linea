@@ -1,0 +1,7 @@
+// A conversion is a call whose callee names a type. There is no second syntax
+// for it: once a primitive is an ordinary name, `UInt8(x)` and `f(x)` are one
+// shape, and which one this is follows from what `UInt8` reaches.
+fn main() -> UInt8 {
+    let wide: Int64 = 7
+    UInt8(wide)
+}

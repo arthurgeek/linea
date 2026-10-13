@@ -1,0 +1,9 @@
+main.lin, as the script opens it:
+fn main() -> UInt8 {
+    0
+}
+main.lin, as it sits beside the script:
+fn main() -> UInt8 {
+    let x: UInt8 = true
+    x
+}

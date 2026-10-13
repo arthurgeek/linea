@@ -1,0 +1,9 @@
+// Re-exporting does not reach past a visibility. The `pub use` is where the
+// boundary is crossed, so it is where crossing it is refused.
+import inner
+
+pub use inner.Hidden
+
+fn main() -> UInt8 {
+    inner.ping(.A)
+}

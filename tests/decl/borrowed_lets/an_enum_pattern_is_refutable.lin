@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let choice: Option[UInt8] = .Some(3)
+    let read Some(value) = choice
+    value
+}

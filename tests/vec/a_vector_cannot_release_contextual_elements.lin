@@ -1,0 +1,10 @@
+import std.mem
+
+@linear
+struct Transaction { number: UInt64 }
+
+fn main() -> UInt8 {
+    let values: Vec[Transaction, mem.SystemAllocator] = Vec.new()
+    Release.release(values)
+    0
+}

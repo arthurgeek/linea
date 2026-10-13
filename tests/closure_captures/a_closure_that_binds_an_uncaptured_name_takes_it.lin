@@ -1,0 +1,21 @@
+// `let mine = ticket` takes `ticket`, so the closure has to own it and be
+// called once.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(1)
+    let spend = || {
+        let mine = ticket
+        redeem(mine)
+    }
+    spend()
+}

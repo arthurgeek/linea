@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `fn() -> borrow UInt8`, and `<closure>` is not that callable type
+  --> tests/closure_captures/generic_callback_independence_excludes_captures.lin:10:23
+   |
+10 |     let observation = invoke(callback)
+   |                       ^^^^^^ give it the exact callable type the bound names

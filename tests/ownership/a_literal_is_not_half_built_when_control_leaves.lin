@@ -1,0 +1,25 @@
+// A structure literal takes several values and completes as one, so it holds a
+// transfer open exactly as a call does. `d` is in the literal and the literal
+// is never built.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+struct Pair {
+    a: Key,
+    b: Key,
+}
+
+fn go(sink d: Key) -> UInt8 {
+    let p: Pair = .{ a = d, b = return 7 }
+    let Pair { a: one, b: two } = p
+    let Key { n: x } = one
+    let Key { n: y } = two
+    x + y
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

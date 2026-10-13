@@ -1,0 +1,10 @@
+import std.env
+
+fn main() -> UInt8 {
+    let given = env.args()
+    if given.count() > 0 {
+        0
+    } else {
+        1
+    }
+}

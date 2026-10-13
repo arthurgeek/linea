@@ -1,0 +1,49 @@
+==================
+Array length inference
+==================
+
+fn main() -> UInt8 {
+    let values: [UInt8; _] = [1, 2]
+    let grid: [[UInt8; _]; _] = (([[1, 2], [3, 4]]))
+    values[0] + grid[1][0]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (array_type
+          (type_identifier))
+        (array_literal
+          (integer_literal)
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (array_type
+          (array_type
+            (type_identifier)))
+        (parenthesised_expression
+          (parenthesised_expression
+            (array_literal
+              (array_literal
+                (integer_literal)
+                (integer_literal))
+              (array_literal
+                (integer_literal)
+                (integer_literal))))))
+      (expression_statement
+        (binary_expression
+          (index_expression
+            (identifier)
+            (integer_literal))
+          (index_expression
+            (index_expression
+              (identifier)
+              (integer_literal))
+            (integer_literal)))))))

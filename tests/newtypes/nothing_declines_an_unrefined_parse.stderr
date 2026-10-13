@@ -1,0 +1,5 @@
+error[T-Refine]: `Meters` has no refinement for `?` to decline
+ --> tests/newtypes/nothing_declines_an_unrefined_parse.lin:6:16
+  |
+6 |     let _bad = Meters?(5)
+  |                ^^^^^^^^^^ every base value is already legal here; drop the `?`

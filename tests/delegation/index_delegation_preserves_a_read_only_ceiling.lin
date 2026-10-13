@@ -1,0 +1,23 @@
+struct Inner {
+    values: [UInt8; 2],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[UInt64] for Inner {
+    type Elem = UInt8
+
+    proj at(self: Inner, i: UInt64) -> UInt8 {
+        self.values[i]
+    }
+}
+
+impl Index[UInt64] for Outer via inner
+
+fn main() -> UInt8 {
+    var outer: Outer = .{ inner = .{ values = [2, 3] } }
+    outer[0] = 4
+    return outer[0]
+}

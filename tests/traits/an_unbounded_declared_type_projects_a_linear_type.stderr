@@ -1,0 +1,5 @@
+error[O-Copy]: `O.Mid` does not permit copying
+  --> tests/traits/an_unbounded_declared_type_projects_a_linear_type.lin:34:20
+   |
+34 |     let n: O.Mid = copy(m)
+   |                    ^^^^^^^ move the value, or declare a copyable representation

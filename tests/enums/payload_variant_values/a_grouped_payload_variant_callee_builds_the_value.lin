@@ -1,0 +1,12 @@
+enum Mode {
+    Preserve,
+    Exact(UInt64),
+}
+
+fn main() -> UInt8 {
+    let mode = (Mode.Exact)(5)
+    match mode {
+        Preserve => 1,
+        Exact(bits) => UInt8(bits) - 5,
+    }
+}

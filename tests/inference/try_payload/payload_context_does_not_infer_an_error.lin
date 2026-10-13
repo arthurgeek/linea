@@ -1,0 +1,8 @@
+fn success[T, E](sink value: T) -> Result[T, E] where carries(.Ok: value) {
+    .Ok(value)
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: UInt64 = success(7)?
+    return .Ok(UInt8(value))
+}

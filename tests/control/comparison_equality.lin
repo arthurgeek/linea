@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let a: UInt8 = 4
+    let same = a == 4
+    let differs = a != 5
+    let _ = same
+    let _ = differs
+    a
+}

@@ -1,0 +1,5 @@
+error[S-Entry]: an inherent impl holds functions and constants
+  --> tests/traits/an_inherent_impl_settles_no_type.lin:10:5
+   |
+10 |     type Item = UInt8
+   |     ^^^^ a declared type is a trait's, and this impl names no trait

@@ -1,0 +1,10 @@
+// A newtype that is not copyable cannot be a constant: every read of a
+// constant builds a fresh value, which would duplicate a `Ticket`.
+type Ticket = UInt8
+
+let first: Ticket = Ticket(1)
+
+fn main() -> UInt8 {
+    let Ticket(number) = first
+    number
+}

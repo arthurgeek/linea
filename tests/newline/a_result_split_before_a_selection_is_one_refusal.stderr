@@ -1,0 +1,10 @@
+error[S-Separator]: a line break ends a result type
+ --> tests/newline/a_result_split_before_a_selection_is_one_refusal.lin:8:9
+  |
+8 |         .Item
+  |         ^ move this selection to the end of the line above
+error[S-Separator]: a line break ends a result type
+  --> tests/newline/a_result_split_before_a_selection_is_one_refusal.lin:24:5
+   |
+24 |     .Item {
+   |     ^ move this selection to the end of the line above

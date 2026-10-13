@@ -1,0 +1,5 @@
+error[N-Unused]: `x` is never used
+ --> tests/diag/unused_binding.lin:2:9
+  |
+2 |     let x = 1
+  |         ^ bind it as `_` if the value is not wanted

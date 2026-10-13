@@ -1,0 +1,10 @@
+fn bump(inout n: UInt8, by: UInt8) -> () {
+    n = n + by
+}
+
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    bump(&x, 20)
+    bump(&x, 21)
+    x
+}

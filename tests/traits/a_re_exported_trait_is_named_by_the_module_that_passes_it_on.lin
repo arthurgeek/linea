@@ -1,0 +1,8 @@
+// `ByteWriter` is declared inside the library and passed on by `std.io`, which
+// this file imports, so the `use` to write names it through `io`.
+import std.io
+
+fn main() -> UInt8 {
+    let err = io.stderr()
+    UInt8(err.pending_bytes())
+}

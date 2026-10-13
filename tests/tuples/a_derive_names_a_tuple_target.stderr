@@ -1,0 +1,5 @@
+error[T-Derive]: this derive entry is not supported
+ --> tests/tuples/a_derive_names_a_tuple_target.lin:4:8
+  |
+4 | derive Debug for (UInt8, Bool)
+  |        ^^^^^ this derivation requires a target declared in the same module

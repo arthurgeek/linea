@@ -1,0 +1,42 @@
+// A trait's operation may declare type parameters of its own. Written in
+// brackets, they are chosen at the call, and the rest is inferred as usual.
+trait Measure {
+    fn measure[U: Scale](self: Self) -> U
+}
+
+trait Scale {
+    fn from_grams(grams: UInt32) -> Self
+}
+
+impl Scale for UInt32 {
+    fn from_grams(grams: UInt32) -> UInt32 {
+        grams
+    }
+}
+
+impl Scale for UInt8 {
+    fn from_grams(grams: UInt32) -> UInt8 {
+        UInt8(grams / 1000)
+    }
+}
+
+struct Parcel {
+    grams: UInt32,
+}
+
+impl Measure for Parcel {
+    fn measure[U: Scale](self: Parcel) -> U {
+        Scale.from_grams(self.grams)
+    }
+}
+
+fn main() -> UInt8 {
+    let parcel = Parcel { grams = 5000 }
+    let grams = parcel.measure[UInt32]()
+    let kilograms = parcel.measure[UInt8]()
+    if grams == 5000 && kilograms == 5 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,34 @@
+// The bound names one trait, and that trait is the whole of what the name may
+// reach. A name it never declares is settled by no implementation of it, and a
+// name it declares as an operation is a body to run rather than a type to
+// write.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _weighed[W: Measure](_v: W.Weight) -> UInt8 {
+    0
+}
+
+fn _called[W: Measure](_v: W.of) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

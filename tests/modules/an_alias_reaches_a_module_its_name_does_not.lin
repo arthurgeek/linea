@@ -1,0 +1,17 @@
+// Inside `first_digit`, the parameter `text` shadows the module `text`, and
+// the alias `strings` still reaches the module's `ParseError`.
+import std.text
+import std.text as strings
+
+fn first_digit(text: Str) -> Result[UInt8, text.ParseError] {
+    let digit = text.slice(0, 1).unwrap()
+    let failure = strings.ParseError.Syntax(0)
+    match digit.parse[UInt8]() {
+        Ok(value) => .Ok(value),
+        Err(_) => .Err(failure),
+    }
+}
+
+fn main() -> UInt8 {
+    first_digit("7:30").unwrap_or(0)
+}

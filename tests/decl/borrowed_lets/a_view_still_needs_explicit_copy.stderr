@@ -1,0 +1,5 @@
+error[O-Move]: `raw` is a lend, and this takes it
+ --> tests/decl/borrowed_lets/a_view_still_needs_explicit_copy.lin:5:5
+  |
+5 |     raw
+  |     ^^^ `copy` it, or use the plain form of the construct, which does take the value

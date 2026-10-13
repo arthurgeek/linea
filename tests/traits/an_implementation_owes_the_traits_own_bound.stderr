@@ -1,0 +1,5 @@
+error[T-Bound]: `Ranked` requires `Same`, and `Mark` does not implement it
+  --> tests/traits/an_implementation_owes_the_traits_own_bound.lin:15:6
+   |
+15 | impl Ranked for Mark {
+   |      ^^^^^^ implement it for that type, or drop the bound

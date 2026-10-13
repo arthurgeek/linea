@@ -1,0 +1,25 @@
+// A generic function's contract is read once, at its declaration: a type
+// parameter later instantiated with a carrier does not change it.
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn name_of[T](_item: T, session: Session) -> Str {
+    if session.user.length() > 0 {
+        copy(session.user)
+    } else {
+        copy(session.user)
+    }
+}
+
+fn main() -> UInt8 {
+    let first = Session { user = "ada" }
+    let second = Session { user = "grace" }
+    let name = name_of(first, second)
+    if name.length() > 0 {
+        0
+    } else {
+        1
+    }
+}

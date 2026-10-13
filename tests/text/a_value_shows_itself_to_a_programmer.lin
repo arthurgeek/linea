@@ -1,0 +1,38 @@
+// `Debug` is the other question about a value, and it has a different answer.
+//
+// `Display` is what a user should see; `Debug` is what a programmer needs. A
+// `Str` is where they part: its characters through one, and a quoted literal
+// with its escapes put back through the other. Where they agree -- every number
+// does -- the implementation says so by calling the other rather than holding a
+// second copy of the digits.
+//
+// Written by hand. What a template would generate for a structure is this
+// shape: a structure's rendering is its fields in order.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+
+    // Two bytes in, four out: the quote and the backslash are escaped, and the
+    // quotes around the whole are two more.
+    Debug.debug("\"\\", &w)?
+    Writer.write_str(&w, "\n")?
+
+    // A newline written as the escape that means it, rather than as a line
+    // break in the middle of the output.
+    Debug.debug("a\nb", &w)?
+    Writer.write_str(&w, "\n")?
+
+    // A multi-byte character is emitted once rather than once per byte.
+    Debug.debug("olá", &w)?
+    Writer.write_str(&w, "\n")?
+
+    // A number reads the same either way.
+    Debug.debug(-42, &w)?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

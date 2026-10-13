@@ -1,0 +1,7 @@
+// The shape the rule admits, kept beside the ones it refuses: the entry point
+// is `main() -> UInt8`, its value is the exit status, and it compiles and runs.
+// Without this the signature check could reject everything and the cases above
+// would all still pass.
+fn main() -> UInt8 {
+    7
+}

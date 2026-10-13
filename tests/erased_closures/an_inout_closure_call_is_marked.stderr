@@ -1,0 +1,5 @@
+error[S-Mutation]: this callback mutates its environment, so its invocation is marked `&`
+  --> tests/erased_closures/an_inout_closure_call_is_marked.lin:20:17
+   |
+20 |     let first = tally()
+   |                 ^^^^^^^ write `&` before the callback invocation

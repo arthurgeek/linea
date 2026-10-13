@@ -1,0 +1,12 @@
+fn reduce2[T, F: fn(read lhs: T, read rhs: UInt8 = 2) -> T](lhs: T, rhs: UInt8, combine: F) -> T where carries(lhs, combine) {
+    combine(lhs, rhs)
+}
+
+fn main() -> UInt8 {
+    let _ = reduce2(UInt8(2), UInt8(3), |sink lhs, rhs = 2| lhs + rhs)
+    let _ = reduce2(UInt8(2), UInt8(3), |lhs: UInt16, rhs = 2| UInt8(lhs) + rhs)
+    let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs| lhs + rhs)
+    let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs = 1 + 2| lhs + rhs)
+    let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs = 2| lhs == rhs)
+    0
+}

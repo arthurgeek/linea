@@ -1,0 +1,26 @@
+trait Indexed[I]: Index[I] {}
+
+struct Board[I] { values: [UInt8; 2], key: I }
+
+impl[I: Integer] Index[I] for Board[I] via values
+
+impl[I: Integer] Indexed[I] for Board[I] {}
+
+fn inspect_first[I: Integer, C: Indexed[I]](container: C, _key: I) -> () {
+    let _first = borrow container[0]
+}
+
+fn repeated[I: Integer, C: Indexed[I] + Index[I]](container: C, _key: I) -> borrow C.Elem where borrows(container) {
+    borrow container[0]
+}
+
+fn main() -> UInt8 {
+    let board = Board[Int16] { values = [7, 9], key = 0 }
+    inspect_first(board, Int16(0))
+    let duplicate = repeated(board, Int16(0))
+    if *duplicate == 7 && board[Int16(0)] == 7 {
+        0
+    } else {
+        1
+    }
+}

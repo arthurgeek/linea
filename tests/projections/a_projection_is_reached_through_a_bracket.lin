@@ -1,0 +1,32 @@
+// A projection yields a place, and a call yields a value. There is nothing for
+// a call to run: what a site writes is the bracket, and the site becomes the
+// path the projection names. A projection a call could reach would be lowered
+// as a function, and the parts its body names would leave their container
+// without the ownership pass ever seeing them go.
+@linear
+struct Token {
+    id: UInt8,
+}
+
+@linear
+struct Bag {
+    a: Token,
+}
+
+impl Index[UInt64] for Bag {
+    type Elem = Token
+
+    proj at(inout self: Bag, _i: UInt64) -> Token {
+        self.a
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Bag = .{ a = .{ id = 4 } }
+    let k: UInt64 = 0
+    let t = Index.at(&g, k)
+    let Token { id: n } = t
+    let Bag { a: rest } = g
+    let Token { id: m } = rest
+    n + m
+}

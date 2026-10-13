@@ -1,0 +1,5 @@
+error[O-Move]: `token` is a lend, and this takes it
+  --> tests/decl/borrowed_lets/a_borrowed_noncopyable_field_cannot_be_consumed.lin:13:10
+   |
+13 |     take(token)
+   |          ^^^^^ `copy` it, or use the plain form of the construct, which does take the value

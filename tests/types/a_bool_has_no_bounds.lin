@@ -1,0 +1,6 @@
+// The standard library writes bounds for the integer types and for nothing
+// else, so `Bool` opens no namespace at all -- a maximum of `Bool` is not a
+// thing. It reads as any other name the library did not write.
+fn main() -> UInt8 {
+    Bool.max
+}

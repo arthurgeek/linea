@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A rename to a name in the wrong case for its kind produces a program the\n// compiler refuses, so it is refused rather than applied, and the server says\n// what the kind is and which spelling would do.\nenum Signal {\n    Ready,\n    Idle,\n}\n\nfn main() -> UInt8 {\n    let signal = Signal.Ready\n    match read signal {\n        Ready => 0,\n        Idle => 1,\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":5},"newName":"ready"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

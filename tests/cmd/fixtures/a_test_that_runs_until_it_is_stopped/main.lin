@@ -1,0 +1,12 @@
+// A test that never finishes, so a transcript can stop `linea test` while the
+// test binary is running and check that the binary stops with it.
+fn main() -> UInt8 {
+    0
+}
+
+test fn counts_until_it_is_stopped() {
+    var turns: UInt64 = 0
+    while true {
+        turns = turns % 1000 + 1
+    }
+}

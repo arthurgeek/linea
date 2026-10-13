@@ -1,0 +1,16 @@
+// An element of a constant reached through its module is a place inside that
+// constant's static storage: it is read by value in a loop, and a borrow of
+// it is returned from a function that carries nothing.
+import settings
+
+fn entry(i: UInt64) -> borrow Int64 where carries() {
+    borrow settings.table[i]
+}
+
+fn main() -> UInt8 {
+    var total = Int64(0)
+    for i in 0..3 {
+        total = total + settings.table[i]
+    }
+    UInt8(total + *entry(2))
+}

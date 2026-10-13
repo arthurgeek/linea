@@ -1,0 +1,5 @@
+error[M-Impl]: `Grid` is declared in `grid`
+ --> tests/iter/a_projection_outside_its_module_cannot_be_traversed/main.lin:9:23
+  |
+9 | impl Index[Int64] for Grid {
+  |                       ^^^^ write it where the trait is declared, or where the type is

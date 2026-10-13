@@ -1,0 +1,8 @@
+// `import std.io as output` binds the module as `output`, so the `use` to
+// write names `ByteWriter` through that name.
+import std.io as output
+
+fn main() -> UInt8 {
+    let err = output.stderr()
+    UInt8(err.pending_bytes())
+}

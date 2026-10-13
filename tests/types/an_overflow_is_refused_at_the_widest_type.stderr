@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `UInt64`
+ --> tests/types/an_overflow_is_refused_at_the_widest_type.lin:7:24
+  |
+7 |     let _b: UInt64 = a * a
+  |                        ^ the result is not representable

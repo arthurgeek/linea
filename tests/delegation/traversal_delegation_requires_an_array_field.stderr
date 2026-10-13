@@ -1,0 +1,5 @@
+error[T-Lend]: a forwarded traversal requires a fixed-size array field
+ --> tests/delegation/traversal_delegation_requires_an_array_field.lin:4:24
+  |
+4 |     trav positions via value
+  |                        ^^^^^ write an ordinary traversal with an explicitly typed range

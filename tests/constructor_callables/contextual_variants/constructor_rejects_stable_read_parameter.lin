@@ -1,0 +1,6 @@
+enum RenderError { Allocation(borrow UInt8) }
+
+fn main() -> UInt8 {
+    let _wrap: fn(read code: UInt8) -> RenderError where borrows(code) = .Allocation
+    0
+}

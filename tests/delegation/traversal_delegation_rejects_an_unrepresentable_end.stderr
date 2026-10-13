@@ -1,0 +1,5 @@
+error[T-Lend]: the array length is not representable as this key's exclusive range bound
+ --> tests/delegation/traversal_delegation_rejects_an_unrepresentable_end.lin:8:24
+  |
+8 |     trav positions via values
+  |                        ^^^^^^ write an ordinary traversal with an explicitly typed range

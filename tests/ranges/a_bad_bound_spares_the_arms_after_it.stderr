@@ -1,0 +1,5 @@
+error[S-Range]: a range pattern's bound is a literal or a name
+ --> tests/ranges/a_bad_bound_spares_the_arms_after_it.lin:7:13
+  |
+7 |         5.. => 0,
+  |             ^^ not a literal or a name

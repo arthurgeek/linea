@@ -1,0 +1,39 @@
+trait First {
+    fn count(self: Self) -> UInt8
+
+    fn advance(inout self: Self) -> ()
+}
+
+trait Second {
+    fn count(self: Self) -> UInt8
+
+    fn reset(inout self: Self) -> ()
+}
+
+struct State { number: UInt8 }
+
+impl First for State {
+    fn count(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn advance(inout self: Self) -> () {
+        self.number += 1
+    }
+}
+
+impl Second for State {
+    fn count(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn reset(inout self: Self) -> () {
+        self.number = 0
+    }
+}
+
+fn main() -> UInt8 {
+    let state: State = .{ number = 7 }
+    let view = borrow state
+    view.count()
+}

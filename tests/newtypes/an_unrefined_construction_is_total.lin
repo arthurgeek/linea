@@ -1,0 +1,11 @@
+// An unrefined newtype admits every value its base does, so construction is
+// total: nothing about the value could make it fail, however large.
+type Meters = UInt64
+
+fn wants(_m: Meters) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    wants(Meters(18446744073709551615))
+}

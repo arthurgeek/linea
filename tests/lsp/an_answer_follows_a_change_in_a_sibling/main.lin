@@ -1,0 +1,8 @@
+// The type of `_n` is written nowhere: it is whatever `size` returns, which is
+// declared in the file beside this one. So a hint here is an answer about
+// `main.lin` that only `sizes.lin` decides, and editing the sibling has to
+// move it.
+fn main() -> UInt8 {
+    let _n = size()
+    0
+}

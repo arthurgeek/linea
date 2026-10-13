@@ -1,0 +1,5 @@
+error[N-Unused]: `spare` is never used
+ --> tests/decl/unused_function.lin:1:4
+  |
+1 | fn spare() -> UInt8 {
+  |    ^^^^^ call it, or name it with a leading `_`

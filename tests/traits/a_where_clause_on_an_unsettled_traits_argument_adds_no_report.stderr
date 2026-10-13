@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Chooser`'s `K`
+  --> tests/traits/a_where_clause_on_an_unsettled_traits_argument_adds_no_report.lin:27:5
+   |
+27 |     Switch { on = true }.pick(1, 9)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ pass what it stands for, or say what the call returns

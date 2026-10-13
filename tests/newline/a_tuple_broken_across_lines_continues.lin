@@ -1,0 +1,9 @@
+// A line ending in a comma has not ended its statement, so a tuple continues
+// across the newline after each comma.
+fn main() -> UInt8 {
+    let triple: (UInt8, UInt8, UInt8) = (1,
+        2,
+        3)
+    let (a, b, c) = triple
+    a + b + c - 6
+}

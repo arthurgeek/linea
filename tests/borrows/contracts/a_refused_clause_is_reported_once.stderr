@@ -1,0 +1,5 @@
+error[T-BorrowContract]: a contract path must name a declared source
+ --> tests/borrows/contracts/a_refused_clause_is_reported_once.lin:3:55
+  |
+3 | fn first(left: Str, _right: Str) -> Str where carries(lefty) {
+  |                                                       ^^^^^ this source is not declared

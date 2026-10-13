@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Select` is already implemented for `Holder` with the same arguments
+  --> tests/constants/enum_variants/coherence_forward_contextual_aliases_are_equal.lin:13:6
+   |
+11 | impl Select[fn(read mode: Mode = chosen) -> UInt8] for Holder {}
+   |      ------ already implemented here
+13 | impl Select[fn(read mode: Mode = Mode.Preserve) -> UInt8] for Holder {}
+   |      ^^^^^^ a trait is implemented once per arguments and type

@@ -1,0 +1,69 @@
+// A program's own extractor reads the query through `request.query_params()`
+// and fills a type that implements `http.Params` by hand, as a derive would,
+// with a query name that differs from its field's.
+import std.http
+import std.io
+import std.mem
+
+use http.Handler
+use mem.Owner
+
+struct Paging {
+    page: UInt32,
+    per_page: UInt32,
+}
+
+impl http.Params for Paging {
+    fn from_params(values: http.ParamValues) -> Result[Paging, http.ParamError] where carries(values) {
+        let page: UInt32 = values.field("page")?
+        let limit: Option[UInt32] = values.field("limit")?
+        return .Ok(.{ page, per_page = limit.unwrap_or(10) })
+    }
+}
+
+impl[P: Allocator] http.Extract[P] for Paging {
+    fn extract(request: http.Request[P]) -> Result[Paging, http.Error[P]] where carries(request) {
+        let values = request.query_params() else {
+            return .Err(http.error(request, .BadRequest, "the query cannot be read"))
+        }
+        let paged: Result[Paging, http.ParamError] = http.Params.from_params(values)
+        match paged {
+            Ok(paging) => .Ok(paging),
+            Err(refusal) => {
+                let name = copy(refusal.name)
+                return .Err(http.error(request, .BadRequest, "cannot page by {name:?}"))
+            },
+        }
+    }
+}
+
+fn list[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let Paging { page, per_page } = request.extract[Paging]()?
+    http.text(request, "page {page}, {per_page} a page")
+}
+
+fn answer(inout router: http.Router[(), mem.SystemAllocator], target: Str) -> () {
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
+    var nothing = {}
+    match &router.serve_http(&nothing, sent.request()) {
+        Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+        Err(error) => io.println("{error}").unwrap(),
+    }
+    arena.release()
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let listed = &router.route_raw("GET /items", list)
+    answer(&router, "/items?page=2")
+    answer(&router, "/items?page=3&limit=50")
+    answer(&router, "/items?limit=50")
+    answer(&router, "/items?page=%zz")
+    router.release()
+    if listed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

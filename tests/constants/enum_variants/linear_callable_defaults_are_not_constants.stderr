@@ -1,0 +1,5 @@
+error[T-Default]: a constant of `Permit` would be built where nothing settles it
+ --> tests/constants/enum_variants/linear_callable_defaults_are_not_constants.lin:4:40
+  |
+4 | fn _invoke[F: fn(read permit: Permit = .Preserve) -> UInt8](callback: F) -> UInt8 {
+  |                                        ^^^^^^^^^ a value of this type must be settled, so it cannot be a constant

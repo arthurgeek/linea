@@ -1,0 +1,5 @@
+error[T-Template]: `Structural` declares `value`'s `amount` as `UInt8`, and this takes `Int64`
+ --> tests/traits/a_template_member_matches_its_signature.lin:6:8
+  |
+6 |     fn value(_self: Self, _amount: Int64) -> UInt8 {
+  |        ^^^^^ take the type the signature declares

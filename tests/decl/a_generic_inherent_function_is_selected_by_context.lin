@@ -1,0 +1,15 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    fn take(sink self: Holder[T]) -> T {
+        let Holder { value } = self
+        value
+    }
+}
+
+fn main() -> UInt8 {
+    let take: fn(sink holder: Holder[UInt8]) -> UInt8 = Holder.take
+    take(.{ value = 7 }) - 7
+}

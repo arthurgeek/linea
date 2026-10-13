@@ -1,0 +1,17 @@
+program decls=4
+  decl constant "fallback" tokens 2..8
+    holds UInt8
+    expr %0 int_literal tokens 7..8 "2"
+  decl function "_accepts" tokens 8..41
+    type param "F" : fn(read lhs: UInt8, read rhs: UInt8 = fallback) -> UInt8
+    param read "_combine" : F
+    returns (
+    expr %2 block tokens 39..41
+  decl function "_keeps" tokens 41..63
+    param read "_f" : fn(read value: UInt8 = fallback) -> UInt8
+    returns (
+    expr %4 block tokens 61..63
+  decl function "main" tokens 63..72
+    returns UInt8
+    expr %6 block tokens 69..72
+      expr %5 int_literal tokens 70..71 "0"

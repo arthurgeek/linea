@@ -1,0 +1,11 @@
+fn _needs_wide[F: fn(read value: UInt16) -> UInt16](_f: F) -> () {}
+
+fn _forwards[
+    F: fn(read value: UInt8) -> UInt8 + fn(read value: UInt16) -> UInt16,
+](f: F) -> () {
+    _needs_wide(f)
+}
+
+fn main() -> UInt8 {
+    0
+}

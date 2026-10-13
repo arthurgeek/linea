@@ -1,0 +1,9 @@
+// Every token past `where` sits on the line that opened the clause, a bound's
+// `-` and the digits it negates among them. A break between the two ends the
+// statement there, and what follows is read as its own.
+pub type Percent = Int8 where it in -
+    5..=99
+
+fn main() -> UInt8 {
+    42
+}

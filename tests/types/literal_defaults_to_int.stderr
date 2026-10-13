@@ -1,0 +1,7 @@
+error[T-Convert]: `UInt8` cannot hold 300
+ --> tests/types/literal_defaults_to_int.lin:3:5
+  |
+2 |     let x = 300
+  |             --- the value comes from here
+3 |     UInt8(x)
+  |     ^^^^^^^^ this conversion cannot succeed

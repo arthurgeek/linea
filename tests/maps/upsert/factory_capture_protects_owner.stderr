@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/maps/upsert/factory_capture_protects_owner.lin:13:5
+   |
+13 |     owner = 9
+   |     ^^^^^ keep this place available until the last use of its observation
+14 |     let observed = **values.get(1).unwrap()
+   |                      ------ the observation is still used here

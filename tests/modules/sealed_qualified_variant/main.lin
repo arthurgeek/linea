@@ -1,0 +1,5 @@
+import vault
+
+fn main() -> UInt8 {
+    vault.tag(vault.Key.Forged(7))
+}

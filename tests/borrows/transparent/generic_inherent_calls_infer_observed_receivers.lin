@@ -1,0 +1,17 @@
+struct Box[T] { value: T }
+
+impl[T: Integer] Box[T] {
+    fn number(self: Self) -> UInt8 {
+        UInt8(self.value)
+    }
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 7 }
+    let view = borrow box
+    if view.number() + Box.number(view) == 14 {
+        0
+    } else {
+        1
+    }
+}

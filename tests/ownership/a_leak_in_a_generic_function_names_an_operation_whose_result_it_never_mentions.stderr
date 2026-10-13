@@ -1,0 +1,9 @@
+error[O-Leak]: `_ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_leak_in_a_generic_function_names_an_operation_whose_result_it_never_mentions.lin:23:9
+   |
+23 |     let _ticket = Ticket { code = 1 }
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+25 | }
+   | - the block ends here
+   |
+   = help: settle it first with `_ticket.redeem()`, or take it apart with `let Ticket { code: _ } = _ticket`

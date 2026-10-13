@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/one_implementation_where_a_family_covers_a_settled_head.lin:20:6
+   |
+14 | impl[T] Give[T] for Holder[T] {
+   |         ---- already implemented here
+20 | impl Give[UInt8] for Holder[UInt8] {
+   |      ^^^^ a trait is implemented once per arguments and type

@@ -1,0 +1,15 @@
+fn duplicate[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let saved = duplicate(number)
+    let flag = true
+    let saved_flag = duplicate(flag)
+    if number == saved && flag && saved_flag {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+error[T-Const]: `first` names itself through `second`
+ --> tests/constants/inferred_cycle.lin:3:21
+  |
+3 | let second: UInt8 = first
+  |                     ^^^^^ a constant's value cannot be worked out from itself

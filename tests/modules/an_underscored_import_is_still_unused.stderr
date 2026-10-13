@@ -1,0 +1,5 @@
+error[M-Unused]: `_a` is never used
+ --> tests/modules/an_underscored_import_is_still_unused/main.lin:5:13
+  |
+5 | import a as _a
+  |             ^^ remove the import

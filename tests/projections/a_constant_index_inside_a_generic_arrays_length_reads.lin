@@ -1,0 +1,18 @@
+// A constant index inside the length of the array a bounded generic body runs
+// on reads that element, folded or written out.
+fn second[C: Index[UInt64]](c: C) -> UInt8 {
+    match read c[2 - 1] {
+        _ => 7,
+    }
+}
+
+fn first[C: Index[UInt64]](c: C) -> UInt8 {
+    match read c[0] {
+        _ => 5,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 2] = [2, 3]
+    first(a) + second(a)
+}

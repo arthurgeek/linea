@@ -1,0 +1,12 @@
+error[T-UnknownOperation]: `UInt64` has no operation `map`
+ --> tests/iter/operations/only_a_sequence_is_walked.lin:6:19
+  |
+6 |     let doubled = count.map(|sink value| value * 2)
+  |                   ^^^^^^^^^ `Sequence` declares it, and `UInt64` does not implement `Sequence`
+error[T-Bound]: `Sequence` requires `Self` to implement it, and `UInt64` does not
+ --> tests/iter/operations/only_a_sequence_is_walked.lin:7:32
+  |
+7 |     let written = Sequence.map(count, |sink value| value * 2)
+  |                                ^^^^^ implement it for that type, or reach the operation on one that does
+  |
+  = help: every type implementing `Iterator` implements `Sequence`, and `UInt64` does not implement `Iterator`

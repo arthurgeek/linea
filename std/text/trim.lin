@@ -1,0 +1,93 @@
+import std.testing
+
+// Return whether a byte is ASCII whitespace: bytes 9 through 13 are HT, LF,
+// VT, FF and CR, and byte 32 is space.
+fn ascii_whitespace(value: UInt8) -> Bool {
+    (value >= 9 && value <= 13) || value == 32
+}
+
+// Return whether a scalar is Unicode 17.0.0 White_Space.
+fn unicode_whitespace(value: UInt32) -> Bool {
+    match read value {
+        9..=13 => true, // U+0009..000D: HT, LF, VT, FF, CR.
+        32 => true, // U+0020: space.
+        133 => true, // U+0085: next line.
+        160 => true, // U+00A0: no-break space.
+        5760 => true, // U+1680: ogham space mark.
+        8192..=8202 => true, // U+2000..200A: en quad through hair space.
+        8232 => true, // U+2028: line separator.
+        8233 => true, // U+2029: paragraph separator.
+        8239 => true, // U+202F: narrow no-break space.
+        8287 => true, // U+205F: medium mathematical space.
+        12288 => true, // U+3000: ideographic space.
+        _ => false,
+    }
+}
+
+impl Str {
+    // Return the text without leading and trailing ASCII whitespace.
+    pub fn trim_ascii(self: Self) -> Str where carries(self) {
+        var from: UInt64 = 0
+        var to = self.length()
+        while from < to && ascii_whitespace(self.byte(from).unwrap()) {
+            from += 1
+        }
+        while to > from && ascii_whitespace(self.byte(to - 1).unwrap()) {
+            to -= 1
+        }
+        self.slice(from, to).unwrap()
+    }
+}
+
+test fn trim_ascii_removes_only_ascii_whitespace_at_the_ends() {
+    testing.assert_eq(" \tá b\r\n".trim_ascii(), "á b", "ASCII trim changed content")?
+    testing.assert_eq(" á ".trim_ascii(), " á ", "ASCII trim removed non-ASCII whitespace")?
+    testing.assert_eq("\u{9}\u{a}\u{b}\u{c}\u{d} ".trim_ascii(), "", "ASCII whitespace table omitted a byte")?
+    .Ok(())
+}
+
+impl Str {
+    // Return the text without leading and trailing Unicode 17.0.0 White_Space.
+    // One pass over the scalars with constant storage records the span from
+    // the first scalar that is not whitespace through the last.
+    pub fn trim_unicode(self: Self) -> Str where carries(self) {
+        var from = self.length()
+        var to = self.length()
+        var found = false
+        var cursor = self.scalars()
+        loop {
+            match &cursor.next() {
+                None => {
+                    break
+                },
+                Some(item) => {
+                    if !unicode_whitespace(item.value) {
+                        if !found {
+                            from = item.offset
+                            found = true
+                        }
+                        to = cursor.at
+                    }
+                },
+            }
+        }
+        self.slice(from, to).unwrap()
+    }
+}
+
+test fn trim_unicode_removes_white_space_at_the_ends() {
+    testing.assert_eq(" \tá b　".trim_unicode(), "á b", "Unicode trim missed whitespace")?
+    testing.assert_eq("".trim_unicode(), "", "empty trim changed text")?
+    testing.assert_eq("　  ".trim_unicode(), "", "all-whitespace trim was not empty")?
+    testing.assert_eq("﻿a﻿".trim_unicode(), "﻿a﻿", "BOM was treated as whitespace")?
+    testing.assert_eq("​a​".trim_unicode(), "​a​", "zero-width space was treated as whitespace")?
+    .Ok(())
+}
+
+test fn unicode_trim_recognizes_every_white_space_character() {
+    let whitespace = "\u{9}\u{a}\u{b}\u{c}\u{d}\u{20}\u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}"
+    testing.assert_eq(whitespace.trim_unicode(), "", "Unicode White_Space table omitted a character")?
+    testing.assert_eq("\u{180e}a\u{180e}".trim_unicode(), "\u{180e}a\u{180e}", "Mongolian vowel separator was whitespace")?
+    testing.assert_eq("\u{0}a\u{0}".trim_unicode(), "\u{0}a\u{0}", "trim removed NUL")?
+    .Ok(())
+}

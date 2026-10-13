@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A name declared again inside a scope that already had one is offered once,\n// and the one offered is the one a reference there would reach. The chain\n// records both and searches from the inside out, so which of them leads is\n// already decided.\nfn shadow(n: UInt8) -> UInt8 {\n    let n: UInt16 = UInt16(n) + 1\n    UInt8(n)\n}\n\nfn main() -> UInt8 {\n    shadow(4)\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":11}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

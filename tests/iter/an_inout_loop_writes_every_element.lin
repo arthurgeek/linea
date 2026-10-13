@@ -1,0 +1,20 @@
+// A `for inout` lends each place writably. The binder names the element where
+// it lives, so an assignment through it writes the array rather than a copy of
+// what the array held.
+//
+// The second walk writes without reading. That is the whole of what the binder
+// is for, exactly as it is for an `inout` parameter: the write is what the
+// value outside the loop is left holding.
+fn main() -> UInt8 {
+    var xs: [UInt64; 3] = [1, 2, 3]
+    for inout x in xs {
+        x = x * 2
+    }
+
+    var ys: [UInt64; 2] = [0, 0]
+    for inout y in ys {
+        y = 5
+    }
+
+    UInt8(xs[0] + xs[1] + xs[2] + ys[0] + ys[1])
+}

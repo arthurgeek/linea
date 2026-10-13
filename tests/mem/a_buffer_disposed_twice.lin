@@ -1,0 +1,18 @@
+// Disposal consumes, so a second one reads a place already taken. The rule is
+// the one every second consume of a linear value reaches; that the memory is
+// real is what this case adds, and nothing about the diagnostic is new.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(8) {
+        Ok(b) => {
+            b.release()
+            b.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

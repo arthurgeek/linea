@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/scalar_snapshots/scalar_arguments_preserve_mutation_exclusivity.lin:12:26
+   |
+12 |     let snapshot = first(value, replace(&value))
+   |                          ^^^^^ already passed `&` here
+   |                                         ------ mutated by this argument

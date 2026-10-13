@@ -1,0 +1,18 @@
+// A declared trait named Copyable shadows the built-in capability.
+// A type lacking that trait implementation fails the ordinary trait bound.
+struct Ledger {
+    total: UInt8,
+}
+
+trait Copyable {
+    fn of(x: Self) -> UInt8
+}
+
+fn weigh[T: Copyable](v: T) -> UInt8 {
+    Copyable.of(v)
+}
+
+fn main() -> UInt8 {
+    let l: Ledger = .{ total = 3 }
+    weigh(l)
+}

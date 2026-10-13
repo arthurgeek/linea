@@ -1,0 +1,12 @@
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair: Pair = .{ left = 1, right = 2 }
+    // Writing no field takes every field from the base: the literal is the
+    // base, moved.
+    let same = Pair { ..pair }
+    same.left + same.right
+}

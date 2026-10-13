@@ -1,0 +1,23 @@
+struct Holder[T] {
+    value: T,
+}
+
+struct Plain {
+    level: UInt8,
+}
+
+impl[T: Equatable] Holder[T] {
+    fn same(self: Holder[T], other: T) -> Bool {
+        self.value == other
+    }
+}
+
+fn main() -> UInt8 {
+    let same: fn(holder: Holder[Plain], other: Plain) -> Bool = Holder.same
+    let holder: Holder[Plain] = .{ value = .{ level = 1 } }
+    if same(holder, .{ level = 1 }) {
+        0
+    } else {
+        1
+    }
+}

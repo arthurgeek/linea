@@ -1,0 +1,15 @@
+@linear
+struct Key { id: UInt8 }
+
+fn apply[F: sink fn() -> UInt8](sink callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    let key: Key = .{ id = 9 }
+    let callback = sink [sink key] || {
+        let { id } = key
+        id
+    }
+    apply(callback)
+}

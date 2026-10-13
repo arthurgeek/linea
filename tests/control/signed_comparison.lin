@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let a: Int64 = -3
+    let negative = a < 0
+    let _ = negative
+    1
+}

@@ -1,0 +1,126 @@
+import std.fmt
+import std.io
+import std.mem
+import std.net
+import std.testing
+
+// An `Observer` is told what happened while serving. `serve` calls `observe`
+// once each exchange has ended, after its answer has been written and its
+// connection settled, and before it retries a failed accept. Serving writes no
+// log of its own: `http.logged` turns events into log lines. `listen_and_serve`
+// also calls `observe` once with `Listening` when serving can begin.
+pub trait Observer {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> ()
+}
+
+// Every type ignores events unless it implements `Observer` itself, so a
+// handler that has nothing to do with them writes nothing. A middleware
+// implements `Observer` and passes each event on to the handler it holds, or
+// that handler and anything around it never sees them.
+default impl[T] Observer for T {
+    fn observe[P: Allocator](inout _self: Self, _event: Event[P]) -> () {}
+}
+
+// An `Event` is what `serve` tells its handler through `Observer.observe`: an
+// exchange that has ended, or a failed accept it is about to retry.
+// `listen_and_serve` also announces the address its listener is bound to, once
+// serving can begin and before it accepts anything, which is how a program that asked for port 0
+// learns the port it was given.
+@copyable
+pub enum Event[P: Allocator = mem.SystemAllocator] {
+    Exchanged(Exchange[P]),
+    AcceptRetried(AcceptRetry),
+    Listening(net.Address),
+}
+
+// An `Exchange` is one connection from the request to the end of its answer.
+// `request` is the request the handler answered, or `None` when it could not
+// be read. `status` is the status the answer carried, or `None` when there
+// was no one to answer. `body_bytes` counts the body bytes the answer wrote;
+// when writing failed, some of them may never have reached the client.
+// `failure` says what went wrong, or is `None` when the handler's response was
+// written whole. The exchange views the request's arena, so it is read during
+// `observe` and not kept past it.
+@copyable
+pub struct Exchange[P: Allocator = mem.SystemAllocator] {
+    request: Option[Request[P]],
+    status: Option[Status],
+    body_bytes: UInt64,
+    failure: Option[Failure],
+}
+
+// A `Failure` says why an exchange did not end with the handler's response
+// written whole:
+//
+// - `Refused` holds the message of the error the handler answered with, or
+//   `None` when it gave none; that error was written as the answer.
+// - `Unread` holds why the request could not be read: it was refused, with
+//   the status in the exchange, or the connection failed while it was read.
+// - `Memory` means the request's arena or the response buffer could not be
+//   had, and the request was answered 503 or 500 without the handler.
+// - `Timeouts` holds why the connection's timeouts could not be set; nothing
+//   was read or answered.
+// - `Write` holds why writing the answer failed; the connection was reset if
+//   a body was cut short.
+// - `Stream` holds the status and message of the error a streamed body's
+//   function returned after the head was sent; the connection was reset.
+@copyable
+pub enum Failure {
+    Refused(Option[Str]),
+    Unread(RequestError),
+    Memory,
+    Timeouts(io.IoError),
+    Write(io.IoError),
+    Stream(Status, Option[Str]),
+}
+
+// A failure reads as one sentence, such as `the handler refused the request:
+// the body is not JSON` or `writing the response failed: Write failed
+// (BrokenPipe) after 0 bytes`.
+impl Display for Failure {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Refused(message) => match read message {
+                Some(text) => "the handler refused the request: {text}".fmt(&w),
+                None => &w.write_str("the handler refused the request"),
+            },
+            Unread(error) => "reading the request failed: {error}".fmt(&w),
+            Memory => &w.write_str("there was no memory to answer the request"),
+            Timeouts(error) => "setting the connection's timeouts failed: {error}".fmt(&w),
+            Write(error) => "writing the response failed: {error}".fmt(&w),
+            Stream(status, message) => {
+                let code = status.code()
+                match read message {
+                    Some(text) => "streaming the response failed with {code}: {text}".fmt(&w),
+                    None => "streaming the response failed with {code}".fmt(&w),
+                }
+            },
+        }
+    }
+}
+
+test fn a_failure_displays_what_went_wrong() {
+    let broken = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 0 }
+    failure_displays_as(.Refused(.Some("the body is not JSON")), "the handler refused the request: the body is not JSON", "a refusal changed")?
+    failure_displays_as(.Refused(.None), "the handler refused the request", "a refusal without a message changed")?
+    failure_displays_as(.Unread(.Status(.ContentTooLarge)), "reading the request failed: the request was refused with 413 Content Too Large", "an unread request changed")?
+    failure_displays_as(.Memory, "there was no memory to answer the request", "running out of memory changed")?
+    failure_displays_as(.Timeouts(copy(broken)), "setting the connection's timeouts failed: Write failed (BrokenPipe) after 0 bytes", "a timeout failure changed")?
+    failure_displays_as(.Write(broken), "writing the response failed: Write failed (BrokenPipe) after 0 bytes", "a write failure changed")?
+    failure_displays_as(.Stream(.InternalServerError, .Some("the data ran out")), "streaming the response failed with 500: the data ran out", "a stream failure changed")?
+    failure_displays_as(.Stream(.InternalServerError, .None), "streaming the response failed with 500", "a stream failure without a message changed")?
+    .Ok(())
+}
+
+// `failure_displays_as` checks that `failure` displays as `expected`.
+fn failure_displays_as(failure: Failure, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    let written = fmt.render_owned(mem.system(), failure).unwrap()
+    let checked = testing.assert_eq(written.view(), expected, said)
+    written.release()
+    checked
+}
+
+// An `AcceptRetry` says that accepting a connection failed with `error`, in a
+// way that waiting may answer, and that serving waits `pause` before trying
+// again.
+pub alias AcceptRetry = net.AcceptRetry

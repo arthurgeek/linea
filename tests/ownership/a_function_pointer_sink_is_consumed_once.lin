@@ -1,0 +1,16 @@
+@linear
+enum Coin {
+    Struck(UInt8),
+}
+
+fn value(sink coin: Coin) -> UInt8 {
+    match coin {
+        Struck(amount) => amount,
+    }
+}
+
+fn main() -> UInt8 {
+    let spend: fn(sink coin: Coin) -> UInt8 = value
+    let coin: Coin = .Struck(7)
+    spend(coin)
+}

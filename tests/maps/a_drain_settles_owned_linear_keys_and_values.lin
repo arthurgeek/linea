@@ -1,0 +1,61 @@
+import std.collections
+import std.mem
+import std.hash
+
+@linear
+struct Key { id: UInt64 }
+
+@linear
+struct Ticket { id: UInt64 }
+
+impl Equatable for Key {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.id == other.id
+    }
+}
+
+impl Equivalent for Key {}
+
+impl hash.Hash for Key {
+    fn hash(self: Self) -> UInt64 {
+        hash.Hash.hash(self.id)
+    }
+}
+
+fn settle(sink entry: collections.Entry[Key, Ticket]) -> UInt64 {
+    let { key, value } = entry
+    let Key { id: key_id } = key
+    let Ticket { id: value_id } = value
+    key_id + value_id
+}
+
+fn main() -> UInt8 {
+    var values: collections.Map[Key, Ticket, mem.SystemAllocator] = collections.Map.new()
+    for id in UInt64(0)..9 {
+        match collections.Map.insert(&values, .{ id }, .{ id = id + 10 }).unwrap() {
+            None => {},
+            Some(entry) => {
+                let _settled = settle(entry)
+                panic("distinct keys replaced one another")
+            },
+        }
+    }
+    var drain = values.drain()
+    var total: UInt64 = 0
+    var count: UInt64 = 0
+    loop {
+        match Iterator.next(&drain) {
+            None => break,
+            Some(entry) => {
+                total += settle(entry)
+                count += 1
+            },
+        }
+    }
+    collections.Drain.finish(drain).unwrap()
+    if total == 162 && count == 9 {
+        0
+    } else {
+        1
+    }
+}

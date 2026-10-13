@@ -1,0 +1,9 @@
+error[O-Leak]: `values[0]` (a linear `Token`) is still owned when this write replaces it
+  --> tests/vec/a_live_linear_element_cannot_be_overwritten.lin:17:5
+   |
+13 |     var values: Vec[Token, mem.SystemAllocator] = Vec.new()
+   |         ------ acquired here
+17 |     values[0] = replacement
+   |     ^^^^^^^^^ this write drops the old value
+   |
+   = help: settle what this part holds before writing over it

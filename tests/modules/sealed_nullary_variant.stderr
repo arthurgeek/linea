@@ -1,0 +1,10 @@
+error[M-Opaque]: `Door` is opaque outside `vault`
+ --> tests/modules/sealed_nullary_variant/main.lin:6:17
+  |
+6 |     vault.width(.Closed) + vault.width(vault.Door.Closed)
+  |                 ^^^^^^^ only its own module can build one
+error[M-Opaque]: `Door` is opaque outside `vault`
+ --> tests/modules/sealed_nullary_variant/main.lin:6:40
+  |
+6 |     vault.width(.Closed) + vault.width(vault.Door.Closed)
+  |                                        ^^^^^^^^^^^^^^^^^ only its own module can build one

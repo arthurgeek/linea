@@ -1,0 +1,30 @@
+trait First {}
+
+template impl First {}
+
+trait Second {}
+
+template impl Second {}
+
+struct Pair[T] {
+    left: T,
+    right: T,
+}
+
+derive[T] (
+    First,
+    Second,
+) for Pair[T]
+
+fn accepts_first[T: First](_value: T) -> UInt8 {
+    3
+}
+
+fn accepts_second[T: Second](_value: T) -> UInt8 {
+    4
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8] = .{ left = 1, right = 2 }
+    accepts_first(pair) + accepts_second(pair)
+}

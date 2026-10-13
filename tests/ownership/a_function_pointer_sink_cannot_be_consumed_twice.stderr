@@ -1,0 +1,7 @@
+error[O-Move]: `coin` has already been moved
+  --> tests/ownership/a_function_pointer_sink_cannot_be_consumed_twice.lin:16:11
+   |
+15 |     let _first = spend(coin)
+   |                        ---- it was taken here
+16 |     spend(coin)
+   |           ^^^^ it was already taken, and a value is taken once

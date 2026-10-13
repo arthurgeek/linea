@@ -1,0 +1,10 @@
+enum Choice[T] { Empty, Value(T) }
+
+fn select[T: Discardable](value: Choice[T] = .Empty) -> UInt8 {
+    match read value { Empty => 0, Value(_) => 1 }
+}
+
+fn main() -> UInt8 {
+    let chosen: Choice[UInt8] = .Value(3)
+    select(chosen)
+}

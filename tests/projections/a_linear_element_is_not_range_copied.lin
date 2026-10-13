@@ -1,0 +1,14 @@
+// A range place is a place of the array type its bounds name, so what may be
+// done with it follows from that type and nothing range-shaped is added:
+// copying `a[0..2]` is copying a `[Key; 2]`, which [O-LinearCopy] refuses
+// because a linear value has exactly one and there is nothing to copy it from.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let a: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+    let held: [Key; 2] = copy(a[0..2])
+    held[0].n + a[1].n
+}

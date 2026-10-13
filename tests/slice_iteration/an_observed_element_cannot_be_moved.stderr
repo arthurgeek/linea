@@ -1,0 +1,5 @@
+error[O-Move]: this read-only observation cannot give away the value it observes
+  --> tests/slice_iteration/an_observed_element_cannot_be_moved.lin:10:17
+   |
+10 |     let moved = *item
+   |                 ^^^^^ read the observation, or copy a copyable referent

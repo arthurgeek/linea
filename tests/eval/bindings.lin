@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let x: UInt8 = 4
+    let y: UInt8 = x * 2
+    y + 1
+}

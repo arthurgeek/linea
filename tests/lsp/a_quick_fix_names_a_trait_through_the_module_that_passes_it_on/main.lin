@@ -1,0 +1,8 @@
+// `ByteWriter` is passed on by `std.io`, which this file imports, so the
+// quick fix writes the `use` through `io`.
+import std.io
+
+fn main() -> UInt8 {
+    let err = io.stderr()
+    UInt8(err.pending_bytes())
+}

@@ -1,0 +1,15 @@
+struct Box {
+    x: UInt8,
+}
+
+// An impl declares no body to run, so the modifier says nothing about it -- the
+// same reason it declares no name for a visibility to export.
+test impl Box {
+    pub fn get(b: Box) -> UInt8 {
+        b.x
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

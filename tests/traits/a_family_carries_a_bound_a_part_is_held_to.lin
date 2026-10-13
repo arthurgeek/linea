@@ -1,0 +1,24 @@
+// A generic trait implementation and a Discardable component bound are
+// discharged independently for an ordinary wrapper.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Wrap[U] {
+    w: U,
+}
+
+impl[T] Show for Wrap[T] {
+    fn show(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Holder[T: Discardable + Show] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Wrap[UInt8]] = .{ v = .{ w = 1 } }
+    Show.show(h.v)
+}

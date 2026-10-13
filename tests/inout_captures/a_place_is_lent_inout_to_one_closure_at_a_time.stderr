@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+ --> tests/inout_captures/a_place_is_lent_inout_to_one_closure_at_a_time.lin:6:30
+  |
+3 |     var once = inout [inout count] || {
+  |                             ----- lent `inout` here
+6 |     var twice = inout [inout count] || {
+  |                              ^^^^^ this uses the place while it is lent
+9 |     &once()
+  |      ---- a value holding the lend is still used here
+  |
+  = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

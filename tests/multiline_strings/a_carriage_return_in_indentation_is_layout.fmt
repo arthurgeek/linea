@@ -1,0 +1,8 @@
+// A carriage return in the indentation before `\\` is layout, like a
+// space or a tab, so the line after it still belongs to the literal.
+fn main() -> UInt8 {
+    let text =
+        \\a
+        \\b
+    UInt8(text.length() - 3)
+}

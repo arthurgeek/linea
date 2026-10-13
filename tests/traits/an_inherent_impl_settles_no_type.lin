@@ -1,0 +1,20 @@
+// A declared type is a member of a trait, so an implementation that names no
+// trait has nothing to settle. Written here it answers no declaration and is
+// reached through no namespace: an inherent implementation's members are the
+// type's, and the type declares no such name.
+struct Counter {
+    at: UInt8,
+}
+
+impl Counter {
+    type Item = UInt8
+
+    fn of(x: Counter) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Counter.of(c)
+}

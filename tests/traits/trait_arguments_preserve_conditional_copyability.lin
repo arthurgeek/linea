@@ -1,0 +1,30 @@
+// Trait arguments select the implementation; explicit copyability of the
+// wrapper and its component permits duplicating the concrete holder.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+@copyable
+struct Coin {
+    n: UInt8,
+}
+
+impl Lookup[UInt64] for Coin {
+    fn at(self: Coin, _i: UInt64) -> UInt8 {
+        self.n
+    }
+}
+
+@copyable
+struct Holder[T: Lookup[UInt64]] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Coin] = .{ v = .{ n = 4 } }
+    let g: Holder[Coin] = copy(h)
+    let Holder { v: a } = h
+    let Holder { v: b } = g
+    let i: UInt64 = 0
+    Lookup.at(a, i) + Lookup.at(b, i)
+}

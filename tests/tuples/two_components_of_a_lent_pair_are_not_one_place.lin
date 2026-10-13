@@ -1,0 +1,18 @@
+// The two binders of a lent pair are different components, so a call passing
+// both names two places and no argument aliases another. The walk lends the
+// whole element, so each write through a binder is reported as a write to a
+// lent place. Passing one binder twice is still aliasing.
+fn add_into(inout target: UInt8, inout source: UInt8) -> () {
+    target = target + source
+}
+
+fn main() -> UInt8 {
+    var pairs = [(1, 2), (3, 4)]
+    for inout (left, right) in pairs {
+        add_into(&left, &right)
+    }
+    for inout (first, _second) in pairs {
+        add_into(&first, &first)
+    }
+    pairs[0]._0
+}

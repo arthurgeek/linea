@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/a_named_length_is_a_value_not_a_spelling.lin:25:6
+   |
+19 | impl Give[[UInt8; n]] for Holder {
+   |      ---- already implemented here
+25 | impl Give[[UInt8; m]] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

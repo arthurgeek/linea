@@ -1,0 +1,15 @@
+enum Wrap[T, U] { Value(T), Other(U) }
+
+fn known(sink value: UInt8) -> Wrap[UInt8, UInt64] {
+    return .Value(value)
+}
+
+fn choose[T, U, F: fn(sink value: UInt8) -> Wrap[T, U], G: fn(sink value: UInt8) -> Wrap[T, U]](first: F, _second: G) -> Wrap[T, U]
+where carries(first, _second) {
+    return first(7)
+}
+
+fn main() -> UInt8 {
+    let wrapped = choose(.Value, known)
+    match wrapped { Value(value) => value, Other(_) => 1 }
+}

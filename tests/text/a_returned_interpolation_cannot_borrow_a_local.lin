@@ -1,0 +1,26 @@
+// A closure's local ends when the closure returns, so the closure cannot
+// return a literal that borrows it.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let greet = || {
+        let name = Name { text = "Ada" }
+        "hi {name}"
+    }
+    println(greet())?
+    return .Ok(0)
+}

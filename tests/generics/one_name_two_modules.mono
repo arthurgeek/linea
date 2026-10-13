@@ -1,0 +1,34 @@
+@copyable
+pub struct Thing {
+    v: UInt8,
+}
+
+@copyable
+pub struct Thing {
+    p: UInt8,
+    q: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let one = a;make()
+    let two = b;make()
+    let c1 = ;ident[a.Thing](one)
+    let c2 = ;ident[b.Thing](two)
+    c1.v + c2.q
+}
+
+pub fn a;make() -> a.Thing {
+    .{ v = 1 }
+}
+
+pub fn b;make() -> b.Thing {
+    .{ p = 2, q = 3 }
+}
+
+fn ;ident[a.Thing](v: a.Thing) -> a.Thing {
+    copy(v)
+}
+
+fn ;ident[b.Thing](v: b.Thing) -> b.Thing {
+    copy(v)
+}

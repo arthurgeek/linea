@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `deeper` with more than it was given
+  --> tests/generics/recursion_that_grows_in_an_impl.lin:16:9
+   |
+16 |         Box.deeper(Wrap.Only(copy(a)))
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

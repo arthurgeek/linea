@@ -1,0 +1,23 @@
+// A module owning neither side may not write the implementation. Nobody else
+// has a claim: the trait's module and the type's module each have a reason to
+// be the one that decides, and a third has only an opinion about two things it
+// does not own.
+//
+// This is also what makes coherence key equality rather than a search. Two
+// implementations conflict only when the trait and the head both match, which
+// this rule already makes impossible across modules.
+import account
+import measure
+
+use account.Account
+use measure.Measure
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,41 @@
+// An initialiser that leaves through `?` binds nothing, so there is nothing to
+// release on that path; the bindings made before it are released.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn open(id: UInt8) -> Option[Lamp] {
+    if id == 0 {
+        Option.None
+    } else {
+        Option.Some(Lamp { id })
+    }
+}
+
+fn lights(first: UInt8, second: UInt8) -> Option[UInt8] {
+    defer let a = open(first)?
+    defer let b = open(second)?
+    Option.Some(first + second)
+}
+
+fn main() -> UInt8 {
+    match lights(1, 0) {
+        Some(total) => total,
+        None => 9,
+    }
+}

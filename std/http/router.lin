@@ -1,0 +1,1045 @@
+import std.collections
+import std.fmt
+import std.mem
+import std.testing
+
+use mem.Closure
+
+// A `Route` answers one request: it may change the application's state, and
+// the response it returns may carry what the request holds.
+alias Route[S = (), P: Allocator = mem.SystemAllocator] = fn(inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request)
+
+// A `MethodTable` holds the handlers registered at one pattern shape: one per
+// named method, and one for the pattern that names no method. Each is an index
+// into the router's handlers.
+@(copyable, derive(Equatable, Debug, Release))
+struct MethodTable {
+    get: Option[UInt64],
+    head: Option[UInt64],
+    post: Option[UInt64],
+    put: Option[UInt64],
+    patch: Option[UInt64],
+    delete: Option[UInt64],
+    options: Option[UInt64],
+    any: Option[UInt64],
+}
+
+// `empty_table` names no handler for any method.
+let empty_table: MethodTable = .{ get = .None, head = .None, post = .None, put = .None, patch = .None, delete = .None, options = .None, any = .None }
+
+impl MethodTable {
+    // `handler` returns the handler registered for `method`, or for no method when
+    // `method` is `None`. `Other` names none.
+    fn handler(self: Self, method: Option[Method]) -> Option[UInt64] {
+        let named = copy(method) else {
+            return copy(self.any)
+        }
+        match named {
+            Get => copy(self.get),
+            Head => copy(self.head),
+            Post => copy(self.post),
+            Put => copy(self.put),
+            Patch => copy(self.patch),
+            Delete => copy(self.delete),
+            Options => copy(self.options),
+            Other => .None,
+        }
+    }
+
+    // Register `index` for `method`, or for no method when `method` is `None`.
+    fn register(inout self: Self, method: Option[Method], index: UInt64) -> () {
+        let named = copy(method) else {
+            self.any = .Some(index)
+            return
+        }
+        match named {
+            Get => self.get = .Some(index),
+            Head => self.head = .Some(index),
+            Post => self.post = .Some(index),
+            Put => self.put = .Some(index),
+            Patch => self.patch = .Some(index),
+            Delete => self.delete = .Some(index),
+            Options => self.options = .Some(index),
+            Other => panic("a pattern names no unknown method"),
+        }
+    }
+}
+
+// A `Node` is one node of the segment trie. It holds the children reached by
+// the next segment and the handlers of the patterns that end here: `exact`
+// answers a path that ends at this node, and `subtree` a path continuing past
+// it.
+@linear
+struct Node[A: Allocator] {
+    literals: collections.Map[String[A], UInt64, A],
+    parameter: Option[UInt64],
+    remainder: Option[UInt64],
+    exact: MethodTable,
+    subtree: MethodTable,
+}
+
+derive[A: Allocator] Release for Node[A]
+
+// Return a node with no children and no handlers.
+fn new_node[A: Allocator](allocator: A) -> Node[A] where carries(allocator) {
+    .{ literals = collections.Map.new_in(allocator), parameter = .None, remainder = .None, exact = empty_table, subtree = empty_table }
+}
+
+// A walk of the trie finds a route, nothing, or a path other methods answer,
+// before any handler runs.
+@(copyable, derive(Equatable, Debug))
+enum Found {
+    Route(UInt64),
+    Unmatched,
+    WrongMethod(MethodTable),
+}
+
+// A `Walk` records what a walk found and how many trie nodes it read to find it.
+@(copyable, derive(Equatable, Debug))
+struct Walk {
+    found: Found,
+    visited: UInt64,
+}
+
+// A `Router` dispatches requests by method and path pattern.
+//
+// A pattern is `[METHOD ]PATH`. A path segment is a literal, `{name}` (one
+// non-empty segment) or `{name...}` (the rest of the path, last only), and a
+// path ending in `/` matches every path beneath it. The pattern that answers
+// is the most specific one matching both path and method: at the first
+// segment where two differ, a literal before `{name}`, before `{name...}`,
+// before a subtree; at one shape, the method's own pattern, then `GET`'s for
+// `HEAD`, then one naming no method. A path some pattern matches under other
+// methods only answers 405 with `Allow` naming them; no match answers 404.
+//
+// Patterns are held in a trie of segments and searched depth first in that
+// order, backing out of a branch that dead-ends. Each node sits at one depth
+// under one prefix, so the search enters a node at most once, and only a node
+// whose pattern prefix matches the request's prefix. It stops where the trie
+// ends, so a request deeper than every pattern costs no more than the deepest
+// pattern matching its prefix. The cost is therefore bounded by the patterns
+// sharing the request's prefix, not by every registered pattern: a table of
+// literals reads one node per segment, and only `{name}` beside literals at
+// the same position widens the search.
+//
+// A route is a named function whose parameters name what it reads, registered
+// with `route`: an optional leading `inout state: S`, up to six extractors, and
+// the request last (see `Endpoint`). `http.with_state` owns the state and
+// lends it down; a router serving a program with nothing to share is a
+// `Router[()]`, made by `Router.new`, and a function that takes no state
+// is registered on a router of any state. `route_raw` registers a closure or
+// function taking `inout state: S` and the request, and returning the
+// response, for a route that reads its own inputs.
+//
+// The router keeps each route in its own allocator, which may be an arena, so
+// a route's captures are fixed when it is registered and hold nothing that
+// must be released: what changes between requests belongs in the state. The
+// names and decoded values of the path values a route reads are stored in the
+// router, which holds those of the request it answered last, so they cost no
+// allocation when the pattern has none.
+@(opaque, linear, derive(Release))
+struct Router[S = (), P: Allocator = mem.SystemAllocator] {
+    allocator: P,
+    nodes: Vec[Node[P], P],
+    handlers: Vec[Closure[Route[S, P], P], P],
+    // `patterns` holds each handler's pattern path as a range of `paths`.
+    patterns: Vec[Span, P],
+    paths: String[P],
+    // `matched` holds the names and decoded values of the path values of the
+    // request answered last, as UTF-8, and `matched_fields` their ranges there.
+    matched: Vec[UInt8, P],
+    matched_fields: Vec[Field, P],
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // `new_in` makes a router that keeps its routes in `allocator`. Its routes
+    // take a state of the type the context names, as
+    // `var router: Router[App, P] = Router.new_in(allocator)` does, and
+    // `inout _: ()` when nothing names one. It has no patterns, so it answers
+    // every request 404, and it allocates nothing until the first is registered.
+    pub fn new_in(allocator: P) -> Self where carries(allocator) {
+        .{
+            allocator = copy(allocator),
+            nodes = Vec.new_in(allocator),
+            handlers = Vec.new_in(allocator),
+            patterns = Vec.new_in(allocator),
+            paths = String.new_in(allocator),
+            matched = Vec.new_in(allocator),
+            matched_fields = Vec.new_in(allocator),
+        }
+    }
+}
+
+test fn a_router_built_in_an_allocator_answers_404() {
+    defer var router = Router.new_in(mem.system())
+    defer let received = served(&router, "GET", "/")
+    testing.assert_eq(received.view(), not_found, "a new router matched")?
+    .Ok(())
+}
+
+impl[S] Router[S] {
+    // `new` makes a router that keeps its routes in the system allocator. Its
+    // state type comes from the context, and is `()` when nothing names one.
+    pub fn new() -> Self {
+        Router.new_in(mem.system())
+    }
+}
+
+test fn a_router_written_without_an_allocator_is_the_system_router() {
+    let short: Router[()] = Router.new()
+    let long: Router[(), mem.SystemAllocator] = short
+    long.release()
+}
+
+test fn a_new_router_answers_404() {
+    defer var router = Router.new()
+    defer let received = served(&router, "GET", "/")
+    testing.assert_eq(received.view(), not_found, "a stateless router matched")?
+    .Ok(())
+}
+
+// Each request to `/visit` counts one visit in the state the router is lent.
+test fn a_stateful_router_lends_the_state_to_each_route() {
+    defer var router: Router[Visits] = Router.new()
+    testing.assert_ok_eq(&router.route_raw("GET /visit", visit), (), "registering failed")?
+    var visits = Visits { count = 0 }
+    defer let first = served_with(&router, &visits, "GET", "/visit")
+    defer let second = served_with(&router, &visits, "GET", "/visit")
+    testing.assert_eq(first.view(), "200 visit 1", "the first visit was not counted")?
+    testing.assert_eq(second.view(), "200 visit 2", "the count was not kept in the state")?
+    testing.assert_eq(visits.count, UInt64(2), "the state lent to the router did not change")?
+    .Ok(())
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // Register `handler` for `pattern`. `handler` is a named function whose
+    // parameters are the inputs it reads, an `Endpoint`: an optional leading
+    // `inout state`, up to six extractors, and the request last. The router
+    // reads each extractor from the request before calling it.
+    pub fn route[H: Endpoint[S, P] + Release + Discardable](inout self: Self, pattern: Str, sink handler: H) -> Result[(), RouteError] where carries(), retains(self: self, handler) {
+        &self.route_raw(pattern, [sink handler] |inout state, request| handler.call(&state, request))
+    }
+
+    // Register `handler` for `pattern`. `handler` is any closure or function
+    // taking `inout state: S` and the request. A closure is called for
+    // reading, so what it captures stays as it was registered, and it captures
+    // nothing that must be released; the router keeps it in its own allocator
+    // and releases it with the router, and a refused registration releases it
+    // at once.
+    // Registration reads the pattern once and adds at most one node per
+    // segment, so it costs the pattern's length whatever is already registered.
+    pub fn route_raw[H: Route[S, P] + Release + Discardable](inout self: Self, pattern: Str, sink handler: H) -> Result[(), RouteError] where carries(), retains(self: self, handler) {
+        let slot = &self.claim(pattern) else |refused| {
+            handler.release()
+            return .Err(refused)
+        }
+        let kept = Closure.open(self.allocator, handler)?
+        let index = &self.add_handler(slot.path, kept)?
+        if slot.subtree {
+            &self.nodes[slot.node].subtree.register(slot.method, index)
+        } else {
+            &self.nodes[slot.node].exact.register(slot.method, index)
+        }
+        .Ok(())
+    }
+}
+
+test fn a_route_is_registered_once_per_shape_and_method() {
+    defer var router = Router.new()
+    let first = &router.route_raw(r"/items/{id}", first_handler)
+    let other_method = &router.route_raw(r"POST /items/{id}", second_handler)
+    let deeper = &router.route_raw(r"/items/{id}/parts", second_handler)
+    let invalid = &router.route_raw("items", first_handler)
+    testing.assert_ok_eq(first, (), "registering failed")?
+    testing.assert_ok_eq(other_method, (), "a second method at one shape was refused")?
+    testing.assert_ok_eq(deeper, (), "a longer pattern was refused")?
+    testing.assert_eq(invalid, .Err(.InvalidPattern), "a pattern without a leading slash was accepted")?
+    .Ok(())
+}
+
+test fn identical_shapes_are_a_duplicate() {
+    defer var router = Router.new()
+    let first = &router.route_raw(r"/a/{x}", first_handler)
+    let renamed = &router.route_raw(r"/a/{y}", second_handler)
+    let method = &router.route_raw(r"GET /a/{x}", second_handler)
+    let again = &router.route_raw(r"GET /a/{z}", second_handler)
+    let subtree = &router.route_raw("/a/", second_handler)
+    let subtree_again = &router.route_raw("/a/", second_handler)
+    testing.assert_ok_eq(first, (), "registering failed")?
+    testing.assert_eq(renamed, .Err(.Duplicate), "a renamed parameter was a new shape")?
+    testing.assert_ok_eq(method, (), "a method pattern at a methodless shape was refused")?
+    testing.assert_eq(again, .Err(.Duplicate), "a repeated method pattern was accepted")?
+    testing.assert_ok_eq(subtree, (), "a subtree was refused")?
+    testing.assert_eq(subtree_again, .Err(.Duplicate), "a repeated subtree was accepted")?
+    defer let received = served(&router, "GET", "/a/1")
+    testing.assert_eq(received.view(), "200 second", "a refused pattern replaced a registered one")?
+    .Ok(())
+}
+
+// A route closure reads what it captured, here the text it answers with.
+test fn a_route_closure_reads_what_it_captured() {
+    defer var router = Router.new()
+    let greeting = "hello"
+    let registered = &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))
+    defer let received = served(&router, "GET", "/greet")
+    testing.assert_ok_eq(registered, (), "registering failed")?
+    testing.assert_eq(received.view(), "200 hello", "the captured text was not answered")?
+    .Ok(())
+}
+
+test fn a_router_keeps_its_routes_in_an_arena() {
+    // The router's tables and the request's 65536-byte arena both come from
+    // this parent arena.
+    defer let parent = mem.Arena.open(mem.system(), size: 131072)
+    defer var router = Router.new_in(parent.handle())
+    testing.assert_ok_eq(&router.route_raw(r"GET /items/{id}", named_id), (), "registering in an arena failed")?
+    testing.assert_ok_eq(&router.route_raw("POST /items", first_handler), (), "a second route in an arena failed")?
+    defer let received = served(&router, "GET", "/items/42")
+    testing.assert_eq(received.view(), "200 id=42", "a router in an arena answered wrongly")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_table_a_route_grows() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), RouteError] {
+            defer var router = Router.new_in(allocator)
+            &router.route_raw(r"GET /items/{id}", named_id)?
+            &router.route_raw("POST /items", first_handler)?
+            &router.route_raw("/static/", second_handler)?
+            // A closure that captures its text is kept in the router's allocator.
+            let greeting = "hello"
+            &router.route_raw("GET /greet", [greeting] |inout _, request| text(request, greeting))?
+            return .Ok(())
+        },
+        RouteError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "registering routes was reported as failing")?
+    .Ok(())
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // `claim` finds the node `pattern` ends at, adding the nodes it lacks, and
+    // refuses a pattern that is malformed or already registered.
+    fn claim(inout self: Self, pattern: Str) -> Result[Slot, RouteError] where carries(.Ok: pattern), retains(self: self) {
+        let parsed = parse_pattern(pattern, self.allocator)?
+        var node = &self.root()?
+        var start: UInt64 = 0
+        while start < parsed.path.length() {
+            let end = segment_end(parsed.path, start)
+            let segment = segment_of(parsed.path.slice(start, end).unwrap()).unwrap()
+            node = &self.child_or_new(node, segment)?
+            start = end + 1
+        }
+        let table = if parsed.subtree {
+            copy(self.nodes[node].subtree)
+        } else {
+            copy(self.nodes[node].exact)
+        }
+        if table.handler(parsed.method).is_some() {
+            return .Err(.Duplicate)
+        }
+        .Ok(.{ path = copy(parsed.path), node, subtree = parsed.subtree, method = copy(parsed.method) })
+    }
+}
+
+// A `Slot` is where a pattern's handler is registered: the node its path ends
+// at, whether it answers the subtree below it, and its method.
+struct Slot {
+    path: Str,
+    node: UInt64,
+    subtree: Bool,
+    method: Option[Method],
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // `root` returns the root node, adding it on first use.
+    fn root(inout self: Self) -> Result[UInt64, RouteError] where carries(), retains(self: self) {
+        if self.nodes.length() != 0 {
+            return .Ok(0)
+        }
+        &self.push_node()
+    }
+
+    // `child_or_new` returns the child of node `at` that `segment` reaches, adding
+    // it when absent.
+    fn child_or_new(inout self: Self, at: UInt64, segment: Segment) -> Result[UInt64, RouteError] where carries(), retains(self: self) {
+        match copy(segment) {
+            Literal(name) => {
+                match self.nodes[at].literals.get(name) {
+                    Some(child) => return .Ok(*child),
+                    None => {},
+                }
+                let child = &self.push_node()?
+                let key = name.to_owned(self.allocator)?
+                let replaced = &self.nodes[at].literals.insert(key, child).settled()?
+                replaced.release()
+                return .Ok(child)
+            },
+            Parameter(_) => {
+                match copy(self.nodes[at].parameter) {
+                    Some(child) => return .Ok(child),
+                    None => {},
+                }
+                let child = &self.push_node()?
+                self.nodes[at].parameter = .Some(child)
+                return .Ok(child)
+            },
+            Remainder(_) => {
+                match copy(self.nodes[at].remainder) {
+                    Some(child) => return .Ok(child),
+                    None => {},
+                }
+                let child = &self.push_node()?
+                self.nodes[at].remainder = .Some(child)
+                return .Ok(child)
+            },
+        }
+    }
+
+    // Append an empty node and return its index.
+    fn push_node(inout self: Self) -> Result[UInt64, RouteError] where carries(), retains(self: self) {
+        let index = self.nodes.length()
+        &self.nodes.push(new_node(self.allocator)).settled()?
+        .Ok(index)
+    }
+
+    // Store `handler` and its pattern path, and return its index. A refused
+    // allocation releases `handler`.
+    fn add_handler(inout self: Self, path: Str, sink handler: Closure[Route[S, P], P]) -> Result[UInt64, RouteError] where carries(), retains(self: handler) {
+        let span = store_part(&self.paths, path) else |reason| {
+            handler.release()
+            return .Err(.Allocation(reason))
+        }
+        match &self.patterns.push(span).settled() {
+            Ok(_) => {},
+            Err(reason) => {
+                handler.release()
+                return .Err(.Allocation(reason))
+            },
+        }
+        let index = self.handlers.length()
+        match &self.handlers.push(handler).settled() {
+            Ok(_) => .Ok(index),
+            Err(reason) => {
+                let _span = &self.patterns.pop()
+                return .Err(.Allocation(reason))
+            },
+        }
+    }
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // Find the pattern that answers `method` at `path`, and count the trie
+    // nodes the search entered.
+    fn walk(self: Self, method: Method, path: Str) -> Walk {
+        if self.nodes.length() == 0 || !path.starts_with("/") {
+            return .{ found = .Unmatched, visited = 0 }
+        }
+        var search: Search = .{ allowed = empty_table, visited = 0 }
+        let found: Found = match self.search(0, method, path, 1, &search) {
+            Some(index) => .Route(index),
+            None => {
+                if search.allowed == empty_table {
+                    .Unmatched
+                } else {
+                    .WrongMethod(copy(search.allowed))
+                }
+            },
+        }
+        .{ found, visited = search.visited }
+    }
+}
+
+test fn a_match_visits_only_nodes_whose_prefix_matches() {
+    defer var router = Router.new()
+    for index in UInt64(0)..1000 {
+        let pattern = fmt.render_owned(mem.system(), "GET /r{index}/{{id}}").unwrap()
+        let outcome = &router.route_raw(pattern.view(), first_handler)
+        pattern.release()
+        testing.assert_ok_eq(outcome, (), "registering a numbered route failed")?
+    }
+    testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"/items/{id}/edit", second_handler), (), "registering failed")?
+    // Of 1004 nodes, three match the prefix: the root, `r999` and `{id}`.
+    let last = router.walk(.Get, "/r999/42")
+    testing.assert_eq(last, Walk { found = .Route(999), visited = 3 }, "the last route was not found directly")?
+    // A path deeper than every pattern stops the search where the trie ends.
+    let past = router.walk(.Get, "/r5/7/x/y/z/w")
+    testing.assert_eq(past, Walk { found = .Unmatched, visited = 3 }, "a path past every pattern was searched past the trie")?
+    // `new` dead-ends at `edit`, and `{id}` is tried next: the root, `items`,
+    // `new`, `{id}` and `edit`.
+    let edit = router.walk(.Get, "/items/new/edit")
+    testing.assert_eq(edit, Walk { found = .Route(1001), visited = 5 }, "the search did not back out of a literal")?
+    .Ok(())
+}
+
+impl[S, P: Allocator] Router[S, P] {
+    // Search beneath node `at` for the segments of `path` from `start`, which
+    // is past the end when none remain. The literal child is tried first, then
+    // `{name}`, then `{name...}`, then this node's subtree, so the first
+    // pattern found is the most specific at the first segment where two
+    // differ. A pattern whose path matches but whose method does not is passed
+    // over, and its methods are added to `search.allowed`.
+    fn search(self: Self, at: UInt64, method: Method, path: Str, start: UInt64, inout search: Search) -> Option[UInt64] {
+        search.visited += 1
+        if start > path.length() {
+            return considered(&search, self.nodes[at].exact, method)
+        }
+        let end = segment_end(path, start)
+        let segment = path.slice(start, end).unwrap()
+        match self.nodes[at].literals.get(segment) {
+            Some(child) => match self.search(*child, method, path, end + 1, &search) {
+                Some(index) => return .Some(index),
+                None => {},
+            },
+            None => {},
+        }
+        if segment.length() != 0 {
+            match copy(self.nodes[at].parameter) {
+                Some(child) => match self.search(child, method, path, end + 1, &search) {
+                    Some(index) => return .Some(index),
+                    None => {},
+                },
+                None => {},
+            }
+        }
+        match copy(self.nodes[at].remainder) {
+            Some(child) => {
+                search.visited += 1
+                match considered(&search, self.nodes[child].exact, method) {
+                    Some(index) => return .Some(index),
+                    None => {},
+                }
+            },
+            None => {},
+        }
+        considered(&search, self.nodes[at].subtree, method)
+    }
+}
+
+// A `Search` records what a search has seen so far: the methods of the
+// patterns whose path matched and whose method did not, and the trie nodes it
+// entered.
+@copyable
+struct Search {
+    allowed: MethodTable,
+    visited: UInt64,
+}
+
+// `considered` returns the handler `table` names for `method`, or adds the
+// table's methods to those the path allows and returns `None`.
+fn considered(inout search: Search, table: MethodTable, method: Method) -> Option[UInt64] {
+    match chosen(table, method) {
+        Some(index) => .Some(index),
+        None => {
+            search.allowed = merged(search.allowed, table)
+            return .None
+        },
+    }
+}
+
+// `chosen` returns the handler `table` names for `method`: its own, `GET`'s for
+// `HEAD`, then the one naming no method.
+fn chosen(table: MethodTable, method: Method) -> Option[UInt64] {
+    match table.handler(.Some(method)) {
+        Some(index) => .Some(index),
+        None => {
+            if method == Method.Head && table.get.is_some() {
+                copy(table.get)
+            } else {
+                copy(table.any)
+            }
+        },
+    }
+}
+
+// `merged` returns a table naming each method either table names.
+fn merged(first: MethodTable, second: MethodTable) -> MethodTable {
+    .{
+        get = either(first.get, second.get),
+        head = either(first.head, second.head),
+        post = either(first.post, second.post),
+        put = either(first.put, second.put),
+        patch = either(first.patch, second.patch),
+        delete = either(first.delete, second.delete),
+        options = either(first.options, second.options),
+        any = either(first.any, second.any),
+    }
+}
+
+// Return `first` when it names a handler, and `second` otherwise.
+fn either(first: Option[UInt64], second: Option[UInt64]) -> Option[UInt64] {
+    if first.is_some() {
+        copy(first)
+    } else {
+        copy(second)
+    }
+}
+
+// `allowed` writes the `Allow` value for a table: its methods in `Method`'s
+// order, with `HEAD` wherever `GET` is, because `GET` answers it.
+fn allowed[A: Allocator](table: MethodTable, inout allow: String[A]) -> Result[(), mem.Oom] where carries() {
+    let listed = [
+        MethodName { present = table.get.is_some(), name = "GET" },
+        MethodName { present = table.head.is_some() || table.get.is_some(), name = "HEAD" },
+        MethodName { present = table.post.is_some(), name = "POST" },
+        MethodName { present = table.put.is_some(), name = "PUT" },
+        MethodName { present = table.patch.is_some(), name = "PATCH" },
+        MethodName { present = table.delete.is_some(), name = "DELETE" },
+        MethodName { present = table.options.is_some(), name = "OPTIONS" },
+    ]
+    for entry in listed {
+        if entry.present {
+            if allow.length() != 0 {
+                &allow.append(", ")?
+            }
+            &allow.append(entry.name)?
+        }
+    }
+    .Ok(())
+}
+
+// A `MethodName` says whether a table names a method, and gives that method's
+// token.
+@copyable
+struct MethodName {
+    present: Bool,
+    name: Str,
+}
+
+// A router answers a request with the handler its pattern selects, and hands
+// it the state and the request with the path values it matched. A path
+// matched under other methods answers 405 with `Allow`, a path matching
+// nothing answers 404, and a path value that is not percent-encoded UTF-8
+// answers 400.
+impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
+    fn serve_http(inout self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        let walked = self.walk(request.method(), request.path())
+        match copy(walked.found) {
+            Route(index) => {
+                let span = copy(self.patterns[index])
+                let pattern = stored_part(self.paths.view(), span)
+                if pattern.find(r"{").is_none() {
+                    return (self.handlers[index])(&state, request)
+                }
+                // The values of the request answered last are dropped, and
+                // their storage is kept for these.
+                &self.matched.clear()
+                &self.matched_fields.clear()
+                match record_path_values(&self.matched, &self.matched_fields, pattern, request.path()) {
+                    Ok(_) => {},
+                    Err(refusal) => return .Err(match refusal {
+                        Invalid => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
+                        Allocation => Error.new(.InternalServerError),
+                    }),
+                }
+                // Every recorded name and value is UTF-8, so the whole is.
+                let matched = Str.from_bytes(self.matched.as_slice()).unwrap()
+                return (self.handlers[index])(&state, request.routed(matched, self.matched_fields.as_slice()))
+            },
+            Unmatched => .Err(error(request, .NotFound, "not found")),
+            WrongMethod(table) => {
+                var allow = String.new_in(request.allocator())
+                allowed(table, &allow)?
+                var response = text(request, "method not allowed\n")?.with_status(.MethodNotAllowed)
+                &response.set_header("Allow", allow.view())?
+                return .Ok(response)
+            },
+        }
+    }
+}
+
+test fn a_literal_beats_a_parameter_at_the_same_position() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"/items/{id}", second_handler), (), "registering failed")?
+    defer let literal = served(&router, "GET", "/items/new")
+    defer let parameter = served(&router, "GET", "/items/old")
+    testing.assert_eq(literal.view(), "200 first", "the parameter beat the literal")?
+    testing.assert_eq(parameter.view(), "200 second", "the parameter did not match another segment")?
+    .Ok(())
+}
+
+test fn a_dead_end_literal_gives_way_to_a_parameter() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"/items/{id}/edit", named_id), (), "registering failed")?
+    defer let edit = served(&router, "GET", "/items/new/edit")
+    defer let new = served(&router, "GET", "/items/new")
+    testing.assert_eq(edit.view(), "200 id=new", "a literal that dead-ends hid a parameter")?
+    testing.assert_eq(new.view(), "200 first", "the literal no longer matched")?
+    .Ok(())
+}
+
+test fn a_method_mismatch_gives_way_to_a_less_specific_path() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw(r"GET /a/{x}", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("POST /a/b", second_handler), (), "registering failed")?
+    defer let get = served(&router, "GET", "/a/b")
+    defer let post = served(&router, "POST", "/a/b")
+    testing.assert_eq(get.view(), "200 first", "a literal of another method answered 405")?
+    testing.assert_eq(post.view(), "200 second", "the more specific pattern lost its own method")?
+    .Ok(())
+}
+
+test fn a_parameter_beats_a_remainder() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw(r"/files/{name}", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"/files/{rest...}", named_rest), (), "registering failed")?
+    defer let one = served(&router, "GET", "/files/a")
+    defer let two = served(&router, "GET", "/files/a/b%20c")
+    defer let empty = served(&router, "GET", "/files/")
+    defer let bare = served(&router, "GET", "/files")
+    testing.assert_eq(one.view(), "200 first", "the remainder beat the parameter")?
+    testing.assert_eq(two.view(), "200 rest=a/b c", "the remainder did not take the rest of the path")?
+    testing.assert_eq(empty.view(), "200 rest=", "the remainder did not take an empty rest")?
+    testing.assert_eq(bare.view(), not_found, "the remainder matched a path ending before it")?
+    .Ok(())
+}
+
+test fn a_method_pattern_beats_a_methodless_one() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("POST /x", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("/x", second_handler), (), "registering failed")?
+    defer let post = served(&router, "POST", "/x")
+    defer let get = served(&router, "GET", "/x")
+    defer let unknown = served(&router, "BREW", "/x")
+    testing.assert_eq(post.view(), "200 first", "the methodless pattern beat the method pattern")?
+    testing.assert_eq(get.view(), "200 second", "the methodless pattern did not answer another method")?
+    testing.assert_eq(unknown.view(), "200 second", "the methodless pattern did not answer an unnamed method")?
+    .Ok(())
+}
+
+test fn get_answers_head() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("GET /x", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("GET /y", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("HEAD /y", second_handler), (), "registering failed")?
+    defer let head = served(&router, "HEAD", "/x")
+    defer let own = served(&router, "HEAD", "/y")
+    // The server sends a HEAD response's head alone; the router answers with
+    // the response its handler built.
+    testing.assert_eq(head.view(), "200 first", "GET did not answer HEAD")?
+    testing.assert_eq(own.view(), "200 second", "GET beat a HEAD pattern")?
+    .Ok(())
+}
+
+test fn a_wrong_method_is_405_with_allow() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("POST /x", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("GET /y", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("DELETE /y", first_handler), (), "registering failed")?
+    defer let post_only = served(&router, "GET", "/x")
+    defer let two = served(&router, "PUT", "/y")
+    testing.assert_eq(post_only.view(), "405 method not allowed\n (Allow: POST)", "a wrong method was not refused")?
+    testing.assert_eq(two.view(), "405 method not allowed\n (Allow: GET, HEAD, DELETE)", "Allow did not list every method")?
+    // Allow names the methods of every pattern whose path matched.
+    testing.assert_ok_eq(&router.route_raw("POST /z/b", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"DELETE /z/{x}", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"PATCH /z/{rest...}", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("OPTIONS /z/c", first_handler), (), "registering failed")?
+    defer let union = served(&router, "PUT", "/z/b")
+    testing.assert_eq(union.view(), "405 method not allowed\n (Allow: POST, PATCH, DELETE)", "Allow did not list the methods of every matching pattern")?
+    .Ok(())
+}
+
+test fn no_match_is_404() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw(r"/items/{id}", first_handler), (), "registering failed")?
+    for path in ["/", "/items", "/items/", "/items/1/2", "/other/1"] {
+        defer let received = served(&router, "GET", path)
+        testing.assert_eq(received.view(), not_found, path)?
+    }
+    // An asterisk-form target has no path to walk.
+    testing.assert_eq(router.walk(.Options, "*"), Walk { found = .Unmatched, visited = 0 }, "an asterisk matched")?
+    .Ok(())
+}
+
+test fn a_subtree_matches_beneath_it() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw("/static/", first_handler), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw(r"/static/css/{name}", second_handler), (), "registering failed")?
+    defer let beneath = served(&router, "GET", "/static/a/b")
+    defer let itself = served(&router, "GET", "/static/")
+    defer let bare = served(&router, "GET", "/static")
+    defer let deeper = served(&router, "GET", "/static/css/site.css")
+    defer let past = served(&router, "GET", "/static/css/site.css/x")
+    testing.assert_eq(beneath.view(), "200 first", "the subtree did not match beneath it")?
+    testing.assert_eq(itself.view(), "200 first", "the subtree did not match its own path")?
+    testing.assert_eq(bare.view(), not_found, "the subtree matched its path without the slash")?
+    testing.assert_eq(deeper.view(), "200 second", "the subtree beat a longer pattern")?
+    testing.assert_eq(past.view(), "200 first", "the subtree did not answer past a longer pattern")?
+    .Ok(())
+}
+
+test fn a_path_value_decodes_escapes_after_matching() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw(r"/files/{name}", named_value), (), "registering failed")?
+    defer let space = served(&router, "GET", "/files/a%20b")
+    defer let slash = served(&router, "GET", "/files/a%2Fb")
+    defer let plain = served(&router, "GET", "/files/caf%C3%A9")
+    defer let invalid = served(&router, "GET", "/files/%FF")
+    defer let broken = served(&router, "GET", "/files/a%2")
+    let bad_request = "400 a path value is not percent-encoded UTF-8"
+    testing.assert_eq(space.view(), "200 name=a b", "an escaped space was not decoded")?
+    testing.assert_eq(slash.view(), "200 name=a/b", "an escaped slash split the segment")?
+    testing.assert_eq(plain.view(), "200 name=café", "an escaped UTF-8 sequence was not decoded")?
+    testing.assert_eq(invalid.view(), bad_request, "a value that is not UTF-8 was accepted")?
+    testing.assert_eq(broken.view(), bad_request, "an incomplete escape was accepted")?
+    .Ok(())
+}
+
+// The router keeps the path values of the request it answered last, and a
+// request whose pattern has none reads none.
+test fn path_values_belong_to_the_request_answered() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route_raw(r"/files/{name}", named_value), (), "registering failed")?
+    testing.assert_ok_eq(&router.route_raw("/files", named_value), (), "registering failed")?
+    defer let first = served(&router, "GET", "/files/a")
+    defer let second = served(&router, "GET", "/files/b")
+    defer let none = served(&router, "GET", "/files")
+    testing.assert_eq(first.view(), "200 name=a", "the first value changed")?
+    testing.assert_eq(second.view(), "200 name=b", "a value outlived its request")?
+    testing.assert_eq(none.view(), "200 name=(none)", "a pattern without values read an earlier request's")?
+    .Ok(())
+}
+
+// Recording a path value fails when the value is not percent-encoded UTF-8
+// (`Invalid`) or when no memory holds it (`Allocation`).
+@copyable
+enum PathValueError {
+    Invalid,
+    Allocation,
+}
+
+// Record the value of each `{name}` and `{name...}` in `pattern`, the path of
+// the pattern that matched `path`, percent-decoded, in `matched` with its
+// ranges in `fields`. `pattern` is stored without its leading `/`, and `path`
+// has one; they have the same segments up to the pattern's end, because the
+// one matched the other. Storage for both is reserved once, since the names
+// and values take no more bytes than the pattern and the path.
+fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PathValueError] where carries() {
+    let reserved = &matched.reserve(pattern.length() + path.length()).is_ok() && &fields.reserve(pattern.length()).is_ok()
+    if !reserved {
+        return .Err(.Allocation)
+    }
+    var pattern_start: UInt64 = 0
+    var path_start: UInt64 = 1
+    while pattern_start < pattern.length() {
+        let pattern_end = segment_end(pattern, pattern_start)
+        let path_end = segment_end(path, path_start)
+        let value: Option[PathValue] = match segment_of(pattern.slice(pattern_start, pattern_end).unwrap()).unwrap() {
+            Literal(_) => .None,
+            Parameter(name) => .Some(.{ name, raw = path.slice(path_start, path_end).unwrap() }),
+            Remainder(name) => .Some(.{ name, raw = path.slice(path_start, path.length()).unwrap() }),
+        }
+        match value {
+            Some(found) => {
+                let name = store_bytes(&matched, found.name.as_bytes())?
+                let decoded = append_decoded(&matched, found.raw, plus_is_space: false)?
+                match &fields.push(.{ name, value = decoded }) {
+                    Ok(_) => {},
+                    Err(_) => return .Err(.Allocation),
+                }
+            },
+            None => {},
+        }
+        pattern_start = pattern_end + 1
+        path_start = path_end + 1
+    }
+    .Ok(())
+}
+
+// Append `bytes` to `stored` and return the range they occupy.
+fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PathValueError] where carries() {
+    let start = stored.length()
+    for byte in copy(bytes) {
+        match &stored.push(*byte) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Allocation),
+        }
+    }
+    .Ok(.{ start, end = stored.length() })
+}
+
+// A `PathValue` pairs a pattern's name with the request text it matched, not
+// yet decoded.
+@copyable
+struct PathValue {
+    name: Str,
+    raw: Str,
+}
+
+// `append_decoded` appends `raw` to `stored` with each `%XX` escape decoded
+// into the byte it spells, and each `+` into a space when `plus_is_space` is
+// set, as a query encodes one, and returns the range the decoded bytes
+// occupy. An incomplete escape, one that is not hexadecimal, or decoded bytes
+// that are not UTF-8 are invalid, and leave `stored` as it was. Decoding
+// never lengthens the text, so reserving `raw`'s length first means nothing
+// is allocated here.
+fn append_decoded[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_space: Bool) -> Result[Span, PathValueError] where carries() {
+    let start = stored.length()
+    let bytes = raw.as_bytes()
+    var at: UInt64 = 0
+    var outcome: Result[(), PathValueError] = .Ok(())
+    while outcome.is_ok() && at < bytes.length() {
+        var byte = bytes[at]
+        at += 1
+        if byte == percent {
+            let escaped = if at + 2 <= bytes.length() {
+                escape_value(bytes[at], bytes[at + 1])
+            } else {
+                Option.None
+            }
+            match escaped {
+                Some(value) => byte = value,
+                None => outcome = .Err(.Invalid),
+            }
+            at += 2
+        } else if byte == plus && plus_is_space {
+            byte = ascii_space
+        }
+        if outcome.is_ok() && &stored.push(byte).is_err() {
+            outcome = .Err(.Allocation)
+        }
+    }
+    if outcome.is_ok() {
+        let appended = stored.as_slice().subspan(start: start, count: stored.length() - start).unwrap()
+        if Str.from_bytes(appended).is_err() {
+            outcome = .Err(.Invalid)
+        }
+    }
+    match outcome {
+        Ok(_) => .Ok(.{ start, end = stored.length() }),
+        Err(error) => {
+            &stored.truncate(start)
+            return .Err(error)
+        },
+    }
+}
+
+test fn decoding_appends_the_bytes_escapes_spell() {
+    defer var stored: Vec[UInt8] = Vec.new()
+    let spaced = append_decoded(&stored, "a%20b+c", plus_is_space: false).unwrap()
+    let formed = append_decoded(&stored, "Ada+L%C3%B3pez", plus_is_space: true).unwrap()
+    let kept = stored.length()
+    let cut = append_decoded(&stored, "ab%4", plus_is_space: true)
+    let lettered = append_decoded(&stored, "%zz", plus_is_space: true)
+    let invalid = append_decoded(&stored, "%FF", plus_is_space: true)
+    let text = Str.from_bytes(stored.as_slice()).unwrap()
+    testing.assert_eq(stored_part(text, spaced), "a b+c", "a path value decoded a plus")?
+    testing.assert_eq(stored_part(text, formed), "Ada López", "a query value was not decoded")?
+    testing.assert(cut.is_err() && lettered.is_err() && invalid.is_err(), "an invalid escape was decoded")?
+    testing.assert_eq(stored.length(), kept, "a refused value was kept")?
+    .Ok(())
+}
+
+// The byte `%` begins an escape.
+let percent: UInt8 = 37
+
+// In a query, the byte `+` stands for a space.
+let plus: UInt8 = 43
+
+// `escape_value` returns the byte two hexadecimal digits spell, in either case.
+fn escape_value(high: UInt8, low: UInt8) -> Option[UInt8] {
+    let first = hex_value(high)?
+    let second = hex_value(low)?
+    .Some(first * 16 + second)
+}
+
+// `hex_value` returns the value of one hexadecimal digit. The ASCII digits
+// `0` to `9` are 48 through 57, `A` to `F` are 65 through 70, and `a` to `f`
+// are 97 through 102.
+fn hex_value(byte: UInt8) -> Option[UInt8] {
+    if byte >= 48 && byte <= 57 {
+        .Some(byte - 48)
+    } else if byte >= 65 && byte <= 70 {
+        .Some(byte - 55)
+    } else if byte >= 97 && byte <= 102 {
+        .Some(byte - 87)
+    } else {
+        .None
+    }
+}
+
+test fn an_escape_is_two_hexadecimal_digits_in_either_case() {
+    testing.assert_eq(escape_value(50, 70), Option.Some(UInt8(47)), "%2F did not decode")?
+    testing.assert_eq(escape_value(99, 51), Option.Some(UInt8(195)), "%c3 did not decode")?
+    testing.assert_eq(escape_value(71, 48), .None, "a non-hexadecimal digit decoded")?
+    .Ok(())
+}
+
+// `served` describes a 404 this way.
+let not_found: Str = "404 not found"
+
+fn first_handler[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, "first")
+}
+
+fn second_handler[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, "second")
+}
+
+// Answer `name=` and the path value `name`.
+fn named_value[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let name = request.path_value("name").unwrap_or("(none)")
+    text(request, "name={name}")
+}
+
+// Answer `id=` and the path value `id`.
+fn named_id[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let id = request.path_value("id").unwrap_or("(none)")
+    text(request, "id={id}")
+}
+
+// Answer `rest=` and the path value `rest`.
+fn named_rest[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let rest = request.path_value("rest").unwrap_or("(none)")
+    text(request, "rest={rest}")
+}
+
+// Answer `method` and `target` through `router`, and describe the outcome as
+// its status code and body, followed by its `Allow` header when it has one. An
+// error's body is its message.
+fn served[P: Allocator](inout router: Router[(), P], method: Str, target: Str) -> String[mem.SystemAllocator] {
+    var nothing = ()
+    served_with(&router, &nothing, method, target)
+}
+
+// `served_with` is `served` for a router lent `state`. The router's allocator
+// serves as the parent the request's arena is carved from; `serve` carves it
+// from the parent it is given, which need not be the router's allocator.
+fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, method: Str, target: Str) -> String[mem.SystemAllocator] {
+    let arena = mem.Arena.open(router.allocator, size: 65536)
+    let sent = new_request(arena.handle(), method, target, body: "").unwrap()
+    let described = match &router.serve_http(&state, sent.request()) {
+        Ok(response) => {
+            let code = response.status().code()
+            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            match response.header("Allow") {
+                Some(allow) => fmt.render_owned(mem.system(), "{code} {body} (Allow: {allow})").unwrap(),
+                None => fmt.render_owned(mem.system(), "{code} {body}").unwrap(),
+            }
+        },
+        Err(error) => {
+            let code = error.status().code()
+            let message = error.message().unwrap_or(error.status().reason())
+            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+        },
+    }
+    arena.release()
+    described
+}
+
+// `Visits` is the state of a router that counts visits.
+@derive(Release)
+struct Visits {
+    count: UInt64,
+}
+
+// Count a visit and answer with the count so far.
+fn visit[P: Allocator](inout visits: Visits, request: Request[P]) -> Result[Response[P], Error[P]] {
+    visits.count += 1
+    text(request, "visit {visits.count}")
+}

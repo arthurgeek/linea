@@ -1,0 +1,46 @@
+// `?` produces a value like any other expression, so what it yields answers to
+// wherever it was written. Three positions that impose a type, and a `?` whose
+// payload is not that type in each.
+//
+// Dropping the expectation here is silent rather than loud: the annotation
+// wins, lowering reads the annotation's layout, and a `UInt8` is read as a
+// `Big`. No case in the corpus put a `?` in a position that imposes a type, so
+// nothing noticed.
+struct Big {
+    a: UInt64,
+    b: UInt64,
+}
+
+fn some() -> Option[UInt8] {
+    Option.Some(7)
+}
+
+fn wants_a_big(_b: Big) -> UInt8 {
+    1
+}
+
+fn annotated() -> Option[UInt8] {
+    let _n: Big = some()?
+    Option.Some(2)
+}
+
+fn as_an_argument() -> Option[UInt8] {
+    Option.Some(wants_a_big(some()?))
+}
+
+fn as_a_tail() -> Option[Bool] {
+    some()?
+}
+
+fn main() -> UInt8 {
+    match annotated() {
+        Some(a) => match as_an_argument() {
+            Some(b) => match as_a_tail() {
+                Some(_c) => a + b,
+                None => 0,
+            },
+            None => 0,
+        },
+        None => 0,
+    }
+}

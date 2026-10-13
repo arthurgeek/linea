@@ -1,0 +1,35 @@
+trait Traverse {
+    fn run(sink self: Self) -> UInt8
+}
+
+trait Step: Copyable {
+    type Next: Traverse
+
+    fn next(self: Self) -> Self.Next where carries(self)
+}
+
+@copyable
+struct Wrap[T: Copyable] { value: T }
+
+@copyable
+struct Carrier[A: Step] { value: A }
+
+impl[T: Copyable] Step for Wrap[T] {
+    type Next = Carrier[Wrap[Wrap[T]]]
+
+    fn next(self: Self) -> Self.Next where carries(self) {
+        .{ value = .{ value = copy(self) } }
+    }
+}
+
+impl[A: Step] Traverse for Carrier[A] {
+    fn run(sink self: Self) -> UInt8 {
+        let next = Step.next(self.value)
+        Traverse.run(next)
+    }
+}
+
+fn main() -> UInt8 {
+    let start: Carrier[Wrap[UInt8]] = .{ value = .{ value = 7 } }
+    Traverse.run(start)
+}

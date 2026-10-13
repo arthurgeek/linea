@@ -1,0 +1,16 @@
+import std.mem
+
+// After a lent walk the drain is still owned, and nothing settles it here.
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(3).unwrap()
+    var pending = readings.drain()
+    var total: UInt64 = 0
+    for reading in &pending {
+        total += reading
+        if total > 2 {
+            break
+        }
+    }
+    UInt8(total)
+}

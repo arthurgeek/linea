@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    var next = inout [sink count = UInt8(0)] || {
+        count += 1
+        count
+    }
+    let first = &next()
+    first + &next()
+}

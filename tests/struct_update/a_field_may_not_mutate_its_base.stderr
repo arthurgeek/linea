@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/struct_update/a_field_may_not_mutate_its_base.lin:15:52
+   |
+15 |     let other = Counter { hits = next(&counter), ..counter }
+   |                                       -------- mutated by this argument
+   |                                                    ^^^^^^^ already passed `&` here

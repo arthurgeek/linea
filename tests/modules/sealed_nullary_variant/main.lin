@@ -1,0 +1,7 @@
+import vault
+
+fn main() -> UInt8 {
+    // A variant that carries nothing is built by naming it, so naming it
+    // outside `vault` builds a `Door` just as a constructor call would.
+    vault.width(.Closed) + vault.width(vault.Door.Closed)
+}

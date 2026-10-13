@@ -1,0 +1,5 @@
+error[T-Bound]: `Pair` takes 1 type argument(s), and was given 0
+ --> tests/modules/a_dotted_type_name_is_given_what_it_declares/main.lin:7:19
+  |
+7 | fn widest(_p: pct.Pair) -> UInt8 {
+  |                   ^^^^ give it the arguments it declares

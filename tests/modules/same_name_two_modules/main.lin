@@ -1,0 +1,10 @@
+// Two modules declaring one name, and the only case that records its IR
+// across a module boundary. That is what the `.ssa` golden is here for: one
+// path blob per file a function came from, in file order, so a change to how
+// they are found is a diff someone reads rather than a claim someone makes.
+import a
+import b
+
+fn main() -> UInt8 {
+    a.open() + b.open()
+}

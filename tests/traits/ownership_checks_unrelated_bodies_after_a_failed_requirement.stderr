@@ -1,0 +1,18 @@
+error[T-Derive]: `Box` cannot derive `Inspect` because component type `T` does not implement `Measured`
+  --> tests/traits/ownership_checks_unrelated_bodies_after_a_failed_requirement.lin:24:11
+   |
+7  | template impl Inspect where reflect.components: Measured {
+   |                                                 -------- the template requires every component to implement `Measured`
+21 |     value: T,
+   |     ----- this component has type `T`
+24 | derive[T] Inspect for Box[T]
+   |           ^^^^^^^ this written constraint environment does not prove the requirement
+error[O-Leak]: `_key` (a linear `Key`) is still owned when this path leaves
+  --> tests/traits/ownership_checks_unrelated_bodies_after_a_failed_requirement.lin:32:9
+   |
+32 |     let _key = Key.Forged(7)
+   |         ^^^^ never settled on the path that reaches the end of this block
+34 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

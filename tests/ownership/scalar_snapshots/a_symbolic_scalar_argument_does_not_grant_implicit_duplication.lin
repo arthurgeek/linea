@@ -1,0 +1,7 @@
+fn duplicate[T: Copyable](value: T) -> T {
+    value
+}
+
+fn main() -> UInt8 {
+    duplicate(UInt8(7))
+}

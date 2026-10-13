@@ -1,0 +1,12 @@
+struct Destination { number: UInt64 }
+
+fn convert(value: borrow UInt64) -> Destination where carries() {
+    .{ number = *value }
+}
+
+fn main() -> UInt8 {
+    var owner: UInt64 = 7
+    let result = convert(borrow owner)
+    owner = 9
+    UInt8(result.number + owner)
+}

@@ -1,0 +1,36 @@
+// A consuming walk may abandon its iterator on an early exit, so an
+// explicitly linear iterator does not satisfy the required Discardable capability.
+@linear
+struct Steps {
+    n: UInt8,
+}
+
+struct Counter {
+    n: UInt8,
+}
+
+impl Iterator for Steps {
+    type Item = UInt8
+
+    fn next(inout self: Steps) -> Option[UInt8] {
+        if self.n == 0 {
+            return .None
+        }
+        self.n = self.n - 1
+        return .Some(self.n)
+    }
+}
+
+impl Sequence for Counter {
+    type Iter = Steps
+
+    fn iterate(sink self: Counter) -> Steps {
+        .{ n = self.n }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ n = 3 }
+    for _x in c {}
+    0
+}

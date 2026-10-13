@@ -1,0 +1,15 @@
+import shelf
+
+use shelf.Outer
+
+// Comparing `Outer[Token]` fails because `Token` has no equality. The note
+// names what the reader can see, `T` and `Token`, not the sealed field type.
+struct Token {}
+
+fn main() -> UInt8 {
+    let wrapped = Outer.wrap(Token {})
+    if wrapped == wrapped {
+        return 1
+    }
+    0
+}

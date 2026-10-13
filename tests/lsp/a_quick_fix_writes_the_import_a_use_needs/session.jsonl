@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Nothing this file imports passes `ByteWriter` on, so the quick fix writes\n// the import that reaches it beside the `use`.\nimport std.fs\n\nfn waiting(file: fs.File) -> UInt64 {\n    file.pending_bytes()\n}\n\nfn main() -> UInt8 {\n    let _count = waiting\n    0\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":5,"character":4},"end":{"line":5,"character":22}},"context":{"diagnostics":[{"range":{"start":{"line":5,"character":4},"end":{"line":5,"character":22}},"severity":1,"code":"T-UnknownOperation","source":"linea","message":"`pending_bytes` is declared by `ByteWriter`, which is not in scope here"}]}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

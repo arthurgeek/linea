@@ -1,0 +1,10 @@
+// `Self` is the type an implementation names, so a constant a module declares
+// cannot write it: there is no implementation for it to stand for. A trait's
+// signature is the one place `Self` stands for something not yet known, and a
+// signature is a function written inside something with no body -- a constant
+// carries no body either, so having none is not what tells the two apart.
+pub let most: Self = 9
+
+fn main() -> UInt8 {
+    0
+}

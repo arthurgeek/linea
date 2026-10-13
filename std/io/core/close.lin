@@ -1,0 +1,31 @@
+import std.testing
+
+// Close is implemented by a resource whose disposal can fail, such as an open
+// file or socket. `close`
+// consumes the resource and reports whether it closed. `Release` closes it
+// too, but returns nothing, so a failed close is lost there; call `close`
+// when that result matters. Because `Release` drops the close error, the
+// error must be discardable.
+pub trait Close: Release {
+    type CloseError: Discardable
+
+    fn close(sink self: Self) -> Result[(), Self.CloseError] where carries()
+}
+
+// A descriptor wrapper never owns its descriptor, so closing the wrapper
+// leaves the descriptor open and cannot fail.
+impl Close for Descriptor {
+    type CloseError = Never
+
+    fn close(sink _self: Self) -> Result[(), Never] where carries() {
+        .Ok(())
+    }
+}
+
+test fn closing_a_descriptor_wrapper_succeeds() {
+    let closed = stderr().close()
+    testing.assert(closed.is_ok(), "closing a descriptor wrapper failed")?
+    // The wrapper did not own standard error, so it still accepts output.
+    eprint("")
+    .Ok(())
+}

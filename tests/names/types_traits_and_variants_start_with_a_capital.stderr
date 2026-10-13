@@ -1,0 +1,30 @@
+error[N-Case]: types start with a capital letter
+ --> tests/names/types_traits_and_variants_start_with_a_capital.lin:3:8
+  |
+3 | struct point {
+  |        ^^^^^ rename it `Point`
+error[N-Case]: variants start with a capital letter
+ --> tests/names/types_traits_and_variants_start_with_a_capital.lin:8:5
+  |
+8 |     light,
+  |     ^^^^^ rename it `Light`
+error[N-Case]: types start with a capital letter
+  --> tests/names/types_traits_and_variants_start_with_a_capital.lin:12:6
+   |
+12 | type meters = UInt8
+   |      ^^^^^^ rename it `Meters`
+error[N-Case]: traits start with a capital letter
+  --> tests/names/types_traits_and_variants_start_with_a_capital.lin:14:7
+   |
+14 | trait sized {
+   |       ^^^^^ rename it `Sized`
+error[N-Case]: associated types start with a capital letter
+  --> tests/names/types_traits_and_variants_start_with_a_capital.lin:15:10
+   |
+15 |     type unit
+   |          ^^^^ rename it `Unit`
+error[N-Case]: type parameters start with a capital letter
+  --> tests/names/types_traits_and_variants_start_with_a_capital.lin:31:10
+   |
+31 | fn first[t](sink value: t) -> t {
+   |          ^ rename it `T`

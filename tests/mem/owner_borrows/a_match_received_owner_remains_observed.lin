@@ -1,0 +1,21 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn open() -> Result[Arena[mem.SystemAllocator], UInt8] {
+    return .Ok(Arena.open(system(), 64))
+}
+
+fn main() -> UInt8 {
+    match open() {
+        Err(code) => code,
+        Ok(owner) => {
+            let bytes = owner.handle().acquire(8).unwrap()
+            owner.release()
+            bytes.release()
+            0
+        },
+    }
+}

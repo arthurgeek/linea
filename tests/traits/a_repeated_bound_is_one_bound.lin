@@ -1,0 +1,30 @@
+// `Lookup[UInt64]` written twice is one bound, not two: the second admits
+// exactly what the first admits and declares exactly what it declares, so
+// `C.Elem` reads through it without ambiguity.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn first[C: Lookup[UInt64] + Lookup[UInt64]](c: C) -> C.Elem {
+    let i: UInt64 = 0
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    first(b)
+}

@@ -1,0 +1,17 @@
+import std.mem
+
+// `seen` observes `scores`, and the closure carries that observation, so
+// `scores` cannot be released while the closure is still to be called.
+fn main() -> UInt8 {
+    let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let counted = mem.Closure.open(
+        mem.system(),
+        [seen = scores] || -> UInt64 {
+            seen.length()
+        },
+    ).unwrap()
+    scores.release()
+    let count = counted()
+    counted.release()
+    UInt8(count)
+}

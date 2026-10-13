@@ -1,0 +1,17 @@
+error[N-Duplicate]: `Show` is already implemented for `Holder`
+  --> tests/traits/one_implementation_answers_for_a_head.lin:18:9
+   |
+12 | impl[T] Show for Holder[T] {
+   |         ---- already implemented here
+18 | impl[T] Show for Holder[T] {
+   |         ^^^^ a trait is implemented once for a type
+error[N-Unused]: `self` is never used
+  --> tests/traits/one_implementation_answers_for_a_head.lin:13:13
+   |
+13 |     fn show(self: Holder[T]) -> UInt8 {
+   |             ^^^^ name it with a leading `_` if the value is not wanted
+error[N-Unused]: `self` is never used
+  --> tests/traits/one_implementation_answers_for_a_head.lin:19:13
+   |
+19 |     fn show(self: Holder[T]) -> UInt8 {
+   |             ^^^^ name it with a leading `_` if the value is not wanted

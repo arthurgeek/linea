@@ -1,0 +1,5 @@
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+ --> tests/projections/a_range_place_needs_settled_bounds.lin:8:38
+  |
+8 |     let head: [UInt8; 2] = copy(a[0..hi])
+  |                                      ^^ this is not settled here, and the place's length is what the bounds name

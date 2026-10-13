@@ -1,0 +1,5 @@
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/constructor_callables/contextual_variants/generic_constructor_needs_unmentioned_result_argument.lin:8:28
+  |
+8 |     let _wrapped = wrap(7, .Value)
+  |                            ^^^^^^ settle every input type before this callable value

@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may return `Option[RenderError]`, and the function answers with `Result[UInt8, RenderError]`
+ --> tests/constructor_callables/contextual_variants/option_does_not_propagate_into_result.lin:5:32
+  |
+5 |     let wrapped: RenderError = source.map(.Allocation)?
+  |                                ^^^^^^^^^^^^^^^^^^^^^^^^ `?` returns from the function it is written in

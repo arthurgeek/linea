@@ -1,0 +1,30 @@
+// The other direction of the same rule, and the one that costs more: read
+// against the caller's `impl`, `Small.make()` is a `Big` here, so a binding
+// two fields wide takes a value one field wide and the second field is
+// whatever the call left on the stack. Nothing further down could catch it --
+// by then the value has the type the annotation asked for.
+struct Small {
+    a: UInt8,
+}
+
+struct Big {
+    a: UInt8,
+    b: UInt8,
+}
+
+impl Small {
+    fn make() -> Self {
+        .{ a = 5 }
+    }
+}
+
+impl Big {
+    fn sum() -> UInt8 {
+        let b: Big = Small.make()
+        b.a + b.b
+    }
+}
+
+fn main() -> UInt8 {
+    Big.sum()
+}

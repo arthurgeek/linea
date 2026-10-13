@@ -1,0 +1,22 @@
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn add_two(value: UInt8) -> UInt8 {
+    value + 2
+}
+
+fn make() -> fn(read value: UInt8) -> UInt8 {
+    add_one
+}
+
+fn main() -> UInt8 {
+    // Nothing declared names for the joined value or the call's result.
+    let joined = if true {
+        add_one
+    } else {
+        add_two
+    }
+    let made = make()
+    joined(value: 1) + made(value: 1) + make()(value: 1) + joined(1)
+}

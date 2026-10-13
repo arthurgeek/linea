@@ -1,0 +1,51 @@
+// A schedule is cancelled only where every place it takes is already gone.
+//
+// `take2` takes two. By the end of the scope `a` has been given to `take1` and
+// `b` has been given to nobody, so the schedule can neither run nor be skipped:
+// running it takes `a` twice, skipping it loses `b`. There is no answer, so the
+// program is refused, and [O-Move] names the value that was already taken.
+//
+// Cancelling per operation rather than per placement has an answer for this and
+// it is the wrong one -- the first consume to find a moved place stands for the
+// whole expression, and the values beside it are recorded as consumed by code
+// that never runs.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take2(sink a: Key, sink b: Key, inout freed: UInt8) -> () {
+    let Key { n: _x } = a
+    let Key { n: _y } = b
+    freed = freed + 2
+}
+
+fn take1(sink k: Key, inout freed: UInt8) -> () {
+    let Key { n: _n } = k
+    freed = freed + 1
+}
+
+fn maybe(c: Bool) -> Option[UInt8] {
+    if c {
+        Option.Some(1)
+    } else {
+        Option.None
+    }
+}
+
+fn go(c: Bool, inout freed: UInt8) -> Option[UInt8] {
+    let a: Key = .{ n = 1 }
+    let b: Key = .{ n = 2 }
+    defer take2(a, b, &freed)
+    let n = maybe(c)?
+    take1(a, &freed)
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    var f: UInt8 = 0
+    match go(true, &f) {
+        Some(_n) => f,
+        None => 0,
+    }
+}

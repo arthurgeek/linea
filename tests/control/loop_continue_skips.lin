@@ -1,0 +1,15 @@
+fn main() -> UInt8 {
+    var i: UInt8 = 0
+    var sum: UInt8 = 0
+    loop {
+        i = i + 1
+        if i == 3 {
+            continue
+        }
+        sum = sum + i
+        if i > 5 {
+            break
+        }
+    }
+    sum
+}

@@ -1,0 +1,22 @@
+error[S-Separator]: expected `;` or a newline
+ --> tests/recovery/an_unclosed_brace_leaves_the_block_around_it_closed.lin:8:19
+  |
+8 |         score + 1 oops {
+  |                   ^^^^ this statement ends here
+error[T-Discard]: this expression produces an `Int64` that is discarded
+ --> tests/recovery/an_unclosed_brace_leaves_the_block_around_it_closed.lin:8:9
+  |
+8 |         score + 1 oops {
+  |         ^^^^^^^^^ bind it with `let _ =` to discard it deliberately
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/recovery/an_unclosed_brace_leaves_the_block_around_it_closed.lin:10:23
+   |
+10 |     let last: UInt8 = "two"
+   |               ----- expected because of this annotation
+   |                       ^^^^^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/recovery/an_unclosed_brace_leaves_the_block_around_it_closed.lin:15:24
+   |
+15 |     let count: UInt8 = "three"
+   |                ----- expected because of this annotation
+   |                        ^^^^^^^ expected `UInt8`, found `Str`

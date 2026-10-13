@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let empty: Range[UInt8] = 5..5
+    let backwards: Range[UInt8] = 9..0
+    empty.lo + empty.hi + backwards.lo - backwards.hi
+}

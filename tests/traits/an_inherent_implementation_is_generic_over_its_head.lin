@@ -1,0 +1,23 @@
+// An inherent implementation declares parameters of its own, and its head is
+// the constructor applied to them. Each call binds them from the receiver, so
+// one member answers for every instantiation of that constructor, and `Self`
+// and the head written out longhand name the same type in it.
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Holder[T] {
+    pub fn one(_self: Self) -> UInt8 {
+        1
+    }
+
+    pub fn two(_self: Holder[T]) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Holder[UInt8] = .{ v = 3 }
+    let b: Holder[Bool] = .{ v = true }
+    Holder.one(a) + Holder.two(b)
+}

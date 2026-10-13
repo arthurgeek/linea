@@ -1,0 +1,23 @@
+@linear
+struct Ticket { code: UInt8 }
+
+enum Failure { Refused(Ticket) }
+
+fn main() -> UInt8 {
+    let ticket: Ticket = .{ code = 13 }
+    let input: Result[UInt8, Ticket] = .Err(ticket)
+    let mapped: Result[UInt8, Failure] = input.map_err(.Refused)
+    match mapped {
+        Ok(_) => 1,
+        Err(error) => match error {
+            Refused(owned) => {
+                let Ticket { code } = owned
+                if code == 13 {
+                    0
+                } else {
+                    2
+                }
+            },
+        },
+    }
+}

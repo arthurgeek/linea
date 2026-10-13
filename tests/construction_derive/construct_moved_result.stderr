@@ -1,0 +1,20 @@
+error[O-Move]: `Pair.first` has already been moved
+  --> tests/construction_derive/construct_moved_result.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code for `Pair.first`
+43 | struct Pair { first: Token, second: Token }
+   |               ----- the code was generated for this field
+47 | derive Build for Pair
+   |        ^^^^^ it was already taken, and a value is taken once
+   |        ----- it was taken here
+error[O-Move]: `Pair.second` has already been moved
+  --> tests/construction_derive/construct_moved_result.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code for `Pair.second`
+43 | struct Pair { first: Token, second: Token }
+   |                             ------ the code was generated for this field
+47 | derive Build for Pair
+   |        ^^^^^ it was already taken, and a value is taken once
+   |        ----- it was taken here

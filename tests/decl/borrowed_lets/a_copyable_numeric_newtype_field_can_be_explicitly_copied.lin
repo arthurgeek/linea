@@ -1,0 +1,18 @@
+@copyable
+type Count = UInt8
+
+struct Holder { count: Count }
+
+fn main() -> UInt8 {
+    let holder = Holder { count = Count(7) }
+    let read Holder { count } = holder
+    let duplicate = copy(count)
+    let Count(raw) = duplicate
+    let Holder { count: original } = holder
+    let Count(again) = original
+    if raw == 7 && again == raw {
+        0
+    } else {
+        1
+    }
+}

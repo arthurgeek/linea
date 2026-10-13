@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_write_is_reported_with_the_use_that_still_needs_the_borrow.lin:10:5
+   |
+10 |     score.points = 9
+   |     ^^^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     let doubled = *view + *view
+   |                   ----- the observation is still used here

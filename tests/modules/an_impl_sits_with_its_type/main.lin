@@ -1,0 +1,19 @@
+// A re-exported name is that type wherever it is written, so an `impl` on one
+// parsed and attached its declarations to a type from outside the module that
+// owns it. What a type can do then lived somewhere the type's own module
+// cannot see, and a private function among them was reachable from a module
+// that could not name it.
+import inner
+
+pub use inner.Cell
+
+impl Cell {
+    fn make(sink x: UInt8) -> Cell {
+        .{ v = x }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Cell = Cell.make(9)
+    c.v
+}

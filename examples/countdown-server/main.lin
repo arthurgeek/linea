@@ -1,0 +1,181 @@
+// Count down to a launch over HTTP, one line a second.
+// GET /countdown/{seconds} answers `T-3`, `T-2`, `T-1` and `liftoff`, each
+// line sent as soon as it is written and the next a second later, so
+// `curl -N` prints them as they arrive. A count that is not a number, or not
+// from 1 to 10, is answered 400. The handler logs each countdown it starts,
+// and every request is logged to standard error.
+import std.env
+import std.http
+import std.io
+import std.log
+import std.mem
+import std.net
+import std.testing
+import std.time
+
+// `use` brings a trait's operations into scope: `Handler` lets a test call
+// `&router.serve_http(&app, request)`, and `ByteWriter` lets `count_down`
+// call `&body.flush()`. `Writer` is in the prelude, so `&body.write_str(text)`
+// needs no `use`.
+use http.Handler
+use io.ByteWriter
+use mem.Owner
+
+// A countdown runs for at most ten seconds.
+let longest_countdown: UInt64 = 10
+
+// `App` is the state the routes share. `http.with_state` owns it and lends it
+// down to each route as `inout app`. The logger is the only value they share,
+// so it is the only field; another shared value would be another field.
+@derive(Release)
+struct App {
+    logger: log.Logger[io.Descriptor],
+}
+
+// Refuse a count out of range before anything is sent; otherwise log the
+// countdown's start and answer with a body that `count_down` streams once
+// the head has gone out. The closure captures the checked count with
+// `[sink seconds]`, so the path is read once.
+//
+// `http.Path[UInt64]` reads the route's only path value, `{seconds}`, as a
+// number before `countdown` runs, and the router answers 400 when it is not
+// one. `.value` is the number.
+fn countdown(inout app: App, path: http.Path[UInt64], request: http.Request) -> Result[http.Response, http.Error] {
+    let seconds = path.value
+    if seconds < 1 || seconds > longest_countdown {
+        return .Err(http.error(request, .BadRequest, "{seconds} is not a count from 1 to {longest_countdown}"))
+    }
+    app.logger.info("starting a countdown", log.field("seconds", seconds))
+    http.stream(request, [sink seconds] |inout body| count_down(seconds, &body))
+}
+
+// Register the countdown's route. The router hands `countdown` the `App` it
+// is lent on every request, and reads the path value it asks for.
+fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
+    &router.route(r"GET /countdown/{seconds}", countdown)
+}
+
+// Write one line for each second left, then `liftoff`. The body collects what
+// is written in a buffer, and `flush` sends it to the client at once, so each
+// line arrives before the pause that follows it rather than with the last one.
+// `flush` returns how many bytes it sent, which `_sent` discards. `time.sleep`
+// blocks for at least the duration it is given.
+fn count_down(seconds: UInt64, inout body: http.BodyWriter) -> Result[(), http.Error] {
+    let tick = time.Duration.from_seconds(1)
+    // `seconds..0` counts down to 1, and walks nothing when `seconds` is 0.
+    for left in seconds..0 {
+        "T-{left}\n".fmt(&body)?
+        let _sent = &body.flush()?
+        time.sleep(tick)
+    }
+    &body.write_str("liftoff\n")?
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    let options = parse_options(env.args()) else {
+        io.eprintln("usage: countdown-server --port PORT [--requests N]")
+        return 64
+    }
+    // The logger writes lines at `Info` and above to standard error.
+    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    // The annotation names the state the routes take, `App`.
+    var router: http.Router[App] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `http.logged` logs the address the server listens on, and then one line
+    // per request once its response has been sent.
+    // `copy(logger)` gives `http.logged` and `App` loggers of their own and
+    // keeps this one for the line `main` writes if serving stops. A logger to
+    // standard error owns nothing, so a copy costs nothing.
+    let server = http.logged(copy(logger), router)
+    let app = App { logger = copy(logger) }
+    // `..http.Limits.default()` takes every limit not written here from the
+    // standard limits, so only the connection count changes.
+    let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
+    // `listen_and_serve` opens the listener, takes the server and lends `app`
+    // to the route on every request, closes the listener when it stops, and
+    // reports a failure to listen or to serve through `error`. Port 0 asks the
+    // operating system for any free port, and `http.logged` logs the one it
+    // chose. It returns `app`, which `main` releases.
+    let finished = http.listen_and_serve(net.loopback(options.port), server, state: app, limits: limits) else |error| {
+        logger.error("serving stopped", log.field("error", error))
+        return 1
+    }
+    finished.release()
+    0
+}
+
+// `Options` holds what the command line asked for: the port to listen on,
+// and how many requests to answer before stopping, or `.None` to serve until
+// killed.
+struct Options {
+    port: UInt16,
+    requests: Option[UInt64],
+}
+
+// Read `--port PORT` and an optional `--requests N`, in either order.
+fn parse_options(args: env.Args) -> Option[Options] {
+    var port: Option[UInt16] = .None
+    var requests: Option[UInt64] = .None
+    var index: UInt64 = 1
+    while index < args.count() {
+        let flag = args.at(index)?
+        let value = args.at(index + 1)?
+        if flag == "--port" {
+            let number = value.parse[UInt16]() else |_| {
+                return .None
+            }
+            port = .Some(number)
+        } else if flag == "--requests" {
+            let number = value.parse[UInt64]() else |_| {
+                return .None
+            }
+            requests = .Some(number)
+        } else {
+            return .None
+        }
+        index += 2
+    }
+    .Some(.{ port = port?, requests })
+}
+
+// The tests hand the handler a state whose logger writes only errors, so the
+// lines it logs while answering stay out of the test report.
+fn quiet() -> App {
+    .{ logger = log.to_stderr(mem.system(), minimum: .Error) }
+}
+
+// A request built in an arena goes through the router, which records the
+// path value the handler reads.
+test fn a_count_out_of_range_is_refused_before_streaming() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let long = http.new_request(arena.handle(), "GET", "/countdown/11", body: "").unwrap()
+    let refused = match &router.serve_http(&app, long.request()) {
+        Ok(_) => return testing.assert(false, "a count past 10 was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("11 is not a count from 1 to 10"), "the message changed")?
+}
+
+// `recorded_body` runs the streamed body into the request's arena, so a test
+// reads what a client would receive. A countdown from 1 pauses once.
+test fn a_countdown_ends_with_liftoff() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/countdown/1", body: "").unwrap()
+    let started = time.Instant.now()
+    let body = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    let took = started.elapsed()
+    testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "T-1\nliftoff\n", "the countdown changed")?
+    testing.assert(took >= time.Duration.from_seconds(1), "the countdown did not pause for a second")?
+}

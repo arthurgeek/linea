@@ -1,0 +1,10 @@
+// Writing an element of `t.b` at a constant index changes only `t.b`, so a
+// view of the sibling array `t.a` is still good to use.
+struct Two { a: [UInt8; 2], b: [UInt8; 2] }
+
+fn main() -> UInt8 {
+    var t = Two { a = [UInt8(1), 2], b = [UInt8(3), 4] }
+    let s = t.a.as_slice()
+    t.b[0] = 9
+    UInt8(s.length())
+}

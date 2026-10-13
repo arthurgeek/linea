@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Two files of one module. The file beside this one wrote `import ledger`, and\n// an import binds inside the file that wrote it -- so this file has bound\n// nothing and an import written here collides with nothing. What may be\n// written here is what an import of its own would reach, and that is one\n// question: the answer before the dot and the answer after it agree.\nfn main() -> UInt8 {\n    ledger.size()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"other.lin","languageId":"linea","version":1,"text":"// The same module, the file that wrote the import. It binds `ledger` here and\n// nowhere else.\nimport ledger\n\nfn _twice() -> UInt8 {\n    ledger.size() + ledger.size()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":10}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":11}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

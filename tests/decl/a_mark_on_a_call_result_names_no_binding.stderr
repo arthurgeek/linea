@@ -1,0 +1,5 @@
+error[S-Name]: expected a name
+  --> tests/decl/a_mark_on_a_call_result_names_no_binding.lin:12:12
+   |
+12 |     bump(&(fresh()))
+   |            ^^^^^^^ `&` marks a binding the call writes to

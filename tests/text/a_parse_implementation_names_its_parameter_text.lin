@@ -1,0 +1,38 @@
+import std.io
+import std.text
+
+@(copyable, derive(Debug))
+struct Time {
+    hours: UInt8,
+    minutes: UInt8,
+}
+
+// With `Parse`, `text.parse[Time]()` reads a `Time` the way it reads a number.
+// A `ParseError` says which byte is wrong.
+impl text.Parse for Time {
+    fn parse(text: Str) -> Result[Time, text.ParseError] where carries() {
+        let colon = text.find(":") else {
+            return .Err(.Syntax(text.length()))
+        }
+        let hours = text.slice(0, colon).unwrap().parse[UInt8]()?
+        let minutes = text.slice(colon + 1, text.length()).unwrap().parse[UInt8]()?
+        if hours > 23 {
+            return .Err(.Syntax(0))
+        }
+        if minutes > 59 {
+            return .Err(.Syntax(colon + 1))
+        }
+        return .Ok(.{ hours, minutes })
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let written = ["07:30", "7h30", "25:00"]
+    for text in written {
+        match text.parse[Time]() {
+            Ok(time) => io.println("{text}: {time:?}")?,
+            Err(error) => io.println("{text}: {error:?}")?,
+        }
+    }
+    return .Ok(0)
+}

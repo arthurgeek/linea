@@ -1,0 +1,14 @@
+import std.mem
+
+// `S` could be any type, so nothing here can check that `step` is callable as
+// it; a closure is opened where its `fn` type is written.
+fn keep[S, F: Release](sink step: F) -> Result[mem.Closure[S, mem.SystemAllocator], mem.Oom] {
+    mem.Closure.open(mem.system(), step)
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let kept: mem.Closure[fn() -> UInt8, mem.SystemAllocator] = keep(|| UInt8(7))?
+    let seven = kept()
+    kept.release()
+    return .Ok(seven)
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/a_vector_element_keeps_its_allocator_owner_alive.lin:18:21
+   |
+18 |     Release.release(arena)
+   |                     ^^^^^ keep this place available until the last use of its observation
+19 |     let observed = mem.Buffer.load(values[0], 0)
+   |                                    --------- the observation is still used here

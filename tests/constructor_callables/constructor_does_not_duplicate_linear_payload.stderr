@@ -1,0 +1,7 @@
+error[O-Move]: `ticket` has already been moved
+  --> tests/constructor_callables/constructor_does_not_duplicate_linear_payload.lin:10:27
+   |
+9  |     let wrapped = wrap(ticket)
+   |                        ------ it was taken here
+10 |     let Ticket { code } = ticket
+   |                           ^^^^^^ it was already taken, and a value is taken once

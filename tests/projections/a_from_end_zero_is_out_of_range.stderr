@@ -1,0 +1,10 @@
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/projections/a_from_end_zero_is_out_of_range.lin:6:7
+  |
+6 |     a[^0] + a[^5]
+  |       ^^ the length is 4, so the greatest count back is 4
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/projections/a_from_end_zero_is_out_of_range.lin:6:15
+  |
+6 |     a[^0] + a[^5]
+  |               ^^ the length is 4, so the greatest count back is 4

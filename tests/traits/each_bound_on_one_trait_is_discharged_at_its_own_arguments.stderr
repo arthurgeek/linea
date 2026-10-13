@@ -1,0 +1,5 @@
+error[T-Bound]: `C` requires `Lookup[Bool]`, and `Board` does not implement it
+  --> tests/traits/each_bound_on_one_trait_is_discharged_at_its_own_arguments.lin:23:5
+   |
+23 |     reach(b)
+   |     ^^^^^ implement it for that type, or drop the bound

@@ -1,0 +1,64 @@
+// What Zig needs `errdefer` for, derived here instead. Two values acquired,
+// both given away on the path that succeeds and only the first released on the
+// path that fails -- and nothing declares which paths are which.
+//
+// On success `join` consumes both, so both schedules see a value already moved
+// and are skipped. On the failing `?` only the first is scheduled and still
+// owned, so exactly one release happens. `freed` counts them.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key, inout freed: UInt8) -> () {
+    let Key { n: _n } = k
+    freed = freed + 1
+}
+
+fn join(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn first() -> Option[Key] {
+    Option.Some(.{ n = 1 })
+}
+
+fn second(c: Bool) -> Option[Key] {
+    if c {
+        Option.Some(.{ n = 2 })
+    } else {
+        Option.None
+    }
+}
+
+// A third fallible step after both schedules, so both can fire. Without it
+// the second `defer` is cancelled on the only path it exists on, which is
+// [O-DeferDead] and a different case.
+fn third(c: Bool) -> Option[UInt8] {
+    if c {
+        Option.Some(0)
+    } else {
+        Option.None
+    }
+}
+
+fn go(c: Bool, inout freed: UInt8) -> Option[UInt8] {
+    let a = first()?
+    defer take(a, &freed)
+    let b = second(c)?
+    defer take(b, &freed)
+    let n = third(c)?
+    Option.Some(join(a, b) + n)
+}
+
+fn main() -> UInt8 {
+    var freed: UInt8 = 0
+    let ok = go(true, &freed)
+    let _bad = go(false, &freed)
+    match ok {
+        Some(v) => v + freed,
+        None => 0,
+    }
+}

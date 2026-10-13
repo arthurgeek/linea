@@ -1,0 +1,32 @@
+trait Make[A: Copyable] {
+    fn make(sink input: A) -> Self where carries()
+}
+
+@copyable
+struct Wrap[A: Copyable] {
+    value: A,
+}
+
+struct Left {}
+
+struct Right {}
+
+impl[A: Copyable] Make[A] for Left {
+    fn make(sink input: A) -> Self where carries() {
+        let wrapped: Wrap[A] = .{ value = input }
+        let _right: Right = Make.make(wrapped)
+        return .{}
+    }
+}
+
+impl[A: Copyable] Make[A] for Right {
+    fn make(sink input: A) -> Self where carries() {
+        let _left: Left = Make.make(input)
+        return .{}
+    }
+}
+
+fn main() -> UInt8 {
+    let _left: Left = Make.make(UInt8(7))
+    return 0
+}

@@ -1,0 +1,7 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { x = 3 }
+    var read Point { x } = point
+    x
+}

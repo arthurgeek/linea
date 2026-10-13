@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/a_generic_call_chain_preserves_an_allocator_observation.lin:18:5
+   |
+18 |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+19 |     let bytes = handle.acquire(8).unwrap()
+   |                 ------ the observation is still used here

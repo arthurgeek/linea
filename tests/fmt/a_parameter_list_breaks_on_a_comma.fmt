@@ -1,0 +1,25 @@
+// A parameter list is comma-driven like any other list: the trailing comma the
+// author wrote is what breaks it, and deleting one is a rewrite rather than a
+// layout choice. The payload a variant carries is the same list.
+fn add(
+    a: UInt8,
+    b: UInt8,
+) -> UInt8 {
+    a + b
+}
+
+enum Pair {
+    Both(
+        UInt8,
+        UInt8,
+    ),
+    Neither,
+}
+
+fn main() -> UInt8 {
+    let p: Pair = .Neither
+    match p {
+        Both(x, y) => add(x, y),
+        Neither => add(3, 4),
+    }
+}

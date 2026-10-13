@@ -1,0 +1,8 @@
+// A `sink` parameter takes its default as it takes any argument.
+fn grow(sink base: UInt8 = 5, step: UInt8 = 2) -> UInt8 {
+    base + step
+}
+
+fn main() -> UInt8 {
+    grow() + grow(1) - 10
+}

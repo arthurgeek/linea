@@ -1,0 +1,30 @@
+// Each parameter of a type's own implementation stands alone in one position
+// of its head, so a receiver settles it by that position. A parameter written
+// twice, written inside another type, or not written at all is refused.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[T] Pair[T, T] {
+    fn _same() -> UInt8 {
+        1
+    }
+}
+
+impl[T] Pair[Option[T], UInt8] {
+    fn _wrapped() -> UInt8 {
+        2
+    }
+}
+
+impl[T, U] Pair[T, UInt8] {
+    fn _loose() -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, UInt8] = .{ first = 0, second = 1 }
+    pair.first
+}

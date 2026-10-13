@@ -1,0 +1,30 @@
+// A settled reference is read through whatever declares the name, and the head
+// is what says which trait: `Self` has the implementation, and a type
+// parameter has the bound. A head that is neither names a type, and a type's
+// members are what it declares rather than what an implementation settled. A
+// name after the first is selected from what the name before it reached, so
+// `Item` declaring no bound is a type nothing is selected from.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        let _named: Counter.Item = 0
+        let _deeper: Self.Item.Wider = 0
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

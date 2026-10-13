@@ -1,0 +1,10 @@
+main.lin, as the script opens it:
+fn main( )->UInt8{
+      let    n:UInt8=1
+    n
+}
+main.lin, as it sits beside the script:
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    n
+}

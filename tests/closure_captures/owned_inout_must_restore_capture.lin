@@ -1,0 +1,11 @@
+@linear
+struct Key { id: UInt8 }
+
+fn main() -> UInt8 {
+    let key: Key = .{ id = 7 }
+    var take = inout [sink key] || {
+        let { id } = key
+        id
+    }
+    &take()
+}

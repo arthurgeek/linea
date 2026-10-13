@@ -1,0 +1,20 @@
+// A handler returning `http.Error` writes `.settled()` to give up the item a
+// full vector refused; `?` alone does not.
+import std.http
+import std.mem
+
+fn collect(inout items: Vec[String, mem.SystemAllocator], sink item: String) -> Result[(), http.Error] {
+    &items.push(item)?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    var items: Vec[String, mem.SystemAllocator] = Vec.new()
+    let collected = collect(&items, String.new())
+    items.release()
+    if collected.is_ok() {
+        0
+    } else {
+        1
+    }
+}

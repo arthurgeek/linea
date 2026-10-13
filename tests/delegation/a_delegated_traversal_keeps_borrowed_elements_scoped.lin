@@ -1,0 +1,22 @@
+struct Board { values: [borrow UInt8; 1] }
+
+impl Index[UInt64] for Board via values
+
+impl Board {
+    trav positions via values
+}
+
+fn escaped() -> Option[borrow UInt8] {
+    let local: UInt8 = 7
+    let board: Board = .{ values = [borrow local] }
+    for read item in board {
+        break copy(item)
+    }
+}
+
+fn main() -> UInt8 {
+    match escaped() {
+        None => 0,
+        Some(item) => *item,
+    }
+}

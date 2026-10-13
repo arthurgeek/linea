@@ -1,0 +1,32 @@
+// The representation is sealed outside this module, and a type parameter does
+// not change that. `opaque` seals what a declaration says, and `Key[UInt8]` is
+// that declaration's representation with an argument written into it -- so
+// deciding the question by the handle the declaration entered answers about
+// `Key` and about no instantiation of it.
+@(opaque, linear)
+enum Key[T] {
+    Forged(T),
+}
+
+@opaque
+struct Account[T] {
+    id: T,
+    balance: UInt8,
+}
+
+pub fn take(sink k: Key[UInt8]) -> UInt8 {
+    match k { Forged(n) => n }
+}
+
+pub fn mint(id: UInt8) -> Key[UInt8] {
+    Key.Forged(id)
+}
+
+pub fn open(id: UInt8) -> Account[UInt8] {
+    .{ id = id, balance = 0 }
+}
+
+pub fn total(sink a: Account[UInt8]) -> UInt8 {
+    let Account { id: i, balance: b } = a
+    i + b
+}

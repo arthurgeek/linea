@@ -1,0 +1,9 @@
+@copyable
+struct Entry { value: UInt8 }
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ value = 7 }
+    let view = borrow entry
+    let saved = copy(*view)
+    saved.value + (*view).value
+}

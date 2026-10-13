@@ -1,0 +1,47 @@
+// `length()` reports how many elements an array holds.
+import std.io
+
+use io.IoError
+use io.println
+
+let weekday_names: [Str; _] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+// An array's length is part of its type, so reading it from a constant array
+// is a constant expression: it can size another array or initialize a constant.
+let open_days: [Bool; weekday_names.length()] = [false, true, true, true, true, true, false]
+
+let days_in_week = weekday_names.length()
+
+// A parameter default may read it too.
+fn open_count(open: [Bool; 7], through: UInt64 = open_days.length()) -> UInt64 {
+    var count: UInt64 = 0
+    var day: UInt64 = 0
+    while day < through {
+        if open[day] {
+            count = count + 1
+        }
+        day = day + 1
+    }
+    count
+}
+
+// A borrowed array reports the length of the array it observes.
+fn row_width(row: borrow [UInt8; 3]) -> UInt64 {
+    row.length()
+}
+
+// The receiver is still evaluated, so its effects happen in order.
+fn announced_row() -> Result[[UInt8; 3], IoError] {
+    println("building a row")?
+    return .Ok([1, 2, 3])
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let row = [UInt8(4), UInt8(5), UInt8(6)]
+    let nothing: [UInt8; 0] = []
+    let grid: [[UInt8; _]; _] = [[1, 2], [3, 4], [5, 6]]
+    let built = announced_row()?.length()
+    println("{days_in_week} {open_count(open_days)} {row.length()} {row_width(borrow row)}")?
+    println("{nothing.length()} {grid.length()} {grid[0].length()} {built}")?
+    return .Ok(0)
+}

@@ -1,0 +1,20 @@
+import std.io
+
+struct Triple { first: UInt8, second: UInt8, third: UInt8 }
+
+fn mark(value: UInt8) -> Result[UInt8, io.IoError] {
+    io.println("{value}")?
+    return .Ok(value)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let first: UInt8 = 1
+    let triple: Triple = .{ third = mark(3)?, first, second = mark(2)? }
+    return .Ok(
+        if triple.first == 1 && triple.second == 2 && triple.third == 3 {
+            0
+        } else {
+            1
+        },
+    )
+}

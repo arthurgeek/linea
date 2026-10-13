@@ -1,0 +1,5 @@
+error[T-ArraySize]: an inferred array length needs an array literal to count
+ --> tests/arrays/inferred_length/empty_outer_needs_inner_length.lin:2:25
+  |
+2 |     let _grid: [[UInt8; _]; _] = []
+  |                         ^ supply an array literal or write an explicit length

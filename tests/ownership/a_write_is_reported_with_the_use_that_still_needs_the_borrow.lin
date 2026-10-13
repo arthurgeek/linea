@@ -1,0 +1,13 @@
+struct Score {
+    points: UInt8,
+    bonus: UInt8,
+}
+
+fn main() -> UInt8 {
+    var score = Score { points = 7, bonus = 2 }
+    let view = borrow score.points
+    score.bonus = 3
+    score.points = 9
+    let doubled = *view + *view
+    doubled + score.bonus
+}

@@ -1,0 +1,9 @@
+// `pub` on the program's entry point reaches nobody, but `main` is only the
+// entry point in the root: an imported module's `main` is an ordinary function
+// and exports like any other. The rule that refuses `pub fn main` is about the
+// entry point rather than about the name, so it has to stop at the boundary.
+import helper
+
+fn main() -> UInt8 {
+    helper.main()
+}

@@ -1,0 +1,18 @@
+error[O-Leak]: `pair` (a linear `Pair[Crate]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_conditional_implementation_that_applies_is_named.lin:43:9
+   |
+43 |     let pair: Pair[Crate] = .{ first = Crate { kilograms = 4 }, second = Crate { kilograms = 5 } }
+   |         ^^^^ never settled on the path that reaches the end of this block
+46 | }
+   | - the block ends here
+   |
+   = help: settle it first with `pair.release()`
+error[O-Leak]: `parcels` (a linear `Pair[Parcel]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_conditional_implementation_that_applies_is_named.lin:44:9
+   |
+44 |     let parcels: Pair[Parcel] = .{ first = Parcel { grams = 1 }, second = Parcel { grams = 2 } }
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+46 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

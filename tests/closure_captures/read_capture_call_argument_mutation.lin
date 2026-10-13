@@ -1,0 +1,10 @@
+fn change(inout number: UInt8) -> UInt8 {
+    number = 4
+    0
+}
+
+fn main() -> UInt8 {
+    var number: UInt8 = 3
+    let get = read [read number] |_input: UInt8| number
+    get(change(&number))
+}

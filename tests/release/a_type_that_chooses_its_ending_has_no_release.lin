@@ -1,0 +1,32 @@
+// A transfer that must be committed or rolled back has no `Release`, so
+// `release()` is not an operation on it and nothing ends it by default.
+@linear
+struct Transfer {
+    cents: UInt64,
+}
+
+impl Transfer {
+    fn commit(sink self: Self) -> UInt64 {
+        let Transfer { cents } = self
+        cents
+    }
+
+    fn rollback(sink self: Self) -> () {
+        let Transfer { cents: _ } = self
+    }
+}
+
+fn settle(sink transfer: Transfer, approved: Bool) -> UInt64 {
+    if approved {
+        return transfer.commit()
+    }
+    transfer.rollback()
+    0
+}
+
+fn main() -> UInt8 {
+    let _paid = settle(Transfer { cents = 100 }, true)
+    let transfer = Transfer { cents = 300 }
+    transfer.release()
+    0
+}

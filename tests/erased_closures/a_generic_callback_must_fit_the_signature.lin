@@ -1,0 +1,15 @@
+import std.mem
+
+// `F` is called with a `UInt8`, and the closure is called with a `UInt64`, so
+// no `F` can be kept as this closure.
+fn keep[F: fn(value: UInt8) -> UInt8 + Release](sink step: F) -> Result[mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator], mem.Oom] {
+    mem.Closure.open(mem.system(), step)
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let bump: UInt8 = 1
+    let kept = keep([sink bump] |value| value + bump)?
+    let answer = kept(41)
+    kept.release()
+    return .Ok(UInt8(answer))
+}

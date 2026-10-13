@@ -1,0 +1,8 @@
+// The same rule, failing quietly rather than loudly. A wider integer needs no
+// frame address to go wrong: it is held in a register, so the `ret` truncates
+// it, and `300` leaves as `44`. Nothing reports the narrowing, because the
+// narrowing is not written in the program -- it is what the entry point's
+// convention does to whatever it is given.
+fn main() -> Int64 {
+    300
+}

@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/derive_from/a_from_derive_stays_silent_after_an_undefined_alias_target.lin:1:13
+  |
+1 | alias Bad = Nope
+  |             ^^^^ no type with this name is declared here

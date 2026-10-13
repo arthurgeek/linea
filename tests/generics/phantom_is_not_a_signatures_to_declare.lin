@@ -1,0 +1,11 @@
+// A signature is a function header, so what a function may not declare it may
+// not either -- and the refusal must reach the signature itself, not wait for
+// an implementation to repeat it: a trait nobody implements yet still says
+// something false.
+pub trait Sized {
+    fn f[phantom X](s: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

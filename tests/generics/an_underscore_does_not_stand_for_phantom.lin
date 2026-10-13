@@ -1,0 +1,13 @@
+// `_Tag` says a thing exists and is deliberately not read. A phantom
+// parameter is read -- by the type system, for identity -- and a program
+// depends on that reading: delete the parameter and two brands become one
+// type, silently. A spelling that calls it unused asserts something false,
+// so the truthful one is required.
+struct Handle[_Tag] {
+    slot: UInt8,
+}
+
+fn main() -> UInt8 {
+    let h: Handle[UInt8] = .{ slot = 1 }
+    h.slot
+}

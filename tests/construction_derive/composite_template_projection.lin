@@ -1,0 +1,32 @@
+trait Source {
+    type Item
+}
+
+struct Wrapper[T] { value: T }
+
+impl[T] Source for Wrapper[T] {
+    type Item = T
+}
+
+trait Maker[A: Source] {
+    fn make(_value: A.Item) -> Self
+}
+
+template impl[A: Source] Maker[A] where reflect.target: struct {
+    fn make(_value: A.Item) -> Self {
+        .{}
+    }
+}
+
+struct Record {}
+
+derive[T] Maker[Wrapper[T]] for Record
+
+fn accepts[T: Maker[Wrapper[UInt8]]](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let record: Record = .{}
+    accepts(record)
+}

@@ -1,0 +1,24 @@
+// A type is written in six places here and only one of them is an expression:
+// the declaration, the `impl` head, the return it carries, the annotation on
+// `p`, the receiver `Point.zero()` is called through, and the argument `Cell`
+// is given.
+// Every one of them is a place this name is used.
+struct Point {
+    x: UInt8,
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+impl Point {
+    fn zero() -> Point {
+        .{ x = 0 }
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Point = Point.zero()
+    let c: Cell[Point] = .{ v = p }
+    c.v.x
+}

@@ -1,0 +1,25 @@
+import std.mem
+
+use mem.SystemAllocator
+
+trait Ranked {
+    fn rank(self: Self) -> UInt8
+}
+
+impl Ranked for UInt8 {
+    fn rank(self: Self) -> UInt8 {
+        self
+    }
+}
+
+alias RankedVec[T: Ranked] = Vec[T, SystemAllocator]
+
+fn open_unranked() -> Vec[UInt16, SystemAllocator] {
+    RankedVec.new_in(mem.system())
+}
+
+fn main() -> UInt8 {
+    let names = open_unranked()
+    names.release()
+    0
+}

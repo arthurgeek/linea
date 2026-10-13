@@ -1,0 +1,12 @@
+// A type has no parts to select, whether it is named bare or reached through
+// a module: `Thing` declares no namespace `x` could come from, and that is
+// the one mistake here. `x` names a field the type's own values carry, not a
+// member the type itself declares, so [N-Variant] is what the resolver
+// already said -- naming the qualifier's type as a second mistake describes
+// the same line twice.
+import pct
+
+fn main() -> UInt8 {
+    let _v = pct.Thing.x
+    0
+}

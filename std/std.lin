@@ -1,0 +1,90 @@
+// The prelude puts two groups of names in every module: the names the
+// language's syntax requires, and the core vocabulary most programs write in
+// their signatures. Other library names require an explicit import. A
+// module's own declaration or `use` of a prelude name shadows it there. The
+// prelude's traits also participate in postfix lookup, so adding a trait can
+// change which operation a call selects.
+// The standard-library root publishes these names through imports and pub use.
+import convert
+import default
+import option
+import range
+import result
+import release
+import mem
+import scalar
+import cmp
+import text
+import fmt
+import env
+import testing
+import index
+import iter
+import tuple
+
+// Equality, comparison and stepping support ==, < and ranges.
+pub use cmp.Equatable
+pub use cmp.Comparable
+pub use cmp.Steppable
+
+// The ? operator propagates Option or Result; a fallible entry point uses Result.
+pub use option.Option
+pub use result.Result
+
+// Range expressions construct this type.
+pub use range.Range
+
+// Brackets use Index; ^ constructs an index counted from the end.
+pub use index.Index
+pub use index.FromEnd
+
+// Non-array consuming for loops obtain an Iterator through Sequence.
+pub use iter.Sequence
+pub use iter.Iterator
+
+// Tuple syntax constructs these types: (a, b) builds a Tuple2, and so on up
+// to eight components.
+pub use tuple.Tuple2
+pub use tuple.Tuple3
+pub use tuple.Tuple4
+pub use tuple.Tuple5
+pub use tuple.Tuple6
+pub use tuple.Tuple7
+pub use tuple.Tuple8
+
+// String literals have type Str. Display renders {} and entry-point failures;
+// Debug renders :?. Exporting them does not expose the other declarations in
+// their modules.
+pub use text.Str
+pub use fmt.Display
+pub use fmt.Debug
+
+// The prelude also holds the core vocabulary. No syntax requires these names;
+// they are here because most programs write them in signatures and bounds.
+
+// Release settles a value through its one ordinary consuming operation.
+pub use release.Release
+
+// Equivalent and Ordered add laws to Equatable and Comparable, and are what
+// hashing and sorting require.
+pub use cmp.Equivalent
+pub use cmp.Ordered
+
+// From and Into convert a value totally; TryFrom and TryInto convert it when
+// it fits.
+pub use convert.From
+pub use convert.Into
+pub use convert.TryFrom
+pub use convert.TryInto
+
+// Default builds the value a type starts from.
+pub use default.Default
+
+// Allocator hands out storage; Vec and String are the growable sequence and
+// text that own storage from one.
+pub use mem.Allocator
+pub use mem.Vec
+pub use text.String
+
+// Writer accepts text, and every Display and Debug implementation writes to one.
+pub use fmt.Writer

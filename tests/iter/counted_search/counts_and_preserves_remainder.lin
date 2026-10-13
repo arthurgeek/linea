@@ -1,0 +1,16 @@
+import std.testing
+
+fn reaches_three(item: UInt64) -> Bool {
+    item == 3
+}
+
+fn main() -> UInt8 {
+    var arrivals = (UInt64(1)..UInt64(6)).iterate()
+    let report = &arrivals.find_counted(reaches_three)
+    testing.assert_eq(report.inspected, UInt64(3), "include the matching item").unwrap()
+    let expected: Option[UInt64] = .Some(3)
+    testing.assert_eq(report.found, expected, "return the matching item").unwrap()
+    let next: Option[UInt64] = .Some(4)
+    testing.assert_eq(Iterator.next(&arrivals), next, "leave the remainder unread").unwrap()
+    0
+}

@@ -1,0 +1,5 @@
+error[N-Variant]: `Bogus` is not a variant of `Colour`
+  --> tests/enums/not_a_variant_from_context.lin:14:11
+   |
+14 |     shade(.Bogus)
+   |           ^^^^^^ not a variant of the type expected here

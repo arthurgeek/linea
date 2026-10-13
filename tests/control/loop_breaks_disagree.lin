@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let x: UInt8 = loop {
+        if true {
+            break 1
+        }
+        break true
+    }
+    x
+}

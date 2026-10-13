@@ -1,0 +1,536 @@
+import std.mem
+import std.release
+import std.testing
+import std.text
+
+use release.Settle
+
+// ReadAllError says why reading a whole input failed: the reader's error at a
+// stream offset, refused storage, input past the byte limit, or a reader that
+// claimed more bytes than it was asked for.
+@copyable
+pub enum ReadAllError[E] {
+    Input(InputFailure[E]),
+    Allocation(mem.Oom),
+    Limit,
+    InvalidProgress,
+}
+
+// A ReadAllFailure owns the bytes read before the failure. `partial` is None
+// when no storage was obtained; otherwise it holds every successfully consumed
+// byte, including the single byte used to establish that the limit was
+// exceeded.
+@linear
+pub struct ReadAllFailure[A: Allocator, E] {
+    partial: Option[Vec[UInt8, A]],
+    reason: ReadAllError[E],
+}
+
+derive[E: Debug] Debug for ReadAllError[E]
+
+derive[E: Release] Release for ReadAllError[E]
+
+impl[E] ReadAllError[E] {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    internal fn is_refusal(self: Self) -> Bool {
+        match read self { Allocation(_) => true, _ => false }
+    }
+}
+
+derive[A: Allocator, E: Release] Release for ReadAllFailure[A, E]
+
+impl[E: Display] Display for ReadAllError[E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Input(failure) => failure.fmt(&w),
+            Allocation(error) => error.fmt(&w),
+            Limit => &w.write_str("input exceeded the byte limit"),
+            InvalidProgress => &w.write_str("the reader reported an invalid count"),
+        }
+    }
+}
+
+test fn whole_input_errors_display_their_reason() {
+    let input: ReadAllError[Str] = .Input(.{ reason = "device unplugged", stream_offset = 2 })
+    let allocation: ReadAllError[Str] = .Allocation(.Exhausted)
+    let limit: ReadAllError[Str] = .Limit
+    let invalid: ReadAllError[Str] = .InvalidProgress
+    // The 192-byte recorder holds all four reasons and their separators.
+    var writer = testing.Recorder.of(mem.system(), 192).unwrap()
+    let wrote = "{input}; {allocation}; {limit}; {invalid}".fmt(&writer).is_ok()
+    let equal = writer.holds("input failed at stream byte 2: device unplugged; Exhausted; input exceeded the byte limit; the reader reported an invalid count")
+    writer.release()
+    testing.assert(wrote && equal, "a whole-input error lost its reason")?
+    .Ok(())
+}
+
+// Display renders the reason and borrows any partial bytes without settling them.
+impl[A: Allocator, E: Display] Display for ReadAllFailure[A, E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.reason.fmt(&w)
+    }
+}
+
+test fn whole_input_failure_display_borrows_its_partial_bytes() {
+    let input = "abcd"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    let failure = match read_all(mem.system(), &source, max_bytes: 2) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an oversized input succeeded")
+        },
+        Err(failure) => failure,
+    }
+    // The 64-byte recorder holds the limit reason.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = failure.fmt(&writer).is_ok()
+    let equal = writer.holds("input exceeded the byte limit")
+    writer.release()
+    let intact = match read failure.partial { Some(bytes) => bytes.length() == 3, None => false }
+    failure.release()
+    testing.assert(wrote && equal, "a whole-input failure lost its reason")?
+    testing.assert(intact, "displaying a whole-input failure changed its partial bytes")?
+    .Ok(())
+}
+
+// Settling a failed read releases the bytes read before the failure and keeps
+// its reason.
+impl[A: Allocator, E: Release] release.Settle for ReadAllFailure[A, E] {
+    type Reason = ReadAllError[E]
+
+    fn settle(sink self: Self) -> ReadAllError[E] where carries(self) {
+        let ReadAllFailure { partial, reason } = self
+        partial.release()
+        reason
+    }
+}
+
+test fn settling_a_failed_read_releases_the_partial_bytes() {
+    let input = "abcdef"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 6, fail_at = UInt64.max, calls = 0 }
+    let settled = read_all(mem.system(), &source, max_bytes: 3).settled()
+    let limited = match settled {
+        Ok(bytes) => {
+            bytes.release()
+            false
+        },
+        Err(reason) => match reason { Limit => true, _ => false },
+    }
+    testing.assert(limited, "settling a failed read lost its reason")?
+    .Ok(())
+}
+
+// Put `next` in `buffer` and return the buffer it replaced.
+fn replace_whole_input_buffer[A: Allocator](inout buffer: mem.Buffer[A], sink next: mem.Buffer[A]) -> mem.Buffer[A] where carries(buffer), retains(buffer: next) {
+    let previous = buffer
+    buffer = next
+    previous
+}
+
+// Build a failure that owns the first `length` bytes of `buffer`.
+fn whole_input_failure[A: Allocator, E](sink buffer: mem.Buffer[A], length: UInt64, sink reason: ReadAllError[E]) -> ReadAllFailure[A, E] where carries(.partial.Some: buffer), carries(.reason: reason) {
+    .{ partial = .Some(mem.vector_from_buffer(buffer, length)), reason = reason }
+}
+
+// WholeInputFixture delivers `bytes` at most `step` at a time, fails with 9 on
+// reaching `fail_at`, and counts its reads in `calls`.
+struct WholeInputFixture {
+    bytes: mem.Slice[UInt8],
+    position: UInt64,
+    step: UInt64,
+    fail_at: UInt64,
+    calls: UInt64,
+}
+
+impl Reader for WholeInputFixture {
+    type Error = UInt8
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, UInt8] where carries() {
+        self.calls += 1
+        if self.position == self.fail_at {
+            return .Err(9)
+        }
+        var amount = self.bytes.length() - self.position
+        if amount > count {
+            amount = count
+        }
+        if amount > self.step {
+            amount = self.step
+        }
+        if amount > self.fail_at - self.position {
+            amount = self.fail_at - self.position
+        }
+        for index in 0..amount {
+            &buffer.store_byte(offset + index, self.bytes[self.position + index])
+        }
+        self.position += amount
+        .Ok(amount)
+    }
+}
+
+// ExcessReadFixture claims to have read more bytes than it was asked for.
+struct ExcessReadFixture {}
+
+impl Reader for ExcessReadFixture {
+    type Error = UInt8
+
+    fn read_some[A: Allocator](inout _self: Self, inout _buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, UInt8] where carries() {
+        .Ok(offset + count + 1)
+    }
+}
+
+// Read `reader` through EOF into storage from `allocator`, refusing input
+// longer than `max_bytes`. Allocate before consuming input and preserve partial
+// ownership on failure. Input offsets start at this call.
+pub fn read_all[R: Reader, A: Allocator](allocator: A, inout reader: R, max_bytes: UInt64) -> Result[Vec[UInt8, A], ReadAllFailure[A, R.Error]] where carries(.Ok: allocator), carries(.Err.partial.Some: allocator), carries(.Err.reason.Input.reason: reader) {
+    let bound = if max_bytes == UInt64.max {
+        UInt64.max
+    } else {
+        max_bytes + 1
+    }
+    // Start with at most 4 KiB of byte storage, then double up to the bound.
+    let initial = if bound < 4096 {
+        bound
+    } else {
+        UInt64(4096)
+    }
+    var buffer = allocator.acquire(initial) else |reason| {
+        return .Err(.{ partial = .None, reason = .Allocation(reason) })
+    }
+    var length: UInt64 = 0
+    loop {
+        let capacity = buffer.length()
+        if length == capacity {
+            if length == UInt64.max {
+                let reason: ReadAllError[R.Error] = .Allocation(.Exhausted)
+                return .Err(whole_input_failure(buffer, length, reason))
+            }
+            let doubled = if capacity > UInt64.max / 2 {
+                UInt64.max
+            } else {
+                capacity * 2
+            }
+            let grown = if doubled > bound {
+                bound
+            } else {
+                doubled
+            }
+            var next = allocator.acquire(grown) else |error| {
+                let reason: ReadAllError[R.Error] = .Allocation(error)
+                return .Err(whole_input_failure(buffer, length, reason))
+            }
+            for index in 0..length {
+                &next.store_byte(index, buffer.load_byte(index))
+            }
+            let previous = replace_whole_input_buffer(&buffer, next)
+            previous.release()
+        }
+        let remaining = buffer.length() - length
+        let count = &reader.read_some(&buffer, offset: length, count: remaining) else |error| {
+            let reason: ReadAllError[R.Error] = .Input(.{ reason = error, stream_offset = length })
+            return .Err(whole_input_failure(buffer, length, reason))
+        }
+        if count > remaining {
+            let reason: ReadAllError[R.Error] = .InvalidProgress
+            return .Err(whole_input_failure(buffer, length, reason))
+        }
+        length += count
+        if length > max_bytes {
+            let reason: ReadAllError[R.Error] = .Limit
+            return .Err(whole_input_failure(buffer, length, reason))
+        }
+        if count == 0 {
+            return .Ok(mem.vector_from_buffer(buffer, length))
+        }
+    }
+}
+
+test fn whole_input_accepts_short_reads_and_an_exact_limit() {
+    let input = "a\0á"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max, calls = 0 }
+    defer let bytes = read_all(mem.system(), &source, max_bytes: 4).unwrap()
+    testing.assert_eq(bytes.length(), UInt64(4), "whole-input reading changed the exact-limit extent")?
+    for index in 0..bytes.length() {
+        testing.assert_eq(bytes[index], input.byte(index).unwrap(), "whole-input reading changed a byte")?
+    }
+    testing.assert_eq(source.calls, UInt64(5), "short reads skipped bytes or failed to establish EOF")?
+    .Ok(())
+}
+
+test fn whole_input_limit_failure_retains_the_extra_byte() {
+    let input = "abcdef"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 6, fail_at = UInt64.max, calls = 0 }
+    match read_all(mem.system(), &source, max_bytes: 3) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an oversized whole input succeeded")
+        },
+        Err(failure) => {
+            let limited = match read failure.reason { Limit => true, _ => false }
+            let intact = match read failure.partial {
+                None => false,
+                Some(bytes) => bytes.length() == 4 && bytes[0] == 97 && bytes[3] == 100,
+            }
+            failure.release()
+            testing.assert(limited && intact, "limit failure lost its consumed overflow byte")?
+        },
+    }
+    testing.assert_eq(source.position, UInt64(4), "whole-input limit consumed more than one overflow byte")?
+    .Ok(())
+}
+
+test fn whole_input_zero_limit_distinguishes_eof_from_one_byte() {
+    let empty = ""
+    var source = WholeInputFixture { bytes = empty.as_bytes(), position = 0, step = 1, fail_at = UInt64.max, calls = 0 }
+    defer let bytes = read_all(mem.system(), &source, max_bytes: 0).unwrap()
+    testing.assert_eq(bytes.length(), UInt64(0), "empty input gained bytes")?
+    testing.assert_eq(source.calls, UInt64(1), "zero limit skipped the EOF probe")?
+    let input = "x"
+    var nonempty = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max, calls = 0 }
+    match read_all(mem.system(), &nonempty, max_bytes: 0) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "zero limit accepted one byte")
+        },
+        Err(failure) => {
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 1 && bytes[0] == 120, None => false }
+            let limited = match read failure.reason { Limit => true, _ => false }
+            failure.release()
+            testing.assert(intact && limited, "zero-limit failure lost its probe byte")?
+        },
+    }
+    .Ok(())
+}
+
+test fn whole_input_failure_retains_a_partial_scalar_and_its_stream_offset() {
+    let input = "aáz"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 2, calls = 0 }
+    match read_all(mem.system(), &source, max_bytes: 8) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an input error became success")
+        },
+        Err(failure) => {
+            let positioned = match read failure.reason { Input(error) => error.reason == 9 && error.stream_offset == 2, _ => false }
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 2 && bytes[0] == 97 && bytes[1] == 195, None => false }
+            failure.release()
+            testing.assert(positioned && intact, "input failure lost its partial scalar or position")?
+        },
+    }
+    .Ok(())
+}
+
+test fn whole_input_initial_allocation_refusal_does_not_read() {
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    let input = "data"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    match read_all(arena.handle(), &source, max_bytes: 4) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "a refusing allocator produced whole-input storage")
+        },
+        Err(failure) => {
+            let no_storage = failure.partial.is_none()
+            let refused = match read failure.reason { Allocation(_) => true, _ => false }
+            failure.release()
+            testing.assert(no_storage && refused, "initial refusal invented partial ownership")?
+        },
+    }
+    testing.assert_eq(source.calls, UInt64(0), "allocation refusal consumed input")?
+    .Ok(())
+}
+
+test fn whole_input_is_allocated_from_an_arena() {
+    // The arena holds the first 4096-byte buffer and its cursor.
+    defer let arena = mem.Arena.open(mem.system(), 4104)
+    var source = WholeInputFixture { bytes = "data".as_bytes(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    let bytes = read_all(arena.handle(), &source, max_bytes: 16).unwrap()
+    testing.assert_eq(bytes.as_slice(), "data".as_bytes(), "a whole input read into an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn whole_input_growth_refusal_preserves_bytes_before_reading_more() {
+    defer let input = Vec.filled(mem.system(), count: 4097, value: UInt8(7)).unwrap()
+    // The eight-byte arena cursor leaves exactly the initial 4096-byte buffer.
+    defer let arena = mem.Arena.open(mem.system(), 4104)
+    var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4097, fail_at = UInt64.max, calls = 0 }
+    match read_all(arena.handle(), &source, max_bytes: 4097) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "whole-input growth ignored exhausted storage")
+        },
+        Err(failure) => {
+            let refused = match read failure.reason { Allocation(_) => true, _ => false }
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 4096 && bytes[0] == 7 && bytes[4095] == 7, None => false }
+            failure.release()
+            testing.assert(refused && intact, "growth refusal changed its retained prefix")?
+        },
+    }
+    testing.assert_eq(source.position, UInt64(4096), "growth refusal consumed unretained input")?
+    testing.assert_eq(source.calls, UInt64(1), "growth refusal performed another read")?
+    .Ok(())
+}
+
+test fn whole_input_rejects_unreported_destination_overflow() {
+    var source = ExcessReadFixture {}
+    match read_all(mem.system(), &source, max_bytes: 3) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an oversized read count succeeded")
+        },
+        Err(failure) => {
+            let invalid = match read failure.reason { InvalidProgress => true, _ => false }
+            let empty = match read failure.partial { Some(bytes) => bytes.length() == 0, None => false }
+            failure.release()
+            testing.assert(invalid && empty, "an invalid read count invented initialized progress")?
+        },
+    }
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_whole_input() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), ReadAllError[UInt8]] {
+            // Ten thousand bytes outgrow the first 4096-byte buffer twice.
+            defer let input = Vec.filled(mem.system(), count: 10000, value: UInt8(7)).unwrap()
+            var source = WholeInputFixture { bytes = input.as_slice(), position = 0, step = 4096, fail_at = UInt64.max, calls = 0 }
+            let bytes = read_all(allocator, &source, max_bytes: 10000).settled()?
+            bytes.release()
+            return .Ok(())
+        },
+        ReadAllError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing whole-input read was reported as failing")?
+    .Ok(())
+}
+
+// ReadTextError says whether reading the input or decoding it as UTF-8 failed.
+// `read_text` and `read_text_in` release the bytes of either failure, so the error owns nothing
+// beyond what the reader's own error owns.
+@copyable
+pub enum ReadTextError[E] {
+    Read(ReadAllError[E]),
+    Encoding(text.Utf8Error),
+}
+
+derive[E: Debug] Debug for ReadTextError[E]
+
+derive[E: Release] Release for ReadTextError[E]
+
+impl[E] From[ReadAllError[E]] for ReadTextError[E] {
+    fn from(sink source: ReadAllError[E]) -> ReadTextError[E] {
+        .Read(source)
+    }
+}
+
+impl[E] From[text.Utf8Error] for ReadTextError[E] {
+    fn from(sink source: text.Utf8Error) -> ReadTextError[E] {
+        .Encoding(source)
+    }
+}
+
+impl[E] ReadTextError[E] {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    internal fn is_refusal(self: Self) -> Bool {
+        match read self { Read(error) => error.is_refusal(), Encoding(_) => false }
+    }
+}
+
+impl[E: Display] Display for ReadTextError[E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Read(error) => error.fmt(&w),
+            Encoding(error) => {
+                &w.write_str("input is not UTF-8: ")?
+                error.fmt(&w)
+            },
+        }
+    }
+}
+
+// Read `reader` through EOF as UTF-8 text, under the limits of `read_all`. A
+// read that fails, or bytes that are not UTF-8, release what was read and
+// leave only the reason.
+pub fn read_text_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_bytes: UInt64) -> Result[String[A], ReadTextError[R.Error]] where carries(.Ok: allocator), carries(.Err: allocator, reader), R.Error: Release {
+    let bytes = match read_all(allocator, &reader, max_bytes) {
+        Ok(bytes) => bytes,
+        Err(failure) => return .Err(.Read(failure.settle())),
+    }
+    let decoded = String.from_bytes(bytes).settled()?
+    .Ok(decoded)
+}
+
+// Read `reader` through EOF as UTF-8 text from the system allocator. See
+// `read_text_in`.
+pub fn read_text[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[String, ReadTextError[R.Error]] where carries(.Err: reader), R.Error: Release {
+    read_text_in(mem.system(), &reader, max_bytes)
+}
+
+test fn reading_text_decodes_the_input_as_utf8() {
+    let input = "café"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max, calls = 0 }
+    defer let decoded = read_text(&source, max_bytes: 8).unwrap()
+    testing.assert_eq(decoded.view(), "café", "reading text changed the input")?
+}
+
+test fn reading_text_names_the_offset_of_invalid_utf8() {
+    // The bytes are ASCII a followed by ED A0 80, which would encode the
+    // forbidden surrogate U+D800.
+    let invalid = [UInt8(97), 237, 160, 128]
+    var source = WholeInputFixture { bytes = invalid.as_slice(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+    let offset = match read_text(&source, max_bytes: 8) {
+        Ok(decoded) => {
+            decoded.release()
+            UInt64.max
+        },
+        Err(error) => match error {
+            Encoding(encoding) => encoding.offset,
+            Read(_) => UInt64.max,
+        },
+    }
+    testing.assert_eq(offset, UInt64(1), "invalid UTF-8 was not reported at its first bad byte")?
+}
+
+test fn reading_text_reports_a_reader_failure_as_a_read_failure() {
+    let input = "abcdef"
+    var source = WholeInputFixture { bytes = input.as_bytes(), position = 0, step = 2, fail_at = 2, calls = 0 }
+    let failed = match read_text(&source, max_bytes: 8) {
+        Ok(decoded) => {
+            decoded.release()
+            false
+        },
+        Err(error) => match error {
+            Read(reason) => match reason { Input(_) => true, _ => false },
+            Encoding(_) => false,
+        },
+    }
+    testing.assert(failed, "a failing reader was not a read failure")?
+}
+
+test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), ReadTextError[UInt8]] {
+            // Invalid text is the expected answer, and a refusal is the other
+            // acceptable one; both must leave nothing allocated.
+            let invalid = [UInt8(97), 237, 160, 128]
+            var source = WholeInputFixture { bytes = invalid.as_slice(), position = 0, step = 4, fail_at = UInt64.max, calls = 0 }
+            match read_text_in(allocator, &source, max_bytes: 8) {
+                Ok(decoded) => {
+                    decoded.release()
+                    .Err(.Encoding(text.Utf8Error { offset = 0 }))
+                },
+                Err(error) => match error {
+                    Encoding(_) => .Ok(()),
+                    Read(reason) => .Err(.Read(reason)),
+                },
+            }
+        },
+        ReadTextError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a failed text read left bytes allocated")?
+    .Ok(())
+}

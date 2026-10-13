@@ -1,0 +1,7 @@
+// A parameter of a written `fn` type is named, so `fn(UInt64)` cannot be read.
+// The annotation says nothing about the array, so its closures are not held
+// against each other.
+fn main() -> UInt8 {
+    let steps: [fn(UInt64) -> UInt64; 2] = [|c: UInt64| c + 1, |c: UInt64| c * 2]
+    UInt8(steps[1](3))
+}

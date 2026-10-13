@@ -1,0 +1,20 @@
+import helper as _linea_trait_0
+import protocol
+
+fn _linea_trait_1() -> UInt8 {
+    0
+}
+
+struct Item {}
+
+derive protocol.Label for Item
+
+struct Other {}
+
+derive protocol.Label for Other
+
+fn main() -> UInt8 {
+    let item: Item = .{}
+    let _other: Other = .{}
+    protocol.Label.label(item) + _linea_trait_0.zero()
+}

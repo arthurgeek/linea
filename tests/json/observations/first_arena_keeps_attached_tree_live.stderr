@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/json/observations/first_arena_keeps_attached_tree_live.lin:12:5
+   |
+12 |     first.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+13 |     let found = document.at(0).unwrap().as_str().unwrap() == "tea"
+   |                 -------- the observation is still used here

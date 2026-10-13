@@ -1,0 +1,16 @@
+// Two places overlap when one path is a prefix of the other: `o.inner.y` is
+// part of what `o.inner` names, so the callee would observe its storage change
+// through an argument nobody marked.
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+fn replace(inout i: Inner, n: UInt8) -> UInt8 {
+    i.y = 5
+    n
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+    replace(&o.inner, o.inner.y) + o.z
+}

@@ -1,0 +1,91 @@
+import std.io.core
+
+pub use core.Writer
+
+// Display formats a value as application output, the text a user reads.
+pub trait Display {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w)
+}
+
+// Derived Display writes the type or variant name, then its components: in
+// parentheses when they are positional, or as `name: value` pairs in braces
+// when they are named. A case with no components writes its name alone.
+template impl Display where reflect.components: Display {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            reflect.case => {
+                Writer.write_str(&w, reflect.case.name)?
+                var wrote_component = false
+                for component in reflect.components {
+                    if component.ordinal == 0 {
+                        if reflect.case.components_named {
+                            Writer.write_str(&w, r" { ")?
+                        } else {
+                            Writer.write_str(&w, "(")?
+                        }
+                    } else {
+                        Writer.write_str(&w, ", ")?
+                    }
+                    if reflect.case.components_named {
+                        Writer.write_str(&w, component.name)?
+                        Writer.write_str(&w, ": ")?
+                    }
+                    Display.fmt(component.of(self), &w)?
+                    wrote_component = true
+                }
+                if wrote_component {
+                    if reflect.case.components_named {
+                        Writer.write_str(&w, r" }")?
+                    } else {
+                        Writer.write_str(&w, ")")?
+                    }
+                }
+                return .Ok(())
+            },
+        }
+    }
+}
+
+// Debug formats a value for diagnostics, including its structure and variant
+// payloads.
+pub trait Debug {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w)
+}
+
+// Derived Debug writes the same shape as derived Display, formatting each
+// component with Debug so nested text and payloads keep their detail.
+template impl Debug where reflect.components: Debug {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            reflect.case => {
+                Writer.write_str(&w, reflect.case.name)?
+                var wrote_component = false
+                for component in reflect.components {
+                    if component.ordinal == 0 {
+                        if reflect.case.components_named {
+                            Writer.write_str(&w, r" { ")?
+                        } else {
+                            Writer.write_str(&w, "(")?
+                        }
+                    } else {
+                        Writer.write_str(&w, ", ")?
+                    }
+                    if reflect.case.components_named {
+                        Writer.write_str(&w, component.name)?
+                        Writer.write_str(&w, ": ")?
+                    }
+                    Debug.debug(component.of(self), &w)?
+                    wrote_component = true
+                }
+                if wrote_component {
+                    if reflect.case.components_named {
+                        Writer.write_str(&w, r" }")?
+                    } else {
+                        Writer.write_str(&w, ")")?
+                    }
+                }
+                return .Ok(())
+            },
+        }
+    }
+}

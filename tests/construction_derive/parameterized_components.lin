@@ -1,0 +1,45 @@
+trait Count[A] {
+    fn count(self: Self, _context: A) -> UInt64 where carries()
+}
+
+impl[A] Count[A] for UInt64 {
+    fn count(self: UInt64, _context: A) -> UInt64 where carries() {
+        self
+    }
+}
+
+template impl[A] Count[A] where reflect.components: Count[A] {
+    fn count(self: Self, _context: A) -> UInt64 where carries() {
+        var total: UInt64 = 0
+        match read self {
+            reflect.case => {
+                for component in reflect.components {
+                    total += Count.count(component.of(self), _context)
+                }
+            },
+        }
+        total
+    }
+}
+
+struct Plain {
+    value: UInt64,
+}
+
+struct Holder[T] {
+    value: T,
+}
+
+derive[A] Count[A] for Plain
+
+derive[A, T: Count[A]] Count[A] for Holder[T]
+
+fn main() -> UInt8 {
+    let plain: Plain = .{ value = 3 }
+    let holder: Holder[UInt64] = .{ value = 4 }
+    if Count.count(plain, UInt8(1)) + Count.count(holder, false) == 7 {
+        0
+    } else {
+        1
+    }
+}

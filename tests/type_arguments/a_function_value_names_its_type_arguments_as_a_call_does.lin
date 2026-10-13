@@ -1,0 +1,26 @@
+// A function named as a value with brackets names every type parameter, and
+// each must meet its bound, as in a call. Brackets after a value index it, so
+// a list of types there is refused.
+trait Weighed {
+    fn grams(self: Self) -> UInt32
+}
+
+fn create[P](sink value: P) -> Option[P] where carries(value) {
+    .Some(value)
+}
+
+fn heaviest[W: Weighed](first: W, second: W) -> UInt32 {
+    if first.grams() > second.grams() {
+        first.grams()
+    } else {
+        second.grams()
+    }
+}
+
+fn main() -> UInt8 {
+    let _too_many = create[UInt8, Bool]
+    let _unweighed = heaviest[UInt8]
+    let values = [UInt8(1), 2]
+    let _indexed = values[UInt8, Bool]
+    0
+}

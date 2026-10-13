@@ -1,0 +1,12 @@
+// A function's written result type is resolved once, so a length that is not
+// a number is one report however many calls read the function's result.
+fn make() -> [Int64; "3"] {
+    [1, 2, 3]
+}
+
+fn main() -> UInt8 {
+    let _a = make()
+    let _b = make()
+    let _c = make()
+    0
+}

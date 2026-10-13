@@ -1,0 +1,56 @@
+// [S-Defer]. A `defer` runs where control leaves, so an expression that leaves
+// from inside one is a jump out of a scope exit -- a shape the language has
+// nothing to say about.
+//
+// Refused rather than left open, because both walks that place a schedule
+// re-enter over a stack they have not popped and follow themselves forever.
+// A three-line program getting a stack overflow is not a rule deliberately
+// unmade; it is the frontend failing, which it may not do.
+//
+// All four forms that leave, so a rule that caught three would be found by
+// the fourth.
+fn maybe(c: Bool) -> Option[UInt8] {
+    if c {
+        Option.Some(1)
+    } else {
+        Option.None
+    }
+}
+
+fn returns() -> UInt8 {
+    defer return 1
+    2
+}
+
+fn questions(c: Bool) -> Option[UInt8] {
+    defer maybe(c)?
+    Option.Some(0)
+}
+
+fn breaks() -> UInt8 {
+    var i: UInt8 = 0
+    while i < 2 {
+        defer break
+        i = i + 1
+    }
+    i
+}
+
+fn continues() -> UInt8 {
+    var i: UInt8 = 0
+    while i < 2 {
+        defer continue
+        i = i + 1
+    }
+    i
+}
+
+fn main() -> UInt8 {
+    let a = returns()
+    let b = breaks()
+    let c = continues()
+    match questions(true) {
+        Some(n) => n + a + b + c,
+        None => 0,
+    }
+}

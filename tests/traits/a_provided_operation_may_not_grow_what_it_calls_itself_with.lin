@@ -1,0 +1,70 @@
+// A provided operation that calls itself at a larger type argument would need
+// a body for every height, as a function would. Each operation below wraps
+// `value` in an array before recursing: `by_dot` calls itself by dot,
+// `by_name` through the trait's name, and `by_bound` through a function that
+// reaches it again through a bound. `Layered[K]` recurses the same way over a
+// trait that takes a parameter.
+trait Nest {
+    fn tag(self: Self) -> UInt8
+
+    fn by_dot[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8 {
+        if depth == 0 {
+            self.tag()
+        } else {
+            self.by_dot(depth - 1, [copy(value)]) + 1
+        }
+    }
+
+    fn by_name[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8 {
+        if depth == 0 {
+            self.tag()
+        } else {
+            Nest.by_name(self, depth - 1, [copy(value)]) + 1
+        }
+    }
+
+    fn by_bound[U: Copyable](self: Self, depth: UInt8, value: U) -> UInt8 {
+        if depth == 0 {
+            self.tag()
+        } else {
+            deeper(self, depth - 1, [copy(value)]) + 1
+        }
+    }
+}
+
+fn deeper[T: Nest, U: Copyable](nest: T, depth: UInt8, value: U) -> UInt8 {
+    nest.by_bound(depth, value)
+}
+
+trait Layered[K] {
+    fn base(self: Self, key: K) -> UInt8
+
+    fn wrap[U: Copyable](self: Self, key: K, depth: UInt8, value: U) -> UInt8 {
+        if depth == 0 {
+            self.base(key)
+        } else {
+            self.wrap(key, depth - 1, [copy(value)]) + 1
+        }
+    }
+}
+
+struct Box {
+    size: UInt8,
+}
+
+impl Nest for Box {
+    fn tag(self: Self) -> UInt8 {
+        self.size
+    }
+}
+
+impl Layered[UInt32] for Box {
+    fn base(self: Self, key: UInt32) -> UInt8 {
+        self.size + UInt8(key)
+    }
+}
+
+fn main() -> UInt8 {
+    let box = Box { size = 4 }
+    box.by_dot(2, UInt8(1)) + box.by_name(2, UInt8(1)) + box.by_bound(2, UInt8(1)) + box.wrap(UInt32(0), 2, UInt8(1))
+}

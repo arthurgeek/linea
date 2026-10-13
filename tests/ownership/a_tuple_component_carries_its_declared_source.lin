@@ -1,0 +1,17 @@
+// A `carries` contract names a tuple component by its position, so each
+// component may hold the borrow of the parameter its path names.
+fn pick(a: borrow UInt8, b: borrow UInt8) -> (borrow UInt8, borrow UInt8) where carries(._0: a), carries(._1: b) {
+    (copy(a), copy(b))
+}
+
+fn observed(x: borrow UInt8) -> (borrow UInt8, UInt8) where carries(._0: x) {
+    (copy(x), 1)
+}
+
+fn main() -> UInt8 {
+    let v: UInt8 = 6
+    let w: UInt8 = 2
+    let (seen, n) = observed(borrow v)
+    let (first, second) = pick(borrow v, borrow w)
+    *seen + n + *first + *second - 15
+}

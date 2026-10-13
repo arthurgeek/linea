@@ -1,0 +1,8 @@
+// A tuple whose components are constants is itself a constant, so it can be
+// declared at module level.
+let origin: (UInt8, UInt8) = (0, 0)
+
+fn main() -> UInt8 {
+    let (x, y) = origin
+    x + y
+}

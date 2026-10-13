@@ -1,0 +1,15 @@
+// A contract written in this module may name the sealed fields, because the
+// module that declares them may read them.
+@opaque
+struct Vault {
+    secret: Str,
+    tally: UInt8,
+}
+
+pub fn open(sink secret: Str) -> Vault where carries(secret) {
+    .{ secret = secret, tally = 1 }
+}
+
+pub fn reveal(vault: Vault) -> Str where carries(vault.secret) {
+    copy(vault.secret)
+}

@@ -1,0 +1,5 @@
+error[S-Range]: an open end awaits a consumer that gives it meaning
+ --> tests/ranges/an_open_end_before_a_body_is_refused.lin:6:9
+  |
+6 |     if 0.. {
+  |         ^^ `..b`, `a..`, and bare `..` have no consumer yet

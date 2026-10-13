@@ -1,0 +1,12 @@
+// A name beginning with `_` may go unused, so `let _status = launch` binds the
+// function itself and `()` on the next line stands alone. `launch` never runs,
+// and the parser notes the line that could have called it.
+fn launch() -> UInt8 {
+    panic("launched")
+}
+
+fn main() -> UInt8 {
+    let _status = launch
+    ()
+    0
+}

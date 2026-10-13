@@ -1,0 +1,29 @@
+trait Required {
+    fn value(self: Self) -> UInt8
+}
+
+trait Ready {
+    fn ready(self: Self) -> UInt8
+}
+
+template impl Ready where reflect.components: Required {
+    fn ready(_self: Self) -> UInt8 {
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    component.of(_self).value()
+                }
+            },
+        }
+    }
+}
+
+struct Box {
+    value: UInt8,
+}
+
+derive Ready for Box
+
+fn main() -> UInt8 {
+    0
+}

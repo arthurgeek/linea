@@ -1,0 +1,9 @@
+// A `sink` parameter that leaks what it was given.
+//
+// Every other case here disposes of what it takes, so deleting the rule that
+// says a `sink` arrives owned left the whole corpus passing: a check that
+// stops firing loses errors, and a case that must be accepted cannot notice.
+fn main() -> UInt8 {
+    let k = mint(7)
+    swallow(k)
+}

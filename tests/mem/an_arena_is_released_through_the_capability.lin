@@ -1,0 +1,17 @@
+// Arena carries the handle needed to return its slab, so Release is one valid
+// context-free fallback. A generic caller reaches that operation without
+// knowing that the value is an Arena.
+import std.mem
+
+use mem.Arena
+use mem.system
+
+fn discard[T: Release](sink value: T) -> () {
+    Release.release(value)
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 64)
+    discard(arena)
+    42
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: a closure is opened at a `fn` or `inout fn` type, and `sink fn() -> UInt8` is not one
+ --> tests/erased_closures/a_consuming_closure_is_not_kept.lin:7:30
+  |
+7 |     let finish = mem.Closure.open(
+  |                              ^^^^ a kept closure is called in place, so give the callback read or `inout` invocation

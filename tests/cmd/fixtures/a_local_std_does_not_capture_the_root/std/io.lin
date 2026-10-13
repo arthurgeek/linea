@@ -1,0 +1,7 @@
+// A directory called `std`, holding a module called `io`, beside a program
+// that imports `std.io`. It is never reached: what `std` names is decided
+// before anything is resolved against this program's own directory, so no
+// arrangement of files here can stand in for the library.
+pub fn println(s: UInt8) -> UInt8 {
+    s
+}

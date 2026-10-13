@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/a_variant_carries_one_list.lin:17:42
+   |
+17 |     let s: Shape = Shape.Round(bump(&p), p)
+   |                                     -- mutated by this argument
+   |                                          ^ already passed `&` here

@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let half = 0.5
+    let almost = 255.9
+    let low = -128.9
+    if UInt8(-half) == 0 && UInt8(almost) == 255 && Int8(low) == -128 {
+        0
+    } else {
+        1
+    }
+}

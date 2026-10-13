@@ -1,0 +1,14 @@
+// A pattern's binders are locals of the lambda: they shadow an outer name of
+// the same spelling, a lambda nested inside captures them as it captures any
+// other local, and the nested lambda's own pattern may reuse their names.
+fn apply[F: fn(read pair: (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = 100
+    let shadowed = apply((3, 4), |(a, b)| a + b)
+    let nested = apply((3, 4), |(a, b)| apply((a, b), [a] |(c, d)| c * 10 + d + a))
+    let reused = apply((3, 4), |(a, b)| apply((b, a), |(a, b)| a * 10 + b))
+    a + shadowed + nested + reused - 187
+}

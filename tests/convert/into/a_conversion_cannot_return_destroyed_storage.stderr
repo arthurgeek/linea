@@ -1,0 +1,12 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/convert/into/a_conversion_cannot_return_destroyed_storage.lin:11:9
+   |
+11 |         owned.release()
+   |         ^^^^^ keep this place available until the last use of its observation
+12 |         return .{ text = view }
+   |                          ---- the observation is still used here
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/convert/into/a_conversion_cannot_return_destroyed_storage.lin:12:16
+   |
+12 |         return .{ text = view }
+   |                ^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

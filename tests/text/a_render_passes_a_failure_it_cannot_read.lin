@@ -1,0 +1,31 @@
+// An implementation renders into a writer it knows nothing about, so the
+// failure it meets is a type it can only hand on. `W.Error` carries no bound:
+// `?` passes one to the caller, and nothing here can render or inspect it.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+struct Pair {
+    a: Int64,
+    b: Int64,
+}
+
+impl Display for Pair {
+    fn fmt[W: Writer](self: Pair, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        let a: Int64 = self.a
+        let b: Int64 = self.b
+        Display.fmt(a, &w)?
+        Writer.write_str(&w, " ")?
+        Display.fmt(b, &w)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+    let p: Pair = .{ a = 3, b = 4 }
+    Display.fmt(p, &w)?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

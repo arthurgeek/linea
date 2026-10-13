@@ -1,0 +1,24 @@
+trait Give[U] {
+    fn give(_self: Self, _value: U) -> UInt8
+}
+
+struct Holder {
+    value: UInt8,
+}
+
+impl Give[fn(read value: UInt8 = 1 + 1) -> UInt8] for Holder {
+    fn give(_self: Holder, _value: fn(read value: UInt8 = 1 + 1) -> UInt8) -> UInt8 {
+        0
+    }
+}
+
+impl Give[fn(read value: UInt8 = 2) -> UInt8] for Holder {
+    fn give(_self: Holder, _value: fn(read value: UInt8 = 2) -> UInt8) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let _holder: Holder = .{ value = 0 }
+    0
+}

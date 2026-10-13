@@ -1,0 +1,8 @@
+// A block whose only content is its tail. Nothing has flushed a comment before
+// the tail is reached, so the marker has not been found and the region has not
+// been copied -- and the tail is then written a second time, after the copy.
+// Every other walk flushes before it asks whether a node was already copied.
+fn main() -> UInt8 {
+    // linea fmt: off
+    0
+}

@@ -1,0 +1,21 @@
+// `let x = e` and `let S { .. } = e` are one statement form with two
+// spellings, and only one had a tail. The destructuring branch ate a `;` and
+// returned, so two statements written on one line raised no [S-Separator] and
+// the program was accepted -- while its twin, `let q: P = p m = q.x`, is
+// refused.
+//
+// The same gap silenced [S-Continuation]: a next line beginning with `-` could
+// have continued the expression above, and the note that says so is what the
+// formatter reads to decide whether a written `;` is meaningful. Without it a
+// separator answering nothing was kept.
+struct P {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p: P = .{ x = 1, y = 2 }
+    var m: UInt8 = 0
+    let P { x: a, y: b } = p m = a
+    m + b
+}

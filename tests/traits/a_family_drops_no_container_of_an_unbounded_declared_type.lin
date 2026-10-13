@@ -1,0 +1,40 @@
+// An ordinary enum inherits the obligation of its associated-type payload.
+// An unbounded associated type cannot be discarded by a generic method.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(sink x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = Key
+
+    fn of(sink x: Self) -> Self.Item {
+        Key.Forged(x.at)
+    }
+}
+
+enum Wrap[W: Measure] {
+    Holds(W.Item),
+}
+
+impl[W: Measure] Wrap[W] {
+    pub fn drop_it(sink _self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 3 }
+    let w: Wrap[Counter] = .Holds(Measure.of(c))
+    Wrap.drop_it(w)
+}

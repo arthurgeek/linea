@@ -1,0 +1,30 @@
+// A newtype's head is a head: an `impl` naming one implements the trait for
+// that name, and a call through the trait reaches the body it wrote. The base
+// implements nothing on the newtype's behalf, so what the operation means is
+// exactly what is written here.
+@copyable
+type Tag = UInt8
+
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+impl Same for Tag {
+    fn alike(self: Tag, other: Tag) -> Bool {
+        let Tag(mine) = copy(self)
+        let Tag(theirs) = copy(other)
+        mine == theirs
+    }
+}
+
+// Both answers, so what the golden records is the body running rather than
+// the call reaching something that always agrees.
+fn main() -> UInt8 {
+    let same = Same.alike(Tag(7), Tag(7))
+    let differ = Same.alike(Tag(7), Tag(8))
+    if same && !differ {
+        1
+    } else {
+        0
+    }
+}

@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: `Buf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_defaulted_allocator_is_reported_once_where_a_type_and_its_call_leave_it.lin:17:17
+   |
+17 |     let buffer: Buf[UInt8] = Buf.empty()
+   |                 ^^^ write the allocator: `P`, or `SystemAllocator` where the system allocator is meant

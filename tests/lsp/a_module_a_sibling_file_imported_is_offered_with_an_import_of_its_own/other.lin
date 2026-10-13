@@ -1,0 +1,7 @@
+// The same module, the file that wrote the import. It binds `ledger` here and
+// nowhere else.
+import ledger
+
+fn _twice() -> UInt8 {
+    ledger.size() + ledger.size()
+}

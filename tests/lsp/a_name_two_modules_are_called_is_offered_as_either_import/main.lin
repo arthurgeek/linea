@@ -1,0 +1,5 @@
+// Two paths ending in the same element are two modules, and which of them
+// was meant is not a question about the name.
+fn main() -> UInt8 {
+    hash.digest()
+}

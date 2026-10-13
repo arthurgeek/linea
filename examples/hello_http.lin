@@ -1,0 +1,147 @@
+// A small HTTP service with two routes.
+// GET /health answers `ok`. POST /echo reads a JSON message such as
+// `{"text":"hello"}` and answers it as `{"echo":"hello"}`. The service listens
+// on 127.0.0.1 at the port its first argument names.
+import std.env
+import std.http
+import std.io
+import std.json
+import std.mem
+import std.net
+import std.testing
+
+// `use` brings a trait's operations into scope; the tests call `arena.handle()`,
+// which `Owner` declares, and `router.serve_http`, which `Handler` declares.
+use http.Handler
+use mem.Owner
+
+// `Message` is the JSON object POST /echo expects. `json.Decode[A]` builds one
+// from a document and refuses an object that lacks `text`, gives it the wrong
+// kind of value, or has a field `Message` does not. `mem.Handle` is the memory
+// that holds the text, and `Release` is what lets a `Message` free it.
+@derive(Release, json.Decode[mem.Handle])
+struct Message {
+    text: String[mem.Handle],
+}
+
+// `Reply` is what POST /echo answers, and `json.Encode` writes it as the
+// JSON object `{"echo":"hello"}`.
+@derive(json.Encode)
+struct Reply {
+    echo: Str,
+}
+
+// A handler is a function from a request to an answer. `http.Request` and
+// `http.Response` take their memory from the system allocator, so a handler
+// needs no type parameter for it.
+fn health(request: http.Request) -> Result[http.Response, http.Error] {
+    // The handler takes the request because every answer is built in the
+    // memory the request came with: `http.text` puts the body there.
+    http.text(request, "ok")
+}
+
+// A handler asks for what it reads by naming it as a parameter. `Message`
+// implements `http.Extract`, so the router reads the JSON body into one before
+// calling `echo`, and answers the request with the refusal when it cannot: 400
+// for a body that is not JSON, and 422 naming the field for one that is not a
+// `Message`. The router releases the message when `echo` returns.
+impl http.Extract[mem.SystemAllocator] for Message {
+    fn extract(request: http.Request) -> Result[Message, http.Error] {
+        request.extract[http.Json[Message]]()
+    }
+}
+
+// `http.Request` is a carrier, so the answer may borrow from the request
+// without a `where` clause, as it does from the message's text held in the
+// request's memory.
+fn echo(message: Message, request: http.Request) -> Result[http.Response, http.Error] {
+    // `http.json` encodes the reply and answers with it.
+    http.json(request, Reply { echo = message.text.view() })
+}
+
+// A route pairs a method and a path with a handler. `?` stops at a pattern
+// the router refuses.
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route("GET /health", health)?
+    &router.route("POST /echo", echo)
+}
+
+fn main() -> UInt8 {
+    match port_argument() {
+        Some(port) => serve(port),
+        None => {
+            io.eprintln("usage: hello_http PORT")
+            64
+        },
+    }
+}
+
+// Read the first command-line argument as a port number. `?` returns `None`
+// when there is no argument, and `parse` fails on text that is not a port.
+fn port_argument() -> Option[UInt16] {
+    let text = env.args().at(1)?
+    match text.parse[UInt16]() {
+        Ok(port) => .Some(port),
+        Err(_) => .None,
+    }
+}
+
+fn serve(port: UInt16) -> UInt8 {
+    var router = http.Router.new()
+    let _ = routes(&router) else |error| {
+        io.eprintln("cannot register a route: {error}")
+        router.release()
+        return 2
+    }
+    io.eprintln("listening on http://127.0.0.1:{port}")
+    // `listen_and_serve` opens the listener, answers requests until it fails,
+    // and releases the router. One `else` handles a failure to listen and a
+    // failure while serving.
+    let _ = http.listen_and_serve(net.loopback(port), router) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
+}
+
+// A test builds a request in an arena, as the server does, and sends it
+// through the routes, so no socket is involved.
+fn body_of(response: http.Response) -> Str where borrows(response) {
+    Str.from_bytes(response.body().unwrap()).unwrap()
+}
+
+test fn health_answers_ok() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/health", "").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), "ok", "the health answer changed")?
+}
+
+test fn echo_answers_the_text_it_was_sent() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), "POST", "/echo", r#"{"text":"hello"}"#).unwrap()
+    &sent.add_header("Content-Type", "application/json").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
+    testing.assert_eq(body_of(response), r#"{"echo":"hello"}"#, "the echo changed")?
+}
+
+test fn echo_refuses_a_body_without_text() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), "POST", "/echo", r"{}").unwrap()
+    &sent.add_header("Content-Type", "application/json").unwrap()
+    var nothing = ()
+    let refused = match &router.serve_http(&nothing, sent.request()) {
+        Ok(_) => return testing.assert(false, "a message without text was answered"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status changed")?
+}

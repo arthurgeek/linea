@@ -1,0 +1,17 @@
+// An expression statement's range ends before the `;` that terminated it,
+// where a binding's includes it. Reading only one of those said an assignment
+// carried no separator, so the `;` answering the note below was deleted and
+// the note came back -- on every save.
+struct Account {
+    balance: Int64,
+}
+
+fn overdrawn_by(spent: Int64) -> Int64 {
+    var account: Account = .{ balance = 10 }
+    account.balance = account.balance - spent;
+    -account.balance
+}
+
+fn main() -> UInt8 {
+    UInt8.try_from(overdrawn_by(17)).unwrap_or(0)
+}

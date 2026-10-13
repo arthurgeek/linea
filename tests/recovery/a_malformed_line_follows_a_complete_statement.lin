@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let _ = 1
+    / 2
+    let following: UInt8 = 3
+    following
+}

@@ -1,0 +1,9 @@
+import std.io
+
+// What the library is reached by naming, and what it holds is qualified by the
+// module that holds it. `std` says where the path starts; it is not a directory
+// beside this one and cannot be shadowed by one.
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("reached")?
+    return .Ok(0)
+}

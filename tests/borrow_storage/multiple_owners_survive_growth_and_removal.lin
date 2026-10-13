@@ -1,0 +1,24 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let first: UInt64 = 7
+    let second: UInt64 = 9
+    var values: Vec[borrow UInt64, mem.SystemAllocator] = Vec.new()
+    for i in UInt64(0)..40 {
+        let view = if i % 2 == 0 {
+            borrow first
+        } else {
+            borrow second
+        }
+        Vec.push(&values, view).unwrap()
+    }
+    let removed = match Vec.remove(&values, 0) {
+        Some(view) => view,
+        None => panic("element missing"),
+    }
+    values.release()
+    if *removed != 7 {
+        panic("removed observation lost its source")
+    }
+    0
+}

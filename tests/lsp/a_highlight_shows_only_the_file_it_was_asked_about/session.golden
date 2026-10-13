@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"resolveProvider":false},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"documentSymbolProvider":true,"codeActionProvider":{"codeActionKinds":["quickfix"]},"documentFormattingProvider":true,"renameProvider":true,"foldingRangeProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","variable","number","string","comment","operator"],"tokenModifiers":["declaration","readonly","defaultLibrary","linear"]},"full":true},"inlayHintProvider":{"resolveProvider":false}}}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"sizes.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"sizes.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","id":2,"result":[{"uri":"main.lin","range":{"start":{"line":4,"character":4},"end":{"line":4,"character":8}}},{"uri":"sizes.lin","range":{"start":{"line":0,"character":3},"end":{"line":0,"character":7}}},{"uri":"sizes.lin","range":{"start":{"line":5,"character":4},"end":{"line":5,"character":8}}},{"uri":"sizes.lin","range":{"start":{"line":5,"character":13},"end":{"line":5,"character":17}}}]}
+{"jsonrpc":"2.0","id":3,"result":[{"range":{"start":{"line":4,"character":4},"end":{"line":4,"character":8}}}]}
+{"jsonrpc":"2.0","id":4,"result":null}

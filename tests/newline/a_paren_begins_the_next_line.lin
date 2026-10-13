@@ -1,0 +1,13 @@
+// A newline ends the binding, so `(o).x = 7` is an assignment of its own
+// rather than an assignment to the result of calling the literal above. A line
+// opening with `(` is not noted: a call split before its `(` leaves a value
+// nothing uses, which is refused.
+struct Point {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    var o: Point = .{ x = 1 }
+    (o).x = 7
+    o.x
+}

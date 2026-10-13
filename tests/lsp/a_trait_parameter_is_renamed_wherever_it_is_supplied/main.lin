@@ -1,0 +1,24 @@
+// A trait's parameter is one name written in several places: a member declares
+// each parameter under the name the signature gives it, so renaming one edits
+// the signature, every member supplying it, and every argument that names it.
+// A member marking a parameter its body ignores keeps the mark, which is a
+// note about that body rather than part of the name.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self, width: UInt8) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self, width: UInt8) -> UInt8 {
+        x.balance + width
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 1 }
+    let w: Weight = .{ grams = 2 }
+    a.of(width: 3) + w.of(4)
+}

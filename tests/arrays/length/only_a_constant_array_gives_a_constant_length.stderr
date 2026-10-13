@@ -1,0 +1,10 @@
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/length/only_a_constant_array_gives_a_constant_length.lin:7:21
+  |
+7 | let widths: [UInt8; row().length()] = [1, 2]
+  |                     ^^^^^^^^^^^^^^ this is not a constant
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/arrays/length/only_a_constant_array_gives_a_constant_length.lin:11:24
+   |
+11 |     let _flags: [Bool; counts.length()] = [true, false]
+   |                        ^^^^^^^^^^^^^^^ this is not a constant

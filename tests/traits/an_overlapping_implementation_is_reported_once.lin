@@ -1,0 +1,38 @@
+// `Badge` is implemented for every `Seated` type, so `Guest`'s own
+// implementation overlaps it. The overlap is the one mistake reported: the
+// operations `Guest`'s implementation leaves out say nothing more.
+trait Seated {
+    fn seat(self: Self) -> UInt8
+}
+
+trait Badge {
+    fn row(self: Self) -> UInt8
+
+    fn column(self: Self) -> UInt8
+}
+
+impl[T: Seated] Badge for T {
+    fn row(self: Self) -> UInt8 {
+        self.seat()
+    }
+
+    fn column(self: Self) -> UInt8 {
+        self.seat()
+    }
+}
+
+struct Guest {
+    seat: UInt8,
+}
+
+impl Seated for Guest {
+    fn seat(self: Self) -> UInt8 {
+        self.seat
+    }
+}
+
+impl Badge for Guest {}
+
+fn main() -> UInt8 {
+    0
+}

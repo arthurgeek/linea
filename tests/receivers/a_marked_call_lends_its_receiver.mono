@@ -1,0 +1,44 @@
+struct Counter {
+    count: UInt8,
+}
+
+struct Tally {
+    counter: Counter,
+}
+
+fn ;main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    ;Counter.bump(&counter)
+    ;Counter.add(&counter, 2)
+    ;Counter.bump_twice(&counter)
+    ;press_twice[Counter](&counter)
+
+    // A field path and an element are places, and are lent the same way.
+    var tally = Tally { counter = counter }
+    ;Counter.bump(&tally.counter)
+    var counters = [Counter { count = 10 }, Counter { count = 20 }]
+    ;Counter.add(&counters[1], tally.counter.count)
+    counters[1].count
+}
+
+fn ;Counter.bump(inout self: Counter) -> () {
+    self.count += 1
+}
+
+fn ;Counter.add(inout self: Counter, amount: UInt8) -> () {
+    self.count += amount
+}
+
+fn ;Counter.bump_twice(inout self: Counter) -> () {
+    ;Counter.bump(&self)
+    ;Counter.bump(&self)
+}
+
+fn ;press_twice[Counter](inout button: Counter) -> () {
+    Counter;;Press.press(&button)
+    Counter;;Press.press(&button)
+}
+
+fn Counter;;Press.press(inout self: Counter) -> () {
+    ;Counter.add(&self, 3)
+}

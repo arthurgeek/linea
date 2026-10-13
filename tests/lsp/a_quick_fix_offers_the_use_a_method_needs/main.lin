@@ -1,0 +1,14 @@
+// The trait is not in scope, so the postfix call below does not resolve. An
+// editor offers what a `use` would make writable, and writes the `use` along
+// with it.
+import std.hash
+
+fn main() -> UInt8 {
+    let seat = UInt64(12)
+    let digest = seat.hash()
+    if digest == hash.Hash.hash(seat) {
+        0
+    } else {
+        1
+    }
+}

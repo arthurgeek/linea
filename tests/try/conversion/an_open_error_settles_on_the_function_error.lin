@@ -1,0 +1,36 @@
+// A call whose error type is still open takes the function's error type from
+// `?`. The `From` implementation is not consulted, so `.Code` builds a
+// `LoadError` directly rather than a `ParseError` that is then converted.
+enum ParseError {
+    Code(UInt8),
+}
+
+enum LoadError {
+    Code(UInt8),
+}
+
+impl From[ParseError] for LoadError {
+    fn from(sink source: ParseError) -> LoadError {
+        match source {
+            Code(code) => .Code(code + 100),
+        }
+    }
+}
+
+fn attempt[A: Discardable](make: fn(sink code: UInt8) -> A) -> Result[UInt8, A] {
+    return .Err(make(3))
+}
+
+fn load() -> Result[UInt8, LoadError] {
+    let value = attempt(.Code)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match load() {
+        Ok(value) => value,
+        Err(failure) => match failure {
+            Code(code) => code,
+        },
+    }
+}

@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 1
+    let before = borrow count
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    &tick()
+    *before
+}

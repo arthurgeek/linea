@@ -1,0 +1,31 @@
+// Two values, each given away by its own statement, so deleting either leaves
+// one of them undisposed.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn mint(id: UInt8) -> Key {
+    Key.Forged(id)
+}
+
+fn tag(k: Key) -> UInt8 {
+    match read k {
+        Forged(n) => n,
+    }
+}
+
+fn release(sink k: Key) -> () {
+    match k {
+        Forged(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    let a = mint(1)
+    let b = mint(2)
+    let s = tag(a) + tag(b)
+    release(a)
+    release(b)
+    s
+}

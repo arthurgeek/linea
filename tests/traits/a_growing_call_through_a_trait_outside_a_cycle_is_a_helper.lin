@@ -1,0 +1,31 @@
+// A call that grows its type argument is refused only where it can reach its
+// own declaration again. `hand` gives the trait a `Wrap[T]` where it was
+// given `T`, and the member answering it calls nothing back, so the cycle the
+// measure is about is not there and the program stands.
+struct Wrap[T] {
+    v: T,
+}
+
+struct Sink {
+    n: UInt8,
+}
+
+trait Take {
+    fn take[S: Discardable](self: Self, sink _s: S) -> UInt8
+}
+
+impl Take for Sink {
+    fn take[S: Discardable](self: Sink, sink _s: S) -> UInt8 {
+        self.n
+    }
+}
+
+fn hand[T: Discardable](sink t: T) -> UInt8 {
+    let k: Sink = .{ n = 5 }
+    let w: Wrap[T] = .{ v = t }
+    Take.take(k, w)
+}
+
+fn main() -> UInt8 {
+    hand(2)
+}

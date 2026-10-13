@@ -1,0 +1,13 @@
+import tags
+
+use tags.Tag
+
+impl[T: Integer] Tag for T {
+    fn tag(value: T) -> UInt8 {
+        UInt8(value)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

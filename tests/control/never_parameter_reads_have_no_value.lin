@@ -1,0 +1,13 @@
+fn impossible_sink(sink value: Never) -> Never {
+    value
+}
+
+fn impossible_inout(inout value: Never) -> Never {
+    value
+}
+
+fn main() -> UInt8 {
+    let _sink: fn(sink value: Never) -> Never = impossible_sink
+    let _inout: fn(inout value: Never) -> Never = impossible_inout
+    0
+}

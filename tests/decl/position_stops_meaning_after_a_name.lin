@@ -1,0 +1,10 @@
+// Once an argument names its parameter, position has stopped meaning
+// anything: a positional argument after a named one is a mistake, not a
+// puzzle to infer the answer to.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    add(b: 2, 40)
+}

@@ -1,0 +1,39 @@
+// The `else` block runs on the path where nothing was bound, so it releases
+// nothing; the release is scheduled once `lamp` is bound.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn find(code: UInt8) -> Option[Lamp] {
+    if code == 0 {
+        Option.None
+    } else {
+        Option.Some(Lamp { id = code })
+    }
+}
+
+fn run(code: UInt8) -> UInt8 {
+    defer let lamp = find(code) else {
+        return 10
+    }
+    code
+}
+
+fn main() -> UInt8 {
+    run(0) + run(5)
+}

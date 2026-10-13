@@ -1,0 +1,1543 @@
+import std.fmt
+import std.fs
+import std.io
+import std.log
+import std.mem
+import std.net
+import std.testing
+import std.time
+
+use io.BufferOpenFailure
+use io.Reader
+
+// A request buffer holds 4 KiB of input at a time.
+let request_buffer_bytes: UInt64 = 4096
+
+// Closing a socket whose input is unread resets the connection, and a peer
+// that receives the reset may discard the response before reading it. After
+// refusing a request, the server stops writing, then reads and discards input
+// until the client closes, waiting for each read no longer than 500 ms or the
+// read timeout, whichever is shorter, and reading at most 16 times 4 KiB.
+let longest_linger_read_ms: UInt64 = 500
+
+let linger_reads: UInt64 = 16
+
+// `serve` stops with `Accept` when accepting a connection fails with an
+// error that retrying does not answer, with `Close` when closing the listener
+// fails, and, before accepting anything, with `ArenaTooSmall` when
+// `limits.request_arena_bytes` cannot hold every request the limits admit and
+// with `Memory` when `parent` refuses the buffer a 503 discards input into.
+@(copyable, derive(Equatable, Debug))
+pub enum ServeError {
+    Accept(net.NetError),
+    Close(io.IoError),
+    ArenaTooSmall,
+    Memory(mem.Oom),
+}
+
+impl ServeError {
+    // The serving failure `error` names, which `net.serve` and this `serve`
+    // share.
+    fn of(sink error: net.ServeError) -> ServeError {
+        match error {
+            Accept(reason) => .Accept(reason),
+            Close(reason) => .Close(reason),
+        }
+    }
+}
+
+impl Display for ServeError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Accept(error) => net.ServeError.Accept(copy(error)).fmt(&w),
+            Close(error) => net.ServeError.Close(copy(error)).fmt(&w),
+            ArenaTooSmall => &w.write_str("the request arena cannot hold every request the limits admit"),
+            Memory(reason) => {
+                &w.write_str("the parent refused the buffer a refused request is discarded into: ")?
+                reason.fmt(&w)
+            },
+        }
+    }
+}
+
+test fn a_serve_error_displays_its_cause() {
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let closing = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    defer let accept = fmt.render_owned(mem.system(), ServeError.Accept(.Io(invalid))).unwrap()
+    defer let close = fmt.render_owned(mem.system(), ServeError.Close(closing)).unwrap()
+    testing.assert_eq(accept.view(), "accepting a connection failed: Accept failed (InvalidDescriptor) after 0 bytes", "the accept failure changed")?
+    testing.assert_eq(close.view(), "closing the listener failed: Close failed (InvalidDescriptor) after 0 bytes", "the close failure changed")?
+    defer let small = fmt.render_owned(mem.system(), ServeError.ArenaTooSmall).unwrap()
+    testing.assert_eq(small.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
+    defer let memory = fmt.render_owned(mem.system(), ServeError.Memory(.Exhausted)).unwrap()
+    testing.assert_eq(memory.view(), "the parent refused the buffer a refused request is discarded into: Exhausted", "the memory refusal changed")?
+    .Ok(())
+}
+
+// Accept connections on `listener` and answer one request on each through
+// `handler`, one connection at a time. `handler` takes no state of its own: a
+// program that shares state serves `http.with_state(state, handler)`, which
+// owns it and lends it down. Serving keeps one arena of
+// `limits.request_arena_bytes` carved from `parent`: each request is read into
+// it, the handler builds its response in it, and once the response is
+// written the arena is rewound, which zeroes only the bytes that exchange
+// used, so a small request costs little however large the arena is. When
+// `parent` refuses the arena, the request is answered 503 and the arena is
+// opened again for the next. The 503 discards the unread request into a
+// 4 KiB buffer taken from `parent` once, before anything is accepted, so a
+// parent that refuses every arena still has each client read its 503 rather
+// than a reset. Once each exchange has ended, serving tells
+// `handler` how through `observe`, failures included, and continues; it writes
+// nothing to standard error of its own. A reset connection or running out of
+// descriptors while accepting is reported the same way and retried after a
+// pause that grows while the failure repeats; any other accept failure ends
+// serving with `Accept`. Serving ends with `Ok` after `limits.connections`
+// connections, and never ends when that is `.None`. The listener is closed on
+// every exit.
+pub fn serve[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P: Allocator](sink listener: L, inout handler: H, parent: P, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    serve_announcing(listener, &handler, parent, limits, .None)
+}
+
+// Serve as `serve` does. When `announce` holds the address `listener` is bound
+// to, tell `handler` so as `Event.Listening` once the limits and the parent are
+// accepted and before anything is accepted.
+fn serve_announcing[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P: Allocator](sink listener: L, inout handler: H, parent: P, limits: Limits, announce: Option[net.Address]) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    var accepting = listener
+    let needed = smallest_arena(limits)
+    if needed == UInt64.max || limits.request_arena_bytes < needed {
+        let _closed = accepting.close()
+        return .Err(.ArenaTooSmall)
+    }
+    var refusal = parent.acquire(request_buffer_bytes) else |reason| {
+        let _closed = accepting.close()
+        return .Err(.Memory(reason))
+    }
+    var arena = mem.Arena.open(parent, limits.request_arena_bytes)
+    match read announce {
+        Some(address) => {
+            let listening: Event[P] = .Listening(copy(address))
+            &handler.observe(listening)
+        },
+        None => {},
+    }
+    var served: UInt64 = 0
+    var pause_ms: UInt64 = 0
+    var stopped: Option[net.NetError] = .None
+    while stopped.is_none() && !net.reached(limits.connections, served) {
+        match net.accept_attempt(&accepting, &pause_ms) {
+            Connected(accepted) => {
+                let Accepted { connection, address: _ } = accepted
+                match serve_connection(connection, &handler, arena.handle(), &refusal, limits, time.Instant.now()) {
+                    Answered => &arena.rewind(),
+                    ArenaRefused => mem.exchange(&arena, mem.Arena.open(parent, limits.request_arena_bytes)).release(),
+                }
+                served += 1
+            },
+            Retry(retry) => {
+                let pause = copy(retry.pause)
+                let event: Event[P] = .AcceptRetried(retry)
+                &handler.observe(event)
+                time.sleep(pause)
+            },
+            Failed(error) => stopped = .Some(error),
+        }
+    }
+    arena.release()
+    refusal.release()
+    match net.finish(accepting, stopped) {
+        Ok(_) => .Ok(()),
+        Err(error) => .Err(ServeError.of(error)),
+    }
+}
+
+test fn one_connection_is_served_and_serve_returns() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    // The backlog queues the connection before serve accepts it.
+    let client = send(listener.local_address().unwrap(), health_request)
+    defer var router = health_router()
+    let served = serve(listener, &router, mem.system(), serving(1))
+    defer let received = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(received.view(), health_answer, "the request was not answered")?
+    .Ok(())
+}
+
+test fn a_malformed_request_is_answered_and_serving_continues() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let malformed = send(bound, "garbage\r\n\r\n")
+    let valid = send(bound, health_request)
+    defer var router = health_router()
+    let served = serve(listener, &router, mem.system(), serving(2))
+    defer let refused = read_to_end(malformed)
+    defer let answered = read_to_end(valid)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(refused.view(), "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "the malformed request was not refused")?
+    testing.assert_eq(answered.view(), health_answer, "the next request was not answered")?
+    .Ok(())
+}
+
+test fn a_silent_client_times_out_and_the_next_is_served() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let silent = net.connect(bound).unwrap()
+    let valid = send(bound, health_request)
+    defer var router = health_router()
+    let limits = Limits { read_timeout_ms = 100, ..serving(2) }
+    let served = serve(listener, &router, mem.system(), limits)
+    defer let timed_out = read_to_end(silent)
+    defer let answered = read_to_end(valid)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(timed_out.view(), "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "the silent client was not timed out")?
+    testing.assert_eq(answered.view(), health_answer, "the next request was not answered")?
+    .Ok(())
+}
+
+// The deadline counts from accept, so a request already sent in full is
+// refused as timed out when more than `read_timeout_ms` has passed since the
+// connection was accepted.
+test fn a_request_read_after_its_deadline_from_accept_times_out() {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), health_request)
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    let accepted_at = time.Instant.now()
+    time.sleep(time.Duration.from_milliseconds(150))
+    var recorded = Recorded.new()
+    let arena = mem.Arena.open(mem.system(), 1048576)
+    var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
+    let limits = Limits { read_timeout_ms = 100, ..serving(1) }
+    let _answered = serve_connection(connection, &recorded, arena.handle(), &refusal, limits, accepted_at)
+    refusal.release()
+    arena.release()
+    listener.close().unwrap()
+    client.close().unwrap()
+    testing.assert_eq(recorded.exchanges, UInt64(1), "the exchange was not reported")?
+    testing.assert_eq(recorded.timed_out, UInt64(1), "a request read after its deadline was not timed out")?
+    .Ok(())
+}
+
+test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    send(bound, "GET /health HTTP/1.1\r\nHost: a\r\n").reset().unwrap()
+    let valid = send(bound, health_request)
+    // The reset reaches the listener before or after serve accepts the
+    // connection. Unaccepted, the accept failure is retried and not counted;
+    // accepted, its failed read is logged and it counts as served. `extra`
+    // gives serve a second connection to count in the first case, so serving
+    // ends either way, and only `valid`'s answer is asserted.
+    let extra = send(bound, health_request)
+    defer var router = health_router()
+    let served = serve(listener, &router, mem.system(), serving(2))
+    defer let answered = read_to_end(valid)
+    let _extra_closed = extra.close()
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(answered.view(), health_answer, "the next request was not answered")?
+    .Ok(())
+}
+
+test fn a_refused_body_left_unread_does_not_lose_the_answer() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nContent-Length: 20000\r\n\r\n")
+    // 200 writes of 100 bytes send the whole 20000-byte body.
+    let chunk = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    for _ in 0..200 {
+        let _sent = io.write_all(&client, chunk.as_bytes()).unwrap()
+    }
+    defer var router = health_router()
+    let limits = Limits { max_body_bytes = 16, ..serving(1) }
+    let served = serve(listener, &router, mem.system(), limits)
+    defer let received = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(received.view(), "HTTP/1.1 413 Content Too Large\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "the refusal was lost")?
+    .Ok(())
+}
+
+test fn a_handler_error_before_headers_answers_its_status() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), health_request)
+    var handler = Unprocessable { refused = 0 }
+    let served = serve(listener, &handler, mem.system(), serving(1))
+    defer let received = read_to_end(client)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(received.view(), "HTTP/1.1 422 Unprocessable Content\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nUnprocessable Content\n", "the handler's status was not answered")?
+    testing.assert_eq(handler.refused, UInt64(1), "the handler's state was not kept")?
+    .Ok(())
+}
+
+// Serving acquires one arena from the parent for every kind of exchange and
+// disposes it once: an answer, a streamed answer, a stream that fails, an
+// error, a path value, a HEAD request, a refused request, a silent client and
+// a handler that fills the arena. Each exchange starts from a rewound arena,
+// so the one after a full arena is answered too.
+test fn every_exchange_returns_its_arena_to_the_parent() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let requests = [
+        health_request,
+        "GET /count HTTP/1.1\r\n\r\n",
+        "GET /broken HTTP/1.1\r\n\r\n",
+        "GET /nowhere HTTP/1.1\r\n\r\n",
+        "GET /echo/a%20b HTTP/1.1\r\n\r\n",
+        "HEAD /count HTTP/1.1\r\n\r\n",
+        "garbage\r\n\r\n",
+        "",
+        "GET /fill HTTP/1.1\r\n\r\n",
+    ]
+    var clients: Vec[net.Connection] = Vec.new()
+    for request in requests {
+        &clients.push(send(bound, request)).unwrap()
+    }
+    let parent = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let tables = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var router = exchanges_router(tables.allocator())
+    let limits = Limits {
+        read_timeout_ms = 100,
+        max_line_bytes = 1024,
+        max_headers = 4,
+        max_body_bytes = 16384,
+        request_arena_bytes = 98304,
+        ..serving(9),
+    }
+    let served = serve(listener, &router, parent.allocator(), limits)
+    router.release()
+    let settled = parent.all_disposed()
+    let acquired = parent.acquired()
+    let tables_settled = tables.all_disposed()
+    parent.release()
+    tables.release()
+    var answers: Vec[String] = Vec.new()
+    var pending = clients.drain()
+    for client in &pending {
+        &answers.push(read_or_reset(client)).unwrap()
+    }
+    pending.finish().unwrap()
+    defer let first_lines = status_lines(answers)
+    answers.release()
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert(settled, "an exchange kept an allocation from the parent")?
+    // Serving takes one arena and one buffer for discarding refused input.
+    testing.assert_eq(acquired, UInt64(2), "serving acquired more than its arena and discard buffer from the parent")?
+    testing.assert(tables_settled, "the router kept an allocation after its release")?
+    testing.assert_eq(first_lines.view(), "200 OK|200 OK|reset|404 Not Found|200 OK|200 OK|400 Bad Request|408 Request Timeout|500 Internal Server Error|", "an exchange was answered wrongly")?
+    .Ok(())
+}
+
+test fn an_arena_parent_serves_every_exchange_from_one_request_arena() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let first = send(bound, health_request)
+    let second = send(bound, "GET /echo/tea HTTP/1.1\r\n\r\n")
+    let limits = Limits {
+        read_timeout_ms = 100,
+        max_line_bytes = 1024,
+        max_headers = 4,
+        max_body_bytes = 16384,
+        request_arena_bytes = 98304,
+        ..serving(2),
+    }
+    // The parent holds its eight-byte cursor, the 4096-byte buffer a 503
+    // discards input into and exactly one request arena, so the second
+    // exchange is answered only if serving rewinds that arena.
+    defer let parent = mem.Arena.open(mem.system(), size: 102408)
+    defer let tables = mem.Arena.open(mem.system(), size: 16384)
+    var router = exchanges_router(tables.handle())
+    let served = serve(listener, &router, parent.handle(), limits)
+    router.release()
+    defer let health = read_to_end(first)
+    defer let echoed = read_to_end(second)
+    testing.assert_ok_eq(served, (), "serving from an arena parent failed")?
+    testing.assert_eq(health.view(), health_answer, "the first exchange was answered wrongly")?
+    testing.assert_eq(echoed.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nname=tea", "the second exchange was answered wrongly")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_acquisition_from_the_parent() -> Result[(), testing.Failure] {
+    // The backing arena is smaller than a request arena. Every run takes the
+    // 4096-byte buffer a 503 discards input into, is refused the request
+    // arena, answers 503 and opens the arena again, and the walk refuses each
+    // of those acquisitions in turn. A refused discard buffer ends serving
+    // before it accepts; every other run must answer 503. The backing also
+    // holds each run's 8240-byte allocation log and discard buffer.
+    defer let backing = mem.Arena.open(mem.system(), size: 65536)
+    let checked = testing.each_allocation_failure(
+        backing.handle(),
+        |allocator| -> Result[(), testing.Failure] {
+            let listener = net.listen(net.loopback(0)).unwrap()
+            let client = send(listener.local_address().unwrap(), health_request)
+            // The router's tables come from a log of their own, over an arena
+            // of their own, so only the parent's acquisitions are refused.
+            defer let tables_backing = mem.Arena.open(mem.system(), size: 32768)
+            let tables = mem.AllocationLog.open(tables_backing.handle(), 0).unwrap()
+            var router = exchanges_router(tables.allocator())
+            let limits = Limits {
+                read_timeout_ms = 100,
+                max_line_bytes = 1024,
+                max_headers = 4,
+                max_body_bytes = 16384,
+                request_arena_bytes = 98304,
+                ..serving(1),
+            }
+            let served = serve(listener, &router, allocator, limits)
+            router.release()
+            tables.release()
+            let answer = read_or_reset(client)
+            let unavailable = answer.view() == unavailable_answer
+            answer.release()
+            if served == .Err(.Memory(.Exhausted)) {
+                return .Err(testing.refused("the parent refused the discard buffer"))
+            }
+            testing.assert_ok_eq(served, (), "serving failed")?
+            testing.assert(unavailable, "a parent that refused the arena was not answered 503")?
+            return .Ok(())
+        },
+        testing.Failure.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "serving from a refusing parent was reported as failing")?
+    .Ok(())
+}
+
+// `status_lines` joins the status phrase of each answer's first line, or the
+// whole answer when it has no line, each followed by `|`.
+fn status_lines(answers: Vec[String]) -> String {
+    var lines = String.new()
+    for answer in answers.as_slice() {
+        let first = match answer.find("\r\n") {
+            Some(end) => answer.slice(9, end).unwrap_or(""),
+            None => answer.view(),
+        }
+        &lines.append(first).unwrap()
+        &lines.append("|").unwrap()
+    }
+    lines
+}
+
+test fn a_streamed_answer_goes_out_as_it_is_written() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let counted = send(bound, "GET /count HTTP/1.1\r\n\r\n")
+    let broken = send(bound, "GET /broken HTTP/1.1\r\n\r\n")
+    defer var router = exchanges_router(mem.system())
+    let served = serve(listener, &router, mem.system(), serving(2))
+    defer let full = read_to_end(counted)
+    defer let cut = read_or_reset(broken)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(full.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n1\n2\n3\n", "the stream changed")?
+    // A stream that fails resets its connection, so the client does not
+    // mistake the part it received for the whole body.
+    testing.assert_eq(cut.view(), "reset", "a failed stream ended as if whole")?
+    .Ok(())
+}
+
+// A parent that refuses the arena is answered 503, and serving opens the arena
+// again for the next connection.
+test fn a_refused_arena_is_answered_503() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let refused = send(bound, health_request)
+    let valid = send(bound, health_request)
+    let parent = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var router = exchanges_router(parent.allocator())
+    // Serving first takes the buffer a 503 discards input into, then opens the
+    // arena; refuse the arena.
+    parent.refuse_attempt(parent.attempts() + 2)
+    let served = serve(listener, &router, parent.allocator(), serving(2))
+    router.release()
+    let settled = parent.all_disposed()
+    parent.release()
+    defer let unavailable = read_to_end(refused)
+    defer let answered = read_to_end(valid)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert(settled, "an exchange kept an allocation from the parent")?
+    testing.assert_eq(unavailable.view(), "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a refused arena was not answered 503")?
+    testing.assert_eq(answered.view(), health_answer, "the next request was not answered")?
+    .Ok(())
+}
+
+// A parent that can never hold a request arena still has every connection
+// answered 503, so the client reads the answer the observer reports rather
+// than a reset.
+test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let first = send(bound, health_request)
+    let second = send(bound, health_request)
+    // The parent holds its eight-byte cursor and one 4096-byte buffer, which
+    // is far less than a request arena.
+    defer let parent = mem.Arena.open(mem.system(), size: 4104)
+    defer let tables = mem.Arena.open(mem.system(), size: 16384)
+    var router = exchanges_router(tables.handle())
+    let limits = Limits {
+        read_timeout_ms = 100,
+        max_line_bytes = 1024,
+        max_headers = 4,
+        max_body_bytes = 16384,
+        request_arena_bytes = 98304,
+        ..serving(2),
+    }
+    let served = serve(listener, &router, parent.handle(), limits)
+    router.release()
+    defer let answered_first = read_or_reset(first)
+    defer let answered_second = read_or_reset(second)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(answered_first.view(), unavailable_answer, "the first refused connection was not answered 503")?
+    testing.assert_eq(answered_second.view(), unavailable_answer, "the second refused connection was not answered 503")?
+    .Ok(())
+}
+
+test fn a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    defer let parent = mem.Arena.open(mem.system(), size: 0)
+    defer let tables = mem.Arena.open(mem.system(), size: 16384)
+    defer var router = exchanges_router(tables.handle())
+    let served = serve(listener, &router, parent.handle(), serving(1))
+    testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving began without a buffer to discard refused input into")?
+    .Ok(())
+}
+
+// `serve` accepts no arena too small for the limits, so these tests answer
+// one exchange directly in a 53,256-byte arena, which is smaller. There a
+// request of six 3000-byte header lines and an 8 KiB body does not fit and is
+// answered 500, with the input left unread discarded so the client reads the
+// answer.
+test fn a_request_larger_than_the_arena_is_answered_500() {
+    defer let received = exchanged_in_small_arena(headers: 6, length: 3000)
+    testing.assert_eq(received.view(), "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a request past the arena was not answered 500")?
+    .Ok(())
+}
+
+// Four 3700-byte header lines and an 8 KiB body fill the
+// same arena to less than 4 KiB from its end, so the request is read whole
+// and answered 500 without running the handler, for want of a response
+// buffer.
+test fn a_request_that_leaves_no_room_for_the_response_is_answered_500() {
+    defer let received = exchanged_in_small_arena(headers: 4, length: 3700)
+    testing.assert_eq(received.view(), "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a request leaving no room for the response was not answered 500")?
+    .Ok(())
+}
+
+// `exchanged_in_small_arena` sends `POST /health` with an 8 KiB body and
+// `headers` header lines holding `length` bytes each, answers it in a
+// 53,256-byte arena, and returns what the client read.
+fn exchanged_in_small_arena(headers: UInt64, length: UInt64) -> String {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    var request = String.new()
+    &request.append("POST /health HTTP/1.1\r\nContent-Length: 8192\r\n").unwrap()
+    for index in 0..headers {
+        "X-{index}: ".fmt(&request).unwrap()
+        for _ in 0..length {
+            &request.append("a").unwrap()
+        }
+        &request.append("\r\n").unwrap()
+    }
+    &request.append("\r\n").unwrap()
+    for _ in 0..8192 {
+        &request.append("b").unwrap()
+    }
+    let _sent = io.write_all(&client, request.as_bytes()).unwrap()
+    request.release()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    var router = exchanges_router(mem.system())
+    let limits = Limits { max_body_bytes = 8192, read_timeout_ms = 100, ..serving(1) }
+    let arena = mem.Arena.open(mem.system(), 53256)
+    var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
+    let _answered = serve_connection(connection, &router, arena.handle(), &refusal, limits, time.Instant.now())
+    refusal.release()
+    arena.release()
+    router.release()
+    listener.close().unwrap()
+    read_to_end(client)
+}
+
+test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), health_request)
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let scripted = net.scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
+    defer var router = health_router()
+    let served = serve(scripted, &router, mem.system(), serving(1))
+    defer let received = read_to_end(client)
+    testing.assert_eq(served, .Ok(()), "serving did not retry")?
+    testing.assert_eq(received.view(), health_answer, "the connection after the failures was not answered")?
+    .Ok(())
+}
+
+// Each retried accept failure is reported to the observer with the pause
+// before the retry, which doubles while failures repeat and starts again at 5
+// ms once a connection has been accepted.
+test fn each_accept_retry_is_observed_with_its_pause() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let first = send(bound, health_request)
+    let second = send(bound, health_request)
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let scripted = net.scripted(listener, [.Some(.Io(copy(exhausted))), .Some(.Io(reset)), .None, .Some(.Io(exhausted))], .None)
+    var recorded = Recorded.new()
+    let served = serve(scripted, &recorded, mem.system(), serving(2))
+    defer let answered = read_to_end(first)
+    defer let also_answered = read_to_end(second)
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(recorded.exchanges, UInt64(2), "an exchange was not reported")?
+    testing.assert_eq(recorded.retries, UInt64(3), "an accept retry was not reported")?
+    testing.assert_eq(recorded.pauses_ms, [UInt64(5), 10, 5, 0], "the pauses before the retries changed")?
+    .Ok(())
+}
+
+test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
+    defer var router = health_router()
+    let served = serve(scripted, &router, mem.system(), serving(1))
+    let refused = match net.connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(served, .Err(.Accept(.Io(invalid))), "a fatal accept failure did not end serving")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn a_failed_listener_close_ends_serving_with_close() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = net.scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
+    defer var router = health_router()
+    let served = serve(scripted, &router, mem.system(), serving(0))
+    testing.assert_eq(served, .Err(.Close(failure)), "a failed close was not reported")?
+    .Ok(())
+}
+
+// `listen_and_serve` fails with `Listen` when the listener cannot be opened at
+// `address` or its bound address cannot be read, and with `Serve` carrying the
+// failure `serve` ended with otherwise. When serving ends with an accept
+// failure and closing the listener fails too, `Serve` carries the accept
+// failure, as `serve` reports it.
+@(copyable, derive(Equatable, Debug))
+pub enum ListenAndServeError {
+    Listen(net.NetError),
+    Serve(ServeError),
+}
+
+impl Display for ListenAndServeError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Listen(error) => {
+                &w.write_str("listening failed: ")?
+                error.fmt(&w)
+            },
+            Serve(error) => error.fmt(&w),
+        }
+    }
+}
+
+test fn a_listen_and_serve_error_displays_its_cause() {
+    let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
+    defer let listening = fmt.render_owned(mem.system(), ListenAndServeError.Listen(.Io(invalid))).unwrap()
+    defer let arena = fmt.render_owned(mem.system(), ListenAndServeError.Serve(.ArenaTooSmall)).unwrap()
+    testing.assert_eq(listening.view(), "listening failed: Listen failed (InvalidDescriptor) after 0 bytes", "the listen failure changed")?
+    testing.assert_eq(arena.view(), "the request arena cannot hold every request the limits admit", "the arena refusal changed")?
+    .Ok(())
+}
+
+// Open a listener at `address` and serve on it as `serve` does, so the program
+// chooses what it serves and this function owns the listener and the handler.
+// `state` is what the routes share, wrapped around `handler` as `with_state`
+// does; a service that shares nothing leaves it out, and its state is `()`.
+// `parent` supplies the memory of each exchange and is the system allocator
+// unless the program passes another.
+//
+// `handler` and `state` are released on every failure, including when listening
+// fails, and the listener is closed on every exit. On success the handler is
+// released and the state is returned, so a program reads what its routes
+// changed and releases it. Once serving can begin, which is after the limits and
+// the parent have been accepted and before anything is accepted, `handler` is
+// told the address the listener is bound to as `Event.Listening`, which is how
+// a program that asked for port 0 learns its port. A program that opens its own
+// listener calls `serve`.
+pub fn listen_and_serve[H: Handler[S, P] + Observer + Release, S: Release = (), P: Allocator = mem.SystemAllocator](address: net.Address, sink handler: H, sink state: S = (), parent: P = .System, limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
+    let server = with_state(state, handler)
+    let listener = net.listen(address) else |error| {
+        server.release()
+        return .Err(.Listen(error))
+    }
+    let bound = listener.local_address()
+    let served = serve_opened(listener, bound, server, parent, limits)?
+    .Ok(served.into_state())
+}
+
+test fn the_state_is_returned_when_serving_ends() {
+    let router: Router[Tally] = Router.new()
+    let served = listen_and_serve(net.loopback(0), router, state: Tally { visits = 7 }, limits: serving(0))
+    let kept = match served {
+        Ok(tally) => tally.visits,
+        Err(_) => 0,
+    }
+    testing.assert_eq(kept, UInt64(7), "the state was not returned")?
+    .Ok(())
+}
+
+test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
+    let file = log.capture()
+    let announcer = Announcer { report = file.logger(minimum: .Info) }
+    let served = listen_and_serve(net.loopback(0), announcer, limits: serving(0))
+    defer let lines = file.finish()
+    testing.assert_ok_eq(served, (), "serving nothing failed")?
+    testing.assert_eq(lines.view(), "INFO announced bound=true\n", "the bound address was not announced")?
+    .Ok(())
+}
+
+test fn a_server_that_serves_nothing_ends_and_releases_its_handler() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let served = listen_and_serve(net.loopback(0), exchanges_router(log.allocator()), parent: log.allocator(), limits: serving(0))
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_ok_eq(served, (), "serving nothing failed")?
+    testing.assert(settled, "the handler was kept after serving ended")?
+    .Ok(())
+}
+
+test fn a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released() {
+    let held = net.listen(net.loopback(0)).unwrap()
+    let taken = held.local_address().unwrap()
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let served = listen_and_serve(taken, exchanges_router(log.allocator()), parent: log.allocator(), limits: serving(1))
+    let settled = log.all_disposed()
+    log.release()
+    held.close().unwrap()
+    let refused = match read served {
+        Err(error) => match read error {
+            Listen(_) => true,
+            _ => false,
+        },
+        Ok(_) => false,
+    }
+    testing.assert(refused, "a taken port was not reported as a listen failure")?
+    testing.assert(settled, "the handler was kept after listening failed")?
+    .Ok(())
+}
+
+test fn serving_that_cannot_begin_announces_nothing_and_releases_the_handler() {
+    let file = log.capture()
+    let announcer = Announcer { report = file.logger(minimum: .Info) }
+    let small = Limits { request_arena_bytes = 1, ..serving(1) }
+    let arena = listen_and_serve(net.loopback(0), announcer, limits: small)
+    defer let parent = mem.Arena.open(mem.system(), size: 0)
+    let memory = listen_and_serve(net.loopback(0), Announcer { report = file.logger(minimum: .Info) }, parent: parent.handle(), limits: serving(1))
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let released = listen_and_serve(net.loopback(0), exchanges_router(log.allocator()), parent: log.allocator(), limits: Limits { request_arena_bytes = 1, ..serving(1) })
+    let settled = log.all_disposed()
+    log.release()
+    defer let lines = file.finish()
+    testing.assert_eq(arena, .Err(.Serve(.ArenaTooSmall)), "an arena too small for the limits did not end serving")?
+    testing.assert_eq(memory, .Err(.Serve(.Memory(.Exhausted))), "a parent without a buffer did not end serving")?
+    testing.assert_eq(released, .Err(.Serve(.ArenaTooSmall)), "an arena too small for the limits did not end serving")?
+    testing.assert_eq(lines.view(), "", "a server that never accepted announced its address")?
+    testing.assert(settled, "the handler was kept after the arena was refused")?
+    .Ok(())
+}
+
+// Serve on `listener` after its bound address `bound` was read, for
+// `listen_and_serve`. A bound address that could not be read is a
+// `Listen` failure; the listener is closed, and a failure to close it is
+// dropped in favour of the reported one. `server` is released on every
+// failure and returned on success.
+fn serve_opened[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer + Release, P: Allocator](sink listener: L, sink bound: Result[net.Address, net.NetError], sink server: H, parent: P, limits: Limits) -> Result[H, ListenAndServeError] where L.CloseError: Into[io.IoError], carries(server) {
+    let address = bound else |error| {
+        let _closed = listener.close()
+        server.release()
+        return .Err(.Listen(error))
+    }
+    var held = server
+    match serve_announcing(listener, &held, parent, limits, .Some(address)) {
+        Ok(_) => .Ok(held),
+        Err(error) => {
+            held.release()
+            .Err(.Serve(error))
+        },
+    }
+}
+
+test fn a_bound_address_that_cannot_be_read_closes_the_listener_and_releases_the_handler() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let scripted = net.scripted(listener, [.None, .None, .None, .None], .None)
+    let served = serve_opened(scripted, .Err(.Io(copy(invalid))), exchanges_router(log.allocator()), log.allocator(), serving(1))
+    let failure = failure_of(served)
+    let settled = log.all_disposed()
+    log.release()
+    let refused = match net.connect(address) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(failure, Option.Some(ListenAndServeError.Listen(.Io(invalid))), "an unreadable bound address was not a listen failure")?
+    testing.assert(settled, "the handler was kept after the bound address failed")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn serving_reports_an_accept_failure_when_closing_the_listener_fails_too() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .Some(broken))
+    let served = serve_opened(scripted, .Ok(address), health_router(), mem.system(), serving(1))
+    testing.assert_eq(failure_of(served), Option.Some(ListenAndServeError.Serve(.Accept(.Io(invalid)))), "the close failure replaced the accept failure")?
+    .Ok(())
+}
+
+test fn an_announced_server_answers_the_connection_queued_for_it() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    let client = send(address, health_request)
+    let file = log.capture()
+    let served = serve_opened(listener, .Ok(address), Announcer { report = file.logger(minimum: .Info) }, mem.system(), serving(1))
+    defer let answer = read_to_end(client)
+    defer let lines = file.finish()
+    testing.assert_eq(failure_of(served), Option.None, "serving failed")?
+    testing.assert_eq(answer.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "the queued request was not answered")?
+    testing.assert_eq(lines.view(), "INFO announced bound=true\nINFO exchanged\n", "the announcement did not precede the exchange")?
+    .Ok(())
+}
+
+// `failure_of` releases the server `served` returned, if it did, and says what
+// it failed with.
+fn failure_of[H: Release](sink served: Result[H, ListenAndServeError]) -> Option[ListenAndServeError] {
+    match served {
+        Ok(server) => {
+            server.release()
+            .None
+        },
+        Err(error) => .Some(error),
+    }
+}
+
+// A connection is answered from the arena, or refused 503 because the
+// parent refused to give the arena its storage.
+@copyable
+enum Served {
+    Answered,
+    ArenaRefused,
+}
+
+// The arena holds the request buffer, the buffer a refusal discards input
+// into, and the response buffer, 4 KiB each, and the arena's 8-byte cursor.
+let exchange_buffer_bytes: UInt64 = 3 * 4096 + 8
+
+// A header's name and value are two spans of two `UInt64`s each, 32 bytes.
+let field_bytes: UInt64 = 32
+
+// Every arena reservation is rounded up to 8 bytes, and the head's text is
+// reserved at most 64 times, since each reservation at least doubles it.
+let rounding_bytes: UInt64 = 8 * 64
+
+// `smallest_arena` is the size that holds every request the limits admit, a
+// request line and `max_headers` header lines at the line limit and a body at
+// the body limit, beside the exchange's buffers. It adds what reading such a
+// request reserves, each term an upper bound:
+//
+// - The body is reserved at its exact length, rounded up to 8 bytes.
+// - The reader collects a line in a record that starts at 64 bytes and
+//   doubles up to the line limit plus its terminator; the arena keeps every
+//   record it outgrew, and those sum to less than twice the last.
+// - The head's text, the method, target and header names and values, is at
+//   most one line limit per line. It grows by doubling, or straight to what an
+//   append needs, so its last reservation is at most twice the text and all
+//   of its reservations together at most twice the last: four times the text.
+// - The table of header ranges doubles from 4 entries, so it reserves at most
+//   four times `max_headers + 2` entries in all.
+// - The decoded query is reserved once at the query's length, at most one
+//   line, and its ranges once at its pair count, at most `max_query_pairs`.
+// - A body sent as a form is decoded the same way, reserved once at the
+//   body's length, at most `max_body_bytes`, and its ranges once at its pair
+//   count, at most `max_form_pairs`, whether or not a route reads it.
+//
+// A smaller arena would answer 500 to a request the limits accept. Limits
+// that need more than `UInt64.max` bytes answer `UInt64.max`, which no arena
+// reaches.
+fn smallest_arena(limits: Limits) -> UInt64 {
+    let line = limits.max_line_bytes
+    let lines = added(limits.max_headers, 1)
+    let body = added(limits.max_body_bytes, 8)
+    let record = added(multiplied(2, added(line, 1)), 8)
+    let head = added(multiplied(multiplied(4, lines), line), rounding_bytes)
+    let fields = multiplied(multiplied(4, added(limits.max_headers, 2)), field_bytes)
+    let query = added(added(added(line, 8), multiplied(limits.max_query_pairs, field_bytes)), 8)
+    let form = added(added(body, multiplied(limits.max_form_pairs, field_bytes)), 8)
+    var total = exchange_buffer_bytes
+    for part in [body, record, head, fields, query, form] {
+        total = added(total, part)
+    }
+    total
+}
+
+// `added` and `multiplied` stop at `UInt64.max` instead of overflowing, so
+// `smallest_arena` answers `UInt64.max` for limits no arena could hold.
+fn added(left: UInt64, right: UInt64) -> UInt64 {
+    if right > UInt64.max - left {
+        return UInt64.max
+    }
+    left + right
+}
+
+fn multiplied(left: UInt64, right: UInt64) -> UInt64 {
+    if left != 0 && right > UInt64.max / left {
+        return UInt64.max
+    }
+    left * right
+}
+
+test fn arena_arithmetic_stops_at_the_largest_integer() {
+    testing.assert_eq(added(2, 3), UInt64(5), "a sum changed")?
+    testing.assert_eq(added(UInt64.max, 1), UInt64.max, "a sum past the largest integer wrapped")?
+    testing.assert_eq(multiplied(4, 8), UInt64(32), "a product changed")?
+    testing.assert_eq(multiplied(0, UInt64.max), UInt64(0), "a product with zero changed")?
+    testing.assert_eq(multiplied(UInt64.max / 2 + 1, 2), UInt64.max, "a product past the largest integer wrapped")?
+    .Ok(())
+}
+
+test fn the_default_arena_holds_every_request_the_default_limits_admit() {
+    let limits = Limits.default()
+    testing.assert(limits.request_arena_bytes >= smallest_arena(limits), "the default arena is smaller than the default limits need")?
+    .Ok(())
+}
+
+// A request at every limit is answered in the smallest arena `serve` accepts
+// for those limits: a request line and six header lines at the line limit,
+// two short headers that bring the count to the limit of eight, and a body at
+// the body limit.
+test fn a_request_at_every_limit_is_answered_in_the_smallest_arena() {
+    let limits = Limits { max_line_bytes = 256, max_headers = 8, max_body_bytes = 1024, ..serving(1) }
+    defer let received = served_at_limits(limits, header_lines: 6, line_length: 256)
+    testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a request at every limit was refused")?
+    .Ok(())
+}
+
+// A request line at the line limit whose query holds `max_query_pairs`
+// pairs is decoded within the smallest arena, so a route that never reads it
+// still answers. Each pair is 81 letters and `&`, 82 bytes, and the query's
+// 8169 bytes hold 99 of them and a 100th of 51 letters.
+test fn a_query_of_the_most_pairs_is_answered_in_the_smallest_arena() {
+    let limits = Limits { max_body_bytes = 8, ..serving(1) }
+    defer let received = served_at_limits(limits, header_lines: 0, line_length: 8192, query_part: query_pair(81))
+    testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a query of the most pairs was refused")?
+    .Ok(())
+}
+
+// One pair past `max_query_pairs` is refused with 414 before it is decoded:
+// pairs of 80 letters and `&` fit 100 in the query and a 101st of 69 letters.
+test fn a_query_of_one_pair_too_many_is_refused_with_414() {
+    let limits = Limits { max_body_bytes = 8, ..serving(1) }
+    defer let received = served_at_limits(limits, header_lines: 0, line_length: 8192, query_part: query_pair(80))
+    testing.assert(received.starts_with("HTTP/1.1 414 URI Too Long\r\n"), "a query of too many pairs was answered")?
+    .Ok(())
+}
+
+// `query_pair` returns `letters` letters and an `&`, one pair of a query.
+fn query_pair(letters: UInt64) -> Str {
+    let pair = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&"
+    pair.slice(pair.length() - letters - 1, pair.length()).unwrap()
+}
+
+// A `POST /health` body sent as a form and decoded within the smallest
+// arena, whether or not the route reads it, holds `max_form_pairs` pairs:
+// each pair is 81 letters and `&`, 82 bytes, and the body's 8169 bytes hold
+// 99 of them and a 100th of 51 letters, exactly as a query's pairs are
+// counted.
+test fn a_form_of_the_most_pairs_is_answered_in_the_smallest_arena() {
+    let limits = Limits { max_body_bytes = 8169, ..serving(1) }
+    defer let received = served_form_at_limits(limits, query_pair(81))
+    testing.assert_eq(received.view(), health_answer, "a form of the most pairs was refused")?
+    .Ok(())
+}
+
+// One pair past `max_form_pairs` is refused with 413 before it is decoded:
+// pairs of 80 letters and `&` fit 100 in the body and a 101st of 69 letters.
+test fn a_form_of_one_pair_too_many_is_refused_with_413() {
+    let limits = Limits { max_body_bytes = 8169, ..serving(1) }
+    defer let received = served_form_at_limits(limits, query_pair(80))
+    testing.assert(received.starts_with("HTTP/1.1 413 Content Too Large\r\n"), "a form of too many pairs was answered")?
+    .Ok(())
+}
+
+// `served_form_at_limits` sends `POST /health` with a body of `pair_part`
+// repeated to `limits.max_body_bytes` and sent as
+// `application/x-www-form-urlencoded`, serves it in `smallest_arena(limits)`,
+// and returns what the client read.
+fn served_form_at_limits(sink limits: Limits, pair_part: Str) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    var body = String.new()
+    var written: UInt64 = 0
+    while written < limits.max_body_bytes {
+        let left = limits.max_body_bytes - written
+        let part = if pair_part.length() > left {
+            pair_part.slice(0, left).unwrap()
+        } else {
+            copy(pair_part)
+        }
+        &body.append(part).unwrap()
+        written += part.length()
+    }
+    var request = String.new()
+    let length = body.length()
+    "POST /health HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {length}\r\n\r\n".fmt(&request).unwrap()
+    &request.append(body.view()).unwrap()
+    body.release()
+    let _sent = io.write_all(&client, request.as_bytes()).unwrap()
+    request.release()
+    var router = Router.new()
+    &router.route_raw("POST /health", health).unwrap()
+    let smallest = smallest_arena(limits)
+    serve(listener, &router, mem.system(), Limits { request_arena_bytes = smallest, ..limits }).unwrap()
+    router.release()
+    read_to_end(client)
+}
+
+// A header after a line at the limit makes the head's text grow past it, and
+// the request is still answered in the smallest arena.
+test fn a_short_header_after_a_long_line_is_answered_in_the_smallest_arena() {
+    let limits = Limits { max_body_bytes = 8192, ..serving(1) }
+    defer let received = served_at_limits(limits, header_lines: 1, line_length: 8192)
+    testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a short header after a long line was refused")?
+    .Ok(())
+}
+
+// `served_at_limits` sends `GET /health` with a request line of
+// `line_length` bytes, whose query is `query_part` repeated, `header_lines`
+// header lines of `line_length` bytes, a short `Y: b` header,
+// `Content-Length` and a body at the body limit, serves it in
+// `smallest_arena(limits)`, and returns what the client read. Each line
+// counts its CRLF.
+fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt64, query_part: Str = "q") -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    var request = String.new()
+    // `GET /health?` and ` HTTP/1.1` with CRLF take 23 bytes around the query.
+    &request.append("GET /health?").unwrap()
+    let query_length = line_length - 23
+    var written: UInt64 = 0
+    while written < query_length {
+        let left = query_length - written
+        let part = if query_part.length() > left {
+            query_part.slice(0, left).unwrap()
+        } else {
+            copy(query_part)
+        }
+        &request.append(part).unwrap()
+        written += part.length()
+    }
+    &request.append(" HTTP/1.1\r\n").unwrap()
+    for index in 0..header_lines {
+        // `X-{index}: ` takes 5 bytes and CRLF 2 around the value.
+        "X-{index}: ".fmt(&request).unwrap()
+        for _ in 0..line_length - 7 {
+            &request.append("a").unwrap()
+        }
+        &request.append("\r\n").unwrap()
+    }
+    let body = limits.max_body_bytes
+    "Y: b\r\nContent-Length: {body}\r\n\r\n".fmt(&request).unwrap()
+    for _ in 0..body {
+        &request.append("b").unwrap()
+    }
+    let _sent = io.write_all(&client, request.as_bytes()).unwrap()
+    request.release()
+    var router = exchanges_router(mem.system())
+    let smallest = smallest_arena(limits)
+    serve(listener, &router, mem.system(), Limits { request_arena_bytes = smallest, ..limits }).unwrap()
+    router.release()
+    read_to_end(client)
+}
+
+test fn an_arena_below_the_body_limit_is_refused_before_serving() {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    defer var router = health_router()
+    let limits = serving(1)
+    // The field reads `limits` before the base takes it.
+    let refused = serve(listener, &router, mem.system(), Limits { request_arena_bytes = smallest_arena(limits) - 1, ..limits })
+    let closed = match net.connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(refused, .Err(.ArenaTooSmall), "a small arena was accepted")?
+    testing.assert(closed, "the listener was left open")?
+    .Ok(())
+}
+
+// Limits too large for any arena to hold are refused as an arena too small,
+// whichever limit is large and however large the arena asked for is.
+test fn limits_beyond_every_arena_are_refused_without_overflowing() {
+    let huge = UInt64.max
+    let candidates = [
+        Limits { max_line_bytes = 9000000000000000000, ..serving(0) },
+        Limits { max_headers = huge, ..serving(0) },
+        Limits { max_body_bytes = huge, ..serving(0) },
+        Limits { max_query_pairs = huge, ..serving(0) },
+        Limits { max_form_pairs = huge, ..serving(0) },
+        Limits { max_line_bytes = huge, max_headers = huge, max_body_bytes = huge, max_query_pairs = huge, max_form_pairs = huge, request_arena_bytes = huge, ..serving(0) },
+    ]
+    var refused = true
+    for limits in candidates {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        var router = health_router()
+        let answer = serve(listener, &router, mem.system(), limits)
+        refused = refused && answer == .Err(.ArenaTooSmall)
+        router.release()
+    }
+    testing.assert(refused, "limits beyond every arena were not refused with ArenaTooSmall")?
+    .Ok(())
+}
+
+// Answer one request on `connection` from `memory`, the serving arena, and
+// close it. Every failure is reported to `handler` through `observe` rather
+// than returned, so one connection never stops the server. The whole request,
+// head and body, must be read within `limits.read_timeout_ms` of `accepted`,
+// the instant the connection was accepted; each write may take
+// `limits.write_timeout_ms`.
+fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, accepted: time.Instant) -> Served {
+    var configured = connection
+    // The deadline bounds the whole request. Each read also waits at most the
+    // read budget, which is the longest the deadline lets one wait, so a read
+    // never blocks without a bound.
+    match &configured.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms) {
+        Ok(_) => {},
+        Err(error) => {
+            close_connection(configured)
+            let event: Event[P] = .Exchanged(.{ request = .None, status = .None, body_bytes = 0, failure = .Some(.Timeouts(error)) })
+            &handler.observe(event)
+            return .Answered
+        },
+    }
+    &configured.set_deadline(accepted, limits.read_timeout_ms)
+    answer_exchange(configured, &handler, memory, &refusal, limits)
+}
+
+// Read a request into `memory`, answer it through `handler`, close the
+// connection, and tell `handler` how the exchange ended. Nothing this
+// allocates in `memory` outlives the call.
+fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) -> Served {
+    var reader = io.BufferedReader.open(memory, capacity: request_buffer_bytes, reader: connection) else |failure| {
+        let BufferOpenFailure { resource, reason: _ } = failure
+        return refuse_for_want_of_arena(resource, &handler, memory, &refusal, limits)
+    }
+    // The buffer a refusal discards input into is reserved before reading,
+    // so a request that fills the arena can still be refused cleanly.
+    var discarded = memory.acquire(request_buffer_bytes) else |_| {
+        return refuse_for_want_of_arena(reader.abandon(), &handler, memory, &refusal, limits)
+    }
+    let received = read_request(&reader, memory, limits)
+    var connection = reader.abandon()
+    let message = received else |error| {
+        let status = error.status()
+        let refused = match read status {
+            Some(answer) => refuse(&connection, answer, memory),
+            None => .Ok(()),
+        }
+        // Only a refusal stops reading before the input ends.
+        match read error {
+            Status(_) => linger(&connection, &discarded, limits.read_timeout_ms),
+            _ => {},
+        }
+        close_connection(connection)
+        // A client that closed the connection before sending a byte asked
+        // for nothing, so there is no exchange to report. Otherwise the
+        // failed read is the cause, unless the request was refused and
+        // the refusal could not be written.
+        let failure: Failure = match read error {
+            Closed => return .Answered,
+            Io(_) => .Unread(error),
+            Status(_) => match refused {
+                Ok(_) => .Unread(error),
+                Err(reason) => .Write(reason),
+            },
+        }
+        let event: Event[P] = .Exchanged(.{ request = .None, status, body_bytes = 0, failure = .Some(failure) })
+        &handler.observe(event)
+        return .Answered
+    }
+    let request = message.request()
+    // The response buffer is reserved before the handler runs, so a handler
+    // that fills the arena is still answered.
+    var body = BodyWriter.open(connection, request) else |failure| {
+        let BufferOpenFailure { resource, reason: _ } = failure
+        var refused = resource
+        let _answered = refuse(&refused, .InternalServerError, memory)
+        close_connection(refused)
+        let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(.InternalServerError), body_bytes = 0, failure = .Some(.Memory) })
+        &handler.observe(event)
+        return .Answered
+    }
+    let head_only = request.method() == Method.Head
+    // A response or error may view what the handler owns, and `observe` may
+    // change it, so the answer is written and its connection settled before
+    // `observe` runs, and a message the report quotes is first copied into
+    // the arena as `note`. A message the arena cannot hold is left out.
+    var note = String.new_in(memory)
+    // The handler at the top of the stack takes no state: `http.with_state`
+    // keeps a program's own and lends it down, so this lends `()`.
+    var nothing = ()
+    let answered: Answered = match &handler.serve_http(&nothing, request) {
+        Ok(response) => {
+            let status = response.status()
+            let written = write_response(&body, response, head_only)
+            Answered { status, refused = false, noted = .Absent, sent = settle_answer(body, written, &note) }
+        },
+        Err(error) => {
+            let written = write_error(&body, error, head_only)
+            let status = error.status()
+            let noted = copy_message(&note, error.message())
+            Answered { status, refused = true, noted, sent = settle_answer(body, written, &note) }
+        },
+    }
+    let failure: Option[Failure] = match read answered.sent.delivery {
+        Whole => if answered.refused {
+            .Some(.Refused(noted_text(note, answered.noted)))
+        } else {
+            .None
+        },
+        Write(error) => .Some(.Write(copy(error))),
+        Stream(status, noted) => .Some(.Stream(copy(status), noted_text(note, noted))),
+    }
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, failure })
+    &handler.observe(event)
+    .Answered
+}
+
+// `Answered` is how the handler answered: the status, whether it refused the
+// request with an error, whether its message was copied into the note, and
+// how sending the answer went.
+struct Answered {
+    status: Status,
+    refused: Bool,
+    noted: Noted,
+    sent: Sent,
+}
+
+// A failure's message is `Copied` into the note, or `Absent` because there
+// was none or the arena could not hold it.
+@copyable
+enum Noted {
+    Copied,
+    Absent,
+}
+
+// `copy_message` appends `message` to `note` and says whether it is there.
+fn copy_message[A: Allocator](inout note: String[A], message: Option[Str]) -> Noted {
+    let copied = match read message {
+        Some(text) => &note.append(text).is_ok(),
+        None => false,
+    }
+    if copied {
+        return .Copied
+    }
+    .Absent
+}
+
+// `Sent` says how writing an answer ended, and how many body bytes the
+// connection accepted.
+@copyable
+struct Sent {
+    delivery: Delivery,
+    body_bytes: UInt64,
+}
+
+// An answer is delivered whole, or writing it failed, or the function
+// streaming its body failed with a status after the head was sent, and its
+// message may have been copied into the note.
+@copyable
+enum Delivery {
+    Whole,
+    Write(io.IoError),
+    Stream(Status, Noted),
+}
+
+// Send what `body` still buffers and close its connection, or reset it when
+// `written` failed, so the client does not take a body cut short for a whole
+// one. The message of a failed stream is appended to `note`.
+fn settle_answer[P: Allocator](sink body: BodyWriter[P], sink written: Result[(), WriteError[P]], inout note: String[mem.Handle[P]]) -> Sent {
+    let body_bytes = body.body_bytes
+    match written {
+        Ok(_) => match body.finish() {
+            Ok(connection) => {
+                close_connection(connection)
+                return .{ delivery = .Whole, body_bytes }
+            },
+            Err(failure) => {
+                let ResponseFailure { connection, error } = failure
+                reset_connection(connection)
+                return .{ delivery = .Write(error), body_bytes }
+            },
+        },
+        Err(error) => {
+            reset_connection(body.abandon())
+            match error {
+                Io(reason) => .{ delivery = .Write(reason), body_bytes },
+                Stream(stopped) => {
+                    let noted = copy_message(&note, stopped.message())
+                    Sent { delivery = .Stream(stopped.status(), noted), body_bytes }
+                },
+            }
+        },
+    }
+}
+
+// `noted_text` returns the note when a message was copied into it.
+fn noted_text[A: Allocator](note: String[A], noted: Noted) -> Option[Str] where borrows(.Some: note) {
+    match read noted {
+        Copied => .Some(note.view()),
+        Absent => .None,
+    }
+}
+
+// Answer 503 when the parent refused the arena its storage: the server is out
+// of memory for the moment. The answer allocates nothing, and the unread input
+// is discarded into `refusal`, the buffer `serve` holds for this, so the client
+// reads the 503 the event reports unless writing it failed, which the event
+// then reports instead.
+fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) -> Served {
+    var refused = connection
+    // The answer's headers are empty, so the refused arena's handle allocates
+    // nothing for them.
+    let answered = refuse(&refused, .ServiceUnavailable, memory)
+    linger(&refused, &refusal, limits.read_timeout_ms)
+    close_connection(refused)
+    let failure: Failure = match answered {
+        Ok(_) => .Memory,
+        Err(reason) => .Write(reason),
+    }
+    let event: Event[P] = .Exchanged(.{ request = .None, status = .Some(.ServiceUnavailable), body_bytes = 0, failure = .Some(failure) })
+    &handler.observe(event)
+    .ArenaRefused
+}
+
+// Answer a request that was not read with `status` alone.
+fn refuse[A: Allocator](inout connection: net.Connection, status: Status, allocator: A) -> Result[(), io.IoError] {
+    let headers = ResponseHeaders.open(allocator)
+    let wrote = write_head(&connection, status, headers)
+    headers.release()
+    let _written = wrote?
+    .Ok(())
+}
+
+// Stop writing to `connection` and discard what the client still sends into
+// `discarded`, so closing it does not reset the connection before the client
+// reads the answer.
+fn linger[A: Allocator](inout connection: net.Connection, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) -> () {
+    let stopped = &connection.shutdown_write().is_ok() && &connection.set_timeouts(linger_wait(read_timeout_ms), 0).is_ok()
+    if !stopped {
+        return
+    }
+    var reads: UInt64 = 0
+    while reads < linger_reads {
+        reads += 1
+        match &connection.read_some(&discarded, offset: 0, count: request_buffer_bytes) {
+            Ok(count) => if count == 0 {
+                reads = linger_reads
+            },
+            Err(_) => reads = linger_reads,
+        }
+    }
+}
+
+// `linger_wait` returns how long one linger read waits, given the read timeout,
+// where 0 means none.
+fn linger_wait(read_timeout_ms: UInt64) -> UInt64 {
+    if read_timeout_ms == 0 || read_timeout_ms > longest_linger_read_ms {
+        return longest_linger_read_ms
+    }
+    read_timeout_ms
+}
+
+test fn a_linger_read_waits_no_longer_than_the_read_timeout() {
+    testing.assert_eq(linger_wait(100), 100, "a shorter read timeout was exceeded")?
+    testing.assert_eq(linger_wait(5000), 500, "the linger waited past 500 ms")?
+    testing.assert_eq(linger_wait(0), 500, "no read timeout let the linger wait forever")?
+    .Ok(())
+}
+
+// Close `connection` and ignore a failure: the descriptor is released either
+// way, and the response has already been delivered or lost, so a server has
+// nothing to do about it.
+fn close_connection(sink connection: net.Connection) -> () {
+    let _closed = connection.close()
+}
+
+// Reset `connection`, so the client reads an error rather than the end of a
+// response, and ignore a failure: the descriptor is released either way.
+fn reset_connection(sink connection: net.Connection) -> () {
+    let _reset = connection.reset()
+}
+
+// A test sends this GET of `/health` and nothing else.
+let health_request: Str = "GET /health HTTP/1.1\r\n\r\n"
+
+// A client reads this answer to `health_request`.
+let health_answer: Str = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok"
+
+// `unavailable_answer` is what a client reads when its request is refused 503.
+let unavailable_answer: Str = "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+
+// Answer every request with "ok".
+fn health[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    text(request, "ok")
+}
+
+// `health_router` builds a router that answers `GET /health` with "ok".
+fn health_router() -> Router[()] {
+    var router = Router.new()
+    &router.route_raw("GET /health", health).unwrap()
+    router
+}
+
+// `serving` returns the default limits, ending after `count` connections.
+fn serving(count: UInt64) -> Limits {
+    Limits { connections = .Some(count), ..Limits.default() }
+}
+
+// Connect to `address` and send `request`, leaving the connection open.
+fn send(address: net.Address, request: Str) -> net.Connection {
+    var client = net.connect(address).unwrap()
+    let _sent = io.write_all(&client, request.as_bytes()).unwrap()
+    client
+}
+
+// `Unprocessable` refuses every request with 422 and counts them.
+struct Unprocessable {
+    refused: UInt64,
+}
+
+impl[P: Allocator] Handler[(), P] for Unprocessable {
+    fn serve_http(inout self: Self, inout _state: (), _request: Request[P]) -> Result[Response[P], Error[P]] {
+        self.refused += 1
+        .Err(Error.new(.Other(Code(422))))
+    }
+}
+
+// Fill the arena eight bytes at a time until it refuses, which answers 500.
+fn fill_the_arena[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    var filled = String.new_in(request.allocator())
+    loop {
+        &filled.append("abcdefgh")?
+    }
+}
+
+// Stream the numbers 1 to 3, one per line.
+fn count[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    stream(request, count_to_three)
+}
+
+// Stream one line, then fail.
+fn broken_stream[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    stream(request, fail_after_one)
+}
+
+// `exchanges_router` builds a router that answers `GET /health` with "ok",
+// `/count` with a stream of three lines, `/broken` with a stream that fails after
+// one line, `/fill` by filling the arena, and `/echo/{name}` with the name.
+fn exchanges_router[A: Allocator](allocator: A) -> Router[(), A] where carries(allocator) {
+    var router = Router.new_in(allocator)
+    &router.route_raw("GET /health", health).unwrap()
+    &router.route_raw("GET /count", count).unwrap()
+    &router.route_raw("GET /broken", broken_stream).unwrap()
+    &router.route_raw("GET /fill", fill_the_arena).unwrap()
+    &router.route_raw(r"GET /echo/{name}", named_value).unwrap()
+    router
+}
+
+// `Recorded` answers every request with "ok" and records what `serve` tells
+// it: how many exchanges ended, how many of them failed to read the request
+// because it timed out, and how many accept retries it was told of, with the
+// first four pauses in milliseconds.
+struct Recorded {
+    exchanges: UInt64,
+    timed_out: UInt64,
+    retries: UInt64,
+    pauses_ms: [UInt64; 4],
+}
+
+impl Recorded {
+    fn new() -> Recorded {
+        Recorded { exchanges = 0, timed_out = 0, retries = 0, pauses_ms = [0, 0, 0, 0] }
+    }
+}
+
+impl[P: Allocator] Handler[(), P] for Recorded {
+    fn serve_http(inout _self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+        text(request, "ok")
+    }
+}
+
+impl Observer for Recorded {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+        match read event {
+            Exchanged(exchange) => {
+                self.exchanges += 1
+                match read exchange.failure {
+                    Some(failure) => match read failure {
+                        Unread(error) => match read error {
+                            Io(reason) => match read reason.category { TimedOut => self.timed_out += 1, _ => {} },
+                            _ => {},
+                        },
+                        _ => {},
+                    },
+                    None => {},
+                }
+            },
+            Listening(_) => {},
+            AcceptRetried(retry) => {
+                if self.retries < 4 {
+                    self.pauses_ms[self.retries] = retry.pause.nanoseconds() / 1000000
+                }
+                self.retries += 1
+            },
+        }
+    }
+}
+
+// `Announcer` answers every request with "ok" and reports to `report` that it
+// was told the address `listen_and_serve` bound, with whether its port is
+// known, and that an exchange ended.
+@derive(Release)
+struct Announcer {
+    report: log.Logger[fs.File],
+}
+
+impl[P: Allocator] Handler[(), P] for Announcer {
+    fn serve_http(inout _self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+        text(request, "ok")
+    }
+}
+
+impl Observer for Announcer {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+        match read event {
+            Listening(address) => self.report.info("announced", log.field("bound", address.port != 0)),
+            Exchanged(_) => self.report.info("exchanged", ()),
+            AcceptRetried(_) => {},
+        }
+    }
+}
+
+// `Tally` is the state a route shares in a test.
+@derive(Release)
+struct Tally {
+    visits: UInt64,
+}

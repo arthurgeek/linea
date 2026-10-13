@@ -1,0 +1,43 @@
+import std.io
+
+struct Pair { first: UInt64, second: UInt64 }
+
+struct Record { pair: Pair, number: UInt64 }
+
+type Wrapped = Pair
+
+type Count = UInt64
+
+fn record_pair(value: Record) -> borrow Pair where borrows(value) {
+    match read value { Record { pair, number: _ } => borrow pair }
+}
+
+fn record_number(value: Record) -> borrow UInt64 where borrows(value) {
+    match read value { Record { pair: _, number } => borrow number }
+}
+
+fn wrapped_pair(value: Wrapped) -> borrow Pair where borrows(value) {
+    match read value { Wrapped(pair) => borrow pair }
+}
+
+fn count_value(value: Count) -> borrow UInt64 where borrows(value) {
+    match read value { Count(number) => borrow number }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let record: Record = .{ pair = .{ first = 11, second = 23 }, number = 47 }
+    let wrapped = Wrapped(.{ first = 61, second = 79 })
+    let count = Count(97)
+    let pair = record_pair(record)
+    let number = record_number(record)
+    let wrapped_view = wrapped_pair(wrapped)
+    let count_view = count_value(count)
+    io.println("record={pair.first},{pair.second},{*number}; wrapped={wrapped_view.first},{wrapped_view.second}; count={*count_view}")?
+    return .Ok(
+        if pair.first == 11 && pair.second == 23 && *number == 47 && wrapped_view.first == 61 && wrapped_view.second == 79 && *count_view == 97 {
+            0
+        } else {
+            1
+        },
+    )
+}

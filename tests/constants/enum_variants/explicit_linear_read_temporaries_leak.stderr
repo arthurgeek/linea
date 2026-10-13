@@ -1,0 +1,7 @@
+error[O-Leak]: this linear `Permit` is never settled
+ --> tests/constants/enum_variants/explicit_linear_read_temporaries_leak.lin:9:13
+  |
+9 |     observe(.Preserve)
+  |             ^^^^^^^^^ nothing can take what this yields
+  |
+  = help: bind it with `let`, or give it to something that takes it

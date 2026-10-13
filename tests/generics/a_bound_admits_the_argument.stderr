@@ -1,0 +1,33 @@
+error[T-Bound]: `T` requires `Copyable`, and `Key` does not have that capability
+  --> tests/generics/a_bound_admits_the_argument.lin:29:22
+   |
+29 |     let _copy: Key = twin(k)
+   |                      ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-Bound]: `T` requires `Discardable`, and `Key` does not have that capability
+  --> tests/generics/a_bound_admits_the_argument.lin:30:5
+   |
+30 |     drop_it(Key.Forged(3))
+   |     ^^^^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-Bound]: `T` requires `Discardable`, and `Key` does not have that capability
+  --> tests/generics/a_bound_admits_the_argument.lin:28:16
+   |
+28 |     let _kept: Held[Key] = .{ v = Key.Forged(2) }
+   |                ^^^^ use a type meeting the capability requirement, or relax the bound
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/generics/a_bound_admits_the_argument.lin:27:9
+   |
+27 |     let k: Key = .Forged(1)
+   |         ^ never settled on the path that reaches the end of this block
+31 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it
+error[O-Leak]: `_kept` (a linear `Held[Key]`) is still owned when this path leaves
+  --> tests/generics/a_bound_admits_the_argument.lin:28:9
+   |
+28 |     let _kept: Held[Key] = .{ v = Key.Forged(2) }
+   |         ^^^^^ never settled on the path that reaches the end of this block
+31 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

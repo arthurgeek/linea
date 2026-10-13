@@ -1,0 +1,10 @@
+error[T-Bound]: `Pair` takes 2 type argument(s), and was given 0
+ --> tests/structs/named_literals/named_heads_require_declared_generic_arguments.lin:4:20
+  |
+4 |     let _omitted = Pair { first = 1, second = 2 }
+  |                    ^^^^ give it the arguments it declares
+error[T-Bound]: `Pair` takes 2 type argument(s), and was given 1
+ --> tests/structs/named_literals/named_heads_require_declared_generic_arguments.lin:5:20
+  |
+5 |     let _partial = Pair[UInt8] { first = 1, second = 2 }
+  |                    ^^^^ give it the arguments it declares

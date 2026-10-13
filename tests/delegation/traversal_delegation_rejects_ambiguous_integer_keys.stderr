@@ -1,0 +1,5 @@
+error[T-Lend]: a forwarded traversal has more than one applicable integer indexing key
+  --> tests/delegation/traversal_delegation_rejects_ambiguous_integer_keys.lin:10:24
+   |
+10 |     trav positions via values
+   |                        ^^^^^^ write an ordinary traversal with an explicitly typed range

@@ -1,0 +1,28 @@
+// A call whose result borrows an argument may be given a value that is not
+// a variable. The value is kept in a temporary until the end of the
+// statement, so the result can be passed on and used within it.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Reading {
+    name: Str,
+    value: borrow Int64,
+}
+
+// `reading` borrows `value` rather than copying it into the result.
+fn reading(sink name: Str, value: Int64) -> Reading where carries(.name: name), borrows(.value: value) {
+    .{ name, value = borrow value }
+}
+
+fn report(entry: Reading) -> Result[(), IoError] {
+    println("{entry.name}={*entry.value}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let base = 40
+    report(reading("answer", base + 2))?
+    report(reading("seven", 7))?
+    return .Ok(0)
+}

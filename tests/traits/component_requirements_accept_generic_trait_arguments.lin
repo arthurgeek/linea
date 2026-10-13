@@ -1,0 +1,22 @@
+trait At[phantom I] {}
+
+trait Ready {}
+
+template impl Ready where reflect.components: At[UInt8] {}
+
+struct Box[T] {
+    value: T,
+}
+
+impl At[UInt8] for UInt8 {}
+
+derive[T: At[UInt8]] Ready for Box[T]
+
+fn accept[T: Ready](_value: T) -> UInt8 {
+    8
+}
+
+fn main() -> UInt8 {
+    let boxed: Box[UInt8] = .{ value = 1 }
+    accept(boxed)
+}

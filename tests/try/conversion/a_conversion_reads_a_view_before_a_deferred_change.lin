@@ -1,0 +1,43 @@
+// The error `find` returns borrows `name`. The conversion reads the first
+// byte through that view at the `?`, before the deferred `append` may move the
+// string's bytes, and keeps only that byte, so the converted error borrows
+// nothing.
+import std.mem
+
+enum LookupError {
+    Unknown(Str),
+}
+
+enum ReportError {
+    UnknownNameStart(UInt8),
+}
+
+impl From[LookupError] for ReportError {
+    fn from(sink source: LookupError) -> ReportError {
+        match source {
+            Unknown(name) => .UnknownNameStart(name.byte(0).unwrap()),
+        }
+    }
+}
+
+fn find(sink name: Str) -> Result[UInt8, LookupError] where carries(.Err: name) {
+    return .Err(.Unknown(name))
+}
+
+fn report(inout name: String[mem.SystemAllocator]) -> Result[UInt8, ReportError] {
+    defer String.append(&name, " was looked up, and this suffix grows its buffer").unwrap()
+    let found = find(name.view())?
+    return .Ok(found)
+}
+
+fn main() -> UInt8 {
+    var name = String.new()
+    defer name.release()
+    String.append(&name, "harbour").unwrap()
+    match report(&name) {
+        Ok(_) => 0,
+        Err(error) => match error {
+            UnknownNameStart(first) => first,
+        },
+    }
+}

@@ -1,0 +1,13 @@
+import std.json
+
+enum Choice { First(UInt8), Second }
+
+derive json.Encode for Choice
+
+fn main() -> UInt8 {
+    let value: Choice = .First(1)
+    var output = String.new()
+    json.encode(&output, value).unwrap()
+    output.release()
+    return 0
+}

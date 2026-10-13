@@ -1,0 +1,10 @@
+// A chained range in an arm is the expression mistake in pattern position,
+// and it is one mistake: the refusal names it once, and recovery reaches the
+// next arm rather than cascading through the arrow and the body.
+fn main() -> UInt8 {
+    let b: UInt8 = 5
+    match b {
+        0..3..9 => 1,
+        _ => 0,
+    }
+}

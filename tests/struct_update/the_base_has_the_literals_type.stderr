@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Size`, found `Area`
+  --> tests/struct_update/the_base_has_the_literals_type.lin:15:36
+   |
+15 |     let size = Size { width = 4, ..area }
+   |                ---- a base has the type of the literal it ends
+   |                                    ^^^^ expected `Size`, found `Area`

@@ -1,0 +1,92 @@
+// `settled()` turns a failure that hands back a refused value into the reason
+// alone: it releases the value and keeps why the operation failed. `?` then
+// converts that reason through `From`, as it converts any other error.
+import std.collections
+import std.io
+import std.json
+import std.mem
+
+use mem.Owner
+
+// A ticket prints when it is released, so the output shows each refused
+// ticket going back through `Release`.
+struct Ticket {
+    number: UInt64,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number } = self
+        match io.println("released ticket {number}") {
+            _ => {},
+        }
+    }
+}
+
+@derive(Debug)
+enum BoardError {
+    Memory(mem.Oom),
+    Document(json.MutationReason),
+}
+
+impl From[mem.Oom] for BoardError {
+    fn from(sink source: mem.Oom) -> BoardError {
+        .Memory(source)
+    }
+}
+
+impl From[json.MutationReason] for BoardError {
+    fn from(sink source: json.MutationReason) -> BoardError {
+        .Document(source)
+    }
+}
+
+// A vector that cannot grow refuses the ticket; `settled()` releases it.
+fn queue[A: Allocator](inout tickets: Vec[Ticket, A], number: UInt64) -> Result[(), BoardError] {
+    &tickets.push(.{ number }).settled()?
+    return .Ok({})
+}
+
+// A map that cannot grow refuses the key and the ticket together.
+fn assign[A: Allocator](inout desks: collections.Map[UInt64, Ticket, A], desk: UInt64, number: UInt64) -> Result[(), BoardError] {
+    let previous = &desks.insert(desk, .{ number }).settled()?
+    match previous {
+        Some(entry) => entry.release(),
+        None => {},
+    }
+    return .Ok({})
+}
+
+// A document that is not an object refuses the member it was offered.
+fn summarize[A: Allocator](inout document: json.Value[A], sink summary: json.Value[A]) -> Result[(), BoardError] where retains(document: summary) {
+    let previous = &document.insert("summary", summary).settled()?
+    match previous {
+        Some(value) => value.release(),
+        None => {},
+    }
+    return .Ok({})
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // An arena of no bytes refuses every allocation.
+    let empty = mem.Arena.open(mem.system(), 0)
+    defer empty.release()
+    var tickets: Vec[Ticket, mem.Handle[mem.SystemAllocator]] = Vec.new_in(empty.handle())
+    defer tickets.release()
+    let queued = queue(&tickets, 7)
+    io.println("queue: {queued:?}")?
+
+    var desks: collections.Map[UInt64, Ticket, mem.Handle[mem.SystemAllocator]] = collections.Map.new_in(empty.handle())
+    defer desks.release()
+    let assigned = assign(&desks, 3, 8)
+    io.println("assign: {assigned:?}")?
+
+    let storage = mem.Arena.open(mem.system(), 1024)
+    defer storage.release()
+    var document = json.Value.array(storage.handle())
+    defer document.release()
+    let summary = json.Value.string(storage.handle(), "all clear").unwrap()
+    let summarized = summarize(&document, summary)
+    io.println("summarize: {summarized:?}")?
+    return .Ok(0)
+}

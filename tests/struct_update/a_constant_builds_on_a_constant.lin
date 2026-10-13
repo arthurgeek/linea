@@ -1,0 +1,21 @@
+@copyable
+struct Size {
+    width: UInt8,
+    height: UInt8,
+    depth: UInt8,
+}
+
+let small: Size = .{ width = 1, height = 2, depth = 3 }
+
+// A constant may take its unwritten fields from another constant.
+let wide: Size = .{ width = 8, ..small }
+
+// A default parameter value is a constant, so it may build on one too.
+fn volume(size: Size = Size { depth = 5, ..wide }) -> UInt8 {
+    size.width * size.height * size.depth
+}
+
+fn main() -> UInt8 {
+    // 8 * 2 * 5 + 8 * 2 * 3
+    volume() + volume(size: wide)
+}

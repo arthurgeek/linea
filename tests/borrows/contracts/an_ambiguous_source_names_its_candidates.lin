@@ -1,0 +1,21 @@
+// A result with two eligible sources names both in the error, so the clause
+// to write is one the signature already spells.
+struct Directory {
+    entries: Str,
+}
+
+impl Directory {
+    fn lookup(self: Self, key: Str) -> Option[Str] {
+        if key.length() > 0 {
+            .Some(copy(key))
+        } else {
+            .Some(copy(self.entries))
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let directory = Directory { entries = "a" }
+    let _found = directory.lookup("b")
+    0
+}

@@ -1,0 +1,16 @@
+// Each dependency clause retains its result target and source path.
+struct Views {
+    first: borrow UInt64,
+    second: borrow UInt64,
+}
+
+fn views(a: UInt64, b: UInt64) -> Result[Views, UInt8] where borrows(.Ok.first: a), borrows(.Ok.second: b) {
+    .Ok(.{ first = borrow a, second = borrow b })
+}
+
+fn main() -> UInt8 {
+    let a: UInt64 = 1
+    let b: UInt64 = 2
+    let selected = views(a, b).unwrap()
+    UInt8(*selected.first + *selected.second)
+}

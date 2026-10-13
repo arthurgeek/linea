@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A qualifier nothing bound is still a module of this program, so the names\n// it exports are offered after the dot, each carrying the import that binds\n// the qualifier. This is the rule for a name from an unimported module\n// reaching the one place a qualifier is already written.\nfn main() -> UInt8 {\n    ledger.size()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":11}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

@@ -1,0 +1,130 @@
+import std.testing
+import std.mem
+
+// A Descriptor wraps a borrowed file descriptor for byte and text I/O.
+// Creating or discarding the wrapper does not close the descriptor.
+@(opaque, copyable)
+type Descriptor = Int32
+
+// Wrap the file descriptor `fd`, which the wrapper borrows and never closes.
+pub fn descriptor(fd: Int32) -> Descriptor {
+    Descriptor(fd)
+}
+
+test fn a_write_to_a_descriptor_the_process_lacks_reports_why() {
+    var bad = descriptor(-1)
+    match "nowhere".fmt(&bad) {
+        Ok(_) => testing.assert(false, "a write to a descriptor the process lacks succeeded")?,
+        Err(e) => testing.assert(match read e.code { Some(code) => code != 0, None => false }, "a failed write reported no reason")?,
+    }
+    .Ok(())
+}
+
+// POSIX reserves descriptors 0, 1, and 2 for standard input, output, and error.
+pub fn stdin() -> Descriptor {
+    descriptor(0)
+}
+
+test fn standard_input_is_descriptor_zero() {
+    let Descriptor(fd) = stdin()
+    testing.assert_eq(fd, 0, "standard input is not descriptor zero")?
+    .Ok(())
+}
+
+pub fn stdout() -> Descriptor {
+    descriptor(1)
+}
+
+test fn standard_output_is_descriptor_one() {
+    let Descriptor(fd) = stdout()
+    testing.assert_eq(fd, 1, "standard output is not descriptor one")?
+    .Ok(())
+}
+
+pub fn stderr() -> Descriptor {
+    descriptor(2)
+}
+
+test fn standard_error_is_descriptor_two() {
+    let Descriptor(fd) = stderr()
+    testing.assert_eq(fd, 2, "standard error is not descriptor two")?
+    .Ok(())
+}
+
+// Releasing a descriptor wrapper leaves the descriptor open, since the
+// wrapper never owned it, so a type holding one, such as a logger, can be
+// released whatever it writes to.
+impl Release for Descriptor {
+    fn release(sink _self: Self) -> () {}
+}
+
+test fn releasing_a_descriptor_leaves_it_open() {
+    stderr().release()
+    var err = stderr()
+    testing.assert("".fmt(&err).is_ok(), "standard error was closed")?
+    .Ok(())
+}
+
+impl ByteWriter for Descriptor {
+    type Error = IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[IoError]] where carries() {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        let read Descriptor(fd) = self
+        let answer = mem.write_slice_fd(bytes, fd)
+        if answer < 0 {
+            let error = IoError.from_os(.Write, Int32(0 - answer))
+            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+        } else {
+            return .Ok(UInt64(answer))
+        }
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, WriteFailure[IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+impl Writer for Descriptor {
+    type Error = IoError
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), IoError] where carries() {
+        let _written = write_all(&self, s.as_bytes())?
+        .Ok(())
+    }
+}
+
+test fn an_empty_descriptor_read_does_not_access_the_descriptor() {
+    let allocator = mem.system()
+    defer var buffer = allocator.acquire(1).unwrap()
+    var input = descriptor(-1)
+    match &input.read_some(&buffer, offset: 1, count: 0) {
+        Ok(count) => testing.assert_eq(count, 0, "empty read gained progress")?,
+        Err(_) => return testing.assert(false, "empty read accessed an invalid descriptor"),
+    }
+    match &input.read_some(&buffer, offset: 0, count: 1) {
+        Ok(_) => return testing.assert(false, "invalid descriptor read succeeded"),
+        Err(error) => testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "read lost its stable error category")?,
+    }
+    .Ok(())
+}
+
+impl Reader for Descriptor {
+    type Error = IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, IoError] where carries() {
+        let read Descriptor(fd) = self
+        let answer = mem.read_fd(&buffer, fd, offset, count)
+        if answer < 0 {
+            .Err(IoError.from_os(.Read, Int32(0 - answer)))
+        } else {
+            .Ok(UInt64(answer))
+        }
+    }
+}

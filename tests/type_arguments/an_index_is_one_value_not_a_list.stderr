@@ -1,0 +1,5 @@
+error[T-Index]: this bracket holds a list, and an index is one value
+ --> tests/type_arguments/an_index_is_one_value_not_a_list.lin:8:5
+  |
+8 |     grid[row, col]
+  |     ^^^^^^^^^^^^^^ index one position at a time, as in `grid[row][column]`

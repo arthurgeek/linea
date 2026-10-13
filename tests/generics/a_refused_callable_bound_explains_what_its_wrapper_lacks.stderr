@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `fn(read value: UInt8) -> Bool`, and `<closure>` is not that callable type
+  --> tests/generics/a_refused_callable_bound_explains_what_its_wrapper_lacks.lin:25:19
+   |
+25 |     let wrapped = make(check)
+   |                   ^^^^ give it the exact callable type the bound names

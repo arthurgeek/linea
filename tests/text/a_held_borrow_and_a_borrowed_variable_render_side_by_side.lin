@@ -1,0 +1,44 @@
+// An interpolation copies a `borrow` value into itself, and borrows a
+// variable it cannot copy. Both literals below render `Ada`, and each is its
+// own type, so each `println` is its own instantiation.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+// `T` may not be Copyable, so a literal borrows `v`.
+fn show[T: Display](v: T) -> Result[(), IoError] {
+    println("show {v}")
+}
+
+// `T` is Copyable, so a literal holds a copy of `v`.
+fn show_copy[T: Copyable + Display](v: T) -> Result[(), IoError] {
+    println("show_copy {v}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let name = Name { text = "Ada" }
+    let observed = borrow name
+    println("{observed}")?
+    println("{name}")?
+    let n = 5
+    show(n)?
+    show_copy(borrow n)?
+    show(borrow name)?
+    show_copy(borrow name)?
+    let twice = borrow n
+    show(borrow twice)?
+    show_copy(borrow twice)?
+    return .Ok(0)
+}

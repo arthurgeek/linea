@@ -1,0 +1,10 @@
+error[S-Float]: float literal is unfinished
+ --> tests/diag/float_literal_unfinished.lin:2:14
+  |
+2 |     let _a = 1.
+  |              ^^ digits are required on both sides of the point, and in an exponent
+error[S-Float]: float literal is unfinished
+ --> tests/diag/float_literal_unfinished.lin:3:14
+  |
+3 |     let _b = 1.5e
+  |              ^^^^ digits are required on both sides of the point, and in an exponent

@@ -1,0 +1,27 @@
+// `@opaque` exports the type's name and seals its representation outside this
+// module. Inside the module, it is built and taken apart like any other type.
+@(opaque, linear)
+struct Ticket { seat: UInt8 }
+
+@opaque
+enum State { Open(UInt8), Closed }
+
+@opaque
+type Id = UInt8
+
+impl Ticket {
+    fn settle(sink self: Ticket) -> UInt8 {
+        let Ticket { seat } = self
+        seat
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket { seat = 4 }
+    let open = match State.Open(3) {
+        Open(n) => n,
+        Closed => 0,
+    }
+    let Id(id) = Id(1)
+    ticket.settle() - open - id
+}

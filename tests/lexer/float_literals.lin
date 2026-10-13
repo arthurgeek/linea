@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let a = 1.5
+    let b = 1.5e3
+    let c = 2E10
+    let d = 1.5e-3
+    let e = 6.022e23
+    let f = 2e+5
+    let g = 1e
+    0
+}

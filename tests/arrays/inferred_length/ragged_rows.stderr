@@ -1,0 +1,5 @@
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/arrays/inferred_length/ragged_rows.lin:2:43
+  |
+2 |     let _grid: [[UInt8; _]; _] = [[1, 2], [3]]
+  |                                           ^^^ this has 1, and the type says 2

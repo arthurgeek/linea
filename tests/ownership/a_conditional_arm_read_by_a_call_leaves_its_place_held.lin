@@ -1,0 +1,22 @@
+// `sum` only reads its parameter, so the `else` arm that names `kept` lends it
+// rather than taking it, and `kept` is still whole afterwards.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn sum(p: Pair) -> UInt8 {
+    p.left + p.right
+}
+
+fn main() -> UInt8 {
+    let kept: Pair = .{ left = 4, right = 5 }
+    let chosen = sum(
+        if kept.left > 9 {
+            .{ left = 1, right = 1 }
+        } else {
+            kept
+        },
+    )
+    chosen + kept.left
+}

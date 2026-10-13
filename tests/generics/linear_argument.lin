@@ -1,0 +1,20 @@
+// An ordinary generic wrapper inherits its concrete payload obligation.
+// The scalar instantiation is discardable; the linear instantiation must settle.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Box[T] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    // A scalar payload imposes no settlement obligation.
+    let plain: Box[UInt8] = .{ v = 1 }
+
+    // Linear at a linear one, so this is a leak.
+    let held: Box[Key] = .{ v = Key.Forged(2) }
+
+    plain.v
+}

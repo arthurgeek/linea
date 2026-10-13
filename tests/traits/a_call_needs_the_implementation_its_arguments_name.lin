@@ -1,0 +1,27 @@
+// `Coins` implements `Holds[UInt8]` and nothing else, and this call settles `T`
+// to `Bool` -- so the key it names has no implementation. Refused where the
+// arguments are supplied, which is where the mistake is: the body is fine and
+// so is the trait.
+//
+// Coherence is key equality rather than a search, so the one implementation
+// that exists is not a candidate for a call that asked for another. Reaching
+// for it would be ranking by specificity, which is what key equality exists to
+// avoid.
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count + t
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    Holds.held(c, true)
+}

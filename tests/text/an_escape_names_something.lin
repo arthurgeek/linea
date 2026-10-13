@@ -1,0 +1,6 @@
+// An escape names one of a short list. Anything else is a spelling the language
+// has no meaning for, and guessing at one -- treating `\q` as `q`, say -- makes
+// a literal mean something different from what it looks like.
+fn main() -> UInt8 {
+    UInt8(Str.length("a\qb"))
+}

@@ -1,0 +1,23 @@
+struct Point { x: UInt8 }
+
+fn add(inout total: UInt8, value: UInt8) -> () {
+    total = total + value
+}
+
+fn main() -> UInt8 {
+    var point = Point { x = 3 }
+    var total: UInt8 = 0
+    var index: UInt8 = 0
+    while index < 3 {
+        let read Point { x } = point
+        defer add(&total, x)
+        index = index + 1
+    }
+    point.x = 5
+    let x: UInt8 = 7
+    if total == 9 && point.x == 5 && x == 7 {
+        0
+    } else {
+        1
+    }
+}

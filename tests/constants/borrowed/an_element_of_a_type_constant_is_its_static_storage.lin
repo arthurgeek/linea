@@ -1,0 +1,38 @@
+// An element of a constant reached through a type is a place inside that
+// constant's static storage: it is read by value, borrowed, and returned
+// from a function that carries nothing, including in a generic body.
+@copyable
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl[T] Pair[T] {
+    let names = ["first", "second"]
+}
+
+struct Limits {
+    low: Int64,
+}
+
+impl Limits {
+    let table = [Int64(1), Int64(2), Int64(4)]
+}
+
+fn table(i: UInt64) -> borrow Int64 where carries() {
+    borrow Limits.table[i]
+}
+
+fn name[T](_pair: Pair[T]) -> borrow Str where carries() {
+    borrow Pair.names[1]
+}
+
+fn main() -> UInt8 {
+    var total = Int64(0)
+    for i in 0..3 {
+        total = total + Limits.table[i]
+    }
+    let pair: Pair[UInt8] = .{ first = 1, second = 2 }
+    let limits = Limits { low = 10 }
+    UInt8(total + *table(1) + limits.low) + UInt8((*name(pair)).length())
+}

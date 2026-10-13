@@ -1,0 +1,33 @@
+// What generated code calls is not what a program may name.
+//
+// An entry point answering `Result` is unwrapped where it returns, and the
+// failing arm calls the library's `report`. A test binary's entry point is
+// written by the compiler too, and calls `selected`, `ran` and `no_such_test`.
+// Lowering finds each by its module and its name -- `core::report`,
+// `testing::selected` -- rather than through what the prelude publishes, so
+// they are reachable by the compiler and by nothing else.
+//
+// Both ways of asking are refused, and they are refused for different reasons.
+// Unqualified, the name is simply not in scope: the prelude publishes what the
+// language's own syntax obliges a program to write, and nothing a programmer
+// types names this. Qualified, the module holding it is imported and the name
+// is found and then refused -- it is private, and visibility is what decides
+// whether a program may write a name it can reach.
+//
+// The second is the one worth writing down. A library module is importable, so
+// what keeps this out of a program's reach is that it is private. Publishing one
+// to let the compiler reach it is what that refuses, since the compiler needs no
+// such help: a generated call names a module and a name, and visibility never
+// enters into finding one.
+// All four, because the one left out is the one somebody publishes.
+import std.testing
+import std.io
+import std.io.core
+
+fn main() -> UInt8 {
+    let _unqualified = report(1)
+    let _ran = core.ran(io.println("a"))
+    let _selected = testing.selected("a")
+    let _no_such = testing.no_such_test()
+    core.report(1)
+}

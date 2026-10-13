@@ -1,0 +1,25 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+struct Pair { first: mem.Handle[mem.SystemAllocator], second: mem.Handle[mem.SystemAllocator] }
+
+fn pair(first: Arena[mem.SystemAllocator], second: Arena[mem.SystemAllocator]) -> Pair where borrows(first, second) {
+    return .{ first = first.handle(), second = second.handle() }
+}
+
+fn main() -> UInt8 {
+    let first = Arena.open(system(), 64)
+    let second = Arena.open(system(), 64)
+    let both = pair(first, second)
+    first.release()
+    let Pair { first: left, second: right } = both
+    let a = left.acquire(8).unwrap()
+    let b = right.acquire(8).unwrap()
+    a.release()
+    b.release()
+    second.release()
+    0
+}

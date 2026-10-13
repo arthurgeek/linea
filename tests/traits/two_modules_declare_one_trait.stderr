@@ -1,0 +1,5 @@
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Account` does not
+  --> tests/traits/two_modules_declare_one_trait/main.lin:15:16
+   |
+15 |     Measure.of(a)
+   |                ^ implement it for that type, or reach the operation on one that does

@@ -1,0 +1,17 @@
+import std.testing
+
+export fn sum() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 4, 5]
+    var total: UInt8 = 0
+    for read x in xs {
+        if x > 1 {
+            total += x
+        }
+    }
+    total
+}
+
+test fn a_lending_sum_checks_each_number() -> Result[(), testing.Failure] {
+    testing.assert_eq(sum(), 9, "four plus five is nine")?
+    return .Ok({})
+}

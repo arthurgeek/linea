@@ -1,0 +1,5 @@
+error[S-Params]: a parameter is a name
+ --> tests/tuples/a_declaration_parameter_is_a_name_not_a_pattern.lin:3:6
+  |
+3 | fn f((a, b): (UInt8, UInt8)) -> UInt8 {
+  |      ^ a declaration parameter's name is the label a call writes; take the pair apart in the body

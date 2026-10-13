@@ -1,0 +1,17 @@
+// `close` takes a code first, so a postfix call on a door cannot pass the
+// door to it. The call is refused where the parameter says what it takes,
+// rather than as a field the type does not have.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(code: UInt8) -> UInt8 {
+        code
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    door.close()
+}

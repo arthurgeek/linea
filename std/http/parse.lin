@@ -1,0 +1,589 @@
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+
+use io.InputFailure
+
+// Reading a request fails with `Closed` when the client closed the connection
+// before sending a byte, with `Status` holding the status that answers a
+// refused request, and with `Io` when the connection itself failed.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum RequestError {
+    Closed,
+    Status(Status),
+    Io(io.IoError),
+}
+
+impl Display for RequestError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Closed => &w.write_str("the client closed the connection before sending a request"),
+            Status(status) => {
+                let code = status.code()
+                let reason = status.reason()
+                if reason.length() == 0 {
+                    return "the request was refused with {code}".fmt(&w)
+                }
+                "the request was refused with {code} {reason}".fmt(&w)
+            },
+            Io(error) => error.fmt(&w),
+        }
+    }
+}
+
+test fn a_request_error_displays_its_reason() {
+    let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
+    defer let closed = fmt.render_owned(mem.system(), RequestError.Closed).unwrap()
+    defer let refused = fmt.render_owned(mem.system(), RequestError.Status(.ContentTooLarge)).unwrap()
+    defer let failed = fmt.render_owned(mem.system(), RequestError.Io(reset)).unwrap()
+    testing.assert_eq(closed.view(), "the client closed the connection before sending a request", "the closed reason changed")?
+    testing.assert_eq(refused.view(), "the request was refused with 413 Content Too Large", "the refusal changed")?
+    testing.assert_eq(failed.view(), "Read failed (ConnectionReset) after 3 bytes", "the connection failure changed")?
+    .Ok(())
+}
+
+impl RequestError {
+    // `status` returns the status to answer with, when the client can still
+    // receive one. A read that timed out is answered 408. A connection the client
+    // closed, reset or otherwise broke has no one to answer, so it has none.
+    pub fn status(self: Self) -> Option[Status] {
+        match read self {
+            Closed => .None,
+            Status(status) => .Some(copy(status)),
+            Io(error) => match read error.category {
+                TimedOut => .Some(.RequestTimeout),
+                _ => .None,
+            },
+        }
+    }
+}
+
+test fn a_request_error_names_the_status_that_answers_it() {
+    let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
+    let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
+    testing.assert_eq(RequestError.Closed.status(), .None, "a closed connection was answered")?
+    testing.assert_eq(RequestError.Status(.UriTooLong).status(), Option.Some(Status.UriTooLong), "a refusal changed its status")?
+    testing.assert_eq(RequestError.Io(timeout).status(), Option.Some(Status.RequestTimeout), "a timeout")?
+    testing.assert_eq(RequestError.Io(reset).status(), .None, "a reset connection was answered")?
+    .Ok(())
+}
+
+// The request grammar names these ASCII bytes.
+let ascii_tab: UInt8 = 9
+
+let ascii_lf: UInt8 = 10
+
+let ascii_cr: UInt8 = 13
+
+let ascii_space: UInt8 = 32
+
+let ascii_dot: UInt8 = 46
+
+let ascii_zero: UInt8 = 48
+
+let ascii_nine: UInt8 = 57
+
+let ascii_delete: UInt8 = 127
+
+// A `RequestLine` holds the method of a request line and the ranges of its
+// method token and target in the request's text.
+@copyable
+struct RequestLine {
+    method: Method,
+    method_token: Span,
+    target: Span,
+}
+
+// Read one request into `memory`: the request line, headers up to an empty
+// line, and a body of exactly `Content-Length` bytes, each bounded by
+// `limits`. A line ends in CRLF or a bare LF. Every refusal names the status
+// that answers it; an input failure is `Io`, so a read timeout answers 408.
+fn read_request[R: io.Reader, P: Allocator](inout reader: io.BufferedReader[R, mem.Handle[P]], memory: mem.Handle[P], limits: Limits) -> Result[Message[P], RequestError] where R.Error: Into[io.IoError], carries(.Ok: memory), retains(reader: reader) {
+    var head = String.new_in(memory)
+    let line = read_request_line(&reader, &head, limits)?
+    var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
+    let length = read_headers(&reader, &head, &header_fields, limits)?
+    let payload = read_body(&reader, memory, length, limits)?
+    let RequestLine { method, method_token, target } = line
+    var query_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
+    let query_fields = query_of(&query_text, stored_part(head.view(), target), memory, limits.max_query_pairs)?
+    let is_form = is_form_content_type(header_value(head.view(), header_fields.as_slice(), "Content-Type"))
+    var body_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
+    let body_fields = form_of(&body_text, is_form, payload.as_slice(), memory, limits.max_form_pairs)?
+    .Ok(.{ memory = copy(memory), known_method = method, head, method_token, target, header_fields, query_text, query_fields, payload, body_text, body_fields })
+}
+
+test fn a_request_with_a_body_parses() {
+    let input = "POST /echo?x=1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello"
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 7, Limits.default()).unwrap()
+    let request = sent.request()
+    let method = request.method()
+    let path = request.path()
+    let query = request.query()
+    let host = request.header("host")
+    let body = request.text()
+    testing.assert_eq(method, Method.Post, "the method changed")?
+    testing.assert_eq(path, "/echo", "the path changed")?
+    testing.assert_eq(query, Option.Some("x=1"), "the query changed")?
+    testing.assert_eq(host, Option.Some("a"), "the host header changed")?
+    testing.assert_ok_eq(body, "hello", "the body changed")?
+    .Ok(())
+}
+
+test fn a_request_split_into_single_bytes_parses_as_one() {
+    let input = "POST /echo?x=1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello"
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 1, Limits.default()).unwrap()
+    let request = sent.request()
+    testing.assert_eq(request.method(), Method.Post, "the method changed")?
+    testing.assert_eq(request.path(), "/echo", "the path changed")?
+    testing.assert_eq(request.query(), Option.Some("x=1"), "the query changed")?
+    testing.assert_eq(request.header("host"), Option.Some("a"), "the host header changed")?
+    testing.assert_ok_eq(request.text(), "hello", "the body changed")?
+    .Ok(())
+}
+
+test fn a_bare_lf_ends_a_line() {
+    let input = "GET / HTTP/1.1\nHost: a\n\n"
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 3, Limits.default()).unwrap()
+    let request = sent.request()
+    testing.assert_eq(request.method(), Method.Get, "the method changed")?
+    testing.assert_eq(request.path(), "/", "the path changed")?
+    testing.assert_eq(request.header("Host"), Option.Some("a"), "the host header changed")?
+    testing.assert_eq(request.body().length(), UInt64(0), "a request without a length had a body")?
+    .Ok(())
+}
+
+test fn a_silent_close_is_closed_not_an_error() {
+    testing.assert_eq(refusal("", 4, Limits.default()), Option.Some(RequestError.Closed), "an empty connection was not closed")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost", 4, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a request cut off in its headers was accepted")?
+    testing.assert_eq(refusal("GET / HTT", 4, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a request cut off in its request line was accepted")?
+    .Ok(())
+}
+
+test fn each_limit_answers_its_status_at_one_past_the_bound() {
+    let limits = Limits { max_line_bytes = 32, max_headers = 2, max_body_bytes = 4, ..Limits.default() }
+    // Each line below is exactly 32 bytes with its CRLF.
+    testing.assert_eq(refusal("GET /aaaaaaaaaaaaaaaa HTTP/1.1\r\n\r\n", 5, limits), .None, "a request line at the limit was refused")?
+    testing.assert_eq(refusal("GET /aaaaaaaaaaaaaaaaa HTTP/1.1\r\n\r\n", 5, limits), Option.Some(RequestError.Status(.UriTooLong)), "a request line past the limit")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: aaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n\r\n", 5, limits), .None, "a header line at the limit was refused")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: aaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n\r\n", 5, limits), Option.Some(RequestError.Status(.RequestHeaderFieldsTooLarge)), "a header line past the limit")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\n\r\n", 5, limits), .None, "headers at the limit were refused")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n", 5, limits), Option.Some(RequestError.Status(.RequestHeaderFieldsTooLarge)), "headers past the limit")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd", 5, limits), .None, "a body at the limit was refused")?
+    // No body bytes follow, so only a refusal before reading answers 413.
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\n", 5, limits), Option.Some(RequestError.Status(.ContentTooLarge)), "a body past the limit")?
+    .Ok(())
+}
+
+test fn a_read_timeout_answers_408() {
+    let input = "GET / HTTP/1.1\r\n"
+    let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var reader = io.BufferedReader.open(arena.handle(), capacity: 16, reader: source).unwrap()
+    let outcome = read_request(&reader, arena.handle(), Limits.default())
+    let _source = reader.abandon()
+    let error = match outcome {
+        Ok(_) => return testing.assert(false, "a request that timed out was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(error, RequestError.Io(timeout), "the timeout was not reported as an input failure")?
+    testing.assert_eq(error.status(), Option.Some(Status.RequestTimeout), "a timeout did not answer 408")?
+    .Ok(())
+}
+
+test fn transfer_encoding_is_not_implemented() {
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.NotImplemented)), "a transfer coding was accepted")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\nabc", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a transfer coding beside a length")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 3\r\ntransfer-encoding: chunked\r\n\r\nabc", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a length beside a transfer coding")?
+    .Ok(())
+}
+
+test fn content_length_must_be_digits_and_agree() {
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 12a\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a length with a letter was accepted")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: +5\r\n\r\nhello", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a signed length was accepted")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length:\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "an empty length was accepted")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello!", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "disagreeing lengths were accepted")?
+    let input = "POST / HTTP/1.1\r\nContent-Length: 5\r\ncontent-length: 5\r\n\r\nhello"
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 6, Limits.default()).unwrap()
+    let request = sent.request()
+    let body = request.text()
+    testing.assert_ok_eq(body, "hello", "agreeing lengths lost the body")?
+    // Twenty-one digits exceed UInt64, so the length is past every limit.
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 100000000000000000000\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.ContentTooLarge)), "an overflowing length")?
+    .Ok(())
+}
+
+test fn an_unknown_version_is_refused() {
+    testing.assert_eq(refusal("GET / HTTP/2.0\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.HttpVersionNotSupported)), "HTTP/2.0 was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.0\r\n\r\n", 5, Limits.default()), .None, "HTTP/1.0 was refused")?
+    testing.assert_eq(refusal("GET / HTTX/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a malformed version")?
+    .Ok(())
+}
+
+test fn a_malformed_request_line_is_refused() {
+    testing.assert_eq(refusal("GET  / HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "two spaces were accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1 extra\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a fourth part was accepted")?
+    testing.assert_eq(refusal("GET /\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a missing version was accepted")?
+    testing.assert_eq(refusal("G(T / HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a method outside the token characters")?
+    testing.assert_eq(refusal("\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "an empty request line was accepted")?
+    testing.assert_eq(refusal("GET /a\rb HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a bare CR in the target was accepted")?
+    testing.assert_eq(refusal("GET /é HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a target outside ASCII was accepted")?
+    .Ok(())
+}
+
+test fn a_folded_header_is_refused() {
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: a\r\n b\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a space-folded header was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: a\r\n\tb\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a tab-folded header was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: a\r\n b: c\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a folded line holding a colon was accepted")?
+    .Ok(())
+}
+
+test fn a_malformed_header_is_refused() {
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nno colon\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a header without a colon was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX : a\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "whitespace before the colon was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\n: a\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "an empty name was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: a\rb\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a bare CR in a value was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: a\r\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a trailing bare CR was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: \u{b}a\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a leading vertical tab was accepted")?
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 5\u{c}\r\n\r\nhello", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a length ending in a form feed was accepted")?
+    testing.assert_eq(refusal("GET / HTTP/1.1\r\nX: \t a \t\r\n\r\n", 5, Limits.default()), .None, "spaces and tabs around a value were refused")?
+    .Ok(())
+}
+
+test fn a_body_shorter_than_its_length_is_malformed() {
+    testing.assert_eq(refusal("POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", 2, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a short body was accepted")?
+    .Ok(())
+}
+
+// `read_request_line` reads `METHOD SP target SP version` and splits it on
+// single spaces into exactly three parts. A connection that ends before the
+// line's first byte is `Closed`.
+fn read_request_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[A], limits: Limits) -> Result[RequestLine, RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
+        return .Err(line_failure(error, .UriTooLong))
+    }
+    let raw = line_read else {
+        return .Err(.Closed)
+    }
+    let line = line_text(raw)?
+    var parts = line.split(" ").unwrap()
+    let method = &parts.next().unwrap()
+    let target = &parts.next() else {
+        return .Err(.Status(.BadRequest))
+    }
+    let version = &parts.next() else {
+        return .Err(.Status(.BadRequest))
+    }
+    if &parts.next().is_some() || !is_token(method) || !is_target(target) {
+        return .Err(.Status(.BadRequest))
+    }
+    if version != "HTTP/1.1" && version != "HTTP/1.0" {
+        if is_version(version) {
+            return .Err(.Status(.HttpVersionNotSupported))
+        }
+        return .Err(.Status(.BadRequest))
+    }
+    let method_token = stored_or_refused(&stored, method)?
+    let target_span = stored_or_refused(&stored, target)?
+    .Ok(.{ method = method_of(method), method_token = method_token, target = target_span })
+}
+
+// Read `name: value` lines up to an empty line and answer the body's length:
+// `.None` when no `Content-Length` was sent.
+fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[A], inout header_fields: Vec[Field, A], limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    var count: UInt64 = 0
+    var length: Option[UInt64] = .None
+    var transfer_coded = false
+    loop {
+        let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
+            return .Err(line_failure(error, .RequestHeaderFieldsTooLarge))
+        }
+        let raw = line_read else {
+            return .Err(.Status(.BadRequest))
+        }
+        let line = line_text(raw)?
+        if line.length() == 0 {
+            break
+        }
+        count += 1
+        if count > limits.max_headers {
+            return .Err(.Status(.RequestHeaderFieldsTooLarge))
+        }
+        let colon = line.find(":") else {
+            return .Err(.Status(.BadRequest))
+        }
+        let name = line.slice(0, colon).unwrap()
+        let value = trim_optional_whitespace(line.slice(colon + 1, line.length()).unwrap())
+        // A name is a token, which holds no whitespace, so this also refuses
+        // a folded line continuing the previous header with a space or tab.
+        if !is_token(name) || !is_field_value(value) {
+            return .Err(.Status(.BadRequest))
+        }
+        if name.equals_ascii_folded("Content-Length") {
+            length = .Some(content_length(value, length)?)
+        }
+        if name.equals_ascii_folded("Transfer-Encoding") {
+            transfer_coded = true
+        }
+        let name_span = stored_or_refused(&stored, name)?
+        let value_span = stored_or_refused(&stored, value)?
+        match &header_fields.push(.{ name = name_span, value = value_span }) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Status(.InternalServerError)),
+        }
+    }
+    // A body framed two ways is ambiguous; chunked framing alone is unsupported.
+    if transfer_coded {
+        return match length {
+            Some(_) => .Err(.Status(.BadRequest)),
+            None => .Err(.Status(.NotImplemented)),
+        }
+    }
+    .Ok(length)
+}
+
+// Refuse a length that is not decimal digits or disagrees with an earlier one.
+// A length too large for UInt64 exceeds every body limit.
+fn content_length(value: Str, earlier: Option[UInt64]) -> Result[UInt64, RequestError] {
+    if value.length() == 0 {
+        return .Err(.Status(.BadRequest))
+    }
+    for at in 0..value.length() {
+        let byte = value.byte(at).unwrap()
+        if byte < ascii_zero || byte > ascii_nine {
+            return .Err(.Status(.BadRequest))
+        }
+    }
+    let length = value.parse[UInt64]() else |_| {
+        return .Err(.Status(.ContentTooLarge))
+    }
+    match read earlier {
+        Some(previous) => {
+            if previous != length {
+                return .Err(.Status(.BadRequest))
+            }
+        },
+        None => {},
+    }
+    .Ok(length)
+}
+
+// Read a body of exactly `length` bytes, or none when no length was sent. A
+// length past the limit answers 413, and a connection that ends early 400.
+fn read_body[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], allocator: A, length: Option[UInt64], limits: Limits) -> Result[Vec[UInt8, A], RequestError] where R.Error: Into[io.IoError], carries(.Ok: allocator) {
+    let count = match read length {
+        Some(count) => count,
+        None => return .Ok(Vec.new_in(allocator)),
+    }
+    match &reader.read_exact(allocator, count, limits.max_body_bytes) {
+        Ok(bytes) => .Ok(bytes),
+        Err(error) => .Err(match error {
+            Input(failure) => input_failure(failure),
+            Limit => .Status(.ContentTooLarge),
+            Ended(_) => .Status(.BadRequest),
+            Allocation(_reason) => .Status(.InternalServerError),
+            RecoveryRequired => .Status(.InternalServerError),
+            InvalidProgress => .Status(.InternalServerError),
+        }),
+    }
+}
+
+// An over-long line answers `limit_status`; the reader's other refusals are
+// the server's own failures.
+fn line_failure[E: Into[io.IoError]](sink error: io.LineError[E], limit_status: Status) -> RequestError {
+    match error {
+        Input(failure) => input_failure(failure),
+        Limit => .Status(copy(limit_status)),
+        Allocation(_reason) => .Status(.InternalServerError),
+        Encoding(_problem) => .Status(.InternalServerError),
+        RecoveryRequired => .Status(.InternalServerError),
+        ResumeUnavailable => .Status(.InternalServerError),
+        InvalidProgress => .Status(.InternalServerError),
+        PositionOverflow => .Status(.InternalServerError),
+    }
+}
+
+// A failed read of the connection is `Io`, holding the connection's own error.
+fn input_failure[E: Into[io.IoError]](sink failure: InputFailure[E]) -> RequestError {
+    let InputFailure { reason, stream_offset: _ } = failure
+    .Io(reason.into())
+}
+
+// Strip a line's LF and a CR just before it. A line the connection ended
+// without terminating is malformed, as is one that is not UTF-8.
+fn line_text(raw: mem.Slice[UInt8]) -> Result[Str, RequestError] where carries(.Ok: raw) {
+    var end = raw.length()
+    if end == 0 || raw[end - 1] != ascii_lf {
+        return .Err(.Status(.BadRequest))
+    }
+    end -= 1
+    if end != 0 && raw[end - 1] == ascii_cr {
+        end -= 1
+    }
+    match Str.from_bytes(raw.subspan(start: 0, count: end).unwrap()) {
+        Ok(line) => .Ok(line),
+        Err(_) => .Err(.Status(.BadRequest)),
+    }
+}
+
+// Store `part` in the request's text; an arena too full to hold it answers 500.
+fn stored_or_refused[A: Allocator](inout stored: String[A], part: Str) -> Result[Span, RequestError] {
+    match store_part(&stored, part) {
+        Ok(span) => .Ok(span),
+        Err(_) => .Err(.Status(.InternalServerError)),
+    }
+}
+
+// A token is one or more of the visible ASCII characters other than the
+// delimiters `"(),/:;<=>?@[\]{}`.
+fn is_token(candidate: Str) -> Bool {
+    if candidate.length() == 0 {
+        return false
+    }
+    for at in 0..candidate.length() {
+        let byte = candidate.byte(at).unwrap()
+        if byte <= ascii_space || byte >= ascii_delete || is_delimiter(byte) {
+            return false
+        }
+    }
+    true
+}
+
+// A target is one or more visible ASCII bytes: no space, no control byte and
+// nothing above ASCII, which a target carries percent-encoded.
+fn is_target(candidate: Str) -> Bool {
+    if candidate.length() == 0 {
+        return false
+    }
+    for at in 0..candidate.length() {
+        let byte = candidate.byte(at).unwrap()
+        if byte <= ascii_space || byte >= ascii_delete {
+            return false
+        }
+    }
+    true
+}
+
+// `is_delimiter` says whether `byte` is the ASCII code of one of
+// `"(),/:;<=>?@[\]{}`.
+fn is_delimiter(byte: UInt8) -> Bool {
+    match read byte {
+        34 => true,
+        40 => true,
+        41 => true,
+        44 => true,
+        47 => true,
+        58..=64 => true,
+        91..=93 => true,
+        123 => true,
+        125 => true,
+        _ => false,
+    }
+}
+
+// Optional whitespace around a field value is spaces and tabs only; any other
+// control byte stays in the value, where `is_field_value` refuses it.
+fn trim_optional_whitespace(value: Str) -> Str where carries(value) {
+    var from: UInt64 = 0
+    var to = value.length()
+    while from < to && is_optional_whitespace(value.byte(from).unwrap()) {
+        from += 1
+    }
+    while to > from && is_optional_whitespace(value.byte(to - 1).unwrap()) {
+        to -= 1
+    }
+    value.slice(from, to).unwrap()
+}
+
+fn is_optional_whitespace(byte: UInt8) -> Bool {
+    byte == ascii_space || byte == ascii_tab
+}
+
+// A field value holds tabs, spaces, visible ASCII and bytes above ASCII, but
+// no other control byte.
+fn is_field_value(value: Str) -> Bool {
+    for at in 0..value.length() {
+        let byte = value.byte(at).unwrap()
+        if (byte < ascii_space && byte != ascii_tab) || byte == ascii_delete {
+            return false
+        }
+    }
+    true
+}
+
+// `is_version` says whether `version` is `HTTP/` then a digit, a dot and a
+// digit.
+fn is_version(version: Str) -> Bool {
+    if version.length() != 8 || !version.starts_with("HTTP/") || version.byte(6) != .Some(ascii_dot) {
+        return false
+    }
+    let major = version.byte(5).unwrap()
+    let minor = version.byte(7).unwrap()
+    major >= ascii_zero && major <= ascii_nine && minor >= ascii_zero && minor <= ascii_nine
+}
+
+// Fragments delivers `bytes` at most `step` at a time; once they are
+// exhausted, it reports `failure` if one is set and the end of input
+// otherwise.
+struct Fragments {
+    bytes: mem.Slice[UInt8],
+    position: UInt64,
+    step: UInt64,
+    failure: Option[io.IoError],
+}
+
+impl io.Reader for Fragments {
+    type Error = io.IoError
+
+    fn read_some[B: Allocator](inout self: Self, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        if count == 0 {
+            return .Ok(0)
+        }
+        if self.position == self.bytes.length() {
+            match read self.failure {
+                Some(error) => return .Err(copy(error)),
+                None => return .Ok(0),
+            }
+        }
+        var amount = self.bytes.length() - self.position
+        if amount > count {
+            amount = count
+        }
+        if amount > self.step {
+            amount = self.step
+        }
+        for i in 0..amount {
+            &buffer.store_byte(offset + i, self.bytes[self.position + i])
+        }
+        self.position += amount
+        .Ok(amount)
+    }
+}
+
+// Parse `bytes` into `memory`, delivered `step` bytes per read through a
+// 16-byte buffer.
+fn read_in_steps[P: Allocator](memory: mem.Handle[P], sink bytes: mem.Slice[UInt8], step: UInt64, limits: Limits) -> Result[Message[P], RequestError] where carries(.Ok: memory) {
+    let source = Fragments { bytes = bytes, position = 0, step = step, failure = .None }
+    var reader = io.BufferedReader.open(memory, capacity: 16, reader: source).unwrap()
+    let outcome = read_request(&reader, memory, limits)
+    let _source = reader.abandon()
+    outcome
+}
+
+// `refusal` returns the error a request is refused with, or `.None` when it
+// parses. Each attempt reads into an arena of its own.
+fn refusal(input: Str, step: UInt64, limits: Limits) -> Option[RequestError] {
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    let refused = match read_in_steps(arena.handle(), input.as_bytes(), step, limits) {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error),
+    }
+    arena.release()
+    refused
+}

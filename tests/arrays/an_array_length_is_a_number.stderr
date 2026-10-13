@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/arrays/an_array_length_is_a_number.lin:5:22
+  |
+5 |     let _xs: [UInt8; true] = [1]
+  |                      ^^^^ this is not a number

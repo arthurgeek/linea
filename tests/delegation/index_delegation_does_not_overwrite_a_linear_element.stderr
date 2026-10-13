@@ -1,0 +1,9 @@
+error[O-Leak]: `g[0]` (a linear `Key`) is still owned when this write replaces it
+  --> tests/delegation/index_delegation_does_not_overwrite_a_linear_element.lin:15:5
+   |
+14 |     var g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+   |         - acquired here
+15 |     g[0] = .{ n = 3 }
+   |     ^^^^ this write drops the old value
+   |
+   = help: settle what this part holds before writing over it

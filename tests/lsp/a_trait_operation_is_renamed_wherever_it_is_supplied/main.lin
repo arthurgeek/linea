@@ -1,0 +1,21 @@
+// A trait's operation and every member supplying it are one name, so renaming
+// any of them edits the signature, every implementation, and every call.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 1 }
+    let w: Weight = .{ grams = 2 }
+    a.of() + w.of()
+}

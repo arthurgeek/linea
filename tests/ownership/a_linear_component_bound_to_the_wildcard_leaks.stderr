@@ -1,0 +1,9 @@
+error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_linear_component_bound_to_the_wildcard_leaks.lin:8:10
+   |
+8  |     let (_, n) = pair
+   |          ^ `_` does not settle `_0`
+10 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

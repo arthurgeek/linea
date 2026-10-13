@@ -1,0 +1,5 @@
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/text/an_extern_is_only_in_the_library.lin:7:11
+  |
+7 | extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+  |           ^^^^^^^^^^^^^^^^ call it through the standard library, which declares the ones that exist

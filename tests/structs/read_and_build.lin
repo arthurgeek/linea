@@ -1,0 +1,19 @@
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+struct Mixed { a: UInt8, b: UInt64, c: UInt8 }
+
+fn main() -> UInt8 {
+    // Read through a nesting, where the outer offset and the inner one are
+    // computed by different calls and summed -- a sum taken from the wrong
+    // base hides best here.
+    let o: Outer = .{ inner = .{ y = 3 }, z = 4 }
+
+    // Fields of mixed widths, every one written and every one read back: an
+    // offset that overlaps its neighbour shows as a value that changed when
+    // something else was written.
+    let m: Mixed = .{ a = 1, b = 2, c = 5 }
+
+    o.inner.y + o.z + m.a + UInt8(m.b) + m.c
+}

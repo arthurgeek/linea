@@ -1,0 +1,5 @@
+import counters
+
+fn main() -> UInt8 {
+    counters.one()
+}

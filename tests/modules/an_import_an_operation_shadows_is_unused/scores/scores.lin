@@ -1,0 +1,4 @@
+// Adds up a round's points.
+pub fn total(points: UInt8) -> UInt8 {
+    points
+}

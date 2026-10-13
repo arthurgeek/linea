@@ -1,0 +1,5 @@
+error[S-Type]: expected a name
+  --> tests/traits/a_settled_reference_the_parser_could_not_finish_is_one_report.lin:19:26
+   |
+19 |         let _held: Self. = 0
+   |                          ^ a selected type names a member after the dot

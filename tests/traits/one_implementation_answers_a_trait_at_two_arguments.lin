@@ -1,0 +1,24 @@
+// One implementation whose trait argument names its head parameter answers the
+// trait at whatever a receiver settles that parameter to: a `Holder[UInt8]` is
+// `Give[UInt8]` and a `Holder[Bool]` is `Give[Bool]`, from the one `impl`. Each
+// call reaches the instantiation its own receiver names.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Holder[UInt8] = .{ v = 9 }
+    let b: Holder[Bool] = .{ v = false }
+    let n: UInt8 = 1
+    Give.give(a, n) + Give.give(b, true)
+}

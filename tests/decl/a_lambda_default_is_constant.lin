@@ -1,0 +1,8 @@
+fn apply(seed: UInt8) -> UInt8 {
+    let _read_seed = |value: UInt8 = seed| value
+    0
+}
+
+fn main() -> UInt8 {
+    apply(5)
+}

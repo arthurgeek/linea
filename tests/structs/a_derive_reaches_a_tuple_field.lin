@@ -1,0 +1,19 @@
+import std.io
+
+// A derive on a struct reaches a tuple field through the tuple's own
+// implementation of the trait.
+@derive(Equatable, Debug)
+struct S {
+    pair: (UInt8, Bool),
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let s = S { pair = (1, true) }
+    io.println("{s:?}")?
+    let expected = S { pair = (1, true) }
+    if s == expected {
+        .Ok(0)
+    } else {
+        .Ok(1)
+    }
+}

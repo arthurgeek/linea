@@ -1,0 +1,5 @@
+error[T-Bound]: `Percent` does not implement `Equatable`
+ --> tests/newtypes/equality_is_not_inherited_from_a_base.lin:9:10
+  |
+9 |     if a == b {
+  |          ^^ a name over a base does not inherit its operators: take the value apart to reach them

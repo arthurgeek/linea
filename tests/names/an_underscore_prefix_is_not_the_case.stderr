@@ -1,0 +1,15 @@
+error[N-Case]: type parameters start with a capital letter
+ --> tests/names/an_underscore_prefix_is_not_the_case.lin:8:13
+  |
+8 | fn pick[_T, _u](_first: UInt8, _Second: UInt8) -> UInt8 {
+  |             ^^ rename it `_U`
+error[N-Case]: parameters start with a lowercase letter
+ --> tests/names/an_underscore_prefix_is_not_the_case.lin:8:32
+  |
+8 | fn pick[_T, _u](_first: UInt8, _Second: UInt8) -> UInt8 {
+  |                                ^^^^^^^ rename it `_second`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/an_underscore_prefix_is_not_the_case.lin:10:9
+   |
+10 |     let _Ignored = 3
+   |         ^^^^^^^^ rename it `_ignored`

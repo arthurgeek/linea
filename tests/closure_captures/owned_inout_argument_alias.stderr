@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/closure_captures/owned_inout_argument_alias.lin:10:10
+   |
+10 |     pair(callback, &callback())
+   |          ^^^^^^^^ this argument accesses the same place
+   |                    ----------- mutated by this argument

@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Maybe[UInt8]`, found `Bool`
+  --> tests/modules/reexported_type_is_a_type/main.lin:23:11
+   |
+14 | fn twice(sink o: Maybe[UInt8]) -> UInt8 {
+   |               - expected because of this parameter
+23 |     twice(flag)
+   |           ^^^^ expected `Maybe[UInt8]`, found `Bool`

@@ -1,0 +1,5 @@
+error[S-Nesting]: this expression nests too deeply
+ --> tests/recovery/an_expression_nests_too_deeply.lin:9:1005
+  |
+9 | ... (((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1)))))))))))))))))))))))))))))))))))))))))))))))))))))))))) ...
+  |                                                                 ^ the limit is 1000 levels

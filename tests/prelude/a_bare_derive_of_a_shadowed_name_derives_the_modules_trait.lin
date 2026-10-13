@@ -1,0 +1,16 @@
+// Where a module declares its own `Release`, `@derive(Release)` asks to derive
+// that trait, which has no structural template. The standard library's is
+// written `@derive(release.Release)`.
+trait Release {
+    fn shelf(self: Self) -> UInt8
+}
+
+@derive(Release)
+struct Book {
+    shelf: UInt8,
+}
+
+fn main() -> UInt8 {
+    let book = Book { shelf = 6 }
+    book.shelf
+}

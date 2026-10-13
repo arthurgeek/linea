@@ -1,0 +1,55 @@
+// A member of an implementation may be generic on its own account, and a
+// settled reference written off one of its own parameters is read through that
+// parameter's bound rather than through the implementation the member sits in.
+// The two are different keys: `Counter`'s implementation settles `Item` to
+// `UInt8`, and the `W.Item` below is whatever the argument settles it to, which
+// is `Bool` at one of the calls here.
+struct Counter {
+    at: UInt8,
+}
+
+struct Flag {
+    on: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+
+    fn kept[W: Measure](x: Self, w: W, sink v: W.Item) -> W.Item where carries(v)
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+
+    fn kept[W: Measure](_x: Self, _w: W, sink v: W.Item) -> W.Item where carries(v) {
+        v
+    }
+}
+
+impl Measure for Flag {
+    type Item = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.on == 1
+    }
+
+    fn kept[W: Measure](_x: Self, _w: W, sink v: W.Item) -> W.Item where carries(v) {
+        v
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 6 }
+    let f: Flag = .{ on = 1 }
+    if Measure.kept(c, f, Measure.of(f)) {
+        Measure.kept(c, c, Measure.of(c)) + 1
+    } else {
+        0
+    }
+}

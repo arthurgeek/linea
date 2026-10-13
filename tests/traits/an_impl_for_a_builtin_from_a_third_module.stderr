@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `UInt8`
+  --> tests/traits/an_impl_for_a_builtin_from_a_third_module/main.lin:12:18
+   |
+12 | impl Measure for UInt8 {
+   |                  ^^^^^ write it where the trait is declared

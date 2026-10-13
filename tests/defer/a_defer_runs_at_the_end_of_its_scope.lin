@@ -1,0 +1,20 @@
+// The scheduled expression runs, and it runs at the scope's end rather than
+// where it is written. `go` reads `n` after the `defer` is written but before
+// it fires, so it answers with the value from before the bump.
+//
+// Written where it stands, the bump would happen first and `go` would answer
+// 2, making `main` answer 4. The golden says which.
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+fn go(inout n: UInt8) -> UInt8 {
+    defer bump(&n)
+    n
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 1
+    let before = go(&n)
+    before + n
+}

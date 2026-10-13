@@ -1,0 +1,18 @@
+import std.mem
+
+// `copy(square)` hands the first `from_fn` its own initializer, so `square` is
+// still there for the second.
+fn main() -> UInt8 {
+    let square = |index: UInt64| index * index
+    let small = mem.Vec.from_fn(mem.system(), 2, copy(square)) else |_| {
+        return 1
+    }
+    let large = mem.Vec.from_fn(mem.system(), 4, square) else |_| {
+        small.release()
+        return 1
+    }
+    let total = small.length() + large.length()
+    small.release()
+    large.release()
+    UInt8(total)
+}

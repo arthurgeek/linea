@@ -1,0 +1,9 @@
+error[O-Leak]: `values` (a linear `Vec[Vec[UInt8, SystemAllocator], Handle[SystemAllocator]]`) is still owned when this path leaves
+  --> tests/mem/discardability/an_arena_vector_preserves_system_element_obligations.lin:12:9
+   |
+12 |     let values: Vec[Vec[UInt8, SystemAllocator], Handle[SystemAllocator]] = Vec.new_in(arena.handle())
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+18 | }
+   | - the block ends here
+   |
+   = help: settle it first with `values.release()`

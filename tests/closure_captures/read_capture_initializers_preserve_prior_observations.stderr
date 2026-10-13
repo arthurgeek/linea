@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/closure_captures/read_capture_initializers_preserve_prior_observations.lin:9:55
+   |
+9  |     let saved = read [read number, read item = values[change(&number)]] || number + item
+   |                                                       ^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+10 |     saved()
+   |     ----- the observation is still used here

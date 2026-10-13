@@ -1,0 +1,25 @@
+// A bound names its trait, so the bound alone puts the trait's operations in
+// reach for the parameter, with no `use gauge.Gauge`: `G.zero()` builds a
+// reading through the type, `level.reading()` reads one through the value,
+// and `G.Unit` names the associated type. A `where` clause does the same.
+import gauge
+
+fn fresh[G: gauge.Gauge]() -> G {
+    G.zero()
+}
+
+fn level_of[G](level: G) -> UInt8
+where G: gauge.Gauge {
+    level.reading()
+}
+
+fn unit_of[G: gauge.Gauge](_level: G, sink unit: G.Unit) -> G.Unit where carries(unit) {
+    unit
+}
+
+fn main() -> UInt8 {
+    let empty: gauge.Tank = fresh()
+    let filled = gauge.Tank { litres = 9 }
+    let _unit = unit_of(filled, gauge.Litre {})
+    level_of(empty) + level_of(gauge.Tank { litres = 4 })
+}

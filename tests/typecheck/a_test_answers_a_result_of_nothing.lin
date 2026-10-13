@@ -1,0 +1,9 @@
+// A test has no exit status to answer with, and nothing reads a value it
+// produced. What it reports is whether it failed.
+test fn a_thing_holds() -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

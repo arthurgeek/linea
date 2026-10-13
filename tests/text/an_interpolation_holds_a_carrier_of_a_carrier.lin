@@ -1,0 +1,18 @@
+// A literal renders whatever implements `Display`, and a carrier of a carrier
+// implements it through the one it holds: the `Result` renders the half it
+// holds, which is an `Option`, which renders the number inside it. Nothing
+// about the nesting is written at the site -- `{c}` is the whole of it.
+//
+// What the literal's own type is called is the compiler's to decide, and it is
+// carried into a symbol. A name spelling the type a reader would write grows
+// with the type, and the assembler is where a name too long to hold is found.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let c: Result[Option[UInt8], IoError] = .Ok(.Some(9))
+    println("{c}")?
+    return .Ok(0)
+}

@@ -1,0 +1,27 @@
+import std.mem
+
+use mem.Owner
+
+// The walk abandons the drain wherever it ends, and the drain holds
+// transactions nobody settles.
+@linear
+struct Transaction {
+    cents: UInt64,
+}
+
+fn settle(sink transaction: Transaction) -> UInt64 {
+    let Transaction { cents } = transaction
+    cents
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    defer arena.release()
+    let built: Result[Vec[Transaction, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: |index| Transaction { cents = index })
+    let pending = built.unwrap()
+    var total: UInt64 = 0
+    for transaction in pending.drain() {
+        total += settle(transaction)
+    }
+    UInt8(total)
+}

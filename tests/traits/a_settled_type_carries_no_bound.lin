@@ -1,0 +1,38 @@
+// What a settling must satisfy is the trait's to say. A bound written on the
+// answering side would be a requirement the implementation wrote for itself,
+// which nothing reads and nothing else can rely on -- so it is refused where
+// it is written, the way a settled type on the declaring side is.
+struct Counter {
+    at: UInt8,
+}
+
+trait Stepper {
+    type Item
+    fn next(inout self: Self) -> Option[Self.Item]
+}
+
+trait Walk {
+    type Iter: Stepper
+    fn iterate(sink self: Self) -> Self.Iter
+}
+
+impl Stepper for Counter {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[Self.Item] {
+        self.at = self.at + 1
+        return .Some(self.at)
+    }
+}
+
+impl Walk for Counter {
+    type Iter: Stepper = Counter
+
+    fn iterate(sink self: Self) -> Self.Iter {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

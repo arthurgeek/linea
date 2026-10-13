@@ -1,0 +1,138 @@
+==================
+Record construction shorthand
+==================
+
+fn make() -> Entry {
+    .{ key, value = replacement }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (expression_statement
+        (struct_literal
+          (field_initialiser
+            (identifier))
+          (field_initialiser
+            (identifier)
+            (identifier)))))))
+
+==================
+Named construction and ordinary field access
+==================
+
+fn make(self: Cell) -> Cell {
+    let value = self.value
+    let named = cells.Cell[UInt8] { value }
+    let nested = ArrayBox[[UInt8; 3]] { value = [1, 2, 3] }
+    if named.value == nested.value[0] { consume(named) }
+    match self { Cell { value } => Self { value } }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (field_expression
+          (identifier)
+          (identifier)))
+      (let_statement
+        (identifier)
+        (struct_literal
+          (literal_type
+            (type_identifier)
+            (type_identifier)
+            (type_arguments
+              (type_identifier)))
+          (field_initialiser
+            (identifier))))
+      (let_statement
+        (identifier)
+        (struct_literal
+          (literal_type
+            (type_identifier)
+            (type_arguments
+              (array_type
+                (type_identifier)
+                (integer_literal))))
+          (field_initialiser
+            (identifier)
+            (array_literal
+              (integer_literal)
+              (integer_literal)
+              (integer_literal)))))
+      (block_statement
+        (if_expression
+          (binary_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (index_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (integer_literal)))
+          (block
+            (expression_statement
+              (call_expression
+                (identifier)
+                (argument_list
+                  (identifier)))))))
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (struct_pattern
+              (type_identifier)
+              (field_pattern
+                (identifier)))
+            (struct_literal
+              (literal_type
+                (type_identifier))
+              (field_initialiser
+                (identifier)))))))))
+
+==================
+A contextual literal begins a statement
+==================
+
+fn next(inout counter: UInt8) -> Ticket {
+    counter += 1
+    .{ value = counter }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (expression_statement
+        (assignment_expression
+          (identifier)
+          (integer_literal)))
+      (expression_statement
+        (struct_literal
+          (field_initialiser
+            (identifier)
+            (identifier)))))))

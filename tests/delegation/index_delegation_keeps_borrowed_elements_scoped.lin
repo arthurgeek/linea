@@ -1,0 +1,14 @@
+struct Board { values: [borrow UInt8; 1] }
+
+impl Index[UInt64] for Board via values
+
+fn escaped() -> borrow UInt8 {
+    let local: UInt8 = 7
+    let board: Board = .{ values = [borrow local] }
+    copy(board[0])
+}
+
+fn main() -> UInt8 {
+    let saved = escaped()
+    *saved
+}

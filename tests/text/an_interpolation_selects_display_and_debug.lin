@@ -1,0 +1,29 @@
+// The selector changes the trait used for one interpolation piece. Distinct
+// implementations make a lowering that ignores the recorded mode observable.
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct Word {
+    value: UInt8,
+}
+
+impl Display for Word {
+    fn fmt[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "display")
+    }
+}
+
+impl Debug for Word {
+    fn debug[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "debug")
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let word: Word = .{ value = 7 }
+    println("{word} {word:?}")?
+    return .Ok(0)
+}

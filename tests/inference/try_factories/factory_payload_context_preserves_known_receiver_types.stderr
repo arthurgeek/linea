@@ -1,0 +1,5 @@
+error[T-Bound]: `Factory` requires `Self` to implement it, and `Int64` does not
+  --> tests/inference/try_factories/factory_payload_context_preserves_known_receiver_types.lin:13:38
+   |
+13 |     let value: UInt64 = Factory.make(input)?
+   |                                      ^^^^^ implement it for that type, or reach the operation on one that does

@@ -1,0 +1,29 @@
+// One head answers a trait at two arguments. The arguments do not meet, so the
+// two implementations answer for no instantiation in common, and both are
+// accepted.
+struct Row[T] {
+    cells: [T; 4],
+}
+
+impl[T] Index[UInt64] for Row[T] {
+    type Elem = T
+
+    proj at(inout self: Row[T], i: UInt64) -> T {
+        self.cells[i]
+    }
+}
+
+impl[T] Index[FromEnd] for Row[T] {
+    type Elem = T
+
+    proj at(inout self: Row[T], i: FromEnd) -> T {
+        self.cells[^i.k]
+    }
+}
+
+fn main() -> UInt8 {
+    let r: Row[UInt8] = .{ cells = [1, 2, 3, 4] }
+    let front: UInt8 = r[0]
+    let back: UInt8 = r[^1]
+    front + back
+}

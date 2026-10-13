@@ -1,0 +1,10 @@
+error[T-BorrowContract]: a result cannot borrow closure-owned storage
+ --> tests/closure_captures/captured_owned_storage_cannot_escape.lin:2:56
+  |
+2 |     let observe = [sink number = UInt8(7)] || -> where borrows(number) borrow number
+  |                                                        ^^^^^^^ carry existing captured dependencies instead
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/closure_captures/captured_owned_storage_cannot_escape.lin:2:72
+  |
+2 |     let observe = [sink number = UInt8(7)] || -> where borrows(number) borrow number
+  |                                                                        ^^^^^^^^^^^^^ escape observations only from the signature's declared sources

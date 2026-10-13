@@ -1,0 +1,6 @@
+struct Cell { value: UInt8 }
+
+fn main() -> UInt8 {
+    let _cell = Cell { .value = 1 }
+    0
+}

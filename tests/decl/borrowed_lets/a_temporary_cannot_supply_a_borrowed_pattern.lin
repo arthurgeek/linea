@@ -1,0 +1,10 @@
+type Label = Str
+
+fn main() -> UInt8 {
+    let read Label(raw) = Label("Ada")
+    if raw == "Ada" {
+        0
+    } else {
+        1
+    }
+}

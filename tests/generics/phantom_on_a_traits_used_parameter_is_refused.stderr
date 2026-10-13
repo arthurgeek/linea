@@ -1,0 +1,5 @@
+error[T-Phantom]: `T` appears in this declaration, and `phantom` says it appears nowhere
+ --> tests/generics/phantom_on_a_traits_used_parameter_is_refused.lin:4:26
+  |
+4 | pub trait Relate[phantom T] {
+  |                          ^ remove `phantom`: a signature reads the parameter

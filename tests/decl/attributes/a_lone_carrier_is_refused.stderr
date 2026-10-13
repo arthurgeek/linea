@@ -1,0 +1,15 @@
+error[S-Entry]: carrier is a declaration attribute
+ --> tests/decl/attributes/a_lone_carrier_is_refused.lin:1:1
+  |
+1 | carrier
+  | ^^^^^^^ write `@` before this word
+error[S-Entry]: a program is a list of declarations
+ --> tests/decl/attributes/a_lone_carrier_is_refused.lin:1:9
+  |
+1 | carrier
+  |         ^ expected `fn` here
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/decl/attributes/a_lone_carrier_is_refused.lin:1:1
+  |
+1 | carrier
+  | ^ found 0

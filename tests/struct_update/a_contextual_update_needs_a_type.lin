@@ -1,0 +1,11 @@
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let small: Size = .{ width = 1, height = 1 }
+    // The base does not name the literal's type; the context or a head does.
+    let wide = .{ width = 8, ..small }
+    wide.width
+}

@@ -1,0 +1,20 @@
+import std.mem
+import std.testing
+
+// `copy(body)` and `copy(refused)` hand the first walk its own callbacks, so
+// both are still there for the second.
+fn main() -> UInt8 {
+    let body = |allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[(), mem.Oom] {
+        let held = allocator.acquire(8)?
+        held.release()
+        .Ok(())
+    }
+    let refused = |_error: mem.Oom| true
+    let first = testing.each_allocation_failure(mem.system(), copy(body), copy(refused))
+    let second = testing.each_allocation_failure(mem.system(), body, refused)
+    if first.is_ok() && second.is_ok() {
+        0
+    } else {
+        1
+    }
+}

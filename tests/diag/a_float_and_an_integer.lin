@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let a = 1.0
+    let _s = a + 1
+    0
+}

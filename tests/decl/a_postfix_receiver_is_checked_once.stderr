@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/decl/a_postfix_receiver_is_checked_once.lin:9:11
+  |
+4 | fn wants(_level: UInt8) -> Option[UInt8] {
+  |          ------ expected because of this parameter
+9 |     wants(true).unwrap()
+  |           ^^^^ expected `UInt8`, found `Bool`

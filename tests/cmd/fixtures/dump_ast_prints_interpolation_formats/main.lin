@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let value: UInt8 = 7
+    let _text = "display={value} debug={value:?} laid out={value:*>+6?}"
+    0
+}

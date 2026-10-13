@@ -1,0 +1,17 @@
+trait Allowed {}
+
+struct Board[T] { values: [UInt8; 2], tag: T }
+
+impl[T: Allowed] Index[UInt8] for Board[T] via values
+
+impl[T] Index[Int16] for Board[T] via values
+
+fn main() -> UInt8 {
+    var board = Board[UInt64] { values = [7, 9], tag = 0 }
+    board[0] += 1
+    if board[0] == 8 && board[Int16(1)] == 9 {
+        0
+    } else {
+        1
+    }
+}

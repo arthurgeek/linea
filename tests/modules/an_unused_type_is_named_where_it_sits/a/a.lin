@@ -1,0 +1,12 @@
+struct Ghost {
+    v: UInt8,
+}
+
+struct Cell[T] {
+    t: T,
+}
+
+pub fn seven() -> UInt8 {
+    let _c: Cell[Ghost] = .{ t = .{ v = 7 } }
+    7
+}

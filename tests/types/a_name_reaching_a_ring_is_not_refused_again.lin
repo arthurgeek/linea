@@ -1,0 +1,13 @@
+// A ring is reported once, where it closes. A constant naming a member of one
+// names a binding that cannot be assigned again, so its initialiser is a
+// constant expression whose value happens not to exist -- and there is nothing
+// wrong with it that the ring does not already explain.
+pub let outer: UInt8 = mid
+
+pub let mid: UInt8 = inner
+
+pub let inner: UInt8 = mid
+
+fn main() -> UInt8 {
+    outer
+}

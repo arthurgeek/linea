@@ -1,0 +1,27 @@
+// [T-Impl] holds an implementation to the signature its trait declares, not
+// to the name alone. A call is typed against the signature and runs the
+// implementation's body, so a member agreeing about the name and disagreeing
+// about a parameter type is an argument checked against one function and
+// passed to another.
+struct Account {
+    balance: UInt8,
+}
+
+struct Ledger {
+    total: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self, n: UInt8) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self, n: Ledger) -> UInt8 {
+        x.balance + n.total
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a, 200)
+}

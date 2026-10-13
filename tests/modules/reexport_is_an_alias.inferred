@@ -1,0 +1,28 @@
+// A re-export is an alias, never a fresh identity: what it binds is the source
+// declaration itself. So a value built through the re-exported spelling is
+// accepted by a function whose signature was written against the original, and
+// no later pass can tell which spelling reached it.
+//
+// A re-export is also never unused. It exists for another module to reach
+// rather than for use where it is written.
+import inner
+
+pub use inner.Maybe
+
+fn main() -> UInt8 {
+    let three: UInt8 = 3
+    let built_here: Maybe[UInt8] = Maybe[UInt8].Some(three)
+    inner.unwrap(built_here)
+}
+
+pub enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+pub fn unwrap(sink o: Maybe[UInt8]) -> UInt8 {
+    match o {
+        None => 0,
+        Some(n) => n,
+    }
+}

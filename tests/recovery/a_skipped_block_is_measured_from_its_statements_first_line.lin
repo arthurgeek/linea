@@ -1,0 +1,21 @@
+// `oops {` cannot follow the call, and the skip starts on the call's second
+// line. The `}` sits at the indentation of the line the statement starts on,
+// so it closes the `{` after `oops` and the rest of `main` is still read: the
+// mismatch in `main` and the one in `_other` are reported.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let _total = add(1,
+            2) oops {
+        0
+    }
+    let last: UInt8 = "two"
+    last
+}
+
+fn _other() -> UInt8 {
+    let count: UInt8 = "three"
+    count
+}

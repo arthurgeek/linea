@@ -1,0 +1,34 @@
+// An implementation that writes its own clause keeps it, and may promise less
+// than its trait: `Fixed` answers with text that depends on nothing. A call is
+// still checked against the trait's signature.
+import std.io
+
+struct Request {
+    name: Str,
+}
+
+trait Handler {
+    fn handle(self: Self, request: Request) -> Str where carries(request)
+}
+
+struct Fixed {}
+
+impl Handler for Fixed {
+    fn handle(_self: Self, _request: Request) -> Str where carries() {
+        "fixed"
+    }
+}
+
+struct Echo {}
+
+impl Handler for Echo {
+    fn handle(_self: Self, request: Request) -> Str {
+        copy(request.name)
+    }
+}
+
+fn main() -> UInt8 {
+    let _fixed = io.println(Fixed {}.handle(Request { name = "world" }))
+    let _echoed = io.println(Echo {}.handle(Request { name = "world" }))
+    0
+}

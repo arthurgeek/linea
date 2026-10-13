@@ -1,0 +1,31 @@
+// Two implementations of one trait overlap when a substitution for both
+// declarations' parameters makes their heads and their trait arguments
+// structurally equal. `Give[T] for Holder[T]` answers `Give[Bool]` at
+// `Holder[Bool]`, and so does `Give[Bool] for Holder[U]` -- at every `Holder`
+// there is. The two meet at that one instantiation, and neither is written
+// from the other's parameters, so nothing decides which of them a call at
+// that instantiation would run: they are refused together.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        5
+    }
+}
+
+impl[U] Give[Bool] for Holder[U] {
+    fn give(_self: Self, _u: Bool) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Bool] = .{ v = true }
+    Give.give(h, true)
+}

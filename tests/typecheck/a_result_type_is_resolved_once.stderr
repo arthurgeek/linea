@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/typecheck/a_result_type_is_resolved_once.lin:3:22
+  |
+3 | fn make() -> [Int64; "3"] {
+  |                      ^^^ this is not a number

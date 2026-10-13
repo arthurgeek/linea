@@ -1,0 +1,30 @@
+error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capability
+  --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:21:16
+   |
+21 |     let lock = open(pair)
+   |                ^^^^ use a type meeting the capability requirement, or relax the bound
+error[O-Move]: `lock` has already been moved
+  --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:23:18
+   |
+22 |     let _kept = lock
+   |                 ---- it was taken here
+23 |     let _again = lock
+   |                  ^^^^ it was already taken, and a value is taken once
+error[O-Leak]: `_kept` (a linear `Lock`) is still owned when this path leaves
+  --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:22:9
+   |
+22 |     let _kept = lock
+   |         ^^^^^ never settled on the path that reaches the end of this block
+25 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Lock { held: _ } = _kept`, or give it to something that takes it
+error[O-Leak]: `_again` (a linear `Lock`) is still owned when this path leaves
+  --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:23:9
+   |
+23 |     let _again = lock
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+25 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Lock { held: _ } = _again`, or give it to something that takes it

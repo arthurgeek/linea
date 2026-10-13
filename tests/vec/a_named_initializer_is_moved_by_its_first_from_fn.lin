@@ -1,0 +1,18 @@
+import std.mem
+
+// `from_fn` consumes its initializer, so the first vector moves `square` and
+// the second cannot pass it again.
+fn main() -> UInt8 {
+    let square = |index: UInt64| index * index
+    let small = mem.Vec.from_fn(mem.system(), 2, square) else |_| {
+        return 1
+    }
+    let large = mem.Vec.from_fn(mem.system(), 4, square) else |_| {
+        small.release()
+        return 1
+    }
+    let total = small.length() + large.length()
+    small.release()
+    large.release()
+    UInt8(total)
+}

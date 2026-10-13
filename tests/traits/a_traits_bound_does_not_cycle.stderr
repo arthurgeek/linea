@@ -1,0 +1,5 @@
+error[T-Bound]: `There` requires `Here`, and `Here` requires `There`
+ --> tests/traits/a_traits_bound_does_not_cycle.lin:7:14
+  |
+7 | trait There: Here {
+  |              ^^^^ drop one of the two bounds

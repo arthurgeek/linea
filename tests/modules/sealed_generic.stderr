@@ -1,0 +1,35 @@
+error[M-Opaque]: `Key` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:10:31
+   |
+10 |     let a: UInt8 = vault.take(.Forged(7))
+   |                               ^^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Key` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:11:31
+   |
+11 |     let b: UInt8 = vault.take(vault.Key.Forged(7))
+   |                               ^^^^^^^^^^^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Account` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:12:32
+   |
+12 |     let c: UInt8 = vault.total(.{ id = 1, balance = 4 })
+   |                                ^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Key` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:14:20
+   |
+14 |     let d: UInt8 = match k { Forged(n) => n }
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can take one apart
+error[M-Opaque]: `Account` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:16:5
+   |
+16 |     acct.balance = 9
+   |     ^^^^^^^^^^^^ only its own module can read its parts
+error[M-Opaque]: `Account` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:17:20
+   |
+17 |     let e: UInt8 = acct.balance
+   |                    ^^^^^^^^^^^^ only its own module can read its parts
+error[M-Opaque]: `Account` is opaque outside `vault`
+  --> tests/modules/sealed_generic/main.lin:18:9
+   |
+18 |     let Account { id: i, balance: f } = acct
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can take one apart

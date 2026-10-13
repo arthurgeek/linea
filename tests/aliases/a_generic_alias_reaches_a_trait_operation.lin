@@ -1,0 +1,21 @@
+trait Make {
+    fn make() -> Self
+}
+
+struct Crate[T] {
+    count: T,
+}
+
+impl Make for Crate[UInt8] {
+    fn make() -> Self {
+        .{ count = 4 }
+    }
+}
+
+alias Packed[T] = Crate[T]
+
+fn main() -> UInt8 {
+    let packed: Packed[UInt8] = Packed.make()
+    let Crate { count } = packed
+    count
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/an_aggregate_observation_protects_the_second_owner.lin:17:5
+   |
+17 |     second.release()
+   |     ^^^^^^ keep this place available until the last use of its observation
+18 |     let Pair { first: left, second: right } = both
+   |                                               ---- the observation is still used here

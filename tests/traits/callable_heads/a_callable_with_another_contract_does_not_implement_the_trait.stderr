@@ -1,0 +1,7 @@
+error[T-Bound]: `H` requires `Pick`, and `fn(read Str) -> Str where carries()` does not implement it
+  --> tests/traits/callable_heads/a_callable_with_another_contract_does_not_implement_the_trait.lin:23:18
+   |
+23 |     let _fixed = run(fixed, "dropped")
+   |                  ^^^ implement it for that type, or drop the bound
+   |
+   = help: its parameter conventions are ones `Pick` is implemented for, so its parameter types or its contract differ from the implementation's

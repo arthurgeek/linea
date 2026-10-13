@@ -1,0 +1,11 @@
+// A literal holds what its escapes mean, and the token holds what was written.
+// `"Ol\u{e1}"` and `"Olá"` are the same four bytes spelled two ways, so they are
+// one blob -- which the `.ssa` beside this case records.
+//
+// Four bytes, not three characters: a length is what the storage holds.
+fn main() -> UInt8 {
+    let escaped: Str = "Ol\u{e1}"
+    let written: Str = "Olá"
+    let quoted: Str = "a\"b"
+    UInt8(Str.length(escaped) + Str.length(written) + Str.length(quoted))
+}

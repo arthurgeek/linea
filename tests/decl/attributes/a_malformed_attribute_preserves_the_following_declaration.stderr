@@ -1,0 +1,5 @@
+error[S-Entry]: expected an attribute name after `@`
+ --> tests/decl/attributes/a_malformed_attribute_preserves_the_following_declaration.lin:1:1
+  |
+1 | @
+  | ^ use `opaque`, `linear`, `copyable`, `carrier`, or `derive(...)`

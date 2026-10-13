@@ -1,0 +1,13 @@
+// The bound holds at any depth, not at one more than the last that failed:
+// eight carriers name a structure several times longer than a symbol may be,
+// and the symbol is the same length as any other that ran out of room.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let deep: Option[Option[Option[Option[Option[Option[Option[Option[UInt8]]]]]]]] = .Some(.Some(.Some(.Some(.Some(.Some(.Some(.Some(9))))))))
+    println("{deep}")?
+    return .Ok(0)
+}

@@ -1,0 +1,235 @@
+==================
+Explicit closure captures
+==================
+
+fn configure() -> () {
+    let filter = read [read threshold, read limit = settings.limit] |read item: UInt8| item > threshold + limit
+    var counter = inout [sink total = UInt64(0)] || { total += 1; total }
+    var tick = inout [inout seen] || { seen += 1 }
+    let owned = sink [sink resource] || resource
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier))
+            (capture
+              (identifier)
+              (field_expression
+                (identifier)
+                (identifier))))
+          (parameter
+            (identifier)
+            (type_identifier))
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (identifier)
+              (identifier)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)
+              (call_expression
+                (identifier)
+                (argument_list
+                  (integer_literal)))))
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (integer_literal)))
+            (expression_statement
+              (identifier)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (integer_literal))))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (identifier))))))
+
+==================
+Default closure captures
+==================
+
+fn configure() -> () {
+    let predicate = [threshold, limit = settings.limit] |sink item| item > threshold + limit
+    let mixed = [read threshold] |item| item + threshold
+    let explicit = read [threshold] || threshold
+    let empty = [] || 1
+    let array = [threshold, limit]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier))
+            (capture
+              (identifier)
+              (field_expression
+                (identifier)
+                (identifier))))
+          (parameter
+            (identifier))
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (identifier)
+              (identifier)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (parameter
+            (identifier))
+          (binary_expression
+            (identifier)
+            (identifier))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (identifier)))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list)
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (array_literal
+          (identifier)
+          (identifier))))))
+
+==================
+Closure expression bodies contain binary operators
+==================
+
+fn callbacks() -> () {
+    let numeric = |item| item + 1 * 2
+    let predicate = |item| item > 1 && item < 8
+    let captured = read [read threshold] |item| item > threshold + 1
+    let nested = |first| |second| first + second
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (identifier))
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (integer_literal)
+              (integer_literal)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (identifier))
+          (binary_expression
+            (binary_expression
+              (identifier)
+              (integer_literal))
+            (binary_expression
+              (identifier)
+              (integer_literal)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (parameter
+            (identifier))
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (identifier)
+              (integer_literal)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (identifier))
+          (lambda_expression
+            (parameter
+              (identifier))
+            (binary_expression
+              (identifier)
+              (identifier))))))))
+
+==================
+Match observation precedes default closure invocation
+==================
+fn observe() -> () {
+    let result = match read [value] || value + 1 { _ => 0 }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (let_statement
+        (identifier)
+        (match_expression
+          (lambda_expression
+            (capture_list
+              (capture
+                (identifier)))
+            (binary_expression
+              (identifier)
+              (integer_literal)))
+          (match_arm
+            (wildcard_pattern)
+            (integer_literal)))))))

@@ -1,0 +1,21 @@
+// A tally stores its step closure in a field. The closure's lend of `count`
+// lasts as long as the tally is used.
+struct Tally[F] {
+    step: F,
+}
+
+fn tally[F](sink step: F) -> Tally[F] where carries(step) {
+    .{ step = step }
+}
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var counter = tally(
+        inout [inout count] || {
+            count += 3
+        },
+    )
+    &(counter.step)()
+    &(counter.step)()
+    count
+}

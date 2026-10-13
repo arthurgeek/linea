@@ -1,0 +1,5 @@
+error[O-Move]: only part of `self` is named here
+ --> tests/vec/a_traversal_cannot_move_from_its_read_receiver.lin:8:34
+  |
+8 |     trav positions(self: Self) = self.positions
+  |                                  ^^^^^^^^^^^^^^ move the whole binding, or `copy` this part out of it

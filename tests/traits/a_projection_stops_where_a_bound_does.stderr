@@ -1,0 +1,5 @@
+error[T-Impl]: `O.Mid.Item` has no available associated type `Rest`
+  --> tests/traits/a_projection_stops_where_a_bound_does.lin:15:32
+   |
+15 | fn _deeper[O: Outer](_o: O) -> O.Mid.Item.Rest {
+   |                                ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

@@ -1,0 +1,15 @@
+error[M-Impl]: `Cell` is declared in `inner`
+  --> tests/modules/an_impl_sits_with_its_type/main.lin:10:6
+   |
+10 | impl Cell {
+   |      ^^^^ write the `impl` in the module that declares the type
+error[N-Variant]: this name refers to a type, and a type has no parts to select
+  --> tests/modules/an_impl_sits_with_its_type/main.lin:17:19
+   |
+17 |     let c: Cell = Cell.make(9)
+   |                   ^^^^ only an enum has variants
+error[N-Unused]: `make` is never used
+  --> tests/modules/an_impl_sits_with_its_type/main.lin:11:8
+   |
+11 |     fn make(sink x: UInt8) -> Cell {
+   |        ^^^^ call it, or name it with a leading `_`

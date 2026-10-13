@@ -1,0 +1,47 @@
+// A part of a declared type may be written as a settled reference off one of
+// that type's own parameters, and each instantiation settles it through its own
+// argument's implementation. So `Holder[Counter]`'s part is a `UInt8` and
+// `Holder[Flag]`'s is a `Bool`: two types, and comparing one against the other
+// is the mismatch it would be if the two had been written out.
+struct Counter {
+    at: UInt8,
+}
+
+struct Flag {
+    on: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+impl Measure for Flag {
+    type Item = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.on == 1
+    }
+}
+
+struct Holder[W: Measure] {
+    v: W.Item,
+}
+
+fn _same(a: Holder[Counter], b: Holder[Flag]) -> Bool {
+    a.v == b.v
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

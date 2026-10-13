@@ -1,0 +1,7 @@
+error[O-Capture]: this name is not declared in the closure capture list
+ --> tests/closure_captures/a_closure_inside_another_names_what_it_did_not_capture.lin:6:24
+  |
+6 |         let inner = || count
+  |                        ^^^^^ this name belongs to an enclosing body
+  |
+  = help: write `[count]` before the parameters to read it where it is, or `[sink count]` to move it into the closure

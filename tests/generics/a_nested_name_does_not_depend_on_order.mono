@@ -1,0 +1,43 @@
+enum Opt[UInt8] {
+    None,
+    Some(UInt8),
+}
+
+struct Cell[Opt[UInt8]] {
+    v: Opt[UInt8],
+}
+
+struct Cell[UInt8] {
+    v: UInt8,
+}
+
+struct Cell[Bool] {
+    v: Bool,
+}
+
+fn ;main() -> UInt8 {
+    let a: Cell[UInt8] = .{ v = 5 }
+    let b: Cell[Bool] = .{ v = true }
+    let nested: Cell[Opt[UInt8]] = .{ v = Opt[UInt8].Some(2) }
+
+    if ;Cell[Bool].get(b) {
+        ;Cell[UInt8].get(a) + ;depth(nested)
+    } else {
+        0
+    }
+}
+
+pub fn ;Cell[Bool].get(c: Cell[Bool]) -> Bool {
+    copy(c.v)
+}
+
+pub fn ;Cell[UInt8].get(c: Cell[UInt8]) -> UInt8 {
+    copy(c.v)
+}
+
+fn ;depth(c: Cell[Opt[UInt8]]) -> UInt8 {
+    match read c.v {
+        None => 0,
+        Some(n) => n,
+    }
+}

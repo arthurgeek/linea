@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let threshold = UInt8(3)
+    let above = read [read threshold] |item: UInt8| item > threshold
+    if above(4) && above(5) {
+        0
+    } else {
+        1
+    }
+}

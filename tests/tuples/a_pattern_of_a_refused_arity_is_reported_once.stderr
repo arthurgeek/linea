@@ -1,0 +1,15 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_pattern_of_a_refused_arity_is_reported_once.lin:6:9
+  |
+6 |     let (_a,) = pair
+  |         ^ bind one value with `let a = …`
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_pattern_of_a_refused_arity_is_reported_once.lin:7:9
+  |
+7 |     let (_b,) = 5
+  |         ^ bind one value with `let a = …`
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_pattern_of_a_refused_arity_is_reported_once.lin:9:9
+  |
+9 |     let (_c, _d, _e, _f, _g, _h, _i, _j, _k) = eight
+  |         ^ give a struct names past eight parts

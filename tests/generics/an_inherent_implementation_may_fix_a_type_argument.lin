@@ -1,0 +1,33 @@
+// A type's own implementation may fix some of its arguments: its members
+// belong to the instantiations its head matches. `Pair.alone` makes a pair
+// whose second half is `()`, and `Pair.of` makes any pair.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[A] Pair[A, ()] {
+    fn alone(sink first: A) -> Self where carries(first) {
+        .{ first, second = {} }
+    }
+
+    fn doubled(self: Self) -> A where A: Copyable {
+        copy(self.first)
+    }
+}
+
+impl[A, B] Pair[A, B] {
+    fn of(sink first: A, sink second: B) -> Self where carries(first, second) {
+        .{ first, second }
+    }
+}
+
+fn main() -> UInt8 {
+    let lone = Pair.alone(UInt8(3))
+    let both = Pair.of(UInt8(4), true)
+    if lone.doubled() == 3 && both.second {
+        0
+    } else {
+        1
+    }
+}

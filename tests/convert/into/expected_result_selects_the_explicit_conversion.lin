@@ -1,0 +1,29 @@
+struct Fahrenheit { value: Float64 }
+
+struct Celsius { value: Float64 }
+
+struct Kelvin { value: Float64 }
+
+impl From[Fahrenheit] for Celsius {
+    fn from(sink source: Fahrenheit) -> Celsius where carries(source) {
+        .{ value = (source.value - 32.0) / 1.8 }
+    }
+}
+
+impl From[Fahrenheit] for Kelvin {
+    fn from(sink source: Fahrenheit) -> Kelvin where carries(source) {
+        .{ value = (source.value - 32.0) / 1.8 + 273.15 }
+    }
+}
+
+fn main() -> UInt8 {
+    let freezing: Fahrenheit = .{ value = 32.0 }
+    let celsius: Celsius = freezing.into()
+    let boiling: Fahrenheit = .{ value = 212.0 }
+    let kelvin: Kelvin = Into.into(boiling)
+    if celsius.value == 0.0 && kelvin.value == 373.15 {
+        0
+    } else {
+        1
+    }
+}

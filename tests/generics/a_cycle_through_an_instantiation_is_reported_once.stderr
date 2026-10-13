@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Node contains Wrap[Node] contains Node
+ --> tests/generics/a_cycle_through_an_instantiation_is_reported_once.lin:8:8
+  |
+8 | struct Node {
+  |        ^^^^ a value of this type would have to hold one, so it has no size

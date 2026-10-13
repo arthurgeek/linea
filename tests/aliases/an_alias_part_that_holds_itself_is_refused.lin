@@ -1,0 +1,11 @@
+// `Again[T]` is `S[T]`, so `S` holds itself through the alias as it would
+// written out.
+struct S[T] {
+    v: Again[T],
+}
+
+alias Again[U] = S[U]
+
+fn main() -> UInt8 {
+    0
+}

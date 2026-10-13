@@ -1,0 +1,11 @@
+pub fn helper(num: Int32) -> Int32 {
+    num + 1
+}
+
+pub fn unreached(num: Int32) -> Int32 {
+    num + 2
+}
+
+export fn api(num: Int32) -> Int32 {
+    helper(num)
+}

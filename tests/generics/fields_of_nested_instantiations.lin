@@ -1,0 +1,32 @@
+// Where a written type ends is read from the tree, and the rewrite that
+// reorders a structure's fields slices the source between those points. The
+// only generic structure the rewrite reached had fields written as bare
+// parameters, so nothing in the corpus exercised the case the answer was hard
+// for: a field whose type carries arguments that carry arguments of their own.
+@copyable
+enum Opt[T] {
+    None,
+    Some(T),
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+struct Holder {
+    a: Cell[Opt[UInt8]],
+    b: Opt[Cell[Bool]],
+    c: UInt8,
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{
+        a = .{ v = Opt.Some(2) },
+        b = Opt.None,
+        c = 5,
+    }
+    match copy(h.a.v) {
+        None => h.c,
+        Some(n) => n,
+    }
+}

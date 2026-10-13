@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Tree contains [Tree; 2] contains Tree
+ --> tests/types/diagnostic_detail/recursive_array.lin:1:8
+  |
+1 | struct Tree {
+  |        ^^^^ a value of this type would have to hold one, so it has no size

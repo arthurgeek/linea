@@ -1,0 +1,5 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/decl/attributes/derive_attributes_do_not_attach_to_implementations.lin:4:1
+  |
+4 | @derive(Mark)
+  | ^ an impl is behaviour, not a nominal type declaration

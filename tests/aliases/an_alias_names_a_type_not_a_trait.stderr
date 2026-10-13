@@ -1,0 +1,10 @@
+error[N-TypeAlias]: `Show` names `Debug`, which is a trait rather than a type
+ --> tests/aliases/an_alias_names_a_type_not_a_trait.lin:1:14
+  |
+1 | alias Show = Debug
+  |              ^^^^^ an alias names a type; bound a type parameter by the trait instead
+error[N-Unused]: `Show` is never used
+ --> tests/aliases/an_alias_names_a_type_not_a_trait.lin:1:7
+  |
+1 | alias Show = Debug
+  |       ^^^^ name it in an annotation, or remove it

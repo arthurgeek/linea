@@ -1,0 +1,6 @@
+error[T-Operands]: expected `Float64`, found `Int64`
+ --> tests/diag/a_float_and_an_integer.lin:3:18
+  |
+3 |     let _s = a + 1
+  |              - expected because of this operand
+  |                  ^ expected `Float64`, found `Int64`

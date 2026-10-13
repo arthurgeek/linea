@@ -1,0 +1,62 @@
+import std.json
+import std.mem
+
+struct Preferences[A: Allocator] {
+    title: String[A],
+    tags: Vec[String[A], A],
+    retries: UInt8,
+}
+
+derive[A: Allocator] Release for Preferences[A]
+
+impl[A: Allocator] json.Decode[A] for Preferences[A] {
+    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        var fields = json.ObjectDecoder.open(value, allocator)?
+        defer fields.release()
+        let title: String[A] = json.ObjectDecoder.field(&fields, "title")?
+        defer title.release()
+        let tags: Vec[String[A], A] = json.ObjectDecoder.field(&fields, "tags")?
+        defer tags.release()
+        let supplied: Option[UInt8] = json.ObjectDecoder.optional(&fields, "retries")?
+        let retries = match supplied { Some(count) => count, None => 3 }
+        fields.finish()?
+        if retries > 10 {
+            let failure = json.DecodeError.failure(allocator, .InvalidValue)
+            return .Err(json.DecodeError.at_field(failure, allocator, "retries"))
+        }
+        return .Ok(.{ title, tags, retries })
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        .Err(json.DecodeError.failure(allocator, .MissingField))
+    }
+}
+
+fn main() -> UInt8 {
+    let allocator = mem.system()
+    let input = r#"{"title":"Tea","tags":["green"]}"#.to_owned(allocator).unwrap()
+    let preferences_result: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(allocator, input.view())
+    let preferences = preferences_result.unwrap()
+    input.release()
+    let valid = preferences.title.view() == "Tea" && preferences.tags[UInt64(0)].view() == "green" && preferences.retries == 3
+    preferences.release()
+    if !valid {
+        return 1
+    }
+    let failed: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(allocator, r#"{"title":"Tea","tags":["green"],"retries":false}"#)
+    match failed {
+        Ok(preferences) => {
+            preferences.release()
+            return 2
+        },
+        Err(error) => {
+            let correct = match read error { Value(failure) => failure.reason() == .WrongKind && failure.path_length() == 1, _ => false }
+            error.release()
+            return if correct {
+                0
+            } else {
+                3
+            }
+        },
+    }
+}

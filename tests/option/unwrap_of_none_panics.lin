@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let absent: Option[UInt8] = .None
+    absent.unwrap()
+}

@@ -1,0 +1,23 @@
+// Writing over a field that holds a linear value destroys what was there. The
+// value is not moved anywhere and nothing disposed of it -- it is simply gone,
+// which is what [O-Leak] is about. The graph keeps state per binding rather
+// than per field, so what says the field was linear is the type of the place
+// that was written.
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn main() -> UInt8 {
+    var h: Holder = .{ k = mint(7), n = 1 }
+    let j = mint(9)
+    h.k = j
+    consume(h)
+}

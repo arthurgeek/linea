@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_return_does_not_cross_a_pending_argument.lin:19:13
+   |
+19 |     use2(d, return 7)
+   |          - it was given up here
+   |             ^^^^^^^^ give the value up after this, not before it

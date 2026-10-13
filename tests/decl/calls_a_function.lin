@@ -1,0 +1,7 @@
+fn double(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    double(21)
+}

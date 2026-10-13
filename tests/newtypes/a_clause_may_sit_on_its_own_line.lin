@@ -1,0 +1,8 @@
+// The refinement clause may sit on its own line, split from the head that
+// declares the base. The parse and type annotation alone show the distinction.
+pub type Percent = UInt8
+    where it in 0..=99
+
+fn main() -> UInt8 {
+    42
+}

@@ -1,0 +1,7 @@
+error[O-Move]: `flag` has already been moved
+  --> tests/ownership/scalar_snapshots/a_unit_payload_enum_does_not_receive_implicit_duplication.lin:10:11
+   |
+8  |     let moved = flag
+   |                 ---- it was taken here
+10 |     match flag { Present(_) => 0 }
+   |           ^^^^ it was already taken, and a value is taken once

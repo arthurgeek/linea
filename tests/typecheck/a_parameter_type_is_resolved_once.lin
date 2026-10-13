@@ -1,0 +1,25 @@
+// A parameter's written type is resolved once, so each refusal inside it is
+// one report: the length that is not a number, the negative length, and the
+// type given the wrong number of arguments each appear once, at the trait
+// signature and at the implementation that writes it again.
+trait Tally {
+    fn tally(self: Self, counts: [Int64; "3"], marks: [Bool; -1], note: Option[Str, Str]) -> Int64
+}
+
+struct Board {}
+
+impl Tally for Board {
+    fn tally(_self: Self, _counts: [Int64; "3"], _marks: [Bool; -1], _note: Option[Str, Str]) -> Int64 {
+        0
+    }
+}
+
+fn total(_counts: [Int64; 1 + true]) -> Int64 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _board = Board {}
+    let _total = total([1])
+    0
+}

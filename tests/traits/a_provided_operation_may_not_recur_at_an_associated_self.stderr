@@ -1,0 +1,15 @@
+error[T-PolyRec]: this call instantiates `depth` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_recur_at_an_associated_self.lin:19:13
+   |
+19 |             self.up().depth(steps - 1) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `named_depth` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_recur_at_an_associated_self.lin:27:13
+   |
+27 |             Nested.named_depth(self.up(), steps - 1) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `walk` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_recur_at_an_associated_self.lin:35:13
+   |
+35 |             walk(self.up(), steps - 1) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

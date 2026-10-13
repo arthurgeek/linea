@@ -1,0 +1,17 @@
+import std.mem
+
+// The slice `shown` observes `scores` through the closure, so `scores` must
+// outlive `shown` even after the closure is released.
+fn main() -> UInt8 {
+    let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let listing = mem.Closure.open(
+        mem.system(),
+        [seen = scores] || -> mem.Slice[UInt64] where borrows(seen) {
+            seen.as_slice()
+        },
+    ).unwrap()
+    let shown = listing()
+    listing.release()
+    scores.release()
+    UInt8(shown.length())
+}

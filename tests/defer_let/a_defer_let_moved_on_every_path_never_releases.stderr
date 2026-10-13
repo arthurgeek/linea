@@ -1,0 +1,5 @@
+error[O-DeferDead]: `lamp` is moved on every path out, so the release `defer let` schedules never runs
+  --> tests/defer_let/a_defer_let_moved_on_every_path_never_releases.lin:20:5
+   |
+20 |     defer let lamp: Lamp = .{ id = 4 }
+   |     ^^^^^^^^^^^^^^ write `let` where the value is meant to move

@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_count_back_inside_a_projection_settles_the_site_index.lin:21:7
+   |
+21 |     g[0] = 99
+   |       ^ the length is 4, so the greatest count back is 4

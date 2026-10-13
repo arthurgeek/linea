@@ -1,0 +1,11 @@
+fn apply[T, F: fn(read value: T) -> T](value: T, selected: F) -> T where carries(value, selected) {
+    selected(value)
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    apply(UInt8(7), identity)
+}

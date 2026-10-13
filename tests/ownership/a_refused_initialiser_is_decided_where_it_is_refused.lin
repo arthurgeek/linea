@@ -1,0 +1,21 @@
+// `make("one")` is refused, so `made` holds nothing anyone built. The `match`
+// is not refused as a whole: its first arm builds a ticket, which `kept` then
+// owns and never settles.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn make(row: UInt8) -> Ticket {
+    Ticket.Seat(row)
+}
+
+fn main() -> UInt8 {
+    let _made = make("one")
+    let choice: UInt8 = 2
+    let _kept: Ticket = match choice {
+        0 => Ticket.Seat(1),
+        _ => nope,
+    }
+    0
+}

@@ -1,0 +1,15 @@
+error[T-Refine]: `?` declines a newtype's construction, and this call constructs none
+  --> tests/newtypes/only_a_newtypes_parse_may_decline.lin:12:14
+   |
+12 |     let _a = double?(5)
+   |              ^^^^^^^^^^ drop the `?`
+error[T-Refine]: `?` declines a newtype's construction, and this call constructs none
+  --> tests/newtypes/only_a_newtypes_parse_may_decline.lin:13:14
+   |
+13 |     let _b = UInt8?(30)
+   |              ^^^^^^^^^^ drop the `?`
+error[T-Refine]: `?` declines a newtype's construction, and this call constructs none
+  --> tests/newtypes/only_a_newtypes_parse_may_decline.lin:14:14
+   |
+14 |     let _c = Point?(1)
+   |              ^^^^^^^^^ drop the `?`

@@ -1,0 +1,13 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { x = 31 }
+    let seen = borrow point
+    let read Point { x: first } = *seen
+    let read Point { x: second } = point
+    if first == 31 && second == first {
+        0
+    } else {
+        1
+    }
+}

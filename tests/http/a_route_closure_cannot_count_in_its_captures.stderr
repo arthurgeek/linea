@@ -1,0 +1,7 @@
+error[N-Immutable]: `hits` is captured by a closure that cannot change it
+  --> tests/http/a_route_closure_cannot_count_in_its_captures.lin:11:13
+   |
+10 |         [sink hits = UInt64(0)] |inout _, request| {
+   |               ---- captured here; a capture changes only in an `inout` closure that owns it
+11 |             hits += 1
+   |             ^^^^ this binding cannot be assigned

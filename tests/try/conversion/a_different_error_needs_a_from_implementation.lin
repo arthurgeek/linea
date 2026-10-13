@@ -1,0 +1,26 @@
+// `?` converts a different error type only through a `From` implementation
+// for the function's error type. Without one, the `?` is refused, and the
+// diagnostic names the implementation that would convert it.
+enum Parse {
+    Malformed,
+}
+
+enum Io {
+    Refused,
+}
+
+fn parsed() -> Result[UInt8, Parse] {
+    Result.Ok(1)
+}
+
+fn go() -> Result[UInt8, Io] {
+    let n = parsed()?
+    Result.Ok(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Ok(n) => n,
+        Err(_) => 0,
+    }
+}

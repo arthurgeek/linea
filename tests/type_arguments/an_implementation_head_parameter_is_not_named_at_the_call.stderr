@@ -1,0 +1,5 @@
+error[T-Bound]: `swap` takes 1 type argument(s), and was given 2
+  --> tests/type_arguments/an_implementation_head_parameter_is_not_named_at_the_call.lin:16:27
+   |
+16 |     let swapped = box.swap[Bool, UInt8](4)
+   |                           ^^^^^^^^^^^^^ `T` belongs to the implementation of `Box`, and the receiver or the path settles it

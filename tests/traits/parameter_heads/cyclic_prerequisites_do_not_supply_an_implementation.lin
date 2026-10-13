@@ -1,0 +1,17 @@
+trait Route {
+    fn route(self: Self) -> UInt8
+}
+
+trait Allowed {}
+
+impl[T: Allowed] Route for T {
+    fn route(_self: T) -> UInt8 {
+        1
+    }
+}
+
+impl[T: Route] Allowed for T {}
+
+fn main() -> UInt8 {
+    Route.route(UInt8(0))
+}

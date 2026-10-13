@@ -1,0 +1,5 @@
+import bank
+
+fn main() -> UInt8 {
+    bank.total(.{ id = 1, balance = 0 })
+}

@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: only a struct, an enum or an alias gives a type parameter a default
+ --> tests/type_defaults/a_trait_gives_no_type_parameter_a_default.lin:1:17
+  |
+1 | trait _Source[T = UInt8] {
+  |                 ^ this declaration's type arguments are written or settled by a call

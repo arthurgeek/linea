@@ -1,0 +1,7 @@
+error[T-Bound]: `K` requires `Copyable`, and `Ticket` does not have that capability
+  --> tests/traits/a_provided_operation_value_is_refused_where_the_traits_argument_misses_its_capability.lin:26:71
+   |
+6  |     fn doubled(self: Self, sink unit: K) -> UInt8 where K: Copyable {
+   |                                                         - required by this `where` clause
+26 |     let doubled: fn(self: Booth, sink unit: Ticket) -> UInt8 = Priced.doubled
+   |                                                                       ^^^^^^^ use a type meeting the capability requirement, or relax the bound

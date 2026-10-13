@@ -1,0 +1,9 @@
+fn add_into(inout a: UInt8, b: UInt8) -> () {
+    a = a + b
+}
+
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    add_into(&x, x)
+    x
+}

@@ -1,0 +1,5 @@
+error[M-Export]: a generic designates no entry point until something instantiates it
+ --> tests/library/an_export_designates_one_entry_point/main.lin:1:11
+  |
+1 | export fn count[T](_it: T) -> Int32 {
+  |           ^^^^^ export a function that names the types it works on

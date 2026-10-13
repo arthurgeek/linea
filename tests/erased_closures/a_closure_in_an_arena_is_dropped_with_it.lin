@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Owner
+
+// A closure kept in an arena's memory owes nothing the arena's release does
+// not settle, so it may be dropped without a release, like a vector there.
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 1024)
+    let step: UInt8 = 2
+    let add = mem.Closure.open(
+        arena.handle(),
+        [sink step] |value: UInt8| -> UInt8 {
+            value + step
+        },
+    ).unwrap()
+    let answer = add(40)
+    arena.release()
+    answer
+}

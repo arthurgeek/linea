@@ -1,0 +1,22 @@
+// `Swap[UInt8, Bool]` is `Pair[Bool, UInt8]` and not `Pair[UInt8, Bool]`, so the
+// parameter carries two bounds and `Elem` is declared by both.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+alias Swap[A, B] = Pair[B, A]
+
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+fn _pass[C: Lookup[Swap[UInt8, Bool]] + Lookup[Pair[UInt8, Bool]]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    0
+}

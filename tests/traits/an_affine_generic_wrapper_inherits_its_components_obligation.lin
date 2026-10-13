@@ -1,0 +1,27 @@
+// An ordinary generic wrapper inherits its linear component obligation.
+// Destructuring the wrapper and then the component settles the whole value.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+trait Sealed {
+    fn seal(x: Self) -> UInt8
+}
+
+impl Sealed for Key {
+    fn seal(x: Self) -> UInt8 {
+        x.id
+    }
+}
+
+struct Holder[T: Sealed] {
+    held: T,
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Key] = .{ held = .{ id = 7 } }
+    let Holder { held: k } = h
+    let Key { id: n } = k
+    n
+}

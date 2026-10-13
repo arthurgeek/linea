@@ -1,0 +1,20 @@
+error[N-Unused]: `Point` is never used
+ --> tests/library/an_export_is_a_function/main.lin:1:15
+  |
+1 | export struct Point { x: Int32 }
+  |               ^^^^^ name it in an annotation, or remove it
+error[N-Unused]: `answer` is never used
+ --> tests/library/an_export_is_a_function/main.lin:3:12
+  |
+3 | export let answer: Int32 = 42
+  |            ^^^^^^ bind it as `_` if the value is not wanted
+error[M-Export]: only a function designates a foreign entry point
+ --> tests/library/an_export_is_a_function/main.lin:1:15
+  |
+1 | export struct Point { x: Int32 }
+  |               ^^^^^ export a function, which is what a caller calls
+error[M-Export]: only a function designates a foreign entry point
+ --> tests/library/an_export_is_a_function/main.lin:3:12
+  |
+3 | export let answer: Int32 = 42
+  |            ^^^^^^ export a function, which is what a caller calls

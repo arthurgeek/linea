@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `b`
+  --> tests/mem/a_buffer_disposed_on_one_path_only.lin:14:13
+   |
+14 |             if b.length() == 8 {
+   |             ^^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

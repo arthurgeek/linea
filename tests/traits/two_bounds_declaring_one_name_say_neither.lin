@@ -1,0 +1,38 @@
+// One trait bounded at two different arguments is two bounds, not one: each
+// may implement `Lookup` its own way and settle `Elem` differently, so
+// `C.Elem` names two declarations and nothing written here says which.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Lookup[UInt8] for Board {
+    type Elem = Bool
+
+    fn at(self: Board, i: UInt8) -> Bool {
+        self.cells[i] > 0
+    }
+}
+
+fn _either[C: Lookup[UInt64] + Lookup[UInt8]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let i: UInt64 = 0
+    Lookup.at(b, i)
+}

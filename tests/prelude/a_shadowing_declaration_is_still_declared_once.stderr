@@ -1,0 +1,5 @@
+error[N-Duplicate]: `Option` is already declared
+ --> tests/prelude/a_shadowing_declaration_is_still_declared_once.lin:7:6
+  |
+7 | enum Option {
+  |      ^^^^^^ a name is declared once

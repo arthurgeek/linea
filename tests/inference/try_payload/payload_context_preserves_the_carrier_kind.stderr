@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may return `Option[UInt64]`, and the function answers with `Result[UInt8, UInt8]`
+ --> tests/inference/try_payload/payload_context_preserves_the_carrier_kind.lin:6:25
+  |
+6 |     let value: UInt64 = some(7)?
+  |                         ^^^^^^^^ `?` returns from the function it is written in

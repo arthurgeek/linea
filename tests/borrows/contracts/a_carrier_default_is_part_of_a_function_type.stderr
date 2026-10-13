@@ -1,0 +1,14 @@
+error[T-Mismatch]: expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
+  --> tests/borrows/contracts/a_carrier_default_is_part_of_a_function_type.lin:45:17
+   |
+33 | fn run(call: fn(session: Session, tag: Str) -> Str where carries(session), session: Session) -> Str {
+   |        ---- expected because of this parameter
+45 |     let c = run(through_tag, session)
+   |                 ^^^^^^^^^^^ expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
+error[T-Mismatch]: expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`
+  --> tests/borrows/contracts/a_carrier_default_is_part_of_a_function_type.lin:46:23
+   |
+37 | fn run_plain(call: fn(session: Session, tag: Str) -> Str, session: Session) -> Str {
+   |              ---- expected because of this parameter
+46 |     let d = run_plain(through_tag, session)
+   |                       ^^^^^^^^^^^ expected `fn(read Session, read Str) -> Str where carries(#1)`, found `fn(read Session, read Str) -> Str where carries(#2)`

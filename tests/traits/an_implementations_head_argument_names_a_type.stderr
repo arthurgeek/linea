@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Bogus`
+  --> tests/traits/an_implementations_head_argument_names_a_type.lin:13:12
+   |
+13 | impl Coins[Bogus] {
+   |            ^^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Missing`
+  --> tests/traits/an_implementations_head_argument_names_a_type.lin:19:21
+   |
+19 | impl Zero for Coins[Missing] {
+   |                     ^^^^^^^ no type with this name is declared here

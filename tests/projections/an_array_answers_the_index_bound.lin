@@ -1,0 +1,27 @@
+// An array holds elements a bracket reaches, so it implements `Index[UInt64]`
+// -- the compiler provides that implementation, because no module declares an
+// array and none could write one for it. It is a row of the one
+// implementation relation, so one bounded body takes both containers: the
+// implementation written for `Grid` and the one provided for `[UInt8; 3]`
+// discharge the same bound through the same lookup.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn holds[C: Index[UInt64]](_c: C) -> UInt8 {
+    4
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 3] = [1, 2, 3]
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    holds(a) + holds(g) + a[2]
+}

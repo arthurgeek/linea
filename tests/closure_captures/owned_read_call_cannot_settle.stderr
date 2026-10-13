@@ -1,0 +1,14 @@
+error[O-Leak]: `finish` (a linear closure) is still owned when this path leaves
+  --> tests/closure_captures/owned_read_call_cannot_settle.lin:6:9
+   |
+6  |     let finish = [sink key] || {
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+11 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
+error[O-Move]: `key` is a lend, and this takes it
+ --> tests/closure_captures/owned_read_call_cannot_settle.lin:7:22
+  |
+7 |         let { id } = key
+  |                      ^^^ `copy` it, or use the plain form of the construct, which does take the value

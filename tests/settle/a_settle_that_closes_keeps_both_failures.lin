@@ -1,0 +1,90 @@
+// A failure that holds an open resource settles by closing it, and closing can
+// fail too. The reason keeps both failures, so neither is lost when `?`
+// propagates it.
+import std.io
+import std.release
+
+@(copyable, derive(Debug))
+enum CloseError {
+    Jammed,
+}
+
+// A door must be closed. `close` reports a jam; `Release` closes the door and
+// ignores one, because `Release` returns nothing.
+@linear
+struct Door {
+    jammed: Bool,
+}
+
+impl Door {
+    fn close(sink self: Self) -> Result[(), CloseError] {
+        let Door { jammed } = self
+        if jammed {
+            return .Err(.Jammed)
+        }
+        return .Ok({})
+    }
+}
+
+impl Release for Door {
+    fn release(sink self: Self) -> () {
+        match self.close() {
+            _ => {},
+        }
+    }
+}
+
+@(copyable, derive(Debug))
+enum LockError {
+    WrongKey,
+}
+
+// A refused lock hands the door back, still open.
+@derive(Release)
+struct LockFailure {
+    door: Door,
+    error: LockError,
+}
+
+@(copyable, derive(Debug))
+struct LockProblem {
+    lock: LockError,
+    close: Option[CloseError],
+}
+
+// Settling the failure closes the door and records a failed close beside the
+// lock error.
+impl release.Settle for LockFailure {
+    type Reason = LockProblem
+
+    fn settle(sink self: Self) -> LockProblem {
+        let LockFailure { door, error } = self
+        let close: Option[CloseError] = match door.close() {
+            Ok(_) => .None,
+            Err(problem) => .Some(problem),
+        }
+        return .{ lock = error, close }
+    }
+}
+
+fn lock(sink door: Door, key: UInt8) -> Result[(), LockFailure] {
+    if key != 7 {
+        return .Err(.{ door, error = .WrongKey })
+    }
+    return .Ok(door.close().unwrap())
+}
+
+fn secure(jammed: Bool, key: UInt8) -> Result[(), LockProblem] {
+    lock(.{ jammed }, key).settled()?
+    return .Ok({})
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let smooth = secure(false, 3)
+    io.println("smooth door: {smooth:?}")?
+    let jammed = secure(true, 3)
+    io.println("jammed door: {jammed:?}")?
+    let locked = secure(false, 7)
+    io.println("right key: {locked:?}")?
+    return .Ok(0)
+}

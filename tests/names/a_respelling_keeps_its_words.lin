@@ -1,0 +1,48 @@
+import std.text
+
+// The suggested name keeps the words of the one written: digits stay apart
+// where two runs of them meet, and an acronym stays one word. A respelling
+// that is not a usable name is not offered, and neither is one that would be
+// declared twice where the name is -- `limit` beside the function `limit`,
+// `text` beside the import -- while `Held` beside a type parameter `held` is.
+enum Arch {
+    x86_64,
+    not_found,
+}
+
+fn IPv4Addr() -> UInt8 {
+    4
+}
+
+fn XMLHttpRequest() -> UInt8 {
+    1
+}
+
+fn pick[self](_value: self) -> UInt8 {
+    0
+}
+
+fn limit() -> UInt8 {
+    3
+}
+
+let LIMIT: UInt8 = 2
+
+fn Text() -> UInt8 {
+    match text.parse_float64("1") {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+}
+
+enum Wrap[held] {
+    Held(held),
+    Empty,
+}
+
+fn main() -> UInt8 {
+    let _arch = Arch.x86_64
+    let _missing = Arch.not_found
+    let _wrapped: Wrap[UInt8] = .Empty
+    IPv4Addr() + XMLHttpRequest() + pick(true) + limit() + LIMIT + Text() - 11
+}

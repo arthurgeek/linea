@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/arrays/inferred_length/borrowed_elements_keep_their_owner.lin:4:5
+  |
+4 |     views
+  |     ^^^^^ escape observations only from the signature's declared sources

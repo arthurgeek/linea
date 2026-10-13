@@ -1,0 +1,2 @@
+Point { x: 1, word: raw }
+Point { x: 1, word: debug }

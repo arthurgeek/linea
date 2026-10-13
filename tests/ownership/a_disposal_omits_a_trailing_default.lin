@@ -1,0 +1,19 @@
+// A default carries no obligation, so a call that omits it hands over exactly
+// the values the linear parameters ask for: the `sink` is filled by name, the
+// trailing `read` is filled from the declaration, and the value is consumed
+// once. The constant reaches the body, which is what the answer carries.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn burn(sink k: Key, weight: UInt8 = 3) -> UInt8 {
+    match k {
+        Forged(n) => n * weight,
+    }
+}
+
+fn main() -> UInt8 {
+    let key: Key = .Forged(7)
+    burn(k: key)
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `Item` takes 0 type argument(s), and was given 1
+  --> tests/traits/a_settled_reference_takes_no_type_arguments.lin:22:30
+   |
+22 | fn take[W: Measure](w: W) -> W.Item[UInt8] {
+   |                              ^^^^^^ this type takes no arguments

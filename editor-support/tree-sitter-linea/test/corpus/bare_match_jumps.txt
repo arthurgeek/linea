@@ -1,0 +1,50 @@
+==================
+Bare jumps terminate at match arm commas
+==================
+
+fn walk() -> () {
+    loop {
+        match item {
+            None => break,
+            Some(_) => continue,
+        }
+    }
+    match item {
+        None => return,
+        Some(_) => {},
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (block_statement
+        (loop_expression
+          (block
+            (block_statement
+              (match_expression
+                (identifier)
+                (match_arm
+                  (type_identifier)
+                  (break_expression))
+                (match_arm
+                  (variant_pattern
+                    (type_identifier)
+                    (wildcard_pattern))
+                  (continue_expression)))))))
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (type_identifier)
+            (return_expression))
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (wildcard_pattern))
+            (block)))))))

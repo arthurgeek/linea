@@ -1,0 +1,5 @@
+error[T-ExternRuntime]: the runtime gives `linea_close` the signature `fn(Int32) -> Int64`
+ --> tests/library/a_runtime_symbol_keeps_the_runtimes_signature/main.lin:1:11
+  |
+1 | extern fn linea_close(fd: Int64, flags: Int64) -> UInt8
+  |           ^^^^^^^^^^^ declare it with the runtime's parameter types, conventions and result

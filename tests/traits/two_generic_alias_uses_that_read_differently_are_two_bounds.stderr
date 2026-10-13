@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Lookup` and `Lookup` both declare `Elem`, and a type carrying both bounds reads it through neither
+  --> tests/traits/two_generic_alias_uses_that_read_differently_are_two_bounds.lin:16:76
+   |
+16 | fn _pass[C: Lookup[Swap[UInt8, Bool]] + Lookup[Pair[UInt8, Bool]]](sink v: C.Elem) -> C.Elem {
+   |                                                                            ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `Lookup` and `Lookup` both declare `Elem`, and a type carrying both bounds reads it through neither
+  --> tests/traits/two_generic_alias_uses_that_read_differently_are_two_bounds.lin:16:87
+   |
+16 | fn _pass[C: Lookup[Swap[UInt8, Bool]] + Lookup[Pair[UInt8, Bool]]](sink v: C.Elem) -> C.Elem {
+   |                                                                                       ^^^^^^ bound it by one of them

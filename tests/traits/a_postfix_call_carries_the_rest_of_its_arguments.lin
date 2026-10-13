@@ -1,0 +1,29 @@
+// The receiver becomes the first argument and the rest follow it, in the order
+// they were written. A form that took only the receiver would be a different
+// construct that happened to work on operations of one parameter.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn beyond(x: Self, floor: UInt8, ceiling: UInt8) -> UInt8
+}
+
+impl Measure for Account {
+    fn beyond(x: Self, floor: UInt8, ceiling: UInt8) -> UInt8 {
+        if x.balance < floor {
+            floor
+        } else {
+            if x.balance > ceiling {
+                ceiling
+            } else {
+                x.balance
+            }
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 9 }
+    a.beyond(2, 5) + Measure.beyond(a, 2, 20)
+}

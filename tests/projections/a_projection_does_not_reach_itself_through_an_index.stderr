@@ -1,0 +1,5 @@
+error[T-Projection]: a projection whose expansion reaches itself is refused: Cycle -> Cycle
+  --> tests/projections/a_projection_does_not_reach_itself_through_an_index.lin:13:20
+   |
+13 |         self.cells[self[i]]
+   |                    ^^^^^^^ this is where the chain returns to an implementation already on it

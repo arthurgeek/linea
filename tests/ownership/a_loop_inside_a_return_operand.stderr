@@ -1,0 +1,28 @@
+error[O-Loop]: `k` is moved inside a loop, so this would run more than once
+  --> tests/ownership/a_loop_inside_a_return_operand/main.lin:13:17
+   |
+13 |         release(k)
+   |                 ^ consume it outside the loop, or restructure until it is consumed once
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_loop_inside_a_return_operand/main.lin:12:5
+   |
+11 |     let k = mint(1)
+   |         - acquired here
+12 |     return loop {
+   |     ^^^^^^ still owned here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it
+error[O-Loop]: `k` is moved inside a loop, so this would run more than once
+  --> tests/ownership/a_loop_inside_a_return_operand/main.lin:21:17
+   |
+21 |         release(k)
+   |                 ^ consume it outside the loop, or restructure until it is consumed once
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_loop_inside_a_return_operand/main.lin:19:9
+   |
+19 |     let k = mint(1)
+   |         ^ never settled on the path that reaches the end of this block
+24 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

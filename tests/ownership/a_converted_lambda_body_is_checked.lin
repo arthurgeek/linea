@@ -1,0 +1,9 @@
+@linear
+enum Key {
+    Held,
+}
+
+fn main() -> UInt8 {
+    let _drop: fn(sink _value: Key) -> () = |sink _value| {}
+    0
+}

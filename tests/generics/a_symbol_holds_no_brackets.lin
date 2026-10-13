@@ -1,0 +1,20 @@
+// A symbol carries what a function was instantiated with, and an argument may
+// itself be an instantiation. Spelled the way a diagnostic spells one, that
+// put `[`, `]` and a comma into a name the assembler reads -- so a program
+// using any generic at a generic argument could not be built.
+//
+// The pool asked has to be the one lowering extended, too: substitution mints
+// handles the checker never saw, and asking the checker's pool about one is an
+// index past its end.
+fn ident[T: Copyable](v: T) -> T {
+    copy(v)
+}
+
+fn main() -> UInt8 {
+    let held: Option[UInt8] = .Some(3)
+    let same = ident(held)
+    match same {
+        None => 0,
+        Some(n) => n,
+    }
+}

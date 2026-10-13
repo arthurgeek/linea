@@ -1,0 +1,10 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    var values: collections.Map[UInt8, UInt8, mem.SystemAllocator] = collections.Map.new()
+    collections.Map.insert(&values, 1, 7).unwrap().release()
+    let item = values.get(1).unwrap()
+    values.release()
+    *item
+}

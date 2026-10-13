@@ -1,0 +1,15 @@
+// An overlap witness rebuilds a nested first argument while retaining the
+// substitution for the second argument of the same constructor.
+trait Mark[phantom A, phantom B] {}
+
+struct Wrap[T] { value: T }
+
+struct Pair[A, B] { a: A, b: B }
+
+impl[T, U] Mark[Pair[T, Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[U]]]]]]]]]]]]]]]]]]]]]]]]], UInt8] for Pair[T, U] {}
+
+impl[S, V] Mark[Pair[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[V]]]]]]]]]]]]]]]]]]]]]]]], S], V] for Pair[S, V] {}
+
+fn main() -> UInt8 {
+    0
+}

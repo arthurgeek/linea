@@ -1,0 +1,29 @@
+// A trait reference has one spelling in every position, including through an
+// imported module namespace.
+import protocol
+
+trait Child: protocol.Parent {}
+
+struct Item {
+    value: UInt8,
+}
+
+derive protocol.Marker for Item
+
+impl protocol.Parent for Item {
+    fn value(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+impl Child for Item {}
+
+fn accepts[T: protocol.Parent, Item](value: T, _item: Item) -> UInt8
+where Item: protocol.Parent {
+    protocol.Parent.value(value)
+}
+
+fn main() -> UInt8 {
+    let item: Item = .{ value = 7 }
+    accepts(item, item)
+}

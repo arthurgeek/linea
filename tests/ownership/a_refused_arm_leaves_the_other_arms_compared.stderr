@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/a_refused_arm_leaves_the_other_arms_compared.lin:18:14
+   |
+18 |         0 => lookup(ticket),
+   |              ^^^^^^ no binding with this name is in scope
+error[O-Merge]: the paths here disagree about `ticket`
+  --> tests/ownership/a_refused_arm_leaves_the_other_arms_compared.lin:17:5
+   |
+17 |     match choice {
+   |     ^^^^^^^^^^^^^^ consume it on the other path too, or on neither

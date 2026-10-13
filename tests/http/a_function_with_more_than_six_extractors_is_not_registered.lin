@@ -1,0 +1,30 @@
+// An endpoint reads at most six extractors, so a seventh parameter leaves the
+// function without an `Endpoint`.
+import std.http
+import std.mem
+
+@derive(Release)
+struct Word {
+    text: Str,
+}
+
+impl http.Extract[mem.SystemAllocator] for Word {
+    fn extract(request: http.Request) -> Result[Word, http.Error] where carries(request) {
+        .Ok(.{ text = request.header("X-Word").unwrap_or("") })
+    }
+}
+
+fn crowded(a: Word, b: Word, c: Word, d: Word, e: Word, f: Word, g: Word, request: http.Request) -> Result[http.Response, http.Error] where carries(request) {
+    http.text(request, "{a.text}{b.text}{c.text}{d.text}{e.text}{f.text}{g.text}")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", crowded)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

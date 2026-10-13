@@ -1,0 +1,6 @@
+enum Failure { Refused(UInt8) }
+
+fn main() -> UInt8 {
+    let _wrap: fn(read value: UInt8) -> Failure = Failure.Refused
+    0
+}

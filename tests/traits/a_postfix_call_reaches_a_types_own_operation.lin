@@ -1,0 +1,39 @@
+// `a.f()` reaches what the type itself declares, not only what a trait does.
+//
+// It used to reach a trait's operations and nothing else, so `s.length()` was
+// `[T-UnknownField]` while `Str.length(s)` worked -- the harder case supported
+// and the common one not. Nothing recorded that as a decision.
+//
+// The receiver decides which operations are in play, so it is checked first;
+// then the type's own are looked for beside the traits rather than before
+// them, because a name declared twice is a question and not a precedence.
+struct Counter {
+    n: UInt8,
+}
+
+impl Counter {
+    // Private, and reached only through the postfix form. The unused rule has
+    // to see that as a mention, or a programmer is told to delete a function
+    // they are calling.
+    fn doubled(c: Counter) -> UInt8 {
+        c.n * 2
+    }
+
+    fn taken(sink c: Counter) -> UInt8 {
+        let Counter { n: v } = c
+        v
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Counter = .{ n = 3 }
+    let b: Counter = .{ n = 4 }
+
+    // A `read` receiver and a `sink` one: both are ordinary parameters, and the
+    // form says nothing about which.
+    let sum: UInt8 = a.doubled() + b.taken()
+
+    // And the library's own, which is what this was noticed through.
+    let text: Str = "Olá"
+    UInt8(text.length()) + sum
+}

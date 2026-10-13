@@ -1,0 +1,14 @@
+// A region that closes mid-file leaves the printer at the start of a line. One
+// blank line separates declarations; the region must not leave state behind
+// that makes the next separator stack a second one.
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    // linea fmt: off
+    let   y   =   x
+    // linea fmt: on
+    y + g()
+}
+
+fn g() -> UInt8 {
+    1
+}

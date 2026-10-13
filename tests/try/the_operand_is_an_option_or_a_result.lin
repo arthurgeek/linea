@@ -1,0 +1,21 @@
+// [T-Try]. `?` is nominal over exactly two types, so a number is not one of
+// them however plausible an early return over it would be.
+//
+// The operand is a call rather than a literal: a numeric literal takes no suffix at
+// all, so `7?` never reaches this rule and says something about the grammar
+// instead.
+fn plain() -> UInt8 {
+    7
+}
+
+fn go() -> Option[UInt8] {
+    let n = plain()?
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

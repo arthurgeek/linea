@@ -1,0 +1,8 @@
+// A module may bind a name to a value. It is the `let` the language already
+// has, in a scope where nothing can run -- so the only rule it gains is that
+// its initialiser must be a constant expression.
+pub let limit: UInt8 = 200
+
+fn main() -> UInt8 {
+    limit
+}

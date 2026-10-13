@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Countr`
+  --> tests/decl/an_undefined_base_leaves_its_member_used.lin:14:16
+   |
+14 |         .{ n = Countr.start() }
+   |                ^^^^^^ no binding with this name is in scope

@@ -1,0 +1,13 @@
+// `Ticket` is opaque outside `box`, so neither literal can build one here.
+// Written with a leading `.` against an annotation or with its type name, a
+// refused construction builds nothing, so nothing is left owed.
+import box
+
+use box.Ticket
+
+fn main() -> UInt8 {
+    let _forged: Ticket = .{ seat = 3 }
+    let _written = Ticket { seat = 4 }
+    let real = Ticket.issue(5)
+    real.redeem()
+}

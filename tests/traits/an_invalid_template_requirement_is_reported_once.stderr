@@ -1,0 +1,5 @@
+error[T-Template]: `Lookup` takes 1 type argument(s), and this component requirement gives 0
+ --> tests/traits/an_invalid_template_requirement_is_reported_once.lin:9:49
+  |
+9 | template impl Inspect where reflect.components: Lookup {
+  |                                                 ^^^^^^ supply exactly the type arguments the required trait declares

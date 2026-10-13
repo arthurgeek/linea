@@ -1,0 +1,27 @@
+enum RenderError { Allocation(UInt8) }
+
+fn fetch(mode: UInt8) -> Result[Result[UInt8, RenderError], UInt8] {
+    if mode == 0 {
+        .Err(7)
+    } else if mode == 1 {
+        .Ok(.Err(.Allocation(9)))
+    } else {
+        .Ok(.Ok(11))
+    }
+}
+
+fn reading(mode: UInt8) -> Result[UInt8, RenderError] {
+    let value = fetch(mode).map_err(.Allocation)??
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    let outer = match reading(0) { Ok(_) => false, Err(error) => match error { Allocation(code) => code == 7 } }
+    let inner = match reading(1) { Ok(_) => false, Err(error) => match error { Allocation(code) => code == 9 } }
+    let success = match reading(2) { Ok(value) => value == 11, Err(_) => false }
+    if outer && inner && success {
+        0
+    } else {
+        1
+    }
+}

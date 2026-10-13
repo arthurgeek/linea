@@ -1,0 +1,30 @@
+trait Route[T] {
+    fn route(self: Self, target: T) -> UInt8
+}
+
+impl[T] Route[UInt8] for T {
+    fn route(_self: T, target: UInt8) -> UInt8 {
+        target
+    }
+}
+
+struct Parcel { value: UInt8 }
+
+impl Route[Bool] for Parcel {
+    fn route(self: Parcel, target: Bool) -> UInt8 {
+        if target {
+            self.value
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let parcel: Parcel = .{ value = 7 }
+    if parcel.route(UInt8(3)) == 3 && parcel.route(true) == 7 {
+        0
+    } else {
+        1
+    }
+}

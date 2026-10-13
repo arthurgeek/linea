@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: a type parameter without a default cannot follow one that has a default
+ --> tests/type_defaults/a_default_argument_trails_the_parameters_without_one.lin:1:25
+  |
+1 | struct _Pair[A = UInt8, B] {
+  |                         ^ give it a default, or declare it before the defaulted parameters

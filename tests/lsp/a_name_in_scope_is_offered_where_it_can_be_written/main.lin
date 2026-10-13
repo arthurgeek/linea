@@ -1,0 +1,12 @@
+// What could be written at a point is what the resolver's chain makes visible
+// there: the parameters of the function the cursor is in, the locals declared
+// around it, the module's own declarations, and the names the compiler puts in
+// every scope. Each carries the type the checker settled, where it settled one.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = add(1, 2)
+    total
+}

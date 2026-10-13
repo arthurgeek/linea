@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/borrows/contracts/an_ambiguous_trait_signature_is_reported_once.lin:4:8
+  |
+4 |     fn choose(self: Self, left: Str, right: Str) -> Str
+  |        ^^^^^^ the result may borrow from `self`, `left` or `right`; add `where borrows(self)`, `where borrows(left)` or `where borrows(right)`, or list several sources in one clause

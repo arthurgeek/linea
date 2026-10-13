@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Give[Pair[Bool, Bool]]` for `Holder[Bool]`
+  --> tests/traits/two_families_their_arguments_alone_bring_together.lin:22:9
+   |
+16 | impl[T] Give[Pair[T, Bool]] for Holder[T] {
+   |         ---- the other implementation
+22 | impl[U] Give[Pair[Bool, U]] for Holder[U] {
+   |         ^^^^ no instantiation may answer to two implementations of one trait

@@ -1,0 +1,9 @@
+// An import binds a name in the file that wrote it, so two files of one module
+// may each import the same dependency -- and must, because neither can see the
+// other's. Binding at module scope made the second one a duplicate of the
+// first, which left a module of several files unable to share a dependency.
+import util
+
+fn main() -> UInt8 {
+    util.one() + helper()
+}

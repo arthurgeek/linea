@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"fn main( )->UInt8{\n      let    n:UInt8=1\n    n\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":"main.lin"},"options":{"tabSize":4,"insertSpaces":true}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"main.lin","version":2},"contentChanges":[{"text":"fn main() -> UInt8 {\n"}]}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/formatting","params":{"textDocument":{"uri":"main.lin"},"options":{"tabSize":4,"insertSpaces":true}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

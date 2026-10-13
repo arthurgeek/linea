@@ -1,0 +1,19 @@
+program decls=3
+  decl struct_ "Point" tokens 3..15
+    field "x" : UInt8
+    field "y" : UInt8
+  decl enum_ "Wrapper" tokens 15..26
+    variant "Has" : Point
+    variant "None"
+  decl function "main" tokens 26..51
+    returns UInt8
+    expr %9 block tokens 32..51
+      expr %8 match_ tokens 33..50
+        expr %1 field tokens 34..37 "None"
+          expr %0 name_ref tokens 34..35 "Wrapper"
+        expr %4 call tokens 38..42
+          expr %2 name_ref tokens 38..39 "Has"
+          expr %3 name_ref tokens 40..41 "_p"
+        expr %5 int_literal tokens 43..44 "0"
+        expr %6 name_ref tokens 45..46 "None"
+        expr %7 int_literal tokens 47..48 "7"

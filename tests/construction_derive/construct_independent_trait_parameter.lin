@@ -1,0 +1,45 @@
+import std.mem
+
+trait Field[A: Allocator] {
+    fn field(allocator: A) -> Self where carries(allocator)
+}
+
+impl[A: Allocator] Field[A] for UInt64 {
+    fn field(allocator: A) -> UInt64 where carries(allocator) {
+        let _handle = copy(allocator)
+        7
+    }
+}
+
+trait Build[A: Allocator] {
+    fn build(allocator: A) -> Self where carries(allocator)
+}
+
+template impl[A: Allocator] Build[A] where
+    reflect.target: struct,
+    reflect.components: Field[A],
+{
+    fn build(allocator: A) -> Self where carries(allocator) {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let field: component.Type = Field.field(allocator)
+                field
+            },
+            {},
+        )
+    }
+}
+
+struct Holder[T] { first: T, second: T }
+
+derive[A: Allocator, T: Field[A]] Build[A] for Holder[T]
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt64] = Build.build(mem.system())
+    return if holder.first == 7 && holder.second == 7 {
+        0
+    } else {
+        1
+    }
+}

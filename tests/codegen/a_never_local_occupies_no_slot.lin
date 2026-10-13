@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _value: Never = panic("stop")
+    0
+}

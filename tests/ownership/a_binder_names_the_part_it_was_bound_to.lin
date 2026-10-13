@@ -1,0 +1,21 @@
+// The other direction of the same question, so the rule is pinned at both
+// ends: `&e.a` and the name bound to `a` are one place, and one write through
+// the first changes what the second reads.
+struct Inner {
+    v: UInt8,
+}
+
+struct Pair {
+    a: Inner,
+    b: Inner,
+}
+
+fn grow(inout s: Inner, p: Inner) -> UInt8 {
+    s = .{ v = 9 }
+    p.v
+}
+
+fn main() -> UInt8 {
+    var e: Pair = .{ a = .{ v = 1 }, b = .{ v = 2 } }
+    match read e { Pair { a: x, b: y } => grow(&e.a, x) + y.v }
+}

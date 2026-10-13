@@ -1,0 +1,11 @@
+pub struct Timeout {
+    seconds: UInt8,
+}
+
+pub fn wait(seconds: UInt8) -> Result[UInt8, Timeout] {
+    if seconds > 30 {
+        .Err(Timeout { seconds = seconds })
+    } else {
+        .Ok(seconds)
+    }
+}

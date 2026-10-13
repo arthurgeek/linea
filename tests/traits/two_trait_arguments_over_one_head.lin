@@ -1,0 +1,35 @@
+// Two implementations of one trait for one type, told apart by the trait's
+// arguments. Different keys, so they coexist with nothing compared for overlap
+// -- which is the whole reason a trait's identity holds its arguments.
+//
+// Declared and not called, because which of the two a call reaches is settled
+// at the call and is a separate question. What this records is that both may
+// be written.
+trait _Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl _Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count + t
+    }
+}
+
+impl _Holds[Bool] for Coins {
+    fn held(x: Self, t: Bool) -> UInt8 {
+        if t {
+            x.count
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    c.count
+}

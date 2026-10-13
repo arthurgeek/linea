@@ -1,0 +1,22 @@
+@linear
+struct Ledger {
+    entries: UInt8,
+}
+
+impl Ledger {
+    fn close(sink self: Self) -> UInt8 {
+        let Ledger { entries } = self
+        entries
+    }
+}
+
+fn main() -> UInt8 {
+    var ledger = Ledger { entries = 0 }
+    var record = inout [inout ledger] || {
+        ledger.entries += 1
+    }
+    &record()
+    let closed = ledger.close()
+    &record()
+    closed
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `H` requires `Discardable`, because a value of it may be dropped without a release, and this closure captures `seen`, a `Vec[UInt64, mem.SystemAllocator]` that must be released
+  --> tests/erased_closures/a_route_handler_captures_nothing_to_release.lin:10:31
+   |
+10 |     let _registered = &router.route_raw(
+   |                               ^^^^^^^^^ capture `seen` by `read`, or build it in memory that is dropped with its owner, such as an arena's

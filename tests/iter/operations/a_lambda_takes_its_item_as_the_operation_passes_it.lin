@@ -1,0 +1,12 @@
+// `any` hands each item to its predicate `sink`, so a lambda given to `any`
+// takes its parameter `sink` too. The report names the convention the lambda
+// wrote and the one `any` passes.
+fn main() -> UInt8 {
+    let scores = [UInt64(4), 8, 15]
+    let high = scores.as_slice().any(|score| *score > 10)
+    if high {
+        0
+    } else {
+        1
+    }
+}

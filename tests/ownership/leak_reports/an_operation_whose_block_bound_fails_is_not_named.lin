@@ -1,0 +1,43 @@
+// `dispose` is declared in a block for `Pair[T]` where `T` implements
+// `Release`. A `Pair[Parcel]` does not meet that bound, so the call would be
+// refused, and the help does not name it.
+@linear
+struct Crate {
+    kilograms: UInt8,
+}
+
+impl Release for Crate {
+    fn release(sink self: Self) -> () {
+        let Crate { kilograms: _ } = self
+    }
+}
+
+@linear
+struct Parcel {
+    grams: UInt8,
+}
+
+@linear
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl[T: Release] Pair[T] {
+    pub fn dispose(sink self: Self) -> () {
+        let Pair { first, second } = self
+        first.release()
+        second.release()
+    }
+}
+
+fn count(parcels: Pair[Parcel]) -> UInt8 {
+    parcels.first.grams + parcels.second.grams
+}
+
+fn main() -> UInt8 {
+    let crates: Pair[Crate] = .{ first = Crate { kilograms = 4 }, second = Crate { kilograms = 5 } }
+    crates.dispose()
+    let parcels: Pair[Parcel] = .{ first = Parcel { grams = 1 }, second = Parcel { grams = 2 } }
+    count(parcels)
+}

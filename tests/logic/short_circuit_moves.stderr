@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/logic/short_circuit_moves.lin:15:8
+   |
+15 |     if ready && release(k) {
+   |        ^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

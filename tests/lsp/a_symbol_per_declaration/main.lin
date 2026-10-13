@@ -1,0 +1,35 @@
+// One declaration of every kind a file can hold, so the outline has to name
+// each of them and say what it is.
+import counters
+
+use counters.one
+
+pub let limit: UInt8 = 9
+
+struct Account {
+    balance: UInt8,
+}
+
+enum Colour {
+    Red,
+    Green,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = limit }
+    let c: Colour = Colour.Red
+    match c {
+        Red => Measure.of(a) + one(),
+        Green => 0,
+    }
+}

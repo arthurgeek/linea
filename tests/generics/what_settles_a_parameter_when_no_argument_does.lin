@@ -1,0 +1,25 @@
+// The Boolean result cannot constrain T. With no typed argument, numeric
+// literals default to Int64; a typed argument supplies their context instead.
+fn same[T: Equatable](a: T, b: T) -> Bool {
+    a == b
+}
+
+fn main() -> UInt8 {
+    // Both wait, so both default, and the call is over `Int64`.
+    let plain = same(6, 6)
+
+    // Still both, through arithmetic and parentheses: what waits is decided by
+    // the shape and not by how deeply it is wrapped.
+    let computed = same(4 + 4, (8))
+
+    // A `UInt8` beside a literal settles the parameter, and the literal takes
+    // it — the same call, one argument different.
+    let narrow: UInt8 = 8
+    let settled = same(narrow, 8)
+
+    if plain && computed && settled {
+        0
+    } else {
+        1
+    }
+}

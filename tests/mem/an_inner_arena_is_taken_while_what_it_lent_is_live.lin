@@ -1,0 +1,27 @@
+// An allocation observes the inner arena itself, not only the outer slab.
+// Keeping the outer arena alive does not permit releasing the inner owner.
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let outer = Arena.open(system(), 4096)
+    let inner = Arena.open(outer.handle(), 1024)
+    let a = inner.handle()
+
+    match a.acquire(64) {
+        Err(_) => {
+            inner.release()
+            outer.release()
+            1
+        },
+        Ok(b) => {
+            inner.release()
+            b.release()
+            outer.release()
+            0
+        },
+    }
+}

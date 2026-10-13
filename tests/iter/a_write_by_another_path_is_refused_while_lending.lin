@@ -1,0 +1,15 @@
+// The walk's binder stands for every position it will reach, because which one
+// it is on is not known statically -- so a write to any position of what is
+// walked is a write to a place the binder may be naming. The imprecision is in
+// the place rather than in the comparison: the relation that answers this is
+// the one [N-Aliased] asks between two arguments of one call, and the answer is
+// settled while the program is checked rather than while it runs.
+fn main() -> UInt8 {
+    var xs: [UInt64; 3] = [1, 2, 3]
+    var t: UInt64 = 0
+    for read x in xs {
+        xs[2] = 100
+        t += x
+    }
+    UInt8(t)
+}

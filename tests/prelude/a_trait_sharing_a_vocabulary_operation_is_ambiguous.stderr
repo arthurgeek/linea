@@ -1,0 +1,20 @@
+error[N-Ambiguous]: `Recycle` and `Release` both declare `release` for `Bottle`
+  --> tests/prelude/a_trait_sharing_a_vocabulary_operation_is_ambiguous.lin:73:18
+   |
+73 |     let refund = bottle.release()
+   |                  ^^^^^^^^^^^^^^ write `Recycle.release(…)` or `Release.release(…)`, which says which trait it goes through
+error[N-Ambiguous]: `Pour` and `Into` both declare `into` for `Bottle`
+  --> tests/prelude/a_trait_sharing_a_vocabulary_operation_is_ambiguous.lin:74:18
+   |
+74 |     let poured = bottle.into()
+   |                  ^^^^^^^^^^^ write `Pour.into(…)` or `Into.into(…)`, which says which trait it goes through
+error[N-Ambiguous]: `Journal` and `Writer` both declare `write_str` for `Log`
+  --> tests/prelude/a_trait_sharing_a_vocabulary_operation_is_ambiguous.lin:76:6
+   |
+76 |     &log.write_str("recycled").unwrap()
+   |      ^^^^^^^^^^^^^ write `Journal.write_str(…)` or `Writer.write_str(…)`, which says which trait it goes through
+error[N-Ambiguous]: `Recycle` and `Release` both declare `release` for `Bottle`
+  --> tests/prelude/a_trait_sharing_a_vocabulary_operation_is_ambiguous.lin:77:5
+   |
+77 |     bottle.release()
+   |     ^^^^^^^^^^^^^^ write `Recycle.release(…)` or `Release.release(…)`, which says which trait it goes through

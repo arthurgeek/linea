@@ -1,0 +1,19 @@
+trait Make[A] {
+    fn make(_input: A) -> Self where carries()
+}
+
+impl[A] Make[A] for Bool {
+    fn make(_input: A) -> Bool where carries() {
+        true
+    }
+}
+
+fn main() -> UInt8 {
+    let first: Bool = Make.make(UInt8(7))
+    let second: Bool = Make.make(false)
+    if first && second {
+        0
+    } else {
+        1
+    }
+}

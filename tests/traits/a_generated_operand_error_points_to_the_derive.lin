@@ -1,0 +1,19 @@
+trait Remainder {
+    fn remainder(self: Self) -> UInt8
+}
+
+template impl Remainder {
+    fn remainder(self: Self) -> UInt8 {
+        let _result = self.value % self.value
+        0
+    }
+}
+
+struct Mark[T] { value: T }
+
+derive[T: Discardable] Remainder for Mark[T]
+
+fn main() -> UInt8 {
+    let mark: Mark[Float64] = .{ value = 5.5 }
+    Remainder.remainder(mark)
+}

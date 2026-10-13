@@ -1,0 +1,12 @@
+// `into_captures` consumes the closure, so nothing can change `count`
+// through the recovered observation, and `count` may be read beside it.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    &tick()
+    let { count: lent } = tick.into_captures()
+    let seen = count
+    seen + *lent
+}

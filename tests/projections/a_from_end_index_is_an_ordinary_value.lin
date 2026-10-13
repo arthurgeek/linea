@@ -1,0 +1,18 @@
+// `FromEnd` is an ordinary struct anyone can build, pass, return and index
+// with: `^k` is the short spelling of one, so a value built by hand, a value a
+// function returns and a value a call is handed all name places the same
+// bracket names. The caret is read anywhere an index is being read, which is
+// inside whatever the brackets hold.
+fn second_from_the_end() -> FromEnd {
+    .{ k = 2 }
+}
+
+fn same(sink f: FromEnd) -> FromEnd {
+    f
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    let f: FromEnd = .{ k = 1 }
+    a[f] + a[second_from_the_end()] + a[same(^3)] + a[^1]
+}

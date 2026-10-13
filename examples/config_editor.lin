@@ -1,0 +1,333 @@
+// Set one key in a key=value configuration file and save the file atomically.
+// Parsed entries borrow slices of the input text, while the rendered file owns
+// its bytes and so stays valid after the input is released.
+import std.env
+import std.fs
+import std.io
+import std.mem
+import std.testing
+
+use mem.Owner
+
+@derive(Release)
+struct Entry {
+    key: Str,
+    value: Str,
+}
+
+@(copyable, derive(Debug, Release))
+enum ConfigIssue {
+    Allocation(mem.Oom),
+    Syntax,
+    Duplicate,
+}
+
+@(copyable, derive(Debug, Release))
+struct ConfigError {
+    line: UInt64,
+    reason: ConfigIssue,
+}
+
+// `?` in `render` turns a refused allocation into `RenderError.Allocation`
+// through the derived `From[mem.Oom]`.
+@(copyable, derive(Debug, Release, From[mem.Oom]))
+enum RenderError {
+    Allocation(mem.Oom),
+    Limit,
+}
+
+test fn configuration_parsing_retains_trimmed_views() {
+    defer let entries = parse(mem.system(), "# settings\n name = Ada \ncount=3\n").unwrap()
+    testing.assert_eq(entries.length(), 2, "the comment line became an entry")?
+    testing.assert_eq(entries[0].key, "name", "the key was not trimmed")?
+    testing.assert_eq(entries[0].value, "Ada", "the value was not trimmed")?
+    testing.assert_eq(entries[1].value, "3", "the second value changed")?
+}
+
+test fn configuration_parsing_refuses_ambiguous_or_malformed_records() {
+    let duplicate = match parse(mem.system(), "name=Ada\nname=Grace\n") {
+        Err(error) => match read error.reason { Duplicate => error.line == 2, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    let malformed = match parse(mem.system(), "name\n") {
+        Err(error) => match read error.reason { Syntax => error.line == 1, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    testing.assert(duplicate, "a repeated key was accepted")?
+    testing.assert(malformed, "a line without `=` was accepted")?
+}
+
+test fn parsing_reports_the_record_that_exhausts_entry_storage() {
+    // Four entries fit in 256 bytes; the next eight-entry reservation does not.
+    defer let arena = mem.Arena.open(mem.system(), size: 256)
+    let records =
+        \\a=1
+        \\b=2
+        \\c=3
+        \\d=4
+        \\e=5
+        \\
+    let refused = match parse(arena.handle(), records) {
+        Err(error) => error.line == 5 && match read error.reason { Allocation(_) => true, _ => false },
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+    }
+    testing.assert(refused, "entry allocation failure lost its source line")?
+}
+
+// Entries borrow slices of input. The caller keeps that input alive until the
+// entries are released; no string copies are needed while parsing.
+fn parse[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], ConfigError] where carries(.Ok: allocator, input) {
+    // Error exits release partial entries; returning them transfers ownership.
+    defer var entries: Vec[Entry, A] = Vec.new_in(allocator)
+    var number: UInt64 = 0
+    for record in input.split("\n").unwrap() {
+        number += 1
+        let line = record.trim_ascii()
+        if line.length() == 0 || line.starts_with("#") {
+            continue
+        }
+        let separator = line.find("=") else {
+            return .Err(.{ line = number, reason = .Syntax })
+        }
+        let key = line.slice(0, separator).unwrap().trim_ascii()
+        let value = line.slice(separator + 1, line.length()).unwrap().trim_ascii()
+        if key.length() == 0 {
+            return .Err(.{ line = number, reason = .Syntax })
+        }
+        // `any` stops at the first entry that already has this key.
+        if entries.as_slice().any([key] |sink entry| entry.key == key) {
+            return .Err(.{ line = number, reason = .Duplicate })
+        }
+        let _ = &entries.push(.{ key, value }) else |refused| {
+            return .Err(.{ line = number, reason = .Allocation(refused.reason) })
+        }
+    }
+    .Ok(entries)
+}
+
+// Rendering normalizes entries to key=value lines, omitting comments and blank
+// lines. The output borrows only its allocator, so it can outlive parsed input.
+fn render[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[B], RenderError] where carries(.Ok: allocator) {
+    // A failed write releases partial output; success moves it to the caller.
+    defer var output = String.new_in(allocator)
+    var replaced = false
+    for read entry in entries {
+        let selected = entry.key == key
+        let chosen = if selected {
+            copy(value)
+        } else {
+            copy(entry.value)
+        }
+        replaced = replaced || selected
+        io.line("{entry.key}={chosen}", &output)?
+    }
+    if !replaced {
+        io.line("{key}={value}", &output)?
+    }
+    // Refuse publication of an edit that the next invocation could not read.
+    if output.length() > max_bytes {
+        return .Err(.Limit)
+    }
+    .Ok(output)
+}
+
+test fn rendering_reports_allocation_failure_after_a_short_entry() {
+    defer let entries = parse(mem.system(), "a=b\n").unwrap()
+    // Sixty-four bytes accommodate the short entry, but not this longer value.
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let value = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
+    let refused = match render(arena.handle(), entries, key: "next", value: value, max_bytes: max_config_bytes) {
+        Err(error) => match read error { Allocation(_) => true, Limit => false },
+        Ok(output) => {
+            output.release()
+            false
+        },
+    }
+    testing.assert(refused, "rendering failed to report exhausted output storage")?
+}
+
+test fn rendered_configuration_owns_its_bytes_after_input_is_released() {
+    let input = "name=Ada\ncount=3\n".to_owned(mem.system()).unwrap()
+    let entries = parse(mem.system(), input.view()).unwrap()
+    defer let rendered = render(mem.system(), entries, key: "name", value: "Grace", max_bytes: max_config_bytes).unwrap()
+    entries.release()
+    input.release()
+    testing.assert_eq(rendered.view(), "name=Grace\ncount=3\n", "rendered configuration retained an input dependency")?
+}
+
+test fn a_missing_configuration_key_is_appended() {
+    defer let entries = parse(mem.system(), "name=Ada\n").unwrap()
+    defer let rendered = render(mem.system(), entries, key: "count", value: "4", max_bytes: max_config_bytes).unwrap()
+    testing.assert_eq(rendered.view(), "name=Ada\ncount=4\n", "a new key replaced another entry or was omitted")?
+}
+
+test fn rendering_refuses_a_configuration_larger_than_its_read_limit() {
+    defer let entries = parse(mem.system(), "k=v\n").unwrap()
+    // "k=v\n" occupies exactly four bytes; appending another entry exceeds it.
+    defer let exact = render(mem.system(), entries, key: "k", value: "v", max_bytes: 4).unwrap()
+    testing.assert_eq(exact.view(), "k=v\n", "a configuration at the limit was refused")?
+    let refused = match render(mem.system(), entries, key: "x", value: "y", max_bytes: 4) {
+        Err(error) => match read error { Limit => true, Allocation(_) => false },
+        Ok(output) => {
+            output.release()
+            false
+        },
+    }
+    testing.assert(refused, "rendering did not preserve the configuration size bound")?
+}
+
+// Bound the complete input and rewritten output to 1 MiB (1024 * 1024 bytes).
+let max_config_bytes: UInt64 = 1048576
+
+// A prompted or supplied value may contain at most 4 KiB of UTF-8 bytes.
+let max_value_bytes: UInt64 = 4096
+
+// Read stdin in 1 KiB chunks; this buffer size does not set the input limit.
+let input_capacity: UInt64 = 1024
+
+// Each variant names one step of the edit that can fail and carries that
+// step's error. A failing step releases its partial buffers before returning,
+// so a ConfigFailure holds only the details that `report` prints. Each step's
+// own error becomes its `ConfigFailure` variant when `?` propagates it from
+// `edit_configuration`, through the `From` implementation that
+// `@derive(From[...])` writes for the one variant holding that error type.
+@derive(
+    From[fs.PathError],
+    From[io.ReadTextError[io.IoError]],
+    From[fs.ReadTextError],
+    From[ConfigError],
+    From[io.PromptError[io.IoError, io.IoError]],
+    From[RenderError],
+    From[fs.FsFailure],
+)
+enum ConfigFailure {
+    Usage,
+    Arguments,
+    ArgumentEncoding,
+    Key,
+    Path(fs.PathError),
+    Input(io.ReadTextError[io.IoError]),
+    File(fs.ReadTextError),
+    Parse(ConfigError),
+    ValueLimit,
+    ValueAllocation,
+    PromptBuffer,
+    Prompt(io.PromptError[io.IoError, io.IoError]),
+    NoValue,
+    Value,
+    Render(RenderError),
+    Save(fs.FsFailure),
+}
+
+fn main() -> UInt8 {
+    match edit_configuration() {
+        Ok(_) => 0,
+        Err(failure) => {
+            report(failure)
+            1
+        },
+    }
+}
+
+// Print this when the arguments match neither form; the second form lines up
+// with the first.
+let usage_text =
+    \\usage: config_editor <path> <key> [value]
+    \\       config_editor --stdin <path> <key> <value>
+    \\rewrites normalized key=value lines; comments and blank lines are omitted
+
+fn report(sink failure: ConfigFailure) -> () {
+    match failure {
+        Usage => io.eprintln(usage_text),
+        Arguments => io.eprintln("could not read command-line arguments"),
+        ArgumentEncoding => io.eprintln("configuration key and value arguments must be valid UTF-8"),
+        Key => io.eprintln("key must be a nonempty single-line name without '=' or surrounding whitespace"),
+        Path(error) => io.eprintln("invalid destination path: {error:?}"),
+        Input(reason) => io.eprintln("cannot read the configuration: {reason}"),
+        File(reason) => io.eprintln("cannot read the configuration: {reason}"),
+        Parse(error) => io.eprintln("configuration parse failed: {error:?}"),
+        ValueLimit => io.eprintln("replacement value exceeds {max_value_bytes} bytes"),
+        ValueAllocation => io.eprintln("could not allocate the replacement value"),
+        PromptBuffer => io.eprintln("could not allocate the prompt buffer"),
+        Prompt(error) => io.eprintln("prompt failed: {error:?}"),
+        NoValue => io.eprintln("no replacement value was supplied"),
+        Value => io.eprintln("value must be one line without surrounding whitespace"),
+        Render(error) => io.eprintln("configuration render failed: {error:?}"),
+        Save(failure) => io.eprintln("configuration save failed: {failure:?}"),
+    }
+}
+
+fn edit_configuration() -> Result[(), ConfigFailure] {
+    let args = env.args()
+    let batch = args.at(1) == .Some("--stdin")
+    // Skip the executable name and, in batch mode, the --stdin flag.
+    let first: UInt64 = if batch {
+        2
+    } else {
+        1
+    }
+    // Require path and key; a third argument supplies the value and is mandatory in batch mode.
+    if args.count() < first + 2 || args.count() > first + 3 || (batch && args.count() != first + 3) {
+        return .Err(.Usage)
+    }
+    let path_bytes = args.bytes_at(first) else {
+        return .Err(.Arguments)
+    }
+    let key = args.at(first + 1) else {
+        return .Err(.ArgumentEncoding)
+    }
+    if key.length() == 0 || key.trim_ascii() != key || key.starts_with("#") || key.find("=").is_some() || key.find("\n").is_some() || key.find("\r").is_some() {
+        return .Err(.Key)
+    }
+    let path = fs.Path.from_bytes(path_bytes)?
+    // `read_text` reads all the input and decodes it as UTF-8. Its error is
+    // converted into a `ConfigFailure` by `?`.
+    defer let input = if batch {
+        // Batch mode consumes stdin as configuration and requires the value on
+        // the command line. It never tries to prompt from that consumed stream.
+        var source = io.stdin()
+        io.read_text(&source, max_bytes: max_config_bytes)?
+    } else {
+        fs.read_text(path, max_bytes: max_config_bytes)?
+    }
+    defer let entries = parse(mem.system(), input.view())?
+    defer let value = if args.count() == first + 3 {
+        let given = args.at(first + 2) else {
+            return .Err(.ArgumentEncoding)
+        }
+        if given.length() > max_value_bytes {
+            return .Err(.ValueLimit)
+        }
+        // `map_err` replaces the allocation failure with this step's own
+        // variant, which `?` returns.
+        given.to_owned(mem.system()).map_err(|sink _oom| ConfigFailure.ValueAllocation)?
+    } else {
+        var reader = io.BufferedReader.open(mem.system(), capacity: input_capacity, reader: io.stdin()) else |_| {
+            return .Err(.PromptBuffer)
+        }
+        let answer = io.prompt(&reader, message: "new value: ", max_bytes: max_value_bytes)
+        let _stdin = reader.abandon()
+        let answered = answer? else {
+            return .Err(.NoValue)
+        }
+        answered
+    }
+    let chosen = value.view()
+    if chosen.trim_ascii() != chosen || chosen.find("\n").is_some() || chosen.find("\r").is_some() {
+        return .Err(.Value)
+    }
+    defer let output = render(mem.system(), entries, key: key, value: chosen, max_bytes: max_config_bytes)?
+    // Atomic publication installs the complete rendered file. The error also
+    // says whether publication happened before a later cleanup failure.
+    fs.save_atomic(mem.system(), path, output.as_bytes(), policy: .Replace)?
+    .Ok(())
+}

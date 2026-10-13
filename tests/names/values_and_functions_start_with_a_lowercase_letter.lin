@@ -1,0 +1,62 @@
+import std.text as Strings
+
+// A function, a parameter, a field, a constant, a module and every name a
+// body binds hold or reach a value, so each starts with a lowercase letter.
+let LIMIT: UInt8 = 9
+
+struct Counter {
+    Count: UInt8,
+}
+
+impl Counter {
+    let Start: UInt8 = 1
+
+    fn Bump(self: Self) -> UInt8 {
+        self.Count + Counter.Start
+    }
+}
+
+fn Clamp(Value: UInt8) -> UInt8 {
+    if Value > LIMIT {
+        LIMIT
+    } else {
+        Value
+    }
+}
+
+fn For() -> UInt8 {
+    0
+}
+
+fn apply(step: fn(Amount: UInt8) -> UInt8, amount: UInt8) -> UInt8 {
+    step(amount)
+}
+
+fn half(n: UInt8) -> Result[UInt8, UInt8] {
+    if n % 2 == 0 {
+        .Ok(n / 2)
+    } else {
+        .Err(n)
+    }
+}
+
+fn main() -> UInt8 {
+    let Total = Clamp(Counter { Count = 2 }.Bump())
+    var sum = Total
+    for Step in 0..2 {
+        sum += Step
+    }
+    let Add = |Amount: UInt8| Amount + 1
+    let offset = 2
+    let shift = [Moved = offset] || Moved
+    let halved = half(4) else |Reason| {
+        return Reason
+    }
+    let found = match Option.Some(sum) {
+        Some(Inner) => Inner,
+        None => 0,
+    }
+    let Counter { Count: Held } = Counter { Count = 1 }
+    let _whole = Strings.parse_float64("1.5")
+    Add(apply(Clamp, found)) + shift() + halved + Held - 11 + For()
+}

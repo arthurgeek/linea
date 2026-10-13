@@ -1,0 +1,17 @@
+// A traversal is the order a walk runs through, and nothing else names it. It
+// is classified as a constant so its expression is checked where every other
+// constant's is, which is what makes the name resolve at all -- and a
+// reference that resolved and then read a type the traversal's own check never
+// recorded is an accepted program lowering meets as poison.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Grid {
+    trav positions = 0..4
+}
+
+fn main() -> UInt8 {
+    let _it = Grid.positions
+    0
+}

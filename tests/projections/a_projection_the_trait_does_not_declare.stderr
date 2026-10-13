@@ -1,0 +1,5 @@
+error[T-Projection]: `Index` declares no `first`
+  --> tests/projections/a_projection_the_trait_does_not_declare.lin:15:10
+   |
+15 |     proj first(inout self: Grid, i: UInt64) -> UInt8 {
+   |          ^^^^^ declare it on the trait, or drop it

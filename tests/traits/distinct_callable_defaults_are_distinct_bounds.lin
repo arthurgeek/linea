@@ -1,0 +1,17 @@
+trait Give[phantom U] {}
+
+struct Holder {
+    value: UInt8,
+}
+
+impl Give[fn(read value: UInt8 = 1) -> UInt8] for Holder {}
+
+fn _needs[
+    T: Give[fn(read value: UInt8 = 1) -> UInt8] + Give[fn(read value: UInt8 = 2) -> UInt8],
+](_value: T) -> () {}
+
+fn main() -> UInt8 {
+    let holder: Holder = .{ value = 0 }
+    _needs(holder)
+    0
+}

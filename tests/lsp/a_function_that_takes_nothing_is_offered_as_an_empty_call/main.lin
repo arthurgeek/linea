@@ -1,0 +1,12 @@
+// A function that takes nothing is written as an empty call, with the cursor
+// after the bracket. There is no stop inside the brackets: a stop there is a
+// place to type an argument the function does not take, and the text carries no
+// snippet syntax at all because there is none left to write.
+fn seven() -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = seven()
+    total
+}

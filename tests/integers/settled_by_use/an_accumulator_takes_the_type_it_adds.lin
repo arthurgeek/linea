@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let step: UInt64 = 4
+    // `count` starts open and takes `UInt64` from what it accumulates.
+    var count = 0
+    count += step
+    count += step
+    UInt8(count - 8)
+}

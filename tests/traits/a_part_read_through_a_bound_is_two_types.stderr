@@ -1,0 +1,6 @@
+error[T-Operands]: expected `UInt8`, found `Bool`
+  --> tests/traits/a_part_read_through_a_bound_is_two_types.lin:41:12
+   |
+41 |     a.v == b.v
+   |     --- expected because of this operand
+   |            ^^^ expected `UInt8`, found `Bool`

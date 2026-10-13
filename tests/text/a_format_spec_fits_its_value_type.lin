@@ -1,0 +1,26 @@
+// A sign and zero padding lay out numbers, and a precision counts the digits
+// after a Float64's point, so each is refused on a value of another type. A
+// generic value is not known to be a number, so it takes only fill,
+// alignment and width.
+import std.io
+
+use io.IoError
+use io.println
+
+fn column[T: Copyable + Display](value: T) -> Result[(), IoError] {
+    println("{value:>6}")?
+    println("{value:06}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let name = "Ada"
+    let count = 42
+    let ready = true
+    println("{name:.2}")?
+    println("{count:.2}")?
+    println("{name:05}")?
+    println("{ready:+}")?
+    println("{name:>+6?}")?
+    column(count)?
+    return .Ok(0)
+}

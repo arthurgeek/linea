@@ -1,0 +1,31 @@
+// `default` marks a fallback implementation only right before `impl`.
+// Elsewhere it is an ordinary name: an operation, a local or a parameter.
+trait Greeting {
+    fn greet(self: Self) -> UInt8
+}
+
+default impl[T] Greeting for T {
+    fn greet(_self: T) -> UInt8 {
+        1
+    }
+}
+
+// A thermostat starts at nineteen degrees unless told otherwise.
+struct Thermostat {
+    degrees: UInt8,
+}
+
+impl Default for Thermostat {
+    fn default() -> Thermostat {
+        Thermostat { degrees = 19 }
+    }
+}
+
+fn warmer(default: UInt8, by: UInt8) -> UInt8 {
+    default + by
+}
+
+fn main() -> UInt8 {
+    let default: Thermostat = Default.default()
+    warmer(default.degrees, 2) + Greeting.greet(default)
+}

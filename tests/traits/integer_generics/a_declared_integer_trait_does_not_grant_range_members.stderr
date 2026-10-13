@@ -1,0 +1,5 @@
+error[T-UnknownField]: type `T` has no integer property `min`
+ --> tests/traits/integer_generics/a_declared_integer_trait_does_not_grant_range_members.lin:4:11
+  |
+4 |     Int64(T.min)
+  |           ^^^^^ declare an Integer constraint on the type parameter

@@ -1,0 +1,5 @@
+error[T-Bound]: `Show` requires `Self` to implement it, and `Holder[UInt8]` does not
+  --> tests/traits/a_callable_bound_limits_a_generic_implementation.lin:17:15
+   |
+17 |     Show.show(holder)
+   |               ^^^^^^ implement it for that type, or reach the operation on one that does

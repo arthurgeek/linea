@@ -1,0 +1,25 @@
+// A function's type is written with its parameter and result types, so
+// `Never` in either settles the matching parameter of a callable type.
+// `absurd` takes a value that cannot exist, and `stop` never returns; each is
+// held as a function value whose type is written out.
+fn absurd(impossible: Never) -> UInt8 {
+    match read impossible {}
+}
+
+fn stop(_code: UInt8) -> Never {
+    panic("stopped")
+}
+
+fn takes[T](_f: fn(value: T) -> UInt8) -> UInt8 {
+    1
+}
+
+fn gives[T](_f: fn(code: UInt8) -> T) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    let refuse: fn(value: Never) -> UInt8 = absurd
+    let halt: fn(code: UInt8) -> Never = stop
+    takes(refuse) + gives(halt)
+}

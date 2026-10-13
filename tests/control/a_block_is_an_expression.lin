@@ -1,0 +1,29 @@
+// A block is an expression, so it may stand wherever a value may. Its value is
+// its last expression, which is the same rule that decides a function body's
+// -- there is one kind of block and one rule about it, whatever encloses it.
+fn main() -> UInt8 {
+    let a: UInt8 = {
+        let x: UInt8 = 3
+        x + 1
+    }
+
+    // Nothing says a block must hold statements, and one may nest in another
+    // that adds nothing. `fmt` breaks each of them, because a block always
+    // breaks -- which is how the nesting stays visible.
+    let b: UInt8 = {
+        {
+            {
+                2
+            }
+        }
+    }
+
+    // Standing alone, for the scope rather than the value. The binding inside
+    // is unreachable below, which is the point of writing it here.
+    {
+        let inner: UInt8 = 9
+        let _ = inner
+    }
+
+    a + b
+}

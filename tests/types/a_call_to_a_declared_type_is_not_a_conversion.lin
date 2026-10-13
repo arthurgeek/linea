@@ -1,0 +1,12 @@
+// A conversion is a call whose callee names a primitive, and only a primitive.
+// A declared type is not one, so this is a call to something that cannot be
+// called -- which is a question about what the name means rather than about
+// where the parentheses are.
+struct Coins {
+    count: UInt8,
+}
+
+fn main() -> UInt8 {
+    let wide: Int64 = 7
+    Coins(wide)
+}

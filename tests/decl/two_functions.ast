@@ -1,0 +1,10 @@
+program decls=2
+  decl function "helper" tokens 0..9
+    returns UInt8
+    expr %1 block tokens 6..9
+      expr %0 int_literal tokens 7..8 "1"
+  decl function "main" tokens 9..20
+    returns UInt8
+    expr %4 block tokens 15..20
+      expr %3 call tokens 16..19
+        expr %2 name_ref tokens 16..17 "helper"

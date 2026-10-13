@@ -1,0 +1,9 @@
+error[T-Derive]: `Pair` cannot derive `Apply` because component type `Bool` does not implement `Zero`
+  --> tests/construction_derive/a_failed_requirement_reports_nothing_from_the_derived_body.lin:29:8
+   |
+18 | template impl Apply where reflect.target: struct, reflect.components: Zero {
+   |                                                                       ---- the template requires every component to implement `Zero`
+26 |     left: Bool,
+   |     ---- this component has type `Bool`
+29 | derive Apply for Pair
+   |        ^^^^^ implement `Zero` for `Bool`, or write this implementation by hand

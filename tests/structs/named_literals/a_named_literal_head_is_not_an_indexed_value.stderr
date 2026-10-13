@@ -1,0 +1,5 @@
+error[S-Type]: expected a type
+ --> tests/structs/named_literals/a_named_literal_head_is_not_an_indexed_value.lin:5:25
+  |
+5 |     let _moved = points[0] { x = 2 }
+  |                         ^ an argument is a type

@@ -1,0 +1,5 @@
+error[T-Projection]: `Index` lets `at` reach `inout` at most, and this declares `sink`
+  --> tests/projections/a_projection_does_not_sink_its_receiver.lin:11:10
+   |
+11 |     proj at(sink self: Fixed, i: UInt64) -> UInt8 {
+   |          ^^ declare it the way the trait declares it, or lower

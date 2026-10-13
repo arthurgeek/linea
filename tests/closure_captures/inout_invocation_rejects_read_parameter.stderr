@@ -1,0 +1,7 @@
+error[N-Immutable]: `callback` is a read-only parameter
+ --> tests/closure_captures/inout_invocation_rejects_read_parameter.lin:2:6
+  |
+1 | fn apply[F: fn() -> UInt8](callback: F) -> UInt8 {
+  |                            -------- read-only parameter declared here
+2 |     &callback()
+  |      ^^^^^^^^ this binding cannot be assigned

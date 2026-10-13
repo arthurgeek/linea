@@ -1,0 +1,7 @@
+fn address(self: Email) -> Str {
+    let read Email(raw) = self
+//  ^ keyword.storage
+//      ^ keyword.storage.modifier
+//           ^ constructor
+    copy(raw)
+}

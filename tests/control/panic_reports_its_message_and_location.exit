@@ -1,0 +1,2 @@
+trap
+linea: panic: 100% stopped at tests/control/panic_reports_its_message_and_location.lin:2:5

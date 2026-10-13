@@ -1,0 +1,8 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+let count = Mode.Preserve
+
+fn main() -> UInt8 {
+    let _values: [UInt8; count] = [1]
+    0
+}

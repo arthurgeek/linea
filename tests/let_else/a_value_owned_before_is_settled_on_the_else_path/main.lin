@@ -1,0 +1,18 @@
+// Leaving through the `else` block leaves the function, so what the function
+// still holds there is never disposed of.
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn main() -> UInt8 {
+    let key = mint(7)
+    let found = find(1) else {
+        return 1
+    }
+    release(key)
+    found
+}

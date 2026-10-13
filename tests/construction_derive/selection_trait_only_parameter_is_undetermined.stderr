@@ -1,0 +1,5 @@
+error[T-Impl]: `Box` has no available associated type `Item`
+  --> tests/construction_derive/selection_trait_only_parameter_is_undetermined.lin:18:16
+   |
+18 |     let value: Box.Item = 7
+   |                ^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

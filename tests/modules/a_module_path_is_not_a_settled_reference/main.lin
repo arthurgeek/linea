@@ -1,0 +1,11 @@
+// A dotted type name whose head names a module is read through that module,
+// so a name it does not declare is that mistake and not another. What it is
+// not is a settled reference -- those are read through an implementation, and
+// a module is not one -- so advice about writing `Self` is advice a reader of
+// this line cannot act on.
+import hidden
+
+fn main() -> UInt8 {
+    let n: hidden.Absent = .{ at = 1 }
+    copy(n.at)
+}

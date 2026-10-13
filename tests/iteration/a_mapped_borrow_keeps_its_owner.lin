@@ -1,0 +1,20 @@
+import std.mem
+
+struct Word { value: Str }
+
+fn wrap(sink item: Str) -> Word where carries(item) {
+    .{ value = item }
+}
+
+fn main() -> UInt8 {
+    let owner = "word".to_owned(mem.system()).unwrap()
+    let parts = Str.split(owner.view(), ",").unwrap()
+    var mapped = parts.map(wrap)
+    let word = Iterator.next(&mapped).unwrap()
+    owner.release()
+    if word.value == "word" {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(read Mode = .Replace) -> UInt8`, found `fn(read Mode = .Preserve) -> UInt8`
+  --> tests/constants/enum_variants/callable_defaults_reject_a_different_variant.lin:12:12
+   |
+7  | fn invoke[F: fn(read mode: Mode = .Replace) -> UInt8](callback: F) -> UInt8 {
+   |                                                       -------- expected because of this parameter
+12 |     invoke(select)
+   |            ^^^^^^ expected `fn(read Mode = .Replace) -> UInt8`, found `fn(read Mode = .Preserve) -> UInt8`

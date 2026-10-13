@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may fail with `UInt16`, and no `From[UInt16] for UInt8` implementation converts it to the function's error type
+ --> tests/inference/try_payload/payload_context_preserves_error_agreement.lin:6:25
+  |
+6 |     let value: UInt64 = success(7)?
+  |                         ^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`

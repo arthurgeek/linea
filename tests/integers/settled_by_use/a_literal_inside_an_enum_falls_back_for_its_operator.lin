@@ -1,0 +1,30 @@
+@copyable
+enum Reading[T] {
+    Value(T),
+    Missing,
+}
+
+impl Equatable for Reading[Int64] {
+    fn equals(self: Reading[Int64], other: Reading[Int64]) -> Bool {
+        match read self {
+            Value(a) => match read other {
+                Value(b) => a == b,
+                Missing => false,
+            },
+            Missing => match read other {
+                Value(_) => false,
+                Missing => true,
+            },
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let first = Reading.Value(1)
+    let second = Reading.Value(1)
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

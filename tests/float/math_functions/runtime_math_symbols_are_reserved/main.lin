@@ -1,0 +1,3 @@
+export fn linea_math_pow(value: UInt64, exponent: UInt64) -> UInt64 {
+    value + exponent
+}

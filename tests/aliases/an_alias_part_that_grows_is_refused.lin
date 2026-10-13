@@ -1,0 +1,11 @@
+// A part written through an alias is held to the measure a part written out
+// is: `Deeper[T]` is `S[Option[T]]`, which grows `S`'s argument.
+struct S[T] {
+    v: Deeper[T],
+}
+
+alias Deeper[U] = S[Option[U]]
+
+fn main() -> UInt8 {
+    0
+}

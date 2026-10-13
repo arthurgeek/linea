@@ -1,0 +1,15 @@
+import std.mem
+
+use mem.Owner
+
+fn inspect[A: Allocator](_allocator: A) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 64)
+    defer arena.release()
+    let original = arena.handle()
+    let moved = original
+    inspect(original) + inspect(moved)
+}

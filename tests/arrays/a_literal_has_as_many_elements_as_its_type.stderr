@@ -1,0 +1,5 @@
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/arrays/a_literal_has_as_many_elements_as_its_type.lin:4:26
+  |
+4 |     let xs: [UInt8; 3] = [1, 2]
+  |                          ^^^^^^ this has 2, and the type says 3

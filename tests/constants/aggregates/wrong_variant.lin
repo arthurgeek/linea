@@ -1,0 +1,12 @@
+@copyable
+enum Mode {
+    Plain,
+}
+
+let mode: Mode = .Missing
+
+fn main() -> UInt8 {
+    match read mode {
+        Plain => 0,
+    }
+}

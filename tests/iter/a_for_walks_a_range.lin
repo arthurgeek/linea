@@ -1,0 +1,11 @@
+// A `for` binds each element the walk yields and runs its body once per
+// element. A half-open range stops before its end, so this is the sum of the
+// five numbers below it.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..5
+    var total: UInt8 = 0
+    for x in xs {
+        total += x
+    }
+    total
+}

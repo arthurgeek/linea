@@ -1,0 +1,15 @@
+// The design's own match: a digit span and a letter span, each a one-scalar
+// string literal at both ends, over a `UInt8`. Each call names one span and
+// the sum of the two statuses says both ran, since neither arm alone nor
+// doubled adds to the same number.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        "0"..="9" => 1,
+        "a"..="z" => 2,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(53) + classify(120)
+}

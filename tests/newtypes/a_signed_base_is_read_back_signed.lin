@@ -1,0 +1,20 @@
+// Erasure is representational, and the representation includes the sign. A
+// name over a signed base is held, loaded and compared as that base, so a
+// negative value put into a field is negative when it is taken out again.
+@copyable
+type Tiny = Int8
+
+struct Box {
+    t: Tiny,
+}
+
+fn main() -> UInt8 {
+    let b: Box = .{ t = Tiny(-5) }
+    let Tiny(v) = copy(b.t)
+    let _b = b
+    if v < 0 {
+        1
+    } else {
+        0
+    }
+}

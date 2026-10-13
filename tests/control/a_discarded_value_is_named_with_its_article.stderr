@@ -1,0 +1,15 @@
+error[T-Discard]: this body produces an `Int64` that is discarded
+ --> tests/control/a_discarded_value_is_named_with_its_article.lin:7:9
+  |
+7 |         40 + 2
+  |         ^^^^^^ a `while` runs its body for its effect
+error[T-Discard]: this body produces a `UInt8` that is discarded
+  --> tests/control/a_discarded_value_is_named_with_its_article.lin:10:9
+   |
+10 |         left
+   |         ^^^^ a `while` runs its body for its effect
+error[T-Discard]: this body produces an `Option[UInt8]` that is discarded
+  --> tests/control/a_discarded_value_is_named_with_its_article.lin:14:9
+   |
+14 |         found
+   |         ^^^^^ a `while` runs its body for its effect

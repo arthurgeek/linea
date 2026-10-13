@@ -1,0 +1,17 @@
+// `oops {` cannot follow `score + 1`, and the `}` on the next line sits left
+// of that statement, so it closes the loop rather than the stray `{`. What
+// follows is still read: the mismatch in `main` and the one in `_other` are
+// reported.
+fn main() -> UInt8 {
+    let scores = [3, 4]
+    for score in scores {
+        score + 1 oops {
+    }
+    let last: UInt8 = "two"
+    last
+}
+
+fn _other() -> UInt8 {
+    let count: UInt8 = "three"
+    count
+}

@@ -1,0 +1,14 @@
+// With nothing expected of the `match`, the arm that names its type settles
+// the arm that needs one, whichever is written first: `Option.None` names
+// `Option` but not what it holds, and `Option.Some(code)` says `UInt8`.
+fn failure_code(sink reading: Result[UInt8, UInt8]) -> UInt8 {
+    let failure = match reading {
+        Ok(_) => Option.None,
+        Err(code) => Option.Some(code),
+    }
+    failure.unwrap_or(0)
+}
+
+fn main() -> UInt8 {
+    failure_code(.Err(7)) + failure_code(.Ok(1))
+}

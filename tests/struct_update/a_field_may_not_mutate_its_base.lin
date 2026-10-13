@@ -1,0 +1,17 @@
+struct Counter {
+    hits: UInt8,
+    limit: UInt8,
+}
+
+fn next(inout counter: Counter) -> UInt8 {
+    counter.hits = counter.hits + 1
+    counter.hits
+}
+
+fn main() -> UInt8 {
+    var counter: Counter = .{ hits = 1, limit = 9 }
+    // A literal's values and its base are one list, and one may not mutate a
+    // place another reads.
+    let other = Counter { hits = next(&counter), ..counter }
+    other.hits
+}

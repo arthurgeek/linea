@@ -1,0 +1,19 @@
+// A literal's type is named by what it holds, and a symbol carries that name.
+// Spelled the way a reader writes the type, it grows a bracket per level and a
+// comma per argument, and every one of those is three bytes once a symbol may
+// hold only letters, digits, `_` and `.` -- so a program that checks clean
+// stops being a program that builds, at a depth nothing in the source marks.
+//
+// Named by its structure instead, a level costs a component. This one nests
+// three carriers deep, which is past where the written spelling stopped
+// fitting.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let deep: Option[Option[Option[UInt8]]] = .Some(.Some(.Some(4)))
+    println("{deep}")?
+    return .Ok(0)
+}

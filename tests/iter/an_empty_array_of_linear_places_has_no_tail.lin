@@ -1,0 +1,23 @@
+// A zero-length array has no remaining elements to abandon, even when its
+// element type is linear. The body still consumes every element it binds.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+impl Token {
+    fn eat(sink self: Token) -> UInt8 {
+        let Token { n: v } = self
+        v
+    }
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 0] = []
+    var total: UInt8 = 9
+    for t in ts {
+        total += Token.eat(t)
+        break
+    }
+    total
+}

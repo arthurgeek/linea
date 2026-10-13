@@ -1,0 +1,7 @@
+// [T-Index]. The length is part of the type, so an index the compiler settles
+// is one it can refuse -- and refusing it is what leaves nothing to check when
+// the program runs.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 3]
+    xs[9]
+}

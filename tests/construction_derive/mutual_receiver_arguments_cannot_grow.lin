@@ -1,0 +1,45 @@
+trait Run {
+    fn run(sink self: Self) -> UInt8
+}
+
+@copyable
+struct Wrap[A: Copyable] {
+    value: A,
+}
+
+@copyable
+struct Left[A: Copyable] {
+    value: A,
+}
+
+@copyable
+struct Right[A: Copyable] {
+    value: A,
+}
+
+impl[A: Copyable] Run for Left[A] {
+    fn run(sink self: Self) -> UInt8 {
+        match self {
+            Left { value } => {
+                let next: Right[Wrap[A]] = .{ value = .{ value } }
+                Run.run(next)
+            },
+        }
+    }
+}
+
+impl[A: Copyable] Run for Right[A] {
+    fn run(sink self: Self) -> UInt8 {
+        match self {
+            Right { value } => {
+                let next: Left[A] = .{ value }
+                Run.run(next)
+            },
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let first: Left[UInt8] = .{ value = 7 }
+    Run.run(first)
+}

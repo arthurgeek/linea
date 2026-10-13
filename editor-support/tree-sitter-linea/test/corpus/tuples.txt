@@ -1,0 +1,349 @@
+==================
+A tuple is written, typed and taken apart by position
+==================
+
+alias Pair = (UInt8, Str)
+
+fn swap(pair: (UInt8, Str)) -> (Str, UInt8) {
+    let (n, s) = pair
+    (s, n)
+}
+
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8, Bool) = (1, 2, true)
+    let read (first, _) = pair
+    let n = pair._0
+    0
+}
+
+---
+
+(source_file
+  (alias_declaration
+    (type_identifier)
+    (tuple_type
+      (type_identifier)
+      (type_identifier)))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (tuple_type
+          (type_identifier)
+          (type_identifier))))
+    (tuple_type
+      (type_identifier)
+      (type_identifier))
+    (block
+      (let_statement
+        (tuple_pattern
+          (identifier)
+          (identifier))
+        (identifier))
+      (expression_statement
+        (tuple_expression
+          (identifier)
+          (identifier)))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (tuple_type
+          (type_identifier)
+          (type_identifier)
+          (type_identifier))
+        (tuple_expression
+          (integer_literal)
+          (integer_literal)
+          (boolean_literal)))
+      (let_statement
+        (tuple_pattern
+          (identifier)
+          (wildcard_pattern))
+        (identifier))
+      (let_statement
+        (identifier)
+        (field_expression
+          (identifier)
+          (identifier)))
+      (expression_statement
+        (integer_literal)))))
+
+==================
+One expression in parentheses groups it, and empty parentheses are the unit
+==================
+
+fn main() -> UInt8 {
+    let g: (UInt8) = (7)
+    let u: () = ()
+    g
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (grouped_type
+          (type_identifier))
+        (parenthesised_expression
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (unit_type)
+        (unit_expression))
+      (expression_statement
+        (identifier)))))
+
+==================
+A tuple takes a trailing comma and may be broken across lines
+==================
+
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8,) = (1, 2,)
+    let wide: (
+        UInt8,
+        UInt8,
+        UInt8,
+    ) = (
+        1,
+        2,
+        3,
+    )
+    let one = (7,)
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (tuple_type
+          (type_identifier)
+          (type_identifier))
+        (tuple_expression
+          (integer_literal)
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (tuple_type
+          (type_identifier)
+          (type_identifier)
+          (type_identifier))
+        (tuple_expression
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (tuple_expression
+          (integer_literal)))
+      (expression_statement
+        (integer_literal)))))
+
+==================
+A walk and a match arm take a tuple apart
+==================
+
+fn total(pairs: Vec[(UInt8, UInt8)]) -> UInt8 {
+    var sum = 0
+    for (a, b) in pairs {
+        sum = sum + a + b
+    }
+    for read (a, _) in pairs {
+        sum = sum + a
+    }
+    match (sum, 1) {
+        (a, b) => a + b,
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (tuple_type
+              (type_identifier)
+              (type_identifier))))))
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (integer_literal))
+      (block_statement
+        (for_expression
+          (tuple_pattern
+            (identifier)
+            (identifier))
+          (identifier)
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (binary_expression
+                  (binary_expression
+                    (identifier)
+                    (identifier))
+                  (identifier)))))))
+      (block_statement
+        (for_expression
+          (tuple_pattern
+            (identifier)
+            (wildcard_pattern))
+          (identifier)
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (binary_expression
+                  (identifier)
+                  (identifier)))))))
+      (block_statement
+        (match_expression
+          (tuple_expression
+            (identifier)
+            (integer_literal))
+          (match_arm
+            (tuple_pattern
+              (identifier)
+              (identifier))
+            (binary_expression
+              (identifier)
+              (identifier))))))))
+
+==================
+An implementation may be written for a tuple
+==================
+
+impl[A, B] Show for (A, B) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+---
+
+(source_file
+  (impl_block
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (trait_reference
+      (type_identifier))
+    (tuple_type
+      (type_identifier)
+      (type_identifier))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (self_type)))
+      (type_identifier)
+      (block
+        (expression_statement
+          (integer_literal))))))
+
+==================
+A derive request may name a tuple as its target
+==================
+
+derive[A, B] Debug for (A, B)
+
+---
+
+(source_file
+  (derive_declaration
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (derive_trait
+      (trait_reference
+        (type_identifier)))
+    (tuple_type
+      (type_identifier)
+      (type_identifier))))
+
+==================
+A lambda parameter may be a tuple pattern
+==================
+
+fn main() -> UInt8 {
+    let total = pairs.map(|sink (i, x)| i).fold(0, |sink a, sink b| a + b)
+    let f = |(a, _): (UInt8, UInt8)| a
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (call_expression
+          (field_expression
+            (call_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (argument_list
+                (lambda_expression
+                  (parameter
+                    (tuple_pattern
+                      (identifier)
+                      (identifier)))
+                  (identifier))))
+            (identifier))
+          (argument_list
+            (integer_literal)
+            (lambda_expression
+              (parameter
+                (identifier))
+              (parameter
+                (identifier))
+              (binary_expression
+                (identifier)
+                (identifier))))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (parameter
+            (tuple_pattern
+              (identifier)
+              (wildcard_pattern))
+            (tuple_type
+              (type_identifier)
+              (type_identifier)))
+          (identifier)))
+      (expression_statement
+        (integer_literal)))))

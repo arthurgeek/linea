@@ -1,0 +1,32 @@
+// A failure crossing an implementation written here rather than in the
+// library. The descriptor refuses every write, so the first `?` in `Pair`'s
+// own body is what hands the failure back, and the second half is never
+// written.
+import std.io
+
+use io.descriptor
+use io.Descriptor
+
+struct Pair {
+    a: Int64,
+    b: Int64,
+}
+
+impl Display for Pair {
+    fn fmt[W: Writer](self: Pair, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        let a: Int64 = self.a
+        let b: Int64 = self.b
+        Display.fmt(a, &w)?
+        Writer.write_str(&w, " ")?
+        Display.fmt(b, &w)
+    }
+}
+
+fn main() -> UInt8 {
+    var bad: Descriptor = descriptor(9)
+    let p: Pair = .{ a = 3, b = 4 }
+    match Display.fmt(p, &bad) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

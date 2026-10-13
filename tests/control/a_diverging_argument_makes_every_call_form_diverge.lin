@@ -1,0 +1,30 @@
+fn identity(value: UInt8) -> UInt8 {
+    value
+}
+
+fn apply_closure[F: fn(read value: UInt8) -> UInt8](transform: F) -> Bool {
+    if false {
+        transform(panic("closure"))
+    } else {
+        true
+    }
+}
+
+fn apply_indirect(transform: fn(read value: UInt8) -> UInt8) -> Bool {
+    if false {
+        transform(panic("indirect"))
+    } else {
+        true
+    }
+}
+
+fn main() -> UInt8 {
+    let _direct: Bool = if false {
+        identity(panic("direct"))
+    } else {
+        true
+    }
+    let _closure = apply_closure(|value| value)
+    let _indirect = apply_indirect(identity)
+    0
+}

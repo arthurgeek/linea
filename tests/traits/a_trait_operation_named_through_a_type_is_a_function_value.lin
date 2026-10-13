@@ -1,0 +1,41 @@
+// `Crate.default` names `Default`'s operation with `Self` settled to `Crate`,
+// so it is a function value like any other: `restock` calls it to build each
+// fresh crate. An enum and an instantiated generic type reach their trait
+// operations the same way.
+@(copyable, derive(Default))
+struct Crate {
+    apples: UInt8,
+}
+
+@copyable
+enum Shelf {
+    Top,
+    Bottom,
+}
+
+impl Default for Shelf {
+    fn default() -> Shelf {
+        .Bottom
+    }
+}
+
+fn restock(count: UInt8, fresh: fn() -> Crate) -> UInt8 {
+    var total: UInt8 = 0
+    var left = count
+    while left > 0 {
+        let crate = fresh()
+        total = total + crate.apples + 1
+        left = left - 1
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf.default()
+    let spare: Option[UInt8] = Option.default()
+    let placed: UInt8 = match shelf {
+        Top => 10,
+        Bottom => 20,
+    }
+    restock(3, Crate.default) + placed + spare.unwrap_or(4)
+}

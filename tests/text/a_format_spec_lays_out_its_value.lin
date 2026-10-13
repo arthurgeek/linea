@@ -1,0 +1,32 @@
+// The text after an interpolation's colon lays out its value: a fill and an
+// alignment within a width counted in Unicode scalars, a sign and zero
+// padding for numbers, and the digits after a Float64's point. Numbers sit on
+// the right of their width and other values on the left unless the spec
+// names a side, and a value wider than its width is written whole.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let day: UInt8 = 7
+    let count = 42
+    let loss = -5
+    let price = 3.5
+    let name = "Ada"
+    println("{day:02}|{count:>4}|{price:.2}|{name:<10}|")?
+    println("[{count:6}] [{loss:04}] [{count:+}] [{loss:+}] [{count:+06}] [{loss:<4}]")?
+    println("[{name:6}] [{name:^7}] [{name:*>6}] [{name:-^8}] [{name:>2}]")?
+    println("[{count:1}] [{loss:02}] [{price:3.3}]")?
+    let city = "Zürich"
+    let arrow = "→"
+    println("[{city:8}] [{city:>8}] [{arrow:·^5}]")?
+    let tiny = -0.001
+    let half = 2.5
+    let infinity = 1.0 / 0.0
+    println("[{price:8.3}] [{tiny:.2}] [{half:.0}] [{price:+08.2}] [{price}] [{infinity:06}]")?
+    let present: Option[UInt8] = .Some(1)
+    println("[{name:>7?}] [{name:?}] [{present:^11?}] [{present:>3}] [{day:>4?}]")?
+    println("{{ {count:>3} }}")?
+    return .Ok(0)
+}

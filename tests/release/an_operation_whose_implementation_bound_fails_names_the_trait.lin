@@ -1,0 +1,30 @@
+// A vector implements Release only where its element does, so a vector of
+// elements without Release has no `release`. The report names the trait the
+// operation comes from, whether or not the type's own parts are visible here.
+import std.mem
+
+@copyable
+struct Plain {
+    value: UInt64,
+}
+
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl[T: Release] Release for Pair[T] {
+    fn release(sink self: Self) -> () {
+        let Pair { first, second } = self
+        first.release()
+        second.release()
+    }
+}
+
+fn main() -> UInt8 {
+    let values: Vec[Plain, mem.SystemAllocator] = Vec.new()
+    values.release()
+    let pair: Pair[Plain] = .{ first = .{ value = 1 }, second = .{ value = 2 } }
+    pair.release()
+    0
+}

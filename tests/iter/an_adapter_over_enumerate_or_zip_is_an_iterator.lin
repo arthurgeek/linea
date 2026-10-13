@@ -1,0 +1,41 @@
+// `enumerate` and `zip` yield tuples, and `skip`, `filter` and `zip` accept
+// any iterator whose items may be dropped, tuples of such items included.
+fn main() -> UInt8 {
+    let xs = [UInt8(10), 20, 30, 40]
+    let ys = [UInt8(1), 2, 3, 4]
+
+    // Items (1, 20) and (2, 30): 21 + 32 = 53.
+    var skipped: UInt64 = 0
+    for (i, x) in xs.as_slice().enumerate().skip(1).take(2) {
+        skipped += i * 1 + UInt64(*x)
+    }
+
+    // Only the pair at position 3 survives the filter: 3 + 40.
+    var filtered: UInt64 = 0
+    for (i, x) in xs.as_slice().enumerate().filter(|pair| pair._0 == 3) {
+        filtered += i + UInt64(*x)
+    }
+
+    // Positions 0..3 paired with ys: (0, 1), (1, 2), (2, 3): 0+1 + 1+2 + 2+3 = 9.
+    var zipped: UInt64 = 0
+    for (numbered, y) in xs.as_slice().enumerate().take(3).zip(ys.as_slice()) {
+        let (i, _x) = numbered
+        zipped += i + UInt64(*y)
+    }
+
+    // Pairs (10, 1), (20, 2), (30, 3), (40, 4) without the first: 22 + 33 + 44 = 99.
+    var tail: UInt64 = 0
+    for (x, y) in xs.as_slice().zip(ys.as_slice()).skip(1) {
+        tail += UInt64(*x) + UInt64(*y)
+    }
+
+    // The pairs ((1, 20), 1) and ((2, 30), 2): 22 + 34 = 56.
+    var chained: UInt64 = 0
+    for (numbered, y) in xs.as_slice().enumerate().skip(1).take(2).zip(ys.as_slice()) {
+        let (i, x) = numbered
+        chained += i + UInt64(*x) + UInt64(*y)
+    }
+
+    // 53 + 43 + 9 + 99 + 56 = 260.
+    UInt8(skipped + filtered + zipped + tail + chained - 260)
+}

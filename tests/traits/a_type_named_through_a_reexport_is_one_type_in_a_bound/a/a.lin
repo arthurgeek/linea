@@ -1,0 +1,3 @@
+pub struct Pair {
+    value: UInt8,
+}

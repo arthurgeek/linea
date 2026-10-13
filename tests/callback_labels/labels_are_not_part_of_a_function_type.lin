@@ -1,0 +1,42 @@
+import std.mem
+
+// `fn(cents: UInt64) -> UInt64` and `fn(amount: UInt64) -> UInt64` are one
+// type: a parameter's name is a label a call may use, not part of the type.
+// Each call names arguments by the labels written where its callee was
+// declared.
+struct Pricing {
+    rule: fn(cents: UInt64) -> UInt64,
+}
+
+fn half(amount: UInt64) -> UInt64 {
+    amount / 2
+}
+
+fn double(value: UInt64) -> UInt64 {
+    value * 2
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let halving = half
+    var pricing = Pricing { rule = halving }
+    let halved = (pricing.rule)(cents: 40)
+    let doubling = double
+    pricing.rule = doubling
+    let doubled = (pricing.rule)(cents: 3)
+    let direct = half(amount: 8) + double(value: 1)
+    // One vector holds both, whatever each names its parameter.
+    var rules: Vec[fn(amount: UInt64) -> UInt64, mem.SystemAllocator] = Vec.new()
+    let first = half
+    let second = double
+    match &rules.push(first) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+    match &rules.push(second) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+    let count = rules.length()
+    rules.release()
+    return .Ok(UInt8(halved + doubled + direct + count))
+}

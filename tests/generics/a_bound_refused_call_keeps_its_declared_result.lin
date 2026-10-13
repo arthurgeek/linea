@@ -1,0 +1,29 @@
+// `label` needs a Copyable argument, and a `Pair` is not one, so each call
+// below is refused for its bound. What the call returns is still the `Str`
+// its signature declares, so a mistake in how that result is used is its own
+// error and is reported beside the bound.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn label[T: Copyable](_value: T) -> Str {
+    "pair"
+}
+
+fn width(_text: UInt8) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    let first: Pair = .{ left = 1, right = 2 }
+    let count: UInt8 = label(first)
+    let second: Pair = .{ left = 3, right = 4 }
+    let wide = width(label(second))
+    let third: Pair = .{ left = 5, right = 6 }
+    let named = label(third)
+    if named {
+        return 1
+    }
+    count + wide
+}

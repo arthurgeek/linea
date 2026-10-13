@@ -1,0 +1,9 @@
+// A span of seats in one row of a theatre.
+pub struct Range {
+    first: UInt8,
+    last: UInt8,
+}
+
+pub fn width(span: Range) -> UInt8 {
+    span.last - span.first + 1
+}

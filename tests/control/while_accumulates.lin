@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    var i: UInt8 = 0
+    while i < 5 {
+        total = total + i
+        i = i + 1
+    }
+    total
+}

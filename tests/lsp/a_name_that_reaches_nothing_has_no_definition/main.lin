@@ -1,0 +1,6 @@
+// A name that resolves to nothing is declared nowhere, and there is nowhere
+// to go. The server answers that rather than guessing at a declaration whose
+// name happens to match.
+fn main() -> UInt8 {
+    nope
+}

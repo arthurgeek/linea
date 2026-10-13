@@ -1,0 +1,24 @@
+// A type is named through the module that declares it, wherever a type may be
+// named: the import binds `pct`, and a dotted name in a type position reads
+// through it as every other dotted name does. A parameter, a return type and a
+// binding's annotation are three of those positions and one rule, and the
+// arguments a generic one takes are read here, where they are written.
+import pct
+
+fn width(t: pct.Thing) -> UInt8 {
+    t.x
+}
+
+fn kept(sink s: pct.Score) -> pct.Score {
+    s
+}
+
+fn total(p: pct.Pair[UInt8]) -> UInt8 {
+    p.a + p.b
+}
+
+fn main() -> UInt8 {
+    let t: pct.Thing = pct.thing()
+    let _s = kept(pct.Score(4))
+    width(t) + total(.{ a = 1, b = 2 })
+}

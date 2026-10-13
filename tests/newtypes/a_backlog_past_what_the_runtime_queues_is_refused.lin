@@ -1,0 +1,14 @@
+// `net.Backlog` holds 1 to 4096 queued connections, so a larger backlog is
+// refused where it is written rather than by the operating system.
+import std.net
+
+use net.Acceptor
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0), backlog: net.Backlog(9000)).unwrap()
+    if listener.close().is_ok() {
+        0
+    } else {
+        1
+    }
+}

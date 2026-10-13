@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Integer`, and `Float64` is not a built-in integer type
+ --> tests/generics/a_float_cannot_satisfy_integer_remainder.lin:7:15
+  |
+7 |     let _no = remainder(5.5, 2.0)
+  |               ^^^^^^^^^ supply a built-in integer type or an Integer-constrained parameter

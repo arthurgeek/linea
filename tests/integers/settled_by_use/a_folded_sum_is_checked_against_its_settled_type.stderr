@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `UInt8`
+ --> tests/integers/settled_by_use/a_folded_sum_is_checked_against_its_settled_type.lin:2:19
+  |
+2 |     let sum = 200 + 100
+  |                   ^ the result is not representable

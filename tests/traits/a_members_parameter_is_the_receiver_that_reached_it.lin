@@ -1,0 +1,44 @@
+// A member of an implementation generic over its head is lowered once per
+// member of the family, and the type it takes is the receiver that reached it.
+// The two are one type or they are two: a parameter typed at anything else is
+// a body reading its own fields at another type's offsets and widths, which no
+// diagnostic downstream is looking for.
+//
+// The head applies two parameters to tell the positions apart. `b` is the
+// second field of a `Pair[UInt64, UInt8]`, so a body typed at the first
+// position twice would read one byte where the eight-byte `a` sits.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Get {
+    fn get(self: Self) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl Show for UInt8 {
+    fn show(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl Show for UInt64 {
+    fn show(_self: UInt64) -> UInt8 {
+        1
+    }
+}
+
+impl[T: Show, U: Show] Get for Pair[T, U] {
+    fn get(self: Self) -> UInt8 {
+        Show.show(self.b)
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt64, UInt8] = .{ a = 72623859790382856, b = 200 }
+    Get.get(p)
+}

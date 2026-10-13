@@ -1,0 +1,5 @@
+error[T-Index]: an index counts elements, so it is a whole number
+ --> tests/tuples/a_tuple_is_not_an_index.lin:4:7
+  |
+4 |     a[(0, 1)]
+  |       ^^^^^^ this is an `(Int64, Int64)`

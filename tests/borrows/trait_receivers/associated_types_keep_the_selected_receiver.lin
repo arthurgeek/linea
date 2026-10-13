@@ -1,0 +1,35 @@
+struct Pair[X, Y] {
+    first: X,
+    second: Y,
+}
+
+trait Tag {
+    type Item
+
+    fn touch(self: Self) -> UInt8
+}
+
+impl[X, Y] Tag for Pair[X, Y] {
+    type Item = X
+
+    fn touch(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+fn accept[T: Tag](owner: T, _item: T.Item) -> UInt8 {
+    Tag.touch(owner)
+}
+
+fn relay[T: Tag](owner: T, item: T.Item) -> UInt8 {
+    accept(owner, item)
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, UInt8] = .{ first = 1, second = 2 }
+    if relay(borrow pair, UInt8(7)) == 7 {
+        0
+    } else {
+        1
+    }
+}

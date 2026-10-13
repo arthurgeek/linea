@@ -1,0 +1,13 @@
+// Hover reports a compiler fact: the type the checker settled, spelled the
+// way the checker spells it, and nothing else. A binding whose type the source
+// wrote and one it did not are answered alike, because the answer is the type
+// rather than the annotation.
+fn add(a: UInt8, b: UInt8) -> UInt16 {
+    UInt16(a) + UInt16(b)
+}
+
+fn main() -> UInt8 {
+    let written: UInt16 = 1
+    let inferred = add(2, 3)
+    UInt8(written + inferred)
+}

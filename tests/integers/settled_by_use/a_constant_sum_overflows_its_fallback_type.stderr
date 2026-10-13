@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `Int64`
+ --> tests/integers/settled_by_use/a_constant_sum_overflows_its_fallback_type.lin:1:31
+  |
+1 | let big = 9223372036854775807 + 1
+  |                               ^ the result is not representable

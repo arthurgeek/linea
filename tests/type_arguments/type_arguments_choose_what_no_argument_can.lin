@@ -1,0 +1,50 @@
+// `empty` and `nothing` have no argument that mentions `T`, so nothing at the
+// call infers it. Written in brackets, the type argument is chosen by the
+// caller, and any type may be written there.
+struct Shelf {
+    width: UInt8,
+}
+
+enum Slot[T] {
+    Empty(UInt8),
+    Full(T),
+}
+
+impl Shelf {
+    fn empty[T](self: Shelf) -> Slot[T] {
+        .Empty(self.width)
+    }
+
+    fn holding[T, U: Discardable](self: Shelf, _first: T, sink second: U) -> Slot[U] where carries(second) {
+        if self.width == 0 {
+            .Empty(0)
+        } else {
+            .Full(second)
+        }
+    }
+}
+
+fn nothing[T]() -> Slot[T] {
+    .Empty(0)
+}
+
+fn room[T](slot: Slot[T]) -> UInt8 {
+    match read slot {
+        Empty(width) => width,
+        Full(_) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { width = 3 }
+    let left = shelf.empty[UInt8]()
+    let right = nothing[Bool]()
+    let named = Shelf.empty[Str](shelf)
+    let pair = nothing[[UInt8; 2]]()
+    let callback = nothing[fn() -> UInt8]()
+    let held = match shelf.holding[UInt8, UInt16](1, 700) {
+        Empty(_) => 0,
+        Full(value) => value - 700,
+    }
+    room(left) + room(right) + room(named) + room(pair) + room(callback) + UInt8(held) - 6
+}

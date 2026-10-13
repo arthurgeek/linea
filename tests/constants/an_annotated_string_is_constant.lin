@@ -1,0 +1,9 @@
+let message: Str = "hello"
+
+fn main() -> UInt8 {
+    if message.length() == 5 {
+        0
+    } else {
+        1
+    }
+}

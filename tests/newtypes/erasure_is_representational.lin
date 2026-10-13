@@ -1,0 +1,24 @@
+// A newtype's value has its base's own representation -- no wrapper struct,
+// no tag, nothing at a call boundary marking which one this is. So a
+// function taking `Meters` and a function taking `UInt64`, written to do the
+// same arithmetic, compile to the same instructions: the pattern that reads
+// a `Meters` back to its base is a rebind of the same scalar, not a field
+// read out of a structure. The golden beside this case is read to confirm
+// exactly that -- `$lin.addMeters` and `$lin.addUInt64` differ only in name.
+type Meters = UInt64
+
+fn addMeters(sink a: Meters, sink b: Meters) -> UInt64 {
+    let Meters(x) = a
+    let Meters(y) = b
+    x + y
+}
+
+fn addUInt64(sink a: UInt64, sink b: UInt64) -> UInt64 {
+    let x = a
+    let y = b
+    x + y
+}
+
+fn main() -> UInt8 {
+    UInt8(addMeters(Meters(3), Meters(4)) - addUInt64(3, 4))
+}

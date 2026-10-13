@@ -1,0 +1,18 @@
+import std.mem
+
+fn twice[F: fn() -> UInt64 + Copyable](count: F) -> UInt64 {
+    let again = copy(count)
+    count() + again()
+}
+
+// `twice` copies its callback, and a vector cannot be copied, so a closure
+// that owns one cannot be passed to it.
+fn main() -> UInt8 {
+    let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let total = twice(
+        [sink scores] || -> UInt64 {
+            scores.length()
+        },
+    )
+    UInt8(total)
+}

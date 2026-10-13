@@ -1,0 +1,27 @@
+// The brackets before a method's or function's call hold types. `count` is a
+// value, so it cannot stand there, and `Shelve` names nothing.
+struct Shelf {
+    width: UInt8,
+}
+
+impl Shelf {
+    fn empty[T](self: Shelf) -> Option[T] {
+        if self.width == 0 {
+            return .None
+        }
+        return .None
+    }
+}
+
+fn nothing[T]() -> Option[T] {
+    .None
+}
+
+fn main() -> UInt8 {
+    let count = 3
+    let shelf = Shelf { width = count }
+    let _first = shelf.empty[count]()
+    let _second = nothing[count]()
+    let _third = shelf.empty[Shelve]()
+    shelf.width
+}

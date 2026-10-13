@@ -1,0 +1,17 @@
+// A place is a path, not a name: whatever `=` writes through, `+=` updates
+// through, and at whatever depth.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    var p: Point = .{ x = 1, y = 2 }
+    var xs: [UInt8; 2] = [3, 4]
+    p.x += 10
+    p.y *= 3
+    xs[0] += 20
+    xs[1] -= 1
+    // 11 and 6, 23 and 3.
+    p.x + p.y + xs[0] + xs[1]
+}

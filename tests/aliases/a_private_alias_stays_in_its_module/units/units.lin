@@ -1,0 +1,5 @@
+alias Meters = UInt64
+
+pub fn stride() -> Meters {
+    40
+}

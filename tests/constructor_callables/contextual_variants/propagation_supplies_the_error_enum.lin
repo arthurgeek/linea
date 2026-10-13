@@ -1,0 +1,24 @@
+enum RenderError { Allocation(UInt8) }
+
+fn render(succeed: Bool) -> Result[UInt8, RenderError] {
+    let source: Result[UInt8, UInt8] = if succeed {
+        .Ok(11)
+    } else {
+        .Err(7)
+    }
+    let value = source.map_err(.Allocation)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    let success = match render(true) { Ok(value) => value == 11, Err(_) => false }
+    let refusal = match render(false) {
+        Ok(_) => false,
+        Err(error) => match error { Allocation(code) => code == 7 },
+    }
+    if success && refusal {
+        0
+    } else {
+        1
+    }
+}

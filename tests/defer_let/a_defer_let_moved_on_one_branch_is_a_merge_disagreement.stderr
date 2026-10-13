@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `lamp`
+  --> tests/defer_let/a_defer_let_moved_on_one_branch_is_a_merge_disagreement.lin:21:5
+   |
+21 |     if flag {
+   |     ^^^^^^^^^ consume it on the other path too, or on neither

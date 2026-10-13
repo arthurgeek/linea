@@ -1,0 +1,10 @@
+error[S-Test]: a test is not generic
+ --> tests/decl/a_test_is_not_generic.lin:8:23
+  |
+8 | test fn a_thing_holds[T: Copyable]() -> Result[(), IoError] {
+  |                       ^ the compiler writes the only call to a test, so nothing settles this
+error[N-Unused]: `T` is never used
+ --> tests/decl/a_test_is_not_generic.lin:8:23
+  |
+8 | test fn a_thing_holds[T: Copyable]() -> Result[(), IoError] {
+  |                       ^ name it in this declaration, or remove it

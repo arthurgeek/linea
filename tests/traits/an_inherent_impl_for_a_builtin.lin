@@ -1,0 +1,17 @@
+// An inherent `impl` names one side, and a builtin's side is owned by nobody
+// -- so there is no module this could be written in, and it is refused by the
+// rule that decides where an implementation may be written rather than by one
+// of its own.
+//
+// Nothing calls it, because what is on trial is the header. A `pub fn` is
+// exempt from the unused rule, which is what leaves this program provoking one
+// diagnostic rather than a second about the member.
+impl UInt8 {
+    pub fn doubled(x: UInt8) -> UInt8 {
+        x + x
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

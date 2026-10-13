@@ -1,0 +1,5 @@
+error[T-Template]: a component requirement names traits using closed types or template parameters
+ --> tests/traits/self_in_a_component_requirement_is_reported_once.lin:5:27
+  |
+5 | template impl Ready where reflect.components: Required[Self] {}
+  |                           ^^^^^^^ this requirement contains a capability bound, callable, reflection descriptor or unsupported parameter

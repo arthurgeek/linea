@@ -1,0 +1,20 @@
+// `take` returns what the box holds. For a `Box[UInt8]` that is a `UInt8`,
+// which owes nothing, so taking the box with `take` settles it and the report
+// names `_held.take()`.
+@linear
+struct Box[T] {
+    item: T,
+}
+
+impl[T] Box[T] {
+    fn take(sink self: Self) -> T {
+        let Box { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let _held: Box[UInt8] = .{ item = 3 }
+    let used: Box[UInt8] = .{ item = 4 }
+    used.take()
+}

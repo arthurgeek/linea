@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    var number: UInt8 = 7
+    let view = borrow number
+    number = 9
+    if *view == 7 {
+        0
+    } else {
+        1
+    }
+}

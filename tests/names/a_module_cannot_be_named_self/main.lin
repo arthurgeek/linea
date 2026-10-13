@@ -1,0 +1,30 @@
+// A module's name is lowercase, so a directory called `Self` is refused
+// where it is imported, and nothing else is: the rest of the program, which
+// writes the language's own `Self` in a trait, is read as it would be beside
+// any other import.
+import Self
+
+trait Carry {
+    type Item
+
+    fn get(s: Self) -> Self.Item
+}
+
+struct Holder {
+    v: UInt8,
+}
+
+impl Carry for Holder {
+    type Item = UInt8
+
+    fn get(s: Self) -> UInt8 {
+        s.v
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .{ v = 4 }
+    let r = Carry.get(held)
+    let _h = held
+    r + Self.zero()
+}

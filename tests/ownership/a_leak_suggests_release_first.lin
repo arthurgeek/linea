@@ -1,0 +1,24 @@
+// A ticket can be printed, which settles it, or released. The help for a
+// ticket left unsettled names `release` first, the settlement that always
+// fits.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Ticket {
+    fn _print(sink self: Self) -> () {
+        let Ticket { number: _ } = self
+    }
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let _ticket = Ticket { number = 4 }
+    0
+}

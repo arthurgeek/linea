@@ -1,0 +1,7 @@
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_closure_that_binds_an_uncaptured_name_takes_it.lin:17:20
+   |
+17 |         let mine = ticket
+   |                    ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `ticket` away, so it must own it: write `sink [sink ticket]` before the parameters, which makes a closure called once

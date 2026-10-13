@@ -1,0 +1,58 @@
+// A trait's declared types are settled independently by each implementation
+// of it: nothing ties `Pair`'s `A` to its `B`, so some implementation may
+// settle both to the same type. `Give[T.A]` and `Give[T.B]`, both for
+// `Holder[T]`, cannot be proven to name two different arguments -- and two
+// arguments that could be one argument are two implementations answering for
+// one instantiation.
+trait Pair {
+    type A
+    type B
+
+    fn a(self: Self) -> Self.A
+
+    fn b(self: Self) -> Self.B
+}
+
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+struct Both {
+    x: UInt8,
+    y: Bool,
+}
+
+impl Pair for Both {
+    type A = UInt8
+    type B = Bool
+
+    fn a(self: Self) -> Self.A {
+        self.x
+    }
+
+    fn b(self: Self) -> Self.B {
+        self.y
+    }
+}
+
+impl[T: Pair] Give[T.A] for Holder[T] {
+    fn give(_self: Self, _u: T.A) -> UInt8 {
+        1
+    }
+}
+
+impl[T: Pair] Give[T.B] for Holder[T] {
+    fn give(_self: Self, _u: T.B) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Both] = .{ v = .{ x = 1, y = true } }
+    let n: UInt8 = 5
+    Give.give(h, n) * 10 + Give.give(h, true)
+}

@@ -1,0 +1,5 @@
+error[T-Projection]: a projection whose expansion reaches itself is refused: Inner -> Inner
+ --> tests/delegation/index_delegation_rejects_a_recursive_backing_projection.lin:9:21
+  |
+9 |         self.values[self[i]]
+  |                     ^^^^^^^ this is where the chain returns to an implementation already on it

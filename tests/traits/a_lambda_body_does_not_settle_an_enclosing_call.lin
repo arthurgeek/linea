@@ -1,0 +1,6 @@
+fn accept[T, F: fn(read value: T) -> T](_combine: F) -> () {}
+
+fn main() -> UInt8 {
+    accept(|value| value + UInt8(1))
+    0
+}

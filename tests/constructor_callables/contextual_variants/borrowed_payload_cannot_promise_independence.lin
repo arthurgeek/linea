@@ -1,0 +1,6 @@
+enum Failure { Refused(borrow UInt64) }
+
+fn main() -> UInt8 {
+    let _wrap: fn(sink value: borrow UInt64) -> Failure where carries() = .Refused
+    0
+}

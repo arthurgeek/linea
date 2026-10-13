@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter` requires `Discardable`, and `iter.Filter[S.Iter, <closure>]` does not have that capability
+  --> tests/iter/operations/a_generic_chain_is_refused_where_its_bounds_leave_the_walk_undroppable.lin:15:42
+   |
+15 |     values.filter(|value| value.heavy()).fold(0, |sink total, sink _value| total + 1)
+   |                                          ^^^^ `fold` may dispose of an `iter.Filter[S.Iter, <closure>]`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter: Discardable,
+   |         --------- required by this `where` clause

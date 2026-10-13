@@ -1,0 +1,5 @@
+error[N-Duplicate]: `Item` is already declared in this type
+  --> tests/traits/a_declared_type_is_settled_once.lin:16:10
+   |
+16 |     type Item = Counter
+   |          ^^^^ a name is declared once

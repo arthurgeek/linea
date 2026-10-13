@@ -1,0 +1,36 @@
+// A symbol places a name in the module that declares it, and the root
+// module's route is empty. A root type spelled like another module, `Sub`
+// beside `sub`, has members and instantiations spelled from the same parts
+// that module's own names are. The route ends at a separator the root writes
+// too, so they are `;Sub.helper` and `sub;helper`, `;g[Sub,X[Y]]` and
+// `;g[sub.X,Y]`.
+import sub
+
+struct Sub {
+    a: UInt8,
+}
+
+struct Y {
+    b: UInt8,
+}
+
+struct X[T] {
+    t: T,
+}
+
+fn g[A, B](_p: A, _q: B) -> UInt8 {
+    1
+}
+
+impl Sub {
+    pub fn helper() -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let m: Sub = .{ a = 1 }
+    let y: Y = .{ b = 2 }
+    let xy: X[Y] = .{ t = .{ b = 4 } }
+    g(sub.mk(), y) + g(m, xy) + Sub.helper() + sub.helper()
+}

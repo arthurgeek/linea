@@ -1,0 +1,30 @@
+// A trait argument is the type that was written, and an array's length is
+// part of it: `[UInt8; 2]` and `[UInt8; 3]` are two types, so two
+// implementations supplying them to one head are two keys, and each call
+// reaches the one its argument's length names.
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Holds[[UInt8; 2]] for Coins {
+    fn held(x: Self, t: [UInt8; 2]) -> UInt8 {
+        x.count + t[0]
+    }
+}
+
+impl Holds[[UInt8; 3]] for Coins {
+    fn held(x: Self, t: [UInt8; 3]) -> UInt8 {
+        x.count + t[2]
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let pair: [UInt8; 2] = [1, 2]
+    let triple: [UInt8; 3] = [1, 2, 5]
+    Holds.held(c, pair) + Holds.held(c, triple)
+}

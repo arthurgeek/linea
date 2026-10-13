@@ -1,0 +1,5 @@
+error[M-Unused]: `alpha` is never used
+ --> tests/modules/a_reexport_does_not_use_another_files_import/z.lin:1:8
+  |
+1 | import alpha
+  |        ^^^^^ remove the import

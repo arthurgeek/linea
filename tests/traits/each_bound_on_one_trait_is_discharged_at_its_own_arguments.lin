@@ -1,0 +1,24 @@
+// A trait bounded at two arguments is two bounds, so an implementation at one
+// of them discharges that one and leaves the other standing.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn reach[C: Lookup[UInt64] + Lookup[Bool]](_c: C) -> UInt8 {
+    3
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    reach(b)
+}

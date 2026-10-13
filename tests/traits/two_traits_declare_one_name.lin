@@ -1,0 +1,31 @@
+// Two traits declare `of` for one type and nothing is ambiguous: each call
+// names its trait, `Measure.of(a)` or `Weigh.of(a)`, so which one was meant is
+// written at the call rather than worked out from what is in scope.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+trait Weigh {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+impl Weigh for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a) + Weigh.of(a)
+}

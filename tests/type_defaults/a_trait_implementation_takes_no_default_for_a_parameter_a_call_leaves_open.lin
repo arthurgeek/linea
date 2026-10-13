@@ -1,0 +1,18 @@
+struct Box[T = UInt8] {
+    value: T,
+}
+
+trait Make {
+    fn make() -> Self
+}
+
+impl[T: Default] Make for Box[T] {
+    fn make() -> Self {
+        .{ value = Default.default() }
+    }
+}
+
+fn main() -> UInt8 {
+    let _boxed = Box.make()
+    0
+}

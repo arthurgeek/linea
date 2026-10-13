@@ -1,0 +1,12 @@
+@(opaque, linear, derive(Release))
+struct Ticket { code: UInt8 }
+
+impl Ticket {
+    pub fn issue(code: UInt8) -> Ticket {
+        Ticket { code }
+    }
+
+    pub fn number(self: Ticket) -> UInt8 {
+        self.code
+    }
+}

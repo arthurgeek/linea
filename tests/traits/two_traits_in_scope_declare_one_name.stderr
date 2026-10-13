@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Measure` and `Weigh` both declare `of` for `Account`
+  --> tests/traits/two_traits_in_scope_declare_one_name.lin:34:5
+   |
+34 |     a.of() + Measure.of(a) + Weigh.of(a)
+   |     ^^^^ write `Measure.of(…)` or `Weigh.of(…)`, which says which trait it goes through

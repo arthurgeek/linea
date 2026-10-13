@@ -1,0 +1,8 @@
+fn impossible(_value: Never) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    let _selected: fn(read _value: Never) -> UInt8 = impossible
+    0
+}

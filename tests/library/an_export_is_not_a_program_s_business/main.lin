@@ -1,0 +1,7 @@
+export fn published(num: Int32) -> Int32 {
+    num
+}
+
+fn main() -> UInt8 {
+    0
+}

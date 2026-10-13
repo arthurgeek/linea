@@ -1,0 +1,10 @@
+struct Cell[T] { value: T }
+
+fn choose[T: Discardable](sink first: T, sink _second: T) -> T where carries(first) {
+    first
+}
+
+fn main() -> UInt8 {
+    let chosen = choose(.{ value = 1 }, Cell[UInt8] { value = 2 })
+    chosen.value - 1
+}

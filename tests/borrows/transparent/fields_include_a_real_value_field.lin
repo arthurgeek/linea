@@ -1,0 +1,7 @@
+struct Entry { key: UInt8, value: UInt8 }
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ key = 3, value = 7 }
+    let view = borrow entry
+    view.key + view.value
+}

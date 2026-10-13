@@ -1,0 +1,9 @@
+// A trailing `read` parameter may declare a constant default. Nothing reads
+// it yet: a call still writes every argument, the same as before.
+fn pad(s: UInt8, width: UInt8 = 8) -> UInt8 {
+    s + width
+}
+
+fn main() -> UInt8 {
+    pad(1, 2)
+}

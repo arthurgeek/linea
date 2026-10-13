@@ -1,0 +1,78 @@
+import std.io
+import std.testing
+
+// `ScriptedListener` is an `Acceptor` that stands in for failures a real
+// listener rarely reports. Each accept takes the next step of its script:
+// `.Some(error)` reports that failure, and `.None`, like every accept once
+// the script has run out, accepts from the real listener. Closing it closes
+// the real listener, then reports the scripted close failure if there is one.
+@(linear, derive(Release))
+pub struct ScriptedListener {
+    listener: Listener,
+    script: [Option[NetError]; 4],
+    taken: UInt64,
+    close_failure: Option[io.IoError],
+}
+
+// Script `listener`'s accepts with `script`, and its close with
+// `close_failure`.
+pub fn scripted(sink listener: Listener, sink script: [Option[NetError]; 4], sink close_failure: Option[io.IoError]) -> ScriptedListener {
+    ScriptedListener { listener, script, taken = 0, close_failure }
+}
+
+test fn a_scripted_listener_fails_as_scripted_then_accepts_and_reports_its_close_failure() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    var script = scripted(listener, [.Some(.Io(copy(exhausted))), .None, .None, .None], .Some(copy(broken)))
+    let first: Option[NetError] = match &script.accept() {
+        Ok(accepted) => {
+            let Accepted { connection, address: _ } = accepted
+            connection.close().unwrap()
+            .None
+        },
+        Err(error) => .Some(error),
+    }
+    let second_accepted = match &script.accept() {
+        Ok(accepted) => {
+            let Accepted { connection, address: _ } = accepted
+            connection.close().unwrap()
+            true
+        },
+        Err(_) => false,
+    }
+    let closed = script.close()
+    client.close().unwrap()
+    testing.assert_eq(first, Option.Some(NetError.Io(exhausted)), "the scripted failure was not reported first")?
+    testing.assert(second_accepted, "the step after the failure did not accept")?
+    testing.assert_eq(closed, .Err(broken), "the scripted close failure was not reported")?
+    .Ok(())
+}
+
+impl Acceptor for ScriptedListener {
+    fn accept(inout self: Self) -> Result[Accepted, NetError] {
+        if self.taken < 4 {
+            let step = copy(self.script[self.taken])
+            self.taken += 1
+            match step {
+                Some(failure) => return .Err(failure),
+                None => {},
+            }
+        }
+        &self.listener.accept()
+    }
+}
+
+impl io.Close for ScriptedListener {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let ScriptedListener { listener, script: _, taken: _, close_failure } = self
+        listener.close()?
+        match close_failure {
+            Some(failure) => .Err(failure),
+            None => .Ok(()),
+        }
+    }
+}

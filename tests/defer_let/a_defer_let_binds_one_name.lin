@@ -1,0 +1,18 @@
+// A pattern takes a value apart into several bindings, so there is no one
+// value whose release is meant. `defer let` binds a single name.
+@linear
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+impl Release for Pair {
+    fn release(sink self: Self) -> () {
+        let Pair { left: _, right: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    defer let Pair { left, right } = Pair { left = 1, right = 2 }
+    left + right
+}

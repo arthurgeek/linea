@@ -1,0 +1,8 @@
+// A dot after a module offers what that module exports, under the names it
+// exports them by: the qualifier is already written, so the text that goes
+// after the dot is the bare name.
+import ledger
+
+fn main() -> UInt8 {
+    ledger.size()
+}

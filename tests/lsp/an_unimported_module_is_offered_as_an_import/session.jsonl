@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A module a file has not imported is a name nothing has bound. What binds\n// it is the import, so that is what is offered.\nfn main() -> UInt8 {\n    ledger.size()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":10}},"context":{"diagnostics":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":10}},"severity":1,"code":"N-Undefined","source":"linea","message":"undefined name `ledger`"}]}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

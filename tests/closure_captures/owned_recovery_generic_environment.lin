@@ -1,0 +1,14 @@
+@linear
+struct Key { id: UInt8 }
+
+fn recover[T](sink item: T) -> T {
+    let callback = [sink _item = item] || {}
+    let { _item: recovered } = callback.into_captures()
+    recovered
+}
+
+fn main() -> UInt8 {
+    let key: Key = .{ id = 7 }
+    let { id } = recover(key)
+    id
+}

@@ -1,0 +1,13 @@
+trait Identity {
+    fn identity(sink self: Self) -> Self where carries(self)
+}
+
+impl[T] Identity for T {
+    fn identity(sink self: T) -> T where carries(self) {
+        self
+    }
+}
+
+export fn retain(value: UInt8) -> UInt8 {
+    value.identity()
+}

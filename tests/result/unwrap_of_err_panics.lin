@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt8] = .Err(3)
+    failure.unwrap()
+}

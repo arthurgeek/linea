@@ -1,0 +1,49 @@
+trait Required[phantom I] {
+    fn required(self: Self) -> UInt8
+}
+
+trait Other[phantom I] {}
+
+trait Inspect {
+    fn inspect(self: Self) -> UInt8
+}
+
+struct Generic[T] {
+    value: T,
+}
+
+@linear
+struct Constrained[T: Required[UInt8]] {
+    value: T,
+}
+
+template impl Inspect where reflect.components: Required[Generic] + Other[Constrained[Bool]] {
+    fn inspect(_self: Self) -> UInt8 {
+        var total: UInt8 = 0
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    total = total + component.of(_self).required()
+                }
+            },
+        }
+        total
+    }
+}
+
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+struct Single {
+    value: UInt8,
+}
+
+derive Inspect for Pair
+
+derive Inspect for Single
+
+fn main() -> UInt8 {
+    0
+}

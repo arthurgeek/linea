@@ -1,0 +1,13 @@
+// `Bool` has two values and no order. It carries the equivalence marker all
+// the same, because finding a value is a different question from ordering one.
+fn same[T: Equivalent](a: T, b: T) -> Bool {
+    Equatable.equals(a, b)
+}
+
+fn main() -> UInt8 {
+    if same(true, true) {
+        0
+    } else {
+        1
+    }
+}

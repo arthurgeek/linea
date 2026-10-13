@@ -1,0 +1,5 @@
+error[N-Variant]: `Blue` is not a variant of `Colour`
+ --> tests/enums/not_a_variant.lin:4:13
+  |
+4 |     let _ = Colour.Blue
+  |             ^^^^^^^^^^^ the enum has no such variant

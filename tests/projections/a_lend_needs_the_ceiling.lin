@@ -1,0 +1,24 @@
+// A marked argument lends the place for the callee to write through, so it
+// asks of the implementation exactly what an assignment asks: a container that
+// declares `read self` grants neither.
+struct Fixed {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Fixed {
+    type Elem = UInt8
+
+    proj at(self: Fixed, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn bump(inout x: UInt8) -> () {
+    x = x + 10
+}
+
+fn main() -> UInt8 {
+    var f: Fixed = .{ cells = [5, 6] }
+    bump(&f[0])
+    f[1]
+}

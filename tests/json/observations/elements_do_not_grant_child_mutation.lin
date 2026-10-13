@@ -1,0 +1,11 @@
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    var document = json.Value.array(mem.system())
+    json.Value.append(&document, json.Value.array(mem.system())).unwrap()
+    var elements = document.elements().unwrap()
+    json.Value.append(&elements[UInt64(0)], json.Value.null(mem.system())).unwrap()
+    document.release()
+    0
+}

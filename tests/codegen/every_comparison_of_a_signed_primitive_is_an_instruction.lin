@@ -1,0 +1,35 @@
+// The same six over a signed primitive, which is a different instruction each
+// time: whether an ordering reads its operands as signed is what the type
+// decides, and a golden that pinned only the unsigned opcodes would not notice
+// one of them flipping.
+fn eq(a: Int8, b: Int8) -> Bool {
+    a == b
+}
+
+fn ne(a: Int8, b: Int8) -> Bool {
+    a != b
+}
+
+fn lt(a: Int8, b: Int8) -> Bool {
+    a < b
+}
+
+fn le(a: Int8, b: Int8) -> Bool {
+    a <= b
+}
+
+fn gt(a: Int8, b: Int8) -> Bool {
+    a > b
+}
+
+fn ge(a: Int8, b: Int8) -> Bool {
+    a >= b
+}
+
+fn main() -> UInt8 {
+    if eq(-1, -1) && !ne(-1, -1) && lt(-2, -1) && le(-2, -2) && gt(-1, -2) && ge(-1, -1) {
+        5
+    } else {
+        0
+    }
+}

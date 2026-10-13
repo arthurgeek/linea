@@ -1,0 +1,16 @@
+// A failed descriptor write returns its operation, category, and native errno.
+// Descriptor -1 is invalid; EBADF is 9 on the supported Linux/macOS targets.
+import std.io
+
+use io.descriptor
+
+fn main() -> UInt8 {
+    var w = descriptor(-1)
+    match Writer.write_str(&w, "this goes nowhere") {
+        Ok(_) => 0,
+        Err(e) => {
+            let code = copy(e.code)
+            UInt8(code.unwrap())
+        },
+    }
+}

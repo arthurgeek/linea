@@ -1,0 +1,29 @@
+fn shift(number: UInt8, offset: UInt8 = 2) -> UInt8 {
+    number + offset
+}
+
+fn identity[T: Copyable](entry: T) -> T {
+    copy(entry)
+}
+
+fn apply[F: fn(read item: UInt8) -> UInt8](value: UInt8, transform: F) -> UInt8 {
+    transform(item: value)
+}
+
+fn forward[F: fn(read row: UInt8) -> UInt8](value: UInt8, transform: F) -> UInt8 {
+    apply(value, transform)
+}
+
+fn main() -> UInt8 {
+    let selected: fn(read value: UInt8, read by: UInt8 = 2) -> UInt8 = shift
+    let generic: fn(read input: UInt8) -> UInt8 = identity
+    let lambda: fn(read value: UInt8, read by: UInt8 = 2) -> UInt8 = |number, offset = 2| number + offset
+    let local = |entry: UInt8| entry + 1
+    let offset: UInt8 = 3
+    let captured = read [read offset] |number: UInt8| number + offset
+    if selected(by: 4, value: 3) == 7 && selected(value: 3) == 5 && shift(offset: 4, number: 3) == 7 && generic(input: 3) == 3 && lambda(by: 4, value: 3) == 7 && lambda(value: 3) == 5 && local(entry: 3) == 4 && apply(3, |number| number + 1) == 4 && apply(3, identity) == 3 && forward(3, generic) == 3 && forward(3, captured) == 6 {
+        0
+    } else {
+        1
+    }
+}

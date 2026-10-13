@@ -1,0 +1,22 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+impl[T] Shelf[T] {
+    fn counted(self: Self) -> UInt64 {
+        self.items.length()
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf[UInt8] = .{ items = Vec.new() }
+    let total = shelf.counted()
+    shelf.release()
+    UInt8(total) + 6
+}

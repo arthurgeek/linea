@@ -1,0 +1,7 @@
+pub struct Item {
+    x: UInt8,
+}
+
+pub fn zero() -> UInt8 {
+    0
+}

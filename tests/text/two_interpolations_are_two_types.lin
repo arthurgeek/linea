@@ -1,0 +1,23 @@
+// Each literal is its own type, and two of them reaching one generic function
+// are two instantiations of it.
+//
+// They used to share a name -- every interpolation was `{interpolation}` -- and
+// a symbol is derived from a name, so `println` at two of them mangled to one
+// symbol and the emitter refused to write the module. Numbering the type after
+// the expression it came from is what tells them apart, and this is the case
+// that noticed: the example was the first program to interpolate twice.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    let a: Int64 = 2
+    let b: Int64 = 3
+
+    var w: Descriptor = stdout()
+    Display.fmt("a={a}", &w)?
+    Display.fmt("b={b} and {a}", &w)?
+    return .Ok(0)
+}

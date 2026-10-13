@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/decl/return_type_mismatch.lin:2:12
+  |
+1 | fn f() -> UInt8 {
+  |           ----- expected because of this return type
+2 |     return true
+  |            ^^^^ expected `UInt8`, found `Bool`

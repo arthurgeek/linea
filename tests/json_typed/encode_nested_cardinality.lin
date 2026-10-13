@@ -1,0 +1,31 @@
+import std.json
+import std.mem
+
+struct Child { skip: Bool }
+
+impl json.Encode for Child {
+    fn encode[W: Writer](self: Self, inout encoder: json.Encoder, inout writer: W) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+        if self.skip {
+            return .Ok({})
+        }
+        return json.Encoder.boolean(&encoder, &writer, true)
+    }
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Child, mem.SystemAllocator] = Vec.new()
+    let child: Child = .{ skip = true }
+    Vec.push(&values, child).unwrap()
+    var output = String.new()
+    let encoded = json.encode(&output, values)
+    let refused = match encoded { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    output.release()
+    let item = Vec.remove(&values, 0).unwrap()
+    let Child { skip: _ } = item
+    values.finish().unwrap()
+    return if refused {
+        0
+    } else {
+        1
+    }
+}

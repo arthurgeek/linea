@@ -1,0 +1,10 @@
+// A function's tail may open its line with `(` around any expression: the
+// binding above has ended at its newline, and the tail is read on its own.
+fn midpoint(lo: UInt8, hi: UInt8) -> UInt8 {
+    let half = (hi - lo) / 2
+    (lo + half)
+}
+
+fn main() -> UInt8 {
+    midpoint(2, 6) - 4
+}

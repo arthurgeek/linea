@@ -1,0 +1,7 @@
+error[O-Move]: `a` has already been moved
+  --> tests/defer/a_placement_that_takes_two_values.lin:39:17
+   |
+39 |     defer take2(a, b, &freed)
+   |                 ^ it was already taken, and a value is taken once
+41 |     take1(a, &freed)
+   |           - it was taken here

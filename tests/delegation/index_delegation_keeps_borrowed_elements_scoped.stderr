@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/delegation/index_delegation_keeps_borrowed_elements_scoped.lin:8:5
+  |
+8 |     copy(board[0])
+  |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

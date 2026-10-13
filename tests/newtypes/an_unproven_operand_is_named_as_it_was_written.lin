@@ -1,0 +1,13 @@
+// The message names the operand whole. What a reader has to change is the
+// expression they wrote, so naming the operator at its root -- the one token
+// under it -- offers a fix in a spelling that appears nowhere in the source.
+type Percent = UInt8 where it in 0..=99
+
+fn f(sink n: UInt8) -> UInt8 {
+    let Percent(v) = Percent(n + 1)
+    v
+}
+
+fn main() -> UInt8 {
+    f(3)
+}

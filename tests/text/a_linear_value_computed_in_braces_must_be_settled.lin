@@ -1,0 +1,26 @@
+// A literal renders a linear value it borrows, but it cannot hold one that
+// nothing else owns: it has no way to settle it.
+import std.io
+
+use io.IoError
+use io.println
+
+@linear
+struct Ticket {
+    seat: Int64,
+}
+
+impl Display for Ticket {
+    fn fmt[W: Writer](self: Ticket, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Display.fmt(self.seat, &w)
+    }
+}
+
+fn issue() -> Ticket {
+    .{ seat = 3 }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println("seat {issue()}")?
+    return .Ok(0)
+}

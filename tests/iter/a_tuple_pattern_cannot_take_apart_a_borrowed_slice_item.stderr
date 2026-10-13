@@ -1,0 +1,5 @@
+error[T-Mismatch]: this takes a tuple apart, and the value is a `borrow (UInt8, UInt8)`
+ --> tests/iter/a_tuple_pattern_cannot_take_apart_a_borrowed_slice_item.lin:6:9
+  |
+6 |     for (a, b) in pairs.as_slice() {
+  |         ^^^^^^ a tuple pattern takes a tuple apart

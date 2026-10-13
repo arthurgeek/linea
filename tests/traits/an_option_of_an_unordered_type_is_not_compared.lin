@@ -1,0 +1,15 @@
+// The head's bound is what the instantiation owes: an `Option` orders when
+// what it holds does, and a `Key` says nothing about how it orders.
+struct Key {
+    value: Int64,
+}
+
+fn main() -> UInt8 {
+    let a: Option[Key] = .None
+    let b: Option[Key] = .Some(.{ value = 1 })
+    if a < b {
+        1
+    } else {
+        0
+    }
+}

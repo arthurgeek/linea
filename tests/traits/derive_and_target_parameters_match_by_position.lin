@@ -1,0 +1,18 @@
+trait Marker {}
+
+template impl Marker {}
+
+struct Holder[T] {
+    value: T,
+}
+
+derive[U] Marker for Holder[U]
+
+fn accepts[T: Marker](_value: T) -> UInt8 {
+    9
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 1 }
+    accepts(holder)
+}

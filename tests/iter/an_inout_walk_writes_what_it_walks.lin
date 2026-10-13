@@ -1,0 +1,10 @@
+// A walk lending its places writably writes through the value it walks, so it
+// names that value the way `&` names one: a binding declared with `let` cannot
+// be written, and the walk is where that is noticed.
+fn main() -> UInt8 {
+    let xs: [UInt8; 2] = [1, 2]
+    for inout x in xs {
+        x = x + 1
+    }
+    xs[0]
+}

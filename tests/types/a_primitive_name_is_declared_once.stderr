@@ -1,0 +1,5 @@
+error[N-Duplicate]: `UInt8` is already declared
+ --> tests/types/a_primitive_name_is_declared_once.lin:4:8
+  |
+4 | struct UInt8 {
+  |        ^^^^^ a name is declared once

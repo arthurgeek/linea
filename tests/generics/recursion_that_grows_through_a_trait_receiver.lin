@@ -1,0 +1,24 @@
+// Written twice, because what a head binds is bound the same way whether the
+// implementation names a trait or names only its own type. The measure is
+// about the arguments a call instantiates its callee with, and which block the
+// member was written in decides none of them.
+trait Grow {
+    fn grow(self: Self) -> UInt8
+}
+
+@copyable
+struct Env[T] {
+    v: T,
+}
+
+impl[T: Copyable] Grow for Env[T] {
+    fn grow(self: Self) -> UInt8 {
+        let e: Env[Env[T]] = .{ v = copy(self) }
+        Grow.grow(e)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Env[UInt8] = .{ v = 1 }
+    Grow.grow(a)
+}

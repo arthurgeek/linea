@@ -1,0 +1,5 @@
+error[T-Literal]: `I` cannot hold -1
+ --> tests/projections/inferred_index/symbolic_key_rejects_nonuniversal_negative_literal.lin:6:22
+  |
+6 |     borrow container[-1]
+  |                      ^^ value is out of range for its type

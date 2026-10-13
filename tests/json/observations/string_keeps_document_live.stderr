@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/json/observations/string_keeps_document_live.lin:7:5
+  |
+7 |     document.release()
+  |     ^^^^^^^^ keep this place available until the last use of its observation
+8 |     if text == "tea" {
+  |        ---- the observation is still used here

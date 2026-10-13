@@ -1,0 +1,5 @@
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/constants/aggregates/array_extent.lin:1:26
+  |
+1 | let values: [UInt8; 2] = [1]
+  |                          ^^^ this has 1, and the type says 2

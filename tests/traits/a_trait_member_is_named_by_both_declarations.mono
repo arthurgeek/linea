@@ -1,0 +1,12 @@
+pub struct Account {
+    balance: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let a: account.Account = .{ balance = 7 }
+    account.Account;;Measure.of(a)
+}
+
+fn account.Account;;Measure.of(x: account.Account) -> UInt8 {
+    x.balance
+}

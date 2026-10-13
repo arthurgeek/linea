@@ -1,0 +1,15 @@
+// A traversal is the sequence of positions a walk runs through, so what it is
+// given has to be something a walk can ask for a next position. A value that
+// yields nothing names no order.
+struct Bag {
+    xs: [UInt8; 2],
+}
+
+impl Bag {
+    trav positions = 4
+}
+
+fn main() -> UInt8 {
+    let b: Bag = .{ xs = [1, 2] }
+    b.xs[0] + b.xs[1]
+}

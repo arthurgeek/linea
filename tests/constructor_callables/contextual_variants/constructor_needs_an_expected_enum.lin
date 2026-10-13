@@ -1,0 +1,7 @@
+enum RenderError { Allocation(UInt8) }
+
+fn main() -> UInt8 {
+    let source: Result[UInt8, UInt8] = .Err(7)
+    let _mapped = source.map_err(.Allocation)
+    0
+}

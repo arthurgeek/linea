@@ -1,0 +1,26 @@
+// A source and a payload name one type however each is written: the entry
+// qualifies `Timeout` by its module and the variant names it bare.
+import faults
+
+use faults.Timeout
+
+@derive(From[faults.Timeout])
+enum Failure {
+    TimedOut(Timeout),
+    Cancelled,
+}
+
+fn run(seconds: UInt8) -> Result[UInt8, Failure] {
+    let waited = faults.wait(seconds)?
+    .Ok(waited)
+}
+
+fn main() -> UInt8 {
+    match run(45) {
+        Err(failure) => match failure {
+            TimedOut(timeout) => timeout.seconds - 45,
+            Cancelled => 1,
+        },
+        Ok(_) => 2,
+    }
+}

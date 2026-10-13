@@ -1,0 +1,11 @@
+// A `use` without `pub` brings a name into this module and passes it no
+// further. Reading the visibility off the declaration it binds answered about
+// the source -- which is `pub`, or it could not have been named here at all --
+// so every re-export exported, and `pub` on one meant nothing.
+import mid.inner as inner
+
+use inner.helper
+
+pub fn ping() -> UInt8 {
+    helper(1)
+}

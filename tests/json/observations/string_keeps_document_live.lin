@@ -1,0 +1,13 @@
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    let document = json.Value.string(mem.system(), "tea").unwrap()
+    let text = document.as_str().unwrap()
+    document.release()
+    if text == "tea" {
+        0
+    } else {
+        1
+    }
+}

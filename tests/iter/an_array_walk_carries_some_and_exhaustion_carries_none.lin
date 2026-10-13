@@ -1,0 +1,29 @@
+// A walk over an array ends the two ways every walk ends, so it answers with
+// the same `Option[E]`: stopping at a place is `Some(e)` and running past the
+// last one is `None`. What the places belong to decides how they are reached
+// and nothing about what the loop yields.
+fn main() -> UInt8 {
+    let xs: [UInt8; 9] = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    let found = for x in xs {
+        if x == 5 {
+            break x
+        }
+    }
+
+    let ys: [UInt8; 3] = [0, 1, 2]
+    let ran_out = for y in ys {
+        if y == 9 {
+            break y
+        }
+    }
+
+    let a: UInt8 = match found {
+        Some(v) => v,
+        None => 0,
+    }
+    let b: UInt8 = match ran_out {
+        Some(v) => v,
+        None => 7,
+    }
+    a + b
+}

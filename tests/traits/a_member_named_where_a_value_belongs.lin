@@ -1,0 +1,31 @@
+// A dot on a trait's name opens the namespace the trait declares, and what it
+// holds is a type and an operation. A type is not a value: it is what a value
+// has. An operation is a value once its uses say which type `Self` is, and
+// comparing it with a type says nothing about that.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let v = Measure.Item
+    let w = Measure.of
+    if v == w {
+        7
+    } else {
+        3
+    }
+}

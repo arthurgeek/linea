@@ -1,0 +1,22 @@
+// A postfix call checks its receiver to find out what the call reaches at all.
+// An argument list the matcher refuses is a mistake beside the receiver and not
+// a second question about it, so whatever the receiver is wrong about is
+// reported once.
+trait Measure {
+    fn between(x: Self, low: UInt8) -> UInt8
+}
+
+impl Measure for UInt8 {
+    fn between(x: Self, low: UInt8) -> UInt8 {
+        x + low
+    }
+}
+
+fn twice(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    twice(&x).between()
+}

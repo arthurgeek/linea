@@ -1,0 +1,38 @@
+trait Inspect {
+    fn inspect(self: Self) -> UInt8
+}
+
+trait Measured {}
+
+template impl Inspect where reflect.components: Measured {
+    fn inspect(_self: Self) -> UInt8 {
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    copy(component.of(_self))
+                }
+            },
+        }
+        0
+    }
+}
+
+struct Box[T] {
+    value: T,
+}
+
+derive[T] Inspect for Box[T]
+
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn _leak() -> UInt8 {
+    let _key = Key.Forged(7)
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

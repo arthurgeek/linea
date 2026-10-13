@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/codegen/unsigned_two_times_maximum_traps.lin:2:9

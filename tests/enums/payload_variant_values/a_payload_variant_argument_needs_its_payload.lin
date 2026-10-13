@@ -1,0 +1,15 @@
+enum Mode {
+    Preserve,
+    Exact(UInt64),
+}
+
+fn bits(mode: Mode) -> UInt64 {
+    match read mode {
+        Preserve => 0,
+        Exact(value) => value,
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(bits(Mode.Exact) % 200)
+}

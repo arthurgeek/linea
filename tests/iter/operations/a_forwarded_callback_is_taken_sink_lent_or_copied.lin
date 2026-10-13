@@ -1,0 +1,25 @@
+import std.io
+
+// A function that hands its callback on to `any` takes it `sink`.
+fn any_taken[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, sink heavy: F) -> Bool where F: Discardable {
+    (UInt64(1)..stop).any(heavy)
+}
+
+// A function that only borrows its callback lends it to `any_inout`.
+fn any_lent[F: inout fn(sink weight: UInt64) -> Bool](stop: UInt64, inout heavy: F) -> Bool {
+    (UInt64(1)..stop).any_inout(&heavy)
+}
+
+// A function that only reads a copyable callback passes `any` a copy.
+fn any_copied[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, heavy: F) -> Bool where F: Copyable {
+    (UInt64(1)..stop).any(copy(heavy))
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var lent = |sink weight: UInt64| weight > 4
+    let taken = any_taken(10, |sink weight| weight > 4)
+    let borrowed = any_lent(3, &lent)
+    let copied = any_copied(10, |sink weight| weight > 8)
+    io.println("{taken} {borrowed} {copied}")?
+    .Ok(0)
+}

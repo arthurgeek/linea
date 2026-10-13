@@ -1,0 +1,18 @@
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/tuples/a_pattern_settles_open_components_by_their_uses.lin:14:20
+   |
+14 |     let m: UInt8 = x
+   |            ----- expected because of this annotation
+   |                    ^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/tuples/a_pattern_settles_open_components_by_their_uses.lin:15:29
+   |
+15 |     let _p: (UInt8, Str) = ("x", 1)
+   |             ------------ expected because of this annotation
+   |                             ^^^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `Str`, found `Int64`
+  --> tests/tuples/a_pattern_settles_open_components_by_their_uses.lin:15:34
+   |
+15 |     let _p: (UInt8, Str) = ("x", 1)
+   |             ------------ expected because of this annotation
+   |                                  ^ expected `Str`, found `Int64`

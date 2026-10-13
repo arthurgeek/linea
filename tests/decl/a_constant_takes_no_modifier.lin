@@ -1,0 +1,10 @@
+// A constant names a value; it cannot declare representation or ownership policy.
+@opaque
+let sealed: UInt8 = 1
+
+@linear
+let owed: UInt8 = 2
+
+fn main() -> UInt8 {
+    sealed + owed
+}

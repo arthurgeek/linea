@@ -1,0 +1,23 @@
+// An expression written across lines ends each line with the token that
+// carries it on. None of `+`, `&&`, `(` or `,` can end a statement, so the
+// newline after one does not end one either.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = 1 + 2 + 3
+
+    let ready = total > 5 && total < 10
+
+    let sum: UInt8 = add(
+        1,
+        2,
+    )
+
+    if ready {
+        total + sum
+    } else {
+        0
+    }
+}

@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/arrays/an_unsettled_index_names_every_element.lin:14:17
+   |
+14 |     two(&xs[i], xs[j])
+   |         ------ mutated by this argument
+   |                 ^^^^^ already passed `&` here

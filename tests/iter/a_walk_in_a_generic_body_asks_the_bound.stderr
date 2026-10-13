@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking an `S` builds an `S.Iter` and abandons it where the walk ends, and it is linear
+ --> tests/iter/a_walk_in_a_generic_body_asks_the_bound.lin:4:15
+  |
+4 |     for _x in s {
+  |               ^ `S.Iter` is linear, and nothing settles it here
+  |
+  = help: bind it, `var pending = s.iterate()`, walk it lent with `for _x in &pending`, then settle `pending` after the loop

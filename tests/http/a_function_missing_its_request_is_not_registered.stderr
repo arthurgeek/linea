@@ -1,0 +1,7 @@
+error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn() -> Result[Response[SystemAllocator], Error[SystemAllocator]]` does not implement it
+  --> tests/http/a_function_missing_its_request_is_not_registered.lin:11:26
+   |
+11 |     let routed = &router.route("GET /", greet)
+   |                          ^^^^^ implement it for that type, or drop the bound
+   |
+   = help: this function's parameters are `()`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)

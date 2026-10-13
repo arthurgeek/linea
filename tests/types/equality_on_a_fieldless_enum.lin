@@ -1,0 +1,32 @@
+// A fieldless enum is its tag, held in a register like any number -- and that
+// is what an implementation of `Equatable` for one has to compare, because the
+// operator inside such a body would be the operation being written. Equality
+// is not derived from the representation: the tags are reached through a
+// `match`, and what identity means for the type is the author's to say.
+enum Colour {
+    Red,
+    Green,
+}
+
+fn rank(c: Colour) -> UInt8 {
+    match read c {
+        Red => 0,
+        Green => 1,
+    }
+}
+
+impl Equatable for Colour {
+    fn equals(self: Colour, other: Colour) -> Bool {
+        rank(self) == rank(other)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Colour = Colour.Red
+    let b: Colour = Colour.Red
+    if a == b {
+        9
+    } else {
+        1
+    }
+}

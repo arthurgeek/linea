@@ -1,0 +1,5 @@
+error[T-Bound]: `Tuple2` takes 2 type argument(s), and was given 0
+ --> tests/tuples/a_bare_tuple_head_needs_its_arguments.lin:3:13
+  |
+3 |     let t = Tuple2 { _0 = 1, _1 = 2 }
+  |             ^^^^^^ give it the arguments it declares

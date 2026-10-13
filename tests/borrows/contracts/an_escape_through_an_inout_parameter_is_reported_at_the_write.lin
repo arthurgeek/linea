@@ -1,0 +1,14 @@
+// `fill` stores a view of its own local into `target`, which its clause lets
+// retain only what `target` already held. The report points at the write,
+// not at the value the body goes on to return.
+fn fill(inout target: Option[borrow UInt64], seed: UInt64) -> UInt64 where retains(target: target) {
+    let local: UInt64 = 3
+    target = .Some(borrow local)
+    seed + 1
+}
+
+fn main() -> UInt8 {
+    var slot: Option[borrow UInt64] = .None
+    let n = fill(&slot, 1)
+    UInt8(n)
+}

@@ -1,0 +1,5 @@
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/traits/a_lambda_body_does_not_settle_an_enclosing_call.lin:4:12
+  |
+4 |     accept(|value| value + UInt8(1))
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^ settle every input type before this callable value

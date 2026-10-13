@@ -1,0 +1,22 @@
+// Having a Release implementation does not consume a Linear value at scope
+// exit. The program must write a consuming call; observing the ticket and then
+// leaving it owned is the same O-Leak as it is for any other Linear value.
+@linear
+struct Ticket {
+    code: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { code: _code } = self
+    }
+}
+
+fn observe(ticket: Ticket) -> UInt8 {
+    ticket.code
+}
+
+fn main() -> UInt8 {
+    let ticket: Ticket = .{ code = 7 }
+    observe(ticket)
+}

@@ -1,0 +1,8 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/a_carrier_default_never_hides_where_a_value_comes_from.lin:12:9
+   |
+12 |         copy(other)
+   |         ^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `session` is a carrier and this signature writes no clause, so its contract is `where carries(session)`
+   = help: the value comes from `other`; write `where carries(other)` to say so

@@ -1,0 +1,19 @@
+// `_` over an enum whose variants carry no payload abbreviates the exhaustive
+// list of variants and discards nothing. Over a type parameter it abbreviates
+// nothing: there are no variants to stand for, so it is a discard of whatever
+// the argument turns out to hold.
+//
+// A parameter having no parts to look at is not the same as its having none.
+// The body is checked once and stands for every instantiation, so the
+// pessimistic answer is the sound one -- which is why this is refused where it
+// is written, and not at the one call that reaches it with a `UInt8`.
+fn drop[T](sink x: T) -> UInt8 {
+    match x {
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    drop(n)
+}

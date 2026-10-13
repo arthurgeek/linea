@@ -1,0 +1,5 @@
+error[O-Lent]: this reads a place the walk around it lends writably
+ --> tests/iter/a_writable_lend_is_the_only_path_to_what_it_names.lin:9:23
+  |
+9 |     for inout x in xs {
+  |                       ^ read it through the binder, or lend it with `for read`

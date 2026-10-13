@@ -1,0 +1,5 @@
+error[N-NotAValue]: `UInt8` is a type, and a type is not a value
+ --> tests/types/a_primitive_is_not_a_value.lin:6:17
+  |
+6 |     let _wide = UInt8
+  |                 ^^^^^ name a value of that type

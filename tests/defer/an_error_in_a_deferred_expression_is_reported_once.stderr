@@ -1,0 +1,7 @@
+error[O-Move]: `k` has already been moved
+  --> tests/defer/an_error_in_a_deferred_expression_is_reported_once.lin:17:14
+   |
+16 |         take(k)
+   |              - it was taken here
+17 |         take(k)
+   |              ^ it was already taken, and a value is taken once

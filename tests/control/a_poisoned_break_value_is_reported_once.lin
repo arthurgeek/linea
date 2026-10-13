@@ -1,0 +1,11 @@
+// The break value is refused where it is written; the loop's type is not
+// reported again as a second mistake.
+fn main() -> UInt8 {
+    let r = loop {
+        let f = || -> UInt8 {
+            nope
+        }
+        break f()
+    }
+    r
+}

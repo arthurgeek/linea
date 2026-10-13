@@ -1,0 +1,33 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// `SysVec` fixes the allocator and leaves the element open. As the head of a
+// path it takes the remaining argument from what the call is expected to
+// produce, as `Vec.new_in` does.
+alias SysVec[T] = Vec[T, SystemAllocator]
+alias Maybe[T] = Option[T]
+
+fn fresh() -> SysVec[UInt8] {
+    SysVec.new_in(mem.system())
+}
+
+fn count(sink names: SysVec[UInt16]) -> UInt64 {
+    let total = names.length()
+    names.release()
+    total
+}
+
+fn main() -> UInt8 {
+    let bytes: SysVec[UInt8] = SysVec.new_in(mem.system())
+    let spare = fresh()
+    let wide: SysVec[UInt16] = SysVec.new_in(mem.system())
+    let held = bytes.length() + spare.length() + count(wide)
+    bytes.release()
+    spare.release()
+    let some: Maybe[UInt8] = Maybe.Some(UInt8(held) + 3)
+    match some {
+        Some(v) => v,
+        None => 1,
+    }
+}

@@ -1,0 +1,18 @@
+// A declaration that holds itself through an instantiation of another is one
+// cycle, and it is reported once: the edge broken to give the type a size is
+// the declaration's own, which no later filling of the instantiation restores.
+struct Wrap[T] {
+    inner: T,
+}
+
+struct Node {
+    next: Wrap[Node],
+}
+
+fn _keep(_n: Node) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

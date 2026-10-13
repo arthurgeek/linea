@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this write replaces it
+  --> tests/ownership/a_write_through_an_inout_is_the_callees_leak/main.lin:11:5
+   |
+10 | fn steal(inout k: Key) -> UInt8 {
+   |                - acquired here
+11 |     k = mint(2)
+   |     ^ this write drops the old value
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

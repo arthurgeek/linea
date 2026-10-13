@@ -1,0 +1,13 @@
+// A format spec belongs to its interpolation value, so formatting the
+// surrounding expression keeps the spec as written, `.02` included, and
+// settles the spacing around it.
+import std.io
+
+use io.eprintln
+
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    let y = 2.5
+    eprintln("{x:>4}|{y:.02}|{x:*^9?}|{x:02}")
+    0
+}

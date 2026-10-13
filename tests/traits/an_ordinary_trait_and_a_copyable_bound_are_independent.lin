@@ -1,0 +1,26 @@
+// An ordinary trait grants behavior; the separate Copyable bound grants
+// duplication of the generic value.
+@copyable
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn twice[T: Copyable + Measure](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 4 }
+    let b: Account = twice(a)
+    b.balance
+}

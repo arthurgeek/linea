@@ -1,0 +1,14 @@
+error[O-Move]: `h` has already been moved
+  --> tests/ownership/a_part_does_not_refill_a_move/main.lin:21:5
+   |
+20 |     let a = consume(h)
+   |                     - it was taken here
+21 |     h.n = 2
+   |     ^^^ it was already taken, and a value is taken once
+error[O-Move]: `h` has already been moved
+  --> tests/ownership/a_part_does_not_refill_a_move/main.lin:22:21
+   |
+20 |     let a = consume(h)
+   |                     - it was taken here
+22 |     let b = consume(h)
+   |                     ^ it was already taken, and a value is taken once

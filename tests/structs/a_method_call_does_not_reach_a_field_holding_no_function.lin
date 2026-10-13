@@ -1,0 +1,10 @@
+// `box.size()` looks for an operation named `size`, and `Box` declares none.
+// The field `size` holds a number, so there is nothing to call.
+struct Box {
+    size: UInt8,
+}
+
+fn main() -> UInt8 {
+    let box: Box = .{ size = 3 }
+    box.size()
+}

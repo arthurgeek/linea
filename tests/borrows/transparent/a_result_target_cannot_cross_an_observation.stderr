@@ -1,0 +1,5 @@
+error[T-BorrowContract]: a result target cannot enter observation storage
+ --> tests/borrows/transparent/a_result_target_cannot_cross_an_observation.lin:3:83
+  |
+3 | fn rejected(item: borrow UInt8) -> Result[borrow Holder, UInt8] where carries(.Ok.item: item) {
+  |                                                                                   ^^^^ result targets name owned result components

@@ -1,0 +1,12 @@
+@linear
+struct Ticket { number: UInt8 }
+
+fn issue(sink item: UInt8) -> Option[Ticket] {
+    .Some(.{ number = item })
+}
+
+fn main() -> UInt8 {
+    var mapped = (UInt8(0)..1).filter_map(issue)
+    let _ticket = Iterator.next(&mapped).unwrap()
+    0
+}

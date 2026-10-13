@@ -1,0 +1,29 @@
+// `continue` ends an iteration and goes back to the loop's head. The ownership
+// graph had no arm for it at all: it emitted nothing, added no edge, and left
+// the code after it reachable -- so a value consumed before it was consumed
+// again on the next iteration, and a value created after it was never
+// consumed on the iterations that skipped it.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    var i: UInt8 = 0
+    var total: UInt8 = 0
+    while i < 3 {
+        i = i + 1
+        let k: Key = .Forged(1)
+        if i == 2 {
+            continue
+        }
+        total = total + burn(k)
+    }
+    total
+}

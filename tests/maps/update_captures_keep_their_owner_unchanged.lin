@@ -1,0 +1,14 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    let first: UInt64 = 7
+    var second: UInt64 = 9
+    var values: collections.Map[UInt64, borrow UInt64, mem.SystemAllocator] = collections.Map.new()
+    collections.Map.insert(&values, 1, borrow first).unwrap().release()
+    let _updated = collections.Map.update(&values, 1, read [read second] |sink _old| borrow second)
+    second = 11
+    let observed = **values.get(1).unwrap()
+    values.release()
+    UInt8(observed)
+}

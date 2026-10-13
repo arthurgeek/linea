@@ -1,0 +1,7 @@
+fold: 17000 g from 5 parcels
+for_each: 6400 g heaviest of 5
+any: true after 3
+all: false after 3
+find: 6400 g after 3
+find_map: 400 g over after 3
+find_counted: 5 inspected after 5

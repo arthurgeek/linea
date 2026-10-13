@@ -1,0 +1,7 @@
+import inner
+
+pub use inner.value
+
+fn main() -> UInt8 {
+    value()
+}

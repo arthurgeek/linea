@@ -1,0 +1,5 @@
+error[T-RangePlace]: a range place is copied out of or assigned into whole
+ --> tests/projections/a_range_place_is_used_whole.lin:6:16
+  |
+6 |     let head = a[0..2]
+  |                ^^^^^^^ this use is neither, and a part of a range place names nothing

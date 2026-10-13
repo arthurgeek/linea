@@ -1,0 +1,29 @@
+struct Counter {
+    at: UInt8,
+}
+
+@copyable
+pub enum Option[UInt8] {
+    None,
+    Some(UInt8),
+}
+
+fn ;main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    match ;twice[Counter](c) {
+        None => 0,
+        Some(v) => v,
+    }
+}
+
+fn ;twice[Counter](w: Counter) -> std.option.Option[UInt8] {
+    ;wrapped[Counter](w)
+}
+
+fn ;wrapped[Counter](w: Counter) -> std.option.Option[UInt8] {
+    .Some(Counter;;Measure.of(w))
+}
+
+fn Counter;;Measure.of(x: Counter) -> UInt8 {
+    x.at
+}

@@ -1,0 +1,10 @@
+// A type parameter is settled by an argument, and the entry point has no call
+// site to supply one. Lowering instantiates `main` at no arguments whatever it
+// declares, so a body written against `T` would be emitted against nothing.
+//
+// Refused at the declaration rather than left to whether `T` can be reached
+// from the body: a generic entry point is one the runtime cannot call, and
+// that is true of it before anything inside is read.
+fn main[T: Copyable]() -> UInt8 {
+    1
+}

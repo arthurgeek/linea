@@ -1,0 +1,9 @@
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/release/a_release_capability_does_not_schedule_a_call.lin:20:9
+   |
+20 |     let ticket: Ticket = .{ code = 7 }
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+22 | }
+   | - the block ends here
+   |
+   = help: settle it first with `ticket.release()`, or take it apart with `let Ticket { code: _ } = ticket`

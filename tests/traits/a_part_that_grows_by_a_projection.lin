@@ -1,0 +1,30 @@
+// A part is held to the measure a recursive call is held to, and a projection
+// is the same structural step in both places: `Chain[S]` holding a
+// `Chain[S.Next]` reaches its own declaration again with more than it was
+// given, so substituting the parts mints one type per level.
+//
+// What settles `Next` is not read here either. `Cycle` settles it to itself,
+// so the parts would close after one level, and the part is refused anyway.
+trait Step {
+    type Next: Step
+
+    fn onward(sink self: Self) -> Self.Next
+}
+
+struct Cycle { _n: UInt8 }
+
+impl Step for Cycle {
+    type Next = Cycle
+
+    fn onward(sink self: Cycle) -> Self.Next {
+        self
+    }
+}
+
+struct Chain[S: Step] {
+    rest: Chain[S.Next],
+}
+
+fn main() -> UInt8 {
+    0
+}

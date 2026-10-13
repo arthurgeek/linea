@@ -1,0 +1,5 @@
+error[T-Call]: this lambda takes `score` as `read`, and the expected callable passes parameter 1 as `sink`
+ --> tests/iter/operations/a_lambda_takes_its_item_as_the_operation_passes_it.lin:6:39
+  |
+6 |     let high = scores.as_slice().any(|score| *score > 10)
+  |                                       ^^^^^ write `sink score`

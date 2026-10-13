@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Option[UInt8]`, found `option.Option[UInt8]`
+  --> tests/prelude/a_report_names_a_shadowed_prelude_type_through_its_module.lin:10:5
+   |
+9  | fn first_byte(text: Str) -> Option[UInt8] {
+   |                             ------ expected because of this return type
+10 |     text.byte(0)
+   |     ^^^^^^^^^^^^ expected `Option[UInt8]`, found `option.Option[UInt8]`

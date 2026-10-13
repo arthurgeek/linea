@@ -1,0 +1,15 @@
+enum Choice[T] { Empty, Value(T) }
+
+let empty: Choice[UInt64] = .Empty
+
+fn select(value: Choice[UInt64] = empty) -> UInt64 {
+    match read value { Empty => 0, Value(number) => number }
+}
+
+fn main() -> UInt8 {
+    if select() == 0 && select(.Value(19)) == 19 {
+        0
+    } else {
+        1
+    }
+}

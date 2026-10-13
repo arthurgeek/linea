@@ -1,0 +1,41 @@
+// A concrete copyable associated type does not grant copying to a generic
+// body whose associated-type declaration has no Copyable bound.
+trait Outer {
+    type Mid
+
+    fn mid(self: Self) -> Self.Mid
+
+    fn size(self: Self, sink m: Self.Mid) -> UInt8
+}
+
+@copyable
+struct Middle {
+    n: UInt8,
+}
+
+struct Top {
+    _n: UInt8,
+}
+
+impl Outer for Top {
+    type Mid = Middle
+
+    fn mid(_self: Top) -> Self.Mid {
+        .{ n = 2 }
+    }
+
+    fn size(_self: Top, sink m: Self.Mid) -> UInt8 {
+        m.n
+    }
+}
+
+fn both[O: Outer](o: O) -> UInt8 {
+    let m: O.Mid = Outer.mid(o)
+    let n: O.Mid = copy(m)
+    Outer.size(o, m) + Outer.size(o, n)
+}
+
+fn main() -> UInt8 {
+    let t: Top = .{ _n = 1 }
+    both(t)
+}

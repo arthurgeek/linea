@@ -1,0 +1,15 @@
+// A tuple arm the parser refuses is reported there. The arm after it still
+// takes the pair apart, and is not reported as unreachable.
+fn main() -> UInt8 {
+    let literal = (1, 2)
+    let lone = (3, 4)
+    let first = match literal {
+        (a, 1) => a,
+        (a, b) => a + b,
+    }
+    let second = match lone {
+        (a) => a,
+        (a, b) => a + b,
+    }
+    first + second
+}

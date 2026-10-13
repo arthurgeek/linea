@@ -1,0 +1,17 @@
+function ;main
+local $0 fn(read UInt8) -> UInt8 value storage=ptr
+@0:
+  %0 = function_addr @f1 : fn(read UInt8) -> UInt8
+  store fn(read UInt8) -> UInt8 $0 %0
+  %2 = load fn(read UInt8) -> UInt8 value computation=ptr $0
+  %3 = constant UInt8 value computation=i64 4
+  %4 = call_indirect %2(%3) : UInt8
+  ret %4
+function closure.0
+local $0 UInt8 value storage=i8
+@0:
+  %0 = load UInt8 value computation=i64 $0
+  %1 = constant UInt8 value computation=i64 1
+  %2 = add UInt8 value computation=i64 %0, %1
+  %3 = check UInt8 value computation=i64 %2 (overflow)
+  ret %3

@@ -1,0 +1,13 @@
+// `stash` leaks the locker it opens. `Close` settles it, handing back an item
+// that may be dropped, but this module does not bring the trait into scope, so
+// the report names the `use` that makes `locker.close()` callable.
+import vault
+
+fn stash[T: Discardable](sink item: T) -> UInt8 {
+    let locker = vault.open(item)
+    0
+}
+
+fn main() -> UInt8 {
+    stash(UInt8(4))
+}

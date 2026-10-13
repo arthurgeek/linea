@@ -1,0 +1,18 @@
+trait Show {
+    fn show(_self: Self) -> UInt8
+}
+
+struct Holder[T] {
+    value: T,
+}
+
+impl[T: fn(read value: UInt8) -> UInt8] Show for Holder[T] {
+    fn show(_self: Holder[T]) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 0 }
+    Show.show(holder)
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `Ordered` requires `Equivalent`, and `Key` does not implement it
+  --> tests/traits/ordered_needs_equivalent.lin:19:6
+   |
+19 | impl Ordered for Key {}
+   |      ^^^^^^^ implement it for that type, or drop the bound

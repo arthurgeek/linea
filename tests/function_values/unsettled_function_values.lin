@@ -1,0 +1,38 @@
+trait Priced {
+    fn cents(self: Self) -> UInt64
+}
+
+struct Pizza {
+    slices: UInt64,
+}
+
+struct Pebble {
+    grams: UInt64,
+}
+
+impl Priced for Pizza {
+    fn cents(self: Pizza) -> UInt64 {
+        self.slices * 150
+    }
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn main() -> UInt8 {
+    let _never_called = identity
+    let _no_price = Priced.cents
+    let price = Priced.cents
+    let _pebble = price(Pebble { grams = 3 })
+    let same = identity
+    let _byte = same(UInt8(1))
+    let _flag = same(true)
+    let _byte_value: UInt8 = add_one
+    add_one
+    0
+}

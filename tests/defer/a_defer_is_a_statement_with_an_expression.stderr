@@ -1,0 +1,5 @@
+error[S-Defer]: expected an expression after `defer`
+ --> tests/defer/a_defer_is_a_statement_with_an_expression.lin:5:5
+  |
+5 |     defer
+  |     ^^^^^ a `defer` schedules something to run

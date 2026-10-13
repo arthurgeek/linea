@@ -1,0 +1,11 @@
+// One path releases and the other does not. There is nothing to answer here:
+// calling it moved makes the second path leak, and calling it live makes the
+// first free twice. So the join is the error, and the fix goes there too.
+fn main() -> UInt8 {
+    let k = mint(7)
+    let c = tag(k)
+    if c == 7 {
+        release(k)
+    } else {}
+    0
+}

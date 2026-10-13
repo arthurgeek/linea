@@ -1,0 +1,14 @@
+// A bound names a trait or a function type, so an alias of any other type is
+// refused there. A path through an alias reaches what its type holds, and a
+// function type holds nothing.
+alias Meters = UInt64
+alias Step = fn(value: UInt8) -> UInt8
+
+fn measure[T: Meters](sink value: T) -> T {
+    value
+}
+
+fn main() -> UInt8 {
+    let _stepped = Step.apply(1)
+    UInt8(measure(UInt64(3)))
+}

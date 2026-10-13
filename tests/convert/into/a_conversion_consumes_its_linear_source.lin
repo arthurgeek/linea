@@ -1,0 +1,21 @@
+@linear
+struct Parcel { code: UInt64 }
+
+struct ParcelCode { value: UInt64 }
+
+impl From[Parcel] for ParcelCode {
+    fn from(sink source: Parcel) -> ParcelCode where carries(source) {
+        let Parcel { code } = source
+        return .{ value = code }
+    }
+}
+
+fn main() -> UInt8 {
+    let parcel: Parcel = .{ code = 7 }
+    let code: ParcelCode = parcel.into()
+    if parcel.code == code.value {
+        0
+    } else {
+        1
+    }
+}

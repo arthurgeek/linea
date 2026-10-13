@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/slice_iteration/a_yielded_observation_keeps_its_source_alive.lin:8:5
+  |
+8 |     values.release()
+  |     ^^^^^^ keep this place available until the last use of its observation
+9 |     *item
+  |     ----- the observation is still used here

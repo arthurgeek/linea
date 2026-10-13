@@ -1,0 +1,21 @@
+struct Pair { first: UInt64, second: UInt64 }
+
+enum Payload { Pair(Pair), Number(UInt64) }
+
+type Count = UInt64
+
+fn main() -> UInt8 {
+    let pair: Pair = .{ first = 7, second = 11 }
+    let packet: Payload = .Pair(pair)
+    let copied = match packet { Pair(value) => value, Number(_) => panic("expected pair") }
+    let scalar: Payload = .Number(19)
+    let number = match scalar { Number(value) => value, Pair(_) => panic("expected scalar") }
+    let count = Count(23)
+    let base = match count { Count(value) => value }
+    let record = match copied { Pair { first, second } => first + second }
+    if record == 18 && number == 19 && base == 23 {
+        0
+    } else {
+        1
+    }
+}

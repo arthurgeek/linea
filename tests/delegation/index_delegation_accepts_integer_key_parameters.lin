@@ -1,0 +1,14 @@
+struct Board[I] {
+    values: [UInt8; 2],
+    key: I,
+}
+
+impl[I: Integer] Index[I] for Board[I] via values
+
+fn main() -> UInt8 {
+    var small: Board[UInt8] = .{ values = [2, 3], key = 1 }
+    var wide: Board[Int16] = .{ values = [4, 5], key = 0 }
+    small[small.key] += 1
+    wide[wide.key] += 2
+    return small[UInt8(1)] + wide[Int16(0)] - 10
+}

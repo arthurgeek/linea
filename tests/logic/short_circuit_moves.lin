@@ -1,0 +1,20 @@
+// `release` consumes `k` on the path that reaches it and not on the other,
+// which is the disagreement an `if` produces -- and is rejected for the same
+// reason, under the same rule, with no ownership rule of its own.
+@linear
+enum Key { Forged(UInt8) }
+
+fn release(sink k: Key) -> Bool {
+    match k { Forged(_) => {} }
+    true
+}
+
+fn main() -> UInt8 {
+    let k: Key = Key.Forged(1)
+    let ready = false
+    if ready && release(k) {
+        1
+    } else {
+        0
+    }
+}

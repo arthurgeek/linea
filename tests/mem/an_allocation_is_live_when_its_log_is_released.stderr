@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/an_allocation_is_live_when_its_log_is_released.lin:9:5
+   |
+9  |     log.release()
+   |     ^^^ keep this place available until the last use of its observation
+10 |     buffer.release()
+   |     ------ the observation is still used here

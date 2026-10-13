@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let operation = || UInt8(3)
+    let wrapper = read [read operation] || operation()
+    if wrapper() == 3 {
+        0
+    } else {
+        1
+    }
+}

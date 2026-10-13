@@ -1,0 +1,30 @@
+// A default is declared on the signature and only there. An implementation
+// restating one writes a second answer to what an omitted argument is worth,
+// and a call reads neither of the two: it is checked against the signature and
+// runs the body. A default written where the signature declares none is the
+// same mistake with nothing to disagree with -- no call reaches an
+// implementation's member, so the value it names fills nothing.
+trait Pad {
+    fn pad(s: Self, width: UInt8 = 8) -> UInt8
+}
+
+trait Shift {
+    fn shift(s: Self, by: UInt8) -> UInt8
+}
+
+impl Pad for UInt8 {
+    fn pad(s: UInt8, width: UInt8 = 3) -> UInt8 {
+        s + width
+    }
+}
+
+impl Shift for UInt8 {
+    fn shift(s: UInt8, by: UInt8 = 1) -> UInt8 {
+        s + by
+    }
+}
+
+fn main() -> UInt8 {
+    let c: UInt8 = 3
+    c.pad() + c.shift(1)
+}

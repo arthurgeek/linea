@@ -1,0 +1,16 @@
+// The tree holds what was written, so the formatter prints it back -- braces
+// and all. An interpolation is a construct rather than a rewrite into
+// concatenation for the same reason a compound assignment is one: it carries
+// evaluation order, and a tree holding the rewrite would print the rewrite.
+//
+// Spaced badly on purpose. What the formatter settles is the spacing around the
+// expression it contains, and the literal's own text is not its to touch.
+import std.io
+
+use io.eprintln
+
+fn main() -> UInt8 {
+    let n: Int64 = 1
+    eprintln( "a{n}b{ n +  1 }c{{d" )
+    0
+}

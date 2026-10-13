@@ -1,0 +1,14 @@
+import std.collections
+import std.mem
+
+// `copy(add)` hands the first `merge` its own combine, so `add` is still there
+// for the second.
+fn main() -> UInt8 {
+    var totals: collections.Map[UInt64, UInt64, mem.SystemAllocator] = collections.Map.new()
+    let add = |sink current: UInt64, sink incoming: UInt64| current + incoming
+    &totals.merge(7, 5, copy(add)).unwrap()
+    &totals.merge(7, 3, add).unwrap()
+    let total = *totals.get(7).unwrap()
+    totals.release()
+    UInt8(total)
+}

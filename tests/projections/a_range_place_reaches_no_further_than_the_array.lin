@@ -1,0 +1,13 @@
+// The bounds of a range place are settled indexes, so they are held to the
+// clause every settled index is held to: the first element the place names and
+// the last are both elements the array has. An exclusive end names the place
+// after the last element it takes, so what it is told is the greatest end
+// rather than the last index. A pair naming neither names no place at all, and
+// there is no array type of no elements to give it.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    let past: [UInt8; 2] = copy(a[4..6])
+    let over: [UInt8; 5] = copy(a[0..5])
+    let empty: [UInt8; 1] = copy(a[2..2])
+    past[0] + over[0] + empty[0]
+}

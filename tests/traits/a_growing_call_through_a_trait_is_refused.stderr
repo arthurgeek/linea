@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `walk` with more than it was given
+  --> tests/traits/a_growing_call_through_a_trait_is_refused.lin:20:9
+   |
+20 |         Walk.walk(self, w)
+   |         ^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

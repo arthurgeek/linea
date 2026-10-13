@@ -1,0 +1,11 @@
+error[O-Borrow]: `name` ends while a value borrowing it is still used
+  --> tests/text/an_interpolation_cannot_outlive_a_value_it_borrows.lin:24:5
+   |
+23 |         "hello {name}"
+   |                 ---- borrowed here
+24 |     }
+   |     ^ `name` ends here
+25 |     println(greeting)?
+   |             -------- the observation is still used here
+   |
+   = help: keep the borrowing value inside the scope, or declare what it borrows outside it

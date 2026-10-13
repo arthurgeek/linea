@@ -1,0 +1,21 @@
+@copyable
+struct Window {
+    width: UInt16,
+    height: UInt16,
+    title: Str,
+    resizable: Bool,
+}
+
+fn main() -> UInt8 {
+    let standard: Window = .{ width = 640, height = 480, title = "", resizable = true }
+    let small = Window { width = 320, ..standard }
+    let titled = Window { title = "A window whose title is long enough to break the literal", ..copy(small) }
+    let wide: Window = .{
+        ..titled,
+    }
+    if wide.width == 320 && small.height == 480 {
+        0
+    } else {
+        1
+    }
+}

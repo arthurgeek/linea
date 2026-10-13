@@ -1,0 +1,5 @@
+struct Shelf[T, A: Allocator = SystemAllocator] {
+//                              ^ type
+//                 ^ type
+    items: Vec[T, A],
+}

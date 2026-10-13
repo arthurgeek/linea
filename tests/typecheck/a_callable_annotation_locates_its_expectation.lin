@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _value: fn(read x: UInt8) -> UInt8 = 0
+    0
+}

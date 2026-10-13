@@ -1,0 +1,12 @@
+fn exact(value: UInt8, by: UInt8 = 2) -> UInt8 {
+    value + by
+}
+
+fn main() -> UInt8 {
+    let _convention: fn(sink value: UInt8, read by: UInt8 = 2) -> UInt8 = exact
+    let _type: fn(read value: UInt16, read by: UInt8 = 2) -> UInt8 = exact
+    let _default_presence: fn(read value: UInt8, read by: UInt8) -> UInt8 = exact
+    let _default_value: fn(read value: UInt8, read by: UInt8 = 3) -> UInt8 = exact
+    let _result: fn(read value: UInt8, read by: UInt8 = 2) -> Bool = exact
+    0
+}

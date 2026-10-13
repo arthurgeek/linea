@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let zero = 0.0
+    let nan = zero / zero
+    let _n = Int64(nan)
+    0
+}

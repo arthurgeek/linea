@@ -1,0 +1,50 @@
+// The head being `Self` says only where the first name comes from. `Self.Mid`
+// is what this implementation settled, and `Item` is selected from it because
+// `type Mid: Inner` declares it -- the same bound the same question is asked
+// of off a type parameter. What it settles to is what `Middle`'s own
+// implementation of `Inner` wrote.
+trait Inner {
+    type Item
+
+    fn peek(sink self: Self) -> Self.Item
+}
+
+trait Outer {
+    type Mid: Inner
+
+    fn mid(self: Self) -> Self.Mid
+
+    fn deep(self: Self) -> Self.Mid.Item
+}
+
+struct Leaf { n: UInt8 }
+
+struct Middle { _n: UInt8 }
+
+struct Top { _n: UInt8 }
+
+impl Inner for Middle {
+    type Item = Leaf
+
+    fn peek(sink _self: Middle) -> Self.Item {
+        .{ n = 9 }
+    }
+}
+
+impl Outer for Top {
+    type Mid = Middle
+
+    fn mid(_self: Top) -> Self.Mid {
+        .{ _n = 2 }
+    }
+
+    fn deep(self: Top) -> Self.Mid.Item {
+        Inner.peek(Outer.mid(self))
+    }
+}
+
+fn main() -> UInt8 {
+    let t: Top = .{ _n = 1 }
+    let l: Leaf = Outer.deep(t)
+    l.n
+}

@@ -1,0 +1,36 @@
+// A value held across a loop leaves it by `break`, by `continue` onto an
+// iteration that makes a fresh one, and by `return`. Each of those exits
+// still owns `permit`, and each is named in the one report about it; the first
+// one written is where the report points.
+@linear
+struct Permit {
+    zone: UInt8,
+}
+
+fn close(sink permit: Permit) -> UInt8 {
+    let Permit { zone } = permit
+    zone
+}
+
+fn patrol(stops: UInt8) -> UInt8 {
+    var visited: UInt8 = 0
+    while visited < stops {
+        let permit = Permit { zone = visited }
+        visited += 1
+        if permit.zone == 2 {
+            continue
+        }
+        if permit.zone == 5 {
+            break
+        }
+        if permit.zone == 7 {
+            return 7
+        }
+        visited += close(permit)
+    }
+    visited
+}
+
+fn main() -> UInt8 {
+    patrol(9)
+}

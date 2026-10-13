@@ -1,0 +1,19 @@
+enum Priority {
+    Later(UInt8, UInt8),
+    Earlier(UInt8, UInt8),
+}
+
+derive (Equatable, Equivalent, Comparable, Ordered) for Priority
+
+fn main() -> UInt8 {
+    if !Comparable.less(Priority.Later(9, 9), Priority.Earlier(0, 0)) {
+        return 1
+    }
+    if !Comparable.less(Priority.Earlier(1, 2), Priority.Earlier(1, 3)) {
+        return 2
+    }
+    if Comparable.less(Priority.Earlier(2, 0), Priority.Earlier(1, 9)) {
+        return 3
+    }
+    0
+}

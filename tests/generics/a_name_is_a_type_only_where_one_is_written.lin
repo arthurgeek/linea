@@ -1,0 +1,21 @@
+// A variant spelled like the declaration's own type parameter. The dump
+// replaced every token of that spelling across the whole declaration, so `T`
+// in a value position was rendered as the argument -- a program that declares
+// `T`, never uses it, and reads `UInt8` as a value.
+//
+// Which tokens are type occurrences is not a question a renderer has to ask.
+// The checker resolved each written type and recorded what it settled to, by
+// token, so a token with no entry is not a type and nothing replaces it.
+enum Letter {
+    T,
+}
+
+fn id[T](sink v: T) -> T {
+    let _letter = Letter.T
+    v
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    id(n)
+}

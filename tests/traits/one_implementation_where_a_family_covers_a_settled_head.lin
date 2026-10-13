@@ -1,0 +1,30 @@
+// One implementation per trait, trait arguments and head constructor, and a
+// family supplies the trait's arguments from its own head: `Give[T] for
+// Holder[T]` supplies `Give[UInt8]` at `Holder[UInt8]`. That is the key the
+// settled head below carries, so the two are one implementation written twice
+// and the second is where it is reported.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        5
+    }
+}
+
+impl Give[UInt8] for Holder[UInt8] {
+    fn give(_self: Holder[UInt8], _u: UInt8) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 0 }
+    let n: UInt8 = 1
+    Give.give(h, n)
+}

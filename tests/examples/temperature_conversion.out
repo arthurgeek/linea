@@ -1,0 +1,4 @@
+32.0 F = 0.0 C; thermostat rejects this setpoint
+68.0 F = 20.0 C; thermostat accepts 20.0 C
+86.0 F = 30.0 C; thermostat accepts 30.0 C
+104.0 F = 40.0 C; thermostat rejects this setpoint

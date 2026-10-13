@@ -1,0 +1,11 @@
+// A `use` binds the name its path ends with and offers no other spelling, so
+// the token declaring the re-export is the token naming what it re-exports.
+// The name belongs to the module that declared it.
+import sizes
+
+use sizes.Width
+
+fn main() -> UInt8 {
+    let w: Width = .{ of = 2 }
+    w.of
+}

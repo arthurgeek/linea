@@ -1,0 +1,23 @@
+pub struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    pub fn make(width: UInt8) -> Door {
+        .{ width = width }
+    }
+
+    pub fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+pub trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}

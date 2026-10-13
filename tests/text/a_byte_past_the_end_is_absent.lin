@@ -1,0 +1,32 @@
+// A view's length is a value, not part of its type, so whether an offset is
+// inside it is a question rather than something the caller is presumed to know.
+// Indexing an array traps because its length *is* in its type; asking a `Str`
+// for a byte answers `Option` instead.
+//
+// The load carries checked access witnesses and is reached only from the
+// module that declares what a `Str` is -- the same confinement that keeps
+// the address honest. Nothing outside can ask for a byte without the bound
+// being tested first.
+fn main() -> UInt8 {
+    let s = "AB"
+
+    let first: UInt8 = match Str.byte(s, 0) {
+        Some(b) => b - 64,
+        None => 0,
+    }
+
+    let second: UInt8 = match Str.byte(s, 1) {
+        Some(b) => b - 64,
+        None => 0,
+    }
+
+    // One past the last byte, which is where a scan that walked off the end
+    // would ask. Absent rather than whatever byte happens to sit there.
+    let past: UInt8 = match Str.byte(s, 2) {
+        Some(_) => 100,
+        None => 4,
+    }
+
+    // 1 + 2 + 4.
+    first + second + past
+}

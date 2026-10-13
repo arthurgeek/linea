@@ -1,0 +1,9 @@
+@linear
+enum Permit { Preserve }
+
+fn main() -> UInt8 {
+    let observe = |permit: Permit = .Preserve| -> UInt8 {
+        match read permit { Preserve => 0 }
+    }
+    observe()
+}

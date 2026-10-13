@@ -1,0 +1,17 @@
+// An operation named `release` that is not `Release.release` is not the
+// ending `defer let` schedules, so it asks for the explicit `defer`.
+@linear
+struct Socket {
+    fd: UInt8,
+}
+
+impl Socket {
+    fn release(sink self: Self) -> () {
+        let Socket { fd: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    defer let socket = Socket { fd = 3 }
+    0
+}

@@ -1,0 +1,13 @@
+fn make[T: Copyable = UInt8](a: T = 1) -> T where carries(a) {
+    copy(a)
+}
+
+fn takes16(x: UInt16) -> UInt16 {
+    x
+}
+
+fn main() -> UInt8 {
+    let r = make()
+    let _ = takes16(r)
+    0
+}

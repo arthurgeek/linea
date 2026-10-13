@@ -1,0 +1,49 @@
+program decls=7
+  decl function "at" tokens 8..21
+    in Lookup
+    param read "self" : Self
+    param read "i" : I
+    returns UInt8
+  decl trait_ "Lookup" tokens 2..22
+    type param "I"
+  decl struct_ "Board" tokens 22..34
+    field "cells" : [UInt8; 4]
+  decl function "at" tokens 42..63
+    in Board
+    of trait Lookup[UInt64]
+    param read "self" : Board
+    param read "i" : UInt64
+    returns UInt8
+    expr %5 block tokens 55..63
+      expr %4 index tokens 56..62
+        expr %2 field tokens 56..59 "cells"
+          expr %1 name_ref tokens 56..57 "self"
+        expr %3 name_ref tokens 60..61 "i"
+  decl impl_ "Board" tokens 34..64
+    of trait Lookup[UInt64]
+  decl function "reach" tokens 64..97
+    type param "C" : Lookup[UInt64]
+    param read "c" : C
+    returns UInt8
+    expr %12 block tokens 81..97
+      stmt %0 let_decl tokens 82..88 "i" : UInt64
+        expr %6 int_literal tokens 87..88 "2"
+      expr %11 call tokens 88..96
+        expr %8 field tokens 88..91 "at"
+          expr %7 name_ref tokens 88..89 "Lookup"
+        expr %9 name_ref tokens 92..93 "c"
+        expr %10 name_ref tokens 94..95 "i"
+  decl function "main" tokens 97..128
+    returns UInt8
+    expr %23 block tokens 103..128
+      stmt %1 let_decl tokens 104..123 "b" : Board
+        expr %19 struct_literal tokens 109..123
+          expr %13 name_ref tokens 111..112 "cells"
+          expr %18 array_literal tokens 113..122
+            expr %14 int_literal tokens 114..115 "1"
+            expr %15 int_literal tokens 116..117 "2"
+            expr %16 int_literal tokens 118..119 "3"
+            expr %17 int_literal tokens 120..121 "4"
+      expr %22 call tokens 123..127
+        expr %20 name_ref tokens 123..124 "reach"
+        expr %21 name_ref tokens 125..126 "b"

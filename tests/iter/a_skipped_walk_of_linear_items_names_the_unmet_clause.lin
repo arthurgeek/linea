@@ -1,0 +1,44 @@
+import std.iter
+
+// `Skip[Jobs]` is an `Iterator` only when `Jobs` yields items that can be
+// dropped. A `Job` is linear, so a function that asks to walk a `Skip[Jobs]`
+// is told which requirement the type fails.
+@linear
+struct Job {
+    id: UInt8,
+}
+
+impl Release for Job {
+    fn release(sink self: Job) -> () {
+        let Job { id: _ } = self
+    }
+}
+
+struct Jobs {
+    next_id: UInt8,
+}
+
+impl Iterator for Jobs {
+    type Item = Job
+
+    fn next(inout self: Jobs) -> Option[Job] {
+        if self.next_id == 3 {
+            return .None
+        }
+        self.next_id += 1
+        .Some(.{ id = self.next_id })
+    }
+}
+
+fn _total(inout remaining: iter.Skip[Jobs]) -> UInt8 {
+    var total: UInt8 = 0
+    for job in &remaining {
+        total += job.id
+        job.release()
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    0
+}

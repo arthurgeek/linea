@@ -1,0 +1,30 @@
+// `doubled` is offered where `K` is Copyable, and `Crate` prices by `UInt8`,
+// which is. Naming `Priced.doubled` as a value is held to the same clause as
+// calling it: `twice` prices a unit of 3 twice at weight 2, and `apply` hands
+// `doubled` on to price a unit of 4 twice at weight 1.
+trait Priced[K] {
+    fn price(self: Self, sink unit: K) -> UInt8
+
+    fn doubled(self: Self, sink unit: K) -> UInt8 where K: Copyable {
+        self.price(copy(unit)) + self.price(unit)
+    }
+}
+
+struct Crate {
+    weight: UInt8,
+}
+
+impl Priced[UInt8] for Crate {
+    fn price(self: Self, sink unit: UInt8) -> UInt8 {
+        self.weight * unit
+    }
+}
+
+fn apply(priced: fn(self: Crate, sink unit: UInt8) -> UInt8) -> UInt8 {
+    priced(Crate { weight = 1 }, 4)
+}
+
+fn main() -> UInt8 {
+    let twice: fn(self: Crate, sink unit: UInt8) -> UInt8 = Priced.doubled
+    twice(Crate { weight = 2 }, 3) + apply(Priced.doubled)
+}

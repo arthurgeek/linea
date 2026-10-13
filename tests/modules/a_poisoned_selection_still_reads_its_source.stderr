@@ -1,0 +1,12 @@
+error[M-Opaque]: `Account` is opaque outside `bank`
+ --> tests/modules/a_poisoned_selection_still_reads_its_source/main.lin:6:27
+  |
+6 |     let _balance: UInt8 = account.balance
+  |                           ^^^^^^^^^^^^^^^ only its own module can read its parts
+error[O-Move]: `account` has already been moved
+ --> tests/modules/a_poisoned_selection_still_reads_its_source/main.lin:6:27
+  |
+5 |     let moved = account
+  |                 ------- it was taken here
+6 |     let _balance: UInt8 = account.balance
+  |                           ^^^^^^^ it was already taken, and a value is taken once

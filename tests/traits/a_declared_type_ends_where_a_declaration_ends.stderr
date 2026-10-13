@@ -1,0 +1,5 @@
+error[S-Separator]: expected `;` or a newline
+  --> tests/traits/a_declared_type_ends_where_a_declaration_ends.lin:10:15
+   |
+10 |     type Item type Held
+   |               ^^^^ this declared type ends here

@@ -1,0 +1,9 @@
+error[O-Leak]: `_held` (a linear `Box[UInt8]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/an_operation_whose_result_is_the_boxed_value_settles_a_box_of_a_scalar.lin:17:9
+   |
+17 |     let _held: Box[UInt8] = .{ item = 3 }
+   |         ^^^^^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: settle it first with `_held.take()`, or take it apart with `let Box { item: _ } = _held`

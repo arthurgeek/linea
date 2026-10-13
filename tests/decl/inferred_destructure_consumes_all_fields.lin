@@ -1,0 +1,13 @@
+@linear
+struct Pair[T] { first: T, second: UInt8 }
+
+@linear
+struct Empty {}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8] = .{ first = 3, second = 4 }
+    let { first, second: remaining } = pair
+    let empty: Empty = .{}
+    let {} = empty
+    first + remaining
+}

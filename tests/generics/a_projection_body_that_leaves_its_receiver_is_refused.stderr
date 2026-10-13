@@ -1,0 +1,5 @@
+error[T-Projection]: a projection's body is a place, which is one path rather than a sequence of statements
+  --> tests/generics/a_projection_body_that_leaves_its_receiver_is_refused.lin:20:9
+   |
+20 |         var w: Wrapper[Y[Y[T]]] = .{ inner = .{ n = [0], rest = .None } }
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ reach the place from `_self` by field selection and indexing, and nothing else

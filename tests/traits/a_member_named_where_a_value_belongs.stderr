@@ -1,0 +1,10 @@
+error[N-NotAValue]: `Item` is a type a trait declares, and a type a trait declares is not a value
+  --> tests/traits/a_member_named_where_a_value_belongs.lin:24:13
+   |
+24 |     let v = Measure.Item
+   |             ^^^^^^^^^^^^ name a value of the type an implementation settles it to
+error[T-Infer]: nothing that uses `of` here says what `Self` is
+  --> tests/traits/a_member_named_where_a_value_belongs.lin:25:13
+   |
+25 |     let w = Measure.of
+   |             ^^^^^^^^^^ write the function type it is used as, with a type in place of each `_`: `fn(read x: _) -> UInt8`

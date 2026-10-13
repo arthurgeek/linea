@@ -1,0 +1,17 @@
+error[N-Immutable]: `hall` is a function
+  --> tests/receivers/a_marker_before_a_function_call_marks_that_call.lin:27:5
+   |
+20 | fn hall() -> Thermostat {
+   |    ---- declared here
+27 |     hall = hall
+   |     ^^^^ this binding cannot be assigned
+error[S-Mutation]: `&` marks this call, and a function holds nothing a call writes to
+  --> tests/receivers/a_marker_before_a_function_call_marks_that_call.lin:25:5
+   |
+25 |     &hall().warm_up(5)
+   |     ^^^^^^^ bind its result with `var`, then mark the call that changes it
+error[S-Mutation]: `&` marks this call, and a function holds nothing a call writes to
+  --> tests/receivers/a_marker_before_a_function_call_marks_that_call.lin:26:5
+   |
+26 |     &Thermostat.make().warm_up(5)
+   |     ^^^^^^^^^^^^^^^^^^ bind its result with `var`, then mark the call that changes it

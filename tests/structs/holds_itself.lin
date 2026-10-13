@@ -1,0 +1,13 @@
+// The rule reaches a second declaring form without being told about it,
+// because it is about the graph of inline parts rather than about enums.
+struct A {
+    b: B,
+}
+
+struct B {
+    a: A,
+}
+
+fn main() -> UInt8 {
+    0
+}

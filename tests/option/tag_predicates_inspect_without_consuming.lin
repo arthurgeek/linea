@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let some: Option[UInt8] = .Some(7)
+    let none: Option[UInt8] = .None
+    let ok: Result[UInt8, UInt8] = .Ok(9)
+    let error: Result[UInt8, UInt8] = .Err(3)
+    let tags = some.is_some() && none.is_none() && ok.is_ok() && error.is_err()
+    let intact = some.unwrap() == 7 && ok.unwrap() == 9
+    if tags && intact {
+        return 0
+    }
+    return 1
+}

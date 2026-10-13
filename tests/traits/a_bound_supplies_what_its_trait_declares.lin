@@ -1,0 +1,14 @@
+// A trait declaring one type parameter is bounded at one argument.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+fn reach[C: Lookup](_c: C) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    reach(3)
+}

@@ -1,0 +1,5 @@
+error[N-Immutable]: an observation grants read-only access to its place
+ --> tests/borrows/transparent/a_shared_referent_cannot_be_written.lin:6:5
+  |
+6 |     (*view).value = 9
+  |     ^^^^^^^^^^^^^ this place cannot be assigned

@@ -1,0 +1,5 @@
+error[T-UnknownField]: `helper` is a function, and a function has no parts
+ --> tests/enums/variant_of_a_non_enum.lin:6:13
+  |
+6 |     let _ = helper.Red
+  |             ^^^^^^ nothing to select from

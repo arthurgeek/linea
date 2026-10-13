@@ -1,0 +1,10 @@
+// A trait reached through a module is a namespace rather than something the
+// module holds a value of, so it names the same thing a bare reference to it
+// would: [N-NotAValue] reads what the name reaches, and a path of qualifiers
+// in front changes nothing about that.
+import pct
+
+fn main() -> UInt8 {
+    let _v = pct.Measure
+    0
+}

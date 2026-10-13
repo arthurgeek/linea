@@ -1,0 +1,25 @@
+// A literal's type is what it holds, and what it holds is a type of some
+// module: two modules may declare one name, which is most of what a module is
+// for. So `"{x}"` over an `a.Thing` and `"{y}"` over a `b.Thing` are two types
+// and each literal is handed its own.
+//
+// Interned on the printed name, they were one. The second literal took the
+// first's fields, and nothing said so: both values rendered through the first
+// module's implementation and the program printed `AAA` twice. Widening one
+// payload turns the same collision into a copy reading bytes that are no part
+// of the type it was given, which is the same defect with a louder ending.
+import std.io
+
+use io.IoError
+use io.println
+
+import a
+import b
+
+fn main() -> Result[UInt8, IoError] {
+    let x = a.make()
+    let y = b.make()
+    println("{x}")?
+    println("{y}")?
+    return .Ok(0)
+}

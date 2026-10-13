@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/types/a_conversion_reads_the_source_too.lin:14:21

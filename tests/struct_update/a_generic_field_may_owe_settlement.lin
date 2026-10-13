@@ -1,0 +1,15 @@
+struct Slot[T] {
+    held: T,
+    count: UInt8,
+}
+
+// `T` may be linear, so replacing `held` could drop a value that owes
+// settlement.
+fn reset[T: Default](sink slot: Slot[T]) -> Slot[T] {
+    Slot[T] { held = Default.default(), ..slot }
+}
+
+fn main() -> UInt8 {
+    let slot: Slot[UInt8] = .{ held = 1, count = 2 }
+    reset(slot).count
+}

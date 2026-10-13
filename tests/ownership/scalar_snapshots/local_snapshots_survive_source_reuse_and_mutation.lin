@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    var number: UInt8 = 7
+    let first = number
+    let second = number
+    number = 9
+    if first == 7 && second == 7 && number == 9 {
+        0
+    } else {
+        1
+    }
+}

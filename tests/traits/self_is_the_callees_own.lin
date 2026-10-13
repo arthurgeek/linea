@@ -1,0 +1,29 @@
+// `Self` means the implementation that wrote it, and a caller reading a
+// callee's signature reads it there. Resolved against the declaration being
+// walked instead, `Small.make()` called from inside `impl Big` returns a
+// `Big`: the caller's own `impl` decides what the callee said.
+struct Small {
+    a: UInt8,
+}
+
+struct Big {
+    a: UInt8,
+    b: UInt8,
+}
+
+impl Small {
+    fn make() -> Self {
+        .{ a = 5 }
+    }
+}
+
+impl Big {
+    fn sum() -> UInt8 {
+        let s: Small = Small.make()
+        s.a
+    }
+}
+
+fn main() -> UInt8 {
+    Big.sum()
+}

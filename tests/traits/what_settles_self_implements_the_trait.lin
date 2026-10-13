@@ -1,0 +1,26 @@
+// What the expectation settles `Self` to is held to the trait exactly as an
+// argument is. A type with no implementation names an operation that does not
+// exist, and where it was written -- an annotation rather than an argument --
+// changes nothing about that.
+struct Account {
+    balance: UInt8,
+}
+
+struct Ledger {
+    total: UInt8,
+}
+
+trait Make {
+    fn zero() -> Self
+}
+
+impl Make for Account {
+    fn zero() -> Self {
+        .{ balance = 9 }
+    }
+}
+
+fn main() -> UInt8 {
+    let l: Ledger = Make.zero()
+    l.total
+}

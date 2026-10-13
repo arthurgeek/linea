@@ -1,0 +1,12 @@
+@linear
+struct Ticket {
+    serial: UInt8,
+}
+
+fn number(ticket: Ticket = .{ serial = 7 }) -> UInt8 {
+    ticket.serial
+}
+
+fn main() -> UInt8 {
+    number()
+}

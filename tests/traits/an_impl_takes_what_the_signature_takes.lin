@@ -1,0 +1,23 @@
+// The same rule reaches arity, and reaches it first: a body reading a
+// parameter the call never passed reads whatever the machine left there. The
+// convention travels with the parameter for the same reason -- a `read` and a
+// `sink` argument are passed alike and consumed differently, so a member that
+// disagrees about one takes ownership the call did not give it.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self, n: UInt8) -> UInt8 {
+        x.balance + n
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

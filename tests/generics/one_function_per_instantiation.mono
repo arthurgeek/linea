@@ -1,0 +1,25 @@
+fn ;main() -> UInt8 {
+    let a: UInt8 = 1
+    let b: Bool = true
+    if ;twice[Bool](b) {
+        ;twice[UInt8](a)
+    } else {
+        0
+    }
+}
+
+fn ;twice[Bool](x: Bool) -> Bool {
+    ;show[Bool](;show[Bool](x))
+}
+
+fn ;twice[UInt8](x: UInt8) -> UInt8 {
+    ;show[UInt8](;show[UInt8](x))
+}
+
+fn ;show[Bool](x: Bool) -> Bool {
+    copy(x)
+}
+
+fn ;show[UInt8](x: UInt8) -> UInt8 {
+    copy(x)
+}

@@ -1,0 +1,38 @@
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+trait Rebuild {
+    fn rebuild(self: Self) -> Self
+}
+
+template impl Rebuild where reflect.components: Zero {
+    fn rebuild(self: Self) -> Self {
+        match read self {
+            reflect.case => reflect.construct(
+                reflect.case,
+                |component| {
+                    let field: component.Type = Zero.zero()
+                    field
+                },
+                {},
+            ),
+        }
+    }
+}
+
+type Shape = UInt64
+
+derive Rebuild for Shape
+
+fn main() -> UInt8 {
+    let original = Shape(4)
+    let _rebuilt = Rebuild.rebuild(original)
+    0
+}

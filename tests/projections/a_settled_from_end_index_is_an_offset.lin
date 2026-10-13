@@ -1,0 +1,8 @@
+// A count back from an end that the compiler settles names a place the
+// compiler has worked out, so it costs nothing when the program runs: the
+// bracket is the offset the same place reached by counting up would be, with
+// no comparison left to make and nothing to trap on.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    a[^2]
+}

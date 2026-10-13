@@ -1,0 +1,5 @@
+// A cursor on something that names nothing has nothing to rename, and says so
+// rather than refusing: there is nothing there to change.
+fn main() -> UInt8 {
+    1 + 2
+}

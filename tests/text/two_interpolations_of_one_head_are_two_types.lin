@@ -1,0 +1,16 @@
+// A literal is a value of a type named by what it holds, so `"{a}"` over an
+// `Option[Str]` and `"{b}"` over an `Option[Bool]` are two types and reach two
+// instantiations of everything they are passed to. What names one has to say
+// what it holds, and a name stopping at the head says `Option` for both.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let a: Option[Str] = .Some("hi")
+    let b: Option[Bool] = .Some(true)
+    println("{a}")?
+    println("{b}")?
+    return .Ok(0)
+}

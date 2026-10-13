@@ -1,0 +1,11 @@
+// The third ambient operation, which no operator spells: it reaches lowering
+// only through a call, and the compiler provides the body that call would
+// otherwise reach nothing of.
+fn after[T: Steppable](x: T) -> T {
+    Steppable.forward(x)
+}
+
+fn main() -> UInt8 {
+    let start: UInt8 = 41
+    after(start) - 42
+}

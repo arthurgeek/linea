@@ -1,0 +1,9 @@
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn main() -> UInt8 {
+    let original: fn(value: UInt8) -> UInt8 = add_one
+    let moved = original
+    original(7) + moved(8)
+}

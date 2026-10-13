@@ -1,0 +1,4 @@
+Rule { host: Host { octets: [10, 0, 0, 5] }, allowed: 22 } allowed
+Rule { host: Host { octets: [192, 168, 1, 20] }, allowed: 22 } denied
+Rule { host: Host { octets: [192, 168, 1, 20] }, allowed: Backup } allowed
+Rule { host: Host { octets: [192, 168, 1, 20] }, allowed: Mail } denied

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A rename changes a name where it was declared and everywhere it is used, one\n// edit per place it is written. Nothing is matched by spelling: what is edited\n// is what the resolver said each name reaches.\nfn twice(a: UInt8) -> UInt8 {\n    a + a\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = twice(1)\n    total + total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":5},"newName":"sum"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

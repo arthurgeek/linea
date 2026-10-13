@@ -1,0 +1,36 @@
+// A type's namespace holds its own members, and its variants are part of what
+// its name reaches. An implementation adds to neither, so a member sharing a
+// name with a variant leaves that variant where it was: `Colour.Red` is the
+// variant it always was, and `Measure.Red` is the operation.
+//
+// Adding an implementation cannot change what `Colour.` means, and a variant is
+// part of what it means. An operation spelled like a variant is refused for its
+// case, and that is the only thing reported: the namespaces still keep the two
+// apart.
+struct Weights {
+    red: UInt8,
+    green: UInt8,
+}
+
+enum Colour {
+    Red,
+    Green,
+}
+
+trait Measure {
+    fn Red(c: Self) -> UInt8
+}
+
+impl Measure for Colour {
+    fn Red(c: Self) -> UInt8 {
+        let w: Weights = .{ red = 4, green = 3 }
+        match read c {
+            Red => w.red,
+            Green => w.green,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    Measure.Red(Colour.Red) - Measure.Red(Colour.Green)
+}

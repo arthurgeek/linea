@@ -1,0 +1,10 @@
+error[T-Bound]: `Iter` requires `Counted`, and `Counter` does not implement it
+  --> tests/traits/a_settling_that_breaks_a_bound_is_refused.lin:49:17
+   |
+49 |     type Iter = Self
+   |                 ^^^^ implement it for that type, or drop the bound
+error[T-Bound]: `Iter` requires `Stepper`, and `Ledger` does not implement it
+  --> tests/traits/a_settling_that_breaks_a_bound_is_refused.lin:57:17
+   |
+57 |     type Iter = Self
+   |                 ^^^^ implement it for that type, or drop the bound

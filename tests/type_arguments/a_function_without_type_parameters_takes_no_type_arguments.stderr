@@ -1,0 +1,10 @@
+error[T-Bound]: `widen` takes 0 type argument(s), and was given 1
+  --> tests/type_arguments/a_function_without_type_parameters_takes_no_type_arguments.lin:18:15
+   |
+18 |     door.widen[UInt8]() + double[UInt8](2)
+   |               ^^^^^^^ this function declares no type parameters, so its call names none
+error[T-Bound]: `double` takes 0 type argument(s), and was given 1
+  --> tests/type_arguments/a_function_without_type_parameters_takes_no_type_arguments.lin:18:33
+   |
+18 |     door.widen[UInt8]() + double[UInt8](2)
+   |                                 ^^^^^^^ this function declares no type parameters, so its call names none

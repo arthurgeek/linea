@@ -1,0 +1,4 @@
+// A type declares no body, so there is nothing for the compiler to run.
+test struct Box { x: UInt8 }
+
+fn main() -> UInt8 { 0 }

@@ -1,0 +1,11 @@
+// `copy(grow)` hands the first `map` its own transform, so `grow` is still
+// there for the second.
+fn main() -> UInt8 {
+    let step: UInt8 = 2
+    let grow = [step] |sink value: UInt8| value + step
+    let first: Option[UInt8] = .Some(1)
+    let second: Option[UInt8] = .Some(5)
+    let grown = first.map(copy(grow))
+    let also = second.map(grow)
+    grown.unwrap_or(0) + also.unwrap_or(0)
+}

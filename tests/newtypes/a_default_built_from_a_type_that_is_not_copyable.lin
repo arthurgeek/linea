@@ -1,0 +1,20 @@
+// A default is built afresh at every call that omits it, so a default built
+// from a type's parts needs the type to be copyable. `Percent` is declared
+// here, so the fix is to mark it `@copyable`; `ScalarPosition` is the
+// standard library's, and is not copyable.
+import std.text
+
+type Percent = UInt8 where it in 0..=100
+
+fn price_after(price_cents: UInt64, discount: Percent = Percent(10)) -> UInt64 {
+    let read Percent(rate) = discount
+    price_cents - price_cents * UInt64(rate) / 100
+}
+
+fn column(position: text.ScalarPosition = .{ value = 65, offset = 0 }) -> UInt64 {
+    position.offset
+}
+
+fn main() -> UInt8 {
+    UInt8(price_after(500) / 10 + column())
+}

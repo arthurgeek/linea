@@ -1,0 +1,95 @@
+import std.testing
+import std.mem
+
+// Define a total conversion on its destination. Every From implementation
+// supplies the corresponding Into conversion for its source.
+pub trait From[T] {
+    fn from(sink source: T) -> Self where carries(source)
+}
+
+// A derived conversion wraps the source in the one variant of an enum whose
+// only field has the source's type. `@derive(From[io.IoError])` on an enum with
+// an `Io(io.IoError)` variant writes `impl From[io.IoError] for` the enum with
+// `.Io(source)` as its body. A variant that carries nothing, several fields, or
+// the source's type beside another variant is not wrapped, and the derive is
+// refused.
+template impl[S] From[S] where reflect.target: enum {
+    fn from(sink source: S) -> Self {
+        reflect.wrap(source)
+    }
+}
+
+// A total conversion consumes its source and transfers its owned obligations.
+// Conversions that can refuse a value use TryFrom or a Result-returning API.
+pub trait Into[T] {
+    fn into(sink self: Self) -> T where carries(self)
+}
+
+impl[T, U: From[T]] Into[U] for T {
+    fn into(sink self: Self) -> U {
+        U.from(self)
+    }
+}
+
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+@linear
+struct Receipt {
+    number: UInt64,
+}
+
+impl From[Ticket] for Receipt {
+    fn from(sink source: Ticket) -> Receipt {
+        let Ticket { number } = source
+        .{ number }
+    }
+}
+
+impl From[Ticket] for UInt64 {
+    fn from(sink source: Ticket) -> UInt64 {
+        let Ticket { number } = source
+        number
+    }
+}
+
+fn convert_to[T, S: Into[T]](sink source: S) -> T where carries(source) {
+    source.into()
+}
+
+test fn into_transfers_a_linear_source_to_the_requested_destination() {
+    let ticket = Ticket { number = 42 }
+    let receipt: Receipt = ticket.into()
+    let Receipt { number } = receipt
+    testing.assert_eq(number, UInt64(42), "conversion changed the ticket number")?
+    let second = Ticket { number = 7 }
+    let numeric: UInt64 = second.into()
+    testing.assert_eq(numeric, UInt64(7), "result context selected the wrong destination")?
+}
+
+test fn a_generic_into_call_uses_its_declared_target() {
+    let ticket = Ticket { number = 19 }
+    let receipt: Receipt = convert_to(ticket)
+    let Receipt { number } = receipt
+    testing.assert_eq(number, UInt64(19), "generic conversion lost its source")?
+}
+
+struct Label {
+    text: Str,
+}
+
+impl From[Label] for Str {
+    fn from(sink source: Label) -> Str {
+        let Label { text } = source
+        text
+    }
+}
+
+test fn into_preserves_the_external_owner_of_a_transferred_view() {
+    defer let owner = "shipment".to_owned(mem.system()).unwrap()
+    let label = Label { text = owner.view() }
+    let view: Str = label.into()
+    testing.assert_eq(view, "shipment", "conversion lost its backing text")?
+}

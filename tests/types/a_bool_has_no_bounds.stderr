@@ -1,0 +1,5 @@
+error[N-Undefined]: `Bool` declares no `max`
+ --> tests/types/a_bool_has_no_bounds.lin:5:10
+  |
+5 |     Bool.max
+  |          ^^^ a primitive holds what the standard library writes for it

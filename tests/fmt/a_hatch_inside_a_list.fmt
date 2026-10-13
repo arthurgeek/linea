@@ -1,0 +1,17 @@
+// A hatch is copied byte for byte, and a list writes its elements one at a
+// time. Where the hatch sat inside a list, the copy emitted the elements and
+// the loop then wrote them again -- so `T` appeared twice and the type took
+// two parameters where the program declared one. A formatter may not destroy
+// source it can parse, so an element the copy already wrote is skipped.
+struct Cell[
+// linea fmt: off
+    T,
+// linea fmt: on
+] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let c: Cell[UInt8] = .{ v = 1 }
+    c.v
+}

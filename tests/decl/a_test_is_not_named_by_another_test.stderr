@@ -1,0 +1,5 @@
+error[S-Test]: a test is not called by name
+  --> tests/decl/a_test_is_not_named_by_another_test.lin:13:5
+   |
+13 |     one()?
+   |     ^^^ the compiler writes the only call to a test, so a program naming one would ship it

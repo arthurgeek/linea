@@ -1,0 +1,31 @@
+// A tuple literal takes its components in order and completes as one, so it
+// holds a transfer open exactly as a call does. `ticket` is in the literal,
+// and the literal is never built when a later component leaves.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn build(early: Bool, sink ticket: Ticket) -> UInt8 {
+    let pair: (Ticket, UInt8) = (
+        ticket,
+        if early {
+            return 1
+        } else {
+            2
+        },
+    )
+    let (held, n) = pair
+    Release.release(held)
+    n
+}
+
+fn main() -> UInt8 {
+    build(false, .{ number = 2 })
+}

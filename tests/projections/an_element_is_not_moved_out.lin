@@ -1,0 +1,32 @@
+// A projected place is a part of the receiver it is rooted at, exactly as
+// `g.cells[0]` is a part of `g`. [O-Move] refuses moving it out through the
+// bracket for the same reason it refuses `take(ks[0])`: there is no partial
+// move, and a bracket is a step in a path rather than an escape from that
+// rule.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+struct Grid {
+    cells: [Key; 2],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = Key
+
+    proj at(inout self: Grid, i: UInt64) -> Key {
+        self.cells[i]
+    }
+}
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+    take(g[0])
+}

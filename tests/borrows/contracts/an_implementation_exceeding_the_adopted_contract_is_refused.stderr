@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/an_implementation_exceeding_the_adopted_contract_is_refused.lin:18:9
+   |
+9  |     fn handle(self: Self, request: Request) -> Str where carries(request)
+   |        ------ this implementation adopts `Handler.handle`'s `where carries(request)`
+18 |         copy(self.motd)
+   |         ^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

@@ -1,0 +1,10 @@
+// [T-ArraySize]. A length is a constant expression, and a reference to an
+// immutable binding whose initialiser is one is such an expression: the
+// constant is settled where it is declared, so the type is settled where it is
+// written.
+let n: UInt8 = 3
+
+fn main() -> UInt8 {
+    let a: [UInt8; n] = [4, 5, 6]
+    a[n - 1]
+}

@@ -1,0 +1,15 @@
+fn main() -> UInt8 {
+    var outer: UInt8 = 0
+    loop {
+        var inner: UInt8 = 0
+        while true {
+            inner = inner + 1
+            break
+        }
+        outer = outer + inner
+        if outer > 2 {
+            break
+        }
+    }
+    outer
+}

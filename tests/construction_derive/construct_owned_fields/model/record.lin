@@ -1,0 +1,64 @@
+import protocol
+import helpers
+import std.mem
+import std.io
+
+@opaque
+struct First[A: Allocator] { value: String[A] }
+
+@opaque
+struct Second[A: Allocator] { value: Vec[UInt16, A] }
+
+impl[A: Allocator] Release for First[A] {
+    fn release(sink self: Self) -> () {
+        let First { value } = self
+        value.release()
+        io.println("release first").unwrap()
+    }
+}
+
+impl[A: Allocator] Release for Second[A] {
+    fn release(sink self: Self) -> () {
+        let Second { value } = self
+        value.release()
+        io.println("release second").unwrap()
+    }
+}
+
+impl[A: Allocator] helpers.FromField[A] for First[A] {
+    fn field(input: helpers.Input, allocator: A, name: Str) -> Result[Self, helpers.Failure] where carries(.Ok: allocator) {
+        if name != "first" || input.fail_at == 1 {
+            return .Err(.Field)
+        }
+        let value = match input.bytes.to_owned(allocator) { Ok(value) => value, Err(_) => return .Err(.Allocation) }
+        return .Ok(.{ value })
+    }
+}
+
+impl[A: Allocator] helpers.FromField[A] for Second[A] {
+    fn field(input: helpers.Input, allocator: A, name: Str) -> Result[Self, helpers.Failure] where carries(.Ok: allocator) {
+        if name != "second" || input.fail_at == 2 {
+            return .Err(.Field)
+        }
+        let values: Result[Vec[UInt16, A], mem.Oom] = Vec.filled(allocator, count: 3, value: UInt16(7))
+        let value = match values { Ok(value) => value, Err(_) => return .Err(.Allocation) }
+        return .Ok(.{ value })
+    }
+}
+
+@opaque
+struct Settings[A: Allocator] {
+    first: First[A],
+    second: Second[A],
+    enabled: Bool,
+}
+
+derive[Backing: Allocator] Release for Settings[Backing]
+
+derive[Memory: Allocator] protocol.FromFields[Memory] for Settings[Memory]
+
+impl[A: Allocator] Settings[A] {
+    pub fn valid(self: Self) -> Bool {
+        self.first.value.view() == "tea" && self.second.value.length() == 3 && self.enabled
+    }
+}

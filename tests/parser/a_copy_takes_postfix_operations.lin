@@ -1,0 +1,13 @@
+// `copy(x)` is a value like a call's result, so an operation can follow it
+// directly. Each walk below takes a copy of the slice, and the original stays
+// readable afterwards.
+fn main() -> UInt8 {
+    let request = ["GET / HTTP/1.1", "", "Host: example.org"]
+    let lines = request.as_slice()
+    let has_blank = copy(lines).any(|sink line| line.length() == 0)
+    let all_short = copy(lines).all(|sink line| line.length() < 20)
+    if !has_blank || !all_short {
+        return 1
+    }
+    UInt8(lines.length())
+}

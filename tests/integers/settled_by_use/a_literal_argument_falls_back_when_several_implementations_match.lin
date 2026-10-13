@@ -1,0 +1,37 @@
+// `Money` scales by a `UInt8` and by an `Int64`, so a literal argument says
+// nothing about which implementation it means and takes the default integer
+// type, `Int64`. The postfix form, the call through the trait and the call
+// through the type all run `Scale[Int64]`: 20 + 2 is 22, where the `UInt8`
+// body would give 20 * 2.
+trait Scale[F] {
+    fn scaled(self: Self, by: F) -> UInt8
+}
+
+@copyable
+struct Money {
+    cents: UInt8,
+}
+
+impl Scale[UInt8] for Money {
+    fn scaled(self: Money, by: UInt8) -> UInt8 {
+        self.cents * by
+    }
+}
+
+impl Scale[Int64] for Money {
+    fn scaled(self: Money, by: Int64) -> UInt8 {
+        self.cents + UInt8(by)
+    }
+}
+
+fn main() -> UInt8 {
+    let price: Money = .{ cents = 20 }
+    let postfix = price.scaled(2)
+    let through_trait = Scale.scaled(price, 2)
+    let through_type = Money.scaled(price, 2)
+    if postfix == 22 && through_trait == 22 && through_type == 22 {
+        22
+    } else {
+        1
+    }
+}

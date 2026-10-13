@@ -1,0 +1,29 @@
+// Branch and loop results inherit the reading position of the call.
+// Observing an aggregate field keeps the enclosing value intact.
+@copyable
+struct Coordinate { value: UInt8 }
+
+struct Point { x: Coordinate, y: Coordinate }
+
+fn record(n: Coordinate) -> UInt8 {
+    n.value
+}
+
+fn main() -> UInt8 {
+    let p: Point = .{ x = .{ value = 3 }, y = .{ value = 4 } }
+
+    var countdown: UInt8 = 2
+
+    // The loop is an argument, which reads what it is handed. So `p.x` is
+    // observed here and `p` is whole afterwards.
+    let seen: UInt8 = record(
+        loop {
+            if countdown == 0 {
+                break p.x
+            }
+            countdown = countdown - 1
+        },
+    )
+
+    seen + p.x.value + p.y.value
+}

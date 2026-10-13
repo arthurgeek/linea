@@ -1,0 +1,15 @@
+// Whether `lookup` would take `ticket` is unknown, but when `pick` is false
+// no call is made, so `ticket` is still owned where `main` ends.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    let pick = true
+    if pick {
+        let _found = lookup(ticket)
+    }
+    0
+}

@@ -1,0 +1,13 @@
+trait HasCallable {
+    type Item: fn(read value: UInt8) -> UInt8
+}
+
+fn _needs_callable[F: fn(read value: UInt8) -> UInt8](_value: F) -> () {}
+
+fn _forwards[H: HasCallable](value: H.Item) -> () {
+    _needs_callable(value)
+}
+
+fn main() -> UInt8 {
+    0
+}

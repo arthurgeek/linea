@@ -1,0 +1,16 @@
+import std.testing
+
+// A reader whose failures are already I/O errors satisfies a bound asking for
+// failures convertible into one, as a socket or file reader does.
+impl From[IoError] for IoError {
+    fn from(sink source: IoError) -> IoError {
+        source
+    }
+}
+
+test fn an_io_error_converts_into_itself_unchanged() {
+    let error = IoError.from_os(.Read, 9, progress: 3)
+    let converted: IoError = Into.into(copy(error))
+    testing.assert_eq(converted, error, "conversion changed the error")?
+    .Ok(())
+}

@@ -1,0 +1,6 @@
+alias Meters = UInt64
+alias _Kept = UInt8
+
+fn main() -> UInt8 {
+    0
+}

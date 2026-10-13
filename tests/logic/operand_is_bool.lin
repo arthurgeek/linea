@@ -1,0 +1,10 @@
+// A logical operator takes a `Bool` and nothing else. There is no truth value
+// other than one, so an integer is not a condition and nothing converts to it.
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    if n && true {
+        1
+    } else {
+        0
+    }
+}

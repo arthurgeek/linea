@@ -1,0 +1,10 @@
+error[M-Vis]: `reset` is private to `tally`
+ --> tests/modules/a_name_refused_for_its_visibility_is_not_also_unused/main.lin:7:11
+  |
+7 | use tally.reset
+  |           ^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `secret` is private to `tally`
+  --> tests/modules/a_name_refused_for_its_visibility_is_not_also_unused/main.lin:11:25
+   |
+11 |     count.total + Tally.secret() + reset()
+   |                         ^^^^^^ declare it `pub` in its own module, or do not name it here

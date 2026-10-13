@@ -1,0 +1,31 @@
+// The library's own shape, one level up. `impl[T: Display] Display for
+// Option[T]` answers wherever the caller promised `T: Display`, so a function
+// generic over what the box holds renders one without knowing which type it is.
+//
+// This is what the family is for. A generic function forwarding an `Option[T]`
+// rather than a concrete `Option[Str]` is the first thing anything built on the
+// library does, and a bound discharged only by implementations refused it: the
+// promise `T: Display` is exactly what the implementation asks for and is
+// declared right there.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn show[T: Display](o: Option[T], inout w: Descriptor) -> Result[(), IoError] {
+    Display.fmt(o, &w)
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+
+    let some: Option[Str] = .Some("hi")
+    let none: Option[Str] = .None
+
+    show(some, &w)?
+    Writer.write_str(&w, "\n")?
+    show(none, &w)?
+    Writer.write_str(&w, "\n")?
+    return .Ok(0)
+}

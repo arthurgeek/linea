@@ -1,0 +1,33 @@
+// A trait may promise something about a type without declaring an operation.
+// What it promises is discharged by its bound, and there is nothing to supply.
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+trait Settled: Same {}
+
+struct Mark {
+    n: UInt8,
+}
+
+impl Same for Mark {
+    fn alike(self: Mark, other: Mark) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Settled for Mark {}
+
+fn used[T: Settled](a: T, b: T) -> Bool {
+    Same.alike(a, b)
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 3 }
+    let b: Mark = .{ n = 3 }
+    if used(a, b) {
+        5
+    } else {
+        0
+    }
+}

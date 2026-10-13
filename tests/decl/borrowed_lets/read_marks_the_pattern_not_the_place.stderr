@@ -1,0 +1,5 @@
+error[S-Destructure]: `read` marks the pattern, not the place it reads
+ --> tests/decl/borrowed_lets/read_marks_the_pattern_not_the_place.lin:5:28
+  |
+5 |     let read Point { x } = read point
+  |                            ^^^^ write `let read Pattern = place`

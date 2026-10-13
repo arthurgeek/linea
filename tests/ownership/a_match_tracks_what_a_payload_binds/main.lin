@@ -1,0 +1,15 @@
+// A consuming `match` takes the value apart, so what a payload binds is held
+// by the arm and has to be disposed of there. Only a struct pattern's binders
+// were recorded, so a variant's were never asked about -- the value was lent
+// to something, never consumed, and nothing said so.
+@linear
+enum Box {
+    Has(Key),
+}
+
+fn main() -> UInt8 {
+    let b = Box.Has(mint(7))
+    match b {
+        Has(k) => tag(k),
+    }
+}

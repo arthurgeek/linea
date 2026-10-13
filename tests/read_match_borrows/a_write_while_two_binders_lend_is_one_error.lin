@@ -1,0 +1,13 @@
+// A write to a place two binders of one pattern are lending is one mistake,
+// reported once where it is written.
+struct Point { x: UInt8, y: UInt8 }
+
+fn main() -> UInt8 {
+    var point = Point { x = 1, y = 2 }
+    match read point {
+        Point { x, y } => {
+            point = Point { x = 3, y = 4 }
+            x + y
+        },
+    }
+}

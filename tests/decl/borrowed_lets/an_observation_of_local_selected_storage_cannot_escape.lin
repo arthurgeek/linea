@@ -1,0 +1,12 @@
+struct Point { x: UInt8 }
+
+fn escaped() -> borrow UInt8 where carries() {
+    let point = Point { x = 3 }
+    let read Point { x } = point
+    borrow x
+}
+
+fn main() -> UInt8 {
+    let view = escaped()
+    *view
+}

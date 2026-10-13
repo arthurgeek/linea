@@ -1,0 +1,9 @@
+error[O-Leak]: `values` (a linear `collections.Map[UInt8, Ticket, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/maps/a_linear_map_cannot_be_abandoned.lin:8:9
+   |
+8  |     var values: collections.Map[UInt8, Ticket, mem.SystemAllocator] = collections.Map.new()
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+17 | }
+   | - the block ends here
+   |
+   = help: end it with `values.finish()`, and settle what its `Err` hands back

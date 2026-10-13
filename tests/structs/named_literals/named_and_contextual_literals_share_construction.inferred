@@ -1,0 +1,16 @@
+struct Celsius { value: Float64 }
+
+fn main() -> UInt8 {
+    let value: Float64 = 20.0
+    let named: Celsius = Celsius { value }
+    let commented: Celsius = Celsius {
+        // Comments do not change how a bare field label is read.
+        value = 20.0,
+    }
+    let contextual: Celsius = Celsius { value = 20.0 }
+    if named.value == contextual.value && commented.value == contextual.value {
+        0
+    } else {
+        1
+    }
+}

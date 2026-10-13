@@ -1,0 +1,24 @@
+error[N-Duplicate]: `unit` is already declared by this declaration
+ --> tests/decl/a_declaration_declares_each_value_parameter_once.lin:6:36
+  |
+6 |     fn of(self: Self, unit: UInt8, unit: UInt8) -> UInt8
+  |                       ---- already declared here
+  |                                    ^^^^ a declaration declares each parameter once
+error[N-Duplicate]: `b` is already declared by this declaration
+ --> tests/decl/a_declaration_declares_each_value_parameter_once.lin:9:18
+  |
+9 | fn sum(b: UInt8, b: UInt8) -> UInt8 {
+  |        - already declared here
+  |                  ^ a declaration declares each parameter once
+error[N-Duplicate]: `step` is already declared by this declaration
+  --> tests/decl/a_declaration_declares_each_value_parameter_once.lin:15:29
+   |
+15 |     let add = |step: UInt8, step: UInt8| step
+   |                ---- already declared here
+   |                             ^^^^ a closure's captures and parameters are declared once
+error[N-Duplicate]: `held` is already declared by this declaration
+  --> tests/decl/a_declaration_declares_each_value_parameter_once.lin:16:33
+   |
+16 |     let shift = [held = offset, held = offset] || held
+   |                  ---- already declared here
+   |                                 ^^^^ a closure's captures and parameters are declared once

@@ -1,0 +1,12 @@
+struct Point { x: UInt8 }
+
+fn bump(inout number: UInt8) -> () {
+    number = number + 1
+}
+
+fn main() -> UInt8 {
+    var point = Point { x = 3 }
+    let read Point { x } = point
+    bump(&x)
+    point.x
+}

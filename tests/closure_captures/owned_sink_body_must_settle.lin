@@ -1,0 +1,8 @@
+@linear
+struct Key { id: UInt8 }
+
+fn main() -> UInt8 {
+    let key: Key = .{ id = 7 }
+    let inspect = sink [sink key] || key.id
+    inspect()
+}

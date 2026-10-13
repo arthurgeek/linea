@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/a_literal_gives_one_list.lin:15:40
+   |
+15 |     let s: Pair = .{ a = bump(&p), b = p }
+   |                               -- mutated by this argument
+   |                                        ^ already passed `&` here

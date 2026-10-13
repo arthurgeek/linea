@@ -1,0 +1,35 @@
+trait Measure {
+    fn measure(self: Self) -> UInt8
+}
+
+template impl Measure where reflect.components: Measure {
+    fn measure(_self: Self) -> UInt8 {
+        var total: UInt8 = 0
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    total = total + component.of(_self).measure()
+                }
+            },
+        }
+        total
+    }
+}
+
+struct Pair[T] {
+    left: T,
+    right: T,
+}
+
+impl Measure for UInt8 {
+    fn measure(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+derive[T: Measure] Measure for Pair[T]
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8] = .{ left = 2, right = 3 }
+    pair.measure()
+}

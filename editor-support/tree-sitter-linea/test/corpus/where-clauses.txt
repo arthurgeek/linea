@@ -1,0 +1,78 @@
+==================
+Where clauses on type declarations
+==================
+
+struct Box[T] where T: Copyable { value: T }
+enum Maybe[T] where T: Copyable { None, Some(T) }
+trait Convert[T] where T: Copyable { fn convert(value: T) -> T }
+derive[T] Convert for Box[T] where T: Copyable
+
+---
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    (field_list
+      (field
+        name: (identifier)
+        type: (type_identifier))))
+  (enum_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    (variant_list
+      (variant
+        name: (type_identifier))
+      (variant
+        name: (type_identifier)
+        (type_identifier))))
+  (trait_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    (signature
+      name: (identifier)
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (type_identifier)))
+      return_type: (type_identifier)))
+  (derive_declaration
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    (derive_trait
+      trait: (trait_reference
+        name: (type_identifier)))
+    type: (type_identifier)
+    (type_arguments
+      (type_identifier))
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))))

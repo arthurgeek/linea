@@ -1,0 +1,17 @@
+import std.mem
+
+// The lambda stores each name it is given in the vector it owns. A `fn` type
+// cannot say that, so the closure cannot be kept behind one.
+fn main() -> Result[UInt8, mem.Oom] {
+    let names: Vec[Str, mem.SystemAllocator] = Vec.new()
+    var remember = mem.Closure.open(
+        mem.system(),
+        inout [sink names] |name: Str| -> UInt64 where retains(names: name) {
+            let _kept = &names.push(copy(name))
+            names.length()
+        },
+    )?
+    let count = &remember("Ada")
+    remember.release()
+    return .Ok(UInt8(count))
+}

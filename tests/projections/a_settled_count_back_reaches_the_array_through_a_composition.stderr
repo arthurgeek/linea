@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_settled_count_back_reaches_the_array_through_a_composition.lin:29:7
+   |
+29 |     o[^0]
+   |       ^^ the length is 3, so the greatest count back is 3

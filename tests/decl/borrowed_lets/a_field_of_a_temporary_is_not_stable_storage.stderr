@@ -1,0 +1,5 @@
+error[T-Lend]: a borrowed pattern requires a place
+  --> tests/decl/borrowed_lets/a_field_of_a_temporary_is_not_stable_storage.lin:10:28
+   |
+10 |     let read Point { x } = make().point
+   |                            ^^^^^^^^^^^^ bind the value before reading it apart

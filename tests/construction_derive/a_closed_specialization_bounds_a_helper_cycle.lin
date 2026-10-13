@@ -1,0 +1,24 @@
+@copyable
+struct Wrap[T: Copyable] {
+    value: T,
+}
+
+fn helper[T: Copyable](_value: T, remaining: UInt8) -> UInt8 {
+    repeat(UInt8(7), remaining)
+}
+
+fn repeat[T: Copyable](value: T, remaining: UInt8) -> UInt8 {
+    if remaining == 0 {
+        return 0
+    }
+    let wrapped: Wrap[T] = .{ value = copy(value) }
+    return helper(wrapped, remaining - 1) + 1
+}
+
+fn main() -> UInt8 {
+    if repeat(true, 3) == 3 {
+        0
+    } else {
+        1
+    }
+}

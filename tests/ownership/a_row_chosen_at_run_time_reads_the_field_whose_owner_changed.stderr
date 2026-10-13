@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_row_chosen_at_run_time_reads_the_field_whose_owner_changed.lin:15:5
+   |
+15 |     bump(&x)
+   |     ^^^^^^^^ keep this place available until the last use of its observation
+20 |     UInt8(*cs[i][j].right)
+   |           --------------- the observation is still used here

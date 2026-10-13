@@ -1,0 +1,6 @@
+default impl[T: Hash] Key for T {
+// <- keyword.storage.type
+//      ^ keyword.storage.type
+    type Query = T
+    fn matches(self: T, query: T) -> Bool { self == query }
+}

@@ -1,0 +1,139 @@
+// A constant naming a constant naming a constant, as far as anyone cares to
+// write. The definition says nothing about how long such a chain may be, so
+// nothing later may refuse one for its length: a bound the document does not
+// state makes a program valid or not depending on the compiler that reads it.
+pub let link00: UInt8 = link01
+
+pub let link01: UInt8 = link02
+
+pub let link02: UInt8 = link03
+
+pub let link03: UInt8 = link04
+
+pub let link04: UInt8 = link05
+
+pub let link05: UInt8 = link06
+
+pub let link06: UInt8 = link07
+
+pub let link07: UInt8 = link08
+
+pub let link08: UInt8 = link09
+
+pub let link09: UInt8 = link10
+
+pub let link10: UInt8 = link11
+
+pub let link11: UInt8 = link12
+
+pub let link12: UInt8 = link13
+
+pub let link13: UInt8 = link14
+
+pub let link14: UInt8 = link15
+
+pub let link15: UInt8 = link16
+
+pub let link16: UInt8 = link17
+
+pub let link17: UInt8 = link18
+
+pub let link18: UInt8 = link19
+
+pub let link19: UInt8 = link20
+
+pub let link20: UInt8 = link21
+
+pub let link21: UInt8 = link22
+
+pub let link22: UInt8 = link23
+
+pub let link23: UInt8 = link24
+
+pub let link24: UInt8 = link25
+
+pub let link25: UInt8 = link26
+
+pub let link26: UInt8 = link27
+
+pub let link27: UInt8 = link28
+
+pub let link28: UInt8 = link29
+
+pub let link29: UInt8 = link30
+
+pub let link30: UInt8 = link31
+
+pub let link31: UInt8 = link32
+
+pub let link32: UInt8 = link33
+
+pub let link33: UInt8 = link34
+
+pub let link34: UInt8 = link35
+
+pub let link35: UInt8 = link36
+
+pub let link36: UInt8 = link37
+
+pub let link37: UInt8 = link38
+
+pub let link38: UInt8 = link39
+
+pub let link39: UInt8 = link40
+
+pub let link40: UInt8 = link41
+
+pub let link41: UInt8 = link42
+
+pub let link42: UInt8 = link43
+
+pub let link43: UInt8 = link44
+
+pub let link44: UInt8 = link45
+
+pub let link45: UInt8 = link46
+
+pub let link46: UInt8 = link47
+
+pub let link47: UInt8 = link48
+
+pub let link48: UInt8 = link49
+
+pub let link49: UInt8 = link50
+
+pub let link50: UInt8 = link51
+
+pub let link51: UInt8 = link52
+
+pub let link52: UInt8 = link53
+
+pub let link53: UInt8 = link54
+
+pub let link54: UInt8 = link55
+
+pub let link55: UInt8 = link56
+
+pub let link56: UInt8 = link57
+
+pub let link57: UInt8 = link58
+
+pub let link58: UInt8 = link59
+
+pub let link59: UInt8 = link60
+
+pub let link60: UInt8 = link61
+
+pub let link61: UInt8 = link62
+
+pub let link62: UInt8 = link63
+
+pub let link63: UInt8 = link64
+
+pub let link64: UInt8 = link65
+
+pub let link65: UInt8 = 7
+
+fn main() -> UInt8 {
+    link00
+}

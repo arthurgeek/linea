@@ -1,0 +1,23 @@
+// The source is moved into a call after the copy was made. The copy does not
+// depend on the storage the move gave up.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn seats_of(room: Room) -> UInt8 {
+    room.seats
+}
+
+fn main() -> UInt8 {
+    let hall = Room { name = "hall", seats = 120 }
+    let big = borrow hall
+    let booked = copy(*big)
+    let moved = seats_of(hall)
+    if booked.name == "hall" {
+        booked.seats + moved
+    } else {
+        0
+    }
+}

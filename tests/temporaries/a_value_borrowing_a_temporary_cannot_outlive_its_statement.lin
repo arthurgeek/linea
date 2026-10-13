@@ -1,0 +1,15 @@
+// A temporary lives until the end of its statement, so a value that borrows
+// one cannot be kept in a binding for a later statement. Binding the
+// borrowed value first gives it a place that lives as long as the binding.
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+fn main() -> UInt8 {
+    let kept = reading(42)
+    UInt8(*kept.value)
+}

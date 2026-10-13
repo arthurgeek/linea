@@ -1,0 +1,22 @@
+// A phantom parameter is read by the type system, for identity, and by
+// nothing else: it makes `Handle[DocTag]` and `Handle[AstTag]` two types, so
+// a handle into one family cannot stand where the other's is expected. One
+// parameter across two positions is what ties them, and the tie is ordinary
+// inference over an ordinary type argument.
+struct DocTag {}
+
+struct AstTag {}
+
+struct Handle[phantom Tag] {
+    slot: UInt64,
+}
+
+fn paired[Tag](h: Handle[Tag], again: Handle[Tag]) -> UInt64 {
+    h.slot + again.slot
+}
+
+fn main() -> UInt8 {
+    let d: Handle[DocTag] = .{ slot = 3 }
+    let a: Handle[AstTag] = .{ slot = 4 }
+    UInt8(paired(d, a))
+}

@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `digest` is a function, not an operation of `Plain`
+  --> tests/structs/a_function_whose_bound_the_value_does_not_meet_is_named_without_a_call.lin:29:5
+   |
+29 |     p.digest() + digest(h)
+   |     ^^^^^^^^ a dot calls an operation of the value, and a free function is not one

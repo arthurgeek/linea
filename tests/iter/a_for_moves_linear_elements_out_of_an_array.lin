@@ -1,0 +1,18 @@
+// Walking an array takes the array, and each position it walks hands its
+// element over: a Linear element arrives in the binder as a value nothing else
+// holds, so taking it apart in the body consumes it exactly once and the array
+// is left owing nothing.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 3] = [.{ n = 1 }, .{ n = 2 }, .{ n = 4 }]
+    var total: UInt8 = 0
+    for t in ts {
+        let Token { n: v } = t
+        total += v
+    }
+    total
+}

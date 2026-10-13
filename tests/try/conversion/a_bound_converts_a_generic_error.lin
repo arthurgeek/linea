@@ -1,0 +1,57 @@
+// Inside a generic function, a bound on the error type's parameter permits
+// `?` to convert through it. Each instantiation calls its own `From`
+// implementation.
+enum ParseError {
+    Malformed,
+}
+
+enum LoadError {
+    Parse,
+}
+
+enum SaveError {
+    Unreadable,
+}
+
+impl From[ParseError] for LoadError {
+    fn from(sink _source: ParseError) -> LoadError {
+        return .Parse
+    }
+}
+
+impl From[ParseError] for SaveError {
+    fn from(sink _source: ParseError) -> SaveError {
+        return .Unreadable
+    }
+}
+
+fn parse(value: UInt8) -> Result[UInt8, ParseError] {
+    if value == 0 {
+        return .Err(.Malformed)
+    }
+    return .Ok(value)
+}
+
+fn doubled[E: From[ParseError]](value: UInt8) -> Result[UInt8, E] {
+    let parsed = parse(value)?
+    return .Ok(parsed * 2)
+}
+
+fn main() -> UInt8 {
+    let loaded: Result[UInt8, LoadError] = doubled(0)
+    let saved: Result[UInt8, SaveError] = doubled(0)
+    let fine: Result[UInt8, SaveError] = doubled(4)
+    let load_code: UInt8 = match loaded {
+        Ok(_) => 0,
+        Err(_) => 10,
+    }
+    let save_code: UInt8 = match saved {
+        Ok(_) => 0,
+        Err(_) => 20,
+    }
+    let fine_code = match fine {
+        Ok(value) => value,
+        Err(_) => 0,
+    }
+    load_code + save_code + fine_code
+}

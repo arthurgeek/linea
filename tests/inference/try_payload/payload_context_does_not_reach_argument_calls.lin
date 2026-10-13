@@ -1,0 +1,21 @@
+fn identity[T](sink value: T) -> T where carries(value) {
+    value
+}
+
+fn success[T](sink value: T, other: Int64) -> Result[T, UInt8] where carries(.Ok: value) {
+    if other != 1 {
+        panic("argument changed")
+    }
+    return .Ok(value)
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: UInt64 = success(7, identity(1))?
+    return .Ok(
+        if value == 7 {
+            0
+        } else {
+            1
+        },
+    )
+}

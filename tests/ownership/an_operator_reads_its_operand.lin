@@ -1,0 +1,20 @@
+// A negation and a conversion produce a new value from one they only looked
+// at, so the operand is observed whatever position the operation sits in.
+//
+// Both were grouped with parentheses in the walk, and parentheses *are*
+// transparent: what is inside them sits where the whole expression sits. So
+// the position passed straight through a node that should have stopped it,
+// and `let doubled = -n` moved `n`.
+fn main() -> UInt8 {
+    let n: Int64 = 5
+
+    // Read under `-`, and read again below. Neither takes it.
+    let negated: Int64 = -n
+    let narrowed: UInt8 = UInt8(n)
+
+    // The parenthesised one is the move it looks like, because parentheses
+    // are not an operation.
+    let moved: UInt8 = (narrowed)
+
+    UInt8(n + negated) + moved
+}

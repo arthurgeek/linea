@@ -1,0 +1,24 @@
+// Writing a field reaches through the binding to find it, so it is a use of
+// that binding -- and using one that has been moved is [O-Move] like any other
+// use. Saying only that a part does not refill a move leaves the write itself
+// unremarked, and a linear value moved into it is then held by something that
+// is not there: `j` below is never released, and nothing says so.
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn main() -> UInt8 {
+    let j = mint(9)
+    var h: Holder = .{ k = mint(7), n = 1 }
+    let g = h
+    h.k = j
+    consume(g)
+}

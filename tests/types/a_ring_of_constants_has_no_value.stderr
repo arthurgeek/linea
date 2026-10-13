@@ -1,0 +1,5 @@
+error[T-Const]: `first` names itself through `third`
+ --> tests/types/a_ring_of_constants_has_no_value.lin:9:24
+  |
+9 | pub let third: UInt8 = first
+  |                        ^^^^^ a constant's value cannot be worked out from itself

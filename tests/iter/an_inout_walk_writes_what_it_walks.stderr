@@ -1,0 +1,7 @@
+error[N-Immutable]: `xs` is declared with `let`
+ --> tests/iter/an_inout_walk_writes_what_it_walks.lin:6:20
+  |
+5 |     let xs: [UInt8; 2] = [1, 2]
+  |         -- declared with `let` here
+6 |     for inout x in xs {
+  |                    ^^ this binding cannot be assigned

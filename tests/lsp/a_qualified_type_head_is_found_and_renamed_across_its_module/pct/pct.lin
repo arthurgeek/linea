@@ -1,0 +1,7 @@
+pub struct Thing {
+    x: UInt8,
+}
+
+pub fn thing() -> Thing {
+    .{ x = 3 }
+}

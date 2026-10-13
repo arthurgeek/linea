@@ -1,0 +1,15 @@
+struct Board[I] { values: [UInt8; 2], key: I }
+
+impl[I: Integer] Index[I] for Board[I] via values
+
+fn main() -> UInt8 {
+    var signed = Board[Int16] { values = [2, 3], key = 0 }
+    var unsigned = Board[UInt8] { values = [4, 5], key = 1 }
+    signed[0] += 1
+    unsigned[1] += 1
+    if signed[0] == 3 && unsigned[1] == 6 {
+        0
+    } else {
+        1
+    }
+}

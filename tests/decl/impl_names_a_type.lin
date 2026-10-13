@@ -1,0 +1,23 @@
+// An `impl` declares no name of its own, so nothing resolved its header: a
+// header naming no type attached its functions to nothing, and a `pub` member
+// among them was silent, because the unused rule exempts what another module
+// could have called.
+fn helper() -> UInt8 {
+    1
+}
+
+impl helper {
+    pub fn a() -> UInt8 {
+        2
+    }
+}
+
+impl Missing {
+    pub fn b() -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    helper()
+}

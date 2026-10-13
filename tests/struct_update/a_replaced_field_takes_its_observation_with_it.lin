@@ -1,0 +1,18 @@
+struct Pair {
+    left: borrow UInt64,
+    right: borrow UInt64,
+}
+
+// `first.left` observes `local`, but the literal replaces it, so the result
+// observes only `shared`.
+fn pair(shared: borrow UInt64) -> Pair where carries(shared) {
+    let local: UInt64 = 5
+    let first: Pair = .{ left = borrow local, right = copy(shared) }
+    Pair { left = copy(shared), ..first }
+}
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 7
+    let both = pair(borrow owner)
+    UInt8(*both.left + *both.right)
+}

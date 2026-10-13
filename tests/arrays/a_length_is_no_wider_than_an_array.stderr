@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is part of its type, and this one is too wide to be
+ --> tests/arrays/a_length_is_no_wider_than_an_array.lin:8:22
+  |
+8 |     let _xs: [UInt8; wide] = [1]
+  |                      ^^^^ no array holds this many elements

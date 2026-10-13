@@ -1,0 +1,9 @@
+error[O-Leak]: `b` (a linear `Box`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_arm_does_not_dispose/main.lin:16:9
+   |
+15 |     match b {
+   |           - taken apart here
+16 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: name what it holds in the arm, so something can settle it

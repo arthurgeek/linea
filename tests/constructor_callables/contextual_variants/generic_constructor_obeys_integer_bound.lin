@@ -1,0 +1,12 @@
+enum Reading[T: Integer] { Accepted(T) }
+
+fn main() -> UInt8 {
+    let accept: fn(sink value: UInt16) -> Reading[UInt16] = .Accepted
+    match accept(300) {
+        Accepted(value) => if value == 300 {
+            0
+        } else {
+            1
+        },
+    }
+}

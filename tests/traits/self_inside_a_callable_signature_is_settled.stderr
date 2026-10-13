@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Apply`'s `Self`
+ --> tests/traits/self_inside_a_callable_signature_is_settled.lin:6:5
+  |
+6 |     Apply.apply(callback)
+  |     ^^^^^^^^^^^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns

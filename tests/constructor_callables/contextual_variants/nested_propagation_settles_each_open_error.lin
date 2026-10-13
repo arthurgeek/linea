@@ -1,0 +1,17 @@
+enum Failure { Code(UInt8) }
+
+fn nested[A: Discardable, B: Discardable, F: fn(sink code: UInt8) -> A, G: fn(sink code: UInt8) -> B](inner: F, outer: G) -> Result[Result[UInt8, A], B]
+where carries(inner, outer) {
+    let _inner = inner(1)
+    let _outer = outer(2)
+    return .Ok(.Ok(7))
+}
+
+fn run() -> Result[UInt8, Failure] {
+    let value = nested(.Code, .Code)??
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match run() { Ok(value) => value, Err(_) => 1 }
+}

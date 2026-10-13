@@ -1,0 +1,5 @@
+error[S-Args]: a positional argument follows a named one
+  --> tests/decl/a_positional_after_a_name_is_one_mistake.lin:10:15
+   |
+10 |     add(a: 2, 40)
+   |               ^^ name this argument, or move it before the names

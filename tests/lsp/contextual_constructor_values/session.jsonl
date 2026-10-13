@@ -1,0 +1,27 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"enum RenderError { Allocation(UInt8) }\n\nenum OtherError { Allocation(UInt8) }\n\nfn code(error: RenderError) -> UInt8 {\n    match read error { Allocation(value) => value }\n}\n\nfn other_code(error: OtherError) -> UInt8 {\n    match read error { Allocation(value) => value }\n}\n\nfn main() -> UInt8 {\n    let contextual: fn(sink value: UInt8) -> RenderError = .Allocation\n    let qualified: fn(sink value: UInt8) -> RenderError = RenderError.Allocation\n    let unrelated: fn(sink value: UInt8) -> OtherError = .Allocation\n    let direct: RenderError = .Allocation(5)\n    let explicit = RenderError.Allocation(7)\n    let failed: Result[UInt8, UInt8] = .Err(11)\n    let mapped: Result[UInt8, RenderError] = failed.map_err(.Allocation)\n    let mapped_code = match read mapped { Ok(value) => value, Err(error) => code(error) }\n    if code(contextual(value: 2)) + code(qualified(value: 3)) + other_code(unrelated(value: 4)) + code(direct) + code(explicit) + mapped_code + borrowed_code() == 45 {\n        0\n    } else {\n        1\n    }\n}\n\nenum ObservedError { Allocation(borrow UInt8) }\n\nfn borrowed_code() -> UInt8 {\n    let make: fn(sink payload: borrow UInt8) -> ObservedError where carries(.Allocation: payload) = .Allocation\n    let owner: UInt8 = 13\n    match make(payload: borrow owner) { Allocation(value) => *value }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":13,"character":61}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":13,"character":61}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":71}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":71}}}
+{"jsonrpc":"2.0","id":6,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":15,"character":59}}}
+{"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":15,"character":59}}}
+{"jsonrpc":"2.0","id":8,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":16,"character":32}}}
+{"jsonrpc":"2.0","id":9,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":16,"character":32}}}
+{"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":17,"character":32}}}
+{"jsonrpc":"2.0","id":11,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":17,"character":32}}}
+{"jsonrpc":"2.0","id":12,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":19,"character":62}}}
+{"jsonrpc":"2.0","id":13,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":19,"character":62}}}
+{"jsonrpc":"2.0","id":14,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":13,"character":61},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":15,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":15,"character":59},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":16,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":13,"character":61},"newName":"OutOfMemory"}}
+{"jsonrpc":"2.0","id":17,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":15,"character":59},"newName":"Unavailable"}}
+{"jsonrpc":"2.0","id":18,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":0,"character":6},"newName":"RenderFailure"}}
+{"jsonrpc":"2.0","id":19,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":59}}}
+{"jsonrpc":"2.0","id":20,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":31,"character":78}}}
+{"jsonrpc":"2.0","id":21,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":31,"character":102},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":22,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":31,"character":102},"newName":"BorrowedFailure"}}
+{"jsonrpc":"2.0","id":23,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":24}}}
+{"jsonrpc":"2.0","id":24,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":24},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":25,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":24},"newName":"ReadFailure"}}
+{"jsonrpc":"2.0","id":26,"method":"shutdown"}

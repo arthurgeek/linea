@@ -1,0 +1,22 @@
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let rate: UInt8 = 3
+    let bonus: UInt8 = 1
+    let scaled = |x: UInt8| x * rate
+    let raised = [rate] |x: UInt8| x * rate + bonus
+    let first = Ticket.Seat(4)
+    let use_first = || redeem(first)
+    let second = Ticket.Seat(5)
+    let use_second = sink [rate] || redeem(second) + rate
+    scaled(1) + raised(1) + use_first() + use_second()
+}

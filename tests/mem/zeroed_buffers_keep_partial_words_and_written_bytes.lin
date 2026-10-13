@@ -1,0 +1,46 @@
+import std.mem
+
+use mem.system
+
+fn inspect(size: UInt64) -> UInt8 {
+    let a = system()
+    match a.acquire(size) {
+        Err(_) => 1,
+        Ok(acquired) => {
+            var b = acquired
+            var bad: UInt8 = 0
+            if b.length() != size {
+                bad = 2
+            }
+            var i: UInt64 = 0
+            while i < size {
+                if b.load_byte(i) != 0 {
+                    bad = 3
+                }
+                i += 1
+            }
+            if size >= 16 {
+                mem.Buffer.store(&b, 0, 41)
+                if b.load(8) != 0 {
+                    bad = 4
+                }
+                if b.load(0) != 41 {
+                    bad = 5
+                }
+            }
+            if size != 0 {
+                let last = size - 1
+                mem.Buffer.store_byte(&b, last, 193)
+                if b.load_byte(last) != 193 {
+                    bad = 6
+                }
+            }
+            b.release()
+            bad
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    inspect(0) + inspect(7) + inspect(8) + inspect(15) + inspect(16) + inspect(63) + inspect(64) + inspect(65) + inspect(512) + inspect(513)
+}

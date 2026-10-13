@@ -1,0 +1,22 @@
+// A heap allocation is a linear value: what `acquire` answers, `dispose`
+// consumes,
+// and between the two the buffer is an ordinary value the program holds.
+//
+// The status answers the length the buffer carries rather than a constant, so
+// it says the allocation really happened at the size that was asked -- a
+// constant would read the same over a buffer that held nothing.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(7) {
+        Ok(b) => {
+            let n = UInt8(b.length())
+            b.release()
+            n
+        },
+        Err(_) => 0,
+    }
+}

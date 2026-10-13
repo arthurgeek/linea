@@ -1,0 +1,5 @@
+error[S-Nesting]: this expression nests too deeply
+  --> tests/recovery/a_chain_of_operators_nests_too_deeply.lin:10:4003
+   |
+10 | ... + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+   |                                                                 ^ the limit is 1000 levels

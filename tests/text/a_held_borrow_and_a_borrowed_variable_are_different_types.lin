@@ -1,0 +1,27 @@
+// A literal holding a copy of a `borrow` value and one borrowing the variable
+// it observes are different types, although both render the same text.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let name = Name { text = "Ada" }
+    let observed = borrow name
+    var line = "hi {observed}"
+    println(line)?
+    line = "hi {name}"
+    println(line)?
+    return .Ok(0)
+}

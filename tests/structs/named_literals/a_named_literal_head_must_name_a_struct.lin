@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _value = UInt8 { value = 1 }
+    0
+}

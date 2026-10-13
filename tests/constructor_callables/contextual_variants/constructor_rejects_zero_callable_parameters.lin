@@ -1,0 +1,10 @@
+enum RenderError { Allocation(UInt8) }
+
+fn invoke[F: fn() -> RenderError](callback: F) -> RenderError {
+    callback()
+}
+
+fn main() -> UInt8 {
+    let error = invoke(.Allocation)
+    match error { Allocation(code) => code }
+}

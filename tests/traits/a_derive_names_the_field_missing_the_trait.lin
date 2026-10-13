@@ -1,0 +1,22 @@
+// `Reading` derives `Equatable`, and its `sensor` field's type does not
+// implement it. The report names the field and the trait to implement for
+// its type.
+struct Sensor {
+    pin: UInt8,
+}
+
+@derive(Equatable)
+struct Reading {
+    sensor: Sensor,
+    celsius: Int64,
+}
+
+fn main() -> UInt8 {
+    let first = Reading { sensor = Sensor { pin = 4 }, celsius = 21 }
+    let second = Reading { sensor = Sensor { pin = 4 }, celsius = 21 }
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

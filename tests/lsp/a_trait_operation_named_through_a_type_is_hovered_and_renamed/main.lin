@@ -1,0 +1,23 @@
+// `Account.of(a)` reaches `Measure`'s operation through the type, so hovering
+// `of` there describes the call, and renaming it edits the signature, the
+// implementation, every call however it is written, and the function value
+// `Account.of`.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 1 }
+    let measure = Account.of
+    Account.of(a) + a.of() + Measure.of(a) + measure(a)
+}

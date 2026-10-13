@@ -1,0 +1,20 @@
+fn keep[F](sink callback: F, _tick: UInt8) -> F where carries(callback) {
+    callback
+}
+
+fn bump(inout count: UInt8) -> UInt8 {
+    count += 1
+    count
+}
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    let callback = || UInt8(7)
+    let assigned = keep(callback, bump(&count))
+    let result = keep(assigned, bump(&count))()
+    if count == 2 && result == 7 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: this closure keeps its arguments in what it captured, and the `fn` type `inout fn(read Str) -> UInt64` it is kept as cannot say so
+ --> tests/erased_closures/a_closure_that_keeps_its_arguments_is_not_kept.lin:7:32
+  |
+7 |     var remember = mem.Closure.open(
+  |                                ^^^^ keep what it is given outside the closure, or keep the closure's own type

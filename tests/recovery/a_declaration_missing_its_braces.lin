@@ -1,0 +1,23 @@
+// The shape of a declaration, asked one brace at a time. Each of these keeps
+// the parser looking for something that is not there, and each names the piece
+// it wanted rather than the token it found -- a message that only said
+// "unexpected `fn`" would describe every one of them identically.
+//
+// Written as one file because recovery is what is being checked: the parser
+// returns a complete tree from source that is broken in five places, and every
+// declaration after a broken one is still read.
+enum Colour
+    Red,
+}
+
+struct Point
+    x: UInt8,
+}
+
+impl Point
+    fn get() -> UInt8 { 1 }
+}
+
+struct Pair { x, y: UInt8 }
+
+enum Shape { Circle( }

@@ -1,0 +1,6 @@
+import helper
+
+fn main() -> UInt8 {
+    let selected: fn(read value: UInt8) -> UInt8 = helper.increment
+    selected(6)
+}

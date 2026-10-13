@@ -1,0 +1,13 @@
+import protocol
+
+pub struct First {}
+
+pub struct Second {}
+
+derive protocol.Label for First
+
+derive protocol.Label for Second
+
+fn main() -> UInt8 {
+    0
+}

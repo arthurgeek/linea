@@ -1,0 +1,15 @@
+// A `pub use` is where a module boundary is crossed, so it is where crossing
+// it is checked. It has to resolve the module in the file that wrote it: this
+// file imported `alpha`, so `alpha.pick` is alpha's, and alpha's is private.
+//
+// Scanning the whole module for a binding of that name found the one another
+// file wrote -- a different module, under the same name -- and re-exported
+// something from it. The visibility check then asked about the wrong module
+// and found nothing to object to.
+import alpha
+
+pub use alpha.pick
+
+fn main() -> UInt8 {
+    pick() + helper()
+}

@@ -1,0 +1,12 @@
+fn same[T: Equatable](got: T, want: T) -> Bool {
+    got == want
+}
+
+fn main() -> UInt8 {
+    let code: Option[UInt8] = .Some(9)
+    if same(code, .Some(9)) && same(code, .None) == false {
+        0
+    } else {
+        1
+    }
+}

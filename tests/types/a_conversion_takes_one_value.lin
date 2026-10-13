@@ -1,0 +1,6 @@
+// A conversion is a call, and a call is written with any number of arguments.
+// How many a conversion takes is therefore a rule rather than a shape: the
+// grammar has one production for both, so it cannot be the thing that says one.
+fn main() -> UInt8 {
+    UInt8(1, 2)
+}

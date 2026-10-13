@@ -1,0 +1,5 @@
+error[N-NotCallable]: this name does not refer to a function
+ --> tests/decl/not_callable.lin:3:5
+  |
+3 |     x()
+  |     ^ only a function can be called

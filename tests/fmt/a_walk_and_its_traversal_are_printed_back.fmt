@@ -1,0 +1,45 @@
+// The formatter prints every form the walk milestone added: the three `for`
+// spellings, a projection, a traversal, and a range that runs each way. A
+// construct the printer has no case for reaches the source as whatever the
+// fallback prints, so each one is written here badly on purpose and has to
+// come back settled.
+//
+// The three `for`s are three constructs and not one with a modifier, so a
+// printer that dropped `read` or `inout` would produce a program that still
+// compiles and means something else -- which is exactly what a golden catches
+// and a compile does not.
+struct Row {
+    cells: [UInt8; 3],
+}
+
+impl Index[Int64] for Row {
+    type Elem = UInt8
+
+    proj at(inout self: Row, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Row {
+    trav cells = 2..=0
+}
+
+fn main() -> UInt8 {
+    var r: Row = .{ cells = [1, 2, 3] }
+    var total: UInt8 = 0
+
+    for read c in r {
+        total += c
+    }
+
+    for inout c in r {
+        c += 1
+    }
+
+    let ns: Range[UInt8] = 3..0
+    for n in ns {
+        total += n
+    }
+
+    total
+}

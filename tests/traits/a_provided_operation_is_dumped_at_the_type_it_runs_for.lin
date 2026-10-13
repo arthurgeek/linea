@@ -1,0 +1,46 @@
+// `doubled` and `quadrupled` are provided by `Shape` and run once for each
+// type reaching them, so each copy's `self` holds that type: `Tile` for the
+// copies `main` reaches directly and `Board` for those `twice` reaches through
+// its bound. The total is 8 + 12 + 8.
+trait Shape {
+    fn area(self: Self) -> UInt64
+
+    fn doubled(self: Self) -> UInt64 {
+        self.area() * 2
+    }
+
+    fn quadrupled(self: Self) -> UInt64 {
+        self.doubled() * 2
+    }
+}
+
+struct Tile {
+    side: UInt64,
+}
+
+impl Shape for Tile {
+    fn area(self: Self) -> UInt64 {
+        self.side * self.side
+    }
+}
+
+struct Board {
+    width: UInt64,
+    height: UInt64,
+}
+
+impl Shape for Board {
+    fn area(self: Self) -> UInt64 {
+        self.width * self.height
+    }
+}
+
+fn twice[T: Shape](shape: T) -> UInt64 {
+    shape.quadrupled()
+}
+
+fn main() -> UInt8 {
+    let tile = Tile { side = 2 }
+    let board = Board { width = 1, height = 3 }
+    UInt8(tile.doubled() + twice(board) + Shape.doubled(tile))
+}

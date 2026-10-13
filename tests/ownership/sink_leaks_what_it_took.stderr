@@ -1,0 +1,9 @@
+error[O-Leak]: `_k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/sink_leaks_what_it_took/key.lin:14:21
+   |
+14 | pub fn swallow(sink _k: Key) -> UInt8 {
+   |                     ^^ never settled on the path that reaches the end of this block
+16 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

@@ -1,0 +1,5 @@
+error[S-Params]: expected `)`
+ --> tests/decl/attributes/a_group_closes_before_its_declaration.lin:2:1
+  |
+2 | struct Point { value: UInt8 }
+  | ^^^^^^ an attribute group closes before its declaration

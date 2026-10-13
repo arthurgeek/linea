@@ -1,0 +1,8 @@
+// A lambda parameter may be a tuple pattern: `|sink (i, x)|` takes each pair
+// from `enumerate` apart where the closure begins, so the body names the
+// position and the item directly.
+fn main() -> UInt8 {
+    let weights: [UInt8; 3] = [10, 20, 30]
+    let total = weights.as_slice().enumerate().map(|sink (i, x)| i + UInt64(*x)).fold(0, |sink a, sink b| a + b)
+    UInt8(total)
+}

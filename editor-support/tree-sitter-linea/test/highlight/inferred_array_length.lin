@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let values: [UInt8; _] = [1, 2]
+//                      ^ constant.builtin
+    values[0]
+}

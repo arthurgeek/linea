@@ -1,0 +1,7 @@
+// A `fn` type is a code address and holds no environment, so a closure with
+// captures does not become one; `mem.Closure` keeps its environment instead.
+fn main() -> UInt8 {
+    let offset: UInt8 = 2
+    let shift: fn(value: UInt8) -> UInt8 = [sink offset] |value| value + offset
+    shift(40)
+}

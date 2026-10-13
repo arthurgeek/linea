@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `()`, found `Int64`
+ --> tests/control/while_break_carries_no_value.lin:3:15
+  |
+2 |     while true {
+  |     ----- a `while` yields `()`, whatever its body
+3 |         break 1
+  |               ^ expected `()`, found `Int64`

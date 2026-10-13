@@ -1,0 +1,46 @@
+// Trait arguments select the linear component implementation. Its ordinary
+// wrapper inherits the component obligation and is settled by destructuring.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Coin {
+    n: UInt8,
+}
+
+impl Lookup[Bool] for Coin {
+    fn at(self: Coin, _i: Bool) -> UInt8 {
+        self.n
+    }
+}
+
+@linear
+struct Tag {
+    m: UInt8,
+}
+
+impl Lookup[UInt64] for Tag {
+    fn at(self: Tag, _i: UInt64) -> UInt8 {
+        self.m
+    }
+}
+
+struct Holder[T: Lookup[UInt64]] {
+    v: T,
+}
+
+fn hold(sink t: Tag) -> UInt8 {
+    let h: Holder[Tag] = .{ v = t }
+    let Holder { v: x } = h
+    let Tag { m: n } = x
+    n
+}
+
+fn flagged(c: Coin) -> UInt8 {
+    Lookup.at(c, true)
+}
+
+fn main() -> UInt8 {
+    let c: Coin = .{ n = 1 }
+    hold(.{ m = 4 }) + flagged(c)
+}

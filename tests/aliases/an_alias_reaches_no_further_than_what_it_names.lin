@@ -1,0 +1,23 @@
+// An alias gives a type another name, and that name reaches no further than
+// the declarations the type is written with: a published alias of a private
+// structure would let another module build one it cannot name.
+struct Secret {
+    code: UInt8,
+}
+
+internal struct Shared {
+    code: UInt8,
+}
+
+alias Kept = Secret
+pub alias Leak = Secret
+internal alias Spread = Option[Secret]
+pub alias Widened = Shared
+internal alias Within = Shared
+
+fn main() -> UInt8 {
+    let kept: Kept = Secret { code = 1 }
+    let within: Within = Shared { code = 2 }
+    let _spread: Spread = .None
+    kept.code + within.code
+}

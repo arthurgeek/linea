@@ -1,0 +1,41 @@
+// An instantiation is an ordinary declared type: its fields are the
+// template's with the parameters replaced, so layout, matching and field
+// lookup need no case for it. That is what monomorphisation is, and doing it
+// in the pool means nothing downstream has to know.
+//
+// `Pair[UInt8, Bool]` and `Pair[UInt8, UInt8]` are different types with different
+// layouts, interned so each is one handle wherever it is written.
+struct Pair[A, B] {
+    x: A,
+    y: B,
+}
+
+// A field may be an instantiation of its own, so substitution recurses: the
+// arguments are mapped and the inner type is instantiated again.
+struct Inner[T] {
+    v: T,
+}
+
+struct Outer[T] {
+    held: Inner[T],
+    n: UInt8,
+}
+
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+fn main() -> UInt8 {
+    let mixed: Pair[UInt8, Bool] = .{ x = 7, y = true }
+    let same: Pair[UInt8, UInt8] = .{ x = 1, y = 2 }
+    let nested: Outer[UInt8] = .{ held = .{ v = 3 }, n = 4 }
+    let carried: Maybe[UInt8] = .Some(5)
+
+    let held: UInt8 = match carried {
+        None => 0,
+        Some(v) => v,
+    }
+
+    mixed.x + same.x + same.y + nested.held.v + nested.n + held
+}

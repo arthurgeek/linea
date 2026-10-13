@@ -1,0 +1,5 @@
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_hides_no_settled_reference_in_a_callable.lin:12:34
+   |
+12 |     type Second = fn(read value: Self.First) -> UInt8
+   |                                  ^^^^^^^^^^ write the type itself

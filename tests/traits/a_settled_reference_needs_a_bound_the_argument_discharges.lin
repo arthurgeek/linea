@@ -1,0 +1,36 @@
+// What settles a settled reference off a bounded parameter is the argument's
+// implementation of the bounding trait, and the bound is what promises there is
+// one. An argument that does not implement it is refused where it is written,
+// and refused once: the type the signature answers with is settled through the
+// same implementation the bound asked for, so a missing one is a single mistake
+// about the call rather than a second one about the type it would have named.
+struct Counter {
+    at: UInt8,
+}
+
+struct Plain {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn measured[T: Measure](v: T) -> T.Item {
+    Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let p: Plain = .{ at = 7 }
+    measured(p)
+}

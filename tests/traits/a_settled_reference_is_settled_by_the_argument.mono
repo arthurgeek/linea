@@ -1,0 +1,16 @@
+struct Counter {
+    at: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    ;measured[Counter](c)
+}
+
+fn ;measured[Counter](v: Counter) -> UInt8 {
+    Counter;;Measure.of(v)
+}
+
+fn Counter;;Measure.of(x: Counter) -> UInt8 {
+    x.at
+}

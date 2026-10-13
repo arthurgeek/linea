@@ -1,0 +1,15 @@
+// A constant's payload is worked out without running anything, and a block is
+// run. The unit payload is written `()`.
+let done: Result[(), UInt8] = .Ok({})
+
+let kept: Option[()] = .Some({})
+
+fn settle(_value: Option[()] = .Some({})) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _done = done
+    let _kept = kept
+    settle()
+}

@@ -1,0 +1,25 @@
+import std.mem
+
+// An `inout` closure changes what it owns, so its call is written `&tally()`,
+// and a read closure's call takes no `&`.
+fn main() -> UInt8 {
+    var tally: mem.Closure[inout fn() -> UInt8, mem.SystemAllocator] = mem.Closure.open(
+        mem.system(),
+        inout [sink count = UInt8(0)] || {
+            count += 1
+            count
+        },
+    ).unwrap()
+    let seven: UInt8 = 7
+    var fixed = mem.Closure.open(
+        mem.system(),
+        [sink seven] || -> UInt8 {
+            seven
+        },
+    ).unwrap()
+    let first = tally()
+    let second = &fixed()
+    tally.release()
+    fixed.release()
+    first + second
+}

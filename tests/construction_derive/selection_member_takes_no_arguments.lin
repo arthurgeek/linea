@@ -1,0 +1,14 @@
+trait Source {
+    type Item
+}
+
+struct Wrapper[T] { value: T }
+
+impl[T] Source for Wrapper[T] {
+    type Item = T
+}
+
+fn main() -> UInt8 {
+    let value: Wrapper[UInt8].Item[UInt8] = 7
+    value - 7
+}

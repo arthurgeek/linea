@@ -1,0 +1,49 @@
+// `?` inside a lambda converts into the lambda's own error type, which is
+// what its failing path returns.
+enum ParseError {
+    Empty,
+}
+
+enum FieldError {
+    Unreadable(UInt8),
+}
+
+impl From[ParseError] for FieldError {
+    fn from(sink _source: ParseError) -> FieldError {
+        return .Unreadable(7)
+    }
+}
+
+fn parse(value: UInt8) -> Result[UInt8, ParseError] {
+    if value == 0 {
+        return .Err(.Empty)
+    }
+    return .Ok(value)
+}
+
+fn apply(check: fn(value: UInt8) -> Result[UInt8, FieldError], value: UInt8) -> UInt8 {
+    match check(value) {
+        Ok(parsed) => parsed,
+        Err(failure) => match failure {
+            Unreadable(code) => code,
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    let checked = apply(
+        |value| {
+            let parsed = parse(value)?
+            return .Ok(parsed + 1)
+        },
+        0,
+    )
+    let passed = apply(
+        |value| {
+            let parsed = parse(value)?
+            return .Ok(parsed + 1)
+        },
+        4,
+    )
+    checked + passed
+}

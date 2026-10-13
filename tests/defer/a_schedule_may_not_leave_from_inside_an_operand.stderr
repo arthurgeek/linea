@@ -1,0 +1,5 @@
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_schedule_may_not_leave_from_inside_an_operand.lin:12:19
+   |
+12 |     defer take(1, return 0)
+   |                   ^^^^^^^^ `return` inside a `defer`

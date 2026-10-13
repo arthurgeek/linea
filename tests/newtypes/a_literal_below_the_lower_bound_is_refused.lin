@@ -1,0 +1,11 @@
+// The lower end is a bound like any other: a literal one below it is outside
+// the range, and the message names the range as it was written.
+type Temp = Int8 where it in -40..=40
+
+fn wants(_t: Temp) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    wants(Temp(-41))
+}

@@ -1,0 +1,9 @@
+alias Failing[T] = Result[T, Int64]
+
+fn main() -> UInt8 {
+    let fail: fn(sink value: Int64) -> Result[UInt8, Int64] = Failing.Err
+    match fail(9) {
+        Ok(_) => 0,
+        Err(code) => UInt8(code),
+    }
+}

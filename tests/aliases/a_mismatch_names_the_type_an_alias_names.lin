@@ -1,0 +1,10 @@
+alias Meters = UInt64
+
+fn far() -> Meters {
+    "far"
+}
+
+fn main() -> UInt8 {
+    let distance: Meters = true
+    UInt8(distance + far())
+}

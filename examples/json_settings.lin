@@ -1,0 +1,153 @@
+// Read service settings from JSON, validate them, and print them back as JSON.
+import std.env
+import std.fs
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+// `@derive` gives `Settings` three implementations for every allocator type
+// `A`. Release frees each owned field, Encode writes the struct as a JSON
+// object, and `json.Decode[A]` builds one from a document, allocating its
+// text and ports with `A`. Each field owns its decoded data, and an absent
+// Option field becomes None.
+@derive(Release, json.Encode, json.Decode[A])
+struct Settings[A: Allocator = mem.SystemAllocator] {
+    name: String[A],
+    ports: Vec[UInt16, A],
+    enabled: Option[Bool],
+}
+
+fn validate[A: Allocator](settings: Settings[A]) -> Result[(), Str] {
+    if settings.name.length() == 0 {
+        return .Err("name must not be empty")
+    }
+    if settings.ports.length() == 0 {
+        return .Err("at least one port is required")
+    }
+    for read port in settings.ports {
+        if port == 0 {
+            return .Err("ports must be nonzero")
+        }
+    }
+    .Ok(())
+}
+
+fn input() -> Result[String, Str] {
+    let args = env.args()
+    if args.count() == 1 {
+        return r#"{"name":"catalog","ports":[8080,8081]}"#.to_owned(mem.system()).map_err(|sink _error| "cannot allocate sample settings")
+    }
+    if args.count() != 2 {
+        return .Err("usage: json_settings [path]")
+    }
+    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap()) else |_| {
+        return .Err("invalid settings path")
+    }
+    // Read no more than the parser's default input limit accepts.
+    let limits = json.ParseLimits.default()
+    // `read_text` reads the file and decodes it as UTF-8. `map_err` replaces
+    // its error with this program's message for each step that can fail.
+    fs.read_text(path, max_bytes: limits.max_input_bytes).map_err(|sink error| match error {
+        Read(_) => "cannot read settings file",
+        Encoding(_) => "settings must be UTF-8",
+    })
+}
+
+fn main() -> UInt8 {
+    // A missing or unreadable input is reported and ends the program.
+    defer let source = input() else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    // The annotated type tells `json.decode` which struct to build.
+    defer let settings: Settings = json.decode(mem.system(), source.view()) else |error| {
+        // `{error:?}` borrows the error while the line is written, so the
+        // `defer` still releases it afterwards.
+        defer error.release()
+        io.eprintln("{error:?}")
+        return 1
+    }
+    // `let _` keeps nothing from a step whose success carries no value.
+    let _ = validate(settings) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    var output = io.stdout()
+    let _ = write_settings(&output, settings) else |error| {
+        defer error.release()
+        io.eprintln("{error:?}")
+        return 1
+    }
+    0
+}
+
+fn write_settings[A: Allocator, W: Writer](inout writer: W, settings: Settings[A]) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+    json.encode(&writer, settings)?
+    &writer.write_str("\n")?
+    .Ok(())
+}
+
+@copyable
+enum DiskFailure { Full }
+
+// A disk with `free` bytes of room takes each write that fits and refuses
+// the first that does not. `attempts` counts the writes it was asked for.
+struct Disk {
+    free: UInt64,
+    attempts: UInt64,
+}
+
+// `type Error = DiskFailure` chooses this writer's error type, so `W.Error`
+// in `write_settings` means DiskFailure when it writes here.
+impl Writer for Disk {
+    type Error = DiskFailure
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), DiskFailure] {
+        self.attempts += 1
+        if s.length() > self.free {
+            return .Err(.Full)
+        }
+        self.free -= s.length()
+        .Ok(())
+    }
+}
+
+test fn settings_output_stops_at_the_first_writer_error() {
+    defer let settings: Settings = json.decode(mem.system(), r#"{"name":"catalog","ports":[8080]}"#).unwrap()
+    // One byte of room takes the opening `{`, and the next write does not fit.
+    var disk = Disk { free = 1, attempts = 0 }
+    let result = write_settings(&disk, settings)
+    testing.assert(match result { Err(error) => match error { Writer(_) => true, _ => false }, Ok(_) => false }, "output failure was hidden")?
+    testing.assert_eq(disk.attempts, 2, "output continued after failure")?
+    testing.assert_eq(settings.name.view(), "catalog", "output failure changed the settings")?
+}
+
+test fn settings_own_fields_after_input_is_released() {
+    let source = r#"{"name":"catalog","ports":[8080]}"#.to_owned(mem.system()).unwrap()
+    let parsed: Result[Settings, json.DecodeError] = json.decode(mem.system(), source.view())
+    source.release()
+    defer let settings = parsed.unwrap()
+    testing.assert_eq(settings.name.view(), "catalog", "settings retained input text")?
+    testing.assert_eq(settings.ports.as_slice()[0], 8080, "settings changed the port")?
+    testing.assert(settings.enabled.is_none(), "missing optional field was not None")?
+    testing.assert(validate(settings).is_ok(), "valid settings failed validation")?
+}
+
+test fn settings_report_the_nested_field_that_failed() {
+    let parsed: Result[Settings, json.DecodeError] = json.decode(mem.system(), r#"{"name":"catalog","ports":[8080,"https"]}"#)
+    defer let error = match parsed {
+        Err(error) => error,
+        Ok(settings) => {
+            settings.release()
+            panic("text port was accepted")
+        },
+    }
+    testing.assert(match read error {
+        Value(failure) => failure.reason() == .WrongKind && failure.path_length() == 2 && match read *failure.segment(0).unwrap() {
+            Field(name) => name.view() == "ports" && match read *failure.segment(1).unwrap() { Index(index) => index == 1, _ => false },
+            _ => false,
+        },
+        _ => false,
+    }, "decode error lost its field or index")?
+}

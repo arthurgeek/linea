@@ -1,0 +1,7 @@
+alias Left = Right
+alias Right = Left
+
+fn main() -> UInt8 {
+    let _unused: Left = 0
+    0
+}

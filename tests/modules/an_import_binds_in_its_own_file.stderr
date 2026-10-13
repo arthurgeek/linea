@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `util`
+ --> tests/modules/an_import_binds_in_its_own_file/main.lin:5:5
+  |
+5 |     util.one() + helper()
+  |     ^^^^ no binding with this name is in scope

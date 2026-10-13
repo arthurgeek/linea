@@ -1,0 +1,5 @@
+error[T-ExternRuntime]: the runtime declares no function `linea_frobnicate`, and the `linea_` names are the runtime's
+ --> tests/library/a_symbol_the_runtime_does_not_declare_is_refused/main.lin:1:11
+  |
+1 | extern fn linea_frobnicate(value: Int64) -> Int64
+  |           ^^^^^^^^^^^^^^^^ name a function the runtime provides, or give yours a name outside the `linea_` prefix

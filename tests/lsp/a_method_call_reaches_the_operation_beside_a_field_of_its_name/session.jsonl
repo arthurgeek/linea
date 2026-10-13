@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `door.width()` reaches the operation `width`, and `door.width` without a\n// call reads the field of the same name.\nstruct Door {\n    width: UInt8,\n}\n\nimpl Door {\n    fn width(self: Door) -> UInt8 {\n        self.width + 1\n    }\n}\n\nfn main() -> UInt8 {\n    let door: Door = .{ width = 3 }\n    door.width() - door.width - 1\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":10}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":25}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

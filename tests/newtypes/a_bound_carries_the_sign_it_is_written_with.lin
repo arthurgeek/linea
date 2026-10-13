@@ -1,0 +1,15 @@
+// A refinement's bound is a literal with the sign written on it. A signed
+// base has a negative half, and a clause with no way to say so could describe
+// only the values above zero -- which is not the contract the type states.
+@copyable
+type Temp = Int8 where it in -40..=40
+
+fn main() -> UInt8 {
+    let Temp(cold) = Temp(-40)
+    let Temp(zero) = Temp(0)
+    if cold < zero {
+        1
+    } else {
+        0
+    }
+}

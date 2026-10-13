@@ -1,0 +1,7 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_return_inside_a_branch_still_crosses_the_transfer.lin:24:13
+   |
+22 |         d,
+   |         - it was given up here
+24 |             return 7
+   |             ^^^^^^^^ give the value up after this, not before it

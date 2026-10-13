@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let increment: fn(read value: UInt8) -> UInt8 = |value| value + 1
+    increment(4)
+}

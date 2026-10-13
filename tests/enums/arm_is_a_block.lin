@@ -1,0 +1,32 @@
+// An arm's body is a block or an expression, as an `if` arm's already is. No
+// arm could hold two statements before that, which is a gap older than the
+// ownership rules the form was added for.
+enum Colour { Red, Green, Blue }
+
+fn weigh(c: Colour) -> UInt8 {
+    match read c {
+        Red => {
+            let base: UInt8 = 2
+            base * 3
+        },
+        Green => 4,
+        Blue => {
+            5
+        },
+    }
+}
+
+// An empty block computes nothing and has the value `()`, which lets an arm do
+// nothing.
+fn ignore(c: Colour) -> () {
+    match read c {
+        Red => {},
+        Green => {},
+        Blue => {},
+    }
+}
+
+fn main() -> UInt8 {
+    ignore(.Blue)
+    weigh(.Red) + weigh(.Green)
+}

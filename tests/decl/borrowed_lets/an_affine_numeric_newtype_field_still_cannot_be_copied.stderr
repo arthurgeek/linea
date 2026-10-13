@@ -1,0 +1,5 @@
+error[O-Copy]: `Count` does not permit copying
+ --> tests/decl/borrowed_lets/an_affine_numeric_newtype_field_still_cannot_be_copied.lin:8:21
+  |
+8 |     let duplicate = copy(count)
+  |                     ^^^^^^^^^^^ move the value, or declare a copyable representation

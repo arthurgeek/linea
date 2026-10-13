@@ -1,0 +1,44 @@
+program decls=8
+  decl struct_ "Coins" tokens 10..18
+    field "count" : UInt8
+  decl pub function "of" tokens 21..36
+    in Coins
+    param read "x" : Coins
+    returns UInt8
+    expr %2 block tokens 31..36
+      expr %1 field tokens 32..35 "count"
+        expr %0 name_ref tokens 32..33 "x"
+  decl impl_ "Coins" tokens 18..37
+  decl function "of" tokens 40..49
+    in Measure
+    param read "x" : Self
+    returns UInt8
+  decl trait_ "Measure" tokens 37..50
+  decl function "of" tokens 55..71
+    in Coins
+    of trait Measure
+    param read "x" : Self
+    returns UInt8
+    expr %7 block tokens 64..71
+      expr %6 mul tokens 65..70
+        expr %4 field tokens 65..68 "count"
+          expr %3 name_ref tokens 65..66 "x"
+        expr %5 int_literal tokens 69..70 "2"
+  decl impl_ "Coins" tokens 50..72
+    of trait Measure
+  decl function "main" tokens 72..104
+    returns UInt8
+    expr %20 block tokens 78..104
+      stmt %0 let_decl tokens 79..90 "coppers" : Coins
+        expr %10 struct_literal tokens 84..90
+          expr %8 name_ref tokens 86..87 "count"
+          expr %9 int_literal tokens 88..89 "3"
+      expr %19 add tokens 90..103
+        expr %14 call tokens 90..96
+          expr %12 field tokens 90..93 "of"
+            expr %11 name_ref tokens 90..91 "Coins"
+          expr %13 name_ref tokens 94..95 "coppers"
+        expr %18 call tokens 97..103
+          expr %16 field tokens 97..100 "of"
+            expr %15 name_ref tokens 97..98 "Measure"
+          expr %17 name_ref tokens 101..102 "coppers"

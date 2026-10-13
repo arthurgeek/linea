@@ -1,0 +1,25 @@
+// An implementation says what a declared type is, and says it once. Two
+// answers for one name leave which type it settled to decided by which of them
+// a pass happened to read.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+    type Item = Counter
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

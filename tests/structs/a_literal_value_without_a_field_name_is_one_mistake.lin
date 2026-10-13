@@ -1,0 +1,11 @@
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    // The value without a name is refused, and the fields after it are still
+    // matched to their own names.
+    let size = Size { 5, width = 1, height = 2 }
+    size.width
+}

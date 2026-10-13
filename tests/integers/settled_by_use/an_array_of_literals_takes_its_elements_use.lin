@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let items = [1, 2, 3]
+    let first: UInt8 = items[0]
+    first - 1
+}

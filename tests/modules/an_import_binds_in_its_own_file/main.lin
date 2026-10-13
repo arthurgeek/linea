@@ -1,0 +1,6 @@
+// The other half of the same rule: a file that wrote no import cannot use one
+// another file wrote. `util` below is not a name this file has, and reading it
+// as one made the binding depend on which files happened to be in the module.
+fn main() -> UInt8 {
+    util.one() + helper()
+}

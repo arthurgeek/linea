@@ -1,0 +1,30 @@
+trait Measure {
+    fn measure(self: Self) -> UInt8
+}
+
+trait Numeric: Integer {}
+
+impl[T] Measure for T where T: Numeric {
+    fn measure(self: T) -> UInt8 {
+        UInt8(self)
+    }
+}
+
+impl Numeric for UInt16 {}
+
+struct Packet { value: UInt8 }
+
+impl Measure for Packet {
+    fn measure(self: Packet) -> UInt8 {
+        self.value
+    }
+}
+
+fn main() -> UInt8 {
+    let packet: Packet = .{ value = 9 }
+    if packet.measure() == 9 && UInt16(7).measure() == 7 {
+        0
+    } else {
+        1
+    }
+}

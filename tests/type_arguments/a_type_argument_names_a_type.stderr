@@ -1,0 +1,15 @@
+error[N-NotAType]: `count` is not a type
+  --> tests/type_arguments/a_type_argument_names_a_type.lin:24:27
+   |
+24 |     let _second = nothing[count]()
+   |                           ^^^^^ the brackets before a call hold types
+error[N-NotAType]: `count` is not a type
+  --> tests/type_arguments/a_type_argument_names_a_type.lin:23:30
+   |
+23 |     let _first = shelf.empty[count]()
+   |                              ^^^^^ the brackets before a call hold types
+error[N-Undefined]: undefined name `Shelve`
+  --> tests/type_arguments/a_type_argument_names_a_type.lin:25:30
+   |
+25 |     let _third = shelf.empty[Shelve]()
+   |                              ^^^^^^ no type with this name is declared here

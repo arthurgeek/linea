@@ -1,0 +1,14 @@
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/parameters_and_returns.lin:4:5
+  |
+3 | fn message() -> Str {
+  |                 --- expected because of this return type
+4 |     "hello {1}"
+  |     ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`
+error[T-Mismatch]: expected `Str`, found `{interpolation Int64}`
+ --> tests/text/interpolation_context/parameters_and_returns.lin:8:13
+  |
+1 | fn receive(_text: Str) -> () {}
+  |            ----- expected because of this parameter
+8 |     receive("hello {2}")
+  |             ^^^^^^^^^^^ expected `Str`, found `{interpolation Int64}`

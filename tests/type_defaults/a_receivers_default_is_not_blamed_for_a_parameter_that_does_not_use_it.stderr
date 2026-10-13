@@ -1,0 +1,12 @@
+error[N-Unused]: `put` is never used
+  --> tests/type_defaults/a_receivers_default_is_not_blamed_for_a_parameter_that_does_not_use_it.lin:14:8
+   |
+14 |     fn put(inout _self: Self, _v: T) -> () {
+   |        ^^^ call it, or name it with a leading `_`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/type_defaults/a_receivers_default_is_not_blamed_for_a_parameter_that_does_not_use_it.lin:21:13
+   |
+10 |     fn count(_self: Self, n: UInt8) -> UInt8 {
+   |                           - expected because of this parameter
+21 |     b.count("s")
+   |             ^^^ expected `UInt8`, found `Str`

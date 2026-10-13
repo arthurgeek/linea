@@ -1,0 +1,33 @@
+// A dot in a type offers what may follow it, and what may follow `Self.` is a
+// type the trait declares: an implementation settles it, and nothing else can
+// be written there. The names in scope are not among them -- a local, a
+// function or a module is not a type an implementation settles, so offering
+// one is a list of everything the position rejects.
+//
+// Asked on both sides of the relation, because a settled reference is written
+// on both: the trait asks for the type in its signature, and the implementation
+// that settles it writes the same settled reference over again.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    type Held
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+    type Held = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

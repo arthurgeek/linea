@@ -1,0 +1,11 @@
+// `hash` is declared by `Hash`, which is not in scope here, and a postfix
+// call would be told to write the `use`. No call is written: a selection
+// standing anywhere else reaches a field or nothing, so it is refused as a
+// field the type lacks, with no `use` to add.
+import std.hash
+
+fn main() -> UInt8 {
+    let seat = UInt64(12)
+    let _hash = seat.hash
+    UInt8(hash.Hash.hash(seat) % 2)
+}

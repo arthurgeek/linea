@@ -1,0 +1,23 @@
+// An implementation supplies what the trait declares, and a call settles the
+// same arguments from the other side. `held` writes its second parameter as
+// `T`; the argument standing there is a `UInt8`, so `T` is `UInt8` and the
+// implementation the call reaches is the one that supplied it.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count + t
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let four: UInt8 = 4
+    Holds.held(c, four)
+}

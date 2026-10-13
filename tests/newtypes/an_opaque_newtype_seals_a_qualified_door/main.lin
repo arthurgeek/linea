@@ -1,0 +1,11 @@
+// Naming the module the type is sealed in is another door and not a way past
+// the seal: the rule reads what the name reaches, never how it is spelled, so
+// both construction forms are refused where the bare ones are.
+import vault
+
+fn main() -> UInt8 {
+    let _t = vault.mint()
+    let _a = vault.Token(1)
+    let _b = vault.Token?(1)
+    0
+}

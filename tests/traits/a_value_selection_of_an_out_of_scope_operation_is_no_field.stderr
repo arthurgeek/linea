@@ -1,0 +1,5 @@
+error[T-UnknownField]: `UInt64` has no field `hash`
+ --> tests/traits/a_value_selection_of_an_out_of_scope_operation_is_no_field.lin:9:17
+  |
+9 |     let _hash = seat.hash
+  |                 ^^^^^^^^^ not a field of this value

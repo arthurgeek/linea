@@ -1,0 +1,45 @@
+// A derived body that only reads a linear payload leaves it unsettled. The
+// error names the payload by its type, variant and position, and points at it.
+trait Count {
+    fn count(sink self: Self) -> UInt64
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt64
+}
+
+template impl Count where reflect.components: Weigh {
+    fn count(sink self: Self) -> UInt64 {
+        var total: UInt64 = 0
+        match self {
+            reflect.case => {
+                for component in reflect.components {
+                    total += Weigh.weigh(component.of(self))
+                }
+            },
+        }
+        total
+    }
+}
+
+@linear
+struct Token {}
+
+impl Weigh for Token {
+    fn weigh(_self: Token) -> UInt64 {
+        1
+    }
+}
+
+@linear
+enum Slot {
+    Empty,
+    Held(Token),
+}
+
+derive Count for Slot
+
+fn main() -> UInt8 {
+    let slot: Slot = .Empty
+    UInt8(Count.count(slot))
+}

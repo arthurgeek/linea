@@ -1,0 +1,15 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+let selected = later
+
+let later = Mode.Preserve
+
+let contextual: Mode = .Preserve
+
+fn select(mode: Mode = selected) -> UInt8 {
+    match read mode { Preserve => 0, Exact(_) => 1 }
+}
+
+fn main() -> UInt8 {
+    select() + select(contextual) + select(later)
+}

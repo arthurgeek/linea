@@ -1,0 +1,15 @@
+// A qualified variant is a value, so what is selected from it is a field of
+// its enum, and an enum has no fields: another variant is not one of them.
+@copyable
+enum Light {
+    Off,
+    On,
+}
+
+fn main() -> UInt8 {
+    let x = Light.Off.On
+    match read x {
+        Off => 1,
+        On => 2,
+    }
+}

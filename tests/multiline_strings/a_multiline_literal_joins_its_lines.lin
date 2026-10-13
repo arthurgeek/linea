@@ -1,0 +1,106 @@
+// A multi-line literal is a run of lines that each begin with `\\`. Each line
+// holds the text after its `\\` up to the end of the line, and the lines are
+// joined with a line break between them and none after the last.
+import std.io
+
+use io.IoError
+use io.println
+
+// A multi-line literal is a `Str` constant like any other literal.
+let greeting =
+    \\Dear {name},
+    \\your order has shipped.
+
+// A parameter default takes one as it takes any constant. The line runs to
+// its end, so the `)` goes on the next line.
+fn print_banner(banner: Str =
+    \\== {title} ==
+) -> Result[(), IoError] {
+    println(banner)
+}
+
+// The last line ends the statement, like any literal at the end of a line.
+fn sign_off() -> Str {
+    return \\Regards,
+}
+
+// As a block's last expression, it is the block's value.
+fn footer() -> Str {
+    \\Kind regards,
+    \\The shop
+}
+
+@copyable
+enum Size {
+    Short,
+    Long,
+}
+
+// A match arm whose body is a multi-line literal writes it as a block, so the
+// comma follows the block's `}` rather than ending up in the text.
+fn describe(size: Size) -> Str {
+    match size {
+        Short => {
+            \\brief
+        },
+        Long => {
+            \\at
+            \\length
+        },
+    }
+}
+
+fn count(text: Str, lines: Str) -> UInt64 {
+    text.length() + lines.length()
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println(greeting)?
+    print_banner()?
+    println(sign_off())?
+    println(footer())?
+    println(describe(.Short))?
+    println(describe(.Long))?
+
+    // Braces, quotes and backslashes mean themselves: there are no escapes
+    // and no interpolation.
+    let json =
+        \\{"ok": true, "path": "C:\temp", "escaped": "\n"}
+    println(json)?
+
+    // An empty `\\` line is an empty line of text. Ending with one gives the
+    // text a trailing line break.
+    let spaced =
+        \\first
+        \\
+        \\third
+        \\
+    println("[{spaced}]")?
+
+    // Indentation before `\\` is layout; spaces after it are text.
+    let indented =
+        \\left
+        \\    four spaces in
+    println(indented)?
+
+    // The first line may share its line with the `=` before it.
+    let one = \\a single line
+    println(one)?
+
+    // After `(` or `,` the literal continues the call, and whatever follows
+    // its last line starts on the next line.
+    let total = count(
+        \\ab
+        \\cd
+    , "xyz")
+    let after_comma = count("xyz",
+        \\ab
+    )
+    println("{total} {after_comma}")?
+
+    // A literal that holds `//` holds text, not a comment.
+    let url =
+        \\https://example.com // not a comment
+    println(url)?
+    return .Ok(0)
+}

@@ -1,0 +1,35 @@
+enum RenderError { Allocation(UInt8) }
+
+enum OtherError { Allocation(UInt8) }
+
+fn code(error: RenderError) -> UInt8 {
+    match read error { Allocation(value) => value }
+}
+
+fn other_code(error: OtherError) -> UInt8 {
+    match read error { Allocation(value) => value }
+}
+
+fn main() -> UInt8 {
+    let contextual: fn(sink value: UInt8) -> RenderError = .Allocation
+    let qualified: fn(sink value: UInt8) -> RenderError = RenderError.Allocation
+    let unrelated: fn(sink value: UInt8) -> OtherError = .Allocation
+    let direct: RenderError = .Allocation(5)
+    let explicit = RenderError.Allocation(7)
+    let failed: Result[UInt8, UInt8] = .Err(11)
+    let mapped: Result[UInt8, RenderError] = failed.map_err(.Allocation)
+    let mapped_code = match read mapped { Ok(value) => value, Err(error) => code(error) }
+    if code(contextual(value: 2)) + code(qualified(value: 3)) + other_code(unrelated(value: 4)) + code(direct) + code(explicit) + mapped_code + borrowed_code() == 45 {
+        0
+    } else {
+        1
+    }
+}
+
+enum ObservedError { Allocation(borrow UInt8) }
+
+fn borrowed_code() -> UInt8 {
+    let make: fn(sink payload: borrow UInt8) -> ObservedError where carries(.Allocation: payload) = .Allocation
+    let owner: UInt8 = 13
+    match make(payload: borrow owner) { Allocation(value) => *value }
+}

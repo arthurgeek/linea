@@ -1,0 +1,11 @@
+// Each local names its parameters as its written type does, though both hold
+// one value of one type.
+fn increment(number: UInt8) -> UInt8 {
+    number + 1
+}
+
+fn main() -> UInt8 {
+    let selected: fn(read value: UInt8) -> UInt8 = increment
+    let renamed: fn(read item: UInt8) -> UInt8 = copy(selected)
+    renamed(item: 3) + selected(value: 1)
+}

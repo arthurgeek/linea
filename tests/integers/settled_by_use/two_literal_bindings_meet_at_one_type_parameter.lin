@@ -1,0 +1,10 @@
+import std.testing
+
+fn main() -> UInt8 {
+    let total = 2 + 3
+    let expected = 5
+    match testing.assert_eq(total, expected, "sum") {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

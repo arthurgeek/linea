@@ -1,0 +1,18 @@
+// The request is the last parameter of every endpoint, because the answer is
+// built in its arena. A function without one has no `Endpoint`.
+import std.http
+
+fn greet() -> Result[http.Response, http.Error] {
+    .Err(http.Error.new(.NotFound))
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", greet)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

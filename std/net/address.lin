@@ -1,0 +1,211 @@
+import std.mem
+import std.testing
+
+// `Address` holds an IPv4 address and a port. Port 0 asks the operating system
+// for any free port. Equality and Debug compare and print the octets through
+// the array, and the derived Release discards the octets because they are
+// copyable.
+@(copyable, derive(Equatable, Debug, Release))
+pub struct Address {
+    octets: [UInt8; 4],
+    port: UInt16,
+}
+
+test fn an_address_debugs_its_parts() {
+    let address = Address.v4(10, 0, 0, 2, 443)
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = address.debug(&writer).is_ok()
+    let rendered = writer.holds(r"Address { octets: [10, 0, 0, 2], port: 443 }")
+    writer.release()
+    testing.assert(wrote && rendered, "debug lost a part of the address")?
+    .Ok(())
+}
+
+impl Display for Address {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        "{self.octets[0]}.{self.octets[1]}.{self.octets[2]}.{self.octets[3]}:{self.port}".fmt(&w)
+    }
+}
+
+test fn an_address_displays_as_dotted_octets_and_a_port() {
+    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    let wrote = Address.v4(10, 0, 0, 2, 443).fmt(&writer).is_ok()
+    let printed = writer.holds("10.0.0.2:443")
+    writer.release()
+    testing.assert(wrote && printed, "display changed the address")?
+    .Ok(())
+}
+
+// Return the loopback address 127.0.0.1, which reaches only this host.
+pub fn loopback(port: UInt16) -> Address {
+    Address.v4(127, 0, 0, 1, port)
+}
+
+test fn loopback_names_this_host() {
+    testing.assert_eq(loopback(8080), Address.v4(127, 0, 0, 1, 8080), "loopback is not 127.0.0.1")?
+    .Ok(())
+}
+
+// Listening on 0.0.0.0 accepts connections on every local interface.
+pub fn any(port: UInt16) -> Address {
+    Address.v4(0, 0, 0, 0, port)
+}
+
+test fn any_names_every_interface() {
+    testing.assert_eq(any(0), Address.v4(0, 0, 0, 0, 0), "any is not 0.0.0.0")?
+    .Ok(())
+}
+
+impl Address {
+    // Build an address from its four octets, most significant first, and a
+    // port.
+    pub fn v4(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> Address {
+        .{ octets = [a, b, c, d], port = port }
+    }
+}
+
+test fn an_address_keeps_the_parts_it_was_built_from() {
+    let address = Address.v4(192, 168, 1, 254, 443)
+    testing.assert_eq(address.octets, [192, 168, 1, 254], "the octets changed")?
+    testing.assert_eq(address.port, 443, "the port changed")?
+    .Ok(())
+}
+
+impl Address {
+    // Accept exactly four decimal octets and a decimal port: "127.0.0.1:8080".
+    pub fn parse(text: Str) -> Result[Address, NetError] {
+        var octets: [UInt8; 4] = [0, 0, 0, 0]
+        var at: UInt64 = 0
+        for index in 0..4 {
+            let separator = if index == 3 {
+                ascii_colon
+            } else {
+                ascii_dot
+            }
+            let octet = decimal(text, at, 255) else {
+                return .Err(.InvalidAddress)
+            }
+            let separated = match text.byte(octet.end) {
+                Some(byte) => byte == separator,
+                None => false,
+            }
+            if !separated {
+                return .Err(.InvalidAddress)
+            }
+            octets[index] = UInt8(octet.value)
+            at = octet.end + 1
+        }
+        let port = decimal(text, at, 65535) else {
+            return .Err(.InvalidAddress)
+        }
+        if port.end != text.length() {
+            return .Err(.InvalidAddress)
+        }
+        .Ok(.{ octets = octets, port = UInt16(port.value) })
+    }
+}
+
+test fn an_address_parses_and_prints_the_same() {
+    let address = Address.parse("127.0.0.1:8080").unwrap()
+    testing.assert_eq(address, Address.v4(127, 0, 0, 1, 8080), "parse lost a part")?
+    testing.assert_eq(address.port, 8080, "the port changed")?
+    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    let wrote = address.fmt(&writer).is_ok()
+    let printed = writer.holds("127.0.0.1:8080")
+    writer.release()
+    testing.assert(wrote && printed, "display changed the address")?
+    .Ok(())
+}
+
+test fn an_address_refuses_what_is_not_ipv4() {
+    testing.assert(Address.parse("256.0.0.1:80").is_err(), "an octet past 255 parsed")?
+    testing.assert(Address.parse("127.0.0.1").is_err(), "a missing port parsed")?
+    testing.assert(Address.parse("127.0.0.1:65536").is_err(), "a port past 65535 parsed")?
+    testing.assert(Address.parse("127.0.0:80").is_err(), "three octets parsed")?
+    testing.assert(Address.parse("127.0.0.1.1:80").is_err(), "five octets parsed")?
+    testing.assert(Address.parse("127..0.1:80").is_err(), "an empty octet parsed")?
+    testing.assert(Address.parse("127.0.0.1:").is_err(), "an empty port parsed")?
+    testing.assert(Address.parse("127.0.0.1:80x").is_err(), "a trailing byte parsed")?
+    testing.assert(Address.parse("127.0.0.1:0000080").is_err(), "a seven-digit port parsed")?
+    testing.assert(Address.parse("010.0.0.1:80").is_err(), "an octet with a leading zero parsed")?
+    testing.assert(Address.parse("1.2.3.4:080").is_err(), "a port with a leading zero parsed")?
+    testing.assert_eq(Address.parse("0.0.0.0:0").unwrap(), any(0), "a zero field was refused")?
+    .Ok(())
+}
+
+impl Address {
+    // The runtime packs the host-order address above a 16-bit port.
+    fn packed(self: Self) -> UInt64 {
+        var host: UInt64 = 0
+        for index in 0..self.octets.length() {
+            host = host * octet_span + UInt64(self.octets[index])
+        }
+        host * port_span + UInt64(self.port)
+    }
+
+    // Rebuild an address from the runtime's packed form.
+    fn unpacked(value: Int64) -> Address {
+        let bits = UInt64(value)
+        let host = bits / port_span
+        let a = UInt8(host / (octet_span * octet_span * octet_span) % octet_span)
+        let b = UInt8(host / (octet_span * octet_span) % octet_span)
+        let c = UInt8(host / octet_span % octet_span)
+        let d = UInt8(host % octet_span)
+        Address.v4(a, b, c, d, UInt16(bits % port_span))
+    }
+}
+
+test fn an_address_survives_the_runtime_packing() {
+    let address = Address.v4(192, 168, 1, 254, 65535)
+    testing.assert_eq(Address.unpacked(Int64(address.packed())), address, "packing lost a part")?
+    .Ok(())
+}
+
+// An octet holds 2^8 values.
+let octet_span: UInt64 = 256
+
+// A port holds 2^16 values.
+let port_span: UInt64 = 65536
+
+// ASCII codes of the digits and separators an address is written with.
+let ascii_zero: UInt8 = 48
+
+let ascii_nine: UInt8 = 57
+
+let ascii_dot: UInt8 = 46
+
+let ascii_colon: UInt8 = 58
+
+// A Decimal is a parsed field's value and the offset just past its last digit.
+@copyable
+struct Decimal {
+    value: UInt64,
+    end: UInt64,
+}
+
+// Read the digits starting at `at`. Five digits hold every port, and the
+// bound keeps the accumulated value from overflowing. Refuse an empty field,
+// a value over `limit`, and a leading zero before another digit, since some
+// parsers read "010" as octal 8 and others as decimal 10.
+fn decimal(text: Str, at: UInt64, limit: UInt64) -> Option[Decimal] {
+    var value: UInt64 = 0
+    var end = at
+    while end < text.length() {
+        let byte = text.byte(end).unwrap()
+        if byte < ascii_zero || byte > ascii_nine {
+            break
+        }
+        if end - at == 5 {
+            return .None
+        }
+        value = value * 10 + UInt64(byte - ascii_zero)
+        end += 1
+    }
+    if end == at || value > limit {
+        return .None
+    }
+    if end - at > 1 && text.byte(at) == .Some(ascii_zero) {
+        return .None
+    }
+    .Some(.{ value = value, end = end })
+}

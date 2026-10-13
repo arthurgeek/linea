@@ -1,0 +1,25 @@
+// One value, two schedules. They run last-first, so the second consumes the
+// value and the first finds it gone -- which makes the first the one that
+// never fires, not the second.
+//
+// Which of the two is reported is worth pinning: a reader who expects the
+// *second* to be the mistake is reading the order backwards.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> () {
+    let Key { n: _n } = k
+}
+
+fn go() -> UInt8 {
+    let k: Key = .{ n = 7 }
+    defer take(k)
+    defer take(k)
+    3
+}
+
+fn main() -> UInt8 {
+    go()
+}

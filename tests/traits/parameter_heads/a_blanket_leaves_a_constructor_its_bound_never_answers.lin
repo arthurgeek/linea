@@ -1,0 +1,15 @@
+// Nothing implements `Allowed` for any `Packet`, so the blanket head bounded by
+// it never answers for a packet, and the constructor head stands beside it.
+trait Allowed {}
+
+trait Route[phantom T] {}
+
+impl[T: Allowed, U] Route[U] for T {}
+
+pub struct Packet[T] { value: T }
+
+impl[T] Route[Bool] for Packet[T] {}
+
+fn main() -> UInt8 {
+    0
+}

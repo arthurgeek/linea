@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let replace: fn(inout target: borrow UInt64, read value: borrow UInt64) -> () where retains(target: value) = |inout target, value| {
+        target = copy(value)
+    }
+    var owner: UInt64 = 7
+    let other: UInt64 = 1
+    var target = borrow other
+    let incoming = borrow owner
+    replace(&target, incoming)
+    owner = 9
+    UInt8(*target + owner)
+}

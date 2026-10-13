@@ -1,0 +1,13 @@
+import settings
+
+fn invoke[F: fn(read mode: settings.Mode = .Preserve) -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if settings.read_mode() == 7 && settings.read_mode() == 7 && invoke(settings.read_mode) == 7 && settings.read_mode(.Exact(384)) == 384 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,7 @@
+// Permission belongs to the binding, and the question a compound assignment
+// asks is the one `=` asks: may this binding be written.
+fn main() -> UInt8 {
+    let v: UInt8 = 1
+    v += 1
+    v
+}

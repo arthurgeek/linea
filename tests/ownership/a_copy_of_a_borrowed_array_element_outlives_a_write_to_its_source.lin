@@ -1,0 +1,19 @@
+// The borrowed place is an element of an array. The copy of it is independent
+// of the array, which is written afterwards.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn main() -> UInt8 {
+    var rooms = [Room { name = "hall", seats = 120 }, Room { name = "studio", seats = 30 }]
+    let first = borrow rooms[0]
+    let booked = copy(*first)
+    rooms[0].seats = 100
+    if booked.name == "hall" {
+        booked.seats + rooms[0].seats
+    } else {
+        0
+    }
+}

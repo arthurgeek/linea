@@ -1,0 +1,10 @@
+// A range names one place of the array type its settled bounds name, and that
+// place is used whole: copied out of, or assigned into. `a[0..2]` is a
+// `[UInt8; 2]` place, so `copy` of it is the copy of a two-element array and
+// `a[2..4] = [7, 8]` writes two elements at once.
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let head: [UInt8; 2] = copy(a[0..2])
+    a[2..4] = [7, 8]
+    head[0] + head[1] + a[2] + a[3]
+}

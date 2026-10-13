@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Blank` and `Gauge` both declare `zero` for `G`
+  --> tests/traits/two_bounds_answering_one_name_leave_it_ambiguous/main.lin:11:5
+   |
+11 |     G.zero()
+   |     ^^^^^^ write `Blank.zero(…)` or `gauge.Gauge.zero(…)`, which says which trait it goes through

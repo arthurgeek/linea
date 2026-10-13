@@ -1,0 +1,356 @@
+import std.testing
+import std.mem
+
+// A ParseError says why text is not a value. Offsets count bytes, and a
+// missing digit is reported at the end of the input. Overflow reports a
+// decimal integer too large for its destination type. OutOfRange reports a
+// floating-point token whose magnitude has no finite representation, and
+// TokenLimit reports a token longer than parsing accepts.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ParseError {
+    Syntax(UInt64),
+    Overflow(UInt64),
+    OutOfRange,
+    TokenLimit,
+}
+
+test fn parse_errors_can_be_released_explicitly() {
+    let error: ParseError = .Syntax(2)
+    error.release()
+    .Ok(())
+}
+
+// Parse a value of `Self` from decimal text, or report why the text is not
+// one. Every integer type and Float64 implement Parse; a program's own type
+// can implement it too, as `Point` below does.
+pub trait Parse {
+    fn parse(text: Str) -> Result[Self, ParseError] where carries()
+}
+
+// A Decimal is the magnitude of a parsed integer and whether it was negative.
+struct Decimal {
+    magnitude: UInt64,
+    negative: Bool,
+}
+
+// Fold digits with a prechecked bound so even UInt64's maximum is accepted
+// without an intermediate overflow. Syntax and overflow report the first byte
+// that prevents the input from being a value of the requested integer type.
+fn decimal(s: Str, signed: Bool, positive_limit: UInt64, negative_limit: UInt64) -> Result[Decimal, ParseError] where carries() {
+    let length = s.length()
+    var at: UInt64 = 0
+    var negative = false
+    if length > 0 {
+        let first = s.byte(0).unwrap()
+        // ASCII plus is 43 and minus is 45.
+        if first == 43 {
+            at = 1
+        } else if first == 45 && signed {
+            negative = true
+            at = 1
+        }
+    }
+    if at == length {
+        return .Err(.Syntax(at))
+    }
+    let limit = if negative {
+        negative_limit
+    } else {
+        positive_limit
+    }
+    // Base ten splits the limit into its prefix and final permitted digit.
+    let quotient = limit / 10
+    let remainder = limit % 10
+    var magnitude: UInt64 = 0
+    while at < length {
+        let byte = s.byte(at).unwrap()
+        // ASCII digits occupy 48..57; subtracting 48 yields the digit value.
+        if byte < 48 || byte > 57 {
+            return .Err(.Syntax(at))
+        }
+        let digit = UInt64(byte) - 48
+        if magnitude > quotient || (magnitude == quotient && digit > remainder) {
+            return .Err(.Overflow(at))
+        }
+        magnitude = magnitude * 10 + digit
+        at += 1
+    }
+    .Ok(.{ magnitude = magnitude, negative = negative })
+}
+
+test fn integer_parsing_rejects_non_decimal_input() {
+    let invalid = ["", "+", "-", " 1", "1 ", "1_0", "0x10", "１", "1.0"]
+    for read input in invalid {
+        let result = input.parse[Int64]()
+        testing.assert(match result { Err(error) => match error { Syntax(_) => true, _ => false }, _ => false }, "non-decimal input was accepted")?
+    }
+    let unsigned = "-1".parse[UInt64]()
+    testing.assert_eq(unsigned, .Err(.Syntax(0)), "unsigned parser accepted a minus")?
+    let trailing = "12x".parse[Int64]()
+    testing.assert_eq(trailing, .Err(.Syntax(2)), "syntax error did not identify its byte")?
+    .Ok(())
+}
+
+test fn integer_parsing_accepts_zeroes_and_reports_missing_digit_offsets() {
+    let negative_zero = "-0".parse[Int64]()
+    testing.assert_eq(negative_zero.unwrap(), Int64(0), "negative zero changed value")?
+    let padded = "+00042".parse[Int64]()
+    testing.assert_eq(padded.unwrap(), Int64(42), "leading zeroes changed value")?
+    let zeroes = "000".parse[UInt64]()
+    testing.assert_eq(zeroes.unwrap(), UInt64(0), "unsigned zeroes changed value")?
+    let empty = "".parse[Int64]()
+    testing.assert_eq(empty, .Err(.Syntax(0)), "empty input has the wrong error offset")?
+    let just_sign = "+".parse[Int64]()
+    testing.assert_eq(just_sign, .Err(.Syntax(1)), "missing signed digit has the wrong offset")?
+    let unsigned_negative_zero = "-0".parse[UInt64]()
+    testing.assert_eq(unsigned_negative_zero, .Err(.Syntax(0)), "unsigned negative zero was accepted")?
+    let embedded_nul = "12\u{0}3".parse[Int64]()
+    testing.assert_eq(embedded_nul, .Err(.Syntax(2)), "integer parser ignored NUL")?
+    .Ok(())
+}
+
+test fn parsed_values_and_errors_outlive_their_input_text() {
+    let allocator = mem.system()
+    let digits = "42".to_owned(allocator).unwrap()
+    let number = digits.view().parse[UInt64]()
+    digits.release()
+    testing.assert_eq(number.unwrap(), UInt64(42), "parsed number depended on released text")?
+    let malformed = "12x".to_owned(allocator).unwrap()
+    let failure = malformed.view().parse[UInt64]()
+    malformed.release()
+    testing.assert_eq(failure, .Err(.Syntax(2)), "owned parse error depended on released text")?
+    .Ok(())
+}
+
+impl Str {
+    // Parse a value through its Parse implementation. The type to read is
+    // named in brackets, `s.parse[UInt32]()`, or selected by the type the
+    // result is expected to have, `let year: UInt32 = s.parse()?`.
+    pub fn parse[T: Parse](self: Self) -> Result[T, ParseError] where carries() {
+        T.parse(self)
+    }
+}
+
+test fn parse_selects_its_implementation_from_a_result_annotation() {
+    let value: UInt16 = "150".parse().unwrap()
+    testing.assert_eq(value, UInt16(150), "the annotation did not select UInt16's implementation")?
+    .Ok(())
+}
+
+test fn parse_selects_its_implementation_from_a_named_type_argument() {
+    testing.assert_eq("150".parse[UInt16](), .Ok(150), "the brackets did not select UInt16's implementation")?
+    testing.assert_eq("-150".parse[Int16](), .Ok(-150), "the brackets did not select Int16's implementation")?
+    .Ok(())
+}
+
+impl Parse for Int8 {
+    fn parse(text: Str) -> Result[Int8, ParseError] where carries() {
+        let value = decimal(text, true, UInt64(Int8.max), UInt64(Int8.max) + 1)?
+        if value.negative {
+            // The minimum's magnitude cannot be represented as a positive Int8.
+            if value.magnitude == UInt64(Int8.max) + 1 {
+                .Ok(Int8.min)
+            } else {
+                .Ok(0 - Int8(value.magnitude))
+            }
+        } else {
+            .Ok(Int8(value.magnitude))
+        }
+    }
+}
+
+test fn int8_parse_checks_limits() {
+    let minimum = "-128".parse[Int8]()
+    match minimum { Ok(value) => testing.assert_eq(value, Int8.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+127".parse[Int8]()
+    match maximum { Ok(value) => testing.assert_eq(value, Int8.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "128".parse[Int8]()
+    testing.assert_eq(over, .Err(.Overflow(2)), "overflow did not report its digit")?
+    let under = "-129".parse[Int8]()
+    testing.assert_eq(under, .Err(.Overflow(3)), "negative overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for Int16 {
+    fn parse(text: Str) -> Result[Int16, ParseError] where carries() {
+        let value = decimal(text, true, UInt64(Int16.max), UInt64(Int16.max) + 1)?
+        if value.negative {
+            // The minimum's magnitude cannot be represented as a positive Int16.
+            if value.magnitude == UInt64(Int16.max) + 1 {
+                .Ok(Int16.min)
+            } else {
+                .Ok(0 - Int16(value.magnitude))
+            }
+        } else {
+            .Ok(Int16(value.magnitude))
+        }
+    }
+}
+
+test fn int16_parse_checks_limits() {
+    let minimum = "-32768".parse[Int16]()
+    match minimum { Ok(value) => testing.assert_eq(value, Int16.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+32767".parse[Int16]()
+    match maximum { Ok(value) => testing.assert_eq(value, Int16.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "32768".parse[Int16]()
+    testing.assert_eq(over, .Err(.Overflow(4)), "overflow did not report its digit")?
+    let under = "-32769".parse[Int16]()
+    testing.assert_eq(under, .Err(.Overflow(5)), "negative overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for Int32 {
+    fn parse(text: Str) -> Result[Int32, ParseError] where carries() {
+        let value = decimal(text, true, UInt64(Int32.max), UInt64(Int32.max) + 1)?
+        if value.negative {
+            // The minimum's magnitude cannot be represented as a positive Int32.
+            if value.magnitude == UInt64(Int32.max) + 1 {
+                .Ok(Int32.min)
+            } else {
+                .Ok(0 - Int32(value.magnitude))
+            }
+        } else {
+            .Ok(Int32(value.magnitude))
+        }
+    }
+}
+
+test fn int32_parse_checks_limits() {
+    let minimum = "-2147483648".parse[Int32]()
+    match minimum { Ok(value) => testing.assert_eq(value, Int32.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+2147483647".parse[Int32]()
+    match maximum { Ok(value) => testing.assert_eq(value, Int32.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "2147483648".parse[Int32]()
+    testing.assert_eq(over, .Err(.Overflow(9)), "overflow did not report its digit")?
+    let under = "-2147483649".parse[Int32]()
+    testing.assert_eq(under, .Err(.Overflow(10)), "negative overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for Int64 {
+    fn parse(text: Str) -> Result[Int64, ParseError] where carries() {
+        let value = decimal(text, true, UInt64(Int64.max), UInt64(Int64.max) + 1)?
+        if value.negative {
+            // The minimum's magnitude cannot be represented as a positive Int64.
+            if value.magnitude == UInt64(Int64.max) + 1 {
+                .Ok(Int64.min)
+            } else {
+                .Ok(0 - Int64(value.magnitude))
+            }
+        } else {
+            .Ok(Int64(value.magnitude))
+        }
+    }
+}
+
+test fn int64_parse_checks_limits() {
+    let minimum = "-9223372036854775808".parse[Int64]()
+    match minimum { Ok(value) => testing.assert_eq(value, Int64.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+9223372036854775807".parse[Int64]()
+    match maximum { Ok(value) => testing.assert_eq(value, Int64.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "9223372036854775808".parse[Int64]()
+    testing.assert_eq(over, .Err(.Overflow(18)), "overflow did not report its digit")?
+    let under = "-9223372036854775809".parse[Int64]()
+    testing.assert_eq(under, .Err(.Overflow(19)), "negative overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for UInt8 {
+    fn parse(text: Str) -> Result[UInt8, ParseError] where carries() {
+        let value = decimal(text, false, UInt64(UInt8.max), 0)?
+        .Ok(UInt8(value.magnitude))
+    }
+}
+
+test fn uint8_parse_checks_limits() {
+    let minimum = "0".parse[UInt8]()
+    match minimum { Ok(value) => testing.assert_eq(value, UInt8.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+255".parse[UInt8]()
+    match maximum { Ok(value) => testing.assert_eq(value, UInt8.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "256".parse[UInt8]()
+    testing.assert_eq(over, .Err(.Overflow(2)), "overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for UInt16 {
+    fn parse(text: Str) -> Result[UInt16, ParseError] where carries() {
+        let value = decimal(text, false, UInt64(UInt16.max), 0)?
+        .Ok(UInt16(value.magnitude))
+    }
+}
+
+test fn uint16_parse_checks_limits() {
+    let minimum = "0".parse[UInt16]()
+    match minimum { Ok(value) => testing.assert_eq(value, UInt16.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+65535".parse[UInt16]()
+    match maximum { Ok(value) => testing.assert_eq(value, UInt16.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "65536".parse[UInt16]()
+    testing.assert_eq(over, .Err(.Overflow(4)), "overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for UInt32 {
+    fn parse(text: Str) -> Result[UInt32, ParseError] where carries() {
+        let value = decimal(text, false, UInt64(UInt32.max), 0)?
+        .Ok(UInt32(value.magnitude))
+    }
+}
+
+test fn uint32_parse_checks_limits() {
+    let minimum = "0".parse[UInt32]()
+    match minimum { Ok(value) => testing.assert_eq(value, UInt32.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+4294967295".parse[UInt32]()
+    match maximum { Ok(value) => testing.assert_eq(value, UInt32.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "4294967296".parse[UInt32]()
+    testing.assert_eq(over, .Err(.Overflow(9)), "overflow did not report its digit")?
+    .Ok(())
+}
+
+impl Parse for UInt64 {
+    fn parse(text: Str) -> Result[UInt64, ParseError] where carries() {
+        let value = decimal(text, false, UInt64.max, 0)?
+        .Ok(value.magnitude)
+    }
+}
+
+test fn uint64_parse_checks_limits() {
+    let minimum = "0".parse[UInt64]()
+    match minimum { Ok(value) => testing.assert_eq(value, UInt64.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
+    let maximum = "+18446744073709551615".parse[UInt64]()
+    match maximum { Ok(value) => testing.assert_eq(value, UInt64.max, "maximum changed")?, Err(_) => testing.assert(false, "maximum was rejected")? }
+    let over = "18446744073709551616".parse[UInt64]()
+    testing.assert_eq(over, .Err(.Overflow(19)), "overflow did not report its digit")?
+    .Ok(())
+}
+
+// A Point is a grid coordinate spelled "x,y" in decimal text. Implementing
+// Parse lets a program's own type join every built-in numeric type behind one
+// `.parse()`.
+@(copyable, derive(Equatable, Debug))
+struct Point {
+    x: Int32,
+    y: Int32,
+}
+
+impl Parse for Point {
+    fn parse(text: Str) -> Result[Point, ParseError] where carries() {
+        match text.find(",") {
+            None => .Err(.Syntax(text.length())),
+            Some(at) => {
+                let x: Int32 = text.slice(0, at).unwrap().parse()?
+                let y: Int32 = text.slice(at + 1, text.length()).unwrap().parse()?
+                return .Ok(.{ x, y })
+            },
+        }
+    }
+}
+
+test fn a_user_type_implements_parse_by_combining_it_with_split_and_find() {
+    let origin: Point = "0,0".parse().unwrap()
+    testing.assert_eq(origin, Point { x = 0, y = 0 }, "the coordinate's own Parse implementation lost its fields")?
+    let east: Point = "12,-7".parse().unwrap()
+    testing.assert_eq(east, Point { x = 12, y = -7 }, "the coordinate's own Parse implementation misread its fields")?
+    let missing_comma = "12".parse[Point]()
+    testing.assert(missing_comma.is_err(), "a coordinate without a comma was accepted")?
+    .Ok(())
+}

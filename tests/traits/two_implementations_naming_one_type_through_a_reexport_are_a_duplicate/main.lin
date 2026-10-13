@@ -1,0 +1,29 @@
+// `mid` re-exports the `Pair` that `a` declares, so `Give[a.Pair]` and
+// `Give[mid.Pair]` are one trait applied to one type, and `Holder` implements
+// it twice.
+import a
+import mid
+
+trait Give[T] {
+    fn give(self: Self, x: T) -> UInt8
+}
+
+struct Holder {
+    count: UInt8,
+}
+
+impl Give[a.Pair] for Holder {
+    fn give(self: Self, x: a.Pair) -> UInt8 {
+        self.count + x.value
+    }
+}
+
+impl Give[mid.Pair] for Holder {
+    fn give(self: Self, x: mid.Pair) -> UInt8 {
+        self.count * x.value
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

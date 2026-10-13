@@ -1,0 +1,21 @@
+// A temporary given to a kept closure ends with the statement that calls
+// it, so a result borrowing it cannot be kept for the next statement.
+import std.mem
+
+struct Reading {
+    value: borrow UInt64,
+}
+
+fn main() -> UInt8 {
+    let observe = mem.Closure.open(
+        mem.system(),
+        |value: UInt64| -> Reading where borrows(.value: value) {
+            .{ value = borrow value }
+        },
+    ).unwrap()
+    let base: UInt64 = 40
+    let kept = observe(base + 2)
+    let answer = *kept.value
+    observe.release()
+    UInt8(answer)
+}

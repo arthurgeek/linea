@@ -1,0 +1,37 @@
+program decls=8
+  decl struct_ "Account" tokens 12..20
+    field "balance" : UInt8
+  decl function "of" tokens 23..32
+    in Measure
+    param read "x" : Self
+    returns UInt8
+  decl trait_ "Measure" tokens 20..33
+  decl pub function "opened" tokens 36..54
+    in Account
+    param read "balance" : UInt8
+    returns Account
+    expr %3 block tokens 46..54
+      expr %2 struct_literal tokens 47..53
+        expr %0 name_ref tokens 49..50 "balance"
+        expr %1 name_ref tokens 51..52 "balance"
+  decl impl_ "Account" tokens 33..55
+  decl function "of" tokens 60..74
+    in Account
+    of trait Measure
+    param read "x" : Self
+    returns UInt8
+    expr %6 block tokens 69..74
+      expr %5 field tokens 70..73 "balance"
+        expr %4 name_ref tokens 70..71 "x"
+  decl impl_ "Account" tokens 55..75
+    of trait Measure
+  decl function "main" tokens 75..97
+    returns UInt8
+    expr %13 block tokens 81..97
+      stmt %0 let_decl tokens 82..93 "a" : Account
+        expr %10 call tokens 87..93
+          expr %8 field tokens 87..90 "opened"
+            expr %7 name_ref tokens 87..88 "Account"
+          expr %9 int_literal tokens 91..92 "7"
+      expr %12 field tokens 93..96 "balance"
+        expr %11 name_ref tokens 93..94 "a"

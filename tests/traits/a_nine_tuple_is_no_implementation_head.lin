@@ -1,0 +1,16 @@
+// A tuple has at most eight components, so a nine-tuple head is refused
+// where it is written. The head names no type, and the refusal is the only
+// report.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

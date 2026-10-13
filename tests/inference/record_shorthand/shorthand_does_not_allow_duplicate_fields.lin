@@ -1,0 +1,7 @@
+struct Entry { key: UInt8 }
+
+fn main() -> UInt8 {
+    let key: UInt8 = 7
+    let _entry: Entry = .{ key, key = 9 }
+    0
+}

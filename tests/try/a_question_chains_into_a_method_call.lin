@@ -1,0 +1,37 @@
+// `boxed()?.of()`. The third suffix ordering: what `?` yielded is selected
+// from, and what the selection named is called. `?` sits in the same loop as
+// `.` and `(`, so the three compose in whatever order they are written and no
+// rule says which may follow which.
+//
+// The two orderings beside this one -- a selection after a `?`, and a `?` after
+// a call -- say nothing about this one. A suffix loop that returned after
+// building a `?` node passes both and refuses this.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn boxed() -> Option[Account] {
+    Option.Some(.{ balance = 4 })
+}
+
+fn go() -> Option[UInt8] {
+    let n = boxed()?.of()
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

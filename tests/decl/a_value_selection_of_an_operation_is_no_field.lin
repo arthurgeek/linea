@@ -1,0 +1,32 @@
+// A selection that is not a call's callee reaches a field, never an
+// operation. `make`, `close` and `open` are operations `Door` declares, and
+// none of them is a field of a door, so each selection is refused as a field
+// the type lacks -- not for the reason a postfix call could not take it,
+// because no call is written. The path that reaches the operation where a
+// function is expected is named: `Door.make`, `Door.close`, and `Door.open`,
+// which alone takes the door as its first argument.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn make() -> Door {
+        .{ width = 4 }
+    }
+
+    fn close(code: UInt8) -> UInt8 {
+        code
+    }
+
+    fn open(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+fn main() -> UInt8 {
+    let door = Door.make()
+    let _made = door.make
+    let _closed = door.close
+    let _opened = door.open
+    Door.close(door.open())
+}

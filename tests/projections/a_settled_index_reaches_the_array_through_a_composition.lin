@@ -1,0 +1,33 @@
+// The settled clause of [T-Index] is about the array the site's index ends up
+// against, however many implementations the path ran through to reach it. The
+// number a reader wrote fills the outer slot, the outer path hands it to the
+// inner one, and the array at the bottom is what it is held to.
+struct Inner {
+    cells: [UInt8; 3],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[UInt64] for Inner {
+    type Elem = UInt8
+
+    proj at(inout self: Inner, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Index[UInt64] for Outer {
+    type Elem = UInt8
+
+    proj at(inout self: Outer, i: UInt64) -> UInt8 {
+        self.inner[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ cells = [1, 2, 3] } }
+    o[9] = 200
+    o[9]
+}

@@ -1,0 +1,34 @@
+// A handler's state outlives each request, while the request's text lives
+// only until its response is written, so the state cannot keep a view of it.
+import std.http
+import std.mem
+
+use mem.Owner
+
+struct LastPath {
+    path: Str,
+}
+
+impl[P: Allocator] http.Handler[(), P] for LastPath {
+    fn serve_http(inout self: Self, inout _state: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] where borrows(self), carries(request) {
+        self.path = request.path()
+        http.text(request, "ok")
+    }
+}
+
+fn main() -> UInt8 {
+    var handler = LastPath { path = "" }
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = http.new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+    var nothing = {}
+    let status = match http.Handler.serve_http(&handler, &nothing, sent.request()) {
+        Ok(response) => response.status().code(),
+        Err(_) => 0,
+    }
+    arena.release()
+    if status == 200 {
+        0
+    } else {
+        1
+    }
+}

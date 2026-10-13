@@ -1,0 +1,234 @@
+==================
+Structural reflection
+==================
+
+fn visit(read self: Self) -> UInt8 {
+    match read self {
+        reflect.case => for component in reflect.components.reversed {
+            component.of(self)
+        },
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        name: (identifier)
+        type: (self_type)))
+    return_type: (type_identifier)
+    body: (block
+      (block_statement
+        (match_expression
+          value: (identifier)
+          (match_arm
+            pattern: (reflection_case_pattern
+              (reflection_root))
+            body: (for_expression
+              binder: (identifier)
+              sequence: (field_expression
+                (field_expression
+                  (reflection_root)
+                  field: (identifier))
+                field: (identifier))
+              (block
+                (expression_statement
+                  (call_expression
+                    callee: (field_expression
+                      (identifier)
+                      field: (identifier))
+                    (argument_list
+                      (identifier))))))))))))
+
+==================
+Enum reflection selectors
+==================
+
+fn compare(read left: Self, read right: Self) -> Bool {
+    let ordinal = reflect.ordinal_of(left)
+    match read left {
+        reflect.case => match read right {
+            reflect.same_case => reflect.case.ordinal == ordinal,
+            reflect.other_case => false,
+        },
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (self_type))
+      (parameter
+        (convention)
+        (identifier)
+        (self_type)))
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (call_expression
+          (field_expression
+            (reflection_root)
+            (identifier))
+          (argument_list
+            (identifier))))
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (reflection_case_pattern
+              (reflection_root))
+            (match_expression
+              (identifier)
+              (match_arm
+                (reflection_case_pattern
+                  (reflection_root))
+                (binary_expression
+                  (field_expression
+                    (field_expression
+                      (reflection_root)
+                      (identifier))
+                    (identifier))
+                  (identifier)))
+              (match_arm
+                (reflection_case_pattern
+                  (reflection_root))
+                (boolean_literal)))))))))
+
+==================
+Component requirements and grouped derives
+==================
+
+template impl Inspect where reflect.components: Inspect + Lookup[UInt64], reflect.supertraits: derived {}
+derive[T: Inspect] (
+    Inspect,
+) for Box[T] where T: Lookup[UInt64]
+derive (Inspect, Lookup[UInt64]) for Pair
+
+---
+
+(source_file
+  (template_impl_block
+    trait: (trait_reference
+      name: (type_identifier))
+    (template_requirements
+      (template_requirement
+        (reflection_root)
+        components: (identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))
+        (bound
+          (trait_reference
+            name: (type_identifier)
+            (type_arguments
+              (type_identifier)))))
+      (template_requirement
+        (reflection_root)
+        supertraits: (identifier)
+        evidence: (identifier))))
+  (derive_declaration
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    (derive_traits
+      (derive_trait
+        trait: (trait_reference
+          name: (type_identifier))))
+    type: (type_identifier)
+    (type_arguments
+      (type_identifier))
+    (where_clause
+      (where_predicate
+        subject: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)
+            (type_arguments
+              (type_identifier)))))))
+  (derive_declaration
+    (derive_traits
+      (derive_trait
+        trait: (trait_reference
+          name: (type_identifier)))
+      (derive_trait
+        trait: (trait_reference
+          name: (type_identifier)
+          (type_arguments
+            (type_identifier)))))
+    type: (type_identifier)))
+
+==================
+Parameterized struct construction template header
+==================
+
+template impl[A: Allocator] Decode[A] where
+    reflect.target: struct,
+    reflect.components: Decode[A],
+{
+    fn missing(allocator: A) -> Result[Self, Error[A]] {
+        .Err(.Missing)
+    }
+}
+
+---
+
+(source_file
+  (template_impl_block
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (trait_reference
+      (type_identifier)
+      (type_arguments
+        (type_identifier)))
+    (template_requirements
+      (template_requirement
+        (reflection_root)
+        (identifier))
+      (template_requirement
+        (reflection_root)
+        (identifier)
+        (bound
+          (trait_reference
+            (type_identifier)
+            (type_arguments
+              (type_identifier))))))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (self_type)
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_identifier)))))
+      (block
+        (expression_statement
+          (call_expression
+            (variant_reference
+              (type_identifier))
+            (argument_list
+              (variant_reference
+                (type_identifier)))))))))

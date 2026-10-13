@@ -1,0 +1,20 @@
+// A path element is a name, and a name can end a statement, so the newline
+// after one ends the declaration. `import` asked that and `use` did not, so a
+// re-export reached down a line and exported whatever it found there: this
+// compiled clean and ran, re-exporting `mm.thing` from a line the author had
+// separated.
+//
+// The formatter then rewrote the two lines into one, which is a tool that
+// writes in place deleting a line break its own purpose says it must keep. The
+// hatch could not see it either -- what it compares is the already-joined tree
+// against itself.
+//
+// The sibling cases pin the terminator half for both forms. This is the half
+// that was left: which run of tokens the path is.
+import mm
+pub use mm
+.thing
+
+fn main() -> UInt8 {
+    thing()
+}

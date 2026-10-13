@@ -1,0 +1,92 @@
+// One program using every production the grammar in `docs/linea-semantics.md`
+// spells out. It is a guard on that document rather than on any one rule: a
+// form that stops parsing fails here, and a form the document describes but
+// the compiler never accepted could not have been written down.
+//
+// Nothing here is a focused case. Every rule it touches is checked properly
+// somewhere else, and the value of this one is only that it touches them all
+// at once.
+import util.hash as h
+
+@linear
+enum Key { Forged(UInt8), Blank }
+
+// A declaration takes the types it is generic over in brackets, with a bound
+// after `:` and several separated by `+`. A written type carries its arguments.
+struct Both[A, B: Copyable] { first: A, second: B }
+
+fn swap[A: Copyable, B: Copyable](p: Both[A, B]) -> Both[B, A] {
+    .{ first = copy(p.second), second = copy(p.first) }
+}
+
+@(opaque, linear)
+struct Account {
+    id: UInt8,
+    balance: UInt8,
+}
+
+struct Pair { lo: UInt8, hi: UInt8 }
+
+impl Account {
+    pub fn open(balance: UInt8) -> Account {
+        .{ id = 1, balance = balance }
+    }
+
+    pub fn close(sink a: Account) -> UInt8 {
+        let Account { id: _, balance: n } = a
+        n
+    }
+
+    fn peek(a: Account) -> UInt8 {
+        a.balance
+    }
+}
+
+impl Key {
+    pub fn burn(sink k: Key) -> UInt8 {
+        match k { Forged(n) => n, Blank => 0 }
+    }
+}
+
+fn bump(inout p: Pair, by: UInt8) -> () {
+    p.lo = p.lo + by
+}
+
+fn main() -> UInt8 {
+    let generic: Both[UInt8, Bool] = .{ first = 3, second = true }
+    let swapped: Both[Bool, UInt8] = swap(generic)
+    let carried: UInt8 = if swapped.second > 0 && !swapped.first {
+        1
+    } else {
+        0
+    }
+
+    let pair: Pair = .{ lo = 1, hi = 2 }
+    let sum: UInt8 = match pair { Pair { lo: a, hi: b } => a + b }
+
+    var mutable: Pair = .{ lo = 0, hi = 9 }
+    bump(&mutable, 1)
+    if mutable.lo > 0 {
+        let _: UInt8 = h.mix(mutable.lo, mutable.hi)
+    }
+
+    var n: UInt8 = 3
+    while n > 0 {
+        n = n - 1
+    }
+    let looped: UInt8 = loop {
+        if n == 0 {
+            break 4
+        }
+        n = n - 1
+    }
+
+    let account: Account = Account.open(6)
+    let balance: UInt8 = Account.peek(account)
+    let closed: UInt8 = Account.close(account)
+
+    let key: Key = .Forged(2)
+    let burned: UInt8 = Key.burn(key)
+
+    UInt8(sum) + carried + looped + balance + closed + burned + mutable.hi
+}

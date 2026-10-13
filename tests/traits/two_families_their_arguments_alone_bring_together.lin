@@ -1,0 +1,32 @@
+// Two families whose heads unify for free and whose arguments force the same
+// type on both, so they meet at `Holder[Bool]`.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[Pair[T, Bool]] for Holder[T] {
+    fn give(_self: Self, _u: Pair[T, Bool]) -> UInt8 {
+        5
+    }
+}
+
+impl[U] Give[Pair[Bool, U]] for Holder[U] {
+    fn give(_self: Self, _u: Pair[Bool, U]) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Bool] = .{ v = true }
+    let p: Pair[Bool, Bool] = .{ a = true, b = true }
+    Give.give(h, p)
+}

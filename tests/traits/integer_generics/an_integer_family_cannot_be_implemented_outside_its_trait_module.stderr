@@ -1,0 +1,5 @@
+error[M-Impl]: a parameter head has no declaring module
+ --> tests/traits/integer_generics/an_integer_family_cannot_be_implemented_outside_its_trait_module/main.lin:5:26
+  |
+5 | impl[T: Integer] Tag for T {
+  |                          ^ write the implementation where the trait is declared

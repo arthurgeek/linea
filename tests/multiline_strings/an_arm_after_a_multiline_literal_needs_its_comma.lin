@@ -1,0 +1,16 @@
+@copyable
+enum Kind {
+    Short,
+    Long,
+}
+
+fn describe(kind: Kind) -> Str {
+    match kind {
+        Short => \\brief
+        Long => \\at length
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(describe(.Short).length())
+}

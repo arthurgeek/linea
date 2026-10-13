@@ -1,0 +1,16 @@
+// `Blank` is in scope and `gauge.Gauge` is reached through the bound; both
+// declare `zero`, so `G.zero()` names neither and the call is written through
+// the trait that is meant.
+import gauge
+
+trait Blank {
+    fn zero() -> Self
+}
+
+fn _fresh[G: gauge.Gauge + Blank]() -> G {
+    G.zero()
+}
+
+fn main() -> UInt8 {
+    0
+}

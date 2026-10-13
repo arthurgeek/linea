@@ -1,0 +1,23 @@
+pub trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+impl Score for UInt8 {
+    fn score(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+template impl Score where reflect.components: Score {
+    fn score(self: Self) -> UInt8 {
+        var total: UInt8 = 0
+        match read self {
+            reflect.case => {
+                for component in reflect.components {
+                    total += Score.score(component.of(self))
+                }
+            },
+        }
+        total
+    }
+}

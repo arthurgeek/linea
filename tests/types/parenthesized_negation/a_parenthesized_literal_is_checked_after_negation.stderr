@@ -1,0 +1,5 @@
+error[T-Literal]: `Int8` cannot hold -129
+ --> tests/types/parenthesized_negation/a_parenthesized_literal_is_checked_after_negation.lin:2:24
+  |
+2 |     let _below: Int8 = -(129)
+  |                        ^^^^^^ value is out of range for its type

@@ -1,0 +1,7 @@
+fn _sum[T](left: T, right: T) -> T where carries() {
+    left + right
+}
+
+fn main() -> UInt8 {
+    0
+}

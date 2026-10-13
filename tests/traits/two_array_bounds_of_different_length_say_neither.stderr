@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Lookup` and `Lookup` both declare `Elem`, and a type carrying both bounds reads it through neither
+  --> tests/traits/two_array_bounds_of_different_length_say_neither.lin:31:64
+   |
+31 | fn _either[C: Lookup[[UInt8; 4]] + Lookup[[UInt8; 8]]](sink v: C.Elem) -> C.Elem {
+   |                                                                ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `Lookup` and `Lookup` both declare `Elem`, and a type carrying both bounds reads it through neither
+  --> tests/traits/two_array_bounds_of_different_length_say_neither.lin:31:75
+   |
+31 | fn _either[C: Lookup[[UInt8; 4]] + Lookup[[UInt8; 8]]](sink v: C.Elem) -> C.Elem {
+   |                                                                           ^^^^^^ bound it by one of them

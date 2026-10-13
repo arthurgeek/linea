@@ -1,0 +1,20 @@
+error[T-PolyRec]: this call instantiates `by_dot` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_grow_what_it_calls_itself_with.lin:14:13
+   |
+14 |             self.by_dot(depth - 1, [copy(value)]) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `by_name` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_grow_what_it_calls_itself_with.lin:22:13
+   |
+22 |             Nest.by_name(self, depth - 1, [copy(value)]) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `deeper` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_grow_what_it_calls_itself_with.lin:30:13
+   |
+30 |             deeper(self, depth - 1, [copy(value)]) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `wrap` with more than it was given
+  --> tests/traits/a_provided_operation_may_not_grow_what_it_calls_itself_with.lin:46:13
+   |
+46 |             self.wrap(key, depth - 1, [copy(value)]) + 1
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

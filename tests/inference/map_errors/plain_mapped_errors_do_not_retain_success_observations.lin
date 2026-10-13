@@ -1,0 +1,30 @@
+enum Failure { Code(UInt8) }
+
+fn clear(inout value: UInt64) -> () {
+    value = 0
+}
+
+fn inspect(value: UInt64, reject: Bool) -> Result[borrow UInt64, UInt8] where borrows(.Ok: value) {
+    if reject {
+        .Err(9)
+    } else {
+        .Ok(borrow value)
+    }
+}
+
+fn work(reject: Bool) -> Result[UInt8, Failure] {
+    var owner: UInt64 = 7
+    defer clear(&owner)
+    let view = inspect(owner, reject).map_err(|sink error| Failure.Code(error))?
+    return .Ok(UInt8(*view))
+}
+
+fn main() -> UInt8 {
+    let success = match work(false) { Ok(value) => value == 7, Err(_) => false }
+    let failure = match work(true) { Ok(_) => false, Err(error) => match error { Code(value) => value == 9 } }
+    if success && failure {
+        0
+    } else {
+        1
+    }
+}

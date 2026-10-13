@@ -1,0 +1,12 @@
+program decls=3
+  decl function "held" tokens 14..27
+    in _Holds
+    param read "x" : Self
+    param read "t" : T
+    returns UInt8
+  decl trait_ "_Holds" tokens 8..28
+    type param "T"
+  decl function "main" tokens 28..37
+    returns UInt8
+    expr %1 block tokens 34..37
+      expr %0 int_literal tokens 35..36 "0"

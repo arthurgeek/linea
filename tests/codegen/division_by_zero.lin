@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let d: UInt8 = 0
+    10 / d
+}

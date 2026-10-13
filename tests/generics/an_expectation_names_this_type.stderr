@@ -1,0 +1,10 @@
+error[T-Mismatch]: expected `UInt8`, found an `Option`
+  --> tests/generics/an_expectation_names_this_type.lin:13:25
+   |
+13 |     let scalar: UInt8 = Option.None
+   |                         ^^^^^^^^^^^ this names a different type
+error[T-Mismatch]: expected `Option[UInt8]`, found an `Other`
+  --> tests/generics/an_expectation_names_this_type.lin:14:32
+   |
+14 |     let wrong: Option[UInt8] = Other.Nope
+   |                                ^^^^^^^^^^ this names a different type

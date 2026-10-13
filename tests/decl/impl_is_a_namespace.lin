@@ -1,0 +1,32 @@
+// A type is a namespace, and what it can do is written in an `impl`. The
+// braces after `struct` hold the representation and nothing else, which is
+// exactly what `opaque` seals — putting behaviour there too would invite the
+// reading that sealing hides that as well, and it does not.
+struct Account {
+    id: UInt8,
+    balance: UInt8,
+}
+
+// A type may have any number of these, in any file of its module, so what a
+// type can do is split across files exactly as a module is.
+impl Account {
+    // Reached through `Account` and not through the module, so the function
+    // beside this one is a different name entirely.
+    pub fn open(id: UInt8) -> Account {
+        .{ id = id, balance = 0 }
+    }
+
+    // There is no receiver: this sees what any declaration in this module
+    // sees, and `id` is its parameter rather than a field of some instance.
+    pub fn label(id: UInt8) -> UInt8 {
+        id
+    }
+}
+
+fn open() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    Account.label(6) + open()
+}

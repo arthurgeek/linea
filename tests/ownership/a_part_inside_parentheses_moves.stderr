@@ -1,0 +1,5 @@
+error[O-Move]: only part of `owner` is named here
+  --> tests/ownership/a_part_inside_parentheses_moves.lin:10:23
+   |
+10 |     let taken: Part = (owner).part
+   |                       ^^^^^^^^^^^^ move the whole binding, or `copy` this part out of it

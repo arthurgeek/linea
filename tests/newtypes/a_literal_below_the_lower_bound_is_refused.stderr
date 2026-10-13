@@ -1,0 +1,5 @@
+error[T-Refine]: -41 is not in -40..=40 for Temp
+  --> tests/newtypes/a_literal_below_the_lower_bound_is_refused.lin:10:11
+   |
+10 |     wants(Temp(-41))
+   |           ^^^^^^^^^ this value is outside the type's range

@@ -1,0 +1,10 @@
+trait Count[phantom T] {}
+
+struct Counter {}
+
+impl Count[[UInt8; _]] for Counter {}
+
+fn main() -> UInt8 {
+    let _counter: Counter = .{}
+    0
+}

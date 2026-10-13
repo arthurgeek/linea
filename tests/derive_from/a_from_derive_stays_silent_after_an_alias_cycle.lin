@@ -1,0 +1,13 @@
+alias First = Second
+alias Second = First
+
+@derive(From[UInt8])
+enum Failure {
+    Cycle(First),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure.Unknown
+    0
+}

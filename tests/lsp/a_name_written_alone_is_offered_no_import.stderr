@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `ledger`
+ --> tests/lsp/a_name_written_alone_is_offered_no_import/main.lin:5:5
+  |
+5 |     ledger
+  |     ^^^^^^ no binding with this name is in scope

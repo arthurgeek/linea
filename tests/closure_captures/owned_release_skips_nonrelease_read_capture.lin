@@ -1,0 +1,23 @@
+@linear
+struct Transaction { number: UInt8 }
+
+fn finish(sink transaction: Transaction) -> UInt8 {
+    let { number } = transaction
+    number
+}
+
+fn settle[F: Release](sink callback: F) -> () {
+    callback.release()
+}
+
+fn main() -> UInt8 {
+    let transaction: Transaction = .{ number = 7 }
+    let observe = [transaction] || {
+        if transaction.number == 7 {
+            panic("releasing a callback invoked its body")
+        }
+        transaction.number
+    }
+    settle(observe)
+    finish(transaction)
+}

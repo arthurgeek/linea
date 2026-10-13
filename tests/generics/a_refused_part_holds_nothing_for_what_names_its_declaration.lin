@@ -1,0 +1,25 @@
+// A part this rule refuses is answered with poison wherever it is read, so
+// the declaration it sits in stops holding what it held: once `D`'s only part
+// is refused, a `D` holds nothing at its parameter, and an `E` handing itself
+// to that parameter reaches no `E`. `E` has a size, and the one thing wrong
+// with this program is written in `D`.
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct D[T] {
+    p: Pair[T, D[T]],
+}
+
+struct E[U] {
+    e: D[E[U]],
+}
+
+fn _keep[T](_d: D[T], _e: E[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

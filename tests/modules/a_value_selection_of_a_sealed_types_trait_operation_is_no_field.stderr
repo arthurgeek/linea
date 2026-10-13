@@ -1,0 +1,10 @@
+error[T-UnknownField]: `Ticket` has no field `refund`
+  --> tests/modules/a_value_selection_of_a_sealed_types_trait_operation_is_no_field/main.lin:12:19
+   |
+12 |     let _refund = ticket.refund
+   |                   ^^^^^^^^^^^^^ not a field of this value
+error[M-Opaque]: `Ticket` is opaque outside `box_office`
+  --> tests/modules/a_value_selection_of_a_sealed_types_trait_operation_is_no_field/main.lin:13:18
+   |
+13 |     let _seats = ticket.seats
+   |                  ^^^^^^^^^^^^ only its own module can read its parts

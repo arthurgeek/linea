@@ -1,0 +1,20 @@
+// `rack.steps[1](5)` indexes the field `steps` and calls the element, because
+// `steps` is a field of `Rack` rather than one of its methods. Parentheses
+// around `(rack.steps[0])` read the element first too.
+struct Rack {
+    steps: [fn(value: UInt8) -> UInt8; 2],
+}
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn triple(value: UInt8) -> UInt8 {
+    value * 3
+}
+
+fn main() -> UInt8 {
+    let rack = Rack { steps = [double, triple] }
+    let first = 1
+    rack.steps[first](5) + (rack.steps[0])(1) - 17
+}

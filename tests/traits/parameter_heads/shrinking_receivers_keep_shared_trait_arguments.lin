@@ -1,0 +1,26 @@
+struct Box[T] { value: T }
+
+trait Measure[Original] {
+    fn measure(self: Self, original: Original) -> UInt8
+}
+
+impl[T: Measure[Box[Box[UInt8]]]] Measure[Box[Box[UInt8]]] for Box[T] {
+    fn measure(self: Box[T], original: Box[Box[UInt8]]) -> UInt8 {
+        1 + Measure.measure(self.value, original)
+    }
+}
+
+impl Measure[Box[Box[UInt8]]] for UInt8 {
+    fn measure(self: UInt8, _original: Box[Box[UInt8]]) -> UInt8 {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let original: Box[Box[UInt8]] = .{ value = .{ value = 7 } }
+    if Measure.measure(original, original) == 9 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,39 @@
+// `[UInt8; 4]` and `[UInt8; 8]` are two arguments, not one, however alike
+// their element type: the length is what the comparison reads, so two bounds
+// at two lengths both declaring `Elem` name two declarations and nothing
+// written here says which.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[[UInt8; 4]] for Board {
+    type Elem = UInt8
+
+    fn at(_self: Board, i: [UInt8; 4]) -> UInt8 {
+        i[0]
+    }
+}
+
+impl Lookup[[UInt8; 8]] for Board {
+    type Elem = Bool
+
+    fn at(_self: Board, i: [UInt8; 8]) -> Bool {
+        i[0] > 0
+    }
+}
+
+fn _either[C: Lookup[[UInt8; 4]] + Lookup[[UInt8; 8]]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let i: [UInt8; 4] = [9, 0, 0, 0]
+    Lookup.at(b, i)
+}

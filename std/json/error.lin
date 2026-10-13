@@ -1,0 +1,201 @@
+import std.mem
+import std.fmt
+import std.release
+import std.testing
+
+use mem.Owner
+use mem.PushFailure
+
+// hard_depth bounds how deeply containers nest, and with it the stack that
+// recursive parsing, writing and releasing use.
+let hard_depth: UInt64 = 128
+
+// hard_number_bytes bounds a number token's length: 64 KiB.
+let hard_number_bytes: UInt64 = 65536
+
+// hard_object_members bounds how many members one object holds.
+let hard_object_members: UInt64 = 4096
+
+// ParseErrorKind names what stopped a parse: malformed input, a limit, or
+// refused storage.
+@copyable
+pub enum ParseErrorKind {
+    Syntax,
+    TrailingData,
+    InvalidUtf8,
+    InvalidEscape,
+    InvalidSurrogate,
+    DuplicateKey,
+    InputLimit,
+    DepthLimit,
+    NodeLimit,
+    StringLimit,
+    NumberLimit,
+    MemberLimit,
+    Allocation,
+}
+
+// A ParseError says what stopped a parse and where. The offset counts bytes
+// from the beginning of the supplied input; EOF is its length.
+@copyable
+pub struct ParseError {
+    kind: ParseErrorKind,
+    offset: UInt64,
+}
+
+// NumberError says why text is not a JSON number: invalid syntax at a byte
+// offset, a token past the length limit, or refused storage.
+@copyable
+pub enum NumberError {
+    Syntax(UInt64),
+    TokenLimit,
+    Allocation,
+}
+
+// NumberAccessError says why a number cannot be read as a machine value: the
+// value is not a number, not an integer, or out of the type's range.
+@copyable
+pub enum NumberAccessError {
+    WrongKind,
+    NotInteger,
+    OutOfRange,
+}
+
+// KindError says a value is not the kind an accessor asked for.
+@copyable
+pub enum KindError {
+    WrongKind,
+}
+
+// MutationReason says why a document refused a change.
+@copyable
+pub enum MutationReason {
+    WrongKind,
+    DepthLimit,
+    MemberLimit,
+    Allocation,
+}
+
+// A MutationFailure returns the value a document refused, with the reason.
+pub struct MutationFailure[A: Allocator = mem.SystemAllocator] {
+    reason: MutationReason,
+    value: Value[A],
+}
+
+derive (Equatable, Debug, Release) for ParseErrorKind
+
+derive (Equatable, Debug, Release) for ParseError
+
+// A parse error reads as the problem and the byte offset where the parser
+// found it, such as "invalid syntax at byte 7", for a message or a log field.
+impl Display for ParseError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(parse_problem(self.kind))?
+        " at byte {self.offset}".fmt(&w)
+    }
+}
+
+// Name the problem a parse error kind describes.
+fn parse_problem(kind: ParseErrorKind) -> Str {
+    match kind {
+        Syntax => "invalid syntax",
+        TrailingData => "trailing data",
+        InvalidUtf8 => "invalid UTF-8",
+        InvalidEscape => "invalid escape",
+        InvalidSurrogate => "invalid surrogate",
+        DuplicateKey => "duplicate key",
+        InputLimit => "input too long",
+        DepthLimit => "nesting too deep",
+        NodeLimit => "too many values",
+        StringLimit => "string too long",
+        NumberLimit => "number too long",
+        MemberLimit => "too many members in an object",
+        Allocation => "out of memory",
+    }
+}
+
+impl ParseError {
+    // `ran_out_of_memory` says whether parsing stopped because an allocation
+    // failed. Every other parse error is a fault in the input.
+    pub fn ran_out_of_memory(self: Self) -> Bool {
+        match self.kind {
+            Allocation => true,
+            _ => false,
+        }
+    }
+}
+
+test fn only_an_allocation_failure_is_running_out_of_memory() {
+    let full = ParseError { kind = .Allocation, offset = 3 }
+    let malformed = ParseError { kind = .Syntax, offset = 3 }
+    testing.assert(full.ran_out_of_memory(), "an allocation failure was the input's fault")?
+    testing.assert(!malformed.ran_out_of_memory(), "a syntax error ran out of memory")?
+}
+
+test fn a_parse_error_displays_its_problem_and_the_byte_it_stopped_at() {
+    let syntax = ParseError { kind = .Syntax, offset = 7 }
+    defer let shown = fmt.render_owned(mem.system(), syntax).unwrap()
+    testing.assert_eq(shown.view(), "invalid syntax at byte 7", "the syntax error changed")?
+    let deep = ParseError { kind = .DepthLimit, offset = 129 }
+    defer let limit = fmt.render_owned(mem.system(), deep).unwrap()
+    testing.assert_eq(limit.view(), "nesting too deep at byte 129", "the limit error changed")?
+}
+
+derive (Equatable, Debug, Release) for NumberError
+
+derive (Equatable, Debug, Release) for NumberAccessError
+
+derive (Equatable, Debug, Release) for KindError
+
+derive (Equatable, Debug, Release) for MutationReason
+
+// A mutation reason reads as the problem, such as "nesting too deep", for a
+// message or a log field.
+impl Display for MutationReason {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(match self {
+            WrongKind => "the value is the wrong kind for this change",
+            DepthLimit => "nesting too deep",
+            MemberLimit => "too many members in an object",
+            Allocation => "out of memory",
+        })
+    }
+}
+
+test fn a_mutation_reason_displays_its_problem() {
+    // The 64-byte recorder holds the longest reason.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let reason = MutationReason.WrongKind
+    let wrote = reason.fmt(&writer).is_ok()
+    let equal = writer.holds("the value is the wrong kind for this change")
+    writer.release()
+    testing.assert(wrote && equal, "a mutation reason lost its problem")?
+}
+
+derive[A: Allocator] Release for MutationFailure[A]
+
+// Settling a refused mutation releases the value it was offered and keeps
+// why the document refused it.
+impl[A: Allocator] release.Settle for MutationFailure[A] {
+    type Reason = MutationReason
+
+    fn settle(sink self: Self) -> MutationReason where carries(self) {
+        let MutationFailure { reason, value } = self
+        value.release()
+        reason
+    }
+}
+
+test fn settling_a_refused_member_releases_it_and_keeps_the_reason() {
+    let allocator = mem.system()
+    defer var list = Value.array(allocator)
+    let wrong_kind = match &list.insert("summary", Value.string(allocator, "all clear").unwrap()).settled() {
+        Ok(previous) => {
+            previous.release()
+            false
+        },
+        Err(reason) => reason == MutationReason.WrongKind,
+    }
+    testing.assert(wrong_kind, "settling lost the refusal reason")?
+    testing.assert_eq(list.elements().unwrap().length(), UInt64(0), "a refused member changed the array")?
+}

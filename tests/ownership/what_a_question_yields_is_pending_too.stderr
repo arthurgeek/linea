@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `use2` has not been given this value yet, and control leaves here
+  --> tests/ownership/what_a_question_yields_is_pending_too.lin:25:30
+   |
+25 |     Option.Some(use2(get()?, return Option.None))
+   |                      ------ it was given up here
+   |                              ^^^^^^^^^^^^^^^^^^ give the value up after this, not before it

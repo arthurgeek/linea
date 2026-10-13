@@ -1,0 +1,30 @@
+// `match read` looks at a value without taking it, so what its pattern binds
+// is lent rather than owned and may not be moved out. Only a variant pattern's
+// binders were marked as lent, so a struct pattern's were not -- and a `Key`
+// could be carried out of a value the match never took, leaving the caller
+// still holding it and releasing it a second time.
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn eat(sink k: Key) -> UInt8 {
+    release(k)
+    3
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ k = mint(7), n = 1 }
+    let x = match read h {
+        Holder { k: inner, n: _count } => eat(inner),
+    }
+    let y = consume(h)
+    x + y
+}

@@ -1,0 +1,5 @@
+warning[N-Shadowed]: `Door` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/traits/a_postfix_call_reaches_the_types_own_operation_before_a_traits.lin:19:8
+   |
+19 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Shut.close(x)`

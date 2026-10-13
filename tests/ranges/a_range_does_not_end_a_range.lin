@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let r = 0..9..18;
+    let _ = r;
+    0
+}

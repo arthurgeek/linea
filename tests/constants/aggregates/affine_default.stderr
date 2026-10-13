@@ -1,0 +1,7 @@
+error[T-Default]: a default is built again at every call that omits it, so `Config` must be copyable
+ --> tests/constants/aggregates/affine_default.lin:5:28
+  |
+5 | fn amount(config: Config = .{ amount = 7 }) -> UInt8 {
+  |                            ^^^^^^^^^^^^^^^ built from the parts of `Config`, which is not copyable
+  |
+  = help: mark `Config` `@copyable`

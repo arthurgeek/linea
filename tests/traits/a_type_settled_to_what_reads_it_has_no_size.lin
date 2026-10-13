@@ -1,0 +1,31 @@
+// A part written as a settled reference holds whatever the implementation
+// settled the name to, so an implementation may close a layout the
+// declaration alone does not: `S[T]` holds a `T.Iter`, and settling `Iter`
+// to `S[Box]` makes an `S[Box]` a value holding an `S[Box]`.
+//
+// Which argument closes it is what an implementation decides, so the refusal
+// is at the type the argument makes rather than at the declaration: `S` is
+// well formed at every argument whose implementation settles `Iter` to
+// something else.
+trait Holder {
+    type Iter
+}
+
+struct S[T: Holder] {
+    a: T,
+    b: T.Iter,
+}
+
+struct Box { n: UInt8 }
+
+impl Holder for Box {
+    type Iter = S[Box]
+}
+
+fn _use_it(s: S[Box]) -> UInt8 {
+    s.a.n
+}
+
+fn main() -> UInt8 {
+    0
+}

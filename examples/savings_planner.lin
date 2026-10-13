@@ -1,0 +1,39 @@
+// Plan savings by increasing the monthly deposit by 1000 cents each month.
+import std.io
+import std.testing
+
+fn savings_after(months: UInt8, monthly_increment: UInt64 = 1000) -> UInt64 {
+    // `1..=0` would count down from 1, so a plan of no months returns first.
+    if months == 0 {
+        return 0
+    }
+    let schedule = UInt8(1)..=months
+    // `map` turns each month into its deposit and `fold` adds the deposits,
+    // starting from zero. `[monthly_increment]` lets the closure read the
+    // increment. A line opening with `.map` or `.fold` continues the chain on
+    // the line above.
+    schedule
+        .map([monthly_increment] |sink month| UInt64(month) * monthly_increment)
+        .fold(0, |sink saved, sink deposit| saved + deposit)
+}
+
+test fn savings_accumulate_the_monthly_deposits() {
+    testing.assert_eq(savings_after(0), 0, "no deposits before the first month")?
+    testing.assert_eq(savings_after(1), 1000, "the first deposit is 1000 cents")?
+    testing.assert_eq(savings_after(3), 6000, "1000 + 2000 + 3000 cents")?
+    testing.assert_eq(savings_after(12), 78000, "a full year of increasing deposits")?
+    testing.assert_eq(savings_after(3, monthly_increment: 250), 1500, "250 + 500 + 750 cents")?
+    testing.assert_eq(savings_after(0, monthly_increment: 250), 0, "a configured plan starts with no deposits")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("Monthly deposits start at 1000 cents and increase by 1000 cents.")?
+    // `[UInt8; _]` sets the element type and lets the compiler count the
+    // elements: the balances after a quarter, a half-year and a full year.
+    let checkpoints: [UInt8; _] = [3, 6, 12]
+    for months in checkpoints {
+        let saved = savings_after(months)
+        io.println("After {months} months: {saved} cents saved")?
+    }
+    .Ok(0)
+}

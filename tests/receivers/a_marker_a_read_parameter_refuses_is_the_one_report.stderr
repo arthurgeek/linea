@@ -1,0 +1,35 @@
+error[N-Immutable]: `fixed` is declared with `let`
+  --> tests/receivers/a_marker_a_read_parameter_refuses_is_the_one_report.lin:28:6
+   |
+27 |     let fixed = Counter { count = 1 }
+   |         ----- declared with `let` here
+28 |     &fixed.bump()
+   |      ^^^^^ this binding cannot be assigned
+error[N-Immutable]: `fixed` is declared with `let`
+  --> tests/receivers/a_marker_a_read_parameter_refuses_is_the_one_report.lin:29:10
+   |
+27 |     let fixed = Counter { count = 1 }
+   |         ----- declared with `let` here
+29 |     add(&fixed)
+   |          ^^^^^ this binding cannot be assigned
+error[S-Mutation]: this receiver is not mutated, so the call takes no `&`
+  --> tests/receivers/a_marker_a_read_parameter_refuses_is_the_one_report.lin:30:6
+   |
+9  |     fn total(self: Self) -> UInt8 {
+   |              ---- declared `read`
+30 |     &counter.total() + read_total(&counter) + read_total(&fixed)
+   |      ^^^^^^^ remove the `&` before it
+error[S-Mutation]: this argument is not mutated, so it takes no `&`
+  --> tests/receivers/a_marker_a_read_parameter_refuses_is_the_one_report.lin:30:35
+   |
+18 | fn read_total(counter: Counter) -> UInt8 {
+   |               ------- declared `read`
+30 |     &counter.total() + read_total(&counter) + read_total(&fixed)
+   |                                   ^^^^^^^^ unexpected `&`
+error[S-Mutation]: this argument is not mutated, so it takes no `&`
+  --> tests/receivers/a_marker_a_read_parameter_refuses_is_the_one_report.lin:30:58
+   |
+18 | fn read_total(counter: Counter) -> UInt8 {
+   |               ------- declared `read`
+30 |     &counter.total() + read_total(&counter) + read_total(&fixed)
+   |                                                          ^^^^^^ unexpected `&`

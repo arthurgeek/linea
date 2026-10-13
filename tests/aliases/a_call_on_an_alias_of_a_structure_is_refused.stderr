@@ -1,0 +1,5 @@
+error[N-NotCallable]: this name names a type, and only a primitive converts
+  --> tests/aliases/a_call_on_an_alias_of_a_structure_is_refused.lin:10:14
+   |
+10 |     let _p = Spot(3)
+   |              ^^^^ only a function can be called

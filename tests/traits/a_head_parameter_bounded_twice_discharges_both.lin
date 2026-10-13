@@ -1,0 +1,44 @@
+// A head parameter carrying two bounds discharges both of them, and each is
+// discharged by an implementation generic over the same head -- so a receiver
+// nested several levels deep asks each trait about each level, and answers
+// where every level carries both.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Tell {
+    fn tell(self: Self) -> UInt8
+}
+
+struct Wrap[T] {
+    v: T,
+}
+
+impl Show for UInt8 {
+    fn show(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl Tell for UInt8 {
+    fn tell(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl[T: Show + Tell] Show for Wrap[T] {
+    fn show(self: Self) -> UInt8 {
+        Show.show(self.v)
+    }
+}
+
+impl[T: Show + Tell] Tell for Wrap[T] {
+    fn tell(self: Self) -> UInt8 {
+        Tell.tell(self.v)
+    }
+}
+
+fn main() -> UInt8 {
+    let w: Wrap[Wrap[Wrap[UInt8]]] = .{ v = .{ v = .{ v = 7 } } }
+    Show.show(w)
+}

@@ -1,0 +1,34 @@
+// Two implementations of one trait for one head constructor, each supplying
+// the trait a different argument. The arguments are part of the key, so these
+// are two keys rather than one written twice, and each call reaches the one its
+// arguments name.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl Give[UInt8] for Holder[UInt8] {
+    fn give(_self: Holder[UInt8], u: UInt8) -> UInt8 {
+        u + 1
+    }
+}
+
+impl Give[Bool] for Holder[Bool] {
+    fn give(_self: Holder[Bool], u: Bool) -> UInt8 {
+        if u {
+            6
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let n: Holder[UInt8] = .{ v = 2 }
+    let b: Holder[Bool] = .{ v = true }
+    let one: UInt8 = 1
+    Give.give(n, one) + Give.give(b, true)
+}

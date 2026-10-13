@@ -1,0 +1,8 @@
+fn route() -> Str {
+    let r = r#"{"ok":true} \n"#
+//          ^ string
+//                        ^ string
+//                           ^ string
+    r
+//  ^ variable
+}

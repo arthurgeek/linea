@@ -1,0 +1,20 @@
+struct Point { x: UInt8 }
+
+struct Holder { view: borrow UInt8 }
+
+fn selected(inout holder: Holder, point: Point) -> () where retains(holder.view: borrow point.x) {
+    let read Point { x } = point
+    holder.view = borrow x
+}
+
+fn main() -> UInt8 {
+    let initial: UInt8 = 2
+    let point = Point { x = 41 }
+    var holder = Holder { view = borrow initial }
+    selected(&holder, point)
+    if *holder.view == point.x {
+        0
+    } else {
+        1
+    }
+}

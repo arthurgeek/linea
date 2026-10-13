@@ -1,0 +1,40 @@
+// A hatch is copied byte for byte, and every list the formatter writes has to
+// skip what the copy already wrote. Three lists were taught that and the rest
+// were not, so a hatch inside a call, a struct literal or a match duplicated
+// the element it held -- and each run duplicated it again, so the damage grew
+// without bound. A formatter may not destroy source it can parse.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+enum Colour {
+    Red,
+    Green,
+}
+
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let p: Pair = .{
+// linea fmt: off
+        a = 1,
+// linea fmt: on
+        b = 2,
+    }
+    let c: Colour = Colour.Green
+    let n: UInt8 = match c {
+// linea fmt: off
+        Red => 10,
+// linea fmt: on
+        Green => 20,
+    }
+    add(
+// linea fmt: off
+        n,
+// linea fmt: on
+        p.a + p.b,
+    )
+}

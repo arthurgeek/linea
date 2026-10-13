@@ -1,0 +1,10 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/newtypes/a_newtype_constant_is_not_an_array_length.lin:9:24
+  |
+9 |     let named: [UInt8; three] = [1, 2, 3]
+  |                        ^^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/newtypes/a_newtype_constant_is_not_an_array_length.lin:10:26
+   |
+10 |     let written: [UInt8; Count(2)] = [1, 2]
+   |                          ^^^^^^^^ this is not a number

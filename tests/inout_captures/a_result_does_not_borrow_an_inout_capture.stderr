@@ -1,0 +1,7 @@
+error[O-Escapes]: a closure's result cannot observe a place lent to it `inout`
+ --> tests/inout_captures/a_result_does_not_borrow_an_inout_capture.lin:5:9
+  |
+5 |         borrow count
+  |         ^^^^^^^^^^^^ this observes the lent place
+  |
+  = help: the next call may change the place, so return a value of its own, such as a copy

@@ -1,0 +1,13 @@
+// Each of these waits on the next and the last waits on the first, so none of
+// them has a value. Reported once, as the ring it is: telling each member
+// separately that its initialiser is not a constant expression is true of all
+// three and explains none of them.
+pub let first: UInt8 = second
+
+pub let second: UInt8 = third
+
+pub let third: UInt8 = first
+
+fn main() -> UInt8 {
+    first
+}

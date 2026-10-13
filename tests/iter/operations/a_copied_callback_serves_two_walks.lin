@@ -1,0 +1,12 @@
+import std.io
+
+// `copy(heavy)` hands the first walk its own predicate, so `heavy` is still
+// there for the second.
+fn main() -> Result[UInt8, io.IoError] {
+    let limit: UInt64 = 4
+    let heavy = [limit] |sink weight: UInt64| weight > limit
+    let first = (UInt64(1)..10).any(copy(heavy))
+    let second = (UInt64(1)..3).any(heavy)
+    io.println("{first} {second}")?
+    .Ok(0)
+}

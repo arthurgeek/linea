@@ -1,0 +1,71 @@
+// Count primes below a chosen limit with the sieve of Eratosthenes.
+// Vec stores a runtime-sized table of Bool values. Indexing reads or updates
+// an element, and `for read` looks at each element and leaves it in place.
+import std.mem
+import std.testing
+import std.io
+
+use mem.Oom
+use io.IoError
+use io.println
+
+fn primes_below(limit: UInt64) -> Result[UInt64, Oom] {
+    // `Vec.filled` allocates `limit` entries, each set to true; `?` returns
+    // the Oom error to the caller if the allocation fails.
+    // `defer var` runs `candidates.release()` whenever the function returns, so
+    // the table's memory is freed on every path.
+    defer var candidates = Vec.filled(mem.system(), count: limit, value: true)?
+
+    // Zero and one are nonprime; mark them only when their entries exist.
+    if limit > 0 {
+        candidates[0] = false
+    }
+    if limit > 1 {
+        candidates[1] = false
+    }
+    // Start each prime's multiples at its square. Division keeps the
+    // loop condition from overflowing for large limits.
+    var prime: UInt64 = 2
+    while prime < limit && prime <= (limit - 1) / prime {
+        if candidates[prime] {
+            var multiple = prime * prime
+            while multiple < limit {
+                candidates[multiple] = false
+                multiple += prime
+            }
+        }
+        prime += 1
+    }
+    // Count the candidates still marked prime.
+    var count: UInt64 = 0
+    for read candidate in candidates {
+        if candidate {
+            count += 1
+        }
+    }
+    .Ok(count)
+}
+
+test fn a_sieve_counts_the_primes_below_its_limit() {
+    // The primes below 10 are 2, 3, 5 and 7.
+    testing.assert_eq(primes_below(10), .Ok(4), "primes below ten")?
+    // The primes below 30 are 2, 3, 5, 7, 11, 13, 17, 19, 23 and 29.
+    testing.assert_eq(primes_below(30), .Ok(10), "primes below thirty")?
+    // Neither zero nor one is prime.
+    testing.assert_eq(primes_below(2), .Ok(0), "primes below two")?
+    testing.assert_eq(primes_below(3), .Ok(1), "primes below three")?
+    testing.assert_eq(primes_below(0), .Ok(0), "primes below zero")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let limits: [UInt64; _] = [30, 100, 1000]
+    for limit in limits {
+        let n = primes_below(limit) else |_| {
+            io.eprintln("not enough memory to count primes below {limit}")
+            return .Ok(1)
+        }
+        println("{n} primes below {limit}")?
+    }
+
+    .Ok(0)
+}

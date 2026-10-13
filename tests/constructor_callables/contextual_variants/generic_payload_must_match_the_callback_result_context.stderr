@@ -1,0 +1,5 @@
+error[T-Mismatch]: the callable signature makes `T` both `UInt8` and `UInt16`
+ --> tests/constructor_callables/contextual_variants/generic_payload_must_match_the_callback_result_context.lin:8:36
+  |
+8 |     let boxed: Box[UInt16] = apply(.Held)
+  |                                    ^^^^^ the payload parameter and the result must agree on each enum type argument

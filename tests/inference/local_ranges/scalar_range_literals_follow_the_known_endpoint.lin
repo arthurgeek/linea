@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let end: UInt8 = 100
+    let letters = "a"..end
+    let reversed = end.."a"
+    if letters.lo == 97 && reversed.hi == 97 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,55 @@
+import std.io
+
+pub fn print_str(value: Str) -> () {
+    match io.println(value) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+pub fn print_u64(value: UInt64) -> () {
+    match io.println(value) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+pub fn print_bool(value: Bool) -> () {
+    match io.println(value) {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+trait Metadata {
+    fn write(value: Self) -> ()
+}
+
+template impl Metadata {
+    fn write(value: Self) -> () {
+        match read value {
+            reflect.case => {
+                print_str(reflect.case.name)
+                print_u64(reflect.case.ordinal)
+                print_bool(reflect.case.components_named)
+                for component in reflect.components {
+                    print_str(component.name)
+                    print_u64(component.ordinal)
+                }
+            },
+        }
+    }
+}
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+derive Metadata for Point
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1, y = 2 }
+    Metadata.write(point)
+    0
+}

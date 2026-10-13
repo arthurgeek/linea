@@ -1,0 +1,31 @@
+// A lending walk takes nothing, so a Linear element is one it may reach: the
+// binder observes the place rather than emptying it, and the obligation to
+// consume stays with whatever owns the array.
+//
+// That is the difference an early exit makes visible. A consuming walk over
+// these places is refused where control can leave before the last one --
+// there is nothing left to take what it never reached -- and this one leaves
+// early and is accepted, because it never took anything to begin with.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 3] = [.{ n = 1 }, .{ n = 2 }, .{ n = 4 }]
+
+    var seen: UInt8 = 0
+    for read t in ts {
+        seen += t.n
+        if seen > 2 {
+            break
+        }
+    }
+
+    // Still there, and still owed: the walk lent the places and gave them back.
+    for u in ts {
+        let Token { n: v } = u
+        seen += v
+    }
+    seen
+}

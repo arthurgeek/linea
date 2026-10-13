@@ -1,0 +1,16 @@
+fn metadata[T: Copyable](value: T, _by: UInt8 = 1 + 1) -> T {
+    copy(value)
+}
+
+fn higher[T: Copyable](_selected: fn(read value: T) -> T, value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let _convention: fn(sink value: UInt16, read _by: UInt8 = 2) -> UInt16 = metadata
+    let _default_presence: fn(read value: UInt16, read _by: UInt8) -> UInt16 = metadata
+    let _default_value: fn(read value: UInt16, read _by: UInt8 = 3) -> UInt16 = metadata
+    let _arity: fn(read value: UInt16) -> UInt16 = metadata
+    let _callable_kind: fn(read _selected: UInt8, read value: UInt16) -> UInt16 = higher
+    0
+}

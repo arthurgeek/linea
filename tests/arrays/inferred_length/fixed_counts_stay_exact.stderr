@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `[UInt8; 3]`, found `[UInt8; 2]`
+ --> tests/arrays/inferred_length/fixed_counts_stay_exact.lin:7:10
+  |
+1 | fn take(_values: [UInt8; 3]) -> UInt8 {
+  |         ------- expected because of this parameter
+7 |     take(values)
+  |          ^^^^^^ expected `[UInt8; 3]`, found `[UInt8; 2]`

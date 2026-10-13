@@ -1,0 +1,5 @@
+error[T-DuplicateField]: `x` is named twice
+ --> tests/decl/borrowed_lets/a_borrowed_struct_pattern_cannot_repeat_a_field.lin:5:32
+  |
+5 |     let read Point { x: first, x: second } = point
+  |                                ^ already named above

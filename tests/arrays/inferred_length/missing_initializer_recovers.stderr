@@ -1,0 +1,15 @@
+error[S-Equals]: expected `=`
+ --> tests/arrays/inferred_length/missing_initializer_recovers.lin:3:5
+  |
+3 |     let answer: UInt8 = 0
+  |     ^^^ a binding needs an initialiser
+error[S-Expr]: expected an expression
+ --> tests/arrays/inferred_length/missing_initializer_recovers.lin:3:5
+  |
+3 |     let answer: UInt8 = 0
+  |     ^ this is not the start of an expression
+error[T-ArraySize]: an inferred array length needs an array literal to count
+ --> tests/arrays/inferred_length/missing_initializer_recovers.lin:2:26
+  |
+2 |     let _values: [UInt8; _]
+  |                          ^ supply an array literal or write an explicit length

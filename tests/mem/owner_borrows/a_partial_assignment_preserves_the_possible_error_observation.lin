@@ -1,0 +1,14 @@
+fn work(fallback: UInt64, flag: Bool) -> Result[UInt8, borrow UInt64] where borrows(.Err: fallback) {
+    let local: UInt64 = 7
+    var answer: Result[UInt8, borrow UInt64] = .Err(borrow local)
+    if flag {
+        answer = .Err(borrow fallback)
+    }
+    let value = answer?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    let fallback: UInt64 = 3
+    match work(fallback, false) { Ok(value) => value, Err(view) => UInt8(*view) }
+}

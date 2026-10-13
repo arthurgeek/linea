@@ -1,0 +1,11 @@
+// Reading one binder of a `for inout (a, b)` while the other is in use is the
+// walk's own lend being used, so only a write could conflict.
+fn main() -> UInt8 {
+    var pairs: [(UInt8, UInt8); 2] = [(1, 2), (3, 4)]
+    var total: UInt8 = 0
+    for inout (a, b) in pairs {
+        let sum = a * 10 + b
+        total += sum
+    }
+    total - 46
+}

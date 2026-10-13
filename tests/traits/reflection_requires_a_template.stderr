@@ -1,0 +1,5 @@
+error[T-Reflection]: use a supported reflection operation inside a structural-template member
+ --> tests/traits/reflection_requires_a_template.lin:2:5
+  |
+2 |     reflect.case
+  |     ^^^^^^^ a reflection descriptor is not a runtime value

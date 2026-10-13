@@ -1,0 +1,24 @@
+// A constant index reaches the array a wrapper delegates to through a bounded
+// generic body, and traps when the array is shorter than the index.
+struct Wrapper[C] {
+    inner: C,
+}
+
+impl[C: Index[UInt64]] Index[UInt64] for Wrapper[C] {
+    type Elem = C.Elem
+
+    proj at(inout self: Wrapper[C], i: UInt64) -> C.Elem {
+        self.inner[i]
+    }
+}
+
+fn poke[C: Index[UInt64]](c: C) -> UInt8 {
+    match read c[1 + 4] {
+        _ => 7,
+    }
+}
+
+fn main() -> UInt8 {
+    let w: Wrapper[[UInt8; 2]] = .{ inner = [2, 3] }
+    poke(w)
+}

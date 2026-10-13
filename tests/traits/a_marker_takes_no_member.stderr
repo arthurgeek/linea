@@ -1,0 +1,5 @@
+error[T-Impl]: `Settled` declares no `alike`
+  --> tests/traits/a_marker_takes_no_member.lin:20:8
+   |
+20 |     fn alike(self: Mark, other: Mark) -> Bool {
+   |        ^^^^^ declare it on the trait, or move it to an inherent `impl`

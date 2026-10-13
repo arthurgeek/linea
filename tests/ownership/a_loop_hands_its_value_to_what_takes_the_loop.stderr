@@ -1,0 +1,7 @@
+error[O-Uncommitted]: `use2` has not been given `e` yet, and control leaves here
+  --> tests/ownership/a_loop_hands_its_value_to_what_takes_the_loop.lin:33:9
+   |
+31 |             break e
+   |                   - it was given up here
+33 |         return one(d),
+   |         ^^^^^^^^^^^^^ give the value up after this, not before it

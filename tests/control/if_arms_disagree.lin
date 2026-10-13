@@ -1,0 +1,20 @@
+// Arms that cannot agree, and which of them is blamed.
+//
+// `false` says what it is; `1` is a literal and takes what flows into it. So
+// the settled arm is the one that knows, and the waiting one is checked
+// against it -- the same division a call makes across its arguments. The
+// report names `1`, and points at `false` as the arm that decided.
+//
+// Written the other way round it reads the same way, because what settles is
+// not what was written first. That is the whole of the rule: a branch whose
+// arms disagree blames the arm that could have been anything, not the arm
+// that could not.
+fn main() -> UInt8 {
+    let x = if true {
+        1
+    } else {
+        false
+    }
+    let _ = x
+    0
+}

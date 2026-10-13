@@ -1,0 +1,26 @@
+// A generic member instantiated at two nestings of the same components
+// lowers to two functions, and a symbol that is not injective is a program
+// the assembler refuses after `check` accepted it. `(Int64, (Str, Bool))`,
+// `((Int64, Str), Bool)` and `(Int64, Str)` each reach the instantiation
+// their own spelling names, and each earns its own symbol.
+struct Holder {
+    n: UInt8,
+}
+
+impl Holder {
+    pub fn give[T](h: Holder, _u: T) -> UInt8 {
+        h.n
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    let right: (Int64, (Str, Bool)) = (1, ("a", true))
+    let left: ((Int64, Str), Bool) = ((1, "a"), true)
+    let pair: (Int64, Str) = (1, "a")
+    let a = Holder.give(h, right)
+    let b = Holder.give(h, left)
+    let c = Holder.give(h, pair)
+    let _h = h
+    a + b + c
+}

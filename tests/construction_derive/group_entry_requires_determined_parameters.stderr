@@ -1,0 +1,10 @@
+error[N-Unused]: `A` is never used
+  --> tests/construction_derive/group_entry_requires_determined_parameters.lin:17:15
+   |
+17 | derive[A, T] (Marker, Count[A]) for Holder[T]
+   |               ^^^^^^ name it in this declaration, or remove it
+error[T-Impl]: implementation parameter `A` cannot be recovered from its key
+  --> tests/construction_derive/group_entry_requires_determined_parameters.lin:17:15
+   |
+17 | derive[A, T] (Marker, Count[A]) for Holder[T]
+   |               ^^^^^^ place the parameter in the receiver or trait arguments outside associated-type projections

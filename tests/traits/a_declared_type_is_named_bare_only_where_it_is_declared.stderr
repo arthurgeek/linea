@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Item`
+  --> tests/traits/a_declared_type_is_named_bare_only_where_it_is_declared.lin:20:26
+   |
+20 |     fn get(self: Box) -> Item {
+   |                          ^^^^ no type with this name is declared here

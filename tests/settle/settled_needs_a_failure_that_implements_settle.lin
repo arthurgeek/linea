@@ -1,0 +1,9 @@
+// `settled()` is offered only where the failure implements `Settle`. A text
+// failure holds nothing to release, so it has no reason to reduce to.
+fn main() -> UInt8 {
+    let parsed: Result[UInt8, Str] = .Err("not a number")
+    match parsed.settled() {
+        Ok(value) => value,
+        Err(_) => 1,
+    }
+}

@@ -1,0 +1,11 @@
+// An omitted parameter receives the constant its declaration writes, whether
+// the call stops short of the defaults, names one and skips the other, or
+// omits both. Each parameter is weighted differently, so a spliced value that
+// is not the declared one answers with a different number.
+fn shade(base: UInt8, tint: UInt8 = 3, wash: UInt8 = 5) -> UInt8 {
+    base * 10 + tint * 4 + wash
+}
+
+fn main() -> UInt8 {
+    shade(1, 2) + shade(1, wash: 2) + shade(1)
+}

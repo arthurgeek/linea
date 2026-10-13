@@ -1,0 +1,19 @@
+// Another test's name is a name too. The rule refuses every by-name reference
+// rather than the ones from outside a test, because the narrower rule decides
+// per call which caller is ordinary -- two answers, the day a test is lowered.
+import std.io
+
+use io.IoError
+
+test fn one() -> Result[(), IoError] {
+    return .Ok({})
+}
+
+test fn two() -> Result[(), IoError] {
+    one()?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    0
+}

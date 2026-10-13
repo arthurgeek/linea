@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/inference/map_errors/borrowed_mapped_errors_still_require_their_owner.lin:10:11
+   |
+10 |     defer clear(&owner)
+   |           ^^^^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     let value = fail(owner).map_err(|sink error| error)?
+   |                 --------------------------------------- the observation is returned here

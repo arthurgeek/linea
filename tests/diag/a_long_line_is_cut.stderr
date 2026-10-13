@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `zzz`
+ --> tests/diag/a_long_line_is_cut.lin:2:13
+  |
+2 |     let x = zzz + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1  ...
+  |             ^^^ no binding with this name is in scope

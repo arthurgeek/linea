@@ -1,0 +1,17 @@
+import a
+
+use a.Foo
+
+pub trait Conv[X] {
+    fn conv(self: Self, x: X) -> UInt8
+}
+
+pub struct Id {
+    n: UInt8,
+}
+
+impl Conv[Id] for Foo {
+    fn conv(self: Self, x: Id) -> UInt8 {
+        self.n * x.n
+    }
+}

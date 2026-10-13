@@ -1,0 +1,5 @@
+// Not `pub`, so no other module may name it. Private is the default: what a
+// module exports is a decision, and a decision is written down.
+fn hidden() -> UInt8 {
+    1
+}

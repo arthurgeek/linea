@@ -1,0 +1,5 @@
+error[M-Unused]: `a` is never used
+ --> tests/modules/unused_import/main.lin:1:8
+  |
+1 | import a
+  |        ^ remove the import

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `Coins` declares `weight` itself and through `Measure`. The postfix form\n// reaches the type's own operation, so its item keeps the dot, and the trait's\n// is offered written out, replacing the whole postfix call.\ntrait Measure {\n    fn weight(self: Self) -> UInt8\n}\n\nstruct Coins {\n    n: UInt8,\n}\n\nimpl Coins {\n    fn weight(self: Coins) -> UInt8 {\n        self.n\n    }\n}\n\nimpl Measure for Coins {\n    fn weight(self: Self) -> UInt8 {\n        self.n + 1\n    }\n}\n\nfn main() -> UInt8 {\n    let coppers: Coins = .{ n = 3 }\n    coppers.weight()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":25,"character":12}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

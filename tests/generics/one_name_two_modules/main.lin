@@ -1,0 +1,18 @@
+// A symbol carries what a function was instantiated with, and two modules may
+// each declare a type of one name. Spelled by that name alone, one generic
+// instantiated at both produced two functions under one symbol -- which the
+// assembler refuses, so a valid program could not be built.
+import a
+import b
+
+fn ident[T: Copyable](v: T) -> T {
+    copy(v)
+}
+
+fn main() -> UInt8 {
+    let one = a.make()
+    let two = b.make()
+    let c1 = ident(one)
+    let c2 = ident(two)
+    c1.v + c2.q
+}

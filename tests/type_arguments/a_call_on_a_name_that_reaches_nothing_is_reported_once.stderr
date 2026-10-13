@@ -1,0 +1,15 @@
+error[N-Undefined]: undefined name `missing`
+ --> tests/type_arguments/a_call_on_a_name_that_reaches_nothing_is_reported_once.lin:8:14
+  |
+8 |     let _a = missing.parse[UInt8]()
+  |              ^^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `nothing_here`
+ --> tests/type_arguments/a_call_on_a_name_that_reaches_nothing_is_reported_once.lin:9:14
+  |
+9 |     let _b = nothing_here[UInt8](3)
+  |              ^^^^^^^^^^^^ no binding with this name is in scope
+error[N-Variant]: this name refers to a type, and a type has no parts to select
+  --> tests/type_arguments/a_call_on_a_name_that_reaches_nothing_is_reported_once.lin:10:14
+   |
+10 |     let _c = Seed.make[UInt8](1)
+   |              ^^^^ only an enum has variants

@@ -1,0 +1,9 @@
+// A bare `carrier` after the visibility is refused like one before it.
+pub carrier struct Session {
+    user: Str,
+}
+
+fn main() -> UInt8 {
+    let _session = Session { user = "ada" }
+    0
+}

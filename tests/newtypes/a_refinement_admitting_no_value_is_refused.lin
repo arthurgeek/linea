@@ -1,0 +1,8 @@
+// An empty range admits no value, so a type nothing can construct is refused
+// where it is declared rather than left to be discovered at every call site
+// that tries to build one.
+pub type Empty = UInt8 where it in 5..=4
+
+fn main() -> UInt8 {
+    0
+}

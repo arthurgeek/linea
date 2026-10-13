@@ -1,0 +1,23 @@
+struct Point { x: UInt8 }
+
+fn matched(point: Point) -> UInt8 {
+    match read point {
+        Point { x } => {
+            let observe = read [read x] || x
+            observe()
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    var point = Point { x = 3 }
+    let read Point { x } = point
+    let observe = read [read x] || x
+    let before = observe()
+    point.x = 5
+    if before == 3 && matched(point) == 5 {
+        0
+    } else {
+        1
+    }
+}

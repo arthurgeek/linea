@@ -1,0 +1,41 @@
+// Which implementation answered a settled reference is the key coherence makes
+// unique, and the trait's own arguments are part of it: one type may implement
+// one trait twice at different arguments, and each of those settles `Item` its
+// own way. A reading that took the trait and the type alone would find
+// whichever came first, so the two calls below would share one answer -- and
+// one of them would be checked against a type it never has.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[T] {
+    type Item
+
+    fn of(x: Self, t: T) -> Self.Item where carries(x, t)
+}
+
+impl Holds[UInt8] for Coins {
+    type Item = UInt8
+
+    fn of(x: Self, t: UInt8) -> Self.Item {
+        x.count + t
+    }
+}
+
+impl Holds[Bool] for Coins {
+    type Item = Bool
+
+    fn of(_x: Self, t: Bool) -> Self.Item {
+        t
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: UInt8 = 4
+    if Holds.of(c, true) {
+        Holds.of(c, n)
+    } else {
+        0
+    }
+}

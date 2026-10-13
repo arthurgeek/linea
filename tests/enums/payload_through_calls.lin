@@ -1,0 +1,26 @@
+enum Shape { Circle(UInt8), Square }
+
+fn make(n: UInt8) -> Shape {
+    Shape.Circle(n)
+}
+
+fn bump(s: Shape) -> Shape {
+    match read s {
+        Circle(n) => Shape.Circle(n + 1),
+        Square => Shape.Square,
+    }
+}
+
+fn size(s: Shape) -> UInt8 {
+    match read s {
+        Circle(n) => n,
+        Square => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    // Every call here both takes and returns a value too wide for a register,
+    // so each hidden pointer has to name storage that outlives the call it was
+    // made for -- and the innermost result has to survive three more calls.
+    size(bump(bump(bump(make(7)))))
+}

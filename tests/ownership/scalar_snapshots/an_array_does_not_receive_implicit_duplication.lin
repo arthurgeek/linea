@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let original: [UInt8; 2] = [7, 8]
+    let moved = original
+    original[0] + moved[1]
+}

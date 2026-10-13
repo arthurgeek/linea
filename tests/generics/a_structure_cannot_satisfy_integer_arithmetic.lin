@@ -1,0 +1,17 @@
+// Arithmetic requires an Integer constraint on its operand type.
+// A structure cannot satisfy that closed built-in family.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn add[T: Integer](x: T, y: T) -> T where carries() {
+    x + y
+}
+
+fn main() -> UInt8 {
+    let p: Pair = .{ a = 1, b = 2 }
+    let q: Pair = .{ a = 3, b = 4 }
+    let r: Pair = add(p, q)
+    r.a
+}

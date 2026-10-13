@@ -1,0 +1,18 @@
+@linear
+struct Owner { signed: Int64, fraction: Float64 }
+
+fn close(sink owner: Owner) -> () {
+    let Owner { signed: _signed, fraction: _fraction } = owner
+}
+
+fn main() -> UInt8 {
+    let owner: Owner = .{ signed = -7, fraction = 1.5 }
+    let signed = owner.signed
+    let fraction = owner.fraction
+    close(owner)
+    if signed == -7 && fraction == 1.5 {
+        0
+    } else {
+        1
+    }
+}

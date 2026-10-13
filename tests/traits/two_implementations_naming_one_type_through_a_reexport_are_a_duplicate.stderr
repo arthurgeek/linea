@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/two_implementations_naming_one_type_through_a_reexport_are_a_duplicate/main.lin:21:6
+   |
+15 | impl Give[a.Pair] for Holder {
+   |      ---- already implemented here
+21 | impl Give[mid.Pair] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

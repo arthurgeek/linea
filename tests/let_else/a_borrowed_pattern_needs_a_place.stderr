@@ -1,0 +1,5 @@
+error[T-Lend]: a borrowed pattern requires a place
+  --> tests/let_else/a_borrowed_pattern_needs_a_place.lin:20:39
+   |
+20 |     let read Size { width, height } = measure(3) else |_| {
+   |                                       ^^^^^^^^^^^^^^^^^^^^^ bind the value before reading it apart

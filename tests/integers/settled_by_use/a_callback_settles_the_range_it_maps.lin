@@ -1,0 +1,17 @@
+@copyable
+struct Row { index: UInt64 }
+
+impl Row {
+    fn of(index: UInt64) -> Row {
+        Row { index }
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt64 = 0
+    // `Row.of` takes `UInt64`, so the range walks `UInt64`.
+    for row in (0..3).map(|sink item| Row.of(item)) {
+        total += row.index
+    }
+    UInt8(total - 3)
+}

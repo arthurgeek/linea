@@ -1,0 +1,30 @@
+// A declaration takes the types it is generic over in brackets, on all three
+// forms. A bound follows a `:`, and several are separated by `+`.
+//
+// The parser records a bound as a name and nothing more. Whether it is a
+// capability or a trait is a question about names, which the parser answers none
+// of -- the resolver classifies the list, the same way it decides whether a
+// selection is a field or a variant.
+enum Holder[T] {
+    Empty(T),
+}
+
+// A trailing comma asks for the broken form, the same way it does in a field
+// list: a list is edited a line at a time and the last line is not special.
+struct Pair[
+    A,
+    B: Copyable,
+] {
+    x: A,
+    y: B,
+}
+
+// A function takes them too, and its body is what makes a parameter's copyability
+// observable at all -- a type declaration has no body to observe it in.
+fn first[A: Copyable, B: Copyable](p: Pair[A, B]) -> A {
+    copy(p.x)
+}
+
+fn main() -> UInt8 {
+    first(.{ x = 1, y = true })
+}

@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 3
+    let outer = read [read number] || {
+        let inner = read [read number] || number
+        inner() + inner()
+    }
+    outer()
+}

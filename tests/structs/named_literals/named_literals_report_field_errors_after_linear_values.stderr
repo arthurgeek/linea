@@ -1,0 +1,10 @@
+error[T-UnknownField]: `Parcel` has no field `unknown`
+ --> tests/structs/named_literals/named_literals_report_field_errors_after_linear_values.lin:8:35
+  |
+8 |     let _parcel = Parcel { token, unknown = 1 }
+  |                                   ^^^^^^^ not a field of this type
+error[T-MissingField]: `code` is not given a value
+ --> tests/structs/named_literals/named_literals_report_field_errors_after_linear_values.lin:8:19
+  |
+8 |     let _parcel = Parcel { token, unknown = 1 }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ every field is given one

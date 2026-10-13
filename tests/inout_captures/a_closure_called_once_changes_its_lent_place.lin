@@ -1,0 +1,10 @@
+// A `sink` closure is called once, and that call may change the place it has
+// lent `inout`.
+fn main() -> UInt8 {
+    var total: UInt8 = 4
+    let add = sink [inout total] |amount: UInt8| {
+        total += amount
+    }
+    add(5)
+    total
+}

@@ -1,0 +1,13 @@
+import weather
+
+struct Cell[T] { value: T }
+
+fn main() -> UInt8 {
+    let local = Cell[UInt8] { value = 7 }
+    let remote = weather.Celsius { value = 20.0 }
+    if local.value == 7 && remote.value == 20.0 {
+        0
+    } else {
+        1
+    }
+}

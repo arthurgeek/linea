@@ -1,0 +1,21 @@
+// A trait signature writes the default of a method's type parameter and of the
+// parameter typed by it; a call through a bound and a call on a concrete type
+// read the same ones.
+trait Wrap {
+    fn wrap[T: Copyable = UInt8](self: Self, extra: T = 1) -> T where carries(extra)
+}
+
+impl Wrap for UInt8 {
+    fn wrap[T: Copyable](_self: Self, extra: T) -> T where carries(extra) {
+        copy(extra)
+    }
+}
+
+fn through[X: Wrap](x: X) -> UInt8 {
+    x.wrap()
+}
+
+fn main() -> UInt8 {
+    let c: UInt8 = 3
+    through(c) + c.wrap() - 2
+}

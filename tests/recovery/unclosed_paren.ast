@@ -1,0 +1,8 @@
+program decls=1
+  decl function "main" tokens 0..11
+    returns UInt8
+    expr %4 block tokens 6..11
+      expr %3 grouped tokens 7..10
+        expr %2 add tokens 8..10
+          expr %0 int_literal tokens 8..9 "1"
+          expr %1 err tokens 10..10

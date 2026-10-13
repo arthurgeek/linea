@@ -1,0 +1,10 @@
+error[S-Separator]: a line break ends this refinement clause
+ --> tests/newtypes/a_clause_the_file_ends_inside_is_refused.lin:4:26
+  |
+4 | pub type Percent = UInt8 where
+  |                          ^^^^^ a refinement clause is written on the line `where` opens
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/newtypes/a_clause_the_file_ends_inside_is_refused.lin:4:10
+  |
+4 | pub type Percent = UInt8 where
+  |          ^^^^^^^ found 0

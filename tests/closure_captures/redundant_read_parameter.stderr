@@ -1,0 +1,5 @@
+error[S-Entry]: `read` is redundant on a parameter
+ --> tests/closure_captures/redundant_read_parameter.lin:1:13
+  |
+1 | fn identity(read value: UInt8) -> UInt8 {
+  |             ^^^^ omit `read`; parameters are read by default

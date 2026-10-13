@@ -1,0 +1,11 @@
+import std.mem
+
+use mem.SystemAllocator
+
+alias SysVec[T] = Vec[T, SystemAllocator]
+
+fn main() -> UInt8 {
+    let names = SysVec[UInt8].new_in(mem.system())
+    names.release()
+    0
+}

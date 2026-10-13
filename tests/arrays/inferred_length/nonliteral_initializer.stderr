@@ -1,0 +1,5 @@
+error[T-ArraySize]: an inferred array length needs an array literal to count
+ --> tests/arrays/inferred_length/nonliteral_initializer.lin:6:26
+  |
+6 |     let _values: [UInt8; _] = values()
+  |                          ^ supply an array literal or write an explicit length

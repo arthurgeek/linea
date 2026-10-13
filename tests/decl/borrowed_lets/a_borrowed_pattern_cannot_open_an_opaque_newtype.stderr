@@ -1,0 +1,5 @@
+error[M-Opaque]: `Secret` is opaque outside `vault`
+ --> tests/decl/borrowed_lets/a_borrowed_pattern_cannot_open_an_opaque_newtype/main.lin:7:14
+  |
+7 |     let read Secret(value) = secret
+  |              ^^^^^^^^^^^^^ only its own module can take one apart

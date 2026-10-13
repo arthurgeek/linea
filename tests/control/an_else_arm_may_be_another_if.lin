@@ -1,0 +1,24 @@
+// `else if` is the else arm being another conditional rather than a block, so
+// the tree nests exactly as the meaning does. Nothing below the parser knows
+// about a chain: a pass sees a conditional whose else arm is a conditional,
+// which is what it would have seen had the second one been written inside
+// braces.
+//
+// Every arm still agrees on a type, and the last `else` is what makes the
+// whole thing a value rather than a statement.
+fn classify(n: UInt8) -> UInt8 {
+    if n > 100 {
+        3
+    } else if n > 10 {
+        2
+    } else if n > 1 {
+        1
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    // 3 + 2 + 1 + 0, so every arm is the one reached exactly once.
+    classify(200) + classify(50) + classify(5) + classify(0)
+}

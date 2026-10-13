@@ -1,0 +1,8 @@
+extern fn linea_float64_parse(address: UInt64, length: UInt64, inout bits: UInt64, inout offset: UInt64) -> UInt64
+
+// Parse a Float64 from `bytes` through the runtime, which writes the value's
+// bits and the offset parsing stopped at. Only the call receives the certified
+// byte address; no address escapes to text.
+internal fn parse_float64_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
+    linea_float64_parse(bytes.at, bytes.len, &bits, &offset)
+}

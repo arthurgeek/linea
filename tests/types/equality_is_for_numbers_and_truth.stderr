@@ -1,0 +1,5 @@
+error[T-Bound]: `P` does not implement `Equatable`
+  --> tests/types/equality_is_for_numbers_and_truth.lin:12:10
+   |
+12 |     if a == b {
+   |          ^^ the operator is a call on that trait, so implement it for this type

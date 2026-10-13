@@ -1,0 +1,9 @@
+fn remainder[T: Integer](a: T, b: T) -> T where carries() {
+    a % b
+}
+
+fn main() -> UInt8 {
+    let _ok = remainder(5, 2)
+    let _no = remainder(5.5, 2.0)
+    0
+}

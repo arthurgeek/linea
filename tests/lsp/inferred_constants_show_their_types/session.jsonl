@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"let message = \"hello\"\n\nlet answer = UInt8(42)\n\nfn main() -> UInt8 {\n    if message.length() == 5 {\n        answer\n    } else {\n        0\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":0,"character":5}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":2,"character":5}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":0,"character":0},"end":{"line":11,"character":0}}}}
+{"jsonrpc":"2.0","id":5,"method":"shutdown"}

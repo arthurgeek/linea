@@ -1,0 +1,11 @@
+// A literal that folds outside the range is refused at construction, naming
+// the value, the range and the type.
+type Percent = UInt8 where it in 0..=99
+
+fn wants(_p: Percent) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    wants(Percent(150))
+}

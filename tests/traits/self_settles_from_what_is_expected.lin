@@ -1,0 +1,32 @@
+// A signature writing `Self` only where it returns has no argument to settle
+// it, and the type the call is asked for does. Nothing else could: the
+// implementation a call runs follows from what `Self` is, so a constructor
+// reached through a trait is settled by the expectation or by nothing.
+//
+// One trait declaring both shapes, because they are one question asked at two
+// places: `of` settles `Self` from what stands where it is written, `zero`
+// from what the binding says it is about to hold.
+struct Account {
+    balance: UInt8,
+}
+
+trait Make {
+    fn of(x: Self) -> UInt8
+
+    fn zero() -> Self
+}
+
+impl Make for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+
+    fn zero() -> Self {
+        .{ balance = 9 }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = Make.zero()
+    Make.of(a)
+}

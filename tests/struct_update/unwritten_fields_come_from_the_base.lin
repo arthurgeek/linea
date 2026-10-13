@@ -1,0 +1,25 @@
+// `..base` ends a structure literal: every field the literal does not write
+// takes its value from `base`, which has the literal's type.
+@(copyable, derive(Default))
+struct Window {
+    width: UInt8,
+    height: UInt8,
+    depth: UInt8,
+}
+
+impl Window {
+    fn square(side: UInt8) -> Window {
+        .{ width = side, height = side, depth = 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    // A named literal takes the rest of its fields from a function's result.
+    let tall = Window { height = 30, ..Window.square(4) }
+    // A contextual literal takes its type from the annotation.
+    let deep: Window = .{ depth = 2, ..tall }
+    // Every field comes from the base when the literal writes none.
+    let same = Window { ..Window.default() }
+    // 4 + 30 + 2 + 0
+    deep.width + deep.height + deep.depth + same.width
+}

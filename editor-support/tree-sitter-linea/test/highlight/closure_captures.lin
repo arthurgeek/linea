@@ -1,0 +1,14 @@
+fn configure() -> () {
+    let threshold = 3
+    let predicate = [threshold] |sink item| item > threshold + 1
+//                   ^ variable
+//                               ^ keyword.storage.modifier
+//                                    ^ variable.parameter
+//                                          ^ variable
+//                                                           ^ operator
+    let explicit = read [read threshold] |item| item + threshold
+//                 ^ keyword.storage.modifier
+//                       ^ keyword.storage.modifier
+//                            ^ variable
+//                                        ^ variable.parameter
+}

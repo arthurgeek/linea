@@ -1,0 +1,10 @@
+enum Box[T] { Held(T) }
+
+fn apply[R, F: fn(sink value: UInt8) -> R](make: F) -> R where carries(make) {
+    make(4)
+}
+
+fn main() -> UInt8 {
+    let boxed: Box[UInt16] = apply(.Held)
+    match boxed { Held(value) => UInt8(value) }
+}

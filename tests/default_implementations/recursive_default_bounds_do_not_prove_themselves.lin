@@ -1,0 +1,17 @@
+trait First {
+    fn first(self: Self) -> UInt8
+}
+
+trait Second {}
+
+default impl[T: Second] First for T {
+    fn first(_self: T) -> UInt8 {
+        0
+    }
+}
+
+default impl[T: First] Second for T {}
+
+fn main() -> UInt8 {
+    First.first(false)
+}

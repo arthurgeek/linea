@@ -1,0 +1,7 @@
+// The grammar makes imports a prefix of a file, so an import a completion
+// writes joins that prefix rather than opening a second one.
+import ledger
+
+fn main() -> UInt8 {
+    ledger.size()
+}

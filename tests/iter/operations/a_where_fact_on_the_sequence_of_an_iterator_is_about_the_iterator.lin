@@ -1,0 +1,11 @@
+// Every iterator is its own sequence, so `I.Iter` is `I`, and the `where`
+// clauses about `I.Iter` say that `I` and its items may be dropped. `map`
+// drops each item it is given, and `fold` drops the walk. Three items make 3.
+fn count[I: Iterator + Sequence](sink items: I) -> UInt64 where I.Iter: Discardable, I.Iter.Item: Discardable {
+    items.map(|sink _item| UInt64(1)).fold(0, |sink total, sink one| total + one)
+}
+
+fn main() -> UInt8 {
+    let weights = [UInt64(4), 8, 15]
+    UInt8(count(weights.as_slice().iterate()))
+}

@@ -1,0 +1,25 @@
+// A closure's capture and its parameter each shadow the module `shapes`
+// inside the closure body. A closure in `outer`, where no local shadows it,
+// reaches the module.
+import shapes
+
+fn main() -> UInt8 {
+    let shapes: Str = "abc"
+    let measure = [shapes] || {
+        shapes.length()
+    }
+    let via_param = |shapes: Str| {
+        shapes.length()
+    }
+    let sized = [sink bag = shapes.length()] || {
+        bag
+    }
+    UInt8.try_from(measure() + via_param("xy") + sized()).unwrap_or(0) + outer()
+}
+
+fn outer() -> UInt8 {
+    let f = |n: UInt8| {
+        shapes.make().size + n
+    }
+    f(1)
+}

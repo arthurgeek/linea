@@ -1,0 +1,16 @@
+// A trait names a set of signatures and no representation. Each is a function
+// header ended by a newline rather than followed by a block, which is the one
+// declaration form the grammar did not otherwise have.
+//
+// Several of them, because a trait with one signature says nothing about
+// whether the list is a list. Written `_Measure` because nothing here names
+// it: a bound is what names a trait, and a bound naming one is its own case.
+trait _Measure {
+    fn of(x: Self) -> UInt8
+
+    fn scaled(x: Self, by: UInt8) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

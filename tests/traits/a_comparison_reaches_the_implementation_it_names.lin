@@ -1,0 +1,30 @@
+// `less` answers the opposite of what the field says, so the answer proves the
+// operator routed through the implementation rather than through the
+// representation underneath it. `==` reaches `equals` on the same terms.
+struct Backwards {
+    n: UInt8,
+}
+
+impl Equatable for Backwards {
+    fn equals(self: Backwards, other: Backwards) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Comparable for Backwards {
+    fn less(self: Backwards, other: Backwards) -> Bool {
+        self.n > other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Backwards = .{ n = 1 }
+    let b: Backwards = .{ n = 2 }
+    if a == b {
+        1
+    } else if a < b {
+        0
+    } else {
+        8
+    }
+}

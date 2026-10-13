@@ -1,0 +1,27 @@
+// A user iterator is enumerated and then skipped, and the walk lends the
+// adapter it advances.
+struct Countdown {
+    at: UInt8,
+}
+
+impl Iterator for Countdown {
+    type Item = UInt8
+
+    fn next(inout self: Countdown) -> Option[UInt8] {
+        if self.at >= 4 {
+            return .None
+        }
+        self.at += 1
+        .Some(self.at)
+    }
+}
+
+fn main() -> UInt8 {
+    var rest = Countdown { at = 0 }.enumerate().skip(1)
+    var total: UInt64 = 0
+    // The pairs (1, 2), (2, 3) and (3, 4) sum to 15.
+    for (i, x) in &rest {
+        total += i + UInt64(x)
+    }
+    UInt8(total - 15)
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/maps/a_lookup_observation_prevents_removal.lin:8:5
+  |
+8 |     collections.Map.remove(&values, 1).unwrap().release()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+9 |     let observed = *item
+  |                    ----- the observation is still used here

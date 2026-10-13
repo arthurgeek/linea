@@ -1,0 +1,35 @@
+// A standalone derive applies the enum to its own parameters, so a payload
+// naming the enum's parameter is read as the parameter the head applies.
+struct Report[T] {
+    detail: T,
+}
+
+enum Failure[T] {
+    Reported(Report[T]),
+    Silent,
+}
+
+derive[U] From[Report[U]] for Failure[U]
+
+fn check(detail: UInt8) -> Result[UInt8, Report[UInt8]] {
+    if detail > 5 {
+        .Err(Report[UInt8] { detail = detail })
+    } else {
+        .Ok(detail)
+    }
+}
+
+fn run(detail: UInt8) -> Result[UInt8, Failure[UInt8]] {
+    let checked = check(detail)?
+    .Ok(checked)
+}
+
+fn main() -> UInt8 {
+    match run(8) {
+        Err(failure) => match failure {
+            Reported(report) => report.detail - 8,
+            Silent => 1,
+        },
+        Ok(_) => 2,
+    }
+}

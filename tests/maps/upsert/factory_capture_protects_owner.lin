@@ -1,0 +1,17 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    var owner: UInt8 = 7
+    var values: collections.Map[UInt8, borrow UInt8, mem.SystemAllocator] = collections.Map.new()
+    {
+        let make = [owner] |query: UInt8, _allocator: mem.SystemAllocator| -> Result[collections.Entry[UInt8, borrow UInt8], mem.Oom] where borrows(.Ok: owner) {
+            .Ok(.{ key = query, value = borrow owner })
+        }
+        collections.Map.upsert(&values, 1, make, |sink value| value).unwrap()
+    }
+    owner = 9
+    let observed = **values.get(1).unwrap()
+    values.release()
+    observed
+}

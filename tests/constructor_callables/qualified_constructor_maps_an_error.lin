@@ -1,0 +1,16 @@
+enum Failure { Parse(UInt8) }
+
+fn main() -> UInt8 {
+    let input: Result[UInt8, UInt8] = .Err(7)
+    let mapped = input.map_err(Failure.Parse)
+    match mapped {
+        Ok(_) => 1,
+        Err(error) => match error {
+            Parse(code) => if code == 7 {
+                0
+            } else {
+                2
+            },
+        },
+    }
+}

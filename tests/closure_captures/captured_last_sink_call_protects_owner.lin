@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    var number: UInt8 = 7
+    let observe = sink [sink saved = borrow number] || -> where carries(saved) saved
+    let observation = observe()
+    number = 8
+    *observation + number
+}

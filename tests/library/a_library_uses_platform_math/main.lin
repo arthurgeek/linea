@@ -1,0 +1,7 @@
+export fn power_is_eight() -> UInt8 {
+    if Float64.pow(2.0, exponent: 3.0) == 8.0 {
+        1
+    } else {
+        0
+    }
+}

@@ -1,0 +1,5 @@
+error[N-Unused]: `Spare` is never used
+ --> tests/enums/unused_enum.lin:1:6
+  |
+1 | enum Spare { A }
+  |      ^^^^^ name it in an annotation, or remove it

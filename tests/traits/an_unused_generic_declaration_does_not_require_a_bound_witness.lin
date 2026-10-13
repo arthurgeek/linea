@@ -1,0 +1,38 @@
+// An unused generic declaration may combine a Discardable bound with a trait
+// whose available implementations are linear. The declaration creates no value.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+@linear
+struct Locked[U: Discardable] {
+    inner: U,
+}
+
+trait Sealed {
+    fn seal(x: Self) -> UInt8
+}
+
+impl Sealed for Key {
+    fn seal(x: Self) -> UInt8 {
+        x.id
+    }
+}
+
+impl[T: Discardable] Sealed for Locked[T] {
+    fn seal(_x: Self) -> UInt8 {
+        1
+    }
+}
+
+struct _Holder[T: Discardable + Sealed] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let k: Key = .{ id = 7 }
+    let n = Sealed.seal(k)
+    let Key { id: rest } = k
+    n + rest
+}

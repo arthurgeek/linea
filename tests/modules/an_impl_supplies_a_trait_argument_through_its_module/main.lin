@@ -1,0 +1,29 @@
+// The arguments an `impl` supplies its trait are written types, so one of them
+// names a type through the module that declares it exactly as a parameter or a
+// return type does: `impl Holds[pct.Thing]` is the implementation `use
+// pct.Thing` and `impl Holds[Thing]` would register, and the call that reaches
+// it finds the same one.
+import pct
+
+trait Holds[T] {
+    fn of(s: Self, _t: T) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Holds[pct.Thing] for Coins {
+    fn of(s: Self, _t: pct.Thing) -> UInt8 {
+        s.n
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ n = 5 }
+    let t = pct.make()
+    let r = Holds.of(c, t)
+    let _c = c
+    let _t = t
+    r
+}

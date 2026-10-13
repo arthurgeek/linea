@@ -1,0 +1,5 @@
+error[N-Undefined]: `thing` names no type in `pct`
+ --> tests/modules/a_dotted_type_name_names_a_type/main.lin:6:18
+  |
+6 | fn width(_t: pct.thing) -> UInt8 {
+  |                  ^^^^^ no type of that name is declared in that module

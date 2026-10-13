@@ -1,0 +1,14 @@
+@copyable
+enum State { Open, Closed }
+
+fn main() -> UInt8 {
+    let state: State = .Open
+    let duplicate = copy(state)
+    let first = match read state { Open => true, Closed => false }
+    let second = match duplicate { Open => true, Closed => false }
+    if first && second {
+        0
+    } else {
+        1
+    }
+}

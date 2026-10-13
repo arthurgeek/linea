@@ -1,0 +1,12 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_nested_transfer_stays_open.lin:25:21
+   |
+25 |     use2(d, join(e, return 7))
+   |          - it was given up here
+   |                     ^^^^^^^^ give the value up after this, not before it
+error[O-Uncommitted]: `join` has not been given `e` yet, and control leaves here
+  --> tests/ownership/a_nested_transfer_stays_open.lin:25:21
+   |
+25 |     use2(d, join(e, return 7))
+   |                  - it was given up here
+   |                     ^^^^^^^^ give the value up after this, not before it

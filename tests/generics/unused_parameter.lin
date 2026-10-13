@@ -1,0 +1,16 @@
+// A type parameter is a declaration, and one nothing names is an error like
+// any other. `phantom` declares one read for identity alone, which is how a
+// type carries a distinction with no representation.
+struct Held[T] {
+    x: UInt8,
+}
+
+struct Phantom[phantom T] {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    let h: Held[UInt8] = .{ x = 1 }
+    let p: Phantom[UInt8] = .{ x = 2 }
+    h.x + p.x
+}

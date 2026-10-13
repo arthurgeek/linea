@@ -1,0 +1,10 @@
+@linear
+pub enum Key {
+    Forged(UInt8),
+}
+
+impl Key {
+    pub fn release(sink k: Key) -> UInt8 {
+        match k { Forged(n) => n }
+    }
+}

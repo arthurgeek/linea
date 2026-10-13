@@ -1,0 +1,19 @@
+// A function generic over the allocator is not a value until its parameter is
+// settled, so `route` cannot take it by name: `route_raw` takes it, and a
+// function over `http.Request` needs no parameter.
+import std.http
+
+fn generic[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "x")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", generic)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,12 @@
+fn point_at_local(inout target: borrow UInt64) -> () {
+    var local: UInt64 = 3
+    target = borrow local
+    local = 4
+}
+
+fn main() -> UInt8 {
+    let other: UInt64 = 1
+    var target = borrow other
+    point_at_local(&target)
+    UInt8(*target)
+}

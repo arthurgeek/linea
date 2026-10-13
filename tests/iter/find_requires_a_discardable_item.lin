@@ -1,0 +1,25 @@
+@linear
+enum Token {
+    One,
+}
+
+struct Tokens {
+    marker: UInt8,
+}
+
+impl Iterator for Tokens {
+    type Item = Token
+
+    fn next(inout _self: Tokens) -> Option[Token] {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    let tokens: Tokens = .{ marker = 0 }
+    match tokens.find(|item| match read item { One => true }) {
+        Some(item) => match item { One => {} },
+        None => {},
+    }
+    0
+}

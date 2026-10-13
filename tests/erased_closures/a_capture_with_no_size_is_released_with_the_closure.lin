@@ -1,0 +1,34 @@
+import std.io
+import std.mem
+
+// A ticket has no fields, so the closure holding it has no size and takes no
+// memory; the ticket is still released when the closure is, and not before.
+@linear
+struct Ticket {}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket {} = self
+        match io.println("ticket released") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let ticket = Ticket {}
+    let admit = mem.Closure.open(
+        mem.system(),
+        [sink _held = ticket] || -> UInt8 {
+            5
+        },
+    )?
+    let admitted = admit()
+    match io.println("admitted {admitted}") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+    admit.release()
+    return .Ok(admitted)
+}

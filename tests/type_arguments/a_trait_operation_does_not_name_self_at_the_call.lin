@@ -1,0 +1,17 @@
+// `make` declares no type parameters of its own; which implementation runs is
+// `Self`, settled by the arguments or the type the call is expected to have.
+trait Make {
+    fn make(seed: UInt8) -> Self
+}
+
+impl Make for UInt16 {
+    fn make(seed: UInt8) -> UInt16 {
+        UInt16(seed)
+    }
+}
+
+fn main() -> UInt8 {
+    let _named = Make.make[UInt16](3)
+    let _annotated: UInt16 = Make.make(3)
+    0
+}

@@ -1,0 +1,5 @@
+error[S-Entry]: attribute names are closed
+ --> tests/decl/attributes/attribute_names_are_closed.lin:1:2
+  |
+1 | @cached
+  |  ^^^^^^ use `opaque`, `linear`, `copyable`, `carrier`, or `derive(...)`

@@ -1,0 +1,4 @@
+// A string literal, which the lexer reads and no expression holds.
+fn main() -> UInt8 {
+    "seven"
+}

@@ -1,0 +1,20 @@
+// Arithmetic asked only that its operands agree, never that they were numbers.
+// Two structures agree, so `p * q` was accepted -- and a value that lives in
+// memory is its address, so the backend added two stack addresses and read a
+// value out of whatever that pointed at. §1 says an operator over numbers
+// takes numbers; [L-Layout] says nothing reads memory it has no typed path to.
+struct P {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn one() -> P {
+    .{ x = 1, y = 2 }
+}
+
+fn main() -> UInt8 {
+    let p: P = one()
+    let q: P = one()
+    let r: P = p * q
+    r.x
+}

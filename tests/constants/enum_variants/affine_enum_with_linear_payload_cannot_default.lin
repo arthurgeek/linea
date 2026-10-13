@@ -1,0 +1,12 @@
+@linear
+enum Ticket { Issued }
+
+enum Choice { Empty, Held(Ticket) }
+
+fn inspect(value: Choice = .Empty) -> UInt8 {
+    match read value { Empty => 0, Held(_) => 1 }
+}
+
+fn main() -> UInt8 {
+    inspect()
+}

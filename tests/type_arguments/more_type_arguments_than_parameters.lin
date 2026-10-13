@@ -1,0 +1,5 @@
+// `parse` declares one type parameter, so a call may name at most one.
+fn main() -> UInt8 {
+    let value = "7".parse[UInt8, UInt16]().unwrap()
+    value
+}

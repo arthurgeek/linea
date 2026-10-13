@@ -1,0 +1,14 @@
+// `and_then` consumes its transform, so the first call moves `halve` and the
+// second cannot pass it again.
+fn main() -> UInt8 {
+    let halve = |sink value: UInt8| -> Result[UInt8, UInt8] {
+        if value % 2 == 0 {
+            .Ok(value / 2)
+        } else {
+            .Err(value)
+        }
+    }
+    let first: Result[UInt8, UInt8] = .Ok(8)
+    let halved = first.and_then(halve).and_then(halve)
+    halved.unwrap_or(0)
+}

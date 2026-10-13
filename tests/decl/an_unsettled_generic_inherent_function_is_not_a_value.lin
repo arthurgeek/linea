@@ -1,0 +1,14 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    fn empty() -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let make: fn() -> UInt8 = Holder.empty
+    make()
+}

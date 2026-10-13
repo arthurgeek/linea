@@ -1,0 +1,12 @@
+// A `read` binding observes a place and owns nothing, so it has no release to
+// schedule.
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let size = Size { width = 4, height = 5 }
+    defer let read Size { width, height } = size
+    width * height
+}

@@ -1,0 +1,16 @@
+error[T-UnknownOperation]: `make` is a function, not an operation of `Str`
+  --> tests/modules/a_closure_that_does_not_capture_a_shadowing_local_keeps_the_shadowing_note/main.lin:10:9
+   |
+8  |     let shapes: Str = "abc"
+   |         ------ this local `shapes` shadows `shapes`, the import of `shapes`
+10 |         shapes.make().size
+   |         ^^^^^^^^^^^ a dot calls an operation of the value, and a free function is not one
+   |
+   = help: inside this scope `shapes` is the local, not the module; write `import shapes as` another name to reach the module here
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/modules/a_closure_that_does_not_capture_a_shadowing_local_keeps_the_shadowing_note/main.lin:10:9
+   |
+10 |         shapes.make().size
+   |         ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: write `[shapes]` before the parameters to read it where it is, or `[sink shapes]` to move it into the closure

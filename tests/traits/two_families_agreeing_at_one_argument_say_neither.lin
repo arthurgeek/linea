@@ -1,0 +1,35 @@
+// Two implementations agreeing at one argument. `Give[Pair[T, T]]` and
+// `Give[Pair[T, Bool]]`, both for `Holder[T]`, meet where the first field
+// settles `T` to `Bool` -- at `Holder[Bool]` both answer `Give[Pair[Bool,
+// Bool]]`, so neither is written from the other's parameters and both are
+// refused.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[Pair[T, T]] for Holder[T] {
+    fn give(_self: Self, _u: Pair[T, T]) -> UInt8 {
+        4
+    }
+}
+
+impl[T] Give[Pair[T, Bool]] for Holder[T] {
+    fn give(_self: Self, _u: Pair[T, Bool]) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Bool] = .{ v = true }
+    let p: Pair[Bool, Bool] = .{ a = true, b = true }
+    Give.give(h, p)
+}

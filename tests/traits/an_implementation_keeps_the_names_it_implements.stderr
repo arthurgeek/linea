@@ -1,0 +1,10 @@
+error[T-Impl]: `Pad` declares `pad`'s parameter `width`, and this declares it `w`
+  --> tests/traits/an_implementation_keeps_the_names_it_implements.lin:19:8
+   |
+19 |     fn pad(s: UInt8, w: UInt8) -> UInt8 {
+   |        ^^^ name it what the signature names it
+error[T-Impl]: `Weigh` declares `weigh`'s parameter `_grams`, and this declares it `grams`
+  --> tests/traits/an_implementation_keeps_the_names_it_implements.lin:25:8
+   |
+25 |     fn weigh(s: UInt8, grams: UInt8) -> UInt8 {
+   |        ^^^^^ name it what the signature names it

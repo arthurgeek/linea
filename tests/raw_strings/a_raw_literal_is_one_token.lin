@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let r = r"{name}\n"
+    let json = r#"{"ok":true}"#
+    let nested = r##"a "# b"##
+    let rr = rr"text"
+    let spaced = r "text"
+    let hash = r#x
+    let inside = "{r"}"}"
+    r
+}

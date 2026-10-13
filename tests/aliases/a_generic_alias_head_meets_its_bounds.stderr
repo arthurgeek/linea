@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Ranked`, and `UInt16` does not implement it
+  --> tests/aliases/a_generic_alias_head_meets_its_bounds.lin:18:5
+   |
+18 |     RankedVec.new_in(mem.system())
+   |     ^^^^^^^^^ implement it for that type, or drop the bound

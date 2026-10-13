@@ -1,0 +1,10 @@
+// An import ends where a statement does. It is a declaration rather than a
+// statement, but nothing about that makes a different terminator worth
+// learning.
+import a
+import a.deeper as deeper
+import a as top
+
+fn main() -> UInt8 {
+    a.one() + deeper.two() + top.one()
+}

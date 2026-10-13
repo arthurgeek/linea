@@ -1,0 +1,10 @@
+// One scalar means one Unicode scalar, not one rendered glyph: `e` followed
+// by a combining acute is two scalars however it displays, so it names no
+// end. The precomposed spelling is one scalar and does.
+fn main() -> UInt8 {
+    let b: UInt8 = 5
+    match b {
+        "e\u{301}"..="z" => 1,
+        _ => 0,
+    }
+}

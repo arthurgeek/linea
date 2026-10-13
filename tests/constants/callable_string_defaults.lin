@@ -1,0 +1,17 @@
+let greeting = "\u{e1}"
+
+fn size(value: Str = greeting) -> UInt64 {
+    value.length()
+}
+
+fn invoke[F: fn(read value: Str = "á") -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if invoke(size) == 2 {
+        0
+    } else {
+        1
+    }
+}

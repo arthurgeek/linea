@@ -1,0 +1,27 @@
+// An error of the function's own error type passes through `?` unchanged.
+// No `From` implementation is needed for it.
+enum Failure {
+    Code(UInt8),
+}
+
+fn check(value: UInt8) -> Result[UInt8, Failure] {
+    if value > 10 {
+        return .Err(.Code(value))
+    }
+    return .Ok(value)
+}
+
+fn total() -> Result[UInt8, Failure] {
+    let first = check(3)?
+    let second = check(30)?
+    return .Ok(first + second)
+}
+
+fn main() -> UInt8 {
+    match total() {
+        Ok(_) => 1,
+        Err(failure) => match failure {
+            Code(value) => value,
+        },
+    }
+}

@@ -1,0 +1,21 @@
+// A byte store past the end traps, which is the one check a byte access keeps.
+//
+// The offset is the length: every byte before it sits inside the buffer, so
+// this is the first that does not, and the bound is asked as it is for a wide
+// access. What a byte access drops is the alignment, not the bound.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(16) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store_byte(&b, 16, 1)
+            b.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

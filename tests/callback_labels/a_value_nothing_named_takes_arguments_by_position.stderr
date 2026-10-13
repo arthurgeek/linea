@@ -1,0 +1,21 @@
+error[T-UnknownParameter]: a call through this value passes its arguments by position
+  --> tests/callback_labels/a_value_nothing_named_takes_arguments_by_position.lin:21:12
+   |
+21 |     joined(value: 1) + made(value: 1) + make()(value: 1) + joined(1)
+   |            ^^^^^ nothing that declared this value names its parameters
+   |
+   = help: drop the label, or bind the value with a written `fn` type
+error[T-UnknownParameter]: a call through this value passes its arguments by position
+  --> tests/callback_labels/a_value_nothing_named_takes_arguments_by_position.lin:21:29
+   |
+21 |     joined(value: 1) + made(value: 1) + make()(value: 1) + joined(1)
+   |                             ^^^^^ nothing that declared this value names its parameters
+   |
+   = help: drop the label, or bind the value with a written `fn` type
+error[T-UnknownParameter]: a call through this value passes its arguments by position
+  --> tests/callback_labels/a_value_nothing_named_takes_arguments_by_position.lin:21:48
+   |
+21 |     joined(value: 1) + made(value: 1) + make()(value: 1) + joined(1)
+   |                                                ^^^^^ nothing that declared this value names its parameters
+   |
+   = help: drop the label, or bind the value with a written `fn` type

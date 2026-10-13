@@ -1,0 +1,5 @@
+error[S-Separator]: expected `;` or a newline
+ --> tests/newline/two_expression_statements_share_a_line.lin:8:11
+  |
+8 |     a = 3 b = 4
+  |           ^ this statement ends here

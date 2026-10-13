@@ -1,0 +1,7 @@
+// [T-ArrayLength] the other way round. The type says how many, so a literal
+// with too many is refused exactly as one with too few is -- the count is part
+// of the type and a literal does not choose it.
+fn main() -> UInt8 {
+    let xs: [UInt8; 2] = [1, 2, 3, 4]
+    xs[0]
+}

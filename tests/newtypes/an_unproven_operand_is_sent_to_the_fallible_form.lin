@@ -1,0 +1,16 @@
+// An operand the compiler cannot fold is refused at construction, with the
+// fix named in the message: the fallible form is what proof unavailable asks
+// for.
+type Percent = UInt8 where it in 0..=99
+
+fn wants(_p: Percent) -> UInt8 {
+    0
+}
+
+fn takes(sink n: UInt8) -> UInt8 {
+    wants(Percent(n))
+}
+
+fn main() -> UInt8 {
+    takes(7)
+}

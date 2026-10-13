@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Starter` and `Empty` both declare `blank` for `Meal`
+  --> tests/traits/two_traits_answering_a_type_leave_its_name_ambiguous.lin:29:16
+   |
+29 |     let meal = Meal.blank()
+   |                ^^^^^^^^^^ write `Starter.blank(…)` or `Empty.blank(…)`, which says which trait it goes through

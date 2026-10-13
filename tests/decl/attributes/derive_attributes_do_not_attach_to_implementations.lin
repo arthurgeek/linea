@@ -1,0 +1,10 @@
+trait Mark {}
+struct Value {}
+
+@derive(Mark)
+impl Mark for Value {}
+
+fn main() -> UInt8 {
+    let _value = Value {}
+    0
+}

@@ -1,0 +1,7 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let text = "no"
+    let _ = mem.write_slice_fd(text.as_bytes(), 1)
+    0
+}

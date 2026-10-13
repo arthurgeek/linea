@@ -1,0 +1,7 @@
+internal fn spare() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

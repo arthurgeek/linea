@@ -1,0 +1,17 @@
+struct Holder[UInt8] {
+    v: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 3 }
+    let g: Holder[UInt8] = Holder[UInt8];;Swap.twin(Holder[UInt8];;Swap.same(h))
+    g.v
+}
+
+fn Holder[UInt8];;Swap.same(sink self: Holder[UInt8]) -> Holder[UInt8] {
+    self
+}
+
+fn Holder[UInt8];;Swap.twin(sink self: Holder[UInt8]) -> Holder[UInt8] {
+    self
+}

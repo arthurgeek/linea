@@ -1,0 +1,67 @@
+import std.testing
+import std.io
+
+fn main() -> UInt8 {
+    0
+}
+
+test fn fallthrough_succeeds() {
+    testing.assert(true, "fallthrough")?
+}
+
+test fn bare_return_succeeds() {
+    testing.assert(true, "bare return")?
+    return
+}
+
+test fn deferred_cleanup_runs_before_success() {
+    defer mark_cleanup()
+    return
+}
+
+fn mark_cleanup() -> () {
+    io.eprintln[Str]("cleanup")
+}
+
+test fn explicit_custom_signature_is_preserved() -> Result[(), Str] {
+    return .Ok({})
+}
+
+test trap fn an_explicit_trap_remains_expected() -> Result[(), Str] {
+    panic("expected")
+}
+
+test fn trailing_match_succeeds() {
+    let value: Option[UInt8] = .None
+    match value {
+        Some(_) => testing.assert(false, "unexpected payload")?,
+        None => {},
+    }
+}
+
+test fn trailing_integer_match_succeeds() {
+    let value: UInt8 = 3
+    match value {
+        0 => testing.assert(false, "unexpected zero")?,
+        _ => {},
+    }
+}
+
+test fn trailing_conditional_succeeds() {
+    if true {
+        testing.assert(true, "taken branch")?
+    } else {
+        testing.assert(false, "untaken branch")?
+    }
+}
+
+test fn trailing_match_with_returning_first_arm_succeeds() {
+    let value: Option[UInt8] = .None
+    match value {
+        Some(_) => {
+            testing.assert(false, "unexpected returning branch")?
+            return
+        },
+        None => {},
+    }
+}

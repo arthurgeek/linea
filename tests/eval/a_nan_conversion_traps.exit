@@ -1,0 +1,2 @@
+trap
+linea: not a number at tests/eval/a_nan_conversion_traps.lin:4:14

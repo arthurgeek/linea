@@ -1,0 +1,12 @@
+error[S-Destructure]: `read` binds the parts of a pattern
+ --> tests/decl/borrowed_lets/read_requires_an_irrefutable_pattern.lin:3:9
+  |
+3 |     let read other = value
+  |         ^^^^ write a struct, newtype or tuple pattern after `let read`
+error[T-Mismatch]: expected `UInt8`, found `borrow UInt8`
+ --> tests/decl/borrowed_lets/read_requires_an_irrefutable_pattern.lin:4:5
+  |
+1 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+4 |     other
+  |     ^^^^^ expected `UInt8`, found `borrow UInt8`

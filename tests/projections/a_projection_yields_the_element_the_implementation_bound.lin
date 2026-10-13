@@ -1,0 +1,35 @@
+// A projection's result is held to the trait's `-> Elem` under the binding the
+// implementation wrote, which is the rule that already holds a function's
+// result to its signature. The binding's own name and `Self.Elem` spell one
+// type, so an implementation may write either.
+struct Bytes {
+    held: [UInt8; 2],
+}
+
+impl Index[UInt64] for Bytes {
+    type Elem = UInt8
+
+    proj at(inout self: Bytes, i: UInt64) -> UInt8 {
+        self.held[i]
+    }
+}
+
+struct Flags {
+    held: [Bool; 2],
+}
+
+impl Index[UInt64] for Flags {
+    type Elem = Bool
+
+    proj at(inout self: Flags, i: UInt64) -> Self.Elem {
+        self.held[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Bytes = .{ held = [1, 2] }
+    let f: Flags = .{ held = [true, false] }
+    let _ = b
+    let _ = f
+    0
+}

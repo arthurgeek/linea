@@ -1,0 +1,1159 @@
+import std.testing
+
+// Negative values and target minima fit Int64; nonnegative values and target
+// maxima fit UInt64. Check in that domain before converting to the target.
+impl[Source: Integer, Target: Integer] TryFrom[Source] for Target {
+    fn try_from(x: Source) -> Option[Target] {
+        if x < Source(0) {
+            if Int64(x) < Int64(Target.min) {
+                return .None
+            }
+        } else if UInt64(x) > UInt64(Target.max) {
+            return .None
+        }
+        .Some(Target(x))
+    }
+}
+
+// Each source/target pair checks shared endpoints and interior values, plus
+// source extremes and adjacent target values where they fall outside the range.
+test fn int8_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(Int8(-128))
+    testing.assert_eq(lower, Option.Some(Int16(-128)), "lower accepted value changed")?
+    let interior = Int16.try_from(Int8(-1))
+    testing.assert_eq(interior, Option.Some(Int16(-1)), "interior accepted value changed")?
+    let upper = Int16.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(Int16(127)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int32_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(Int32(-32768))
+    testing.assert_eq(lower, Option.Some(Int16(-32768)), "lower accepted value changed")?
+    let interior = Int16.try_from(Int32(-1))
+    testing.assert_eq(interior, Option.Some(Int16(-1)), "interior accepted value changed")?
+    let upper = Int16.try_from(Int32(32767))
+    testing.assert_eq(upper, Option.Some(Int16(32767)), "upper accepted value changed")?
+    let below = Int16.try_from(Int32(-32769))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int16.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int16.try_from(Int32(32768))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int16.try_from(Int32(2147483647))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(Int64(-32768))
+    testing.assert_eq(lower, Option.Some(Int16(-32768)), "lower accepted value changed")?
+    let interior = Int16.try_from(Int64(-1))
+    testing.assert_eq(interior, Option.Some(Int16(-1)), "interior accepted value changed")?
+    let upper = Int16.try_from(Int64(32767))
+    testing.assert_eq(upper, Option.Some(Int16(32767)), "upper accepted value changed")?
+    let below = Int16.try_from(Int64(-32769))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int16.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int16.try_from(Int64(32768))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int16.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
+    let interior = Int16.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(Int16(1)), "interior accepted value changed")?
+    let upper = Int16.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(Int16(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint16_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
+    let interior = Int16.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(Int16(1)), "interior accepted value changed")?
+    let upper = Int16.try_from(UInt16(32767))
+    testing.assert_eq(upper, Option.Some(Int16(32767)), "upper accepted value changed")?
+    let above = Int16.try_from(UInt16(32768))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int16.try_from(UInt16(65535))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint32_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
+    let interior = Int16.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(Int16(1)), "interior accepted value changed")?
+    let upper = Int16.try_from(UInt32(32767))
+    testing.assert_eq(upper, Option.Some(Int16(32767)), "upper accepted value changed")?
+    let above = Int16.try_from(UInt32(32768))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int16.try_from(UInt32(4294967295))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint64_to_int16_preserves_exact_values_and_checks_bounds() {
+    let lower = Int16.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
+    let interior = Int16.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(Int16(1)), "interior accepted value changed")?
+    let upper = Int16.try_from(UInt64(32767))
+    testing.assert_eq(upper, Option.Some(Int16(32767)), "upper accepted value changed")?
+    let above = Int16.try_from(UInt64(32768))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int16.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(Int8(-128))
+    testing.assert_eq(lower, Option.Some(Int32(-128)), "lower accepted value changed")?
+    let interior = Int32.try_from(Int8(-1))
+    testing.assert_eq(interior, Option.Some(Int32(-1)), "interior accepted value changed")?
+    let upper = Int32.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(Int32(127)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int16_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(Int16(-32768))
+    testing.assert_eq(lower, Option.Some(Int32(-32768)), "lower accepted value changed")?
+    let interior = Int32.try_from(Int16(-1))
+    testing.assert_eq(interior, Option.Some(Int32(-1)), "interior accepted value changed")?
+    let upper = Int32.try_from(Int16(32767))
+    testing.assert_eq(upper, Option.Some(Int32(32767)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int64_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(Int64(-2147483648))
+    testing.assert_eq(lower, Option.Some(Int32(-2147483648)), "lower accepted value changed")?
+    let interior = Int32.try_from(Int64(-1))
+    testing.assert_eq(interior, Option.Some(Int32(-1)), "interior accepted value changed")?
+    let upper = Int32.try_from(Int64(2147483647))
+    testing.assert_eq(upper, Option.Some(Int32(2147483647)), "upper accepted value changed")?
+    let below = Int32.try_from(Int64(-2147483649))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int32.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int32.try_from(Int64(2147483648))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int32.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
+    let interior = Int32.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(Int32(1)), "interior accepted value changed")?
+    let upper = Int32.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(Int32(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint16_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
+    let interior = Int32.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(Int32(1)), "interior accepted value changed")?
+    let upper = Int32.try_from(UInt16(65535))
+    testing.assert_eq(upper, Option.Some(Int32(65535)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint32_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
+    let interior = Int32.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(Int32(1)), "interior accepted value changed")?
+    let upper = Int32.try_from(UInt32(2147483647))
+    testing.assert_eq(upper, Option.Some(Int32(2147483647)), "upper accepted value changed")?
+    let above = Int32.try_from(UInt32(2147483648))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int32.try_from(UInt32(4294967295))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint64_to_int32_preserves_exact_values_and_checks_bounds() {
+    let lower = Int32.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
+    let interior = Int32.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(Int32(1)), "interior accepted value changed")?
+    let upper = Int32.try_from(UInt64(2147483647))
+    testing.assert_eq(upper, Option.Some(Int32(2147483647)), "upper accepted value changed")?
+    let above = Int32.try_from(UInt64(2147483648))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int32.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(Int8(-128))
+    testing.assert_eq(lower, Option.Some(Int64(-128)), "lower accepted value changed")?
+    let interior = Int64.try_from(Int8(-1))
+    testing.assert_eq(interior, Option.Some(Int64(-1)), "interior accepted value changed")?
+    let upper = Int64.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(Int64(127)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int16_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(Int16(-32768))
+    testing.assert_eq(lower, Option.Some(Int64(-32768)), "lower accepted value changed")?
+    let interior = Int64.try_from(Int16(-1))
+    testing.assert_eq(interior, Option.Some(Int64(-1)), "interior accepted value changed")?
+    let upper = Int64.try_from(Int16(32767))
+    testing.assert_eq(upper, Option.Some(Int64(32767)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int32_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(Int32(-2147483648))
+    testing.assert_eq(lower, Option.Some(Int64(-2147483648)), "lower accepted value changed")?
+    let interior = Int64.try_from(Int32(-1))
+    testing.assert_eq(interior, Option.Some(Int64(-1)), "interior accepted value changed")?
+    let upper = Int64.try_from(Int32(2147483647))
+    testing.assert_eq(upper, Option.Some(Int64(2147483647)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint8_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
+    let interior = Int64.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(Int64(1)), "interior accepted value changed")?
+    let upper = Int64.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(Int64(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint16_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
+    let interior = Int64.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(Int64(1)), "interior accepted value changed")?
+    let upper = Int64.try_from(UInt16(65535))
+    testing.assert_eq(upper, Option.Some(Int64(65535)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint32_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
+    let interior = Int64.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(Int64(1)), "interior accepted value changed")?
+    let upper = Int64.try_from(UInt32(4294967295))
+    testing.assert_eq(upper, Option.Some(Int64(4294967295)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint64_to_int64_preserves_exact_values_and_checks_bounds() {
+    let lower = Int64.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
+    let interior = Int64.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(Int64(1)), "interior accepted value changed")?
+    let upper = Int64.try_from(UInt64(9223372036854775807))
+    testing.assert_eq(upper, Option.Some(Int64(9223372036854775807)), "upper accepted value changed")?
+    let above_input: UInt64 = 9223372036854775808
+    let above = Int64.try_from(above_input)
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int64.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int16_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(Int16(-128))
+    testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
+    let interior = Int8.try_from(Int16(-1))
+    testing.assert_eq(interior, Option.Some(Int8(-1)), "interior accepted value changed")?
+    let upper = Int8.try_from(Int16(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let below = Int8.try_from(Int16(-129))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int8.try_from(Int16(-32768))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int8.try_from(Int16(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(Int16(32767))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int32_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(Int32(-128))
+    testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
+    let interior = Int8.try_from(Int32(-1))
+    testing.assert_eq(interior, Option.Some(Int8(-1)), "interior accepted value changed")?
+    let upper = Int8.try_from(Int32(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let below = Int8.try_from(Int32(-129))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int8.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int8.try_from(Int32(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(Int32(2147483647))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(Int64(-128))
+    testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
+    let interior = Int8.try_from(Int64(-1))
+    testing.assert_eq(interior, Option.Some(Int8(-1)), "interior accepted value changed")?
+    let upper = Int8.try_from(Int64(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let below = Int8.try_from(Int64(-129))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = Int8.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = Int8.try_from(Int64(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
+    let interior = Int8.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(Int8(1)), "interior accepted value changed")?
+    let upper = Int8.try_from(UInt8(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let above = Int8.try_from(UInt8(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(UInt8(255))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint16_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
+    let interior = Int8.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(Int8(1)), "interior accepted value changed")?
+    let upper = Int8.try_from(UInt16(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let above = Int8.try_from(UInt16(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(UInt16(65535))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint32_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
+    let interior = Int8.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(Int8(1)), "interior accepted value changed")?
+    let upper = Int8.try_from(UInt32(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let above = Int8.try_from(UInt32(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(UInt32(4294967295))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint64_to_int8_preserves_exact_values_and_checks_bounds() {
+    let lower = Int8.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
+    let interior = Int8.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(Int8(1)), "interior accepted value changed")?
+    let upper = Int8.try_from(UInt64(127))
+    testing.assert_eq(upper, Option.Some(Int8(127)), "upper accepted value changed")?
+    let above = Int8.try_from(UInt64(128))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = Int8.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(Int8(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(Int8(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(UInt16(127)), "upper accepted value changed")?
+    let below = UInt16.try_from(Int8(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt16.try_from(Int8(-128))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int16_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(Int16(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(Int16(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(Int16(32767))
+    testing.assert_eq(upper, Option.Some(UInt16(32767)), "upper accepted value changed")?
+    let below = UInt16.try_from(Int16(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt16.try_from(Int16(-32768))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int32_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(Int32(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(Int32(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(Int32(65535))
+    testing.assert_eq(upper, Option.Some(UInt16(65535)), "upper accepted value changed")?
+    let below = UInt16.try_from(Int32(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt16.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt16.try_from(Int32(65536))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt16.try_from(Int32(2147483647))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(Int64(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(Int64(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(Int64(65535))
+    testing.assert_eq(upper, Option.Some(UInt16(65535)), "upper accepted value changed")?
+    let below = UInt16.try_from(Int64(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt16.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt16.try_from(Int64(65536))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt16.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(UInt16(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint32_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(UInt32(65535))
+    testing.assert_eq(upper, Option.Some(UInt16(65535)), "upper accepted value changed")?
+    let above = UInt16.try_from(UInt32(65536))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt16.try_from(UInt32(4294967295))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint64_to_uint16_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt16.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
+    let interior = UInt16.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(UInt16(1)), "interior accepted value changed")?
+    let upper = UInt16.try_from(UInt64(65535))
+    testing.assert_eq(upper, Option.Some(UInt16(65535)), "upper accepted value changed")?
+    let above = UInt16.try_from(UInt64(65536))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt16.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(Int8(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(Int8(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(UInt32(127)), "upper accepted value changed")?
+    let below = UInt32.try_from(Int8(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt32.try_from(Int8(-128))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int16_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(Int16(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(Int16(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(Int16(32767))
+    testing.assert_eq(upper, Option.Some(UInt32(32767)), "upper accepted value changed")?
+    let below = UInt32.try_from(Int16(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt32.try_from(Int16(-32768))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int32_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(Int32(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(Int32(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(Int32(2147483647))
+    testing.assert_eq(upper, Option.Some(UInt32(2147483647)), "upper accepted value changed")?
+    let below = UInt32.try_from(Int32(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt32.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(Int64(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(Int64(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(Int64(4294967295))
+    testing.assert_eq(upper, Option.Some(UInt32(4294967295)), "upper accepted value changed")?
+    let below = UInt32.try_from(Int64(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt32.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt32.try_from(Int64(4294967296))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt32.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(UInt32(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint16_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(UInt16(65535))
+    testing.assert_eq(upper, Option.Some(UInt32(65535)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint64_to_uint32_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt32.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
+    let interior = UInt32.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(UInt32(1)), "interior accepted value changed")?
+    let upper = UInt32.try_from(UInt64(4294967295))
+    testing.assert_eq(upper, Option.Some(UInt32(4294967295)), "upper accepted value changed")?
+    let above = UInt32.try_from(UInt64(4294967296))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt32.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(Int8(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(Int8(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(UInt64(127)), "upper accepted value changed")?
+    let below = UInt64.try_from(Int8(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt64.try_from(Int8(-128))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int16_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(Int16(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(Int16(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(Int16(32767))
+    testing.assert_eq(upper, Option.Some(UInt64(32767)), "upper accepted value changed")?
+    let below = UInt64.try_from(Int16(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt64.try_from(Int16(-32768))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int32_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(Int32(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(Int32(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(Int32(2147483647))
+    testing.assert_eq(upper, Option.Some(UInt64(2147483647)), "upper accepted value changed")?
+    let below = UInt64.try_from(Int32(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt64.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(Int64(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(Int64(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(Int64(9223372036854775807))
+    testing.assert_eq(upper, Option.Some(UInt64(9223372036854775807)), "upper accepted value changed")?
+    let below = UInt64.try_from(Int64(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt64.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint8_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(UInt8(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(UInt8(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(UInt8(255))
+    testing.assert_eq(upper, Option.Some(UInt64(255)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint16_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(UInt16(65535))
+    testing.assert_eq(upper, Option.Some(UInt64(65535)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn uint32_to_uint64_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt64.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
+    let interior = UInt64.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(UInt64(1)), "interior accepted value changed")?
+    let upper = UInt64.try_from(UInt32(4294967295))
+    testing.assert_eq(upper, Option.Some(UInt64(4294967295)), "upper accepted value changed")?
+    .Ok(())
+}
+
+test fn int8_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(Int8(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(Int8(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(Int8(127))
+    testing.assert_eq(upper, Option.Some(UInt8(127)), "upper accepted value changed")?
+    let below = UInt8.try_from(Int8(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt8.try_from(Int8(-128))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int16_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(Int16(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(Int16(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(Int16(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let below = UInt8.try_from(Int16(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt8.try_from(Int16(-32768))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt8.try_from(Int16(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(Int16(32767))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int32_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(Int32(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(Int32(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(Int32(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let below = UInt8.try_from(Int32(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt8.try_from(Int32(-2147483648))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt8.try_from(Int32(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(Int32(2147483647))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int64_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(Int64(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(Int64(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(Int64(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let below = UInt8.try_from(Int64(-1))
+    match below {
+        Some(_) => testing.assert(false, "below out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_min = UInt8.try_from(Int64(-9223372036854775808))
+    match source_min {
+        Some(_) => testing.assert(false, "source_min out-of-range value was accepted")?,
+        None => {},
+    }
+    let above = UInt8.try_from(Int64(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(Int64(9223372036854775807))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint16_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(UInt16(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(UInt16(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(UInt16(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let above = UInt8.try_from(UInt16(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(UInt16(65535))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint32_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(UInt32(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(UInt32(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(UInt32(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let above = UInt8.try_from(UInt32(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(UInt32(4294967295))
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn uint64_to_uint8_preserves_exact_values_and_checks_bounds() {
+    let lower = UInt8.try_from(UInt64(0))
+    testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
+    let interior = UInt8.try_from(UInt64(1))
+    testing.assert_eq(interior, Option.Some(UInt8(1)), "interior accepted value changed")?
+    let upper = UInt8.try_from(UInt64(255))
+    testing.assert_eq(upper, Option.Some(UInt8(255)), "upper accepted value changed")?
+    let above = UInt8.try_from(UInt64(256))
+    match above {
+        Some(_) => testing.assert(false, "above out-of-range value was accepted")?,
+        None => {},
+    }
+    let source_max = UInt8.try_from(UInt64.max)
+    match source_max {
+        Some(_) => testing.assert(false, "source_max out-of-range value was accepted")?,
+        None => {},
+    }
+    .Ok(())
+}
+
+test fn int8_identity_conversion_preserves_its_range() {
+    let lower = Int8.try_from(Int8.min)
+    testing.assert_eq(lower, Option.Some(Int8.min), "identity conversion changed the minimum")?
+    let zero = Int8.try_from(Int8(0))
+    testing.assert_eq(zero, Option.Some(Int8(0)), "identity conversion changed zero")?
+    let upper = Int8.try_from(Int8.max)
+    testing.assert_eq(upper, Option.Some(Int8.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn int16_identity_conversion_preserves_its_range() {
+    let lower = Int16.try_from(Int16.min)
+    testing.assert_eq(lower, Option.Some(Int16.min), "identity conversion changed the minimum")?
+    let zero = Int16.try_from(Int16(0))
+    testing.assert_eq(zero, Option.Some(Int16(0)), "identity conversion changed zero")?
+    let upper = Int16.try_from(Int16.max)
+    testing.assert_eq(upper, Option.Some(Int16.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn int32_identity_conversion_preserves_its_range() {
+    let lower = Int32.try_from(Int32.min)
+    testing.assert_eq(lower, Option.Some(Int32.min), "identity conversion changed the minimum")?
+    let zero = Int32.try_from(Int32(0))
+    testing.assert_eq(zero, Option.Some(Int32(0)), "identity conversion changed zero")?
+    let upper = Int32.try_from(Int32.max)
+    testing.assert_eq(upper, Option.Some(Int32.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn int64_identity_conversion_preserves_its_range() {
+    let lower = Int64.try_from(Int64.min)
+    testing.assert_eq(lower, Option.Some(Int64.min), "identity conversion changed the minimum")?
+    let zero = Int64.try_from(Int64(0))
+    testing.assert_eq(zero, Option.Some(Int64(0)), "identity conversion changed zero")?
+    let upper = Int64.try_from(Int64.max)
+    testing.assert_eq(upper, Option.Some(Int64.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn uint8_identity_conversion_preserves_its_range() {
+    let lower = UInt8.try_from(UInt8.min)
+    testing.assert_eq(lower, Option.Some(UInt8.min), "identity conversion changed the minimum")?
+    let zero = UInt8.try_from(UInt8(0))
+    testing.assert_eq(zero, Option.Some(UInt8(0)), "identity conversion changed zero")?
+    let upper = UInt8.try_from(UInt8.max)
+    testing.assert_eq(upper, Option.Some(UInt8.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn uint16_identity_conversion_preserves_its_range() {
+    let lower = UInt16.try_from(UInt16.min)
+    testing.assert_eq(lower, Option.Some(UInt16.min), "identity conversion changed the minimum")?
+    let zero = UInt16.try_from(UInt16(0))
+    testing.assert_eq(zero, Option.Some(UInt16(0)), "identity conversion changed zero")?
+    let upper = UInt16.try_from(UInt16.max)
+    testing.assert_eq(upper, Option.Some(UInt16.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn uint32_identity_conversion_preserves_its_range() {
+    let lower = UInt32.try_from(UInt32.min)
+    testing.assert_eq(lower, Option.Some(UInt32.min), "identity conversion changed the minimum")?
+    let zero = UInt32.try_from(UInt32(0))
+    testing.assert_eq(zero, Option.Some(UInt32(0)), "identity conversion changed zero")?
+    let upper = UInt32.try_from(UInt32.max)
+    testing.assert_eq(upper, Option.Some(UInt32.max), "identity conversion changed the maximum")?
+    .Ok(())
+}
+
+test fn uint64_identity_conversion_preserves_its_range() {
+    let lower = UInt64.try_from(UInt64.min)
+    testing.assert_eq(lower, Option.Some(UInt64.min), "identity conversion changed the minimum")?
+    let zero = UInt64.try_from(UInt64(0))
+    testing.assert_eq(zero, Option.Some(UInt64(0)), "identity conversion changed zero")?
+    let upper = UInt64.try_from(UInt64.max)
+    testing.assert_eq(upper, Option.Some(UInt64.max), "identity conversion changed the maximum")?
+    .Ok(())
+}

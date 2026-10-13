@@ -1,0 +1,15 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    var points = [Point { x = 1 }, Point { x = 2 }]
+    var total: UInt8 = 0
+    for inout point in points {
+        let read Point { x } = point
+        total = total + x
+    }
+    if total == 3 {
+        0
+    } else {
+        1
+    }
+}

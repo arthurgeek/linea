@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Handler` has no operation `run`
+  --> tests/structs/a_method_call_does_not_reach_a_field_of_its_name.lin:13:5
+   |
+13 |     handler.run(3)
+   |     ^^^^^^^^^^^ `run` is a field; to call the function it holds, write `(handler.run)(...)`

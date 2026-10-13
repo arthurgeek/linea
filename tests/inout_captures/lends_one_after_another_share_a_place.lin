@@ -1,0 +1,15 @@
+// Each closure's lend of `count` ends at its last call, so the next closure
+// may lend it again.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var once = inout [inout count] || {
+        count += 1
+    }
+    &once()
+    var twice = inout [inout count] || {
+        count += 2
+    }
+    &twice()
+    &twice()
+    count
+}

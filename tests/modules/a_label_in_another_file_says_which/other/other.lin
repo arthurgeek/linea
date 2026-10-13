@@ -1,0 +1,7 @@
+pub fn f(x: Bool) -> UInt8 {
+    if x {
+        1
+    } else {
+        0
+    }
+}

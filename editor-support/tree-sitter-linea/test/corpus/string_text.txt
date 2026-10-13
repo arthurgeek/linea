@@ -1,0 +1,24 @@
+===================
+Two slashes inside a string literal are text, not a comment
+===================
+
+fn paths() -> Str {
+    let root = "//"
+    "{root}//x"
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (string_literal))
+      (expression_statement
+        (string_literal
+          (interpolation
+            (identifier)))))))

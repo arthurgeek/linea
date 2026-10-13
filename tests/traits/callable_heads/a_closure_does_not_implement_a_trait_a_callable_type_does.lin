@@ -1,0 +1,21 @@
+// A closure has a type of its own, not the structural signature a callable head
+// is written with, so a trait implemented for a callable type is not
+// implemented for a closure that has the same parameters.
+trait Handle {
+    fn handle(self: Self, input: UInt64) -> UInt64
+}
+
+impl Handle for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, input: UInt64) -> UInt64 {
+        self(input)
+    }
+}
+
+fn run[H: Handle](handler: H, input: UInt64) -> UInt64 {
+    handler.handle(input)
+}
+
+fn main() -> UInt8 {
+    let _answer = run(|input: UInt64| input + 1, 1)
+    0
+}

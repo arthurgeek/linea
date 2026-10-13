@@ -1,0 +1,32 @@
+struct Box {
+    value: UInt8,
+}
+
+trait Measure {
+    fn of(box: Self) -> UInt8
+}
+
+impl Measure for Box {
+    fn of(box: Self) -> UInt8 {
+        box.value
+    }
+}
+
+impl Box {
+    fn own(box: Box) -> UInt8 {
+        box.value
+    }
+}
+
+fn increment(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let box: Box = .{ value = 4 }
+    increment(1) + identity(UInt8(2)) + Box.own(box) + Measure.of(box)
+}

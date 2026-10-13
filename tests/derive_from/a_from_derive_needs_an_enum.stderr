@@ -1,0 +1,5 @@
+error[T-Derive]: this template requires an `enum` target
+ --> tests/derive_from/a_from_derive_needs_an_enum.lin:5:9
+  |
+5 | @derive(From[Missing])
+  |         ^^^^ derive this trait for the declaration kind required by its template

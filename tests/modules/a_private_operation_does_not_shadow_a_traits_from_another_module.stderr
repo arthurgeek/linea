@@ -1,0 +1,5 @@
+warning[N-Shadowed]: `Door` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/modules/a_private_operation_does_not_shadow_a_traits_from_another_module/door/door.lin:22:8
+   |
+22 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Shut.close(x)`

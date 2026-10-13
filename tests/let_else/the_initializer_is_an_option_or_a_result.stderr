@@ -1,0 +1,5 @@
+error[T-LetElse]: `else` unwraps an `Option` or a `Result`, and this is `Int64`
+ --> tests/let_else/the_initializer_is_an_option_or_a_result.lin:4:13
+  |
+4 |     let n = 4 else {
+  |             ^ only an `Option` or a `Result` can fail

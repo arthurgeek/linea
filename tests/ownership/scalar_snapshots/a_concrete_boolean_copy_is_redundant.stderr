@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `Bool` already produces a scalar snapshot when read
+ --> tests/ownership/scalar_snapshots/a_concrete_boolean_copy_is_redundant.lin:3:21
+  |
+3 |     let duplicate = copy(flag)
+  |                     ^^^^^^^^^^ remove `copy` and read the value directly

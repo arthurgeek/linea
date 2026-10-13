@@ -1,0 +1,35 @@
+enum Maybe[Bool] {
+    None,
+    Some(Bool),
+}
+
+enum Maybe[UInt8] {
+    None,
+    Some(UInt8),
+}
+
+struct Cell[Maybe[UInt8]] { v: Maybe[UInt8] }
+
+fn ;main() -> UInt8 {
+    let a: Maybe[Bool] = Maybe[Bool].Some(true)
+    let n: Cell[Maybe[UInt8]] = .{ v = Maybe[UInt8].None }
+    ;count[Bool](a) + ;peel[UInt8](n)
+}
+
+fn ;count[Bool](o: Maybe[Bool]) -> UInt8 {
+    match read o {
+        None => 0,
+        Some(_) => 1,
+    }
+}
+
+fn ;peel[UInt8](c: Cell[Maybe[UInt8]]) -> UInt8 {
+    ;count[UInt8](c.v)
+}
+
+fn ;count[UInt8](o: Maybe[UInt8]) -> UInt8 {
+    match read o {
+        None => 0,
+        Some(_) => 1,
+    }
+}

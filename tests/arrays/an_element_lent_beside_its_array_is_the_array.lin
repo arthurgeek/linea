@@ -1,0 +1,13 @@
+// An array's bracket is a step like a field selection is, so `a` is a prefix of
+// `a[0]` and the two name places one write reaches. Whichever element the
+// bracket names is part of the array beside it, so the argument that merely
+// reads the array would be handed it with that element already written.
+fn f(inout x: UInt8, a: [UInt8; 2]) -> UInt8 {
+    x = 9
+    a[0]
+}
+
+fn main() -> UInt8 {
+    var a: [UInt8; 2] = [1, 2]
+    f(&a[0], a)
+}

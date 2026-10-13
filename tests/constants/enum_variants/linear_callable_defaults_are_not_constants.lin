@@ -1,0 +1,10 @@
+@linear
+enum Permit { Preserve }
+
+fn _invoke[F: fn(read permit: Permit = .Preserve) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    0
+}

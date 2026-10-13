@@ -1,0 +1,16 @@
+// Moving an aggregate remains visible to each enclosing loop's watcher.
+struct Sample { value: UInt8 }
+
+fn main() -> UInt8 {
+    var answer: Sample = .{ value = 0 }
+    let source: Sample = .{ value = 1 }
+    loop {
+        answer = source
+        loop {
+            answer = source
+            break
+        }
+        break
+    }
+    answer.value
+}

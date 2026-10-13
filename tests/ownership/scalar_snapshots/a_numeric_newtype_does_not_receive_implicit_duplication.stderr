@@ -1,0 +1,7 @@
+error[O-Move]: `original` has already been moved
+ --> tests/ownership/scalar_snapshots/a_numeric_newtype_does_not_receive_implicit_duplication.lin:7:24
+  |
+6 |     let moved = original
+  |                 -------- it was taken here
+7 |     let Count(first) = original
+  |                        ^^^^^^^^ it was already taken, and a value is taken once

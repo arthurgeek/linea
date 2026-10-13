@@ -1,0 +1,7 @@
+type Percent = UInt8 where it in 0..=100
+
+fn main() -> UInt8 {
+    let percent = Percent(30)
+    let read Percent(raw) = percent
+    copy(raw)
+}

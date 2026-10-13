@@ -1,0 +1,33 @@
+// A generic function named without a written type is instantiated by how the
+// value is used later: its first call, or the parameter it is passed to.
+struct Holder[T] {
+    value: T,
+}
+
+impl[T: Copyable] Holder[T] {
+    fn peek(self: Holder[T]) -> T {
+        copy(self.value)
+    }
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn first[A: Copyable, B](value: A, _other: B) -> A where carries(value) {
+    copy(value)
+}
+
+fn apply(step: fn(read value: UInt8) -> UInt8, value: UInt8) -> UInt8 {
+    step(value)
+}
+
+fn main() -> UInt8 {
+    let same = identity
+    let passed_on = identity
+    let pick_first = first
+    let peek = Holder.peek
+    let box: Holder[UInt8] = .{ value = 4 }
+    let chosen: UInt8 = pick_first(2, true)
+    same(chosen) + apply(passed_on, 1) + peek(box) - 1
+}

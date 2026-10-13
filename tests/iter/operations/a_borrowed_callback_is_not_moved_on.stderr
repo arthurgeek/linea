@@ -1,0 +1,5 @@
+error[O-Move]: `heavy` is lent, and this takes it
+ --> tests/iter/operations/a_borrowed_callback_is_not_moved_on.lin:6:27
+  |
+6 |     (UInt64(1)..stop).any(heavy)
+  |                           ^^^^^ `copy` it, or declare the parameter `sink` to take it

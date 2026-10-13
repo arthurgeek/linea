@@ -1,0 +1,24 @@
+// `peek` only reads `ticket`, but `redeem` takes it, so the closure has to own
+// `ticket` and be called once.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn peek(ticket: Ticket) -> UInt8 {
+    match read ticket {
+        Seat(row) => row,
+    }
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    let spend = || peek(ticket) + redeem(ticket)
+    spend()
+}

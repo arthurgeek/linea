@@ -1,0 +1,25 @@
+// A signature is read through the arguments the implementation supplied. The
+// trait writes `t` as `T`; this implementation answers for `T` being `UInt8`, so
+// what it owes is a member taking `UInt8` and this is refused for the type it
+// takes rather than for the parameter the trait happened to name.
+//
+// The message is the whole of what this records: `T` is not a type any
+// implementation can take, so a refusal quoting it says nothing a programmer
+// can act on.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    fn held(x: Self, _t: Int64) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

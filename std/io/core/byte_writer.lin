@@ -1,0 +1,198 @@
+import std.mem
+import std.testing
+
+// `Underlying` means the writer reported its own error, `NoProgress` that a
+// write accepted no bytes, and `InvalidProgress` that it claimed more bytes than
+// it was given.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum WriteFailureKind {
+    Underlying,
+    NoProgress,
+    InvalidProgress,
+}
+
+// A WriteFailure says why writing stopped. `written` counts accepted input
+// bytes for write_some and write_all, or bytes removed from the writer chain's
+// pending output by flush. A reason preserves the
+// writer's own error value. Delivery does not promise filesystem durability.
+@copyable
+pub struct WriteFailure[E] {
+    kind: WriteFailureKind,
+    reason: Option[E],
+    written: UInt64,
+}
+
+derive[E: Debug] Debug for WriteFailure[E]
+
+derive[E: Release] Release for WriteFailure[E]
+
+// A ByteWriter accepts bytes, possibly fewer than it is offered on each call,
+// and may hold some pending until `flush` hands them on.
+pub trait ByteWriter {
+    type Error
+
+    // Count accepted bytes retained by this writer and its underlying writers.
+    // Bytes handed to an operating-system descriptor are no longer pending.
+    fn pending_bytes(self: Self) -> UInt64
+
+    // Accept a prefix of `bytes` and return its length.
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[Self.Error]] where carries(.Err: self)
+
+    // Hand pending bytes on and return how many left this writer chain.
+    fn flush(inout self: Self) -> Result[UInt64, WriteFailure[Self.Error]] where carries(.Err: self)
+}
+
+// ShortByteWriter accepts at most `step` bytes per call into eight bytes of
+// storage, and fails with the reason 9 once it holds `stop` bytes.
+struct ShortByteWriter {
+    bytes: [UInt8; 8],
+    length: UInt64,
+    step: UInt64,
+    stop: UInt64,
+}
+
+impl ByteWriter for ShortByteWriter {
+    type Error = UInt8
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[UInt8]] {
+        if self.length == self.stop {
+            return .Err(.{ kind = .Underlying, reason = .Some(9), written = 0 })
+        }
+        var count = self.step
+        if count > bytes.length() {
+            count = bytes.length()
+        }
+        if count > self.stop - self.length {
+            count = self.stop - self.length
+        }
+        for i in 0..count {
+            self.bytes[self.length + i] = bytes[i]
+        }
+        self.length += count
+        .Ok(count)
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, WriteFailure[UInt8]] {
+        .Ok(0)
+    }
+}
+
+// Finish a byte span using one progress policy for every byte writer.
+// Failed calls retain their own accepted prefix in the cumulative result.
+pub fn write_all[W: ByteWriter](inout writer: W, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[W.Error]] where carries(.Err: writer) {
+    var written: UInt64 = 0
+    while written < bytes.length() {
+        let remaining = bytes.length() - written
+        let part = bytes.subspan(start: written, count: remaining).unwrap()
+        match &writer.write_some(part) {
+            Ok(count) => {
+                if count == 0 {
+                    return .Err(.{ kind = .NoProgress, reason = .None, written = written })
+                }
+                if count > remaining {
+                    return .Err(.{ kind = .InvalidProgress, reason = .None, written = written })
+                }
+                written += count
+            },
+            Err(failure) => {
+                let WriteFailure { kind: kind, reason: reason, written: count } = failure
+                if count > remaining {
+                    return .Err(.{ kind = .InvalidProgress, reason = reason, written = written })
+                }
+                return .Err(.{ kind = kind, reason = reason, written = written + count })
+            },
+        }
+    }
+    .Ok(written)
+}
+
+test fn write_all_preserves_the_prefix_across_short_writes() {
+    var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+    let text = "hello"
+    match write_all(&writer, text.as_bytes()) {
+        Ok(written) => testing.assert_eq(written, 5, "write_all lost progress")?,
+        Err(_) => return testing.assert(false, "short writes failed"),
+    }
+    // Arrays compare element by element.
+    let expected: [UInt8; _] = [104, 101, 108, 108, 111, 0, 0, 0]
+    testing.assert_eq(writer.bytes, expected, "short writes duplicated or skipped bytes")?
+    .Ok(())
+}
+
+test fn write_all_reports_progress_before_an_underlying_failure() {
+    var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
+    let text = "hello"
+    match write_all(&writer, text.as_bytes()) {
+        Ok(_) => return testing.assert(false, "an underlying failure was hidden"),
+        Err(failure) => {
+            testing.assert_eq(failure.written, 3, "partial progress was lost")?
+            testing.assert_eq(failure.reason, .Some(9), "underlying reason was lost")?
+        },
+    }
+    let expected: [UInt8; _] = [104, 101, 108, 0, 0, 0, 0, 0]
+    testing.assert_eq(writer.bytes, expected, "failure changed the accepted prefix")?
+    .Ok(())
+}
+
+test fn write_all_rejects_zero_progress_and_skips_empty_inputs() {
+    var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 0, stop = 8 }
+    let text = "x"
+    match write_all(&writer, text.as_bytes()) {
+        Ok(_) => return testing.assert(false, "zero progress was accepted"),
+        Err(failure) => testing.assert(match read failure.kind { NoProgress => failure.written == 0, _ => false }, "zero progress was misreported")?,
+    }
+    writer.stop = 0
+    let empty = ""
+    match write_all(&writer, empty.as_bytes()) {
+        Ok(written) => testing.assert_eq(written, 0, "empty write gained progress")?,
+        Err(_) => return testing.assert(false, "an empty write called the failing sink"),
+    }
+    .Ok(())
+}
+
+impl Display for WriteFailureKind {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Underlying => &w.write_str("underlying output failure"),
+            NoProgress => &w.write_str("the writer made no progress"),
+            InvalidProgress => &w.write_str("the writer reported an invalid count"),
+        }
+    }
+}
+
+// An underlying failure renders the writer's own reason when it has one;
+// every other case renders its kind.
+impl[E: Display] Display for WriteFailure[E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("write failed after ")?
+        self.written.fmt(&w)?
+        &w.write_str(" bytes: ")?
+        match read self.kind {
+            Underlying => match read self.reason {
+                Some(reason) => reason.fmt(&w),
+                None => self.kind.fmt(&w),
+            },
+            _ => self.kind.fmt(&w),
+        }
+    }
+}
+
+test fn write_failures_display_their_kind_or_underlying_reason() {
+    let underlying: WriteFailure[UInt8] = .{ kind = .Underlying, reason = .Some(9), written = 3 }
+    let unexplained: WriteFailure[UInt8] = .{ kind = .Underlying, reason = .None, written = 0 }
+    let stalled: WriteFailure[UInt8] = .{ kind = .NoProgress, reason = .None, written = 2 }
+    let overcounted: WriteFailure[UInt8] = .{ kind = .InvalidProgress, reason = .Some(9), written = 4 }
+    let kind: WriteFailureKind = .Underlying
+    let allocator = mem.system()
+    // The 384-byte recorder holds all five renderings and their separators.
+    var writer = testing.Recorder.of(allocator, 384).unwrap()
+    let wrote = "{underlying}; {unexplained}; {stalled}; {overcounted}; {kind}".fmt(&writer).is_ok()
+    let equal = writer.holds("write failed after 3 bytes: 9; write failed after 0 bytes: underlying output failure; write failed after 2 bytes: the writer made no progress; write failed after 4 bytes: the writer reported an invalid count; underlying output failure")
+    writer.release()
+    testing.assert(wrote && equal, "a write failure lost its progress or reason")?
+    .Ok(())
+}

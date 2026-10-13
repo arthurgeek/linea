@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A `use` binds the name its path ends with and offers no other spelling, so\n// the token declaring the re-export is the token naming what it re-exports.\n// The name belongs to the module that declared it.\nimport sizes\n\nuse sizes.Width\n\nfn main() -> UInt8 {\n    let w: Width = .{ of = 2 }\n    w.of\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sizes/sizes.lin","languageId":"linea","version":1,"text":"pub struct Width {\n    of: UInt8,\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":11},"newName":"Span"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

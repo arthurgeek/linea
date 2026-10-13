@@ -1,0 +1,14 @@
+// A borrow of a newtype observes the storage its base is held in, so a
+// scalar newtype is borrowed and read back like its base.
+@copyable
+type Meters = UInt8
+
+fn doubled(length: borrow Meters) -> UInt8 {
+    let Meters(value) = copy(*length)
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let height = Meters(21)
+    doubled(borrow height)
+}

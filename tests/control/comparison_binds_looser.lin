@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let grouped = a + 1 < 3
+    let _ = grouped
+    a
+}

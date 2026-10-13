@@ -1,0 +1,12 @@
+// `(UInt8, UInt8)` is `Tuple2[UInt8, UInt8]`, whose components are the fields
+// `_0` and `_1`, so a struct literal of either spelling builds the same value
+// as the tuple literal.
+fn main() -> UInt8 {
+    let a = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 2 }
+    let b: (UInt8, UInt8) = .{ _0 = 1, _1 = 2 }
+    if a == (1, 2) && b == (1, 2) {
+        0
+    } else {
+        1
+    }
+}

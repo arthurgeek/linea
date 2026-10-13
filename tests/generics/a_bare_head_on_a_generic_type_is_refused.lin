@@ -1,0 +1,17 @@
+// A generic type named without its arguments is not a type, in an
+// implementation's head as anywhere else. A type's own implementation writes
+// its parameters, `impl[T] Cell[T]`, or fixes them, `impl Cell[UInt8]`.
+struct Cell[T] {
+    v: T,
+}
+
+impl Cell {
+    fn _zero() -> Cell[UInt8] {
+        .{ v = 0 }
+    }
+}
+
+fn main() -> UInt8 {
+    let cell: Cell[UInt8] = .{ v = 0 }
+    cell.v
+}

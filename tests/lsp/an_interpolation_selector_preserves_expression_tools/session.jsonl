@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"fn main() -> UInt8 {\n    let value: UInt8 = 7\n    let _text = \"{value:?}\"\n    0\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"main.lin"}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":2,"character":20},"newName":"item"}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

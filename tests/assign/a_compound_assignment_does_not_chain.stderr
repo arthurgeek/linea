@@ -1,0 +1,5 @@
+error[S-Separator]: expected `;` or a newline
+ --> tests/assign/a_compound_assignment_does_not_chain.lin:6:12
+  |
+6 |     a += b += 3
+  |            ^^ this statement ends here

@@ -1,0 +1,7 @@
+error[N-Immutable]: `x` is declared with `let`
+ --> tests/control/assign_to_let.lin:3:5
+  |
+2 |     let x: UInt8 = 1
+  |         - declared with `let` here
+3 |     x = 2
+  |     ^ this binding cannot be assigned

@@ -1,0 +1,16 @@
+import std.mem
+
+// `mem.Closure` is called as its first argument, so that argument is a `fn`
+// or `inout fn` type. A number is not callable, and a `sink fn` would consume
+// the closure on its first call.
+fn _count(_numbers: mem.Closure[UInt64, mem.SystemAllocator]) -> UInt8 {
+    0
+}
+
+fn _finish(_last: mem.Closure[sink fn() -> UInt8, mem.SystemAllocator]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

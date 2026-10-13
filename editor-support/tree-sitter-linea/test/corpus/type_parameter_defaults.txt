@@ -1,0 +1,49 @@
+==================
+A type parameter may default its argument
+==================
+
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+alias Rack[T, A: Allocator = mem.SystemAllocator] = Shelf[T, A]
+
+---
+
+(source_file
+  (struct_declaration
+    name: (type_identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier))
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))
+        default: (type_identifier)))
+    (field_list
+      (field
+        name: (identifier)
+        type: (generic_type
+          name: (type_identifier)
+          (type_arguments
+            (type_identifier)
+            (type_identifier))))))
+  (alias_declaration
+    name: (type_identifier)
+    type_parameters: (type_parameters
+      (type_parameter
+        name: (type_identifier))
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))
+        default: (settled_ref_type
+          base: (type_identifier)
+          member: (type_identifier))))
+    type: (generic_type
+      name: (type_identifier)
+      (type_arguments
+        (type_identifier)
+        (type_identifier)))))

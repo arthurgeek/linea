@@ -1,0 +1,23 @@
+// The caret is the implementation's, and the number under it is the site's:
+// what the reader wrote fills the slot the caret counts by, so the place the
+// bracket names is the length less that number. The clause is asked of the
+// index the reader wrote, because a count the array has no place for is a
+// bracket reaching past the field it was written over.
+struct Grid {
+    cells: [UInt8; 4],
+    tail: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[^i]
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4], tail = [10, 20, 30, 40] }
+    g[0] = 99
+    g.tail[0]
+}

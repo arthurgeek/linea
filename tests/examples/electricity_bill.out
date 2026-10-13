@@ -1,0 +1,5 @@
+meter 42: 175 kWh, 4025 cents
+meter 107: 24 kWh, 552 cents
+reading refused: MeterNumber(Syntax(2))
+reading refused: Reading(NotInteger)
+reading refused: Document(ParseError { kind: Syntax, offset: 30 })

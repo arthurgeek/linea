@@ -1,0 +1,5 @@
+error[M-Impl]: a callable type has no declaring module
+ --> tests/traits/callable_heads/a_callable_head_belongs_to_the_trait_module/main.lin:7:16
+  |
+7 | impl Route for fn(input: UInt8) -> UInt8 {
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^ write the implementation where the trait is declared

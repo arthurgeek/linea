@@ -1,0 +1,77 @@
+struct Empty {}
+
+struct Pair {
+    left: UInt8,
+    right: Bool,
+}
+
+type Meters = UInt8
+
+enum Flag {
+    Off,
+    On,
+}
+
+enum Choice {
+    None,
+    One(UInt8),
+    Pair(UInt8, Bool),
+}
+
+struct Wrapper[T] {
+    value: T,
+}
+
+derive (Equatable, Equivalent) for Empty
+
+derive (Equatable, Equivalent) for Pair
+
+derive (Equatable, Equivalent) for Meters
+
+derive (Equatable, Equivalent) for Flag
+
+derive (Equatable, Equivalent) for Choice
+
+derive[T: Equatable] Equatable for Wrapper[T]
+
+derive[T: Equivalent] Equivalent for Wrapper[T]
+
+fn main() -> UInt8 {
+    let empty: Empty = .{}
+    let another_empty: Empty = .{}
+    let pair: Pair = .{ left = 3, right = true }
+    let same_pair: Pair = .{ left = 3, right = true }
+    let other_pair: Pair = .{ left = 4, right = true }
+    let meters = Meters(7)
+    let wrapper: Wrapper[UInt8] = .{ value = 9 }
+    let same_wrapper: Wrapper[UInt8] = .{ value = 9 }
+
+    if !Equatable.equals(empty, another_empty) {
+        return 1
+    }
+    if !Equatable.equals(pair, same_pair) {
+        return 2
+    }
+    if Equatable.equals(pair, other_pair) {
+        return 3
+    }
+    if !Equatable.equals(meters, Meters(7)) {
+        return 4
+    }
+    if !Equatable.equals(Flag.Off, Flag.Off) {
+        return 5
+    }
+    if Equatable.equals(Flag.Off, Flag.On) {
+        return 6
+    }
+    if !Equatable.equals(Choice.Pair(2, true), Choice.Pair(2, true)) {
+        return 7
+    }
+    if Equatable.equals(Choice.Pair(2, true), Choice.Pair(2, false)) {
+        return 8
+    }
+    if !Equatable.equals(wrapper, same_wrapper) {
+        return 9
+    }
+    0
+}

@@ -1,0 +1,7 @@
+error[O-Move]: `original` has already been moved
+  --> tests/ownership/scalar_snapshots/an_allocator_descriptor_does_not_receive_implicit_duplication.lin:14:13
+   |
+13 |     let moved = original
+   |                 -------- it was taken here
+14 |     inspect(original) + inspect(moved)
+   |             ^^^^^^^^ it was already taken, and a value is taken once

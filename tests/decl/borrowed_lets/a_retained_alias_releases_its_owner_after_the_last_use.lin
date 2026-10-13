@@ -1,0 +1,22 @@
+struct Point { x: UInt8 }
+
+struct Holder { view: borrow UInt8 }
+
+fn remember(inout holder: Holder, view: borrow UInt8) -> () where retains(holder.view: view) {
+    holder.view = copy(view)
+}
+
+fn main() -> UInt8 {
+    let initial: UInt8 = 1
+    var point = Point { x = 3 }
+    var holder = Holder { view = borrow initial }
+    let read Point { x } = point
+    remember(&holder, borrow x)
+    let before = *holder.view
+    point.x = 5
+    if before == 3 && point.x == 5 {
+        0
+    } else {
+        1
+    }
+}

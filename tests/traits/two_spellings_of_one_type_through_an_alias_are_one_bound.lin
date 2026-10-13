@@ -1,0 +1,35 @@
+// `Spot` is another name for `Cell`, so a parameter bounded by `Lookup[Cell]`
+// and `Lookup[Spot]` carries one bound and reads `Elem` through it.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Cell {
+    value: UInt8,
+}
+
+alias Spot = Cell
+
+struct Board {
+    cells: UInt8,
+}
+
+impl Lookup[Cell] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: Cell) -> UInt8 {
+        self.cells + i.value
+    }
+}
+
+fn pass[C: Lookup[Cell] + Lookup[Spot]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = 1 }
+    let c: Cell = .{ value = 2 }
+    pass[Board](Lookup.at(b, c))
+}

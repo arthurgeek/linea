@@ -1,0 +1,34 @@
+import std.io
+import std.mem
+
+// The filter's predicate counts every parcel it inspects in `inspected`,
+// which stays in `main`. `[inout inspected]` lends it to the predicate until
+// the pipeline's last use, and afterwards `main` reads the final count.
+fn main() -> Result[UInt8, io.IoError] {
+    let weights = [UInt64(1200), 3500, 6400, 5000, 900]
+    let limit: UInt64 = 5000
+    var inspected: UInt64 = 0
+    let accepted = weights.as_slice().filter(
+        inout [limit, inout inspected] |parcel| {
+            inspected += 1
+            *parcel <= limit
+        },
+    )
+    let shipping = accepted.map(
+        |sink parcel: borrow UInt64| -> UInt64 where carries() {
+            *parcel + 100
+        },
+    )
+    let { values, iterator: _ } = shipping.collect(mem.system()).settled() else |_| {
+        io.println("Unable to allocate the manifest")?
+        return .Ok(1)
+    }
+    let accepted_count = values.length()
+    var total: UInt64 = 0
+    for weight in values.as_slice() {
+        total += *weight
+    }
+    values.release()
+    io.println("{accepted_count} accepted, {inspected} inspected, {total} g to ship")?
+    .Ok(0)
+}

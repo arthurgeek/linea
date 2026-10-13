@@ -1,0 +1,36 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// A path through an alias reaches what the type it names holds: its
+// variants, its operations and its constructors, at the arguments the alias
+// gives it.
+struct Point {
+    x: Int64,
+    y: Int64,
+}
+
+impl Point {
+    fn origin() -> Point {
+        Point { x = 2, y = 3 }
+    }
+}
+
+alias Spot = Point
+alias Maybe = Option[UInt8]
+alias Bytes = Vec[UInt8, SystemAllocator]
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let m = Maybe.Some(3)
+    let spot = Spot.origin()
+    var bytes = Bytes.new_in(mem.system())
+    let pushed = &bytes.push(4).settled()
+    let held = bytes.length()
+    bytes.release()
+    pushed?
+    let from_m = match m {
+        Some(v) => v,
+        None => 0,
+    }
+    .Ok(from_m + UInt8(spot.x + spot.y) + UInt8(held))
+}

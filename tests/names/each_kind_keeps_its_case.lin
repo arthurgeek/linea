@@ -1,0 +1,88 @@
+import std.text as strings
+
+// Types, traits, variants and type parameters start with a capital letter;
+// functions, fields, parameters, constants, modules and bindings with a
+// lowercase one.
+let limit: UInt8 = 9
+
+struct Counter {
+    count: UInt8,
+}
+
+enum Shade {
+    Light,
+    Dark,
+}
+
+type Meters = UInt8
+
+trait Sized {
+    type Unit
+
+    fn size(self: Self) -> UInt8
+}
+
+impl Sized for Shade {
+    type Unit = UInt8
+
+    fn size(self: Self) -> UInt8 {
+        match read self {
+            Light => 1,
+            Dark => 2,
+        }
+    }
+}
+
+impl Counter {
+    let start: UInt8 = 1
+
+    fn bump(self: Self) -> UInt8 {
+        self.count + Counter.start
+    }
+}
+
+fn first[T](sink value: T) -> T {
+    value
+}
+
+fn clamp(value: UInt8) -> UInt8 {
+    if value > limit {
+        limit
+    } else {
+        value
+    }
+}
+
+fn apply(step: fn(amount: UInt8) -> UInt8, amount: UInt8) -> UInt8 {
+    step(amount)
+}
+
+fn half(n: UInt8) -> Result[UInt8, UInt8] {
+    if n % 2 == 0 {
+        .Ok(n / 2)
+    } else {
+        .Err(n)
+    }
+}
+
+fn main() -> UInt8 {
+    let total = clamp(Counter { count = 2 }.bump())
+    var sum = total
+    for step in 0..2 {
+        sum += step
+    }
+    let add = |amount: UInt8| amount + 1
+    let offset = 2
+    let shift = [moved = offset] || moved
+    let halved = half(4) else |reason| {
+        return reason
+    }
+    let found = match Option.Some(sum) {
+        Some(inner) => inner,
+        None => 0,
+    }
+    let Counter { count: held } = Counter { count = 1 }
+    let Meters(length) = Meters(1)
+    let _whole = strings.parse_float64("1.5")
+    first(add(apply(clamp, found))) + shift() + halved + held + length + Shade.Dark.size() - 13
+}

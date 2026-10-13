@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+ --> tests/ownership/leak_never_consumed/main.lin:4:9
+  |
+4 |     let k = mint(7)
+  |         ^ never settled on the path that reaches the end of this block
+6 | }
+  | - the block ends here
+  |
+  = help: take it apart with a `match`, or give it to something that takes it

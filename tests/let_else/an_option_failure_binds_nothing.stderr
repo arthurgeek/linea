@@ -1,0 +1,5 @@
+error[T-LetElse]: a failed `Option[UInt8]` carries nothing to bind
+  --> tests/let_else/an_option_failure_binds_nothing.lin:11:31
+   |
+11 |     let found = find(1) else |_| {
+   |                               ^ write `else { … }` with no binder

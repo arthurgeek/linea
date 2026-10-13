@@ -1,0 +1,170 @@
+==================
+Single policies and attached derives
+==================
+
+@opaque
+struct Account { balance: Int64 }
+@linear pub enum Resource { Open(UInt64), Closed }
+@copyable internal type Count = UInt64
+@derive(Equatable, fmt.Debug)
+struct Point { x: UInt64 }
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (policy_attribute))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
+        (type_identifier))))
+  (enum_declaration
+    (attribute
+      (policy_attribute))
+    (visibility)
+    (type_identifier)
+    (variant_list
+      (variant
+        (type_identifier)
+        (type_identifier))
+      (variant
+        (type_identifier))))
+  (newtype_declaration
+    (attribute
+      (policy_attribute))
+    (visibility)
+    (type_identifier)
+    (type_identifier))
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)))
+          (derive_trait
+            (trait_reference
+              (identifier)
+              (type_identifier))))))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
+        (type_identifier)))))
+
+==================
+Grouped attributes preserve comments and order
+==================
+
+@(opaque, // representation stays sealed
+  linear, derive(fmt.detail.Debug, Release),)
+// the declaration follows both groups
+@derive(Equatable)
+struct Resource { value: UInt64 }
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (attribute_group
+        (policy_attribute)
+        (line_comment)
+        (policy_attribute)
+        (derive_attribute
+          (derive_traits
+            (derive_trait
+              (trait_reference
+                (identifier)
+                (identifier)
+                (type_identifier)))
+            (derive_trait
+              (trait_reference
+                (type_identifier)))))))
+    (line_comment)
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier))))))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
+        (type_identifier)))))
+
+==================
+Attached generic and independently constrained derives
+==================
+
+@derive(Debug)
+struct Cell[T: Debug] { value: T }
+struct OpenCell[T] { value: T }
+derive[T: Debug] Debug for OpenCell[T]
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier))))))
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (field_list
+      (field
+        (identifier)
+        (type_identifier))))
+  (struct_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (field_list
+      (field
+        (identifier)
+        (type_identifier))))
+  (derive_declaration
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (derive_trait
+      (trait_reference
+        (type_identifier)))
+    (type_identifier)
+    (type_arguments
+      (type_identifier))))
+
+==================
+An empty derive request
+==================
+
+@derive()
+struct Point { value: UInt8 }
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits)))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
+        (type_identifier)))))

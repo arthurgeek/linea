@@ -1,0 +1,30 @@
+// `Marker` discards its argument, so `Mid[T]` names its parameter without
+// holding it and an `S[T]` holding a `Mid[S[T]]` holds no `S[T]`. The layout
+// closes, and the program below runs.
+//
+// Whether a parameter is held is a question about the parts it reaches, not
+// about the declaration that writes it down: `Mid` names `T` in a part, which
+// is what its declaration owes, and that part hands it to a position nothing
+// is laid out at. Read as "named, therefore held", this program would be
+// refused for a cycle it does not have.
+struct Marker[phantom X] {
+    v: UInt8,
+}
+
+struct Mid[T] {
+    m: Marker[T],
+}
+
+struct S[T] {
+    a: T,
+    b: Mid[S[T]],
+}
+
+fn use_it(s: S[UInt8]) -> UInt8 {
+    s.a
+}
+
+fn main() -> UInt8 {
+    let s: S[UInt8] = .{ a = 40, b = .{ m = .{ v = 1 } } }
+    use_it(s)
+}

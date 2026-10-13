@@ -1,0 +1,5 @@
+import bank
+
+fn main() -> UInt8 {
+    bank.Account.secret()
+}

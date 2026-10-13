@@ -1,0 +1,9 @@
+error[O-Leak]: `_ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_comment_after_a_closing_brace_does_not_move_the_block_end.lin:10:13
+   |
+10 |         let _ticket = Ticket.Seat(4)
+   |             ^^^^^^^ never settled on the path that reaches the end of this block
+12 |     } // the row is chosen
+   |     - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

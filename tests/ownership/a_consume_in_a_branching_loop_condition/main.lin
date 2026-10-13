@@ -1,0 +1,40 @@
+// A condition with control flow of its own does not end where it began. An
+// `if`, a `match` or a `&&` finishes in its own merge block, and that is the
+// block the loop branches from -- so a value the condition took is a value the
+// body, the back edge and everything after the loop have to know about.
+//
+// While the loop branched from the head instead, that merge had no way out and
+// the take stopped inside it: the condition below could consume `k` and the
+// `release` after the loop was told nothing had happened.
+fn eat(sink k: Key) -> Bool {
+    release(k)
+    false
+}
+
+fn through_an_if() -> UInt8 {
+    let k = mint(3)
+    var n: UInt8 = 0
+    while (if n == 0 {
+        eat(k)
+    } else {
+        false
+    }) {
+        n = 1
+    }
+    release(k)
+    0
+}
+
+fn through_an_and() -> UInt8 {
+    let k = mint(4)
+    var n: UInt8 = 0
+    while n == 0 && eat(k) {
+        n = 1
+    }
+    release(k)
+    0
+}
+
+fn main() -> UInt8 {
+    through_an_if() + through_an_and()
+}

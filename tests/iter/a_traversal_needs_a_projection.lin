@@ -1,0 +1,19 @@
+// A traversal says which positions a walk runs through, and nothing else. What
+// place a position stands for is the projection's to say, so a type declaring
+// one and not the other says where to go and not what is there.
+struct Bag {
+    xs: [UInt8; 2],
+}
+
+impl Bag {
+    trav positions = 0..2
+}
+
+fn main() -> UInt8 {
+    let b: Bag = .{ xs = [1, 2] }
+    var total: UInt8 = 0
+    for read x in b {
+        total += x
+    }
+    total
+}

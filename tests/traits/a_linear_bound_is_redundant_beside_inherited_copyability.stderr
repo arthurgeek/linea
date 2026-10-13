@@ -1,0 +1,5 @@
+error[T-Bound]: Linear adds no capability requirement
+ --> tests/traits/a_linear_bound_is_redundant_beside_inherited_copyability.lin:7:11
+  |
+7 | fn _twice[T: Duplicable + Linear](x: T) -> UInt8 {
+  |           ^ drop the redundant Linear bound

@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let r: Range[UInt8] = 3..=7
+    let lo = r.lo
+    let hi = r.hi
+    let Range { lo: _x, hi: _y, inclusive: _flag } = r
+    lo + hi
+}

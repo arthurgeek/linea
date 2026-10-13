@@ -1,0 +1,5 @@
+error[T-Projection]: a projection whose expansion reaches itself is refused: Board -> Board -> Board
+  --> tests/projections/a_projection_does_not_reach_itself_under_a_selection.lin:16:9
+   |
+16 |         self[^i].w
+   |         ^^^^^^^^ this is where the chain returns to an implementation already on it

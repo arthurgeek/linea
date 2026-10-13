@@ -1,0 +1,11 @@
+import messages
+
+let greeting = messages.greeting
+
+fn main() -> UInt8 {
+    if greeting.length() == 5 && messages.selected() == messages.count {
+        0
+    } else {
+        1
+    }
+}

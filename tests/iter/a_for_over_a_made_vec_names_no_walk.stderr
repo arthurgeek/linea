@@ -1,0 +1,5 @@
+error[T-For]: `Vec[UInt64, mem.SystemAllocator]` implements no `Sequence`
+  --> tests/iter/a_for_over_a_made_vec_names_no_walk.lin:12:18
+   |
+12 |     for cents in prices() {
+   |                  ^^^^^^^^ a `for` walks what a `Sequence` says how to walk

@@ -1,0 +1,5 @@
+error[T-Lend]: `Bag` declares a traversal and no place a position reaches
+  --> tests/iter/a_traversal_needs_a_projection.lin:15:19
+   |
+15 |     for read x in b {
+   |                   ^ implement `Index` for it, indexed by what the traversal yields

@@ -1,0 +1,8 @@
+import readings
+
+fn main() -> UInt8 {
+    let value: UInt8 = 3
+    let first = readings.Reading[UInt8] { value }
+    let second: readings.Reading[UInt8] = .{ value = 4 }
+    first.value + second.value + value
+}

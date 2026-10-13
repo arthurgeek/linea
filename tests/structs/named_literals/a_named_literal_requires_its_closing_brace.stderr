@@ -1,0 +1,5 @@
+error[S-Brace]: expected `}`
+ --> tests/structs/named_literals/a_named_literal_requires_its_closing_brace.lin:5:5
+  |
+5 |     return 0
+  |     ^^^^^^ this literal is never closed

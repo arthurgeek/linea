@@ -1,0 +1,26 @@
+trait Count {
+    fn count(self: Self) -> UInt8
+}
+
+struct State { number: UInt8 }
+
+impl Count for State {
+    fn count(self: Self) -> UInt8 {
+        self.number
+    }
+}
+
+fn count[T: Count](value: T) -> UInt8 {
+    Count.count(value)
+}
+
+fn main() -> UInt8 {
+    let state: State = .{ number = 7 }
+    let view = borrow state
+    let nested = borrow view
+    if count(view) == 7 && count(nested) == 7 {
+        0
+    } else {
+        1
+    }
+}

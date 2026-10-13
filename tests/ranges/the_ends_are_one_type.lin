@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let a: UInt8 = 0
+    let b: Int64 = 300
+    let r = a..b
+    let _ = r
+    0
+}

@@ -1,0 +1,15 @@
+fn narrow[T: Integer](value: T) -> UInt8 {
+    UInt8(value)
+}
+
+fn forward[T: Integer](value: T) -> UInt8 {
+    narrow(value)
+}
+
+fn main() -> UInt8 {
+    if forward(Int16(23)) == 23 {
+        0
+    } else {
+        1
+    }
+}

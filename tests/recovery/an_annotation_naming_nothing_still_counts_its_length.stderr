@@ -1,0 +1,20 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/recovery/an_annotation_naming_nothing_still_counts_its_length.lin:3:18
+  |
+3 | fn take(_given: [Nope; 2]) -> UInt8 {
+  |                  ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+ --> tests/recovery/an_annotation_naming_nothing_still_counts_its_length.lin:8:17
+  |
+8 |     let _held: [Nope; 2] = [1, 2, 3]
+  |                 ^^^^ no type with this name is declared here
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/recovery/an_annotation_naming_nothing_still_counts_its_length.lin:8:28
+  |
+8 |     let _held: [Nope; 2] = [1, 2, 3]
+  |                            ^^^^^^^^^ this has 3, and the type says 2
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/recovery/an_annotation_naming_nothing_still_counts_its_length.lin:9:10
+  |
+9 |     take([1, 2, 3])
+  |          ^^^^^^^^^ this has 3, and the type says 2

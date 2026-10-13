@@ -1,0 +1,22 @@
+// A clause the implementation writes replaces the trait's for its body, so a
+// promise of independence refuses a result that carries the request.
+struct Request {
+    name: Str,
+}
+
+trait Handler {
+    fn handle(self: Self, request: Request) -> Str where carries(request)
+}
+
+struct Echo {}
+
+impl Handler for Echo {
+    fn handle(_self: Self, request: Request) -> Str where carries() {
+        copy(request.name)
+    }
+}
+
+fn main() -> UInt8 {
+    let _echoed = Echo {}.handle(Request { name = "world" })
+    0
+}

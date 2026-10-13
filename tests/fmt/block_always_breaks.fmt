@@ -1,0 +1,11 @@
+fn f() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    if true {
+        1
+    } else {
+        2
+    }
+}

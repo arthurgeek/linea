@@ -1,0 +1,15 @@
+// Nothing settles a test's type arguments. The one call to it is written by a
+// compiler with no expression to read them from.
+import std.io
+
+use io.IoError
+use io.println
+
+test fn a_thing_holds[T: Copyable]() -> Result[(), IoError] {
+    println("nothing settles T")?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    0
+}

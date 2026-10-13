@@ -1,0 +1,14 @@
+enum Failure { Refused(UInt8) }
+
+fn main() -> UInt8 {
+    let input: Result[UInt8, UInt8] = .Ok(19)
+    let mapped = input.map_err(Failure.Refused)
+    match mapped {
+        Ok(value) => if value == 19 {
+            0
+        } else {
+            1
+        },
+        Err(_) => 2,
+    }
+}

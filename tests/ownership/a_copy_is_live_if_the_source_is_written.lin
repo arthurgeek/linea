@@ -1,0 +1,23 @@
+// Writing a part reads the binding it reaches through, so a copy taken before
+// that write is still live when it happens -- the two now name different
+// values, which is the whole point of having taken it.
+//
+// [O-CopyDead] used to fire here and tell the programmer to write the move
+// instead. That advice was not takeable: `let q = p` followed by `p.x = 5` is
+// [O-Move], because a part does not refill what a move emptied.
+@copyable
+struct P {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn take(sink p: P) -> UInt8 {
+    p.x + p.y
+}
+
+fn main() -> UInt8 {
+    var p: P = .{ x = 1, y = 2 }
+    let q = copy(p)
+    p.x = 5
+    take(q)
+}

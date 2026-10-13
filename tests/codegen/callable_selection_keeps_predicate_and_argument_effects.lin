@@ -1,0 +1,61 @@
+fn choose(inout count: UInt8, choice: Bool) -> Bool {
+    count = count + 1
+    choice
+}
+
+fn argument(inout count: UInt8) -> UInt8 {
+    count = count + 1
+    count + 0
+}
+
+fn first(inout state: UInt8, value: UInt8, by: UInt8 = 2) -> UInt8 {
+    state = state + by
+    value + 10
+}
+
+fn second(inout state: UInt8, value: UInt8, by: UInt8 = 2) -> UInt8 {
+    state = state + by
+    value + 20
+}
+
+fn through_value(callback: fn(inout state: UInt8, read value: UInt8, read by: UInt8 = 2) -> UInt8, inout state: UInt8, value: UInt8) -> UInt8 {
+    callback(&state, value)
+}
+
+fn exercise(initial: Bool) -> UInt8 {
+    var choice = initial
+    var predicates: UInt8 = 0
+    var arguments: UInt8 = 0
+    var state: UInt8 = 0
+    let selected: fn(inout state: UInt8, read value: UInt8, read by: UInt8 = 2) -> UInt8 = if choose(&predicates, choice) {
+        first
+    } else {
+        second
+    }
+    choice = !choice
+    let a = selected(value: argument(&arguments), state: &state)
+    let b = selected(&state, argument(&arguments), 3)
+    let c = through_value(selected, &state, argument(&arguments))
+    if predicates != 1 || arguments != 3 || state != 7 {
+        return 1
+    }
+    if choice == initial {
+        return 2
+    }
+    if initial {
+        if a != 11 || b != 12 || c != 13 {
+            return 3
+        }
+    } else {
+        if a != 21 || b != 22 || c != 23 {
+            return 4
+        }
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    let a = exercise(true)
+    let b = exercise(false)
+    a + b
+}

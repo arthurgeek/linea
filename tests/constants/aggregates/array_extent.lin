@@ -1,0 +1,5 @@
+let values: [UInt8; 2] = [1]
+
+fn main() -> UInt8 {
+    values[0]
+}

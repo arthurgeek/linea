@@ -1,0 +1,18 @@
+struct Board {
+    scores: [UInt8; 2],
+}
+
+impl Index[UInt64] for Board via scores
+
+impl Index[UInt64] for Board {
+    type Elem = UInt8
+
+    proj at(inout self: Self, i: UInt64) -> UInt8 {
+        self.scores[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let board: Board = .{ scores = [1, 2] }
+    board[0]
+}

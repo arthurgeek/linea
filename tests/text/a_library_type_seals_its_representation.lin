@@ -1,0 +1,29 @@
+// What the library seals, a program cannot reach into.
+//
+// Two of them, sealed for the same reason from opposite ends. A `Descriptor`
+// holds the number the operating system gave, and a program that read it could
+// act on it -- close it, write behind a `Writer`'s back -- so what a caller is
+// given is `stdout`, `stderr` and `descriptor`, none of which needs the number.
+// A `Failure` holds what a test said went wrong, and one built by hand would be
+// a test reporting something no assertion decided, so `expect` and `fail` are
+// how one is made.
+//
+// The type's name crosses the boundary either way: sealing is about the
+// representation, so a signature may say `Descriptor` and a test may answer
+// `Result[(), testing.Failure]`. Unpacking the descriptor, reading a field,
+// and writing a literal expose or construct the sealed representations and
+// are refused.
+import std.testing
+import std.io
+
+use io.Descriptor
+
+fn main() -> UInt8 {
+    let out: io.Descriptor = io.stdout()
+    let Descriptor(_number) = out
+
+    let said: testing.Failure = .{ said = "built by hand" }
+    let _read = copy(said.said)
+
+    0
+}

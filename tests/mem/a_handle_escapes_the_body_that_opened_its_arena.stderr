@@ -1,0 +1,12 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/mem/a_handle_escapes_the_body_that_opened_its_arena.lin:13:5
+   |
+13 |     arena.handle()
+   |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/a_handle_escapes_the_body_that_opened_its_arena.lin:12:11
+   |
+12 |     defer arena.release()
+   |           ^^^^^ keep this place available until the last use of its observation
+13 |     arena.handle()
+   |     -------------- the observation is returned here

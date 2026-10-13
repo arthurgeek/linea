@@ -1,0 +1,5 @@
+error[T-Projection]: a projection's place is rooted at `_self`, and this one is rooted at `spare`
+  --> tests/projections/a_projection_is_rooted_at_its_receiver.lin:14:9
+   |
+14 |         spare
+   |         ^^^^^ reach the place from `_self` by field selection and indexing, and nothing else

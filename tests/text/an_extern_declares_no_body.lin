@@ -1,0 +1,13 @@
+// The whole of what an `extern` is, is a declaration with no body. One written
+// with a body is not an `extern` that also has one -- it is two declarations
+// sharing a keyword, and the language has no use for the second.
+//
+// `[M-Extern]` answers here too, and will in every case that writes one: an
+// `extern` outside the standard library is refused, and a case is outside it.
+extern fn provided(n: UInt64) -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    UInt8(provided(7))
+}

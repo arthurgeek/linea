@@ -1,0 +1,13 @@
+// `Slice`'s projection is written in the library, and reading past the end
+// through it traps at the index this program wrote, on line 6.
+fn pick(values: [UInt64; 3], at: UInt64) -> UInt64 {
+    let view = values.as_slice()
+    // The out-of-range read happens here.
+    view[at]
+}
+
+fn main() -> UInt8 {
+    let values = [UInt64(1), 2, 3]
+    let far = pick(values, 1) + 6
+    UInt8(pick(values, far))
+}

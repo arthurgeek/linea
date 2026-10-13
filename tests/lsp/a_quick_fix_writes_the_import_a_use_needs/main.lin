@@ -1,0 +1,12 @@
+// Nothing this file imports passes `ByteWriter` on, so the quick fix writes
+// the import that reaches it beside the `use`.
+import std.fs
+
+fn waiting(file: fs.File) -> UInt64 {
+    file.pending_bytes()
+}
+
+fn main() -> UInt8 {
+    let _count = waiting
+    0
+}

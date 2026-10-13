@@ -1,0 +1,10 @@
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Int64` does not
+  --> tests/traits/a_refused_self_rechecks_no_omitted_default.lin:12:16
+   |
+12 |     Measure.of(1) + Measure.of(x: 2)
+   |                ^ implement it for that type, or reach the operation on one that does
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Int64` does not
+  --> tests/traits/a_refused_self_rechecks_no_omitted_default.lin:12:35
+   |
+12 |     Measure.of(1) + Measure.of(x: 2)
+   |                                   ^ implement it for that type, or reach the operation on one that does

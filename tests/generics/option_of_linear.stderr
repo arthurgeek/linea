@@ -1,0 +1,9 @@
+error[O-Leak]: `_held` (a linear `Option[Key]`) is still owned when this path leaves
+  --> tests/generics/option_of_linear.lin:9:9
+   |
+9  |     let _held: Option[Key] = .Some(Key.Forged(1))
+   |         ^^^^^ never settled on the path that reaches the end of this block
+11 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

@@ -1,0 +1,22 @@
+trait Transfer[S] {
+    fn transfer(value: S) -> Self
+}
+
+impl[S: Integer, T: Integer] Transfer[S] for T {
+    fn transfer(value: S) -> T {
+        // Different source minima make source substitution observable even
+        // when two calls have the same target and the same input value.
+        T(Int64(value) - Int64(S.min))
+    }
+}
+
+fn main() -> UInt8 {
+    let signed: UInt16 = Transfer.transfer(Int8(7))
+    let unsigned: UInt16 = Transfer.transfer(UInt8(7))
+    let wider: UInt32 = Transfer.transfer(Int16(7))
+    if signed == UInt16(135) && unsigned == UInt16(7) && wider == UInt32(32775) {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,28 @@
+// A length written into what an implementation supplies its trait is read
+// where every other name an implementation writes is read, so a name there
+// that reaches no declaration is undefined -- the answer it would get in any
+// other position, rather than a report about the form the length took.
+trait Give[phantom U] {
+    fn give(self: Self) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; N]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; M]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    h.n
+}

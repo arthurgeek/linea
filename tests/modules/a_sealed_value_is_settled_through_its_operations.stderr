@@ -1,0 +1,9 @@
+error[O-Leak]: `ticket` (a linear `box_office.Ticket`) is still owned when this path leaves
+  --> tests/modules/a_sealed_value_is_settled_through_its_operations/main.lin:8:9
+   |
+8  |     let ticket = box_office.Ticket.sell(14)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+10 | }
+   | - the block ends here
+   |
+   = help: settle it first with `ticket.redeem()` or `ticket.refund()`

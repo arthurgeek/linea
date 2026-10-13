@@ -1,0 +1,8 @@
+trait Marker {}
+
+@derive(Marker)
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    Point { value = 0 }.value
+}

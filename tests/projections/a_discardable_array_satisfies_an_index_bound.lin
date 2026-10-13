@@ -1,0 +1,11 @@
+// Array Index conformance survives inside a generic wrapper. The wrapper
+// inherits discardability from its concrete scalar array, independently of
+// the trait bound used to select its element.
+struct Holder[C: Index[UInt64]] {
+    c: C,
+}
+
+fn main() -> UInt8 {
+    let h: Holder[[UInt8; 3]] = .{ c = [1, 2, 3] }
+    h.c[1]
+}

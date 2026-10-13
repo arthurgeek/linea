@@ -1,0 +1,11 @@
+// The five compound assignments, each doing the arithmetic its operator names
+// and writing the answer back where it read it.
+fn main() -> UInt8 {
+    var v: UInt8 = 10
+    v += 5
+    v -= 3
+    v *= 2
+    v /= 4
+    v %= 4
+    v
+}

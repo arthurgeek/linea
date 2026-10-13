@@ -1,0 +1,14 @@
+// A function declares its parameters and what it returns. The list is what
+// the parser wants next after the name, and a type parameter list is closed
+// where it was opened.
+fn takes -> UInt8 {
+    1
+}
+
+fn generic[T -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    1
+}

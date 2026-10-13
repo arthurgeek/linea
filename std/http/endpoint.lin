@@ -1,0 +1,669 @@
+import std.fmt
+import std.json as json_format
+import std.mem
+import std.testing
+
+// An `Endpoint` is a named function the router calls with what it asks for. Its
+// parameters name its inputs: an optional leading `inout state`, then up to six
+// extractors, each a type that implements `Extract` and `Release`, then the
+// `request` the answer is built in. The router reads each extractor from the
+// request in parameter order, and the first one that refuses answers the
+// request with its error; the extractors already read are released, last
+// first, on every exit. A function with no `inout state` is stateless and is
+// registered on a router of any state.
+//
+//     fn show(id: http.Path[UInt64], request: http.Request) -> Result[http.Response, http.Error]
+//     fn create(inout shop: Shop, order: Order, request: http.Request) -> Result[http.Response, http.Error] where carries(request)
+//
+// An extractor is lent to the function `read`, so a function that needs to own
+// what it extracts reads it in its body with `request.extract[T]()`.
+//
+// Each shape is one implementation, because a callable type is implemented for
+// by its parameters' conventions and count.
+pub trait Endpoint[S, P: Allocator] {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]]
+}
+
+// A stateless function with 0 extractors.
+impl[S, P: Allocator] Endpoint[S, P] for fn(request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        self(request)
+    }
+}
+
+// A stateless function with 1 extractor.
+impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(a: A, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        self(a, request)
+    }
+}
+
+// A stateless function with 2 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        self(a, b, request)
+    }
+}
+
+// A stateless function with 3 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        self(a, b, c, request)
+    }
+}
+
+// A stateless function with 4 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        self(a, b, c, d, request)
+    }
+}
+
+// A stateless function with 5 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, e: E, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        defer let e = E.extract(request)?
+        self(a, b, c, d, e, request)
+    }
+}
+
+// A stateless function with 6 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release, F: Extract[P] + Release] Endpoint[S, P] for fn(a: A, b: B, c: C, d: D, e: E, f: F, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout _state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        defer let e = E.extract(request)?
+        defer let f = F.extract(request)?
+        self(a, b, c, d, e, f, request)
+    }
+}
+
+// A stateful function with 0 extractors.
+impl[S, P: Allocator] Endpoint[S, P] for fn(inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        self(&state, request)
+    }
+}
+
+// A stateful function with 1 extractor.
+impl[S, P: Allocator, A: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        self(&state, a, request)
+    }
+}
+
+// A stateful function with 2 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        self(&state, a, b, request)
+    }
+}
+
+// A stateful function with 3 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        self(&state, a, b, c, request)
+    }
+}
+
+// A stateful function with 4 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        self(&state, a, b, c, d, request)
+    }
+}
+
+// A stateful function with 5 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, e: E, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        defer let e = E.extract(request)?
+        self(&state, a, b, c, d, e, request)
+    }
+}
+
+// A stateful function with 6 extractors.
+impl[S, P: Allocator, A: Extract[P] + Release, B: Extract[P] + Release, C: Extract[P] + Release, D: Extract[P] + Release, E: Extract[P] + Release, F: Extract[P] + Release] Endpoint[S, P] for fn(inout state: S, a: A, b: B, c: C, d: D, e: E, f: F, request: Request[P]) -> Result[Response[P], Error[P]] where carries(request) {
+    fn call(self: Self, inout state: S, request: Request[P]) -> Result[Response[P], Error[P]] {
+        defer let a = A.extract(request)?
+        defer let b = B.extract(request)?
+        defer let c = C.extract(request)?
+        defer let d = D.extract(request)?
+        defer let e = E.extract(request)?
+        defer let f = F.extract(request)?
+        self(&state, a, b, c, d, e, f, request)
+    }
+}
+
+// What the tests below register on a router: the request and answer of a
+// program that serves from the system allocator.
+alias ProbeRequest = Request
+alias ProbeAnswer = Result[Response, Error]
+
+// A `Word` is the `X-Word` header, refused with 400 without one.
+@derive(Release)
+struct Word {
+    text: Str,
+}
+
+impl[P: Allocator] Extract[P] for Word {
+    fn extract(request: Request[P]) -> Result[Word, Error[P]] {
+        match request.header("X-Word") {
+            Some(text) => .Ok(.{ text }),
+            None => .Err(error(request, .BadRequest, "missing X-Word")),
+        }
+    }
+}
+
+// `CallCount` is the state the stateful tests lend to the router.
+@derive(Release)
+struct CallCount {
+    calls: UInt64,
+}
+
+// Answer `target` through `router`, lent `state`, with the request carrying
+// `headers` as alternating names and values, from a request arena of
+// `arena_bytes`. The description is the status code and the body, or the
+// refusal's message.
+fn served_headed[S](inout router: Router[S], inout state: S, target: Str, headers: mem.Slice[Str], arena_bytes: UInt64 = 65536) -> String[mem.SystemAllocator] {
+    let arena = mem.Arena.open(mem.system(), size: arena_bytes)
+    var sent = new_request(arena.handle(), "GET", target, body: "").unwrap()
+    var at: UInt64 = 0
+    while at < headers.length() {
+        &sent.add_header(headers[at], headers[at + 1]).unwrap()
+        at += 2
+    }
+    let described = match &router.serve_http(&state, sent.request()) {
+        Ok(response) => {
+            let code = response.status().code()
+            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            fmt.render_owned(mem.system(), "{code} {body}").unwrap()
+        },
+        Err(error) => {
+            let code = error.status().code()
+            let message = error.message().unwrap_or(error.status().reason())
+            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+        },
+    }
+    arena.release()
+    described
+}
+
+fn stateless_0(request: ProbeRequest) -> ProbeAnswer {
+    text(request, "0:")
+}
+
+fn stateless_1(a: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "1:{a.text}")
+}
+
+fn stateless_2(a: Word, b: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "2:{a.text}{b.text}")
+}
+
+fn stateless_3(a: Word, b: Word, c: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "3:{a.text}{b.text}{c.text}")
+}
+
+fn stateless_4(a: Word, b: Word, c: Word, d: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "4:{a.text}{b.text}{c.text}{d.text}")
+}
+
+fn stateless_5(a: Word, b: Word, c: Word, d: Word, e: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "5:{a.text}{b.text}{c.text}{d.text}{e.text}")
+}
+
+fn stateless_6(a: Word, b: Word, c: Word, d: Word, e: Word, f: Word, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "6:{a.text}{b.text}{c.text}{d.text}{e.text}{f.text}")
+}
+
+fn stateful_0(inout calls_seen: CallCount, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "0:{calls_seen.calls}")
+}
+
+fn stateful_1(inout calls_seen: CallCount, a: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "1:{calls_seen.calls}{a.text}")
+}
+
+fn stateful_2(inout calls_seen: CallCount, a: Word, b: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "2:{calls_seen.calls}{a.text}{b.text}")
+}
+
+fn stateful_3(inout calls_seen: CallCount, a: Word, b: Word, c: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "3:{calls_seen.calls}{a.text}{b.text}{c.text}")
+}
+
+fn stateful_4(inout calls_seen: CallCount, a: Word, b: Word, c: Word, d: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "4:{calls_seen.calls}{a.text}{b.text}{c.text}{d.text}")
+}
+
+fn stateful_5(inout calls_seen: CallCount, a: Word, b: Word, c: Word, d: Word, e: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "5:{calls_seen.calls}{a.text}{b.text}{c.text}{d.text}{e.text}")
+}
+
+fn stateful_6(inout calls_seen: CallCount, a: Word, b: Word, c: Word, d: Word, e: Word, f: Word, request: ProbeRequest) -> ProbeAnswer {
+    calls_seen.calls += 1
+    text(request, "6:{calls_seen.calls}{a.text}{b.text}{c.text}{d.text}{e.text}{f.text}")
+}
+
+test fn a_stateless_function_is_registered_with_each_count_of_extractors() {
+    defer var router: Router[CallCount] = Router.new()
+    var calls_seen = CallCount { calls = 0 }
+    testing.assert_ok_eq(&router.route("GET /s0", stateless_0), (), "registering 0 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s1", stateless_1), (), "registering 1 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s2", stateless_2), (), "registering 2 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s3", stateless_3), (), "registering 3 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s4", stateless_4), (), "registering 4 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s5", stateless_5), (), "registering 5 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /s6", stateless_6), (), "registering 6 extractors failed")?
+    defer let s0 = served_headed(&router, &calls_seen, "/s0", ["X-Word", "w"].as_slice())
+    defer let s1 = served_headed(&router, &calls_seen, "/s1", ["X-Word", "w"].as_slice())
+    defer let s2 = served_headed(&router, &calls_seen, "/s2", ["X-Word", "w"].as_slice())
+    defer let s3 = served_headed(&router, &calls_seen, "/s3", ["X-Word", "w"].as_slice())
+    defer let s4 = served_headed(&router, &calls_seen, "/s4", ["X-Word", "w"].as_slice())
+    defer let s5 = served_headed(&router, &calls_seen, "/s5", ["X-Word", "w"].as_slice())
+    defer let s6 = served_headed(&router, &calls_seen, "/s6", ["X-Word", "w"].as_slice())
+    testing.assert_eq(s0.view(), "200 0:", "0 extractors were not read")?
+    testing.assert_eq(s1.view(), "200 1:w", "1 extractors were not read")?
+    testing.assert_eq(s2.view(), "200 2:ww", "2 extractors were not read")?
+    testing.assert_eq(s3.view(), "200 3:www", "3 extractors were not read")?
+    testing.assert_eq(s4.view(), "200 4:wwww", "4 extractors were not read")?
+    testing.assert_eq(s5.view(), "200 5:wwwww", "5 extractors were not read")?
+    testing.assert_eq(s6.view(), "200 6:wwwwww", "6 extractors were not read")?
+    testing.assert_eq(calls_seen.calls, UInt64(0), "a stateless function changed the state")?
+    .Ok(())
+}
+
+test fn a_stateful_function_is_lent_the_state_with_each_count_of_extractors() {
+    defer var router: Router[CallCount] = Router.new()
+    var calls_seen = CallCount { calls = 0 }
+    testing.assert_ok_eq(&router.route("GET /t0", stateful_0), (), "registering 0 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t1", stateful_1), (), "registering 1 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t2", stateful_2), (), "registering 2 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t3", stateful_3), (), "registering 3 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t4", stateful_4), (), "registering 4 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t5", stateful_5), (), "registering 5 extractors failed")?
+    testing.assert_ok_eq(&router.route("GET /t6", stateful_6), (), "registering 6 extractors failed")?
+    defer let t0 = served_headed(&router, &calls_seen, "/t0", ["X-Word", "w"].as_slice())
+    defer let t1 = served_headed(&router, &calls_seen, "/t1", ["X-Word", "w"].as_slice())
+    defer let t2 = served_headed(&router, &calls_seen, "/t2", ["X-Word", "w"].as_slice())
+    defer let t3 = served_headed(&router, &calls_seen, "/t3", ["X-Word", "w"].as_slice())
+    defer let t4 = served_headed(&router, &calls_seen, "/t4", ["X-Word", "w"].as_slice())
+    defer let t5 = served_headed(&router, &calls_seen, "/t5", ["X-Word", "w"].as_slice())
+    defer let t6 = served_headed(&router, &calls_seen, "/t6", ["X-Word", "w"].as_slice())
+    testing.assert_eq(t0.view(), "200 0:1", "0 extractors were not read beside the state")?
+    testing.assert_eq(t1.view(), "200 1:2w", "1 extractors were not read beside the state")?
+    testing.assert_eq(t2.view(), "200 2:3ww", "2 extractors were not read beside the state")?
+    testing.assert_eq(t3.view(), "200 3:4www", "3 extractors were not read beside the state")?
+    testing.assert_eq(t4.view(), "200 4:5wwww", "4 extractors were not read beside the state")?
+    testing.assert_eq(t5.view(), "200 5:6wwwww", "5 extractors were not read beside the state")?
+    testing.assert_eq(t6.view(), "200 6:7wwwwww", "6 extractors were not read beside the state")?
+    testing.assert_eq(calls_seen.calls, UInt64(7), "the state was not lent to each call")?
+    .Ok(())
+}
+
+test fn a_stateless_function_serves_a_router_with_no_state() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route("GET /health", stateless_0), (), "registering failed")?
+    defer let answered = served(&router, "GET", "/health")
+    testing.assert_eq(answered.view(), "200 0:", "a router with no state did not call the function")?
+    .Ok(())
+}
+
+test fn the_first_refusing_extractor_answers_the_request() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route("GET /s2", stateless_2), (), "registering failed")?
+    defer let answered = served(&router, "GET", "/s2")
+    testing.assert_eq(answered.view(), "400 missing X-Word", "a missing input was not refused")?
+    .Ok(())
+}
+
+// Each probe is the tag of a log the request names by address, so a test sees
+// which probes were released and in what order. A request asks one probe to
+// refuse with 400 through `X-Refuse`.
+@derive(Release)
+struct First {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for First {
+    fn extract(request: Request[P]) -> Result[First, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "First", 1)? })
+    }
+}
+
+@derive(Release)
+struct Second {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for Second {
+    fn extract(request: Request[P]) -> Result[Second, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "Second", 2)? })
+    }
+}
+
+@derive(Release)
+struct Third {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for Third {
+    fn extract(request: Request[P]) -> Result[Third, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "Third", 3)? })
+    }
+}
+
+@derive(Release)
+struct Fourth {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for Fourth {
+    fn extract(request: Request[P]) -> Result[Fourth, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "Fourth", 4)? })
+    }
+}
+
+@derive(Release)
+struct Fifth {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for Fifth {
+    fn extract(request: Request[P]) -> Result[Fifth, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "Fifth", 5)? })
+    }
+}
+
+@derive(Release)
+struct Sixth {
+    tag: mem.ReleaseTag,
+}
+
+impl[P: Allocator] Extract[P] for Sixth {
+    fn extract(request: Request[P]) -> Result[Sixth, Error[P]] {
+        .Ok(.{ tag = probe_tag(request, "Sixth", 6)? })
+    }
+}
+
+// Read the log the request names and tag it with `code`, or refuse when the
+// request asks `name` to refuse.
+fn probe_tag[P: Allocator](request: Request[P], name: Str, code: UInt64) -> Result[mem.ReleaseTag, Error[P]] {
+    if request.header("X-Refuse") == Option.Some(copy(name)) {
+        return .Err(error(request, .BadRequest, "{name} refused"))
+    }
+    let at = request.header("X-Log-At").unwrap_or("0").parse[UInt64]().unwrap_or(0)
+    let extent = request.header("X-Log-Extent").unwrap_or("0").parse[UInt64]().unwrap_or(0)
+    .Ok(mem.ReleaseTag { at, extent, code })
+}
+
+// `Greedy` asks the request's arena for more than a small arena holds, so it
+// fails the way an extractor does when the arena is exhausted.
+@derive(Release)
+struct Greedy {
+    bytes: UInt64,
+}
+
+impl[P: Allocator] Extract[P] for Greedy {
+    fn extract(request: Request[P]) -> Result[Greedy, Error[P]] {
+        defer var text = String.new_in(request.allocator())
+        for _ in 0..64 {
+            &text.append("0123456789012345678901234567890123456789012345678901234567890123")?
+        }
+        .Ok(.{ bytes = text.length() })
+    }
+}
+
+fn probed_s1(_p0: First, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_s2(_p0: First, _p1: Second, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_s3(_p0: First, _p1: Second, _p2: Third, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_s4(_p0: First, _p1: Second, _p2: Third, _p3: Fourth, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_s5(_p0: First, _p1: Second, _p2: Third, _p3: Fourth, _p4: Fifth, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_s6(_p0: First, _p1: Second, _p2: Third, _p3: Fourth, _p4: Fifth, _p5: Sixth, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+fn probed_t1(inout calls: CallCount, _p0: First, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+fn probed_t2(inout calls: CallCount, _p0: First, _p1: Second, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+fn probed_t3(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+fn probed_t4(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, _p3: Fourth, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+fn probed_t5(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, _p3: Fourth, _p4: Fifth, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+fn probed_t6(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, _p3: Fourth, _p4: Fifth, _p5: Sixth, request: ProbeRequest) -> ProbeAnswer {
+    calls.calls += 1
+    text(request, "called")
+}
+
+// Route one handler of each shape that reads probes, and report whether a
+// request through `target` that asks `refused` to refuse answers `answer`
+// and leaves the log holding exactly `released`.
+fn probe(inout router: Router[CallCount], target: Str, refused: Str, answer: Str, released: mem.Slice[UInt64]) -> Bool {
+    let log = mem.ReleaseLog.open(8)
+    // Tagging and releasing one probe reads the log's address and records a
+    // leading 0 that every expectation starts with.
+    let marker = log.tag(0)
+    let at = marker.at
+    let extent = marker.extent
+    marker.release()
+    var calls = CallCount { calls = 0 }
+    let at_text = fmt.render_owned(mem.system(), "{at}").unwrap()
+    let extent_text = fmt.render_owned(mem.system(), "{extent}").unwrap()
+    let described = served_headed(&router, &calls, target, ["X-Log-At", at_text.view(), "X-Log-Extent", extent_text.view(), "X-Refuse", copy(refused)].as_slice())
+    let held = log.holds(released)
+    let answered = described.view() == answer
+    at_text.release()
+    extent_text.release()
+    described.release()
+    log.release()
+    held && answered
+}
+
+test fn every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal() {
+    defer var router: Router[CallCount] = Router.new()
+    testing.assert_ok_eq(&router.route("GET /s1", probed_s1), (), "registering 1 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /s2", probed_s2), (), "registering 2 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /s3", probed_s3), (), "registering 3 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /s4", probed_s4), (), "registering 4 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /s5", probed_s5), (), "registering 5 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /s6", probed_s6), (), "registering 6 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t1", probed_t1), (), "registering 1 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t2", probed_t2), (), "registering 2 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t3", probed_t3), (), "registering 3 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t4", probed_t4), (), "registering 4 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t5", probed_t5), (), "registering 5 probes failed")?
+    testing.assert_ok_eq(&router.route("GET /t6", probed_t6), (), "registering 6 probes failed")?
+    testing.assert(probe(&router, "/s1", "", "200 called", [UInt64(0), 1].as_slice()), "1 probes were not released last first")?
+    testing.assert(probe(&router, "/s1", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 1 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s2", "", "200 called", [UInt64(0), 2, 1].as_slice()), "2 probes were not released last first")?
+    testing.assert(probe(&router, "/s2", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s2", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "", "200 called", [UInt64(0), 3, 2, 1].as_slice()), "3 probes were not released last first")?
+    testing.assert(probe(&router, "/s3", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "", "200 called", [UInt64(0), 4, 3, 2, 1].as_slice()), "4 probes were not released last first")?
+    testing.assert(probe(&router, "/s4", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "", "200 called", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "5 probes were not released last first")?
+    testing.assert(probe(&router, "/s5", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "", "200 called", [UInt64(0), 6, 5, 4, 3, 2, 1].as_slice()), "6 probes were not released last first")?
+    testing.assert(probe(&router, "/s6", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Sixth", "400 Sixth refused", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "a refusal at probe 6 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t1", "", "200 called", [UInt64(0), 1].as_slice()), "1 probes were not released last first")?
+    testing.assert(probe(&router, "/t1", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 1 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t2", "", "200 called", [UInt64(0), 2, 1].as_slice()), "2 probes were not released last first")?
+    testing.assert(probe(&router, "/t2", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t2", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "", "200 called", [UInt64(0), 3, 2, 1].as_slice()), "3 probes were not released last first")?
+    testing.assert(probe(&router, "/t3", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "", "200 called", [UInt64(0), 4, 3, 2, 1].as_slice()), "4 probes were not released last first")?
+    testing.assert(probe(&router, "/t4", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "", "200 called", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "5 probes were not released last first")?
+    testing.assert(probe(&router, "/t5", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "", "200 called", [UInt64(0), 6, 5, 4, 3, 2, 1].as_slice()), "6 probes were not released last first")?
+    testing.assert(probe(&router, "/t6", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Sixth", "400 Sixth refused", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "a refusal at probe 6 of 6 did not stop and release what was read")?
+    .Ok(())
+}
+
+fn greedy_after_a_probe(inout _calls: CallCount, _first: First, _greedy: Greedy, _third: Third, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "called")
+}
+
+// An arena too small for what an extractor allocates fails the request with
+// 500, as every refused allocation does, and what was already read is released
+// once while the extractor after it is never read.
+test fn an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_read() {
+    defer var router: Router[CallCount] = Router.new()
+    testing.assert_ok_eq(&router.route("GET /greedy", greedy_after_a_probe), (), "registering failed")?
+    let log = mem.ReleaseLog.open(4)
+    let marker = log.tag(0)
+    let at = marker.at
+    let extent = marker.extent
+    marker.release()
+    var calls = CallCount { calls = 0 }
+    let at_text = fmt.render_owned(mem.system(), "{at}").unwrap()
+    let extent_text = fmt.render_owned(mem.system(), "{extent}").unwrap()
+    let described = served_headed(&router, &calls, "/greedy", ["X-Log-At", at_text.view(), "X-Log-Extent", extent_text.view()].as_slice(), arena_bytes: 4096)
+    let held = log.holds([UInt64(0), 1].as_slice())
+    let status = described.starts_with("500")
+    at_text.release()
+    extent_text.release()
+    described.release()
+    log.release()
+    testing.assert(status, "an extractor the arena could not hold did not answer 500")?
+    testing.assert(held, "the extractor read before the failure was not released exactly once")?
+    .Ok(())
+}
+
+// `Pick` is a page of an order list, read from the query `?page=2`, and
+// `Order` is a JSON body that reads itself, so the function that asks for one
+// names the type and sees no wrapper.
+@derive(Params, Release)
+struct Pick {
+    page: UInt32,
+}
+
+@derive(Release, json_format.Decode[mem.Handle[mem.SystemAllocator]])
+struct Order {
+    quantity: UInt64,
+}
+
+impl Extract[mem.SystemAllocator] for Order {
+    fn extract(request: ProbeRequest) -> Result[Order, Error] {
+        request.extract[Json[Order]]()
+    }
+}
+
+fn show(id: Path[UInt64], pick: Query[Pick], order: Order, request: ProbeRequest) -> ProbeAnswer {
+    text(request, "order {id.value} page {pick.value.page} of {order.quantity}")
+}
+
+test fn the_library_extractors_and_a_type_that_reads_itself_are_arguments() {
+    defer var router = Router.new()
+    testing.assert_ok_eq(&router.route(r"POST /orders/{id}", show), (), "registering failed")?
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = new_request(arena.handle(), "POST", "/orders/7?page=2", body: r#"{"quantity":3}"#).unwrap()
+    &sent.add_header("Content-Type", "application/json").unwrap()
+    var nothing = ()
+    let described = match &router.serve_http(&nothing, sent.request()) {
+        Ok(response) => Str.from_bytes(response.body().unwrap()).unwrap() == "order 7 page 2 of 3",
+        Err(_) => false,
+    }
+    arena.release()
+    testing.assert(described, "a path, a query and a body were not read into the arguments")?
+    .Ok(())
+}

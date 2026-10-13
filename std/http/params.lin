@@ -1,0 +1,395 @@
+import std.mem
+import std.testing
+import std.text as strings
+
+// `ParamValues` are a request's named text values: the path values its router
+// matched, from `request.path_params()`, or the pairs of its query, decoded,
+// from `request.query_params()`. Each is a name and a value, and a name may
+// repeat in a query. The values borrow the request they came from, and
+// `http.Params` reads a struct from them.
+@(opaque, copyable)
+struct ParamValues {
+    stored: Str,
+    fields: mem.Slice[Field],
+}
+
+impl ParamValues {
+    // `get` returns the value named `name`, compared exactly, or `None` when
+    // there is none. A name given more than once is a `Repeated` error, since
+    // which value the client meant is ambiguous; every by-name reading goes
+    // through here, so none can take the first of a repeated name. The scan
+    // is bounded by the number of values.
+    pub fn get(self: Self, name: Str) -> Result[Option[Str], ParamError] where carries(self, name) {
+        var found: Option[Str] = .None
+        for entry in copy(self.fields) {
+            if stored_part(self.stored, entry.name) == name {
+                let value = stored_part(self.stored, entry.value)
+                if found.is_some() {
+                    return .Err(.{ name = copy(name), value, problem = .Repeated })
+                }
+                found = .Some(value)
+            }
+        }
+        .Ok(found)
+    }
+}
+
+test fn a_param_value_is_found_by_its_exact_name_once() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/?year=2026&year=1999&Name=ada", body: "").unwrap()
+    let values = sent.request().query_params().unwrap()
+    testing.assert_eq(values.get("Name"), .Ok(.Some("ada")), "a value was not found")?
+    testing.assert_eq(values.get("name"), .Ok(.None), "a name matched another's case")?
+    testing.assert_eq(values.get("year"), .Err(.{ name = "year", value = "1999", problem = .Repeated }), "a repeated name was read")?
+    testing.assert_eq(values.count(), UInt64(3), "a value was lost")?
+    .Ok(())
+}
+
+impl ParamValues {
+    // `count` returns how many values there are, repeated names included.
+    pub fn count(self: Self) -> UInt64 {
+        self.fields.length()
+    }
+}
+
+test fn count_includes_every_value_a_repeated_name_holds() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let repeated = new_request(arena.handle(), "GET", "/?tag=a&tag=b&page=2", body: "").unwrap()
+    let bare = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    testing.assert_eq(repeated.request().query_params().unwrap().count(), UInt64(3), "a repeated name was counted once")?
+    testing.assert_eq(bare.request().query_params().unwrap().count(), UInt64(0), "a request without a query had values")?
+    .Ok(())
+}
+
+impl ParamValues {
+    // `field` reads the value named `name` as a `T`. A value that is absent is
+    // `T`'s missing value, such as `None` for an `Option`, or an error when
+    // `T` has none. A value named twice is the error `get` gives, and a value
+    // `T` cannot be read from is an error that says why.
+    pub fn field[T: ParamValue](self: Self, name: Str) -> Result[T, ParamError] where carries(self, name) {
+        let found = self.get(name)?
+        match found {
+            Some(text) => read_value(name, text),
+            None => {
+                let absent: Option[T] = ParamValue.missing()
+                match absent {
+                    Some(value) => .Ok(value),
+                    None => .Err(.{ name = copy(name), value = "", problem = .Missing }),
+                }
+            },
+        }
+    }
+}
+
+test fn a_field_reads_its_value_or_says_why_it_cannot() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/?year=2026&page=x", body: "").unwrap()
+    let values = sent.request().query_params().unwrap()
+    let year: Result[UInt32, ParamError] = values.field("year")
+    let absent: Result[Option[UInt32], ParamError] = values.field("limit")
+    let missing: Result[UInt32, ParamError] = values.field("limit")
+    let invalid: Result[UInt32, ParamError] = values.field("page")
+    testing.assert_eq(year, .Ok(2026), "the year was not read")?
+    testing.assert_eq(absent, .Ok(.None), "an absent optional value was not None")?
+    testing.assert_eq(missing, .Err(.{ name = "limit", value = "", problem = .Missing }), "an absent value was not missing")?
+    testing.assert_eq(invalid, .Err(.{ name = "page", value = "x", problem = .Invalid(.Syntax(0)) }), "an invalid value was read")?
+    let twice = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+    let repeated: Result[UInt32, ParamError] = twice.request().query_params().unwrap().field("page")
+    testing.assert_eq(repeated, .Err(.{ name = "page", value = "2", problem = .Repeated }), "a repeated value was read")?
+    .Ok(())
+}
+
+impl ParamValues {
+    // `only` reads the one value there is as a `T`, whatever its name, as a
+    // route with a single `{name}` holds. Any other count is a `Count` error,
+    // which names no value.
+    pub fn only[T: ParamValue](self: Self) -> Result[T, ParamError] where carries(self) {
+        if self.count() != 1 {
+            return .Err(.{ name = "", value = "", problem = .Count(self.count()) })
+        }
+        let entry = copy(self.fields[0])
+        read_value(stored_part(self.stored, entry.name), stored_part(self.stored, entry.value))
+    }
+}
+
+test fn only_reads_the_single_value_whatever_its_name() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let several = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+    let refused: Result[UInt32, ParamError] = several.request().query_params().unwrap().only()
+    let one = new_request(arena.handle(), "GET", "/?id=42", body: "").unwrap()
+    let only: Result[UInt32, ParamError] = one.request().query_params().unwrap().only()
+    testing.assert_eq(refused, .Err(.{ name = "", value = "", problem = .Count(3) }), "one of several values was read")?
+    testing.assert_eq(only, .Ok(42), "the only value was not read")?
+    .Ok(())
+}
+
+// Read `text`, the value named `name`, as a `T`.
+fn read_value[T: ParamValue](name: Str, text: Str) -> Result[T, ParamError] where carries(text, name) {
+    let parsed: Result[T, strings.ParseError] = ParamValue.from_param(text)
+    match parsed {
+        Ok(value) => .Ok(value),
+        Err(problem) => .Err(.{ name = copy(name), value = copy(text), problem = .Invalid(problem) }),
+    }
+}
+
+// A `ParamError` says which value could not be read, as it was sent, and
+// why. A missing value was sent as nothing, so its `value` is empty.
+@(copyable, derive(Equatable, Debug))
+pub struct ParamError {
+    name: Str,
+    value: Str,
+    problem: ParamProblem,
+}
+
+// A value is `Missing`, `Invalid` for the type it is read as, which the
+// parse error explains, or `Repeated`, named more than once. A single value
+// read from values that number `Count`, other than one, is ambiguous. A
+// program's own `Params` refuses a value it read with `Refused` and a reason,
+// such as a limit past its maximum; the reason completes a sentence about the
+// value, as in `query value "limit" is refused: at most 100`.
+@(copyable, derive(Equatable, Debug))
+pub enum ParamProblem {
+    Missing,
+    Invalid(strings.ParseError),
+    Repeated,
+    Count(UInt64),
+    Refused(Str),
+}
+
+// `DayRange` reads a range of days, `from` to `to`, and refuses a range that ends
+// before it starts.
+struct DayRange {
+    from: UInt32,
+    to: UInt32,
+}
+
+impl Params for DayRange {
+    fn from_params(values: ParamValues) -> Result[DayRange, ParamError] where carries(values) {
+        let from: UInt32 = values.field("from")?
+        let to: UInt32 = values.field("to")?
+        if to < from {
+            let value = values.get("to")?.unwrap()
+            return .Err(.{ name = "to", value, problem = .Refused("ends before `from`") })
+        }
+        .Ok(.{ from, to })
+    }
+}
+
+test fn a_params_of_its_own_refuses_a_value_with_a_reason() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let ordered = new_request(arena.handle(), "GET", "/?from=3&to=9", body: "").unwrap()
+    let reversed = new_request(arena.handle(), "GET", "/?from=9&to=3", body: "").unwrap()
+    let span: Result[DayRange, ParamError] = Params.from_params(ordered.request().query_params().unwrap())
+    let refused: Result[DayRange, ParamError] = Params.from_params(reversed.request().query_params().unwrap())
+    testing.assert(match read span { Ok(days) => days.from == 3 && days.to == 9, Err(_) => false }, "an ordered range was refused")?
+    testing.assert(match read refused { Err(error) => error == ParamError { name = "to", value = "3", problem = .Refused("ends before `from`") }, Ok(_) => false }, "a reversed range was read")?
+    .Ok(())
+}
+
+// A `ParamValue` is a type one named text value is read as. Every type that
+// implements `text.Parse`, such as the integer types and `Float64`, is one,
+// read by parsing the text. `Str` is one that reads the text as it is,
+// borrowing it from the request, and `Option[T]` is one whose value is
+// `None` when the request does not have it.
+pub trait ParamValue {
+    fn from_param(text: Str) -> Result[Self, strings.ParseError] where carries(.Ok: text)
+
+    // `missing` returns the value a type takes when the request does not name
+    // it, or `None` when it must be named.
+    fn missing() -> Option[Self]
+}
+
+// A type that parses from text reads a value by parsing it, and must be
+// named.
+default impl[T: strings.Parse] ParamValue for T {
+    fn from_param(text: Str) -> Result[Self, strings.ParseError] where carries(.Ok: text) {
+        T.parse(text)
+    }
+
+    fn missing() -> Option[Self] {
+        .None
+    }
+}
+
+impl ParamValue for Str {
+    fn from_param(text: Str) -> Result[Str, strings.ParseError] where carries(.Ok: text) {
+        .Ok(copy(text))
+    }
+
+    fn missing() -> Option[Str] {
+        .None
+    }
+}
+
+impl[T: ParamValue] ParamValue for Option[T] {
+    fn from_param(text: Str) -> Result[Option[T], strings.ParseError] where carries(.Ok: text) {
+        let parsed: T = ParamValue.from_param(text)?
+        .Ok(.Some(parsed))
+    }
+
+    fn missing() -> Option[Option[T]] {
+        .Some(.None)
+    }
+}
+
+test fn a_param_value_parses_borrows_or_is_optional() {
+    let number: Result[Int16, strings.ParseError] = ParamValue.from_param("-12")
+    let text: Result[Str, strings.ParseError] = ParamValue.from_param("12x")
+    let present: Result[Option[UInt8], strings.ParseError] = ParamValue.from_param("7")
+    let invalid: Result[Option[UInt8], strings.ParseError] = ParamValue.from_param("700")
+    let required: Option[UInt8] = ParamValue.missing()
+    let optional: Option[Option[UInt8]] = ParamValue.missing()
+    testing.assert_eq(number, .Ok(-12), "a number was not parsed")?
+    testing.assert_eq(text, .Ok("12x"), "text was not read as it is")?
+    testing.assert_eq(present, .Ok(.Some(7)), "an optional value was not parsed")?
+    testing.assert_eq(invalid, .Err(.Overflow(2)), "an optional value past its type was accepted")?
+    testing.assert_eq(required, .None, "a parsed type had a missing value")?
+    testing.assert_eq(optional, .Some(.None), "an option's missing value was not None")?
+    .Ok(())
+}
+
+// `Params` is a type a request's named values fill. `derive(http.Params)`
+// makes a struct one: each field is read from the value of its own name, as
+// its type reads a `ParamValue`, so
+//
+//     @derive(http.Params)
+//     struct Page {
+//         year: UInt32,
+//         month: Option[UInt8],
+//     }
+//
+// reads `year` and, when it is there, `month`. A program may implement it by
+// hand too, reading `values` with `field`. `http.Query` reads a `Params` from
+// the query, and `http.Path` from the path values.
+pub trait Params {
+    fn from_params(values: ParamValues) -> Result[Self, ParamError] where carries(values)
+}
+
+template impl Params where
+    reflect.target: struct,
+    reflect.components: ParamValue,
+{
+    fn from_params(values: ParamValues) -> Result[Self, ParamError] where carries(values) {
+        let result: Self = reflect.construct(
+            reflect.product,
+            |component| {
+                let field: component.Type = values.field(component.name)?
+                field
+            },
+            {},
+        )
+        .Ok(result)
+    }
+}
+
+@derive(Params)
+struct Archive {
+    year: UInt32,
+    month: Option[UInt8],
+    title: Str,
+}
+
+test fn a_derived_params_reads_each_field_by_its_name() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/?title=Old+news&year=1999", body: "").unwrap()
+    let archive: Result[Archive, ParamError] = Params.from_params(sent.request().query_params().unwrap())
+    let found = archive.unwrap()
+    testing.assert_eq(found.year, UInt32(1999), "the year changed")?
+    testing.assert_eq(found.month, .None, "an absent month was read")?
+    testing.assert_eq(found.title, "Old news", "the title changed")?
+    let untitled = new_request(arena.handle(), "GET", "/?year=1999", body: "").unwrap()
+    let refused: Result[Archive, ParamError] = Params.from_params(untitled.request().query_params().unwrap())
+    testing.assert(match read refused { Err(error) => error.name == "title" && error.problem == ParamProblem.Missing, Ok(_) => false }, "a missing title was not named")?
+    .Ok(())
+}
+
+// `FromPath` is a type `http.Path` reads from a route's path values. Every
+// `Params` is one, filled by name, and so is each type `std` reads one text
+// value as, which reads the only value the route has, as `Path[UInt64]` does
+// for `/orders/{id}`. A program's own `ParamValue` becomes one with a short
+// `impl http.FromPath` whose `from_path` returns `values.only()`. The
+// implementations below follow the `text.Parse` implementations in `std`,
+// so a type `std` makes parse gets one here too.
+pub trait FromPath {
+    fn from_path(values: ParamValues) -> Result[Self, ParamError] where carries(values)
+}
+
+default impl[T: Params] FromPath for T {
+    fn from_path(values: ParamValues) -> Result[Self, ParamError] where carries(values) {
+        Params.from_params(values)
+    }
+}
+
+impl FromPath for Str {
+    fn from_path(values: ParamValues) -> Result[Str, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for UInt8 {
+    fn from_path(values: ParamValues) -> Result[UInt8, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for UInt16 {
+    fn from_path(values: ParamValues) -> Result[UInt16, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for UInt32 {
+    fn from_path(values: ParamValues) -> Result[UInt32, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for UInt64 {
+    fn from_path(values: ParamValues) -> Result[UInt64, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for Int8 {
+    fn from_path(values: ParamValues) -> Result[Int8, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for Int16 {
+    fn from_path(values: ParamValues) -> Result[Int16, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for Int32 {
+    fn from_path(values: ParamValues) -> Result[Int32, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for Int64 {
+    fn from_path(values: ParamValues) -> Result[Int64, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+impl FromPath for Float64 {
+    fn from_path(values: ParamValues) -> Result[Float64, ParamError] where carries(values) {
+        values.only()
+    }
+}
+
+test fn a_path_reads_a_struct_by_name_or_its_only_value() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/?year=1999&title=x", body: "").unwrap()
+    let values = sent.request().query_params().unwrap()
+    let archive: Result[Archive, ParamError] = FromPath.from_path(values)
+    let single = new_request(arena.handle(), "GET", "/?id=-3", body: "").unwrap()
+    let signed: Result[Int16, ParamError] = FromPath.from_path(single.request().query_params().unwrap())
+    let named: Result[Str, ParamError] = FromPath.from_path(single.request().query_params().unwrap())
+    testing.assert_eq(archive.unwrap().year, UInt32(1999), "the struct was not filled")?
+    testing.assert_eq(signed, .Ok(-3), "the only value was not parsed")?
+    testing.assert_eq(named, .Ok("-3"), "the only value was not read as text")?
+    .Ok(())
+}

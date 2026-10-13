@@ -1,0 +1,25 @@
+import std.io
+import std.mem
+
+// `defer` releases the drain on every path, including the `return` inside the
+// walk.
+fn first_large(sink readings: Vec[UInt64, mem.SystemAllocator]) -> UInt64 {
+    var pending = readings.drain()
+    defer pending.release()
+    for reading in &pending {
+        if reading > 10 {
+            return reading
+        }
+    }
+    0
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    for reading in UInt64(5)..25 {
+        &readings.push(reading).unwrap()
+    }
+    let found = first_large(readings)
+    io.println("first large {found}")?
+    .Ok(0)
+}

@@ -1,0 +1,11 @@
+// A debug selector belongs to its interpolation value, so formatting the
+// surrounding expression preserves the selector and settles its spacing.
+import std.io
+
+use io.eprintln
+
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    eprintln( "value = { x : ? }" )
+    0
+}

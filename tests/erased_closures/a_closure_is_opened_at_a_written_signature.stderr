@@ -1,0 +1,5 @@
+error[T-Bound]: a closure is opened at a `fn` or `inout fn` type, and `S` is not one
+ --> tests/erased_closures/a_closure_is_opened_at_a_written_signature.lin:6:17
+  |
+6 |     mem.Closure.open(mem.system(), step)
+  |                 ^^^^ open it where the `fn` or `inout fn` type it is called as is written

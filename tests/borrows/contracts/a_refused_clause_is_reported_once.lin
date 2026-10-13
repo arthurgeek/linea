@@ -1,0 +1,10 @@
+// A function whose clause is refused is not also checked against what remains
+// of it.
+fn first(left: Str, _right: Str) -> Str where carries(lefty) {
+    copy(left)
+}
+
+fn main() -> UInt8 {
+    let _first = first("a", "b")
+    0
+}

@@ -1,0 +1,16 @@
+import std.mem
+
+// The walk holds the drain for the whole loop, so the body may not advance it.
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(3).unwrap()
+    &readings.push(4).unwrap()
+    var pending = readings.drain()
+    defer pending.release()
+    var total: UInt64 = 0
+    for reading in &pending {
+        total += reading
+        let _skipped = &pending.next()
+    }
+    UInt8(total)
+}

@@ -1,0 +1,7 @@
+fn pick() -> UInt8 {
+    1
+}
+
+pub fn touch() -> UInt8 {
+    pick()
+}

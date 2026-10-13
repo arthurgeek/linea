@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Mark[Pair[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[UInt8]]]]]]]]]]]]]]]]]]]]]]]], Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[UInt8]]]]]]]]]]]]]]]]]]]]]]]]], UInt8]` for `Pair[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[UInt8]]]]]]]]]]]]]]]]]]]]]]]], UInt8]`
+  --> tests/traits/nested_implementation_arguments_keep_their_substitutions.lin:11:12
+   |
+9  | impl[T, U] Mark[Pair[T, Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[W ...
+   |            ---- the other implementation
+11 | impl[S, V] Mark[Pair[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap[Wrap ...
+   |            ^^^^ no instantiation may answer to two implementations of one trait

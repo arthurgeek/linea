@@ -1,0 +1,20 @@
+import std.mem
+
+use mem.Allocator
+use mem.Owner
+
+// `with` is generic over where its memory comes from and takes the system
+// allocator when a call passes none.
+fn with[A: Allocator = mem.SystemAllocator](size: UInt64, allocator: A = .System) -> UInt64 where carries(allocator) {
+    let items: Vec[UInt8, A] = Vec.new_in(allocator)
+    let held = items.length() + size
+    items.release()
+    held
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 64)
+    let inside = with(8, allocator: arena.handle())
+    arena.release()
+    UInt8(with(4) + inside - 4)
+}

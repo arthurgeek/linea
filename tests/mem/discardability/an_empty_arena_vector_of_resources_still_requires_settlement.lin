@@ -1,0 +1,21 @@
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Owner
+use mem.SystemAllocator
+use mem.system
+
+@linear
+struct Ticket { number: UInt64 }
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    defer arena.release()
+    let tickets: Vec[Ticket, Handle[SystemAllocator]] = Vec.new_in(arena.handle())
+    if tickets.length() == 0 {
+        0
+    } else {
+        1
+    }
+}

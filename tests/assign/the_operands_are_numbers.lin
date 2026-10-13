@@ -1,0 +1,7 @@
+// No arithmetic rule is added, so the rule `+` already reports is the rule that
+// answers here: both sides are the same numeric type.
+fn main() -> UInt8 {
+    var v: UInt8 = 1
+    v += true
+    v
+}

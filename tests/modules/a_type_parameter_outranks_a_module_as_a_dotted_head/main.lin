@@ -1,0 +1,36 @@
+// A type parameter is nearer than an import, so a dotted head naming both is
+// the parameter: `_1.Item` inside a declaration that writes `_1` as a
+// parameter is read through the bound `_1` carries, and the module of that
+// name supplies nothing to it. The module is still reachable under its own
+// name where no parameter shadows it. A name with no letter has no case, so it
+// is the one spelling a module and a type parameter can share.
+import _1
+
+trait Carry {
+    type Item
+
+    fn get(s: Self) -> Self.Item
+}
+
+struct Holder {
+    v: UInt8,
+}
+
+impl Carry for Holder {
+    type Item = UInt8
+
+    fn get(s: Self) -> UInt8 {
+        s.v
+    }
+}
+
+fn first[_1: Carry](h: _1) -> _1.Item {
+    Carry.get(h)
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .{ v = 4 }
+    let r = first(held)
+    let _h = held
+    r + _1.zero()
+}

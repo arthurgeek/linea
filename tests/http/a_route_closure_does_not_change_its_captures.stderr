@@ -1,0 +1,5 @@
+error[T-Call]: this closure is declared `inout`, and `route_raw` calls it for reading
+  --> tests/http/a_route_closure_does_not_change_its_captures.lin:10:9
+   |
+10 |         inout [sink hits = UInt64(0)] |inout _, request| {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `route_raw` calls its callback for reading, so the callback cannot change its captures; pass the closure to a function whose callback is an `inout fn`, or keep what changes in a value `route_raw` lends it

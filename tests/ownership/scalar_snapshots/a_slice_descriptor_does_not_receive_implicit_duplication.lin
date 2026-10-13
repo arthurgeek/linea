@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let text: Str = "bytes"
+    let original = text.as_bytes()
+    let moved = original
+    UInt8(original.length() + moved.length())
+}

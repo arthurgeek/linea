@@ -1,0 +1,5 @@
+error[T-UnknownField]: `Light` has no field `On`
+  --> tests/enums/a_variant_has_no_variants_to_select.lin:10:13
+   |
+10 |     let x = Light.Off.On
+   |             ^^^^^^^^^^^^ not a field of this value

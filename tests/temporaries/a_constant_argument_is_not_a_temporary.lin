@@ -1,0 +1,17 @@
+// A module constant passed where a borrow is taken is borrowed where it is
+// stored, not evaluated into a temporary, so a value borrowing it may be kept
+// after its statement.
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+let limit = 42
+
+fn main() -> UInt8 {
+    let kept = reading(limit)
+    UInt8(*kept.value)
+}

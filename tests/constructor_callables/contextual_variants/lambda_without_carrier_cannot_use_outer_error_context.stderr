@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, RenderError]`, and the function answers with `UInt8`
+ --> tests/constructor_callables/contextual_variants/lambda_without_carrier_cannot_use_outer_error_context.lin:7:9
+  |
+7 |         mapped?
+  |         ^^^^^^^ `?` returns from the function it is written in

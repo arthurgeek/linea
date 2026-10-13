@@ -1,0 +1,5 @@
+error[O-Capture]: an `inout` capture needs a closure called `inout` or `sink`
+ --> tests/inout_captures/an_inout_capture_needs_an_inout_closure.lin:3:23
+  |
+3 |     let tick = [inout count] || {
+  |                       ^^^^^ write `inout` before the capture list, so each call may change what the capture lends

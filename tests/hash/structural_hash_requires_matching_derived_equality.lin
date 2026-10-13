@@ -1,0 +1,18 @@
+import std.hash
+
+struct Key { identity: UInt8, ignored: UInt8 }
+
+impl Equatable for Key {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.identity == other.identity
+    }
+}
+
+impl Equivalent for Key {}
+
+derive hash.Hash for Key
+
+fn main() -> UInt8 {
+    let key: Key = .{ identity = 1, ignored = 2 }
+    UInt8(hash.Hash.hash(key) % 256)
+}

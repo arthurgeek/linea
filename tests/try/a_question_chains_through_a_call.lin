@@ -1,0 +1,23 @@
+// `foo(bar()?)?`. Each `?` is an ordinary expression of its payload's type, so
+// one written inside another's operand needs no rule: the inner yields a value
+// the call takes, and the outer asks the same question of what the call
+// answered with.
+fn inner() -> Option[UInt8] {
+    Option.Some(3)
+}
+
+fn doubled(n: UInt8) -> Option[UInt8] {
+    Option.Some(n + n)
+}
+
+fn go() -> Option[UInt8] {
+    let n = doubled(inner()?)?
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

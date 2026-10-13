@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Failure` wraps exactly `Missing`
+ --> tests/derive_from/a_from_derive_wraps_exactly_one_field.lin:5:9
+  |
+5 | @derive(From[Missing])
+  |         ^^^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Failure` has `Absent(Missing, UInt8)`, `Unknown`

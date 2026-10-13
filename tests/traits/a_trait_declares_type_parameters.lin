@@ -1,0 +1,15 @@
+// A trait may be generic on its own account, and its parameters are in scope in
+// every signature it declares -- which is what lets one trait relate two types
+// rather than one.
+//
+// Declared and not implemented, because supplying the argument and settling it
+// at a call are separate questions with separate answers. What this records is
+// that the parameter is written, is a type where a signature names it, and is
+// used by being named there.
+trait _Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

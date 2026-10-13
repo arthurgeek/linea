@@ -1,0 +1,10 @@
+// `Nope` names nothing, but the length `2` is still read, so a literal of
+// three elements is refused wherever the annotation is written.
+fn take(_given: [Nope; 2]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _held: [Nope; 2] = [1, 2, 3]
+    take([1, 2, 3])
+}

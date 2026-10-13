@@ -1,0 +1,5 @@
+error[N-Undefined]: `Bool` declares no `min`
+ --> tests/traits/integer_generics/boolean_namespaces_do_not_offer_integer_bounds.lin:2:10
+  |
+2 |     Bool.min
+  |          ^^^ a primitive holds what the standard library writes for it

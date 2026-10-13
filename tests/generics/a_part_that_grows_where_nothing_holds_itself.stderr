@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `S` with more than `S` was given
+  --> tests/generics/a_part_that_grows_where_nothing_holds_itself.lin:16:15
+   |
+16 |     b: Marker[S[Cell[T]]],
+   |               ^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

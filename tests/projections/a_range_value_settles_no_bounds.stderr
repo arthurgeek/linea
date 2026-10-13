@@ -1,0 +1,10 @@
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+  --> tests/projections/a_range_value_settles_no_bounds.lin:13:35
+   |
+13 |     let head: [UInt8; 2] = copy(a[r])
+   |                                   ^ this is not settled here, and the place's length is what the bounds name
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+  --> tests/projections/a_range_value_settles_no_bounds.lin:14:7
+   |
+14 |     a[mk()] = [7, 8]
+   |       ^^^^ this is not settled here, and the place's length is what the bounds name

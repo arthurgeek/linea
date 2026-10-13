@@ -1,0 +1,5 @@
+error[T-Impl]: implementation parameter `_U` cannot be recovered from its key
+ --> tests/traits/parameter_heads/unrecoverable_parameter_is_rejected.lin:3:9
+  |
+3 | impl[T, _U] Route for T {}
+  |         ^^ place the parameter in the receiver or trait arguments outside associated-type projections

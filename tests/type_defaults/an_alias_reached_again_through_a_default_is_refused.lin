@@ -1,0 +1,13 @@
+alias Wrapped = Boxed[UInt8]
+
+struct Boxed[T, phantom U = Wrapped] {
+    inner: T,
+}
+
+fn _unwrap(boxed: Wrapped) -> UInt8 {
+    boxed.inner
+}
+
+fn main() -> UInt8 {
+    0
+}

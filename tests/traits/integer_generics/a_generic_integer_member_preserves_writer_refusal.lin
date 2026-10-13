@@ -1,0 +1,34 @@
+trait Writer {
+    fn write(inout self: Self, byte: UInt8) -> Bool
+}
+
+trait Render {
+    fn render[W: Writer](self: Self, inout writer: W) -> Bool
+}
+
+struct RefusingWriter {
+    attempts: UInt8,
+}
+
+impl Writer for RefusingWriter {
+    fn write(inout self: RefusingWriter, _byte: UInt8) -> Bool {
+        self.attempts += 1
+        false
+    }
+}
+
+impl[T: Integer] Render for T {
+    fn render[W: Writer](self: T, inout writer: W) -> Bool {
+        Writer.write(&writer, UInt8(self))
+    }
+}
+
+fn main() -> UInt8 {
+    var writer: RefusingWriter = .{ attempts = 0 }
+    let accepted = Render.render(Int16(7), &writer)
+    if !accepted && writer.attempts == 1 {
+        0
+    } else {
+        1
+    }
+}

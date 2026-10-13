@@ -1,0 +1,57 @@
+// Parameter names are not part of a function type, so a function held in a
+// local fits a parameter whose type names its parameters differently. A call
+// through that parameter names arguments as the parameter's type does.
+trait Priced {
+    fn cents(self: Self) -> UInt64
+}
+
+struct Pizza {
+    slices: UInt64,
+}
+
+impl Priced for Pizza {
+    fn cents(self: Pizza) -> UInt64 {
+        self.slices * 150
+    }
+}
+
+struct Coffee {
+    shots: UInt8,
+}
+
+impl Coffee {
+    fn add_shot(inout self: Coffee) -> () {
+        self.shots += 1
+    }
+}
+
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn apply(step: fn(read x: UInt8) -> UInt8, x: UInt8) -> UInt8 {
+    step(x: x)
+}
+
+fn serve(prepare: fn(inout cup: Coffee) -> (), sink cup: Coffee) -> UInt8 {
+    var served = cup
+    prepare(cup: &served)
+    served.shots
+}
+
+fn charge(pricer: fn(read item: Pizza) -> UInt64, sink item: Pizza) -> UInt64 {
+    pricer(item)
+}
+
+fn main() -> UInt8 {
+    let increment = add_one
+    let same = identity
+    let strengthen = Coffee.add_shot
+    let price = Priced.cents
+    let cents = charge(price, Pizza { slices = 2 })
+    apply(increment, 1) + apply(same, 2) + serve(strengthen, Coffee { shots = 1 }) + UInt8(cents / 100)
+}

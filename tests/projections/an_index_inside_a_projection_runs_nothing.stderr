@@ -1,0 +1,5 @@
+error[T-Projection]: a projection's index is an expression over what is in scope, and this one runs something
+  --> tests/projections/an_index_inside_a_projection_runs_nothing.lin:16:20
+   |
+16 |         self.cells[pick()]
+   |                    ^^^^^^ an index inside a projection names and computes; it does not call or branch

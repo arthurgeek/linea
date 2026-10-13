@@ -1,0 +1,26 @@
+// The clause's bounds are inclusive on both ends. So the lowest value the
+// range admits and the highest both construct, through proof and through the
+// fallible form alike, and the first value past the top is the one that
+// declines.
+@copyable
+type Percent = UInt8 where it in 0..=99
+
+fn main() -> UInt8 {
+    let Percent(low) = Percent(0)
+    let Percent(high) = Percent(99)
+
+    let bottom: UInt8 = match Percent?(0) {
+        Some(_p) => 1,
+        None => 0,
+    }
+    let top: UInt8 = match Percent?(99) {
+        Some(_p) => 2,
+        None => 0,
+    }
+    let past: UInt8 = match Percent?(100) {
+        Some(_p) => 4,
+        None => 0,
+    }
+
+    low + high + bottom + top + past
+}

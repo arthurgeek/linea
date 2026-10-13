@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let fee: UInt64 = 499
+    let percent: UInt64 = 10
+    let rules = [[sink fee] |cents: UInt64| cents + fee, [sink percent] |cents: UInt64| cents - cents * percent / 100]
+    UInt8(rules.length())
+}

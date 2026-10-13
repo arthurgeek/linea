@@ -1,0 +1,5 @@
+error[T-Template]: `Child` has a generic direct supertrait, whose derived arguments this template does not state
+ --> tests/traits/a_generic_direct_supertrait_is_not_a_structural_predicate.lin:5:35
+  |
+5 | template impl Child where reflect.supertraits: derived {}
+  |                                   ^^^^^^^^^^^ remove the structural-supertrait predicate, or make every direct supertrait take no arguments

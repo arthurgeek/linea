@@ -1,0 +1,8 @@
+// Every token past `where` sits on the line that opened the clause. A break
+// after `it` ends the statement there, and what follows is read as its own.
+pub type Percent = UInt8 where it
+    in 0..=99
+
+fn main() -> UInt8 {
+    42
+}

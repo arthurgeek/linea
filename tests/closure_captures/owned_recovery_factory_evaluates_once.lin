@@ -1,0 +1,15 @@
+fn make[F](sink callback: F, inout count: UInt8) -> F where carries(callback) {
+    count += 1
+    callback
+}
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    let callback = [sink value = UInt8(1)] || value
+    let { value } = make(callback, &count).into_captures()
+    if count == 1 && value == 1 {
+        0
+    } else {
+        1
+    }
+}

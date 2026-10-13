@@ -1,0 +1,38 @@
+import std.mem
+
+use mem.Allocator
+use mem.Owner
+
+@derive(Release)
+struct Shelf[S = UInt8, A: Allocator = mem.SystemAllocator] {
+    spare: Option[S],
+    items: Vec[UInt8, A],
+}
+
+impl[S, A: Allocator] Shelf[S, A] {
+    fn new_in(allocator: A) -> Self where carries(allocator) {
+        .{ spare = .None, items = Vec.new_in(allocator) }
+    }
+}
+
+impl[S] Shelf[S] {
+    fn new() -> Self {
+        Shelf.new_in(mem.system())
+    }
+}
+
+fn count(sink shelf: Shelf[UInt8]) -> UInt8 {
+    let total = UInt8(shelf.items.length())
+    shelf.release()
+    total + 7
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 1024)
+    let inside: Shelf[UInt8, mem.Handle] = Shelf.new_in(arena.handle())
+    inside.release()
+    arena.release()
+    let wide: Shelf[UInt16] = Shelf.new()
+    wide.release()
+    count(Shelf.new())
+}

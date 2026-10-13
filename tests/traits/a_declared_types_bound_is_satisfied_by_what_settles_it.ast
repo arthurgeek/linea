@@ -1,0 +1,80 @@
+program decls=14
+  decl struct_ "Counter" tokens 12..20
+    field "at" : UInt8
+  decl associated_type "Item" tokens 23..25
+    in Stepper
+  decl function "next" tokens 25..40
+    in Stepper
+    param inout "self" : Self
+    returns Option[Self.Item]
+  decl trait_ "Stepper" tokens 20..41
+  decl associated_type "Iter" tokens 44..48
+    in Walk
+    requires Stepper
+  decl function "iterate" tokens 48..60
+    in Walk
+    param sink "self" : Self
+    returns Self.Iter
+  decl trait_ "Walk" tokens 41..61
+  decl associated_type "Item" tokens 66..70
+    in Counter
+    of trait Stepper
+    settles UInt8
+  decl function "next" tokens 70..104
+    in Counter
+    of trait Stepper
+    param inout "self" : Self
+    returns Option[Self.Item]
+    expr %12 block tokens 85..104
+      stmt %0 expr_stmt tokens 86..95
+        expr %6 assign tokens 86..95
+          expr %1 field tokens 86..89 "at"
+            expr %0 name_ref tokens 86..87 "self"
+          expr %5 add tokens 90..95
+            expr %3 field tokens 90..93 "at"
+              expr %2 name_ref tokens 90..91 "self"
+            expr %4 int_literal tokens 94..95 "1"
+      expr %11 return_ tokens 95..103
+        expr %10 call tokens 96..103
+          expr %7 variant_ref tokens 96..98
+          expr %9 field tokens 99..102 "at"
+            expr %8 name_ref tokens 99..100 "self"
+  decl impl_ "Counter" tokens 61..105
+    of trait Stepper
+  decl associated_type "Iter" tokens 110..114
+    in Counter
+    of trait Walk
+    settles Self
+  decl function "iterate" tokens 114..129
+    in Counter
+    of trait Walk
+    param sink "self" : Self
+    returns Self.Iter
+    expr %14 block tokens 126..129
+      expr %13 name_ref tokens 127..128 "self"
+  decl impl_ "Counter" tokens 105..130
+    of trait Walk
+  decl function "main" tokens 130..181
+    returns UInt8
+    expr %34 block tokens 136..181
+      stmt %1 let_decl tokens 137..148 "c" : Counter
+        expr %17 struct_literal tokens 142..148
+          expr %15 name_ref tokens 144..145 "at"
+          expr %16 int_literal tokens 146..147 "6"
+      stmt %2 let_decl tokens 148..159 "it" : Counter
+        expr %21 call tokens 153..159
+          expr %19 field tokens 153..156 "iterate"
+            expr %18 name_ref tokens 153..154 "Walk"
+          expr %20 name_ref tokens 157..158 "c"
+      expr %33 match_ tokens 159..180
+        expr %26 call tokens 160..167
+          expr %23 field tokens 160..163 "next"
+            expr %22 name_ref tokens 160..161 "Stepper"
+          expr %25 marked tokens 164..166
+            expr %24 name_ref tokens 165..166 "it"
+        expr %27 name_ref tokens 168..169 "None"
+        expr %28 int_literal tokens 170..171 "0"
+        expr %31 call tokens 172..176
+          expr %29 name_ref tokens 172..173 "Some"
+          expr %30 name_ref tokens 174..175 "n"
+        expr %32 name_ref tokens 177..178 "n"

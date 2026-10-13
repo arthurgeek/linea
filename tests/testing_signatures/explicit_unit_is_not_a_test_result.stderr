@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Result[(), testing.Failure]`, found `()`
+ --> tests/testing_signatures/explicit_unit_is_not_a_test_result.lin:2:12
+  |
+1 | test fn explicit_unit_is_not_success() {
+  |         ---------------------------- expected because of this return type
+2 |     return {}
+  |            ^^ this body produces nothing

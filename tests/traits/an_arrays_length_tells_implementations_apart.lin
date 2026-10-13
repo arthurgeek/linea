@@ -1,0 +1,32 @@
+// An array's length is part of its type, so `[UInt8; 2]` and `[UInt8; 3]` are
+// two arguments to one trait and each gets its own implementation. Each call
+// reaches the implementation its argument names.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; 2]] for Holder {
+    fn give(self: Self, _u: [UInt8; 2]) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; 3]] for Holder {
+    fn give(self: Self, _u: [UInt8; 3]) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    let two: [UInt8; 2] = [1, 2]
+    let three: [UInt8; 3] = [1, 2, 3]
+    let a = Give.give(h, two)
+    let b = Give.give(h, three)
+    let _h = h
+    a + b
+}

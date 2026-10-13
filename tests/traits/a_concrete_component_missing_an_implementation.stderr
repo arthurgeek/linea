@@ -1,0 +1,9 @@
+error[T-Derive]: `Box` cannot derive `Ready` because component type `UInt8` does not implement `Required`
+  --> tests/traits/a_concrete_component_missing_an_implementation.lin:11:8
+   |
+5  | template impl Ready where reflect.components: Required {}
+   |                                               -------- the template requires every component to implement `Required`
+8  |     value: UInt8,
+   |     ----- this component has type `UInt8`
+11 | derive Ready for Box
+   |        ^^^^^ implement `Required` for `UInt8`, or write this implementation by hand

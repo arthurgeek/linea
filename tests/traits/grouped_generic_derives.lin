@@ -1,0 +1,15 @@
+trait Inspect {}
+
+template impl Inspect where reflect.components: Inspect {}
+
+struct Box[T] {
+    value: T,
+}
+
+derive[T: Inspect] (
+    Inspect,
+) for Box[T]
+
+fn main() -> UInt8 {
+    0
+}

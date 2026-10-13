@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Rec contains itself
+  --> tests/generics/a_part_that_holds_an_instantiation_of_itself.lin:17:8
+   |
+17 |     b: Wrap[Rec[T]],
+   |        ^^^^ a value would have to hold one, so it has no size

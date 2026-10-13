@@ -1,0 +1,30 @@
+error[T-Mismatch]: expected `SystemAllocator`, found `Int64`
+  --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:23:46
+   |
+23 |     let names: SysVec[UInt8] = SysVec.new_in(4)
+   |                                              ^ expected `SystemAllocator`, found `Int64`
+  ::: std/mem/vec.lin
+L  |     pub fn new_in(allocator: A) -> Self where carries(allocator) {
+   |                   --------- expected because of this parameter
+error[T-Mismatch]: `Failing` writes `Result[T, Int64]` here, and this is a `Result[UInt8, Str]`
+  --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:29:5
+   |
+29 |     Failing.Err("no")
+   |     ^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: expected `Str`, found `Int64`
+  --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:33:29
+   |
+17 |     fn make(sink a: A, sink b: B) -> Pair[A, B] where carries(a, b) {
+   |                  - expected because of this parameter
+33 |     let _keyed = Keyed.make(1, 2)
+   |                             ^ expected `Str`, found `Int64`
+error[T-Mismatch]: `T` was already settled as `UInt8` here, and this is a `Str`
+  --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:38:5
+   |
+38 |     Twice.make(1, "x")
+   |     ^^^^^^^^^^^^^^^^^^ one type parameter, two types
+error[T-Mismatch]: `Wrapped` writes `Option[T]` here, and this is a `UInt8`
+  --> tests/aliases/a_generic_alias_head_keeps_what_it_writes.lin:42:5
+   |
+42 |     Wrapped.make(1, 2)
+   |     ^^^^^^^^^^^^^^^^^^ the alias fixes this type

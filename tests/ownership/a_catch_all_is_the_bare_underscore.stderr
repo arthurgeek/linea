@@ -1,0 +1,10 @@
+error[S-Match]: name what the variant carries, or drop the parentheses
+  --> tests/ownership/a_catch_all_is_the_bare_underscore/main.lin:19:9
+   |
+19 |         _() => 5,
+   |         ^ a pattern's binder list is never empty
+error[N-Variant]: the enum has no such variant
+  --> tests/ownership/a_catch_all_is_the_bare_underscore/main.lin:19:9
+   |
+19 |         _() => 5,
+   |         ^^^ not a variant of what is matched

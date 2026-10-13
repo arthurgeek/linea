@@ -1,0 +1,5 @@
+error[T-Convert]: `T` does not convert to `UInt8`
+ --> tests/traits/integer_generics/a_declared_integer_trait_does_not_grant_numeric_operations.lin:4:5
+  |
+4 |     UInt8(value)
+  |     ^^^^^^^^^^^^ a conversion is between numbers

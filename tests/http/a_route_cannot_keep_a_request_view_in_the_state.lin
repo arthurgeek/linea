@@ -1,0 +1,22 @@
+// The state outlives each request, while the request's text lives only until
+// its response is written, so a route cannot keep a view of it in the state.
+import std.http
+import std.mem
+
+@derive(Release)
+struct App {
+    last: Str,
+}
+
+fn remember[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] where carries(request) {
+    app.last = request.path()
+    http.text(request, "ok")
+}
+
+fn main() -> UInt8 {
+    var router: http.Router[App, mem.SystemAllocator] = http.Router.new()
+    let _registered = &router.route_raw("GET /", remember)
+    let server = http.with_state(App { last = "" }, router)
+    server.release()
+    0
+}

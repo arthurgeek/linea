@@ -1,0 +1,23 @@
+fn invoke[F: fn() -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+struct Holder[S] {
+    value: S,
+}
+
+impl[S: Integer] Holder[S] {
+    fn maximum(_self: Self) -> UInt64 {
+        invoke(|| UInt64(S.max))
+    }
+}
+
+fn main() -> UInt8 {
+    let narrow: Holder[UInt8] = .{ value = 0 }
+    let wide: Holder[UInt16] = .{ value = 0 }
+    if narrow.maximum() == UInt64(255) && wide.maximum() == UInt64(65535) {
+        0
+    } else {
+        1
+    }
+}

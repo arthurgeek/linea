@@ -1,0 +1,22 @@
+@linear
+enum Token {
+    One,
+}
+
+struct Source {
+    marker: UInt8,
+}
+
+trait HasItem
+where Self.Item: Discardable {
+    type Item
+}
+
+impl HasItem for Source {
+    type Item = Token
+}
+
+fn main() -> UInt8 {
+    let _source: Source = .{ marker = 0 }
+    0
+}

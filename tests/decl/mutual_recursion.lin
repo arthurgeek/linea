@@ -1,0 +1,15 @@
+fn ping(n: UInt8) -> UInt8 {
+    if n == 0 {
+        3
+    } else {
+        pong(n - 1)
+    }
+}
+
+fn pong(n: UInt8) -> UInt8 {
+    ping(n)
+}
+
+fn main() -> UInt8 {
+    ping(4)
+}

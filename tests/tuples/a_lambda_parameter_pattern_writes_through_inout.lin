@@ -1,0 +1,18 @@
+// An `inout` lambda parameter written as a pattern lends each component
+// writably, so assigning `a` and `b` changes the pair the caller passed.
+fn bump[F: fn(inout pair: (UInt8, UInt8)) -> ()](sink pair: (UInt8, UInt8), step: F) -> (UInt8, UInt8) {
+    var held = pair
+    step(&held)
+    held
+}
+
+fn main() -> UInt8 {
+    let (first, second) = bump(
+        (1, 2),
+        |inout (a, b)| {
+            a = a + 10
+            b = b + 20
+        },
+    )
+    first + second - 33
+}

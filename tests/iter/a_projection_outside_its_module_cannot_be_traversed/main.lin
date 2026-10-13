@@ -1,0 +1,24 @@
+// A traversal names positions, and the projection is what turns one into a
+// place. A module owning neither the trait nor the type may not write that
+// implementation, so a type whose traversal is declared where the type is and
+// whose projection is attempted here is a type this module cannot walk.
+import grid
+
+use grid.Grid
+
+impl Index[Int64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    var total: UInt8 = 0
+    for read c in g {
+        total += c
+    }
+    total
+}

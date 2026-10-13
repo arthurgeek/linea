@@ -1,0 +1,19 @@
+// `Option` is Linea source in the standard library, reached without an import
+// because the prelude is ambient. Nothing about it is special: it is an
+// ordinary generic enum, and a value of one goes in and comes back out through
+// an ordinary `match`.
+fn main() -> UInt8 {
+    let seven: UInt8 = 7
+    let present: Option[UInt8] = .Some(seven)
+    let absent: Option[UInt8] = .None
+
+    let a: UInt8 = match present {
+        None => 0,
+        Some(n) => n,
+    }
+    let b: UInt8 = match absent {
+        None => 1,
+        Some(n) => n,
+    }
+    a + b
+}

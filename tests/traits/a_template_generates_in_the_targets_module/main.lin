@@ -1,0 +1,5 @@
+import model
+
+fn main() -> UInt8 {
+    model.label()
+}

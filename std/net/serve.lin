@@ -1,0 +1,386 @@
+import std.io
+import std.mem
+import std.testing
+import std.time
+
+use io.Close
+
+// The first retry of a transient accept failure waits 5 ms; each further
+// failure doubles the wait, up to one second.
+let first_pause_ms: UInt64 = 5
+
+let longest_pause_ms: UInt64 = 1000
+
+// `serve` stops with `Accept` when accepting a connection fails with an
+// error that retrying does not answer, and with `Close` when closing the
+// listener fails.
+@(copyable, derive(Equatable, Debug))
+pub enum ServeError {
+    Accept(NetError),
+    Close(io.IoError),
+}
+
+impl Display for ServeError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Accept(error) => {
+                &w.write_str("accepting a connection failed: ")?
+                error.fmt(&w)
+            },
+            Close(error) => {
+                &w.write_str("closing the listener failed: ")?
+                error.fmt(&w)
+            },
+        }
+    }
+}
+
+test fn a_serve_error_displays_its_cause() {
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let invalid = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var wrote = true
+    for error in [ServeError.Accept(.Io(reset)), ServeError.Close(invalid)] {
+        wrote = wrote && error.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok()
+    }
+    let expected =
+        \\accepting a connection failed: Accept failed (ConnectionReset) after 0 bytes
+        \\closing the listener failed: Close failed (InvalidDescriptor) after 0 bytes
+        \\
+    let equal = writer.holds(expected)
+    writer.release()
+    testing.assert(wrote, "display rendering failed")?
+    testing.assert(equal, "a serve error displayed the wrong cause")?
+    .Ok(())
+}
+
+// An `AcceptRetry` says that accepting a connection failed with `error`, in a
+// way that waiting may answer, and that serving waits `pause` before trying
+// again.
+@copyable
+pub struct AcceptRetry {
+    error: NetError,
+    pause: time.Duration,
+}
+
+// What one try at accepting a connection came to: a connection, a failure
+// that waiting may answer, or a failure that ends serving.
+pub enum Attempt {
+    Connected(Accepted),
+    Retry(AcceptRetry),
+    Failed(NetError),
+}
+
+// What a test saw of an `Attempt`, after settling it.
+@(copyable, derive(Equatable, Debug))
+enum Seen {
+    Retried(UInt64),
+    Connected,
+    Failed(NetError),
+}
+
+// Settle `attempt` and describe it.
+fn seen(sink attempt: Attempt) -> Seen {
+    match attempt {
+        Connected(accepted) => {
+            let Accepted { connection, address: _ } = accepted
+            connection.close().unwrap()
+            .Connected
+        },
+        Retry(retry) => .Retried(retry.pause.nanoseconds() / 1000000),
+        Failed(error) => .Failed(error),
+    }
+}
+
+// Try once to accept the next connection from `listener`. `pause_ms` is how
+// long the last retry waited: it resets to zero when a connection arrives and
+// grows through `accept_pause` while a failure that `retryable` repeats. The
+// caller waits the retry's pause, so it can report the retry first.
+pub fn accept_attempt[L: Acceptor](inout listener: L, inout pause_ms: UInt64) -> Attempt {
+    match &listener.accept() {
+        Ok(accepted) => {
+            pause_ms = 0
+            .Connected(accepted)
+        },
+        Err(error) => {
+            if !retryable(error) {
+                return .Failed(error)
+            }
+            pause_ms = accept_pause(pause_ms)
+            .Retry(.{ error, pause = time.Duration.from_milliseconds(pause_ms) })
+        },
+    }
+}
+
+test fn an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    var script = scripted(listener, [.Some(.Io(copy(exhausted))), .Some(.Io(exhausted)), .None, .Some(.Io(copy(invalid)))], .None)
+    var pause_ms: UInt64 = 0
+    let first = seen(accept_attempt(&script, &pause_ms))
+    let second = seen(accept_attempt(&script, &pause_ms))
+    let third = seen(accept_attempt(&script, &pause_ms))
+    let reset = pause_ms
+    let fourth = seen(accept_attempt(&script, &pause_ms))
+    script.close().unwrap()
+    client.close().unwrap()
+    testing.assert_eq(first, Seen.Retried(5), "the first retry did not wait 5 ms")?
+    testing.assert_eq(second, Seen.Retried(10), "the second retry did not wait 10 ms")?
+    testing.assert_eq(third, Seen.Connected, "the connection was not accepted")?
+    testing.assert_eq(reset, UInt64(0), "a connection did not reset the pause")?
+    testing.assert_eq(fourth, Seen.Failed(.Io(invalid)), "a failure retrying does not answer was retried")?
+    .Ok(())
+}
+
+// Close `listener` and say how serving ended: the accept failure that stopped
+// it, if there was one, else the failure to close the listener, else success.
+// The accept failure is the one reported, since the listener is closed
+// regardless.
+pub fn finish[L: io.Close](sink listener: L, sink stopped: Option[NetError]) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    let closed = listener.close()
+    match stopped {
+        Some(error) => .Err(.Accept(error)),
+        None => match closed {
+            Ok(_) => .Ok(()),
+            Err(error) => .Err(.Close(error.into())),
+        },
+    }
+}
+
+test fn finish_closes_the_listener_and_reports_the_accept_failure_before_the_close_failure() {
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let healthy = listen(loopback(0)).unwrap()
+    let bound = healthy.local_address().unwrap()
+    let clean = finish(healthy, .None)
+    let refused = match connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    let failing = scripted(listen(loopback(0)).unwrap(), [.None, .None, .None, .None], .Some(copy(broken)))
+    let close_failed = finish(failing, .None)
+    let failing_too = scripted(listen(loopback(0)).unwrap(), [.None, .None, .None, .None], .Some(copy(broken)))
+    let accept_failed = finish(failing_too, .Some(.Io(copy(invalid))))
+    testing.assert_eq(clean, .Ok(()), "a clean stop reported a failure")?
+    testing.assert(refused, "finish left the listener open")?
+    testing.assert_eq(close_failed, .Err(.Close(broken)), "a failed close was not reported")?
+    testing.assert_eq(accept_failed, .Err(.Accept(.Io(invalid))), "the close failure replaced the accept failure")?
+    .Ok(())
+}
+
+// Accept connections from `listener` and hand each to `handler` together with
+// the address of the peer that opened it, one connection at a time: `handler`
+// finishes with a connection before the next is accepted, so a slow client
+// holds up the ones queued behind it. `handler` owns the connection and must
+// close or release it. It reports its own failures, and a failed connection
+// never stops serving. It is lent `inout`, so a closure keeps state across
+// connections and the caller reads it back afterwards, as with
+// `for_each_inout`.
+//
+// A reset connection or running out of descriptors while accepting is retried
+// after a pause that grows while the failure repeats; any other accept failure
+// ends serving with `Accept`. Serving ends with `Ok` after `connections`
+// connections, and never ends when that is `.None`. The listener is closed on
+// every exit.
+pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, peer: Address) -> ()](sink listener: L, inout handler: H, connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    var accepting = listener
+    var served: UInt64 = 0
+    var pause_ms: UInt64 = 0
+    var stopped: Option[NetError] = .None
+    while stopped.is_none() && !reached(connections, served) {
+        match accept_attempt(&accepting, &pause_ms) {
+            Connected(accepted) => {
+                let Accepted { connection, address } = accepted
+                &handler(connection, address)
+                served += 1
+            },
+            Retry(retry) => time.sleep(retry.pause),
+            Failed(error) => stopped = .Some(error),
+        }
+    }
+    finish(accepting, stopped)
+}
+
+test fn serve_runs_the_handler_once_for_each_connection_and_returns() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let first = connect(bound).unwrap()
+    let second = connect(bound).unwrap()
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(listener, &handler, connections: .Some(2))
+    let { served } = handler.into_captures()
+    first.close().unwrap()
+    second.close().unwrap()
+    testing.assert_eq(ended, .Ok(()), "serving did not end after two connections")?
+    testing.assert_eq(served, 2, "the handler did not run once per connection")?
+    .Ok(())
+}
+
+test fn the_handler_reads_from_each_connection_and_names_its_peer() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    var client = connect(bound).unwrap()
+    let sent = io.write_all(&client, "ping".as_bytes()).is_ok()
+    let client_closed = client.close().is_ok()
+    var handler = inout [sink received = false, sink from_loopback = false] |sink connection: Connection, peer: Address| {
+        from_loopback = peer == loopback(peer.port)
+        var reader = io.BufferedReader.open(mem.system(), capacity: 16, reader: connection) else |_| {
+            panic("the reader was refused its buffer")
+        }
+        received = match &reader.read_line_borrowed(max_bytes: 16) {
+            Ok(line) => match line { Some(text) => text == "ping", None => false },
+            Err(_) => false,
+        }
+        let _closed = reader.abandon().close()
+    }
+    let ended = serve(listener, &handler, connections: .Some(1))
+    let { received, from_loopback } = handler.into_captures()
+    testing.assert(sent && client_closed, "the client could not send")?
+    testing.assert_eq(ended, .Ok(()), "serving did not end")?
+    testing.assert(received, "the handler did not receive the bytes sent")?
+    testing.assert(from_loopback, "the peer address was not the loopback address")?
+    .Ok(())
+}
+
+test fn serving_no_connections_returns_at_once_and_closes_the_listener() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(listener, &handler, connections: .Some(0))
+    let { served } = handler.into_captures()
+    let refused = match connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(ended, .Ok(()), "serving no connections failed")?
+    testing.assert_eq(served, 0, "the handler ran with no connection to serve")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
+    let listener = listen(loopback(0)).unwrap()
+    let client = connect(listener.local_address().unwrap()).unwrap()
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
+    var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+        served += 1
+    }
+    let ended = serve(scripted, &handler, connections: .Some(1))
+    let { served } = handler.into_captures()
+    client.close().unwrap()
+    testing.assert_eq(ended, .Ok(()), "serving did not retry")?
+    testing.assert_eq(served, 1, "the connection after the failures was not served")?
+    .Ok(())
+}
+
+test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
+    let listener = listen(loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
+    var handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let ended = serve(scripted, &handler, connections: .Some(1))
+    let refused = match connect(bound) {
+        Ok(connection) => {
+            connection.close().unwrap()
+            false
+        },
+        Err(_) => true,
+    }
+    testing.assert_eq(ended, .Err(.Accept(.Io(invalid))), "a fatal accept failure did not end serving")?
+    testing.assert(refused, "the listener was left open")?
+    .Ok(())
+}
+
+test fn a_failed_listener_close_ends_serving_with_close() {
+    let listener = listen(loopback(0)).unwrap()
+    let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
+    let scripted = scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
+    var handler = |sink connection: Connection, _peer: Address| {
+        let _closed = connection.close()
+    }
+    let ended = serve(scripted, &handler, connections: .Some(0))
+    testing.assert_eq(ended, .Err(.Close(failure)), "a failed close was not reported")?
+    .Ok(())
+}
+
+// `reached` says whether `served` connections reach the limit `connections`.
+// `http.serve` counts its connections the same way.
+pub fn reached(connections: Option[UInt64], served: UInt64) -> Bool {
+    match read connections {
+        Some(limit) => served >= limit,
+        None => false,
+    }
+}
+
+test fn a_limit_is_reached_at_its_count_and_none_is_never_reached() {
+    testing.assert_eq(reached(.Some(2), 1), false, "a limit was reached early")?
+    testing.assert_eq(reached(.Some(2), 2), true, "a limit was not reached at its count")?
+    testing.assert_eq(reached(.None, 1000), false, "no limit was reached")?
+    .Ok(())
+}
+
+// `retryable` says whether retrying answers an accept failure: a queued
+// connection the peer reset before it was accepted, or the process running out
+// of descriptors or memory, which closing other connections relieves.
+// `http.serve` retries the same failures.
+pub fn retryable(error: NetError) -> Bool {
+    match read error {
+        Io(reason) => match read reason.category {
+            ConnectionReset => true,
+            ResourceExhausted => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+test fn a_reset_or_exhausted_accept_is_retried() {
+    let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
+    let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
+    let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
+    testing.assert_eq(retryable(.Io(reset)), true, "a reset connection was not retried")?
+    testing.assert_eq(retryable(.Io(exhausted)), true, "running out of descriptors was not retried")?
+    testing.assert_eq(retryable(.Io(invalid)), false, "an invalid listener was retried")?
+    testing.assert_eq(retryable(.InvalidAddress), false, "an invalid address was retried")?
+    .Ok(())
+}
+
+// `accept_pause` returns the wait in milliseconds before the next retry, after
+// waiting `previous`. `http.serve` shares the schedule.
+pub fn accept_pause(previous: UInt64) -> UInt64 {
+    if previous == 0 {
+        return first_pause_ms
+    }
+    if previous >= longest_pause_ms / 2 {
+        return longest_pause_ms
+    }
+    previous * 2
+}
+
+test fn the_accept_pause_doubles_to_one_second() {
+    testing.assert_eq(accept_pause(0), 5, "the first pause changed")?
+    testing.assert_eq(accept_pause(5), 10, "the pause did not double")?
+    testing.assert_eq(accept_pause(640), 1000, "the pause passed one second")?
+    testing.assert_eq(accept_pause(1000), 1000, "the longest pause grew")?
+    .Ok(())
+}

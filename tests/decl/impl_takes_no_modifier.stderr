@@ -1,0 +1,10 @@
+error[S-Entry]: an impl takes no visibility, ownership or export modifier
+ --> tests/decl/impl_takes_no_modifier.lin:6:1
+  |
+6 | pub impl P {
+  | ^^^ a modifier belongs on the type, or on a member
+error[S-Entry]: attributes attach only to a type declaration
+  --> tests/decl/impl_takes_no_modifier.lin:12:1
+   |
+12 | @linear
+   | ^ an impl is behaviour, not a nominal type declaration

@@ -1,0 +1,14 @@
+// A `for` whose every exit carries nothing has type Unit, exactly as a `while`
+// does. `Option[()]` would be a value naming two states a walk with nothing to
+// hand back does not have.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..9
+    var total: UInt8 = 0
+    for x in xs {
+        if x == 4 {
+            break
+        }
+        total += x
+    }
+    total
+}

@@ -1,0 +1,13 @@
+import std.mem
+
+@copyable
+struct Label { text: Str }
+
+fn main() -> UInt8 {
+    let owned = "tea".to_owned(mem.system()).unwrap()
+    let label: Label = .{ text = owned.view() }
+    let length = |_label: Label = label| UInt8(0)
+    let result = length()
+    owned.release()
+    result
+}

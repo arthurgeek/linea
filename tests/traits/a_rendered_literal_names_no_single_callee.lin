@@ -1,0 +1,30 @@
+// A literal with interpolated pieces renders as one call per piece, so the
+// call that renders it names no single callee and the monomorphised program
+// leaves it as written, while an ordinary call names its own.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn double(n: UInt8) -> UInt8 {
+    n + n
+}
+
+impl Display for Point {
+    fn fmt[W: Writer](self: Point, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        "{self.x},{double(self.y)}".fmt(&w)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let p: Point = .{ x = 1, y = 2 }
+    match println(p) {
+        Ok(_) => .Ok(0),
+        Err(e) => .Err(e),
+    }
+}

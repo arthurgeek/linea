@@ -1,0 +1,28 @@
+// A failure that cannot be copied is still written with `{error:?}`: the
+// interpolation borrows the value for as long as the line needs it.
+import std.io
+
+use io.IoError
+use io.println
+
+@derive(Debug)
+enum Refusal {
+    Closed,
+    Full(Int64),
+}
+
+fn book(seats: Int64) -> Result[Int64, Refusal] {
+    if seats > 4 {
+        .Err(.Full(seats))
+    } else {
+        .Ok(seats)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    match book(6) {
+        Ok(seats) => println("booked {seats}")?,
+        Err(refusal) => println("refused: {refusal:?}")?,
+    }
+    return .Ok(0)
+}

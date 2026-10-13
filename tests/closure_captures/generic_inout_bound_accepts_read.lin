@@ -1,0 +1,9 @@
+fn apply[F: inout fn() -> UInt8](inout callback: F) -> UInt8 {
+    &callback()
+}
+
+fn main() -> UInt8 {
+    let value = UInt8(0)
+    var callback = [value] || value
+    apply(&callback)
+}

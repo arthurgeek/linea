@@ -1,0 +1,5 @@
+error[T-Derive]: a derive request is not empty
+ --> tests/traits/attached_derives/a_derive_request_is_not_empty.lin:1:2
+  |
+1 | @derive()
+  |  ^^^^^^ name at least one trait

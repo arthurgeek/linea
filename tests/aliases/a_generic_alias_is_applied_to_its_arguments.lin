@@ -1,0 +1,18 @@
+// An alias may take type parameters, and applying it substitutes its
+// arguments into the type it names.
+alias Both[T] = [T; 2]
+alias Step[T] = fn(value: T) -> T
+
+fn apply_twice(step: Step[UInt8], start: UInt8) -> UInt8 {
+    step(step(start))
+}
+
+fn add_three(value: UInt8) -> UInt8 {
+    value + 3
+}
+
+fn main() -> UInt8 {
+    let both: Both[UInt8] = [1, 2]
+    let plain: [UInt8; 2] = both
+    apply_twice(add_three, plain[0] + plain[1])
+}

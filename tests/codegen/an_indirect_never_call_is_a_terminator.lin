@@ -1,0 +1,8 @@
+fn halt() -> Never {
+    loop {}
+}
+
+fn main() -> UInt8 {
+    let stop: fn() -> Never = halt
+    stop()
+}

@@ -1,0 +1,9 @@
+// Linear grants no capability requirement. Writing it beside an existing
+// Copyable requirement is redundant, including through inherited trait bounds.
+trait _Held: Copyable + Linear {
+    fn tag(self: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

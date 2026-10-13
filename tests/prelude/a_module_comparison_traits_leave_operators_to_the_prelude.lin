@@ -1,0 +1,40 @@
+// A module may declare its own `Equatable` and `Comparable` traits. `==` and
+// `<` still call the standard library's traits.
+trait Equatable {
+    fn same(self: Self, other: Self) -> Bool
+}
+
+trait Comparable {
+    fn before(self: Self, other: Self) -> Bool
+}
+
+impl Equatable for UInt8 {
+    fn same(self: UInt8, other: UInt8) -> Bool {
+        self != other
+    }
+}
+
+impl Comparable for UInt8 {
+    fn before(self: UInt8, other: UInt8) -> Bool {
+        self > other
+    }
+}
+
+fn main() -> UInt8 {
+    let a = UInt8(3)
+    let b = UInt8(5)
+    var score = UInt8(0)
+    if a == a {
+        score = score + 1
+    }
+    if a < b {
+        score = score + 2
+    }
+    if Equatable.same(a, a) {
+        score = score + 10
+    }
+    if Comparable.before(b, a) {
+        score = score + 4
+    }
+    score
+}

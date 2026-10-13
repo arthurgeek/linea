@@ -1,0 +1,26 @@
+// A `while` asks its condition for a `Bool` the way an `if` does, so a call
+// standing in one settles a trait's parameter written only as the signature's
+// return type.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Bool {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Envelope[Bool] = .{ v = true }
+    var n: UInt8 = 0
+    while Innermost.of(b) {
+        n = 13
+        break
+    }
+    n
+}

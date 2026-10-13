@@ -1,0 +1,15 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let owner = "one,two".to_owned(mem.system()).unwrap()
+    let source = owner.view().split(",").unwrap()
+    let { values, iterator: _remaining } = source.collect(mem.system()).unwrap()
+    owner.release()
+    let result: UInt8 = if values[0] == "one" {
+        0
+    } else {
+        1
+    }
+    values.release()
+    result
+}

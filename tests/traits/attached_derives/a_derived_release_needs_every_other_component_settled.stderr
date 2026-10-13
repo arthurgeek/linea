@@ -1,0 +1,7 @@
+error[T-Derive]: `Door` cannot derive `Release` because component type `Lock` is not discardable and does not implement `Release`
+ --> tests/traits/attached_derives/a_derived_release_needs_every_other_component_settled.lin:6:18
+  |
+6 | @(linear, derive(Release))
+  |                  ^^^^^^^ implement `Release` for `Lock`, or write this implementation by hand
+9 |     lock: Lock,
+  |     ---- this component has type `Lock`

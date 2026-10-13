@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `array literal` has not been given `d` yet, and control leaves here
+  --> tests/ownership/an_array_literal_is_not_half_built_when_control_leaves.lin:10:21
+   |
+10 |     let _pair = [d, return 7]
+   |                  - it was given up here
+   |                     ^^^^^^^^ give the value up after this, not before it

@@ -1,0 +1,10 @@
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/float/math_functions/counterfeit_math_extern.lin:1:11
+  |
+1 | extern fn linea_math_sqrt(value: Float64) -> Float64
+  |           ^^^^^^^^^^^^^^^ call it through the standard library, which declares the ones that exist
+error[T-Extern]: `linea_math_sqrt` is a compiler-owned runtime symbol and cannot be declared with this foreign signature
+ --> tests/float/math_functions/counterfeit_math_extern.lin:1:11
+  |
+1 | extern fn linea_math_sqrt(value: Float64) -> Float64
+  |           ^^^^^^^^^^^^^^^ use the checked standard-library operation

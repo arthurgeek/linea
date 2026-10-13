@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/projections/inferred_index/representable_key_still_checks_backing_bounds.lin:7:11
+  |
+7 |     board[3]
+  |           ^ the length is 3, so the last index is 2

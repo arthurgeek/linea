@@ -1,0 +1,20 @@
+// The reason compound assignment is a construct rather than a spelling. The
+// index has an effect, so `xs[step(&i)] += 100` and `xs[step(&i)] = xs[step(&i)]
+// + 100` are different programs: the second calls `step` twice, reads one
+// element and writes another.
+//
+// Written as a status rather than as a diagnostic because the desugared form is
+// accepted -- what is wrong with it is the answer, which is why the place being
+// evaluated once has to be pinned by what the program computes.
+fn step(inout n: UInt8) -> UInt8 {
+    n = n + 1
+    n - 1
+}
+
+fn main() -> UInt8 {
+    var i: UInt8 = 0
+    var xs: [UInt8; 3] = [10, 20, 30]
+    xs[step(&i)] += 100
+    // 110 and one step. Walking the path twice gives 10 and two.
+    xs[0] + i
+}

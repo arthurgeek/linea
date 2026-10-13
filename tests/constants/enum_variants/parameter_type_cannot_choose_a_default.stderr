@@ -1,0 +1,5 @@
+error[T-Default]: a default cannot have the parameter type `T`
+ --> tests/constants/enum_variants/parameter_type_cannot_choose_a_default.lin:3:26
+  |
+3 | fn select[T](_value: T = .Preserve) -> UInt8 {
+  |                          ^^^^^^^^^ the parameter type is settled by the call

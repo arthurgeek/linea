@@ -1,0 +1,19 @@
+import std.io
+
+fn twice[T: Display](message: T) -> Result[(), io.IoError] {
+    io.println(message)?
+    io.println(message)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var message = "count={1}"
+    message = "count={2}"
+    twice(message)?
+    let selected = if true {
+        "chosen={3}"
+    } else {
+        "other={4}"
+    }
+    twice(selected)?
+    return .Ok(0)
+}

@@ -1,0 +1,16 @@
+fn apply[F: inout fn() -> UInt8](inout callback: F) -> UInt8 {
+    &callback()
+}
+
+fn prepare[F: inout fn() -> UInt8](sink callback: F) -> F {
+    callback
+}
+
+fn zero() -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    var callback = prepare(zero)
+    apply(&callback)
+}

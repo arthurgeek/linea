@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `T.Query`, found `T`
+  --> tests/default_implementations/open_receivers_do_not_assume_the_default.lin:16:30
+   |
+4  |     fn accepts(self: Self, query: Self.Query) -> Bool
+   |                            ----- expected because of this parameter
+16 |     Queryable.accepts(value, value)
+   |                              ^^^^^ expected `T.Query`, found `T`

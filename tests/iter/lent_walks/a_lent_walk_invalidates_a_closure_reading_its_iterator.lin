@@ -1,0 +1,34 @@
+// A closure that reads the drain cannot be called while the walk advances it.
+import std.io
+import std.mem
+
+@linear
+struct Payment {
+    cents: UInt64,
+}
+
+fn commit(sink payment: Payment) -> UInt64 {
+    let Payment { cents } = payment
+    cents
+}
+
+fn batch(n: UInt64) -> Vec[Payment, mem.SystemAllocator] {
+    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(mem.system(), count: n, initializer: |index| Payment { cents = (index + 1) * 100 })
+    built.unwrap()
+}
+
+fn peek(_d: mem.Drain[Payment, mem.SystemAllocator]) -> UInt64 {
+    1
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var pending = batch(3).drain()
+    var total: UInt64 = 0
+    let look = read [pending] || peek(pending)
+    for p in &pending {
+        total += commit(p) + look()
+    }
+    pending.finish().unwrap()
+    io.println("{total}")?
+    .Ok(0)
+}

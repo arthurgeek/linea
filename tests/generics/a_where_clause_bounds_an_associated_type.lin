@@ -1,0 +1,20 @@
+struct Counter {
+    marker: UInt8,
+}
+
+impl Iterator for Counter {
+    type Item = UInt8
+
+    fn next(inout _self: Counter) -> Option[UInt8] {
+        .None
+    }
+}
+
+fn discard_item[I: Iterator](_iterator: I, sink _item: I.Item) -> ()
+where I.Item: Discardable {}
+
+fn main() -> UInt8 {
+    let counter: Counter = .{ marker = 0 }
+    discard_item(counter, 7)
+    0
+}

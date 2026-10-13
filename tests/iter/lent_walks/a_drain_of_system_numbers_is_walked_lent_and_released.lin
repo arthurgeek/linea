@@ -1,0 +1,19 @@
+import std.io
+import std.mem
+
+// Numbers need no settling, but their storage came from the system allocator,
+// so the drain is released once the walk is done.
+fn main() -> Result[UInt8, io.IoError] {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    for reading in UInt64(1)..5 {
+        &readings.push(reading * 10).unwrap()
+    }
+    var pending = readings.drain()
+    var total: UInt64 = 0
+    for reading in &pending {
+        total += reading
+    }
+    pending.release()
+    io.println("total {total}")?
+    .Ok(0)
+}

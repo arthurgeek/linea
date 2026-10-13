@@ -1,0 +1,5 @@
+error[T-Bound]: `T` is bounded `Copyable`, and `Duplicable` demands it already
+ --> tests/traits/an_inherited_copyable_requirement_cannot_be_repeated.lin:7:11
+  |
+7 | fn _twice[T: Duplicable + Copyable](x: T) -> UInt8 {
+  |           ^ drop the bound the trait already carries

@@ -1,0 +1,10 @@
+// `carrier` is written as the attribute `@carrier`; before a struct it is
+// refused and the declaration is still read.
+carrier struct Session {
+    user: Str,
+}
+
+fn main() -> UInt8 {
+    let _session = Session { user = "ada" }
+    0
+}

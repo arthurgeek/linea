@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let x: Int64 = 4
+    UInt8(x) + 1
+}

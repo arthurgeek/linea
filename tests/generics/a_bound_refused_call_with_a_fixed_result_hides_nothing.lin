@@ -1,0 +1,32 @@
+// `count` and `label` need a Copyable argument, and a `Pair` is not one, so
+// each call below is refused for its bound. Their results are a `UInt8` and a
+// `Str` whatever the argument, so walking a number or calling an operation a
+// `Str` lacks is a mistake of its own and is reported beside the bound.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn count[T: Copyable](_value: T) -> UInt8 {
+    2
+}
+
+fn label[T: Copyable](_value: T) -> Str {
+    "pair"
+}
+
+fn main() -> UInt8 {
+    let first: Pair = .{ left = 1, right = 2 }
+    for _step in count(first) {}
+    let second: Pair = .{ left = 3, right = 4 }
+    let name = label(second)
+    name.shout()
+    let third: Pair = .{ left = 5, right = 6 }
+    let total: UInt8 = count(third)
+    for _step in total {}
+    let fourth: Pair = .{ left = 7, right = 8 }
+    var renamed = label(fourth)
+    renamed = "other"
+    renamed.shout()
+    0
+}

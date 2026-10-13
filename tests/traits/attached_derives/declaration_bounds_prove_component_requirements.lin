@@ -1,0 +1,12 @@
+@derive(Equatable)
+struct Cell[T: Equatable] { value: T }
+
+fn main() -> UInt8 {
+    let first = Cell[UInt8] { value = 3 }
+    let second = Cell[UInt8] { value = 3 }
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

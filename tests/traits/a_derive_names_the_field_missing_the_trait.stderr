@@ -1,0 +1,7 @@
+error[T-Derive]: `Reading` cannot derive `Equatable` because component type `Sensor` does not implement `Equatable`
+  --> tests/traits/a_derive_names_the_field_missing_the_trait.lin:8:9
+   |
+8  | @derive(Equatable)
+   |         ^^^^^^^^^ implement `Equatable` for `Sensor`, or write this implementation by hand
+10 |     sensor: Sensor,
+   |     ------ this component has type `Sensor`

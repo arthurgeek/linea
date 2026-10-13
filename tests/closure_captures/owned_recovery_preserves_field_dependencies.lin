@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    var left: UInt8 = 1
+    let right: UInt8 = 2
+    let sum = [left, right] || left + right
+    let { left: before, right: after } = sum.into_captures()
+    let first = *before
+    left = 3
+    first + *after + left
+}

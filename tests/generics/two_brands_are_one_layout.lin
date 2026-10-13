@@ -1,0 +1,17 @@
+// Two instantiations differing only in a phantom parameter carry the same
+// bytes: the parameter contributes none, so `Handle[A]` and `Handle[B]` are
+// two types over one layout, and the emitted module says so.
+struct A {}
+
+struct B {}
+
+struct Handle[phantom Tag] {
+    slot: UInt64,
+    gen: UInt64,
+}
+
+fn main() -> UInt8 {
+    let x: Handle[A] = .{ slot = 1, gen = 2 }
+    let y: Handle[B] = .{ slot = 3, gen = 4 }
+    UInt8(x.slot + y.gen)
+}

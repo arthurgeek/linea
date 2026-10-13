@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `Door` declares `close` itself, and `door.Shut`, which is not in scope,\n// declares one too. The trait's item writes the call out beside the `use` it\n// adds, because with that `use` a postfix `close` still reaches the type's own.\nimport door\n\nfn main() -> UInt8 {\n    let d = door.Door.make(4)\n    d.close()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":7,"character":6}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

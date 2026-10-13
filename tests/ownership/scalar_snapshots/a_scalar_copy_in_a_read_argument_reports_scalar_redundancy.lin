@@ -1,0 +1,8 @@
+fn inspect(number: UInt8) -> UInt8 {
+    number
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    inspect(copy(number))
+}

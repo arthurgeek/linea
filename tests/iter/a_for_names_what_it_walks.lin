@@ -1,0 +1,9 @@
+// A `for` binds one name and says what it walks. `in` separates the two, and a
+// `for` written without it names neither.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..5
+    for x xs {
+        let _y = x
+    }
+    0
+}

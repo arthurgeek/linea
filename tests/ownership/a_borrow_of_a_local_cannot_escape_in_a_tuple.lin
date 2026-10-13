@@ -1,0 +1,11 @@
+// A tuple carries the borrows of its components, so a borrow of a local
+// cannot leave the function inside one.
+fn observed() -> (borrow UInt8, UInt8) {
+    let local: UInt8 = 7
+    (borrow local, 1)
+}
+
+fn main() -> UInt8 {
+    let (seen, n) = observed()
+    *seen + n
+}

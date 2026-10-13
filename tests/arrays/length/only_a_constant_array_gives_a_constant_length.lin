@@ -1,0 +1,14 @@
+fn row() -> [UInt8; 2] {
+    [1, 2]
+}
+
+// The call has to run before its array exists, so its length is not a
+// constant expression, even though the type fixes it.
+let widths: [UInt8; row().length()] = [1, 2]
+
+fn main() -> UInt8 {
+    var counts = [UInt8(1), UInt8(2)]
+    let _flags: [Bool; counts.length()] = [true, false]
+    counts[0] = 3
+    widths[0]
+}

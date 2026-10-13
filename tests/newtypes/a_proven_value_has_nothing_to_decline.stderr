@@ -1,0 +1,5 @@
+error[T-Refine]: a proven value has nothing to decline
+ --> tests/newtypes/a_proven_value_has_nothing_to_decline.lin:9:16
+  |
+9 |         Percent?(n) => n,
+  |                ^ drop the `?`; a pattern reads what is already proven

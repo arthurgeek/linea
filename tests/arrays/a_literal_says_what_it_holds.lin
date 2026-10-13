@@ -1,0 +1,13 @@
+// An array literal with nothing expected of it takes its type from its
+// elements. `let xs = [1, 2, 3]` reads like `let x = 1`, which is how most of a
+// program is written -- and unlike `.{ x = 1 }`, where many types have an
+// `x: Int64` and only the context can say which was meant, an array's type is
+// its element's and its count, and both are written here.
+//
+// The elements agree or the literal is refused: it is one type repeated, not a
+// run of whatever was handy.
+fn main() -> UInt8 {
+    let xs = [4, 5, 6]
+    let ys: [UInt8; 2] = [1, 2]
+    UInt8(xs[0]) + ys[1]
+}

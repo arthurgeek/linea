@@ -1,0 +1,10 @@
+error[S-Extern]: an `extern` has no body
+ --> tests/text/an_extern_declares_no_body.lin:7:41
+  |
+7 | extern fn provided(n: UInt64) -> UInt64 {
+  |                                         ^ it names a symbol the runtime provides, and declaring one here would define a second
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/text/an_extern_declares_no_body.lin:7:11
+  |
+7 | extern fn provided(n: UInt64) -> UInt64 {
+  |           ^^^^^^^^ call it through the standard library, which declares the ones that exist

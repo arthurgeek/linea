@@ -1,0 +1,7 @@
+import vault
+
+fn main() -> UInt8 {
+    // `.Forged` resolves against the type the parameter expects, not against
+    // a scope, so leaving the variant out of a scope could not have stopped it.
+    vault.tag(.Forged(7))
+}

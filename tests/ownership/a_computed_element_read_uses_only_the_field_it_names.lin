@@ -1,0 +1,19 @@
+// Reading `cells[i].right` reads the `right` field of some element and no
+// `left` field, so a change to the place one `left` borrows does not end it.
+struct Box { value: UInt64 }
+
+struct Pair { left: borrow UInt64, right: borrow UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    let y = Box { value = 2 }
+    let cells = [Pair { left = borrow y.value, right = borrow y.value }, Pair { left = borrow x.value, right = borrow y.value }]
+    bump(&x)
+    var i: UInt64 = 1
+    i = i - 1
+    UInt8(*cells[i].right)
+}

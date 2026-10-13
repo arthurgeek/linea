@@ -1,0 +1,6 @@
+// A linear value must be consumed exactly once on every path. Reading it is
+// not consuming it: `tag` lends, and a lend gives the value back.
+fn main() -> UInt8 {
+    let k = mint(7)
+    tag(k)
+}

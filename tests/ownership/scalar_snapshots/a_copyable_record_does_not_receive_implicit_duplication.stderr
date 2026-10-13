@@ -1,0 +1,7 @@
+error[O-Move]: `original` has already been moved
+ --> tests/ownership/scalar_snapshots/a_copyable_record_does_not_receive_implicit_duplication.lin:7:5
+  |
+6 |     let moved = original
+  |                 -------- it was taken here
+7 |     original.number + moved.number
+  |     ^^^^^^^^^^^^^^^ it was already taken, and a value is taken once

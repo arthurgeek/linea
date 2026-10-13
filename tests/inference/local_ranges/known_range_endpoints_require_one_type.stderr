@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt64`
+ --> tests/inference/local_ranges/known_range_endpoints_require_one_type.lin:4:22
+  |
+4 |     let range = low..high
+  |                 --- expected because of this end
+  |                      ^^^^ expected `UInt8`, found `UInt64`

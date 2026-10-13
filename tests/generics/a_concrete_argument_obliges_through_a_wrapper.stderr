@@ -1,0 +1,14 @@
+error[O-Copy]: `Bad[T]` does not permit copying
+  --> tests/generics/a_concrete_argument_obliges_through_a_wrapper.lin:19:21
+   |
+19 |     let c: Bad[T] = copy(b)
+   |                     ^^^^^^^ move the value, or declare a copyable representation
+error[O-Leak]: `b` (a linear `Bad[T]`) is still owned when this path leaves
+  --> tests/generics/a_concrete_argument_obliges_through_a_wrapper.lin:18:9
+   |
+18 |     let b: Bad[T] = .{ p = .{ a = Key.Forged(3), b = copy(x) } }
+   |         ^ never settled on the path that reaches the end of this block
+23 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

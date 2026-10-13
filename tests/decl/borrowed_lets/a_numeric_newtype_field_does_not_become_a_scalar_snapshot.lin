@@ -1,0 +1,15 @@
+@copyable
+type Count = UInt8
+
+struct Holder { count: Count }
+
+fn number(sink count: Count) -> UInt8 {
+    let Count(raw) = count
+    raw
+}
+
+fn main() -> UInt8 {
+    let holder = Holder { count = Count(7) }
+    let read Holder { count } = holder
+    number(count)
+}

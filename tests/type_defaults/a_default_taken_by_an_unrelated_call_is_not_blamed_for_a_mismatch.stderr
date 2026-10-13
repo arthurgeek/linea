@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/type_defaults/a_default_taken_by_an_unrelated_call_is_not_blamed_for_a_mismatch.lin:18:11
+   |
+11 | fn takes(_x: UInt8) -> UInt8 {
+   |          -- expected because of this parameter
+18 |     takes(s)
+   |           ^ expected `UInt8`, found `Str`

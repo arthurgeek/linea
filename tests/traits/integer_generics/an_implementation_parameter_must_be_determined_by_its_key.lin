@@ -1,0 +1,13 @@
+trait Tag {
+    fn tag(value: Self) -> UInt8
+}
+
+impl[_S: Integer, T: Integer] Tag for T {
+    fn tag(value: T) -> UInt8 {
+        UInt8(value) + UInt8(_S(0))
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

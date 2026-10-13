@@ -1,0 +1,5 @@
+error[T-Bound]: a failure leaving the program is rendered, so it implements `Display`
+ --> tests/decl/a_failure_leaving_the_program_renders.lin:9:14
+  |
+9 | fn main() -> Result[UInt8, Silent] {
+  |              ^^^^^^ `Silent` does not

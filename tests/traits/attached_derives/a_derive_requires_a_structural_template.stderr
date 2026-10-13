@@ -1,0 +1,5 @@
+error[T-Derive]: declare `template impl` in the trait's module, or write the implementation by hand
+ --> tests/traits/attached_derives/a_derive_requires_a_structural_template.lin:3:9
+  |
+3 | @derive(Marker)
+  |         ^^^^^^ this trait has no structural template

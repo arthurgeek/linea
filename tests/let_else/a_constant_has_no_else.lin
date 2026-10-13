@@ -1,0 +1,12 @@
+// A constant's initializer runs nothing, so it has no failure to handle.
+fn find() -> Option[UInt8] {
+    Option.Some(1)
+}
+
+let port = find() else {
+    80
+}
+
+fn main() -> UInt8 {
+    port
+}

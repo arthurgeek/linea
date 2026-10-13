@@ -1,0 +1,7 @@
+// A qualifier nothing bound is still a module of this program, so the names
+// it exports are offered after the dot, each carrying the import that binds
+// the qualifier. This is the rule for a name from an unimported module
+// reaching the one place a qualifier is already written.
+fn main() -> UInt8 {
+    ledger.size()
+}

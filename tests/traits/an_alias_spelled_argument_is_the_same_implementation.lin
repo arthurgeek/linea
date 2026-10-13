@@ -1,0 +1,32 @@
+// `Spot` is another name for `Cell`, so `Give[Spot]` and `Give[Cell]` are one
+// trait applied to one argument, and a type implements that once.
+struct Cell {
+    value: UInt8,
+}
+
+alias Spot = Cell
+
+trait Give[T] {
+    fn give(_self: Self, x: T) -> UInt8
+}
+
+struct Holder {
+    value: UInt8,
+}
+
+impl Give[Cell] for Holder {
+    fn give(_self: Self, x: Cell) -> UInt8 {
+        x.value
+    }
+}
+
+impl Give[Spot] for Holder {
+    fn give(_self: Self, x: Spot) -> UInt8 {
+        x.value + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let _holder: Holder = .{ value = 0 }
+    0
+}

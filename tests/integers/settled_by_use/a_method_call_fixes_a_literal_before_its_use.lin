@@ -1,0 +1,19 @@
+trait Halve {
+    fn halve(self: Self) -> Self
+}
+
+impl Halve for Int64 {
+    fn halve(self: Int64) -> Int64 {
+        self / 2
+    }
+}
+
+fn narrow(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let k = 5
+    let _half = k.halve()
+    narrow(k)
+}

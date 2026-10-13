@@ -1,0 +1,18 @@
+// The filter's predicate is lent `inspected` for as long as the loop walks the
+// pipeline: each pass calls `next()`, which runs the predicate and writes the
+// count. The loop body cannot read the count while the walk goes on.
+fn main() -> UInt8 {
+    let weights = [UInt64(1200), 3500, 6400]
+    var inspected: UInt64 = 0
+    let accepted = weights.as_slice().filter(
+        inout [inout inspected] |parcel| {
+            inspected += 1
+            *parcel <= 5000
+        },
+    )
+    var total: UInt64 = 0
+    for weight in accepted {
+        total += *weight + inspected
+    }
+    UInt8(total % 256)
+}

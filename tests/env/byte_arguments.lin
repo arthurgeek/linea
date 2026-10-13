@@ -1,0 +1,18 @@
+import std.env
+import std.io
+
+// Decimal bytes make invalid UTF-8 and empty arguments observable without
+// sending undecodable text to the terminal.
+fn main() -> Result[UInt8, io.IoError] {
+    let arguments = env.args()
+    io.println("arguments {arguments.count() - 1}")?
+    for index in UInt64(1)..arguments.count() {
+        let bytes = arguments.bytes_at(index).unwrap()
+        io.print("{bytes.length()}:")?
+        for offset in UInt64(0)..bytes.length() {
+            io.print(" {bytes[offset]}")?
+        }
+        io.println("")?
+    }
+    return .Ok(0)
+}

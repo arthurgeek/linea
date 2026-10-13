@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/delegation/index_delegation_checks_nested_generic_backing_bounds.lin:7:20
+  |
+7 |     return wrapped[9]
+  |                    ^ the length is 2, so the last index is 1

@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `E` is
+ --> tests/inference/try_payload/payload_context_does_not_infer_an_error.lin:6:25
+  |
+6 |     let value: UInt64 = success(7)?
+  |                         ^^^^^^^^^^ no argument determines it, and nothing expects a type of it

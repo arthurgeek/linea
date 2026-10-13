@@ -1,0 +1,19 @@
+// A narrowing conversion answers `.None` where the value does not fit, and
+// both arms run here: 200 is a `UInt8` and 300 is not.
+fn main() -> UInt8 {
+    let fits: Int16 = 200
+    let does_not: Int16 = 300
+
+    let a: Option[UInt8] = TryFrom.try_from(fits)
+    let b: Option[UInt8] = TryFrom.try_from(does_not)
+
+    let first: UInt8 = match a {
+        None => 0,
+        Some(n) => n,
+    }
+    let second: UInt8 = match b {
+        None => 1,
+        Some(_n) => 0,
+    }
+    first + second
+}

@@ -1,0 +1,46 @@
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+trait Rebuild {
+    fn rebuild(self: Self) -> Self
+}
+
+template impl Rebuild where reflect.components: Zero {
+    fn rebuild(self: Self) -> Self {
+        match read self {
+            reflect.case => reflect.construct(
+                reflect.case,
+                |component| {
+                    let field: component.Type = Zero.zero()
+                    field
+                },
+                {},
+            ),
+        }
+    }
+}
+
+enum Shape { Pair(UInt64, UInt64), Empty }
+
+derive Rebuild for Shape
+
+fn main() -> UInt8 {
+    let original: Shape = .Pair(4, 7)
+    let rebuilt = Rebuild.rebuild(original)
+    let pair_ok = match read rebuilt { Pair(left, right) => left == 0 && right == 0, Empty => false }
+    let empty: Shape = .Empty
+    let rebuilt_empty = Rebuild.rebuild(empty)
+    let empty_ok = match read rebuilt_empty { Empty => true, Pair(_, _) => false }
+    if pair_ok && empty_ok {
+        0
+    } else {
+        1
+    }
+}

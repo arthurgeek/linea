@@ -1,0 +1,66 @@
+// The bound is checked where the type is settled, and every bound written is
+// read: `Counter` implements `Stepper` and not `Counted`, `Ledger` implements
+// `Counted` and not `Stepper`, and each implementation is refused naming the
+// bound it broke.
+//
+// Reported at the settling rather than at the trait, for the reason a type
+// argument is reported at the use: a trait is checked once and no
+// implementation of it can add an error to it.
+struct Counter {
+    at: UInt8,
+}
+
+struct Ledger {
+    entries: UInt8,
+}
+
+trait Stepper {
+    type Item
+
+    fn next(inout self: Self) -> Option[Self.Item]
+}
+
+trait Counted {
+    fn howMany(x: Self) -> UInt8
+}
+
+trait Walk {
+    type Iter: Stepper + Counted
+
+    fn iterate(sink self: Self) -> Self.Iter
+}
+
+impl Stepper for Counter {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[Self.Item] {
+        self.at = self.at + 1
+        return .Some(self.at)
+    }
+}
+
+impl Counted for Ledger {
+    fn howMany(x: Self) -> UInt8 {
+        x.entries
+    }
+}
+
+impl Walk for Counter {
+    type Iter = Self
+
+    fn iterate(sink self: Self) -> Self.Iter {
+        self
+    }
+}
+
+impl Walk for Ledger {
+    type Iter = Self
+
+    fn iterate(sink self: Self) -> Self.Iter {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

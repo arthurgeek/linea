@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `UInt8` already produces a scalar snapshot when read
+ --> tests/ownership/scalar_snapshots/a_concrete_numeric_copy_is_redundant.lin:3:21
+  |
+3 |     let duplicate = copy(number)
+  |                     ^^^^^^^^^^^^ remove `copy` and read the value directly

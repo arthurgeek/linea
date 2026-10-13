@@ -1,0 +1,15 @@
+import std.http
+
+struct App { visits: UInt64 }
+
+fn count[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    app.visits += 1
+    http.text(request, "visit")
+}
+
+fn main() -> UInt8 {
+    defer var router = http.Router.new()
+    let counted = &router.route_raw("GET /count", count)
+    match counted { Ok(_) => {}, Err(_) => panic("x") }
+    0
+}

@@ -1,0 +1,108 @@
+import std.mem
+import std.testing
+
+// Build the Float64 whose IEEE 754 bits are `bits`: a sign bit, an 11-bit
+// biased exponent, and a 52-bit fraction. The significand fits exactly in
+// Float64, and scaling by powers of two stays exact through the final normal
+// or subnormal value the runtime chose.
+fn parsed_float64(bits: UInt64) -> Float64 {
+    // Bit 63 holds the sign; 2^52 is one past the largest fraction field.
+    let sign_bit: UInt64 = 9223372036854775808
+    let fraction_scale: UInt64 = 4503599627370496
+    let magnitude = bits % sign_bit
+    let biased_exponent = magnitude / fraction_scale
+    var significand = magnitude % fraction_scale
+    var exponent: Int64 = -1074
+    if biased_exponent != 0 {
+        significand += fraction_scale
+        exponent = Int64(biased_exponent) - 1075
+    }
+    var value = Float64(significand)
+    while exponent < 0 {
+        value /= 2.0
+        exponent += 1
+    }
+    while exponent > 0 {
+        value *= 2.0
+        exponent -= 1
+    }
+    if bits >= sign_bit {
+        -value
+    } else {
+        value
+    }
+}
+
+// Parse one decimal token with optional sign, fraction and exponent. Leading
+// zeroes are allowed; whitespace, separators and nonfinite names are refused.
+// Tokens have at most 65,536 bytes. Syntax offsets count bytes, including EOF.
+pub fn parse_float64(input: Str) -> Result[Float64, ParseError] where carries() {
+    var bits: UInt64 = 0
+    var offset: UInt64 = 0
+    let status = mem.parse_float64_bits(input.as_bytes(), &bits, &offset)
+    // The runtime answers 0 for a value, 1 for a syntax error at `offset`, 2
+    // for a value out of range, and 3 for a token over the length limit.
+    match read status {
+        0 => .Ok(parsed_float64(bits)),
+        1 => .Err(.Syntax(offset)),
+        2 => .Err(.OutOfRange),
+        3 => .Err(.TokenLimit),
+        _ => panic("invalid float parser status"),
+    }
+}
+
+test fn float_parsing_preserves_exact_values_and_signed_zero() {
+    testing.assert_eq(parse_float64("+000.125").unwrap(), 0.125, "decimal grammar changed")?
+    testing.assert_eq(parse_float64("9007199254740993").unwrap(), 9007199254740992.0, "halfway integer did not round to even")?
+    testing.assert_eq(parse_float64("9007199254740995").unwrap(), 9007199254740996.0, "upper halfway integer did not round to even")?
+    testing.assert_eq(parse_float64("1.00000000000000011102230246251565404236316680908203125").unwrap(), 1.0, "halfway fraction did not round to even")?
+    testing.assert_eq(parse_float64("1.00000000000000011102230246251565404236316680908203126").unwrap(), 1.0000000000000002, "fraction above halfway rounded down")?
+    testing.assert_eq(parse_float64("2.225073858507201e-308").unwrap(), 2.225073858507201e-308, "largest subnormal changed")?
+    testing.assert_eq(parse_float64("2.2250738585072014e-308").unwrap(), 2.2250738585072014e-308, "smallest normal changed")?
+    testing.assert_eq(parse_float64("5e-324").unwrap(), 5e-324, "smallest subnormal changed")?
+    testing.assert_eq(parse_float64("1.7976931348623157e308").unwrap(), 1.7976931348623157e308, "largest finite value changed")?
+    testing.assert(1.0 / parse_float64("-0e9999").unwrap() < 0.0, "negative zero lost its sign")?
+    testing.assert(1.0 / parse_float64("0").unwrap() > 0.0, "positive zero gained a sign")?
+}
+
+test fn float_parsing_refuses_range_loss_and_invalid_decimal_tokens() {
+    for input in ["1e309", "-1e400", "1e-324", "-1e-9999"] {
+        testing.assert(match parse_float64(input) { Err(error) => error == ParseError.OutOfRange, Ok(_) => false }, "range loss was accepted")?
+    }
+    let invalid = ["", "+", ".1", "1.", "1e", "1e+", " 1", "1 ", "NaN", "Infinity", "1_0", "0x1", "12\u{0}3"]
+    let offsets: [UInt64; _] = [0, 1, 0, 2, 2, 3, 0, 1, 0, 0, 1, 1, 2]
+    for index in 0..invalid.length() {
+        testing.assert(match parse_float64(invalid[index]) { Err(error) => error == ParseError.Syntax(offsets[index]), Ok(_) => false }, "invalid decimal lost its error offset")?
+    }
+}
+
+test fn float_parsing_results_and_errors_outlive_input() {
+    let input = "-12.5e1".to_owned(mem.system()).unwrap()
+    let result = parse_float64(input.view())
+    input.release()
+    testing.assert_eq(result.unwrap(), -125.0, "parsed float retained input")?
+    let malformed = "12x".to_owned(mem.system()).unwrap()
+    let failure = parse_float64(malformed.view())
+    malformed.release()
+    testing.assert(match failure { Err(error) => error == ParseError.Syntax(2), Ok(_) => false }, "parse error retained input")?
+}
+
+test fn float_parsing_bounds_token_work_before_conversion() {
+    let bytes = Vec.filled(mem.system(), count: 65536, value: UInt8(48)).unwrap()
+    defer var input = String.from_bytes(bytes).unwrap()
+    testing.assert_eq(parse_float64(input.view()).unwrap(), 0.0, "maximum-length zero token was refused")?
+    &input.append("0").unwrap()
+    testing.assert(match parse_float64(input.view()) { Err(error) => error == ParseError.TokenLimit, Ok(_) => false }, "oversized decimal token was accepted")?
+}
+
+impl Parse for Float64 {
+    fn parse(text: Str) -> Result[Float64, ParseError] where carries() {
+        parse_float64(text)
+    }
+}
+
+test fn float64_parses_through_the_parse_trait() {
+    let value: Float64 = "3.5".parse().unwrap()
+    testing.assert_eq(value, 3.5, "Float64's Parse implementation lost its value")?
+    .Ok(())
+}

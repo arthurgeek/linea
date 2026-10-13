@@ -1,0 +1,11 @@
+fn pair[F](_callback: F, value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    var callback = inout [sink count = UInt8(0)] || {
+        count += 1
+        count
+    }
+    pair(callback, &callback())
+}

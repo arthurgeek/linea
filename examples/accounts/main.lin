@@ -1,0 +1,33 @@
+// Withdraw money from an account and report the remaining funds.
+// `import ledger` loads the module in the ledger directory.
+import ledger
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    var account = ledger.Account.open(10000)
+
+    // Named arguments identify the amount and fee. The `&` in
+    // `&account.withdraw(...)` lends `account` to `withdraw`, whose
+    // `inout self` updates the balance.
+    let first = &account.withdraw(amount: 2500, fee: 100)
+
+    // Omitting fee uses the declared default, zero. A rejected withdrawal
+    // returns an error and leaves the balance unchanged.
+    let second = &account.withdraw(amount: 8000)
+    let returned = account.close()
+
+    io.println("Opening balance: 10000 cents")?
+    match first {
+        Ok(balance) => {
+            io.println("Withdrew 2500 cents; fee: 100 cents.")?
+            io.println("Balance: {balance} cents")?
+        },
+        Err(_) => io.println("Withdrawal of 2500 cents declined: insufficient funds.")?,
+    }
+    match second {
+        Ok(_) => io.println("Withdrew 8000 cents; fee: 0 cents.")?,
+        Err(_) => io.println("Withdrawal of 8000 cents declined: insufficient funds.")?,
+    }
+    io.println("Account closed; returned {returned} cents.")?
+    .Ok(0)
+}

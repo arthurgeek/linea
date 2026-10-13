@@ -1,0 +1,30 @@
+import std.io
+import std.mem
+
+use io.print
+
+@copyable
+enum Noisy { Value }
+
+impl Release for Noisy {
+    fn release(sink self: Noisy) -> () {
+        match self { Value => match print("noisy\n") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+@derive(Release)
+struct Outer[A: Allocator] {
+    inner: Inner[A],
+}
+
+@(copyable, derive(Release))
+struct Inner[A: Allocator] {
+    allocator: A,
+    noise: Noisy,
+}
+
+fn main() -> UInt8 {
+    let outer: Outer[mem.SystemAllocator] = .{ inner = .{ allocator = mem.system(), noise = .Value } }
+    outer.release()
+    0
+}

@@ -1,0 +1,11 @@
+// A blank line holds no token, so the line opening with `.fold` is still the
+// next line after `.map(...)`, and continues the chain: 2 + 4 + 6.
+fn main() -> UInt8 {
+    let steps = [UInt64(1), 2, 3]
+    let total = steps
+        .as_slice()
+        .map(|sink step| *step * 2)
+
+        .fold(0, |sink total, sink step| total + step)
+    UInt8(total)
+}

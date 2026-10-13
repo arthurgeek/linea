@@ -1,0 +1,15 @@
+// The value at an inclusive arm's own upper bound belongs to that arm, not
+// the next one -- and at the type's top, to the last arm rather than to
+// nothing. Both edges are exercised at exactly their boundary values, where
+// an exclusive comparison written in an inclusive arm's place would fall
+// through every guard.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=9 => 1,
+        10..=255 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(9) * 10 + classify(255)
+}

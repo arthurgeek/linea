@@ -1,0 +1,14 @@
+@copyable
+enum Mode { First, Second }
+
+fn choose(mode: Mode = .First) -> UInt8 {
+    match read mode { First => 0, Second => 1 }
+}
+
+fn invoke[F: fn(read mode: Mode = .Second) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    invoke(choose)
+}

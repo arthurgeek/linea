@@ -1,0 +1,7 @@
+fn halt() -> Never {
+    loop {}
+}
+
+fn main() -> UInt8 {
+    halt()
+}

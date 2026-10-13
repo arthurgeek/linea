@@ -1,0 +1,14 @@
+fn work(flag: Bool) -> UInt8 {
+    var first: UInt64 = 7
+    let second: UInt64 = 9
+    var view = borrow first
+    if flag {
+        view = borrow second
+    }
+    first = 11
+    UInt8(*view + first)
+}
+
+fn main() -> UInt8 {
+    work(false)
+}

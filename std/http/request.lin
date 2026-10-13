@@ -1,0 +1,796 @@
+import std.io
+import std.mem
+import std.testing
+import std.text as strings
+
+use mem.Owner
+
+// A `Span` is a byte range of a request's stored text: `start` inclusive, `end`
+// exclusive.
+@(copyable, derive(Release))
+struct Span {
+    start: UInt64,
+    end: UInt64,
+}
+
+// A `Field` pairs a name with its value, both ranges of a request's stored text.
+@(copyable, derive(Release))
+struct Field {
+    name: Span,
+    value: Span,
+}
+
+// A `Header` is one header as it arrived, borrowed from its request.
+@(copyable, derive(Equatable, Debug))
+pub struct Header {
+    name: Str,
+    value: Str,
+}
+
+// A `Message` holds a request read in full, body included, in the arena it was
+// read into. The method token, target and header names and values are stored
+// once in `head`, and each field records its byte ranges there. The query's
+// names and values are stored decoded in `query_text`, with their ranges in
+// `query_fields`, which is `None` when the query is not percent-encoded UTF-8.
+// A body sent with `Content-Type: application/x-www-form-urlencoded` is
+// decoded the same way into `body_text`, with its ranges in `body_fields`,
+// which is `None` when the body does not name that type or is not
+// percent-encoded UTF-8. A message holds seven allocations however many
+// headers, query values and form values it carries. A handler reads it
+// through `request`.
+@opaque
+struct Message[P: Allocator = mem.SystemAllocator] {
+    memory: mem.Handle[P],
+    known_method: Method,
+    head: String[mem.Handle[P]],
+    method_token: Span,
+    target: Span,
+    header_fields: Vec[Field, mem.Handle[P]],
+    query_text: Vec[UInt8, mem.Handle[P]],
+    query_fields: Option[Vec[Field, mem.Handle[P]]],
+    payload: Vec[UInt8, mem.Handle[P]],
+    body_text: Vec[UInt8, mem.Handle[P]],
+    body_fields: Option[Vec[Field, mem.Handle[P]]],
+}
+
+// Append `part` to `stored` and return the range it occupies.
+fn store_part[A: Allocator](inout stored: String[A], part: Str) -> Result[Span, mem.Oom] where carries() {
+    let start = stored.length()
+    &stored.append(part)?
+    .Ok(.{ start = start, end = stored.length() })
+}
+
+// Return the text `span` covers in `stored`.
+fn stored_part(stored: Str, span: Span) -> Str where carries(stored) {
+    stored.slice(span.start, span.end).unwrap()
+}
+
+// `header_value` returns the first value of the header `name` among
+// `fields`, stored in `head`, compared under ASCII case folding. It answers
+// `Request.header` and, before a `Message` exists to ask, the construction
+// that decides whether a body is a form.
+fn header_value(head: Str, fields: mem.Slice[Field], name: Str) -> Option[Str] where carries(.Some: head) {
+    for field in copy(fields) {
+        if stored_part(head, field.name).equals_ascii_folded(name) {
+            return .Some(stored_part(head, field.value))
+        }
+    }
+    .None
+}
+
+test fn a_header_value_is_found_by_its_folded_name() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var head = String.new_in(arena.handle())
+    let name = store_part(&head, "Content-Type").unwrap()
+    let value = store_part(&head, "application/json").unwrap()
+    let fields = [Field { name, value }]
+    testing.assert_eq(header_value(head.view(), fields.as_slice(), "content-type"), Option.Some("application/json"), "the value was not found")?
+    testing.assert_eq(header_value(head.view(), fields.as_slice(), "accept"), .None, "an absent header was found")?
+    .Ok(())
+}
+
+// `media_type` returns the media type a `Content-Type` value names: the text
+// before any `;`, without the parameters, trimmed of whitespace. A request
+// without the header names none.
+fn media_type(content_type: Option[Str]) -> Option[Str] {
+    let named = copy(content_type)?
+    match named.find(";") {
+        Some(at) => .Some(named.slice(0, at).unwrap().trim_ascii()),
+        None => .Some(named.trim_ascii()),
+    }
+}
+
+test fn a_media_type_is_the_value_without_its_parameters() {
+    testing.assert_eq(media_type(.Some("text/html")), Option.Some("text/html"), "a bare type changed")?
+    testing.assert_eq(media_type(.Some(" text/html ; charset=utf-8")), Option.Some("text/html"), "a type with a parameter kept its parameter or its spaces")?
+    testing.assert_eq(media_type(.Some("")), Option.Some(""), "an empty value changed")?
+    testing.assert_eq(media_type(.None), .None, "a missing header named a type")?
+    .Ok(())
+}
+
+// `is_form_content_type` says whether `content_type` names an HTML form's
+// encoding, `application/x-www-form-urlencoded`, compared under ASCII case
+// folding, with any parameters after `;` ignored.
+fn is_form_content_type(content_type: Option[Str]) -> Bool {
+    let media = media_type(content_type) else {
+        return false
+    }
+    media.equals_ascii_folded("application/x-www-form-urlencoded")
+}
+
+test fn a_form_content_type_is_named_exactly() {
+    testing.assert(is_form_content_type(.Some("application/x-www-form-urlencoded")), "the form type was not named")?
+    testing.assert(is_form_content_type(.Some("Application/X-WWW-Form-URLEncoded; charset=utf-8")), "a folded type with a parameter was not named")?
+    testing.assert(!is_form_content_type(.Some("application/json")), "JSON was a form")?
+    testing.assert(!is_form_content_type(.Some("multipart/form-data")), "a multipart body was a form")?
+    testing.assert(!is_form_content_type(.None), "a body without a type was a form")?
+    .Ok(())
+}
+
+// `new_request` builds a request for a test to hand to its handler, as a
+// client sends `method` and `target` with `body`. It stores the request in
+// `memory`, the arena the handler's response is built in, and the handler
+// reads it through `request`. A method that is not a token or a target that
+// is not visible ASCII is refused with 400, as a request line holding them
+// is. `content_type` adds a `Content-Type` header, decoded as a form body
+// when it names `application/x-www-form-urlencoded`, exactly as a request
+// read from a connection is; other headers are added afterward with
+// `add_header`, which cannot change what `content_type` decoded.
+pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str, body: Str, content_type: Str = "") -> Result[Message[P], RequestError] where carries(.Ok: memory) {
+    if !is_token(method) || !is_target(target) {
+        return .Err(.Status(.BadRequest))
+    }
+    var head = String.new_in(memory)
+    let method_token = stored_or_refused(&head, method)?
+    let target_span = stored_or_refused(&head, target)?
+    var query_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
+    let query_fields = query_of(&query_text, target, memory, standard_limits.max_query_pairs)?
+    var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
+    var is_form = false
+    if content_type.length() > 0 {
+        if !is_field_value(content_type) {
+            return .Err(.Status(.BadRequest))
+        }
+        let name_span = stored_or_refused(&head, "Content-Type")?
+        let value_span = stored_or_refused(&head, trim_optional_whitespace(content_type))?
+        match &header_fields.push(.{ name = name_span, value = value_span }) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Status(.InternalServerError)),
+        }
+        is_form = is_form_content_type(.Some(copy(content_type)))
+    }
+    var payload = String.new_in(memory)
+    match &payload.append(body) {
+        Ok(_) => {},
+        Err(_) => return .Err(.Status(.InternalServerError)),
+    }
+    var body_text: Vec[UInt8, mem.Handle[P]] = Vec.new_in(memory)
+    let body_fields = form_of(&body_text, is_form, body.as_bytes(), memory, standard_limits.max_form_pairs)?
+    .Ok(.{
+        memory = copy(memory),
+        known_method = method_of(method),
+        head,
+        method_token,
+        target = target_span,
+        header_fields,
+        query_text,
+        query_fields,
+        payload = payload.into_bytes(),
+        body_text,
+        body_fields,
+    })
+}
+
+test fn a_new_request_holds_its_method_target_and_body() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/echo?x=1", body: "hello").unwrap()
+    let request = sent.request()
+    testing.assert_eq(request.method(), Method.Post, "the method changed")?
+    testing.assert_eq(request.path(), "/echo", "the path changed")?
+    testing.assert_eq(request.query(), Option.Some("x=1"), "the query changed")?
+    testing.assert_ok_eq(request.text(), "hello", "the body changed")?
+    testing.assert_eq(request.header("Content-Length"), .None, "a header was invented")?
+    let spaced = match new_request(arena.handle(), "GET", "/a b", body: "") {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error),
+    }
+    let unnamed = match new_request(arena.handle(), "", "/", body: "") {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error),
+    }
+    testing.assert_eq(spaced, Option.Some(RequestError.Status(.BadRequest)), "a target holding a space was accepted")?
+    testing.assert_eq(unnamed, Option.Some(RequestError.Status(.BadRequest)), "an empty method was accepted")?
+    .Ok(())
+}
+
+// `query_of` decodes the query of `target`, the text after its first `?`,
+// into `stored` with `decode_encoded_pairs`. A query of more than `max_pairs`
+// pairs is refused with 414, as a target longer than the server reads, before
+// anything is decoded. Running out of memory answers 500.
+fn query_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], target: Str, memory: mem.Handle[P], max_pairs: UInt64) -> Result[Option[Vec[Field, mem.Handle[P]]], RequestError] where carries(.Ok: memory) {
+    let query = match target.find("?") {
+        Some(at) => target.slice(at + 1, target.length()).unwrap(),
+        None => "",
+    }
+    if pair_count(query) > max_pairs {
+        return .Err(.Status(.UriTooLong))
+    }
+    match decode_encoded_pairs(&stored, query, memory) {
+        Ok(fields) => .Ok(fields),
+        Err(_) => .Err(.Status(.InternalServerError)),
+    }
+}
+
+// `form_of` decodes `body` into `stored` with `decode_encoded_pairs`, exactly
+// as `query_of` decodes a query, when `is_form` says the request's
+// `Content-Type` names `application/x-www-form-urlencoded`. Otherwise it
+// answers `None` without reading `body`, since bytes sent as another type are
+// not name-value pairs. A body of more than `max_pairs` pairs is refused with
+// 413, as a body longer than `Limits.max_body_bytes` is, before anything is
+// decoded; a body that is not UTF-8 answers `None`, as a query that is not
+// is. Running out of memory answers 500.
+fn form_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], is_form: Bool, body: mem.Slice[UInt8], memory: mem.Handle[P], max_pairs: UInt64) -> Result[Option[Vec[Field, mem.Handle[P]]], RequestError] where carries(.Ok: memory) {
+    if !is_form {
+        return .Ok(.None)
+    }
+    let text = Str.from_bytes(body) else |_| {
+        return .Ok(.None)
+    }
+    if pair_count(text) > max_pairs {
+        return .Err(.Status(.ContentTooLarge))
+    }
+    match decode_encoded_pairs(&stored, text, memory) {
+        Ok(fields) => .Ok(fields),
+        Err(_) => .Err(.Status(.InternalServerError)),
+    }
+}
+
+test fn a_form_body_is_read_only_when_the_content_type_names_one() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var not_form: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let skipped = form_of(&not_form, false, "name=Ada".as_bytes(), arena.handle(), 100).unwrap()
+    var as_form: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let decoded = form_of(&as_form, true, "name=Ada+L%C3%B3pez".as_bytes(), arena.handle(), 100).unwrap().unwrap()
+    var over: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let refused = match form_of(&over, true, "a=1&b=2".as_bytes(), arena.handle(), 1) {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error),
+    }
+    testing.assert(skipped.is_none(), "a body sent as another type was decoded")?
+    testing.assert_eq(decoded.length(), UInt64(1), "a form body was not decoded")?
+    testing.assert_eq(refused, Option.Some(RequestError.Status(.ContentTooLarge)), "a form of too many pairs was accepted")?
+    .Ok(())
+}
+
+// `decode_encoded_pairs` decodes the `name=value` pairs of `source`,
+// separated by `&`, into `stored`, and returns their ranges there. `source`
+// is a query's text or a form body's, encoded the same way: `+` stands for a
+// space and `%XX` for the byte it spells. A pair without `=` has an empty
+// value, and an empty pair is skipped. Text holding an escape that is not two
+// hexadecimal digits, or a pair that does not decode to UTF-8, answers
+// `None`.
+//
+// Decoding never lengthens text, and the pairs are counted first, so the text
+// and the ranges are each reserved once, at their final size, and nothing
+// else is allocated.
+fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, allocator: A) -> Result[Option[Vec[Field, A]], mem.Oom] where carries(.Ok: allocator) {
+    var fields: Vec[Field, A] = Vec.new_in(allocator)
+    let pairs = pair_count(source)
+    if pairs == 0 {
+        return .Ok(.Some(fields))
+    }
+    let reserved = &stored.reserve(source.length()).is_ok() && &fields.reserve(pairs).is_ok()
+    if !reserved {
+        fields.release()
+        return .Err(.Exhausted)
+    }
+    var outcome: Result[(), PathValueError] = .Ok(())
+    var start: UInt64 = 0
+    while outcome.is_ok() && start < source.length() {
+        let end = source.find("&", start: start).unwrap_or(source.length())
+        let pair = source.slice(start, end).unwrap()
+        start = end + 1
+        if pair.length() > 0 {
+            outcome = decode_pair(&stored, &fields, pair)
+        }
+    }
+    match outcome {
+        Ok(_) => .Ok(.Some(fields)),
+        Err(error) => {
+            fields.release()
+            return match error {
+                Invalid => .Ok(.None),
+                Allocation => .Err(.Exhausted),
+            }
+        },
+    }
+}
+
+// `pair_count` counts the pairs of `source` that are not empty.
+fn pair_count(source: Str) -> UInt64 {
+    var pairs: UInt64 = 0
+    var start: UInt64 = 0
+    while start < source.length() {
+        let end = source.find("&", start: start).unwrap_or(source.length())
+        if end > start {
+            pairs += 1
+        }
+        start = end + 1
+    }
+    pairs
+}
+
+// `decode_pair` decodes one `name=value` pair into `stored` and records its
+// ranges in `fields`.
+fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
+    let equals = pair.find("=").unwrap_or(pair.length())
+    let raw_name = pair.slice(0, equals).unwrap()
+    let raw_value = pair.slice(equals + 1, pair.length()).unwrap_or("")
+    let name = append_decoded(&stored, raw_name, plus_is_space: true)?
+    let value = append_decoded(&stored, raw_value, plus_is_space: true)?
+    match &fields.push(.{ name, value }) {
+        Ok(_) => .Ok(()),
+        Err(_) => .Err(.Allocation),
+    }
+}
+
+test fn a_query_decodes_into_its_pairs() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let fields = decode_encoded_pairs(&stored, "a=1&&name=Ada+L%C3%B3pez&flag&=x&b=", arena.handle()).unwrap().unwrap()
+    let text = Str.from_bytes(stored.as_slice()).unwrap()
+    var decoded = String.new_in(arena.handle())
+    for field in fields.as_slice() {
+        let name = stored_part(text, field.name)
+        let value = stored_part(text, field.value)
+        "{name}={value};".fmt(&decoded).unwrap()
+    }
+    testing.assert_eq(decoded.view(), "a=1;name=Ada López;flag=;=x;b=;", "the pairs changed")?
+    .Ok(())
+}
+
+test fn a_query_that_is_not_percent_encoded_utf8_has_no_pairs() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let short = decode_encoded_pairs(&stored, "a=%4", arena.handle()).unwrap()
+    let letters = decode_encoded_pairs(&stored, "a=%zz", arena.handle()).unwrap()
+    let invalid = decode_encoded_pairs(&stored, "a=%FF", arena.handle()).unwrap()
+    testing.assert(short.is_none(), "an incomplete escape was decoded")?
+    testing.assert(letters.is_none(), "an escape of letters was decoded")?
+    testing.assert(invalid.is_none(), "a byte that is not UTF-8 was decoded")?
+    .Ok(())
+}
+
+impl[P: Allocator] Message[P] {
+    // `request` returns the view a handler reads: this message's parts and the
+    // arena they are stored in.
+    pub fn request(self: Self) -> Request[P] where borrows(self) {
+        .{
+            memory = copy(self.memory),
+            known_method = self.known_method,
+            head = self.head.view(),
+            method_token = copy(self.method_token),
+            target = copy(self.target),
+            header_fields = self.header_fields.as_slice(),
+            // Every name and value was checked to be UTF-8 as it was
+            // decoded, so the whole is.
+            query_text = Str.from_bytes(self.query_text.as_slice()).unwrap(),
+            query_fields = match read self.query_fields {
+                Some(fields) => .Some(fields.as_slice()),
+                None => .None,
+            },
+            payload = self.payload.as_slice(),
+            // Every name and value was checked to be UTF-8 as it was
+            // decoded, so the whole is.
+            body_text = Str.from_bytes(self.body_text.as_slice()).unwrap(),
+            body_fields = match read self.body_fields {
+                Some(fields) => .Some(fields.as_slice()),
+                None => .None,
+            },
+            matched = "",
+            path_values = .None,
+            request_id = .None,
+        }
+    }
+}
+
+test fn a_message_is_read_through_its_request() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let request = sent.request()
+    testing.assert_eq(request.path(), "/a", "the path changed")?
+    testing.assert_eq(request.header("host"), Option.Some("b"), "the header changed")?
+    testing.assert_eq(request.path_value("a"), .None, "a request no router matched had a path value")?
+    .Ok(())
+}
+
+impl[P: Allocator] Message[P] {
+    // `add_header` adds the header `name: value` to a request a test built
+    // with `new_request`, after the headers it has, as a client sends one. A
+    // name that is not a token, or a value holding a control byte, is refused
+    // with 400, as a header line holding them is.
+    pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), RequestError] where carries() {
+        if !is_token(name) || !is_field_value(value) {
+            return .Err(.Status(.BadRequest))
+        }
+        let name_span = stored_or_refused(&self.head, name)?
+        let value_span = stored_or_refused(&self.head, trim_optional_whitespace(value))?
+        match &self.header_fields.push(.{ name = name_span, value = value_span }) {
+            Ok(_) => .Ok(()),
+            Err(_) => .Err(.Status(.InternalServerError)),
+        }
+    }
+}
+
+test fn a_test_request_carries_the_headers_added_to_it() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var sent = new_request(arena.handle(), "POST", "/orders", body: r"{}").unwrap()
+    &sent.add_header("Content-Type", " application/json ").unwrap()
+    let spaced = &sent.add_header("Bad Name", "x")
+    let broken = &sent.add_header("X-Note", "a\r\nb")
+    let request = sent.request()
+    testing.assert_eq(request.header("content-type"), Option.Some("application/json"), "the header was not added")?
+    testing.assert_eq(request.path(), "/orders", "adding a header disturbed the path")?
+    testing.assert_eq(spaced, .Err(.Status(.BadRequest)), "a name holding a space was accepted")?
+    testing.assert_eq(broken, .Err(.Status(.BadRequest)), "a value holding a line break was accepted")?
+    .Ok(())
+}
+
+// A handler reads the request through this view. It views the text, decoded
+// query and body `serve` read for this exchange and the path values its
+// router matched, and it holds a handle to the exchange's arena. It is copied
+// freely and holds nothing to release. What it views lives until the
+// response has been written, so a handler may return views of it, and values
+// built in its arena, in its response. It is a carrier: a handler taking it
+// writes no `where carries(request)`, since its response lives as long as the
+// request does.
+@(opaque, copyable, carrier)
+struct Request[P: Allocator = mem.SystemAllocator] {
+    memory: mem.Handle[P],
+    known_method: Method,
+    head: Str,
+    method_token: Span,
+    target: Span,
+    header_fields: mem.Slice[Field],
+    query_text: Str,
+    query_fields: Option[mem.Slice[Field]],
+    payload: mem.Slice[UInt8],
+    body_text: Str,
+    body_fields: Option[mem.Slice[Field]],
+    // `matched` holds the names and decoded values of the path values, and
+    // `path_values` their ranges there; `path_values` is `None` until a router
+    // matches the request.
+    matched: Str,
+    path_values: Option[mem.Slice[Field]],
+    // `request_id` is the number `with_request_ids` gave the request. Only that
+    // middleware sets it, so unlike a header it is never the client's.
+    request_id: Option[UInt64],
+}
+
+impl[P: Allocator] Request[P] {
+    // `allocator` returns the exchange's arena. What a handler allocates here
+    // lives until the response has been written and is then released with the
+    // arena, so it is never released one value at a time.
+    pub fn allocator(self: Self) -> mem.Handle[P] {
+        copy(self.memory)
+    }
+}
+
+test fn a_request_allocates_in_its_arena() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    // The arena can hold 4088 bytes; the message already holds some.
+    let fits = "x".to_owned(sent.request().allocator()).is_ok()
+    let past = match sent.request().allocator().acquire(4096) {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    testing.assert(fits, "the arena refused one byte")?
+    testing.assert(past, "the arena handed out more than it holds")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `method` returns the request's method, or `Other` for a token `Method`
+    // does not name.
+    pub fn method(self: Self) -> Method {
+        self.known_method
+    }
+}
+
+test fn a_request_names_its_method() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let method = request.request().method()
+    testing.assert_eq(method, Method.Patch, "the method changed")?
+    let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let unknown = other.request().method()
+    testing.assert_eq(unknown, Method.Other, "an unknown method was named")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `method_text` returns the method token exactly as the client sent it.
+    pub fn method_text(self: Self) -> Str where carries(self) {
+        stored_part(self.head, self.method_token)
+    }
+}
+
+test fn a_request_keeps_its_method_token_as_sent() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `path` returns the target up to its `?`, not percent-decoded.
+    pub fn path(self: Self) -> Str where carries(self) {
+        let target = stored_part(self.head, self.target)
+        match target.find("?") {
+            Some(at) => target.slice(0, at).unwrap(),
+            None => target,
+        }
+    }
+}
+
+test fn a_path_ends_at_the_query() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
+    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(bare.request().path(), "/a/b", "a path without a query changed")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `query` returns the target after its first `?`, not percent-decoded.
+    pub fn query(self: Self) -> Option[Str] where carries(.Some: self) {
+        let target = stored_part(self.head, self.target)
+        let at = target.find("?")?
+        target.slice(at + 1, target.length())
+    }
+}
+
+test fn a_query_follows_the_first_question_mark() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
+    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(empty.request().query(), Option.Some(""), "an empty query was absent")?
+    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_eq(none.request().query(), .None, "a target without a query had one")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `header` returns the first value of the header `name`, compared under ASCII
+    // case folding. The scan is bounded by the request's header count, which the
+    // parser holds to `Limits.max_headers`.
+    pub fn header(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+        header_value(self.head, self.header_fields, name)
+    }
+}
+
+test fn a_header_is_found_by_its_folded_name() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "GET / HTTP/1.1\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+    let request = sent.request()
+    testing.assert_eq(request.header("ACCEPT"), Option.Some("text/plain"), "the first value was not found")?
+    testing.assert_eq(request.header("x-empty"), Option.Some(""), "an empty value was absent")?
+    testing.assert_eq(request.header("Accept-Language"), .None, "an absent header was found")?
+    .Ok(())
+}
+
+// `Headers` walks a request's headers in arrival order.
+@opaque
+struct Headers {
+    stored: Str,
+    fields: mem.Slice[Field],
+    index: UInt64,
+}
+
+impl Iterator for Headers {
+    type Item = Header
+
+    fn next(inout self: Self) -> Option[Header] where carries(.Some: self.stored) {
+        if self.index == self.fields.length() {
+            return .None
+        }
+        let field = copy(self.fields[self.index])
+        self.index += 1
+        .Some(.{ name = stored_part(self.stored, field.name), value = stored_part(self.stored, field.value) })
+    }
+}
+
+impl[P: Allocator] Request[P] {
+    // `headers` walks the request's headers in the order they arrived.
+    pub fn headers(self: Self) -> Headers where carries(self) {
+        .{ stored = copy(self.head), fields = copy(self.header_fields), index = 0 }
+    }
+}
+
+test fn headers_walk_in_arrival_order() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nhost: again\r\n\r\n"
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+    var walk = sent.request().headers()
+    let first = &walk.next()
+    let second = &walk.next()
+    let third = &walk.next()
+    let fourth = &walk.next()
+    testing.assert_eq(first, Option.Some(Header { name = "Host", value = "example.com" }), "the first header changed")?
+    testing.assert_eq(second, Option.Some(Header { name = "Accept", value = "*/*" }), "the second header changed")?
+    testing.assert_eq(third, Option.Some(Header { name = "host", value = "again" }), "the third header changed")?
+    testing.assert_eq(fourth, .None, "the walk continued past the last header")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `body` returns the body's bytes, exactly as many as `Content-Length`
+    // gave.
+    pub fn body(self: Self) -> mem.Slice[UInt8] where carries(self) {
+        copy(self.payload)
+    }
+}
+
+test fn a_body_holds_exactly_its_length() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcdef"
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
+    var reader = io.BufferedReader.open(arena.handle(), capacity: 16, reader: source).unwrap()
+    let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
+    let rest = &reader.read_exact(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
+    let ended = match &reader.read_raw_line_borrowed(1) {
+        Ok(line) => line.is_none(),
+        Err(_) => false,
+    }
+    let _source = reader.abandon()
+    testing.assert_ok_eq(Str.from_bytes(sent.request().body()), "abc", "the body changed")?
+    testing.assert_ok_eq(Str.from_bytes(rest.as_slice()), "def", "the bytes after the body left the reader")?
+    testing.assert(ended, "the reader held more than the bytes after the body")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `text` returns the body as text, or the offset of its first byte that
+    // does not begin valid UTF-8.
+    pub fn text(self: Self) -> Result[Str, strings.Utf8Error] where carries(.Ok: self) {
+        Str.from_bytes(self.payload)
+    }
+}
+
+test fn a_body_is_text_only_when_it_is_utf8() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
+    // Two bytes end inside `é`, so the scalar starting at byte 1 is incomplete.
+    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    let invalid_at: Option[UInt64] = match cut.request().text() {
+        Ok(_) => .None,
+        Err(error) => .Some(error.offset),
+    }
+    testing.assert_eq(invalid_at, .Some(1), "an incomplete scalar was text")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `routed` returns this request with the path values a router matched, whose
+    // ranges `fields` gives in `matched`.
+    fn routed(self: Self, matched: Str, fields: mem.Slice[Field]) -> Request[P] where carries(self, matched, fields) {
+        Self { matched = copy(matched), path_values = .Some(copy(fields)), ..copy(self) }
+    }
+}
+
+impl[P: Allocator] Request[P] {
+    // `path_value` returns the value the router matched for `{name}`, already
+    // percent-decoded.
+    pub fn path_value(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+        let fields = copy(self.path_values) else {
+            return .None
+        }
+        for field in fields {
+            if stored_part(self.matched, field.name) == name {
+                return .Some(stored_part(self.matched, field.value))
+            }
+        }
+        .None
+    }
+}
+
+test fn a_path_value_is_found_by_its_exact_name() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
+    var matched = String.new_in(arena.handle())
+    let id_name = store_part(&matched, "id").unwrap()
+    let id_value = store_part(&matched, "42").unwrap()
+    let rest_name = store_part(&matched, "rest").unwrap()
+    let rest_value = store_part(&matched, "a b").unwrap()
+    let id = Field { name = id_name, value = id_value }
+    let rest = Field { name = rest_name, value = rest_value }
+    let fields = [id, rest]
+    let request = sent.request().routed(matched.view(), fields.as_slice())
+    testing.assert_eq(request.path_value("id"), Option.Some("42"), "the value changed")?
+    testing.assert_eq(request.path_value("rest"), Option.Some("a b"), "the second value changed")?
+    testing.assert_eq(request.path_value("ID"), .None, "a path value matched a folded name")?
+    testing.assert_eq(request.method_text(), "GET", "routing disturbed the method")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `path_params` returns the path values the router matched, which
+    // `http.Params` reads a struct from, or `None` when no router matched the
+    // request.
+    pub fn path_params(self: Self) -> Option[ParamValues] where carries(.Some: self) {
+        match copy(self.path_values) {
+            Some(fields) => .Some(.{ stored = copy(self.matched), fields }),
+            None => .None,
+        }
+    }
+}
+
+test fn a_request_gives_its_path_params_once_a_router_matched_it() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
+    var matched = String.new_in(arena.handle())
+    let id_name = store_part(&matched, "id").unwrap()
+    let id_value = store_part(&matched, "42").unwrap()
+    let fields = [Field { name = id_name, value = id_value }]
+    let routed = sent.request().routed(matched.view(), fields.as_slice())
+    testing.assert_eq(sent.request().path_params().is_none(), true, "an unrouted request had path values")?
+    testing.assert_eq(routed.path_params().unwrap().get("id"), .Ok(.Some("42")), "the path value was lost")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `query_params` returns the query's names and values, decoded as an HTML
+    // form encodes them, or `None` when the query is not percent-encoded
+    // UTF-8.
+    pub fn query_params(self: Self) -> Option[ParamValues] where carries(.Some: self) {
+        match copy(self.query_fields) {
+            Some(fields) => .Some(.{ stored = copy(self.query_text), fields }),
+            None => .None,
+        }
+    }
+}
+
+test fn a_request_gives_its_query_params_decoded() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/items?sort=new+first", body: "").unwrap()
+    let broken = new_request(arena.handle(), "GET", "/items?sort=%zz", body: "").unwrap()
+    testing.assert_eq(sent.request().query_params().unwrap().get("sort"), .Ok(.Some("new first")), "the query was not decoded")?
+    testing.assert_eq(broken.request().query_params().is_none(), true, "a broken query had values")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `form_params` returns the body's names and values, decoded as an HTML
+    // form encodes them, or `None` when the body is not percent-encoded UTF-8.
+    // It is also `None` when `Content-Type` does not name
+    // `application/x-www-form-urlencoded`, so a body of another type is
+    // never read as pairs; `http.Form[T]` answers that mistake with 415
+    // before asking for these. A program builds its own body extractor the
+    // same way `http.Form` does: `request.header("Content-Type")` for the
+    // 415 check and this for the pairs, since `http.Params` reads a struct
+    // from either one.
+    pub fn form_params(self: Self) -> Option[ParamValues] where carries(.Some: self) {
+        match copy(self.body_fields) {
+            Some(fields) => .Some(.{ stored = copy(self.body_text), fields }),
+            None => .None,
+        }
+    }
+}
+
+test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
+    let untyped = new_request(arena.handle(), "POST", "/signup", body: "name=Ada").unwrap()
+    let json = new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
+    let broken = new_request(arena.handle(), "POST", "/signup", body: "name=%zz", content_type: "application/x-www-form-urlencoded").unwrap()
+    testing.assert_eq(sent.request().form_params().unwrap().get("name"), .Ok(.Some("Ada López")), "the form was not decoded")?
+    testing.assert_eq(untyped.request().form_params().is_none(), true, "a body sent without a type was read as a form")?
+    testing.assert_eq(json.request().form_params().is_none(), true, "a JSON body was read as a form")?
+    testing.assert_eq(broken.request().form_params().is_none(), true, "a broken form body had values")?
+    .Ok(())
+}

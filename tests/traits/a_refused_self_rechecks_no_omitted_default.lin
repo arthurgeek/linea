@@ -1,0 +1,13 @@
+// A call settling no `Self` is refused, and what it was written with is
+// checked once more so that whatever is wrong inside an argument is still
+// reported. An omitted parameter is not one of those: what fills it was worked
+// out where it is declared, and there is nothing at the call to check a second
+// time. Written both ways round, because the positional pairing and the named
+// one build the same list and would each have to find it there.
+trait Measure {
+    fn of(x: Self, w: UInt8 = 6) -> UInt8
+}
+
+fn main() -> UInt8 {
+    Measure.of(1) + Measure.of(x: 2)
+}

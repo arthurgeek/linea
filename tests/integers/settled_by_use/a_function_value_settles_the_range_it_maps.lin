@@ -1,0 +1,11 @@
+// `grams` is declared over `UInt64`, so mapping it over a range of literals
+// settles the range to walk `UInt64`.
+fn to_grams(sink kilograms: UInt64) -> UInt64 {
+    kilograms * 1000
+}
+
+fn main() -> UInt8 {
+    let grams: fn(sink kilograms: UInt64) -> UInt64 = to_grams
+    let total = (1..=3).map(grams).fold(0, |sink sum, sink weight| sum + weight)
+    UInt8(total / 1000)
+}

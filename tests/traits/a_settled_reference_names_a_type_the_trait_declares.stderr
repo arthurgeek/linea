@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares no `Weight`
+  --> tests/traits/a_settled_reference_names_a_type_the_trait_declares.lin:19:21
+   |
+19 |         let n: Self.Weight = x.at
+   |                     ^^^^^^ declare it on the trait, or name one it declares

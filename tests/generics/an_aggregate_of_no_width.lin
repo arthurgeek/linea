@@ -1,0 +1,38 @@
+// A generic every part of which lands on the unit type, so the aggregate
+// itself occupies no storage. `Empty[()]` is size zero at alignment one: it
+// lives in memory like any other aggregate, and there is nothing there.
+//
+// This is the one shape where "lives in memory" and "occupies storage" part
+// company, and both questions are asked of every part. The field is written by
+// no instruction and read by none, while the value around it is still an
+// address -- a slot of no width, a copy of no bytes, a type declared as zero
+// bytes at alignment one, and a return through the aggregate ABI.
+//
+// The unit type cannot be written, so the instantiation is reached from an
+// argument that produces nothing.
+struct Empty[T] {
+    v: T,
+}
+
+fn wrap[T: Copyable](v: T) -> Empty[T] {
+    let guard: UInt64 = 18364758544493064720
+    let e: Empty[T] = .{ v = copy(v) }
+
+    if guard != 18364758544493064720 {
+        .{ v = copy(v) }
+    } else {
+        e
+    }
+}
+
+fn main() -> UInt8 {
+    let guard: UInt64 = 12297829382473034410
+    let e = wrap({})
+    let _nothing = copy(e.v)
+
+    if guard != 12297829382473034410 {
+        1
+    } else {
+        7
+    }
+}

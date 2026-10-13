@@ -1,0 +1,13 @@
+import std.testing
+
+impl Equatable for () {
+    fn equals(_self: (), _other: ()) -> Bool {
+        true
+    }
+}
+
+impl Equivalent for () {}
+
+test fn unit_values_are_equivalent() {
+    testing.assert(Equatable.equals((), ()), "unit values compared unequal")?
+}

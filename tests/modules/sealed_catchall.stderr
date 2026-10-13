@@ -1,0 +1,5 @@
+error[M-Opaque]: `Key` is opaque outside `vault`
+ --> tests/modules/sealed_catchall/main.lin:8:5
+  |
+8 |     match k { _ => 0 }
+  |     ^^^^^^^^^^^^^^^^^^ only its own module can take one apart

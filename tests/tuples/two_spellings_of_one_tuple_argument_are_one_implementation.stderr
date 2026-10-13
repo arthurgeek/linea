@@ -1,0 +1,7 @@
+error[N-Duplicate]: `From` is already implemented for `P` with the same arguments
+  --> tests/tuples/two_spellings_of_one_tuple_argument_are_one_implementation.lin:15:12
+   |
+8  | impl[A, B] From[(A, B)] for P[A, B] {
+   |            ---- already implemented here
+15 | impl[A, B] From[Tuple2[A, B]] for P[A, B] {
+   |            ^^^^ a trait is implemented once per arguments and type

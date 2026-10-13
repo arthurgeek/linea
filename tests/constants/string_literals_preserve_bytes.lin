@@ -1,0 +1,30 @@
+let empty = ""
+
+let unicode = "\u{e1}"
+
+let raw = "á"
+
+let escaped = "\"\\\n\r\t\0{{}}"
+
+fn byte_is(text: Str, index: UInt64, value: UInt8) -> Bool {
+    match text.byte(index) {
+        Some(byte) => byte == value,
+        None => false,
+    }
+}
+
+fn main() -> UInt8 {
+    // Quote, backslash, LF, CR, tab, NUL, opening brace and closing brace.
+    let expected: [UInt8; 8] = [34, 92, 10, 13, 9, 0, 123, 125]
+    for index in UInt64(0)..8 {
+        if !byte_is(escaped, index, expected[index]) {
+            return 1
+        }
+    }
+    // U+00E1 encodes as the two UTF-8 bytes C3 A1.
+    if empty.length() == 0 && unicode == raw && escaped.length() == 8 && byte_is(unicode, 0, 195) && byte_is(unicode, 1, 161) {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,34 @@
+// A linear value declared inside a loop body is minted and discharged on every
+// iteration, which is legal precisely because the binding does not outlive the
+// iteration: [O-Loop] refuses moving one declared outside the loop, and this
+// one never is.
+//
+// So the obligation is checked once per iteration and holds each time. Only a
+// body that stops discharging it can say whether the loop was checked at all.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    var countdown: UInt8 = 3
+    var rounds: UInt8 = 0
+
+    loop {
+        if countdown == 0 {
+            break rounds
+        }
+
+        let key: Key = .Forged(countdown)
+        let _spent = burn(key)
+
+        rounds = rounds + 1
+        countdown = countdown - 1
+    }
+}

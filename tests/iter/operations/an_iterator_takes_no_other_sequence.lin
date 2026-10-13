@@ -1,0 +1,35 @@
+// Every iterator is its own sequence, so an iterator cannot say it is walked
+// some other way: `Pages` implements `Iterator`, and its `Sequence`
+// implementation is refused.
+struct Pages {
+    left: UInt8,
+}
+
+impl Iterator for Pages {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left)
+    }
+}
+
+impl Sequence for Pages {
+    type Iter = Pages
+
+    fn iterate(sink self: Self) -> Pages {
+        .{ left = self.left + 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    let pages = Pages { left = 3 }
+    var total: UInt8 = 0
+    for page in pages {
+        total += page
+    }
+    total
+}

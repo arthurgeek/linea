@@ -1,0 +1,10 @@
+error[T-Operands]: `%` is not defined for `Float64`
+ --> tests/diag/a_float_has_no_remainder.lin:4:16
+  |
+4 |     let _r = a % b
+  |                ^ a float division leaves no remainder to take
+error[T-Operands]: `%` is not defined for `Float64`
+ --> tests/diag/a_float_has_no_remainder.lin:6:7
+  |
+6 |     c %= b
+  |       ^^ a float division leaves no remainder to take

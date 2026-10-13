@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/traits/a_step_past_the_last_value_traps.lin:6:5

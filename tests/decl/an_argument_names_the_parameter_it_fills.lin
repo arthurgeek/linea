@@ -1,0 +1,9 @@
+// A named argument restates the parameter it fills; naming them all in
+// declaration order means what the positional spelling means.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    add(a: 40, b: 2)
+}

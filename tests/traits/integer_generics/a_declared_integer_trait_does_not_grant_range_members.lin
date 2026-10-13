@@ -1,0 +1,9 @@
+trait Integer {}
+
+fn _minimum[T: Integer](_witness: T) -> Int64 {
+    Int64(T.min)
+}
+
+fn main() -> UInt8 {
+    0
+}

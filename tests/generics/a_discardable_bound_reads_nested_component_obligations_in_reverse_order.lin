@@ -1,0 +1,26 @@
+// Nested ordinary wrappers inherit their linear payload obligation
+// independently of declaration order.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Box[T] {
+    v: T,
+}
+
+struct Mid[T] {
+    b: Box[T],
+}
+
+struct Held[T: Discardable] {
+    h: T,
+}
+
+fn take(_h: Held[Mid[Key]]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    take(.{ h = .{ b = .{ v = Key.Forged(1) } } })
+}

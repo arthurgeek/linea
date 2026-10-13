@@ -1,0 +1,30 @@
+// A module may declare its own `Display` and `Debug` traits. Interpolation
+// still renders through the standard library's traits, so `{}` and `{:?}`
+// render a number the usual way and ignore this module's traits.
+import std.io
+
+trait Display {
+    fn shown(self: Self) -> UInt8
+}
+
+trait Debug {
+    fn inspected(self: Self) -> UInt8
+}
+
+impl Display for UInt8 {
+    fn shown(self: UInt8) -> UInt8 {
+        self + 1
+    }
+}
+
+impl Debug for UInt8 {
+    fn inspected(self: UInt8) -> UInt8 {
+        self + 2
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let count = UInt8(40)
+    io.println("{count} {count:?} {"note":?}")?
+    return .Ok(Display.shown(count) + Debug.inspected(count) - 80)
+}

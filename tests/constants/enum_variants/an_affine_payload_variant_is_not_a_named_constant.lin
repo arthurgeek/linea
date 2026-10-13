@@ -1,0 +1,7 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+let selected = Mode.Exact(384)
+
+fn main() -> UInt8 {
+    match read selected { Preserve => 0, Exact(_) => 1 }
+}

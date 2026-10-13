@@ -1,0 +1,26 @@
+// A trait declares a type its implementations settle, written beside the
+// signatures it declares: both are members, and an implementation covers the
+// two kinds under one rule. The type is settled by the implementation and by
+// nothing else, so what `Item` is, is a question the implementation answers.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

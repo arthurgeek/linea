@@ -1,0 +1,5 @@
+error[N-Unused]: `Meters` is never used
+ --> tests/aliases/an_unused_alias_is_refused.lin:1:7
+  |
+1 | alias Meters = UInt64
+  |       ^^^^^^ name it in an annotation, or remove it

@@ -1,0 +1,5 @@
+error[T-Lend]: a borrowed pattern requires a place
+ --> tests/decl/borrowed_lets/a_temporary_cannot_supply_a_borrowed_pattern.lin:4:27
+  |
+4 |     let read Label(raw) = Label("Ada")
+  |                           ^^^^^^^^^^^^ bind the value before reading it apart

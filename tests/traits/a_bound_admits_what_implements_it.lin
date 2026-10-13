@@ -1,0 +1,25 @@
+// A trait bound admits a type argument where an implementation exists for it.
+// The bound is what a generic body may assume, so admitting a type without one
+// would let the body call an operation that is not there.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn weighed[T: Measure](_x: T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    weighed(a)
+}

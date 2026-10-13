@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Every module resolves imports from the program's source root. `ledger` sits\n// beneath that root, so it has the same spelling here and in `vault` one\n// module down.\nimport vault\n\nfn main() -> UInt8 {\n    vault.open()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"vault/vault.lin","languageId":"linea","version":1,"text":"// `ledger` is a sibling of this module and beneath their shared source root,\n// so completion offers the root-relative import that names it.\npub fn open() -> UInt8 {\n    3\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":16}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"vault/vault.lin"},"position":{"line":3,"character":5}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

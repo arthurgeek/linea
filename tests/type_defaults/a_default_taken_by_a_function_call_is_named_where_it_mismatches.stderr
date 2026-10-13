@@ -1,0 +1,9 @@
+error[T-Mismatch]: expected `UInt16`, found `UInt8`
+  --> tests/type_defaults/a_default_taken_by_a_function_call_is_named_where_it_mismatches.lin:11:21
+   |
+5  | fn takes16(x: UInt16) -> UInt16 {
+   |            - expected because of this parameter
+11 |     let _ = takes16(r)
+   |                     ^ expected `UInt16`, found `UInt8`
+   |
+   = help: `make()` left `T` to its default `UInt8`; write the type of the binding to choose another

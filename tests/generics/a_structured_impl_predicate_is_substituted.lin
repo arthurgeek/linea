@@ -1,0 +1,26 @@
+// An implementation predicate's whole subject is substituted through the
+// implementation head before applicability is decided.
+trait Mark {}
+
+struct Wrapper[T] {
+    value: T,
+}
+
+impl Mark for Wrapper[UInt8] {}
+
+struct Selected[T] {
+    value: T,
+}
+
+trait Ready {}
+
+impl[T] Ready for Selected[T]
+where Wrapper[T]: Mark {}
+
+fn accept[R: Ready](_value: R) -> () {}
+
+fn main() -> UInt8 {
+    let selected: Selected[UInt8] = .{ value = 1 }
+    accept(selected)
+    0
+}

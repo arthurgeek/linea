@@ -1,0 +1,22 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn open() -> Result[Arena[mem.SystemAllocator], UInt8] {
+    return .Ok(Arena.open(system(), 64))
+}
+
+fn work() -> Result[UInt8, UInt8] {
+    let pending = open()
+    let owner = pending?
+    let bytes = owner.handle().acquire(8).unwrap()
+    owner.release()
+    bytes.release()
+    return .Ok(0)
+}
+
+fn main() -> UInt8 {
+    match work() { Ok(value) => value, Err(value) => value }
+}

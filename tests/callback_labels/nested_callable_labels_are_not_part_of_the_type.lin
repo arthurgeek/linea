@@ -1,0 +1,14 @@
+// A nested function type's parameter names are labels too, so a function
+// taking `fn(read number: UInt8)` fits a type written with `item`.
+fn apply(callback: fn(read number: UInt8) -> UInt8) -> UInt8 {
+    callback(number: 3)
+}
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let selected: fn(read transform: fn(read item: UInt8) -> UInt8) -> UInt8 = apply
+    selected(transform: double)
+}

@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let letter =
+        \\Dear reader,
+        // a comment cannot sit inside the text
+        \\thank you.
+    let table =
+        \\a | b
+
+        \\1 | 2
+    UInt8(letter.length() + table.length())
+}

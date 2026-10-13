@@ -1,0 +1,9 @@
+fn first(pair: (UInt8, Str)) -> UInt8 {
+//              ^ type.builtin
+//                     ^ type
+    let (n, _) = pair
+//  ^ keyword.storage
+//       ^ variable
+    n + pair._0
+//           ^ variable.other.member
+}

@@ -1,0 +1,5 @@
+error[T-DeferLet]: `Socket` implements no `Release`, so it has no single ending `defer let` may choose
+  --> tests/defer_let/a_defer_let_over_a_type_with_only_an_inherent_release_is_refused.lin:15:5
+   |
+15 |     defer let socket = Socket { fd = 3 }
+   |     ^^^^^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path

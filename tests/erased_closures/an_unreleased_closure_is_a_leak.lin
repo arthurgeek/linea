@@ -1,0 +1,14 @@
+import std.mem
+
+// A closure may own captures its type does not show, so it is linear: it
+// must be released.
+fn main() -> UInt8 {
+    let step: UInt8 = 1
+    let next = mem.Closure.open(
+        mem.system(),
+        [sink step] |value: UInt8| -> UInt8 {
+            value + step
+        },
+    ).unwrap()
+    next(1)
+}

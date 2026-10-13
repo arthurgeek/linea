@@ -1,0 +1,5 @@
+error[T-Operands]: `P` is not a number
+  --> tests/types/a_negation_takes_a_number.lin:18:16
+   |
+18 |     let q: P = -p
+   |                ^ negation is defined over integers

@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let observation = {
+        let observe = [number] || -> where borrows(number) borrow number
+        observe()
+    }
+    *observation
+}

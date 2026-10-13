@@ -1,0 +1,22 @@
+// A clause written on a signature replaces the carrier default, so a function
+// whose result comes from another parameter says so.
+import std.io
+
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn pick(session: Session, other: Str) -> Str where carries(other) {
+    if session.user.length() > 0 {
+        copy(other)
+    } else {
+        copy(other)
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let _printed = io.println(pick(session, "other"))
+    0
+}

@@ -1,0 +1,242 @@
+import std.testing
+
+// decimal_pairs holds two ASCII digits for each value from 00 through 99, in
+// order. Pair d starts at byte 2 * d, so formatting slices two digits at a
+// time instead of computing each digit.
+let decimal_pairs = "00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899"
+
+// Return the two digits of `d` from the table. The first group of a number
+// drops its leading zero, so 7 is written as "7" rather than "07".
+fn digits(d: Int64, leading: Bool) -> Str {
+    let start = UInt64(d) * 2
+    let first = if leading && d < 10 {
+        start + 1
+    } else {
+        start
+    }
+    decimal_pairs.slice(first, start + 2).unwrap_or("0")
+}
+
+// Return the largest power of 100 at or below the magnitude of `n`; it selects
+// the first two-digit group. Dividing by p before dividing by 100 avoids
+// overflowing p * 100.
+fn scale(n: Int64) -> Int64 {
+    var p = 1
+    while (n / p) / 100 != 0 {
+        p = p * 100
+    }
+    p
+}
+
+// Return the largest power of 100 at or below `n`, as `scale` does, across the
+// full unsigned range.
+fn scale_unsigned(n: UInt64) -> UInt64 {
+    var p: UInt64 = 1
+    while (n / p) / 100 != 0 {
+        p = p * 100
+    }
+    p
+}
+
+// Write `value` in decimal two digits at a time, after a minus sign when it is
+// negative.
+fn format_signed[W: Writer](value: Int64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    if value < 0 {
+        &w.write_str("-")?
+    }
+    var p = scale(value)
+    var leading = true
+    while p > 0 {
+        let whole = value / p
+        // A remainder modulo 100 selects one pair from decimal_pairs.
+        let d = whole % 100
+        // Only the two-digit remainder is negated; Int64.min itself
+        // cannot be made positive in Int64.
+        let shown = if d < 0 {
+            0 - d
+        } else {
+            d
+        }
+        &w.write_str(digits(shown, leading))?
+        leading = false
+        p = p / 100
+    }
+    .Ok(())
+}
+
+// Write `value` in decimal two digits at a time.
+fn format_unsigned[W: Writer](value: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    var p = scale_unsigned(value)
+    var leading = true
+    while p > 0 {
+        let whole = value / p
+        // A remainder modulo 100 selects one pair from decimal_pairs.
+        let d = whole % 100
+        &w.write_str(digits(Int64(d), leading))?
+        leading = false
+        p = p / 100
+    }
+    .Ok(())
+}
+
+impl[T: Integer] Display for T {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        if self < T(0) {
+            format_signed(Int64(self), &w)
+        } else {
+            format_unsigned(UInt64(self), &w)
+        }
+    }
+}
+
+impl[T: Integer] Debug for T {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.fmt(&w)
+    }
+}
+
+test fn int8_renderers_preserve_decimal_boundaries() {
+    let least: Int8 = -128
+    testing.assert(display_text_equals(least, "-128"), "Int8.display changed least")?
+    testing.assert(debug_text_equals(least, "-128"), "Int8.debug changed least")?
+    let zero: Int8 = 0
+    testing.assert(display_text_equals(zero, "0"), "Int8.display changed zero")?
+    testing.assert(debug_text_equals(zero, "0"), "Int8.debug changed zero")?
+    let greatest: Int8 = 127
+    testing.assert(display_text_equals(greatest, "127"), "Int8.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "127"), "Int8.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "Int8.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "Int8.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn uint8_renderers_preserve_decimal_boundaries() {
+    let least: UInt8 = 0
+    testing.assert(display_text_equals(least, "0"), "UInt8.display changed least")?
+    testing.assert(debug_text_equals(least, "0"), "UInt8.debug changed least")?
+    let greatest: UInt8 = 255
+    testing.assert(display_text_equals(greatest, "255"), "UInt8.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "255"), "UInt8.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "UInt8.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "UInt8.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn int16_renderers_preserve_decimal_boundaries() {
+    let least: Int16 = -32768
+    testing.assert(display_text_equals(least, "-32768"), "Int16.display changed least")?
+    testing.assert(debug_text_equals(least, "-32768"), "Int16.debug changed least")?
+    let zero: Int16 = 0
+    testing.assert(display_text_equals(zero, "0"), "Int16.display changed zero")?
+    testing.assert(debug_text_equals(zero, "0"), "Int16.debug changed zero")?
+    let greatest: Int16 = 32767
+    testing.assert(display_text_equals(greatest, "32767"), "Int16.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "32767"), "Int16.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "Int16.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "Int16.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn uint16_renderers_preserve_decimal_boundaries() {
+    let least: UInt16 = 0
+    testing.assert(display_text_equals(least, "0"), "UInt16.display changed least")?
+    testing.assert(debug_text_equals(least, "0"), "UInt16.debug changed least")?
+    let greatest: UInt16 = 65535
+    testing.assert(display_text_equals(greatest, "65535"), "UInt16.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "65535"), "UInt16.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "UInt16.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "UInt16.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn int32_renderers_preserve_decimal_boundaries() {
+    let least: Int32 = -2147483648
+    testing.assert(display_text_equals(least, "-2147483648"), "Int32.display changed least")?
+    testing.assert(debug_text_equals(least, "-2147483648"), "Int32.debug changed least")?
+    let zero: Int32 = 0
+    testing.assert(display_text_equals(zero, "0"), "Int32.display changed zero")?
+    testing.assert(debug_text_equals(zero, "0"), "Int32.debug changed zero")?
+    let greatest: Int32 = 2147483647
+    testing.assert(display_text_equals(greatest, "2147483647"), "Int32.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "2147483647"), "Int32.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "Int32.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "Int32.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn uint32_renderers_preserve_decimal_boundaries() {
+    let least: UInt32 = 0
+    testing.assert(display_text_equals(least, "0"), "UInt32.display changed least")?
+    testing.assert(debug_text_equals(least, "0"), "UInt32.debug changed least")?
+    let greatest: UInt32 = 4294967295
+    testing.assert(display_text_equals(greatest, "4294967295"), "UInt32.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "4294967295"), "UInt32.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "UInt32.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "UInt32.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn int64_renderers_preserve_decimal_boundaries() {
+    let least = -9223372036854775808
+    testing.assert(display_text_equals(least, "-9223372036854775808"), "Int64.display changed least")?
+    testing.assert(debug_text_equals(least, "-9223372036854775808"), "Int64.debug changed least")?
+    let zero = 0
+    testing.assert(display_text_equals(zero, "0"), "Int64.display changed zero")?
+    testing.assert(debug_text_equals(zero, "0"), "Int64.debug changed zero")?
+    let greatest = 9223372036854775807
+    testing.assert(display_text_equals(greatest, "9223372036854775807"), "Int64.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "9223372036854775807"), "Int64.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "Int64.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "Int64.Debug lost a writer failure")?
+    .Ok(())
+}
+
+test fn uint64_renderers_preserve_decimal_boundaries() {
+    let least: UInt64 = 0
+    testing.assert(display_text_equals(least, "0"), "UInt64.display changed least")?
+    testing.assert(debug_text_equals(least, "0"), "UInt64.debug changed least")?
+    let greatest: UInt64 = 18446744073709551615
+    testing.assert(display_text_equals(greatest, "18446744073709551615"), "UInt64.display changed greatest")?
+    testing.assert(debug_text_equals(greatest, "18446744073709551615"), "UInt64.debug changed greatest")?
+    testing.assert(display_preserves_writer_failure(least), "UInt64.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(greatest), "UInt64.Debug lost a writer failure")?
+    .Ok(())
+}
+
+// Count the decimal digits of `n`; zero has one.
+fn decimal_digits(n: UInt64) -> UInt64 {
+    var count: UInt64 = 1
+    var rest = n / 10
+    while rest > 0 {
+        count += 1
+        rest /= 10
+    }
+    count
+}
+
+test fn decimal_digits_count_every_place() {
+    testing.assert_eq(decimal_digits(0), UInt64(1), "zero has one digit")?
+    testing.assert_eq(decimal_digits(9), UInt64(1), "nine has one digit")?
+    testing.assert_eq(decimal_digits(10), UInt64(2), "ten has two digits")?
+    testing.assert_eq(decimal_digits(18446744073709551615), UInt64(20), "UInt64.max has twenty digits")?
+    .Ok(())
+}
+
+// Return 10^n for n from 0 through 19, the powers of ten a UInt64 holds.
+fn power_of_ten(n: UInt64) -> UInt64 {
+    var result: UInt64 = 1
+    var left = n
+    while left > 0 {
+        result *= 10
+        left -= 1
+    }
+    result
+}
+
+test fn power_of_ten_multiplies_by_ten_each_step() {
+    testing.assert_eq(power_of_ten(0), UInt64(1), "10^0 is not one")?
+    testing.assert_eq(power_of_ten(3), UInt64(1000), "10^3 changed")?
+    let largest: UInt64 = 10000000000000000000
+    testing.assert_eq(power_of_ten(19), largest, "10^19 changed")?
+    .Ok(())
+}

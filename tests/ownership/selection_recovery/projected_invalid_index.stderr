@@ -1,0 +1,11 @@
+error[T-Mismatch]: expected `Bool`, found `UInt8`
+  --> tests/ownership/selection_recovery/projected_invalid_index.lin:13:24
+   |
+13 |     let _wrong: Bool = grid[9]
+   |                 ---- expected because of this annotation
+   |                        ^^^^^^^ expected `Bool`, found `UInt8`
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/ownership/selection_recovery/projected_invalid_index.lin:13:29
+   |
+13 |     let _wrong: Bool = grid[9]
+   |                             ^ the length is 1, so the last index is 0

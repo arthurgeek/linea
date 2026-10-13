@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+struct _Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+alias _Rack[T, A: Allocator = mem.SystemAllocator] = _Shelf[T, A]
+
+enum _Choice[T, E = Str] {
+    Some(T),
+    Else(E),
+}
+
+fn main() -> UInt8 {
+    0
+}

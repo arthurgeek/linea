@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn keep[A: Allocator](sink first: mem.Buffer[A], sink second: mem.Buffer[A]) -> mem.Buffer[A] where carries(first) {
+    second.release()
+    first
+}
+
+fn main() -> UInt8 {
+    let owner = Arena.open(system(), 64)
+    let handle = owner.handle()
+    let kept = keep(handle.acquire(8).unwrap(), handle.acquire(8).unwrap())
+    owner.release()
+    kept.release()
+    0
+}

@@ -1,0 +1,223 @@
+// Total the units in an inventory, attach the total to the JSON document as a
+// summary, and print the whole document.
+//
+// This program walks the document as a `json.Value` rather than decoding it
+// into a struct with `json.decode`, because it edits the document and writes
+// it back. An inventory may hold members this program does not know about,
+// such as the warehouse or a shelf, and their values must come back
+// unchanged. Decoding into a struct refuses a member the struct does not
+// declare, so it suits input of a known shape; a `json.Value` keeps every
+// member, so it suits editing a document.
+import std.env
+import std.fs
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+@copyable
+enum InventoryError {
+    Usage,
+    Path(fs.PathError),
+    File(fs.ReadFileReason),
+    Json(json.ParseError),
+    Products,
+    Product,
+    Units(json.NumberAccessError),
+    Overflow,
+    Allocation,
+    Mutation(json.MutationReason),
+    Output(io.IoError),
+}
+
+// `?` wraps each of these errors in its `InventoryError` variant through the
+// matching derived `From` implementation. The one written below keeps nothing
+// of a refused allocation.
+derive (
+    Debug,
+    Release,
+    From[fs.PathError],
+    From[fs.ReadFileReason],
+    From[json.ParseError],
+    From[json.NumberAccessError],
+    From[json.MutationReason],
+    From[io.IoError],
+) for InventoryError
+
+// A refused allocation becomes `Allocation`. `mem.Oom` has the one case
+// `Exhausted`, so the variant keeps nothing of it.
+impl From[mem.Oom] for InventoryError {
+    fn from(sink _source: mem.Oom) -> InventoryError {
+        .Allocation
+    }
+}
+
+// `sample` holds this JSON document line for line: each `\\` line is one line
+// of the text, and the parser skips the line breaks and indentation between
+// the values.
+let sample =
+    \\{
+    \\  "warehouse": "Leeds",
+    \\  "products": [
+    \\    {"name": "tea", "units": 3, "shelf": "A4"},
+    \\    {"name": "coffee", "units": 2, "shelf": "B1"}
+    \\  ]
+    \\}
+
+// Read only the members the total needs. `get` looks a member up by name and
+// `elements` lists an array's values; each answers `None` when the document
+// does not hold what was asked for.
+fn inventory_total[A: Allocator](document: json.Value[A]) -> Result[UInt64, InventoryError] {
+    let products = document.get("products") else {
+        return .Err(.Products)
+    }
+    let items = products.elements() else {
+        return .Err(.Products)
+    }
+    var total: UInt64 = 0
+    for product in items {
+        let name = product.get("name") else {
+            return .Err(.Product)
+        }
+        if name.as_str().is_none() {
+            return .Err(.Product)
+        }
+        let units = product.get("units") else {
+            return .Err(.Product)
+        }
+        let count = units.as_uint64()?
+        if count > UInt64.max - total {
+            return .Err(.Overflow)
+        }
+        total += count
+    }
+    .Ok(total)
+}
+
+test fn inventory_totals_integer_counts() {
+    let input = sample.to_owned(mem.system()).unwrap()
+    defer let document = json.parse(mem.system(), input.view()).unwrap()
+    // Parsing owns its text; the input can be released before using the result.
+    input.release()
+    testing.assert_eq(inventory_total(document).unwrap(), 5, "inventory total changed")?
+}
+
+test fn inventory_refuses_fractional_negative_and_overflowing_counts() {
+    let inputs = [
+        r#"{"products":[{"name":"tea","units":1.5}]}"#,
+        r#"{"products":[{"name":"tea","units":-1}]}"#,
+        r#"{"products":[{"name":"tea","units":18446744073709551615},{"name":"coffee","units":1}]}"#,
+        r#"{"products":[{"units":1}]}"#,
+    ]
+    for input in inputs {
+        defer let document = json.parse(mem.system(), input).unwrap()
+        testing.assert(inventory_total(document).is_err(), "invalid inventory was accepted")?
+    }
+}
+
+// `where retains(document: document, allocator)` states that after the call
+// `document` may hold values made with `allocator`, so the allocator must stay
+// usable for as long as the document does.
+fn attach_summary[A: Allocator](allocator: A, inout document: json.Value[A]) -> Result[(), InventoryError] where retains(document: document, allocator) {
+    let total = inventory_total(document)?
+    defer var summary = json.Value.object(allocator)
+    let count = json.Value.from_uint(allocator, total)?
+    // A refused insertion returns the incoming value inside its failure.
+    // `settled()` releases that value and keeps only the reason, which `?`
+    // converts into an `InventoryError`. A successful insertion returns the
+    // value the key held before, if any.
+    let previous_count = &summary.insert("total_units", count).settled()?
+    previous_count.release()
+    let previous_summary = &document.insert("summary", summary).settled()?
+    previous_summary.release()
+    .Ok(())
+}
+
+test fn summaries_replace_the_previous_owned_value() {
+    defer var document = json.parse(mem.system(), sample).unwrap()
+    attach_summary(mem.system(), &document).unwrap()
+    attach_summary(mem.system(), &document).unwrap()
+    let count = document.get("summary").unwrap().get("total_units").unwrap().as_uint64().unwrap()
+    testing.assert_eq(count, 5, "summary replacement changed the total")?
+}
+
+fn load_inventory() -> Result[json.Value, InventoryError] {
+    let args = env.args()
+    if args.count() == 1 {
+        return .Ok(json.parse(mem.system(), sample)?)
+    }
+    if args.count() != 2 {
+        return .Err(.Usage)
+    }
+    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap())?
+    // Read no more than the parser's default input limit accepts.
+    let limits = json.ParseLimits.default()
+    // A failed read owns the bytes read before the failure; `settled()`
+    // releases them and keeps why reading or closing the file failed.
+    let bytes = fs.read_file(mem.system(), path, max_bytes: limits.max_input_bytes).settled()?
+    let parsed = json.parse_bytes(mem.system(), bytes.as_slice())
+    bytes.release()
+    .Ok(parsed?)
+}
+
+// `json.write` writes the whole document, the members this program never read
+// included. An object's members may come back in another order than they
+// were read in; an array keeps its order.
+fn write_inventory[A: Allocator, W: Writer](inout writer: W, document: json.Value[A]) -> Result[(), W.Error] where carries(.Err: writer) {
+    json.write(&writer, document)?
+    &writer.write_str("\n")
+}
+
+@copyable
+enum DiskFailure { Full }
+
+// A disk with `free` bytes of room takes each write that fits and refuses
+// the first that does not. `attempts` counts the writes it was asked for.
+struct Disk {
+    free: UInt64,
+    attempts: UInt64,
+}
+
+impl Writer for Disk {
+    type Error = DiskFailure
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), DiskFailure] {
+        self.attempts += 1
+        if s.length() > self.free {
+            return .Err(.Full)
+        }
+        self.free -= s.length()
+        .Ok(())
+    }
+}
+
+test fn inventory_output_propagates_failure_without_consuming_the_inventory() {
+    defer var document = json.parse(mem.system(), sample).unwrap()
+    attach_summary(mem.system(), &document).unwrap()
+    // One byte of room takes the opening `{`, and the next write does not fit.
+    var disk = Disk { free = 1, attempts = 0 }
+    testing.assert(write_inventory(&disk, document).is_err(), "output failure was hidden")?
+    testing.assert_eq(disk.attempts, 2, "output continued after its first failure")?
+    testing.assert_eq(inventory_total(document).unwrap(), 5, "failed output changed the inventory")?
+}
+
+fn summarize() -> Result[(), InventoryError] {
+    defer var document = load_inventory()?
+    attach_summary(mem.system(), &document)?
+    var output = io.stdout()
+    write_inventory(&output, document)?
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    match summarize() {
+        Ok(_) => 0,
+        Err(error) => {
+            match read error {
+                Usage => io.eprintln("usage: json_inventory [path]"),
+                _ => io.eprintln("inventory failed: {error:?}"),
+            }
+            1
+        },
+    }
+}

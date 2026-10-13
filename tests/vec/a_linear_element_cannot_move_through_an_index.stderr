@@ -1,0 +1,5 @@
+error[O-Move]: only part of `values` is named here
+  --> tests/vec/a_linear_element_cannot_move_through_an_index.lin:16:18
+   |
+16 |     let stolen = values[0]
+   |                  ^^^^^^^^^ move the whole binding, or `copy` this part out of it

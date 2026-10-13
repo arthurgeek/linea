@@ -1,0 +1,25 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    var bytes: collections.Map[UInt8, UInt8, mem.SystemAllocator] = collections.Map.new()
+    defer bytes.release()
+    collections.Map.insert(&bytes, 255, 3).unwrap().release()
+    if *bytes.get(255).unwrap() != 3 || !bytes.get(254).is_none() {
+        return 1
+    }
+    var words: collections.Map[UInt64, UInt8, mem.SystemAllocator] = collections.Map.new()
+    defer words.release()
+    collections.Map.insert(&words, 18446744073709551615, 4).unwrap().release()
+    if !collections.Map.update(&words, 18446744073709551615, |sink value| value + 1) {
+        return 2
+    }
+    let removed = collections.Map.remove(&words, 18446744073709551615).unwrap()
+    let result = removed.value
+    removed.release()
+    if result == 5 && words.length() == 0 {
+        0
+    } else {
+        3
+    }
+}

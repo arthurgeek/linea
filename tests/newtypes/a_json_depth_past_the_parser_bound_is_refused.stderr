@@ -1,0 +1,5 @@
+error[T-Refine]: 500 is not in 0..=128 for json.MaxDepth
+ --> tests/newtypes/a_json_depth_past_the_parser_bound_is_refused.lin:7:49
+  |
+7 |     let limits = json.ParseLimits { max_depth = json.MaxDepth(500), ..Default.default() }
+  |                                                 ^^^^^^^^^^^^^^^^^^ this value is outside the type's range

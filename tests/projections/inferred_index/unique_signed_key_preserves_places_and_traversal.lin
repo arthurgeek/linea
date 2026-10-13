@@ -1,0 +1,29 @@
+struct Board { values: [UInt8; 3] }
+
+impl Index[Int64] for Board via values
+
+impl Board {
+    trav positions via values
+}
+
+fn increment(inout value: UInt8) -> () {
+    value += 1
+}
+
+fn main() -> UInt8 {
+    var board = Board { values = [2, 3, 4] }
+    board[0] = 5
+    increment(&board[(1)])
+    for inout value in board {
+        value += 1
+    }
+    var total: UInt8 = 0
+    for read value in board {
+        total += value
+    }
+    if board[0] == board[Int64(0)] && board[0] == 6 && board[1] == 5 && total == 16 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,32 @@
+import std.mem as Storage
+//     ^ variable
+//         ^ variable
+//                ^ variable
+
+use mem.Arena
+//  ^ variable
+//      ^ variable
+use mem.system
+//  ^ variable
+//      ^ variable
+pub use release.Release
+//      ^ variable
+//              ^ variable
+use io.println
+//     ^ variable
+
+use mem.
+    Arena
+//  ^ variable
+import std.mem as
+    Storage
+//  ^ variable
+use
+    mem.Arena
+//  ^ variable
+//      ^ variable
+
+fn count(value: UInt64) -> UInt64 {
+//              ^ type.builtin
+    copy(value)
+}

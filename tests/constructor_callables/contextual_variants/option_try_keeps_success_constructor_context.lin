@@ -1,0 +1,21 @@
+enum Reading { Accepted(UInt8) }
+
+fn reading(present: Bool) -> Option[Reading] {
+    let source: Option[UInt8] = if present {
+        .Some(7)
+    } else {
+        .None
+    }
+    let value: Reading = source.map(.Accepted)?
+    return .Some(value)
+}
+
+fn main() -> UInt8 {
+    let present = match reading(true) { Some(value) => match value { Accepted(code) => code == 7 }, None => false }
+    let absent = match reading(false) { Some(_) => false, None => true }
+    if present && absent {
+        0
+    } else {
+        1
+    }
+}

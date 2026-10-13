@@ -1,0 +1,12 @@
+// `Door` declares a private `close` and a public one through `Shut`. The
+// private operation is not accessible here, so `door.Door.close(d)` reaches
+// the trait's, exactly as `d.close()` does: an operation this module may not
+// name does not stand in the way of one it can.
+import door
+
+use door.Shut
+
+fn main() -> UInt8 {
+    let d = door.Door.make(4)
+    door.Door.close(d) + d.close()
+}

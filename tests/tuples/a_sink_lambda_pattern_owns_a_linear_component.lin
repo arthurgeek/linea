@@ -1,0 +1,26 @@
+// `|sink (ticket, n)|` moves the components into the lambda, so the linear
+// ticket is the lambda's to release.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn spend[F: fn(sink pair: (Ticket, UInt8)) -> UInt8](sink pair: (Ticket, UInt8), take: F) -> UInt8 {
+    take(pair)
+}
+
+fn main() -> UInt8 {
+    spend(
+        (.{ number = 1 }, 5),
+        |sink (ticket, n)| {
+            Release.release(ticket)
+            n
+        },
+    ) - 5
+}

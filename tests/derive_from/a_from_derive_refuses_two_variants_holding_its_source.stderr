@@ -1,0 +1,11 @@
+error[T-Derive]: `Failure` has two variants wrapping `Missing`
+ --> tests/derive_from/a_from_derive_refuses_two_variants_holding_its_source.lin:5:9
+  |
+5 | @derive(From[Missing])
+  |         ^^^^^^^^^^^^^ the conversion would wrap the source in either variant
+7 |     Absent(Missing),
+  |     ------ this variant holds the source's type
+8 |     Lost(Missing),
+  |     ---- this variant holds the source's type
+  |
+  = help: write the conversion by hand, or give each variant its own type

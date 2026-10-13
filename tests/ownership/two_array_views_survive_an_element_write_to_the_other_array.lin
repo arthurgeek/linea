@@ -1,0 +1,14 @@
+import std.mem
+
+// Views of two arrays in one struct: writing an element of the first array
+// ends its view, and the view of the second array still answers its length.
+struct Two { a: [UInt8; 2], b: [UInt8; 2] }
+
+struct Views { va: mem.Slice[UInt8], vb: mem.Slice[UInt8] }
+
+fn main() -> UInt8 {
+    var t = Two { a = [UInt8(1), 2], b = [UInt8(3), 4] }
+    let v = Views { va = t.a.as_slice(), vb = t.b.as_slice() }
+    t.a[0] = 9
+    UInt8(v.vb.length())
+}

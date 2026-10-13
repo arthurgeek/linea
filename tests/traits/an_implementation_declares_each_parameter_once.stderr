@@ -1,0 +1,16 @@
+error[N-Duplicate]: `_T` is already declared by this declaration
+  --> tests/traits/an_implementation_declares_each_parameter_once.lin:35:16
+   |
+35 | impl[_T: Show, _T: Show] Get for Pair[_T, _T] {
+   |      -- already declared here
+   |                ^^ a declaration declares each parameter once
+error[T-Impl]: implementation parameter `_T` cannot be recovered from its key
+  --> tests/traits/an_implementation_declares_each_parameter_once.lin:35:16
+   |
+35 | impl[_T: Show, _T: Show] Get for Pair[_T, _T] {
+   |                ^^ place the parameter in the receiver or trait arguments outside associated-type projections
+error[T-Bound]: `Get` requires `Self` to implement it, and `Pair[UInt64, UInt8]` does not
+  --> tests/traits/an_implementation_declares_each_parameter_once.lin:43:13
+   |
+43 |     Get.get(p)
+   |             ^ implement it for that type, or reach the operation on one that does

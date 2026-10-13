@@ -1,0 +1,72 @@
+import std.mem
+import std.testing
+
+// Index gives bracket access to an element. The projection exposes a place
+// that the caller can read or update, subject to the implementation's receiver
+// mode.
+pub trait Index[I] {
+    type Elem
+    proj at(inout self: Self, i: I) -> Elem where carries(self)
+}
+
+// FromEnd is an offset from the end: a[^1] selects the last element, a[^2] the
+// previous one. The indexed value supplies the length. ^0 is past the last
+// element and does not select an element.
+@derive(Equatable, Equivalent, Debug, Release)
+pub struct FromEnd {
+    k: UInt64,
+}
+
+// Render the source notation, as in ^1 for the last element.
+impl Display for FromEnd {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("^")?
+        self.k.fmt(&w)
+    }
+}
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn from_end_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+test fn derived_from_end_equality_compares_the_offset() {
+    let one = FromEnd { k = 1 }
+    let same = FromEnd { k = 1 }
+    let two = FromEnd { k = 2 }
+    testing.assert(one.equals(same), "equal from-end indexes differed")?
+    testing.assert(!one.equals(two), "different from-end indexes compared equal")?
+    testing.assert(from_end_test_accepts_equivalent(two), "FromEnd did not derive Equivalent")?
+    .Ok(())
+}
+
+test fn derived_from_end_debug_renders_the_offset() {
+    let two = FromEnd { k = 2 }
+    let a = mem.system()
+    // Sixty-four bytes leave room for the complete debug text checked below.
+    var writer = testing.Recorder.of(a, 64).unwrap()
+    let wrote = two.debug(&writer).is_ok()
+    let rendered = writer.holds(r"FromEnd { k: 2 }")
+    writer.release()
+    testing.assert(wrote, "rendering FromEnd failed")?
+    testing.assert(rendered, "FromEnd.Debug did not render its offset")?
+    .Ok(())
+}
+
+test fn a_from_end_index_displays_its_source_notation() {
+    let last = FromEnd { k = 1 }
+    let past_end = FromEnd { k = 0 }
+    // The 16-byte recorder holds both indexes and their separator.
+    var writer = testing.Recorder.of(mem.system(), 16).unwrap()
+    let wrote = last.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && past_end.fmt(&writer).is_ok()
+    let rendered = writer.holds("^1 ^0")
+    writer.release()
+    testing.assert(wrote && rendered, "FromEnd.Display changed its offset")?
+    .Ok(())
+}
+
+test fn derived_from_end_release_consumes_the_offset() {
+    let index = FromEnd { k = 3 }
+    index.release()
+    .Ok(())
+}

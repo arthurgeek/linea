@@ -1,0 +1,10 @@
+error[T-Impl]: `Wrap` declares `wrap`'s type parameter `T` default; an implementation does not restate it
+  --> tests/type_defaults/an_implementation_does_not_restate_a_type_parameter_default.lin:10:8
+   |
+10 |     fn wrap[T: Copyable = UInt16](_self: Self, extra: T) -> T where carries(extra) {
+   |        ^^^^ drop it; the signature declares it
+error[T-Impl]: `Plain` declares `plain`'s type parameter `T` and no default for it; an implementation does not add one
+  --> tests/type_defaults/an_implementation_does_not_restate_a_type_parameter_default.lin:16:8
+   |
+16 |     fn plain[T: Copyable = UInt16](_self: Self, extra: T) -> T where carries(extra) {
+   |        ^^^^^ declare it on the signature, which is what every call reads

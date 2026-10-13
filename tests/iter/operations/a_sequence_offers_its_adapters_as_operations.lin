@@ -1,0 +1,85 @@
+// Every Sequence offers the iterator adapters and terminals as operations, so
+// a pipeline reads left to right from what it walks. A slice is walked without
+// `iterate()`, an iterator is a sequence of itself, and `Sequence.map(values, f)`
+// is the same operation written through its trait.
+import std.io
+import std.mem
+
+// Countdown yields `left - 1` down to zero.
+struct Countdown {
+    left: UInt8,
+}
+
+impl Iterator for Countdown {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left)
+    }
+}
+
+// Keep an even value, reading it through the view a slice walk yields.
+fn even(sink value: borrow UInt64) -> Option[UInt64] {
+    if *value % 2 == 0 {
+        .Some(*value)
+    } else {
+        .None
+    }
+}
+
+// Halve a value above two.
+fn half_of_large(sink value: borrow UInt64) -> Option[UInt64] {
+    if *value > 2 {
+        .Some(*value / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let values = [UInt64(1), 2, 3, 4]
+    let doubled_sum = values.as_slice().map(|sink value| *value * 2).filter(|value| value > 2).fold(0, |sink total, sink value| total + value)
+
+    var shifted: UInt64 = 0
+    for value in values.as_slice().map(|sink value| *value + 1) {
+        shifted += value
+    }
+
+    let from_iterator = values.as_slice().iterate().filter_map(even).fold(0, |sink total, sink value| total + value)
+
+    var counted: UInt8 = 0
+    let four = Countdown { left = 4 }
+    for step in four {
+        counted += step
+    }
+    let three = Countdown { left = 3 }
+    let countdown = three.map(|sink step| UInt16(step) * 10).fold(0, |sink total, sink step| total + step)
+
+    let written = Sequence.fold(Sequence.map(values.as_slice(), |sink value| *value), 0, |sink total, sink value| total + value)
+    let any_large = values.as_slice().any(|sink value| *value > 3)
+    let all_positive = values.as_slice().all(|sink value| *value > 0)
+    let first_even = values.as_slice().find(|value| *value % 2 == 0)
+    let halved = values.as_slice().find_map(half_of_large)
+    var visit = inout [sink visited = UInt64(0)] |sink value: UInt64| {
+        visited += value
+    }
+    values.as_slice().map(|sink value| *value).for_each_inout(&visit)
+    let { visited: seen } = visit.into_captures()
+
+    let { values: collected, iterator: _ } = values.as_slice().map(|sink value| *value * 3).collect(mem.system()).unwrap()
+    let collected_total = collected.as_slice().fold(0, |sink total, sink value| total + *value)
+    collected.release()
+
+    var arrivals = UInt64(1)..6
+    let { found: arrived, inspected } = &arrivals.find_counted(|arrival| arrival == 3)
+    let after = &arrivals.next()
+
+    io.println("{doubled_sum} {shifted} {from_iterator} {counted} {countdown} {written}")?
+    io.println("{any_large} {all_positive} {first_even.unwrap()} {halved.unwrap()} {seen} {collected_total}")?
+    io.println("{arrived.unwrap()} {inspected} {after.unwrap()}")?
+    .Ok(0)
+}

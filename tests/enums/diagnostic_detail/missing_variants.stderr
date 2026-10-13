@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Paused`, `Closed`
+ --> tests/enums/diagnostic_detail/missing_variants.lin:4:5
+  |
+4 |     match State.Ready(1) {
+  |     ^^^^^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`

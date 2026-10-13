@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking a `Countdown` abandons it where the walk ends, and it is linear
+  --> tests/iter/lent_walks/a_walk_help_skips_the_iterate_an_iterator_gets_for_free.lin:28:14
+   |
+28 |     for x in countdown {
+   |              ^^^^^^^^^ `Countdown` is linear, and nothing settles it here
+   |
+   = help: walk it lent with `for x in &countdown`, then settle `countdown` with `release()`

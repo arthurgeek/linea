@@ -1,0 +1,33 @@
+// A type's width is worked out in one place, and that place stops at the limit
+// rather than wrapping past it. Each level here is eight times the last, so
+// `L8` is a quarter of the widest a type may be and four of them beside a tag
+// is past it. Before the rule was stated this crashed the compiler in one build
+// and gave the value an eight-byte slot in the other -- a slot smaller than the
+// value it holds.
+struct L0 { a: UInt64, b: UInt64, c: UInt64, d: UInt64, e: UInt64, f: UInt64, g: UInt64, h: UInt64 }
+
+struct L1 { a: L0, b: L0, c: L0, d: L0, e: L0, f: L0, g: L0, h: L0 }
+
+struct L2 { a: L1, b: L1, c: L1, d: L1, e: L1, f: L1, g: L1, h: L1 }
+
+struct L3 { a: L2, b: L2, c: L2, d: L2, e: L2, f: L2, g: L2, h: L2 }
+
+struct L4 { a: L3, b: L3, c: L3, d: L3, e: L3, f: L3, g: L3, h: L3 }
+
+struct L5 { a: L4, b: L4, c: L4, d: L4, e: L4, f: L4, g: L4, h: L4 }
+
+struct L6 { a: L5, b: L5, c: L5, d: L5, e: L5, f: L5, g: L5, h: L5 }
+
+struct L7 { a: L6, b: L6, c: L6, d: L6, e: L6, f: L6, g: L6, h: L6 }
+
+struct L8 { a: L7, b: L7, c: L7, d: L7, e: L7, f: L7, g: L7, h: L7 }
+
+enum Wide {
+    Four(L8, L8, L8, L8),
+    Nothing,
+}
+
+fn main() -> UInt8 {
+    let _w: Wide = .Nothing
+    0
+}

@@ -1,0 +1,16 @@
+enum Wrapped[T] { Value(T) }
+
+fn main() -> UInt8 {
+    let input: Result[UInt8, UInt8] = .Ok(31)
+    let mapped = input.map(Wrapped.Value)
+    match mapped {
+        Ok(wrapped) => match wrapped {
+            Value(code) => if code == 31 {
+                0
+            } else {
+                1
+            },
+        },
+        Err(_) => 2,
+    }
+}

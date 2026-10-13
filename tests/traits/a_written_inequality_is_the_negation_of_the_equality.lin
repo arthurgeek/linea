@@ -1,0 +1,28 @@
+// `!=` is `equals` negated rather than an operation of its own, so a type says
+// what identity means once. The implementation is written, so what runs is the
+// body below and the negation is the compiler's -- an inequality that reached
+// `equals` and kept its answer would agree with `==` on every pair.
+struct Tally {
+    n: UInt8,
+}
+
+impl Equatable for Tally {
+    fn equals(self: Tally, other: Tally) -> Bool {
+        self.n == other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let one: Tally = .{ n = 1 }
+    let two: Tally = .{ n = 2 }
+    let other: Tally = .{ n = 1 }
+
+    let differ = one != two
+    let alike = other != one
+
+    if differ && !alike {
+        4
+    } else {
+        0
+    }
+}

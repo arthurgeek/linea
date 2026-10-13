@@ -1,0 +1,17 @@
+program decls=2
+  decl function "pad" tokens 2..22
+    param read "s" : UInt8
+    param read "width" : UInt8
+      expr %0 int_literal tokens 13..14 "8"
+    returns UInt8
+    expr %4 block tokens 17..22
+      expr %3 add tokens 18..21
+        expr %1 name_ref tokens 18..19 "s"
+        expr %2 name_ref tokens 20..21 "width"
+  decl function "main" tokens 22..36
+    returns UInt8
+    expr %9 block tokens 28..36
+      expr %8 call tokens 29..35
+        expr %5 name_ref tokens 29..30 "pad"
+        expr %6 int_literal tokens 31..32 "1"
+        expr %7 int_literal tokens 33..34 "2"

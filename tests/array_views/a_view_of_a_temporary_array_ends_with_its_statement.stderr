@@ -1,0 +1,9 @@
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+ --> tests/array_views/a_view_of_a_temporary_array_ends_with_its_statement.lin:4:18
+  |
+4 |     let values = [UInt8(1), UInt8(2)].as_slice()
+  |                  ^^^^^^^^^^^^^^^^^^^^ this temporary ends with its statement
+5 |     UInt8(values.length())
+  |           ------ and a value borrowing it is used here
+  |
+  = help: bind the value with `let` first, and borrow the binding

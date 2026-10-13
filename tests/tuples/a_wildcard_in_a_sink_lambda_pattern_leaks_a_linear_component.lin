@@ -1,0 +1,19 @@
+// `_` binds nothing, so a linear component it matches is never settled.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn spend[F: fn(sink pair: (Ticket, UInt8)) -> UInt8](sink pair: (Ticket, UInt8), take: F) -> UInt8 {
+    take(pair)
+}
+
+fn main() -> UInt8 {
+    spend((.{ number = 1 }, 5), |sink (_, n)| n)
+}

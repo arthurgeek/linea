@@ -1,0 +1,9 @@
+enum ExpectedError { Other(UInt8) }
+
+enum UnrelatedError { Allocation(UInt8) }
+
+fn main() -> UInt8 {
+    let _unrelated: UnrelatedError = .Allocation(7)
+    let _wrap: fn(sink code: UInt8) -> ExpectedError = .Allocation
+    0
+}

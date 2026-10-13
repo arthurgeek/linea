@@ -1,0 +1,12 @@
+// `Door`'s own `close` is private to `door`, and `Door` does not implement
+// `Shut`, which also declares `close`. Nothing this module may name answers
+// `door.Door.close(d)`, so the call is refused for the privacy of the one
+// operation the type declares.
+import door
+
+use door.Shut
+
+fn main() -> UInt8 {
+    let d = door.Door.make(4)
+    door.Door.close(d)
+}

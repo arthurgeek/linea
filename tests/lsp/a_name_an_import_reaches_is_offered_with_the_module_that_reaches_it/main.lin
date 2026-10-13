@@ -1,0 +1,8 @@
+// A name in another module is reached by naming that module, so that is the
+// text offered: an import binds the module's name and nothing else, and a bare
+// `size` here would be a name no import can make work.
+import ledger
+
+fn main() -> UInt8 {
+    twice(ledger.size())
+}

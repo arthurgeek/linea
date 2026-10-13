@@ -1,0 +1,8 @@
+error[T-Mismatch]: each closure has its own type, so this closure is not the one expected
+ --> tests/erased_closures/closures_called_differently_share_no_type.lin:4:45
+  |
+4 |     let rules = [|cents: UInt64| cents + 1, |name: Str| name.length()]
+  |                  ------------------------- this element settles what the array holds
+  |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^ a different closure
+  |
+  = help: the two are called differently, as `fn(read UInt64) -> UInt64` and as `fn(read Str) -> UInt64`, so no one type holds both

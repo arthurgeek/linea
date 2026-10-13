@@ -1,0 +1,24 @@
+// A part that names its own declaration again at the argument that
+// declaration was given is stationary, and the set of types it reaches is the
+// one the program wrote. Refusing it would refuse every recursive generic
+// there is, so the measure has to be the argument rather than the recursion.
+//
+// `Marker` discards its argument, so `S[T]` holding a `Marker[S[T]]` reaches
+// itself without containing itself and has a size.
+struct Marker[phantom X] {
+    v: UInt8,
+}
+
+struct S[T] {
+    a: T,
+    b: Marker[S[T]],
+}
+
+fn use_it(s: S[UInt8]) -> UInt8 {
+    s.a
+}
+
+fn main() -> UInt8 {
+    let s: S[UInt8] = .{ a = 40, b = .{ v = 1 } }
+    use_it(s)
+}

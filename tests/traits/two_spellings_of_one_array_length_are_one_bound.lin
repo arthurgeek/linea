@@ -1,0 +1,29 @@
+// `[UInt8; 4]` and `[UInt8; 2 + 2]` write one array type, so a parameter
+// bounded at both carries one bound and reads `Elem` through it.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[[UInt8; 4]] for Board {
+    type Elem = UInt8
+
+    fn at(_self: Board, i: [UInt8; 4]) -> UInt8 {
+        i[0]
+    }
+}
+
+fn pass[C: Lookup[[UInt8; 4]] + Lookup[[UInt8; 2 + 2]]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let i: [UInt8; 4] = [9, 0, 0, 0]
+    pass[Board](Lookup.at(b, i))
+}

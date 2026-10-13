@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `pending_bytes` is declared by `ByteWriter`, which is not in scope here
+ --> tests/traits/a_trait_no_import_passes_on_is_named_with_the_import_it_needs.lin:7:5
+  |
+7 |     file.pending_bytes()
+  |     ^^^^^^^^^^^^^^^^^^ write `import std.io` and `use io.ByteWriter`: an operation is reached through the trait that declares it

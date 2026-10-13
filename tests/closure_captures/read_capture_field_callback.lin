@@ -1,0 +1,12 @@
+struct Task[F] { callback: F }
+
+fn store[F](sink callback: F) -> Task[F] where carries(callback) {
+    .{ callback = callback }
+}
+
+fn main() -> UInt8 {
+    let value = UInt8(0)
+    let task = store([value] || value)
+    let answer = (task.callback)()
+    answer
+}

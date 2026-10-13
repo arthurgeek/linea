@@ -1,0 +1,16 @@
+// A name reaches the first type parameter spelled that way, so a second of one
+// spelling is a position nothing can write and nothing can settle. The rule is
+// about the declaration rather than about what reads it: a function, a type
+// and an implementation all declare their parameters in one list, and one list
+// holds each name once.
+//
+// What the second one costs is here as well. No argument reaches it, so no
+// call can say what it is, and the call below is refused for a position the
+// caller never wrote.
+fn pick[_T, _T](_a: _T, _b: _T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    pick(1, 2)
+}

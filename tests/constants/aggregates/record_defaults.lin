@@ -1,0 +1,31 @@
+@copyable
+struct Limits {
+    bytes: UInt64,
+    depth: UInt8,
+}
+
+let defaults: Limits = .{ depth = 32, bytes = 4096 }
+
+let alias = defaults
+
+fn depth(limits: Limits = alias) -> UInt8 {
+    limits.depth
+}
+
+fn main() -> UInt8 {
+    if depth() != 32 {
+        return 1
+    }
+    if depth(limits: defaults) != 32 {
+        return 2
+    }
+    var changed = copy(defaults)
+    changed.depth = 16
+    if depth(changed) != 16 {
+        return 3
+    }
+    if defaults.bytes != 4096 {
+        return 4
+    }
+    0
+}

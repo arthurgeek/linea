@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let a = 1.5
+    let b = 0.5
+    let _r = a % b
+    var c = 2.5
+    c %= b
+    let _c = c
+    0
+}

@@ -1,0 +1,7 @@
+fn _maximum[T: Integer](value: T = T.max) -> UInt64 {
+    UInt64(value)
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,24 @@
+// A trait asks for a type and says nothing about what it is. Settled where it
+// is declared, the type would be the trait's answer and the implementation's
+// both, and which one a reader gets would be decided by which of the two a
+// pass happened to read.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item = UInt8
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = Counter
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

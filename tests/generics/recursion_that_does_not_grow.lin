@@ -1,0 +1,34 @@
+// A generic declaration stands for one function per instantiation the program
+// reaches, so the rule that keeps that set finite is a measure on a recursive
+// call's type arguments. All three well-founded directions are here.
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+struct Cell[T] { v: T }
+
+// Stationary: the argument is the caller's own parameter.
+fn count[T](o: Maybe[T], n: UInt8) -> UInt8 {
+    if n == 0 {
+        0
+    } else {
+        count(o, n - 1)
+    }
+}
+
+// Shrinking: the caller was given `Cell[Maybe[T]]` and passes `Maybe[T]`.
+fn peel[T](c: Cell[Maybe[T]]) -> UInt8 {
+    count(c.v, 1)
+}
+
+// Growing, but outside any cycle: an ordinary helper.
+fn hold[T: Copyable](x: T) -> UInt8 {
+    let held: Cell[Maybe[T]] = .{ v = Maybe.Some(copy(x)) }
+    peel(held)
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    hold(n)
+}

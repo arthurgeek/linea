@@ -1,0 +1,20 @@
+// Three traits each requiring the next are three traits none of which can be
+// implemented first, the way two are. What the diagnostic names is the cycle
+// itself and not the edge that closed it: `R` requires `P` and `P` requires
+// `Q`, so a message naming only the two ends would name a bound the program
+// does not hold.
+trait P: Q {
+    fn p(self: Self) -> UInt8
+}
+
+trait Q: R {
+    fn q(self: Self) -> UInt8
+}
+
+trait R: P {
+    fn r(self: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

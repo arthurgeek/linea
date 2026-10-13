@@ -1,0 +1,7 @@
+enum State { Ready(UInt8), Paused, Closed }
+
+fn main() -> UInt8 {
+    match State.Ready(1) {
+        Ready(n) => n,
+    }
+}

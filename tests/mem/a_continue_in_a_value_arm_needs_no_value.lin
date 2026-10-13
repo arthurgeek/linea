@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    var again = false
+    loop {
+        break if again {
+            continue
+        } else {
+            2
+        }
+    }
+}

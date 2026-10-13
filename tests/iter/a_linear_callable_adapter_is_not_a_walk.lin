@@ -1,0 +1,27 @@
+// Exhaustion does not consume an iterator. A map holding a Linear iterator is
+// therefore recovered explicitly rather than abandoned by an ordinary walk.
+@linear
+struct Protocol {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for Protocol {
+    type Item = UInt8
+
+    fn next(inout self: Protocol) -> Option[UInt8] {
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        return .Some(value)
+    }
+}
+
+fn main() -> UInt8 {
+    let protocol: Protocol = .{ at = 0, stop = 2 }
+    let mapped = protocol.map(|sink item| item + 1)
+    for _item in mapped {}
+    0
+}

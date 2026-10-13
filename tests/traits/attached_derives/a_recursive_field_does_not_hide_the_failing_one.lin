@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// `Tree[Token]` does not release because `Token` does not; the recursive
+// `children` field fails only through that, so the note names `T`.
+@derive(Release)
+struct Tree[T] {
+    children: Vec[Tree[T], SystemAllocator],
+    value: T,
+}
+
+struct Token {}
+
+fn main() -> UInt8 {
+    let tree: Tree[Token] = .{ children = Vec.new(), value = .{} }
+    tree.release()
+    0
+}

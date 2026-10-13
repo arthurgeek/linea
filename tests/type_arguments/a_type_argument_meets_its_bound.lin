@@ -1,0 +1,5 @@
+// `parse` requires a type that implements `Parse`, and `Bool` does not.
+fn main() -> UInt8 {
+    let _flag = "true".parse[Bool]()
+    0
+}

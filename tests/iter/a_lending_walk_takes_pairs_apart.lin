@@ -1,0 +1,16 @@
+// `for read (a, b)` lends both components of each pair, and `for inout (a, b)`
+// lends them writably, so a write to `a` changes the pair stored in the array.
+fn main() -> UInt8 {
+    var pairs: [(UInt8, UInt8); 3] = [(1, 10), (2, 20), (3, 30)]
+    var total: UInt8 = 0
+    for read (a, b) in pairs {
+        total += a * 10 + b
+    }
+    for inout (a, _) in pairs {
+        a = a + 1
+    }
+    for read (a, _) in pairs {
+        total += a
+    }
+    total - 129
+}

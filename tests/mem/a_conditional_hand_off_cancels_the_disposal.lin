@@ -1,0 +1,37 @@
+// A buffer given away on one path and held on the other, under one `defer`.
+// The path that gives it away leaves -- paths that rejoin must agree about
+// the value -- and the schedule is cancelled where it went, fires where it
+// did not: every path settles the buffer exactly once, decided before the
+// program runs.
+//
+// The two paths answer different numbers, so the status says which disposal
+// ran where.
+import std.mem
+
+use mem.Buffer
+use mem.SystemAllocator
+use mem.system
+
+fn take(sink b: Buffer[SystemAllocator]) -> UInt64 {
+    let n = b.length()
+    b.release()
+    n * 2
+}
+
+fn hold(c: Bool) -> UInt64 {
+    let a = system()
+    match a.acquire(8) {
+        Ok(b) => {
+            defer b.release()
+            if c {
+                return take(b)
+            }
+            b.length()
+        },
+        Err(_) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(hold(true) + hold(false))
+}

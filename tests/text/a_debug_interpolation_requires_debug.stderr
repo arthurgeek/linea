@@ -1,0 +1,5 @@
+error[T-Bound]: `DisplayOnly` uses `:?` in text, so it implements `Debug`
+  --> tests/text/a_debug_interpolation_requires_debug.lin:19:15
+   |
+19 |     println("{value:?}")?
+   |               ^^^^^ it does not

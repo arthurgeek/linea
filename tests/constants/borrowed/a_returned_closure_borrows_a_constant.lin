@@ -1,0 +1,21 @@
+// A closure may build and return a value that borrows a module constant,
+// because the constant outlives every call of it.
+struct Tag {
+    name: borrow Str,
+}
+
+fn tag(name: Str) -> Tag where borrows(.name: name) {
+    .{ name = borrow name }
+}
+
+let service = "api"
+
+fn service_tag() -> fn() -> Tag {
+    || tag(service)
+}
+
+fn main() -> UInt8 {
+    let make = service_tag()
+    let made = make()
+    UInt8((*made.name).length())
+}

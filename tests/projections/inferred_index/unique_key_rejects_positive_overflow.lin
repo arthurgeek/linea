@@ -1,0 +1,14 @@
+struct Cell { value: UInt8 }
+
+impl Index[Int8] for Cell {
+    type Elem = UInt8
+
+    proj at(inout self: Cell, _i: Int8) -> UInt8 {
+        self.value
+    }
+}
+
+fn main() -> UInt8 {
+    let cell = Cell { value = 1 }
+    cell[128]
+}

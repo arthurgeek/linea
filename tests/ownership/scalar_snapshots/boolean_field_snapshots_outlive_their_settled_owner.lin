@@ -1,0 +1,19 @@
+@linear
+struct Owner { enabled: Bool }
+
+fn close(sink owner: Owner) -> () {
+    let Owner { enabled: _enabled } = owner
+}
+
+fn main() -> UInt8 {
+    var owner: Owner = .{ enabled = true }
+    let before = owner.enabled
+    owner.enabled = false
+    let after = owner.enabled
+    close(owner)
+    if before && !after {
+        0
+    } else {
+        1
+    }
+}

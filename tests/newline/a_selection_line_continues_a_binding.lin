@@ -1,0 +1,17 @@
+// `.doubled()` opens with a lowercase name, which only an operation or a field
+// has, so it calls `doubled` on the `Meters` built on the line above.
+struct Meters {
+    value: UInt8,
+}
+
+impl Meters {
+    fn doubled(self: Self) -> UInt8 {
+        self.value * 2
+    }
+}
+
+fn main() -> UInt8 {
+    let length = Meters { value = 3 }
+        .doubled()
+    length
+}

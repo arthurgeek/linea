@@ -1,0 +1,21 @@
+// A function returns two values as one tuple, written as its tail on a line of
+// its own, and the caller takes the pair apart by position.
+fn bounds(readings: [UInt8; 4]) -> (UInt8, UInt8) {
+    var lo = readings[0]
+    var hi = readings[0]
+    for read r in readings {
+        if r < lo {
+            lo = r
+        }
+        if r > hi {
+            hi = r
+        }
+    }
+    (lo, hi)
+}
+
+fn main() -> UInt8 {
+    let week: [UInt8; 4] = [3, 9, 4, 7]
+    let (lowest, highest) = bounds(week)
+    highest - lowest - 6
+}

@@ -1,0 +1,23 @@
+// A carrier type declares once that what is built from it lives as long as it
+// does, so a function taking one needs no clause even when another parameter
+// could also supply the result.
+import std.io
+
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn greeting(session: Session, tag: Str) -> Str {
+    if tag.length() > 0 {
+        copy(session.user)
+    } else {
+        copy(session.user)
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let _printed = io.println(greeting(session, "x"))
+    0
+}

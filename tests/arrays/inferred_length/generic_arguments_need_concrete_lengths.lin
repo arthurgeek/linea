@@ -1,0 +1,6 @@
+struct Cell[T] { value: T }
+
+fn main() -> UInt8 {
+    let _cell: Cell[[UInt8; _]] = .{ value = [1, 2] }
+    0
+}

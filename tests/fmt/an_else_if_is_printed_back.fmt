@@ -1,0 +1,17 @@
+// Written on one line, so it comes back on one. A tree holding `else if` is a
+// conditional inside a conditional, and printing that nesting as a block that
+// holds a conditional would indent a staircase nobody wrote -- the rule that
+// keeps a redundant parenthesis is the same rule.
+//
+// Spaced badly on purpose: what the formatter settles is the spacing, not the
+// shape.
+fn main() -> UInt8 {
+    let n: UInt8 = 7
+    if n > 10 {
+        2
+    } else if n > 1 {
+        1
+    } else {
+        0
+    }
+}

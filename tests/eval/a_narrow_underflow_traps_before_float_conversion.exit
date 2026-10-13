@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/eval/a_narrow_underflow_traps_before_float_conversion.lin:2:19

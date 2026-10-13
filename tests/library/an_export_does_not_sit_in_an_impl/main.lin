@@ -1,0 +1,11 @@
+struct Counter { count: Int32 }
+
+impl Counter {
+    export fn value(self: Self) -> Int32 {
+        self.count
+    }
+}
+
+pub fn reading(it: Counter) -> Int32 {
+    it.value()
+}

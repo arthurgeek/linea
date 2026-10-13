@@ -1,0 +1,41 @@
+// A type an implementation settles may be selected through a different type
+// parameter's bound. `I.Item` is decided by `I`'s `Measure` implementation; it
+// does not ask for the `Item` this implementation is in the middle of settling.
+trait Measure {
+    type Item
+
+    fn of(self: Self) -> Self.Item
+}
+
+struct Counter {
+    value: UInt8,
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(self: Counter) -> UInt8 {
+        self.value
+    }
+}
+
+struct Forward[I] {
+    inner: I,
+}
+
+impl[I: Measure] Measure for Forward[I] {
+    type Item = I.Item
+
+    fn of(self: Forward[I]) -> I.Item {
+        Measure.of(self.inner)
+    }
+}
+
+fn main() -> UInt8 {
+    let forwarded: Forward[Counter] = .{ inner = .{ value = 7 } }
+    if Measure.of(forwarded) == 7 {
+        0
+    } else {
+        1
+    }
+}

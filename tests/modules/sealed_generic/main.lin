@@ -1,0 +1,20 @@
+import vault
+
+use vault.Account
+
+fn main() -> UInt8 {
+    // Every site that reaches a representation, against an instantiation. A
+    // seal that held at some of them and not others would be a seal a program
+    // picks its way around, so the list is the whole of it rather than a
+    // sample.
+    let a: UInt8 = vault.take(.Forged(7))
+    let b: UInt8 = vault.take(vault.Key.Forged(7))
+    let c: UInt8 = vault.total(.{ id = 1, balance = 4 })
+    let k = vault.mint(7)
+    let d: UInt8 = match k { Forged(n) => n }
+    var acct = vault.open(1)
+    acct.balance = 9
+    let e: UInt8 = acct.balance
+    let Account { id: i, balance: f } = acct
+    a + b + c + d + e + i + f
+}

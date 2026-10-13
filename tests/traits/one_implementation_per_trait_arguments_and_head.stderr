@@ -1,0 +1,7 @@
+error[N-Duplicate]: `_Holds` is already implemented for `Coins` with the same arguments
+  --> tests/traits/one_implementation_per_trait_arguments_and_head.lin:19:6
+   |
+13 | impl _Holds[UInt8] for Coins {
+   |      ------ already implemented here
+19 | impl _Holds[UInt8] for Coins {
+   |      ^^^^^^ a trait is implemented once per arguments and type

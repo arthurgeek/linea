@@ -1,0 +1,13 @@
+trait Selected[A] {
+    fn selected(self: Self, argument: A) -> UInt8
+}
+
+default impl[T] Selected[Bool] for T {
+    fn selected(_self: T, _argument: Bool) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    Selected.selected(UInt8(1), false)
+}

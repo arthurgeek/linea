@@ -1,0 +1,22 @@
+// The path is rooted at the receiver, because the receiver is the value the
+// site wrote the bracket on. A path rooted anywhere else names a place that
+// value does not hold, and no site could reach it.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+let spare: UInt8 = 3
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout _self: Grid, _i: UInt64) -> UInt8 {
+        spare
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

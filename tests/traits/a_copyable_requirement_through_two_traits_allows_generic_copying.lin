@@ -1,0 +1,35 @@
+// A Copyable requirement remains available through two levels of trait bounds.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+trait Held: Duplicable {
+    fn held(self: Self) -> UInt8
+}
+
+@copyable
+struct Loose {
+    n: UInt8,
+}
+
+impl Duplicable for Loose {
+    fn tag(self: Loose) -> UInt8 {
+        self.n
+    }
+}
+
+impl Held for Loose {
+    fn held(_self: Loose) -> UInt8 {
+        5
+    }
+}
+
+fn twice[T: Held](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let l: Loose = .{ n = 4 }
+    let m: Loose = twice(l)
+    Held.held(m)
+}

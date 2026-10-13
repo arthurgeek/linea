@@ -1,0 +1,11 @@
+// A move in a loop body would run more than once. Rejected at the move, since
+// the back edge is not where anyone wrote anything.
+fn main() -> UInt8 {
+    let k = mint(7)
+    var c: UInt8 = 0
+    while c == 0 {
+        release(k)
+        c = 1
+    }
+    0
+}

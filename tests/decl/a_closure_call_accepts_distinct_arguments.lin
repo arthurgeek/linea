@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let update = |inout target: UInt8, source: UInt8| {
+        target = source
+    }
+    var target: UInt8 = 1
+    let source: UInt8 = 7
+    update(&target, source)
+    target
+}

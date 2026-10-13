@@ -1,0 +1,24 @@
+trait Source {
+    type Item: Next
+}
+
+trait Next {
+    type Item
+}
+
+struct Box {}
+
+struct Leaf {}
+
+impl Source for Box {
+    type Item = Leaf
+}
+
+impl Next for Leaf {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let value: (Box).Item.Item = 7
+    value - 7
+}

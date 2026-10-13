@@ -1,0 +1,16 @@
+// A lambda's captures, parameters and pattern binders share one list of
+// names: a binder may not repeat a capture or a named parameter.
+fn apply[F: fn(read pair: (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn apply_with[F: fn(read pair: (UInt8, UInt8), read extra: UInt8) -> UInt8](pair: (UInt8, UInt8), extra: UInt8, check: F) -> UInt8 {
+    check(pair, extra)
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let by_capture = apply((3, 4), [a] |(a, b)| a + b)
+    let by_parameter = apply_with((3, 4), 5, |(c, d), c: UInt8| c + d)
+    by_capture + by_parameter
+}

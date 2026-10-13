@@ -1,0 +1,11 @@
+let message = "hello"
+
+let answer = UInt8(42)
+
+fn main() -> UInt8 {
+    if message.length() == 5 {
+        answer
+    } else {
+        0
+    }
+}

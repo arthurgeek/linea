@@ -1,0 +1,14 @@
+// The other direction of the same rule. `a` names its `Ghost` as a type
+// argument and the root module names its own nowhere, so the report belongs to
+// the root's. Marking the first binding of that name meant a use in one module
+// exempted a type in another, and the diagnostic pointed at the file that had
+// done nothing wrong.
+import a
+
+struct Ghost {
+    v: UInt8,
+}
+
+fn main() -> UInt8 {
+    a.seven()
+}

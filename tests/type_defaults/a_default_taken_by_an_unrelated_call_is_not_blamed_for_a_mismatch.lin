@@ -1,0 +1,19 @@
+struct Box[T = UInt8] {
+    value: T,
+}
+
+impl[T] Box[T] {
+    fn empty() -> Self {
+        panic("x")
+    }
+}
+
+fn takes(_x: UInt8) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _b = Box.empty()
+    let s = "hi"
+    takes(s)
+}

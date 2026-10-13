@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    @copyable
+    let answer: UInt8 = 0
+    answer
+}

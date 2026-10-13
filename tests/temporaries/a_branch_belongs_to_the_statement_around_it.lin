@@ -1,0 +1,32 @@
+// The branches of a conditional belong to the statement around it, so a
+// branch may build a value that borrows a temporary and the call around the
+// conditional still uses it.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Reading {
+    name: Str,
+    value: borrow Int64,
+}
+
+fn reading(sink name: Str, value: Int64) -> Reading where carries(.name: name), borrows(.value: value) {
+    .{ name, value = borrow value }
+}
+
+fn report(entry: Reading) -> Result[(), IoError] {
+    println("{entry.name}={*entry.value}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let late = true
+    report(
+        if late {
+            reading("delay", 5 * 60)
+        } else {
+            reading("delay", 0)
+        },
+    )?
+    return .Ok(0)
+}

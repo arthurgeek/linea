@@ -1,0 +1,14 @@
+// `G: gauge.Gauge` puts `Gauge`'s operations in reach for `G` alone. The
+// concrete `gauge.Tank` still reaches a trait's operation only through a trait
+// in scope, so `gauge.Tank.zero()` needs `use gauge.Gauge`.
+import gauge
+
+fn fresh[G: gauge.Gauge]() -> G {
+    let _tank = gauge.Tank.zero()
+    G.zero()
+}
+
+fn main() -> UInt8 {
+    let tank: gauge.Tank = fresh()
+    gauge.Gauge.reading(tank)
+}

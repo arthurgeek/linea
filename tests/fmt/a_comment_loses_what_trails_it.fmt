@@ -1,0 +1,7 @@
+// A comment keeps its words and loses what trails them. The property that
+// checks comments survive has to read them the same way the printer writes
+// them, or it accuses the printer of rewording what it only trimmed.
+fn main() -> UInt8 {
+    // trailing spaces here too
+    0
+}

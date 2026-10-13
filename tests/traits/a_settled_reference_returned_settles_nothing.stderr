@@ -1,0 +1,10 @@
+error[T-Bound]: nothing here settles `Measure`'s `Self`
+  --> tests/traits/a_settled_reference_returned_settles_nothing.lin:35:20
+   |
+35 |     let z: UInt8 = Measure.zero()
+   |                    ^^^^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns
+error[T-Bound]: nothing here settles `Measure`'s `Self`
+  --> tests/traits/a_settled_reference_returned_settles_nothing.lin:36:28
+   |
+36 |     let n: Option[UInt8] = Measure.none_of()
+   |                            ^^^^^^^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns

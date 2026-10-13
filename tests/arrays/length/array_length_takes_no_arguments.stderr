@@ -1,0 +1,10 @@
+error[T-Arity]: expected 0 argument(s), found 1
+ --> tests/arrays/length/array_length_takes_no_arguments.lin:3:16
+  |
+3 |     let wide = values.length(extra: 0)
+  |                ^^^^^^^^^^^^^^^^^^^^^^^ an array's length takes no arguments
+error[S-Mutation]: an array's length reads its receiver
+ --> tests/arrays/length/array_length_takes_no_arguments.lin:4:18
+  |
+4 |     let marked = &values.length()
+  |                  ^^^^^^^^^^^^^^^^ remove `&` from this call

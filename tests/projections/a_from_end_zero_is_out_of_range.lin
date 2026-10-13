@@ -1,0 +1,7 @@
+// `^0` names the position past the last element, and `^5` counts back past
+// the first. The length is part of the type and both counts are settled, so
+// both are refused where they are written rather than trapping.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    a[^0] + a[^5]
+}

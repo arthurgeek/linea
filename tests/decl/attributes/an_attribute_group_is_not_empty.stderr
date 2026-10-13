@@ -1,0 +1,5 @@
+error[S-Entry]: an attribute group is not empty
+ --> tests/decl/attributes/an_attribute_group_is_not_empty.lin:1:2
+  |
+1 | @()
+  |  ^ name at least one closed attribute

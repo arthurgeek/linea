@@ -1,0 +1,41 @@
+// A bound on a phantom parameter refuses an argument that does not satisfy
+// it, at the place the argument is written.
+//
+// This is the half that makes the bound worth having. One that parsed and
+// constrained nothing would be decoration -- the declaration would read as a
+// promise and the checker would keep none of it, which is worse than refusing
+// the bound outright, because a reader would believe it.
+//
+// `UInt8` implements no `Source`. `Held[UInt8]` is therefore not a type, and
+// saying so where it is written is the whole point: the alternative is a type
+// that can be named everywhere and inhabited nowhere, whose emptiness is a
+// fact about some other module's construction discipline rather than about
+// what was written here.
+trait Source {
+    fn label(self: Self) -> UInt8
+}
+
+enum Upstream {
+    Only,
+}
+
+impl Source for Upstream {
+    fn label(_self: Upstream) -> UInt8 {
+        1
+    }
+}
+
+struct Held[phantom A: Source] {
+    at: UInt64,
+}
+
+// Written in a signature, which is where a reader meets a type they cannot
+// have. Nothing is constructed: what is refused is the type itself.
+fn _refused(_h: Held[UInt8]) -> UInt64 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _ = Upstream.Only
+    0
+}

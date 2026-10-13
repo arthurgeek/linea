@@ -1,0 +1,6 @@
+error[T-Literal]: `Int8` cannot hold 128
+  --> tests/projections/inferred_index/unique_key_rejects_positive_overflow.lin:13:10
+   |
+13 |     cell[128]
+   |     --------- this container is indexed by one integer type, which a bare number takes
+   |          ^^^ literal is out of range for its type

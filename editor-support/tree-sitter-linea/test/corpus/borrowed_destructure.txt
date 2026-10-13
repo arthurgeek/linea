@@ -1,0 +1,70 @@
+==================
+Borrowed destructuring
+==================
+
+fn take(email: Email, point: Point) -> Str {
+    let read Email(raw) = email
+    let read Point { x, y: _ } = point
+    let read { x: horizontal, y } = point
+    copy(raw)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (let_statement
+        (variant_pattern
+          (type_identifier)
+          (identifier))
+        (identifier))
+      (let_statement
+        (struct_pattern
+          (type_identifier)
+          (field_pattern
+            (identifier))
+          (field_pattern
+            (identifier)
+            (wildcard_pattern)))
+        (identifier))
+      (let_statement
+        (struct_pattern
+          (field_pattern
+            (identifier)
+            (identifier))
+          (field_pattern
+            (identifier)))
+        (identifier))
+      (expression_statement
+        (copy_expression
+          (identifier))))))
+
+==================
+A borrowed pattern is not a var binding
+:error
+==================
+
+fn take(point: Point) -> UInt8 {
+    var read Point { x } = point
+    x
+}
+
+==================
+Read marks a pattern rather than a name
+:error
+==================
+
+fn take(value: UInt8) -> UInt8 {
+    let read other = value
+    other
+}

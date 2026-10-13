@@ -1,0 +1,18 @@
+// `Nope` names nothing and `fn(UInt64)` cannot be read, so neither array's
+// element type is known. Each element is still checked on its own.
+fn main() -> UInt8 {
+    let _named: [Nope; 2] = [
+        {
+            let z: UInt8 = "s"
+            z
+        },
+        3,
+    ]
+    let _unread: [fn(UInt64) -> UInt64; 1] = [
+        {
+            let y: UInt8 = "t"
+            y
+        },
+    ]
+    0
+}

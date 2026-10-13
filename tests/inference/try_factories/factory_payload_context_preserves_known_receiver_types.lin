@@ -1,0 +1,15 @@
+trait Factory {
+    fn make(value: Self) -> Result[Self, UInt8] where carries(.Ok: value)
+}
+
+impl Factory for UInt64 {
+    fn make(value: Self) -> Result[Self, UInt8] {
+        .Ok(value)
+    }
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let input: Int64 = 7
+    let value: UInt64 = Factory.make(input)?
+    return .Ok(UInt8(value))
+}

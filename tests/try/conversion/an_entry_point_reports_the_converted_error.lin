@@ -1,0 +1,30 @@
+// A failure the entry point propagates with `?` is converted first, so the
+// reported error is the entry point's own error type.
+enum ConfigError {
+    MissingKey,
+}
+
+enum AppError {
+    Config,
+}
+
+impl Display for AppError {
+    fn fmt[W: Writer](_self: AppError, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "configuration is incomplete")
+    }
+}
+
+impl From[ConfigError] for AppError {
+    fn from(sink _source: ConfigError) -> AppError {
+        return .Config
+    }
+}
+
+fn setting() -> Result[UInt8, ConfigError] {
+    return .Err(.MissingKey)
+}
+
+fn main() -> Result[UInt8, AppError] {
+    let value = setting()?
+    return .Ok(value)
+}

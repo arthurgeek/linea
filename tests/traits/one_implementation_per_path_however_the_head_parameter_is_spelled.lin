@@ -1,0 +1,46 @@
+// A family supplies the trait what its head was applied to, so which name a
+// family gives the parameter it selects through decides nothing: two families
+// selecting the same path off the same head position supply one argument, and
+// the second is the first written twice under another spelling.
+trait Pair {
+    type A
+
+    fn a(self: Self) -> Self.A
+}
+
+trait _Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+struct One {
+    x: UInt8,
+}
+
+impl Pair for One {
+    type A = UInt8
+
+    fn a(self: Self) -> Self.A {
+        self.x
+    }
+}
+
+impl[T: Pair] _Give[T.A] for Holder[T] {
+    fn give(_self: Self, _u: T.A) -> UInt8 {
+        1
+    }
+}
+
+impl[W: Pair] _Give[W.A] for Holder[W] {
+    fn give(_self: Self, _u: W.A) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[One] = .{ v = .{ x = 4 } }
+    Pair.a(h.v)
+}

@@ -1,0 +1,20 @@
+// A failed `Result` carries its error into the `else` block, which names it or
+// discards it with `_`.
+enum Fault {
+    Missing,
+}
+
+fn lookup(key: UInt8) -> Result[UInt8, Fault] {
+    if key == 3 {
+        Result.Ok(40)
+    } else {
+        Result.Err(Fault.Missing)
+    }
+}
+
+fn main() -> UInt8 {
+    let found = lookup(3) else {
+        return 1
+    }
+    found
+}

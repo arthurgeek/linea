@@ -1,0 +1,5 @@
+error[T-Bound]: `Cell` does not implement `Index[UInt64]`
+ --> tests/projections/inferred_index/missing_index_keeps_missing_implementation_diagnostic.lin:5:5
+  |
+5 |     cell[0]
+  |     ^^^^ implement it for those arguments, or settle them to ones that are

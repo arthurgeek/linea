@@ -1,0 +1,22 @@
+// The failing path carries the error out. The returned value is built here
+// rather than passed through: the operand's type and the function's are two
+// instantiations, and each one's layout is the backend's to choose.
+enum Bad {
+    Broken,
+}
+
+fn err() -> Result[UInt8, Bad] {
+    Result.Err(Bad.Broken)
+}
+
+fn go() -> Result[UInt8, Bad] {
+    let _n = err()?
+    Result.Ok(9)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Ok(n) => n,
+        Err(_) => 4,
+    }
+}

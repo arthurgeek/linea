@@ -1,0 +1,20 @@
+trait Source[A] {
+    type Item
+
+    fn supply(_value: A) -> Self
+}
+
+struct Box {}
+
+impl[A] Source[A] for Box {
+    type Item = A
+
+    fn supply(_value: A) -> Self {
+        .{}
+    }
+}
+
+fn main() -> UInt8 {
+    let value: Box.Item = 7
+    value - 7
+}

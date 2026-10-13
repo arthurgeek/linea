@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let n: UInt8 = 2
+    // `1` takes `n`'s type, as it would written on the right.
+    let sum = 1 + n
+    sum - 3
+}

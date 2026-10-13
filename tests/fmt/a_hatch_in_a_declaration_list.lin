@@ -1,0 +1,30 @@
+// The same rule for the lists a declaration is made of: a parameter list, the
+// members of an `impl`, and the path of an import. A parameter list did not
+// even flush its comments, so a hatch inside one stayed pending until the body
+// was written and the region landed among the statements.
+struct Cell {
+    v: UInt8,
+}
+
+impl Cell {
+    pub fn make() -> Cell {
+        .{ v = 1 }
+    }
+
+    pub fn get(c: Cell) -> UInt8 {
+        c.v
+    }
+}
+
+fn add(
+// linea fmt: off
+    a: UInt8,
+// linea fmt: on
+b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let c: Cell = Cell.make()
+    add(Cell.get(c), 2)
+}

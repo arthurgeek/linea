@@ -1,0 +1,42 @@
+// A trait's parameter written under a constructor in the return type is
+// settled by what the call is asked for, one level in: the heads must be the
+// same constructor, and then the arguments bind positionally, so the parameter
+// is settled by what stands in its place. The same reach `Self` written there
+// already has.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> Option[U]
+}
+
+impl Innermost[UInt8] for Envelope[UInt8] {
+    fn of(x: Self) -> Option[UInt8] {
+        .Some(x.v)
+    }
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Option[Bool] {
+        .Some(x.v)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Envelope[UInt8] = .{ v = 3 }
+    let b: Envelope[Bool] = .{ v = true }
+    let r: Option[UInt8] = Innermost.of(a)
+    let s: Option[Bool] = Innermost.of(b)
+    match s {
+        Some(t) => if t {
+            match r {
+                Some(n) => n,
+                None => 0,
+            }
+        } else {
+            0
+        },
+        None => 0,
+    }
+}

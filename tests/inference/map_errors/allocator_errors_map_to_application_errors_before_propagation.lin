@@ -1,0 +1,22 @@
+import std.mem
+
+@copyable
+enum RenderError {
+    Allocation(mem.Oom),
+    Limit,
+}
+
+fn render[A: Allocator](allocator: A) -> Result[String[A], RenderError] where carries(.Ok: allocator) {
+    let output = "rendered".to_owned(allocator).map_err(|sink error| RenderError.Allocation(error))?
+    return .Ok(output)
+}
+
+fn main() -> UInt8 {
+    match render(mem.system()) {
+        Ok(output) => {
+            output.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

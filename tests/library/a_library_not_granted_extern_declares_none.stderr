@@ -1,0 +1,5 @@
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/library/a_library_not_granted_extern_declares_none/main.lin:1:11
+  |
+1 | extern fn linea_close(fd: Int32) -> Int64
+  |           ^^^^^^^^^^^ call it through the standard library, which declares the ones that exist

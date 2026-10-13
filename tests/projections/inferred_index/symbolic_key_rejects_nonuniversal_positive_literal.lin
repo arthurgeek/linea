@@ -1,0 +1,12 @@
+struct Board[I] { values: [UInt8; 2], key: I }
+
+impl[I: Integer] Index[I] for Board[I] via values
+
+fn first[I: Integer, C: Index[I]](container: C, _key: I) -> borrow C.Elem where borrows(container) {
+    borrow container[128]
+}
+
+fn main() -> UInt8 {
+    let board = Board[Int16] { values = [7, 9], key = 0 }
+    UInt8(*first(board, Int16(0)))
+}

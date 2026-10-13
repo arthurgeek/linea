@@ -1,0 +1,9 @@
+error[T-Mismatch]: expected `UInt8`, found `Int64`
+  --> tests/integers/settled_by_use/a_matched_literal_fixes_its_type_before_its_use.lin:13:12
+   |
+3  | fn narrow(value: UInt8) -> UInt8 {
+   |           ----- expected because of this parameter
+9  |     let _small = match k {
+   |                        - fell back to `Int64` here, where an operation needed a type
+13 |     narrow(k)
+   |            ^ expected `UInt8`, found `Int64`

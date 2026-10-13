@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/missing_operand.lin:2:24
+  |
+2 |     let x: UInt8 = 1 + ;
+  |                        ^ this is not the start of an expression

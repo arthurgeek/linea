@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/constructor_callables/constructor_does_not_erase_owner_dependency.lin:7:5
+  |
+7 |     owner = 9
+  |     ^^^^^ keep this place available until the last use of its observation
+8 |     match mapped {
+  |           ------ the observation is still used here

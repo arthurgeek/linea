@@ -1,0 +1,22 @@
+// A dot on a trait's name offers the operations it declares, written out. That
+// is the form the language always accepts and the one this server writes into
+// the buffer where a postfix call is ambiguous, so a trait qualifier that
+// answered nothing would be silent about the spelling it recommends.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    Measure.weight(coppers)
+}

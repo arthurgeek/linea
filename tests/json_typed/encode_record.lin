@@ -1,0 +1,21 @@
+import std.json
+
+struct Settings {
+    name: Str,
+    retries: UInt8,
+    enabled: Option[Bool],
+}
+
+derive json.Encode for Settings
+
+fn main() -> UInt8 {
+    let settings: Settings = .{ name = "tea", retries = 3, enabled = .None }
+    var output = String.new()
+    defer output.release()
+    json.encode(&output, settings).unwrap()
+    if output.view() == r#"{"name":"tea","retries":3,"enabled":null}"# {
+        0
+    } else {
+        1
+    }
+}

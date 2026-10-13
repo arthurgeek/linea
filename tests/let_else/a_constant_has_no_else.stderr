@@ -1,0 +1,5 @@
+error[T-Const]: `port` is not a constant expression
+ --> tests/let_else/a_constant_has_no_else.lin:6:12
+  |
+6 | let port = find() else {
+  |            ^^^^^^^^^^^^^ give it something the language can work out without running anything

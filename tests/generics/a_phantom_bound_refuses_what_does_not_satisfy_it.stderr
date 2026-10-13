@@ -1,0 +1,5 @@
+error[T-Bound]: `A` requires `Source`, and `UInt8` does not implement it
+  --> tests/generics/a_phantom_bound_refuses_what_does_not_satisfy_it.lin:34:17
+   |
+34 | fn _refused(_h: Held[UInt8]) -> UInt64 {
+   |                 ^^^^ implement it for that type, or drop the bound

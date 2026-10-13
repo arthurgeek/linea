@@ -1,0 +1,5 @@
+import mid
+
+fn main() -> UInt8 {
+    mid.helper(2) + mid.ping()
+}

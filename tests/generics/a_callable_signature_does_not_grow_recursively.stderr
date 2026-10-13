@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `S` with more than `S` was given
+ --> tests/generics/a_callable_signature_does_not_grow_recursively.lin:4:19
+  |
+4 |     f: fn(read x: S[S[T]]) -> UInt8,
+  |                   ^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

@@ -1,0 +1,8 @@
+error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/tuples/a_wildcard_in_a_sink_lambda_pattern_leaks_a_linear_component.lin:18:40
+   |
+18 |     spend((.{ number = 1 }, 5), |sink (_, n)| n)
+   |                                        ^ `_` does not settle `_0`
+   |                                               - its scope ends here
+   |
+   = help: give it to something that takes it

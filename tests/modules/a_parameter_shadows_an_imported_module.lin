@@ -1,0 +1,12 @@
+// Inside `colon_at`, `text` is the parameter, so `text.find(":")` searches the
+// string passed in rather than naming a function of the `text` module.
+import std.text
+
+fn colon_at(text: Str) -> UInt64 {
+    text.find(":").unwrap_or(0)
+}
+
+fn main() -> UInt8 {
+    let parsed: Result[UInt8, text.ParseError] = "7".parse[UInt8]()
+    UInt8.try_from(colon_at("07:30")).unwrap_or(0) + parsed.unwrap_or(0)
+}

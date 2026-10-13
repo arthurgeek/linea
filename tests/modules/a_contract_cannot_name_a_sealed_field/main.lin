@@ -1,0 +1,26 @@
+import vault
+
+// Outside the declaring module, a contract path cannot name a sealed field,
+// as a source, a retention destination or a result target.
+fn peek(held: vault.Vault) -> Str where carries(held.secret) {
+    vault.reveal(held)
+}
+
+fn reseal(sink secret: Str) -> vault.Vault where carries(.secret: secret) {
+    vault.open(secret)
+}
+
+fn keep(inout held: vault.Vault, note: Str) -> () where retains(held.secret: note) {
+    let _unchanged = vault.reveal(held)
+    let _length = note.length()
+}
+
+fn main() -> UInt8 {
+    let held = vault.open("hi")
+    var kept = vault.open("kept")
+    keep(&kept, "note")
+    let _kept = kept
+    let _shown = peek(held)
+    let _other = reseal("there")
+    0
+}

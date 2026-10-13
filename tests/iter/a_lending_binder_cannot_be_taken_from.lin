@@ -1,0 +1,16 @@
+// A lending walk's binder names a place the array still owns, so nothing may
+// take what is there: the walk lent it and did not hand it over.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 2] = [.{ n = 1 }, .{ n = 2 }]
+    var total: UInt8 = 0
+    for read t in ts {
+        let Token { n: v } = t
+        total += v
+    }
+    total
+}

@@ -1,0 +1,26 @@
+// A blank line between the arguments of a broken call, or between the links of
+// a broken chain, groups what it separates, so it is kept; a run of them
+// becomes one. The totals are 3, 6 and 6.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let steps = [UInt8(1), 2, 3]
+    let pair = add(
+        1,
+
+
+        2,
+    )
+    let trailing = steps.as_slice().
+        map(|sink step| *step).
+
+        fold(0, |sink total, sink step| total + step)
+    let leading = steps
+        .as_slice()
+
+
+        .fold(0, |sink total, sink step| total + *step)
+    pair + trailing + leading - 12
+}

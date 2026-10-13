@@ -1,0 +1,12 @@
+import units
+
+use units.Meters
+
+fn walk(steps: Meters) -> units.Meters {
+    steps * units.stride()
+}
+
+fn main() -> UInt8 {
+    let distance: UInt64 = walk(3)
+    UInt8(distance / 10)
+}

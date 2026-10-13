@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may fail with `Parse`, and no `From[Parse] for Io` implementation converts it to the function's error type
+  --> tests/try/conversion/a_program_trait_named_from_does_not_convert.lin:26:13
+   |
+26 |     let n = parsed()?
+   |             ^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`

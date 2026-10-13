@@ -1,0 +1,23 @@
+struct Leaf { n: UInt8 }
+
+struct Middle { _n: UInt8 }
+
+struct Top { _n: UInt8 }
+
+fn ;main() -> UInt8 {
+    let t: Top = .{ _n = 1 }
+    let l: Leaf = ;deep[Top](t)
+    l.n
+}
+
+fn ;deep[Top](o: Top) -> Leaf {
+    Middle;;Inner.peek(Top;;Outer.mid(o))
+}
+
+fn Top;;Outer.mid(_self: Top) -> Middle {
+    .{ _n = 2 }
+}
+
+fn Middle;;Inner.peek(sink _self: Middle) -> Leaf {
+    .{ n = 5 }
+}

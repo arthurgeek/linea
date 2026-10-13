@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A cursor on something that is not a name reaches no binding, so there is\n// nowhere it is used and nothing to highlight.\nfn main() -> UInt8 {\n    1 + 2\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":3,"character":4}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/documentHighlight","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":4}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

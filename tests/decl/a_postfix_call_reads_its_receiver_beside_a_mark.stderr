@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/a_postfix_call_reads_its_receiver_beside_a_mark.lin:26:29
+   |
+26 |     Counter.add(&pair.left, pair.count())
+   |                 ---------- mutated by this argument
+   |                             ^^^^^^^^^^^^ already passed `&` here

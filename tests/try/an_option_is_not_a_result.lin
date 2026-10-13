@@ -1,0 +1,35 @@
+// [T-TryAnswer], in both directions. A `Result` used in a function answering
+// an `Option` and an `Option` used in one answering a `Result` are the same
+// mistake, so one case says both rather than leaving the second to be assumed
+// from the first.
+enum Bad {
+    Broken,
+}
+
+fn ok() -> Result[UInt8, Bad] {
+    Result.Ok(1)
+}
+
+fn some() -> Option[UInt8] {
+    Option.Some(2)
+}
+
+fn wants_an_option() -> Option[UInt8] {
+    let n = ok()?
+    Option.Some(n)
+}
+
+fn wants_a_result() -> Result[UInt8, Bad] {
+    let n = some()?
+    Result.Ok(n)
+}
+
+fn main() -> UInt8 {
+    match wants_an_option() {
+        Some(a) => match wants_a_result() {
+            Ok(b) => a + b,
+            Err(_) => 0,
+        },
+        None => 0,
+    }
+}

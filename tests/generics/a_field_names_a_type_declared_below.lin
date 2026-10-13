@@ -1,0 +1,24 @@
+// A field may name a generic type declared further down, for the reason a call
+// may name a function declared further down: nothing orders one declaration
+// against another.
+//
+// An instantiation copies its template's parts, and a template read before its
+// own fields were filled copies nothing -- so this was laid out as if it were
+// empty and the program answered with whatever a zero-sized value holds. No
+// diagnostic: the type existed, it was simply the wrong shape, and moving the
+// two declarations into the other order changed the answer.
+//
+// That reordering is one the corpus performs on every case, which is how a
+// generated program found this and a written one had not.
+struct Holder {
+    a: Inner[UInt8],
+}
+
+struct Inner[T] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ a = .{ v = 4 } }
+    h.a.v
+}

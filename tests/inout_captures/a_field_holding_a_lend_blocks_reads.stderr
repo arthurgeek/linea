@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/inout_captures/a_field_holding_a_lend_blocks_reads.lin:17:16
+   |
+12 |         inout [inout count] || {
+   |                      ----- lent `inout` here
+17 |     let seen = count
+   |                ^^^^^ this uses the place while it is lent
+18 |     &(counter.step)()
+   |       ------------ a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

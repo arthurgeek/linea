@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/integers/settled_by_use/a_literal_checked_twice_is_reported_once.lin:2:28
+  |
+2 |     let wide = Option.Some(300)
+  |                            ^^^ literal is out of range for its type
+4 |     if wide == narrow {
+  |                ------ settled to `UInt8` here

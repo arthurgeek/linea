@@ -1,0 +1,50 @@
+// Copyable associated types reject linear values both directly and inside
+// conditional wrappers; scalar substitutions remain admissible.
+@linear
+struct Coin {
+    minted: UInt8,
+}
+
+@copyable
+struct Cell[T] {
+    v: T,
+}
+
+struct Counter {
+    at: UInt8,
+}
+
+struct Ledger {
+    entries: UInt8,
+}
+
+trait Holds {
+    type Item: Copyable
+    type Held: Copyable
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Holds for Counter {
+    type Item = Coin
+    type Held = Cell[Coin]
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+impl Holds for Ledger {
+    type Item = UInt8
+    type Held = Cell[UInt8]
+
+    fn of(x: Self) -> UInt8 {
+        x.entries
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 1 }
+    let l: Ledger = .{ entries = 2 }
+    Holds.of(c) + Holds.of(l)
+}

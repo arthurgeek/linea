@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Bool`, found `UInt8`
+  --> tests/traits/a_part_read_through_a_bound_crosses_no_instantiation.lin:40:36
+   |
+40 |     let out: Holder[Flag] = .{ v = a.v }
+   |                                - expected because of this field
+   |                                    ^^^ expected `Bool`, found `UInt8`

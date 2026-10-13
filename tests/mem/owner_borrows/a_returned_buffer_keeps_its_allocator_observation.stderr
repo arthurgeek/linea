@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/a_returned_buffer_keeps_its_allocator_observation.lin:16:5
+   |
+16 |     owner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+17 |     kept.release()
+   |     ---- the observation is still used here

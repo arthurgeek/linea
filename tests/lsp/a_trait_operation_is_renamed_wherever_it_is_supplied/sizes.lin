@@ -1,0 +1,9 @@
+struct Weight {
+    grams: UInt8,
+}
+
+impl Measure for Weight {
+    fn of(x: Self) -> UInt8 {
+        x.grams
+    }
+}

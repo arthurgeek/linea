@@ -1,0 +1,14 @@
+trait Factory {
+    fn make() -> Result[Option[Self], UInt8]
+}
+
+impl Factory for UInt64 {
+    fn make() -> Result[Option[Self], UInt8] {
+        .Ok(.Some(7))
+    }
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: Option[UInt64] = Factory.make()?
+    return .Ok(UInt8(value.unwrap()))
+}

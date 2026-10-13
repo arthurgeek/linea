@@ -1,0 +1,26 @@
+// A response is built in its request's arena, so it is written before the
+// arena is released; reading it afterwards is refused.
+import std.http
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn greet[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let name = request.query().unwrap_or("stranger")
+    http.text(request, "hello, {name}")
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = http.new_request(arena.handle(), "GET", "/greet?ada", body: "").unwrap()
+    let answered = greet(sent.request())
+    arena.release()
+    match answered {
+        Ok(response) => {
+            let _printed = io.println("{response.status().code()}")
+            0
+        },
+        Err(_) => 1,
+    }
+}

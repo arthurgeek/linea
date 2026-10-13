@@ -1,0 +1,46 @@
+trait Build: Release {
+    fn build() -> Self
+}
+
+@linear
+struct Token {}
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let Token {} = self
+    }
+}
+
+impl Build for Token {
+    fn build() -> Self {
+        .{}
+    }
+}
+
+template impl Build where reflect.target: struct, reflect.components: Build {
+    fn build() -> Self {
+        let result: Self = reflect.construct(
+            reflect.product,
+            |component| {
+                let field: component.Type = Build.build()
+                defer field.release()
+                field
+            },
+            {},
+        )
+        return result
+    }
+}
+
+@linear
+struct Pair { first: Token, second: Token }
+
+derive Release for Pair
+
+derive Build for Pair
+
+fn main() -> UInt8 {
+    let result: Pair = Build.build()
+    result.release()
+    0
+}

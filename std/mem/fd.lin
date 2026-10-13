@@ -1,0 +1,168 @@
+import std.testing
+
+// The runtime reads or writes a descriptor at a raw address and returns the
+// byte count, or a negated errno.
+extern fn linea_read_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+// Read up to `count` bytes from `fd` into `buffer` at `offset`, checking the
+// range first, and return the runtime's count or negated errno. Transport holds
+// the owner for the complete call. Bounds precede address arithmetic; only the
+// private runtime declaration receives an address.
+internal fn read_fd[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset: UInt64, count: UInt64) -> Int64 {
+    if offset > buffer.len || count > buffer.len - offset {
+        panic("buffer I/O range is out of bounds")
+    }
+    linea_read_some(fd, buffer.at + offset, count)
+}
+
+// Write `bytes` to `fd` and return the count written or a negated errno.
+internal fn write_slice_fd(bytes: Slice[UInt8], fd: Int32) -> Int64 {
+    linea_write_some(fd, bytes.at, bytes.len)
+}
+
+test fn empty_fd_requests_do_not_access_a_descriptor() {
+    // -1 is invalid, so success proves that a zero-byte request bypasses I/O.
+    let allocator = system()
+    defer var bytes = allocator.acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    testing.assert_eq(read_fd(&bytes, -1, 1, 0), 0, "an empty read reached the descriptor")?
+    let empty = bytes.as_slice().subspan(start: 1, count: 0).unwrap()
+    testing.assert_eq(write_slice_fd(empty, -1), 0, "an empty write reached the descriptor")?
+    .Ok(())
+}
+
+test trap fn fd_reads_reject_an_offset_past_the_buffer() -> Result[(), testing.Failure] {
+    // Offset two exceeds a one-byte extent, even for an empty request.
+    // The invalid descriptor -1 must never reach the runtime.
+    let allocator = system()
+    var bytes = allocator.acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    let _result = read_fd(&bytes, -1, 2, 0)
+    bytes.release()
+    .Ok(())
+}
+
+test trap fn fd_reads_reject_a_count_past_the_remaining_buffer() -> Result[(), testing.Failure] {
+    // Offset one leaves no bytes; UInt64.max also exposes unchecked offset+count.
+    // The invalid descriptor -1 must never reach the runtime.
+    let allocator = system()
+    var bytes = allocator.acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    let _result = read_fd(&bytes, -1, 1, UInt64.max)
+    bytes.release()
+    .Ok(())
+}
+
+// The runtime's random and filesystem calls take raw addresses and extents,
+// and return a count, a descriptor, a mode, zero, or a negated errno.
+extern fn linea_random_bytes(at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_open_parent(at: UInt64, extent: UInt64) -> Int64
+
+extern fn linea_open_at(parent: Int32, at: UInt64, extent: UInt64, policy: UInt8, mode: UInt64) -> Int64
+
+extern fn linea_mode_at(parent: Int32, at: UInt64, extent: UInt64) -> Int64
+
+extern fn linea_publish_at(parent: Int32, from: UInt64, from_extent: UInt64, to: UInt64, to_extent: UInt64, replace: UInt8) -> Int64
+
+extern fn linea_unlink_at(parent: Int32, at: UInt64, extent: UInt64) -> Int64
+
+// Fill `count` bytes of `buffer` from `offset` with random bytes. This hook and
+// the filesystem hooks below are needed only by programs importing std.fs.
+internal fn _random_bytes[A: Allocator](inout buffer: Buffer[A], offset: UInt64, count: UInt64) -> Int64 {
+    if offset > buffer.len || count > buffer.len - offset {
+        panic("random byte range is out of bounds")
+    }
+    linea_random_bytes(buffer.at + offset, count)
+}
+
+// Open the directory named by the NUL-terminated `path`.
+internal fn _open_parent_fd[A: Allocator](path: Buffer[A]) -> Int64 {
+    linea_open_parent(path.at, path.len)
+}
+
+// An OpenPolicy says how `_open_at_fd` opens a name: read an existing file,
+// create a new file exclusively, or create a file or truncate an existing one.
+@copyable
+internal enum OpenPolicy {
+    ReadExisting,
+    CreateNew,
+    CreateOrTruncate,
+}
+
+// The runtime takes an open policy as a code: 0 reads an existing file, 1
+// creates a new file exclusively, and 2 creates or truncates one.
+fn open_policy_code(policy: OpenPolicy) -> UInt8 {
+    match read policy {
+        ReadExisting => 0,
+        CreateNew => 1,
+        CreateOrTruncate => 2,
+    }
+}
+
+test fn open_policies_have_the_runtimes_codes() {
+    testing.assert_eq(open_policy_code(.ReadExisting), UInt8(0), "reading an existing file changed its code")?
+    testing.assert_eq(open_policy_code(.CreateNew), UInt8(1), "exclusive creation changed its code")?
+    testing.assert_eq(open_policy_code(.CreateOrTruncate), UInt8(2), "truncating creation changed its code")?
+}
+
+// Open `name` in the directory `parent` under `policy`, giving a created file
+// `mode`; a policy that creates nothing ignores the mode.
+internal fn _open_at_fd[A: Allocator](name: Buffer[A], parent: Int32, policy: OpenPolicy, mode: UInt64) -> Int64 {
+    linea_open_at(parent, name.at, name.len, open_policy_code(policy), mode)
+}
+
+// Return the permission bits of `name` in the directory `parent`.
+internal fn _mode_at_fd[A: Allocator](name: Buffer[A], parent: Int32) -> Int64 {
+    linea_mode_at(parent, name.at, name.len)
+}
+
+// Rename `from` to `to` within `parent`, replacing an existing `to` only when
+// `replace` is set.
+internal fn _publish_at_fd[A: Allocator, B: Allocator](from: Buffer[A], to: Buffer[B], parent: Int32, replace: UInt8) -> Int64 {
+    linea_publish_at(parent, from.at, from.len, to.at, to.len, replace)
+}
+
+// Remove `name` from the directory `parent`.
+internal fn _unlink_at_fd[A: Allocator](name: Buffer[A], parent: Int32) -> Int64 {
+    linea_unlink_at(parent, name.at, name.len)
+}
+
+// The runtime closes a descriptor and returns zero or a negated errno.
+extern fn linea_close(fd: Int32) -> Int64
+
+// Close `fd` and return zero or a negated errno.
+internal fn _close_fd(fd: Int32) -> Int64 {
+    linea_close(fd)
+}
+
+test fn closing_a_descriptor_the_process_lacks_reports_an_error() {
+    // -1 is never an open descriptor.
+    testing.assert(_close_fd(-1) < 0, "closing an invalid descriptor succeeded")?
+}
+
+// Copy `bytes` into a buffer from `allocator` followed by one zero byte, the
+// NUL-terminated form the runtime's path calls take.
+internal fn _terminated[A: Allocator](allocator: A, bytes: Slice[UInt8]) -> Result[Buffer[A], Oom] where carries(.Ok: allocator) {
+    if bytes.length() == UInt64.max {
+        return .Err(.Exhausted)
+    }
+    var buffer = allocator.acquire(bytes.length() + 1)?
+    for index in 0..bytes.length() {
+        &buffer.store_byte(index, bytes[index])
+    }
+    &buffer.store_byte(bytes.length(), 0)
+    .Ok(buffer)
+}
+
+test fn a_terminated_copy_ends_with_one_zero_byte() {
+    defer let copied = _terminated(system(), "tea".as_bytes()).unwrap()
+    testing.assert_eq(copied.length(), UInt64(4), "the copy did not add one byte")?
+    testing.assert_eq(copied.load_byte(0), UInt8(116), "the copy changed the first byte, ASCII t")?
+    testing.assert_eq(copied.load_byte(3), UInt8(0), "the copy did not end with a zero byte")?
+}

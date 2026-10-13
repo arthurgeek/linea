@@ -1,0 +1,12 @@
+// An index written as constant arithmetic folds to one number, and a bounded
+// generic body holds that number against the length of each array it runs on.
+fn poke[C: Index[UInt64]](c: C) -> UInt8 {
+    match read c[2 - 1 + 4] {
+        _ => 7,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 2] = [2, 3]
+    poke(a)
+}

@@ -1,0 +1,11 @@
+// `phantom` says the parameter is read, for identity; the underscore says it
+// is deliberately not read at all. One parameter carries one claim, and two
+// that contradict are refused rather than ranked.
+struct Handle[phantom _Tag] {
+    slot: UInt8,
+}
+
+fn main() -> UInt8 {
+    let h: Handle[UInt8] = .{ slot = 1 }
+    h.slot
+}

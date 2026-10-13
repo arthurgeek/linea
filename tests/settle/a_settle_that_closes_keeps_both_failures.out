@@ -1,0 +1,3 @@
+smooth door: Err(LockProblem { lock: WrongKey, close: None })
+jammed door: Err(LockProblem { lock: WrongKey, close: Some(Jammed) })
+right key: Ok(())

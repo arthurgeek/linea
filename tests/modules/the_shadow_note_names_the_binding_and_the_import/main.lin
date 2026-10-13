@@ -1,0 +1,21 @@
+// `sh` is the import of `shapes`. Inside `count` the parameter `sh` shadows
+// it, and inside `_pick` the type parameter `sh` does, so neither reaches
+// `make` through `sh`. A type parameter spelled like a module is also refused
+// for its case.
+import shapes as sh
+
+trait Carry {
+    fn get(s: Self) -> UInt8
+}
+
+fn count(sh: Str) -> UInt8 {
+    sh.make().size
+}
+
+fn _pick[sh: Carry](held: sh) -> UInt8 {
+    sh.make().size + Carry.get(held)
+}
+
+fn main() -> UInt8 {
+    count("abc") + sh.make().size
+}

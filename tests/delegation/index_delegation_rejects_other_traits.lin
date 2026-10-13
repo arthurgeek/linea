@@ -1,0 +1,9 @@
+trait Other {}
+
+struct _Board { values: [UInt8; 2] }
+
+impl Other for _Board via values
+
+fn main() -> UInt8 {
+    0
+}

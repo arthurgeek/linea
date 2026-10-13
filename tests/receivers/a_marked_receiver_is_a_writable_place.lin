@@ -1,0 +1,20 @@
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+}
+
+fn fresh() -> Counter {
+    Counter { count = 0 }
+}
+
+fn main() -> UInt8 {
+    let fixed = Counter { count = 0 }
+    &fixed.bump()
+    &(fresh()).bump()
+    fixed.count
+}

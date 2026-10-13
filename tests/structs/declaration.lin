@@ -1,0 +1,19 @@
+// A struct declares a type as named parts. Nothing can build one yet, so what
+// this records is that it parses, enters the module scope beside a function
+// and an enum, and that naming it in an annotation counts as using it.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+enum Wrapper {
+    Has(Point),
+    None,
+}
+
+fn main() -> UInt8 {
+    match Wrapper.None {
+        Has(_p) => 0,
+        None => 7,
+    }
+}

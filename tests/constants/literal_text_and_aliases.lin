@@ -1,0 +1,15 @@
+let message = alias
+
+let alias: Str = "Ol\u{e1}\n\0{{}}"
+
+fn selected(value: Str = message) -> UInt8 {
+    if value.length() == 8 {
+        0
+    } else {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    selected()
+}

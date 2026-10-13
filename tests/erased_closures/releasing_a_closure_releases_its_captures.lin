@@ -1,0 +1,35 @@
+import std.io
+import std.mem
+
+// A ticket prints its number when it is released, which shows when that
+// happens.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number } = self
+        match io.println("released ticket {number}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+// The closure owns both tickets. Calling it releases nothing; releasing the
+// closure releases the tickets, the last captured first.
+fn main() -> Result[UInt8, mem.Oom] {
+    let first = Ticket { number = 1 }
+    let second = Ticket { number = 2 }
+    let total = mem.Closure.open(
+        mem.system(),
+        [sink first, sink second] || -> UInt8 {
+            first.number + second.number
+        },
+    )?
+    let sum = total()
+    total.release()
+    return .Ok(sum)
+}

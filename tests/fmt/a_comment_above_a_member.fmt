@@ -1,0 +1,26 @@
+// A field and a variant carry no expression of their own, so the walk over
+// them is the only place a comment written above one can be emitted first.
+// Written after instead, it comes to describe the member below it -- and moves
+// one further down every time the file is formatted.
+struct Plan {
+    // how many are left
+    remaining: UInt8,
+    // which step
+    step: UInt8,
+}
+
+enum Part {
+    // the smaller one
+    Half,
+    // all of it
+    Whole,
+}
+
+fn main() -> UInt8 {
+    let p: Plan = .{ remaining = 6, step = 2 }
+    let q: Part = .Half
+    match q {
+        Half => p.remaining,
+        Whole => p.step,
+    }
+}

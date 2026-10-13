@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    var first: UInt64 = 7
+    let second: UInt64 = 9
+    var view = borrow first
+    view = borrow second
+    first = 11
+    UInt8(*view + first)
+}

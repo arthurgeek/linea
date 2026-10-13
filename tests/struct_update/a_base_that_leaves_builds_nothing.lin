@@ -1,0 +1,23 @@
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn pick(tall: Bool) -> UInt8 {
+    // The base may leave the function instead of producing a value, and then
+    // the literal is never built.
+    let size = Size {
+        width = 1,
+        ..if tall {
+            return 3
+        } else {
+            Size { width = 2, height = 4 }
+        },
+    }
+    size.width + size.height
+}
+
+fn main() -> UInt8 {
+    // 3 + (1 + 4)
+    pick(true) + pick(false)
+}

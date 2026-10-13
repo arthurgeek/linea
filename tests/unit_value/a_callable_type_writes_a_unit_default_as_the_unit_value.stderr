@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `fn(read () = ()) -> UInt8`
+ --> tests/unit_value/a_callable_type_writes_a_unit_default_as_the_unit_value.lin:8:25
+  |
+8 |     let answer: UInt8 = settle
+  |                 ----- expected because of this annotation
+  |                         ^^^^^^ expected `UInt8`, found `fn(read () = ()) -> UInt8`

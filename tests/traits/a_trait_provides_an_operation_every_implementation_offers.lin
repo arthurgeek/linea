@@ -1,0 +1,68 @@
+// An operation a trait writes with its body is provided: every type
+// implementing the trait offers it, by dot, through the trait, and through a
+// bound, and runs the trait's one body with `Self` settled to that type.
+trait Gauge {
+    type Reading
+
+    fn level(self: Self) -> Self.Reading
+
+    fn size(self: Self) -> UInt16
+
+    // Twice the gauge's size, from the size every implementation reports.
+    fn twice(self: Self) -> UInt16 {
+        self.size() * 2
+    }
+
+    // The reading, through the operation each implementation supplies.
+    fn reading(self: Self) -> Self.Reading {
+        self.level()
+    }
+}
+
+struct Tank {
+    litres: UInt8,
+}
+
+impl Gauge for Tank {
+    type Reading = UInt8
+
+    fn level(self: Self) -> UInt8 {
+        self.litres
+    }
+
+    fn size(self: Self) -> UInt16 {
+        UInt16(self.litres)
+    }
+}
+
+struct Dial {
+    turns: UInt16,
+}
+
+impl Gauge for Dial {
+    type Reading = Bool
+
+    fn level(self: Self) -> Bool {
+        self.turns > 0
+    }
+
+    fn size(self: Self) -> UInt16 {
+        self.turns + 1
+    }
+}
+
+// Twice any gauge's size, through the bound.
+fn doubled[G: Gauge](gauge: G) -> UInt16 {
+    gauge.twice()
+}
+
+fn main() -> UInt8 {
+    let tank = Tank { litres = 3 }
+    let dial = Dial { turns = 4 }
+    let total = tank.twice() + Gauge.twice(dial) + doubled(tank)
+    if total == 22 && tank.reading() == 3 && dial.reading() {
+        0
+    } else {
+        1
+    }
+}

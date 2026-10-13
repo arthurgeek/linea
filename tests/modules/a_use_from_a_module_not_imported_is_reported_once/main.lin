@@ -1,0 +1,14 @@
+// A `use` names a module the file imports. `plants` is not imported, so the
+// `use` is reported, and every name it would have bound stays quiet.
+use plants.Plant
+use plants.grow
+
+fn tall(plant: Plant) -> UInt8 {
+    plant.height
+}
+
+fn main() -> UInt8 {
+    let fern = Plant.new(3)
+    let rose: Plant = .{ height = 2 }
+    grow(3) + fern.height + tall(rose)
+}

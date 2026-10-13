@@ -1,0 +1,17 @@
+struct Loop {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Loop {
+    type Elem = UInt8
+
+    proj at(inout self: Loop, i: UInt64) -> UInt8 {
+        self[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let l: Loop = .{ cells = [1, 2] }
+    let _ = l
+    0
+}

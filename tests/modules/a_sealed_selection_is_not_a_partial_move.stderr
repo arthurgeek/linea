@@ -1,0 +1,5 @@
+error[M-Opaque]: `Account` is opaque outside `bank`
+ --> tests/modules/a_sealed_selection_is_not_a_partial_move/main.lin:5:5
+  |
+5 |     account.balance
+  |     ^^^^^^^^^^^^^^^ only its own module can read its parts

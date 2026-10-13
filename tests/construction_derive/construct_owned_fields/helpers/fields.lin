@@ -1,0 +1,53 @@
+@copyable
+pub enum Failure { Field, Finish, Allocation }
+
+pub struct Input { bytes: Str, fail_at: UInt8 }
+
+pub trait FromField[A: Allocator]: Release {
+    fn field(input: Input, allocator: A, name: Str) -> Result[Self, Failure] where carries(.Ok: allocator)
+}
+
+@opaque
+struct Fields[A: Allocator] {
+    input: borrow Input,
+    allocator: A,
+    next: UInt64,
+}
+
+impl[A: Allocator] Fields[A] {
+    pub fn open(input: Input, allocator: A) -> Self where borrows(.input: input), carries(.allocator: allocator) {
+        .{ input = borrow input, allocator = copy(allocator), next = 0 }
+    }
+
+    pub fn field[T: FromField[A]](inout self: Self, name: Str) -> Result[T, Failure] where carries(.Ok: self.allocator) {
+        let names = ["first", "second", "enabled"]
+        if self.next >= 3 || name != names[self.next] {
+            return .Err(.Field)
+        }
+        self.next += 1
+        return FromField.field(*self.input, self.allocator, name)
+    }
+
+    pub fn finish(self: Self) -> Result[(), Failure] {
+        if self.next != 3 || self.input.fail_at == 4 {
+            return .Err(.Finish)
+        }
+        return .Ok({})
+    }
+}
+
+impl[A: Allocator] Release for Fields[A] {
+    fn release(sink self: Self) -> () {
+        let Fields { input: _, allocator: _, next: _ } = self
+    }
+}
+
+impl[A: Allocator] FromField[A] for Bool {
+    fn field(input: Input, allocator: A, name: Str) -> Result[Self, Failure] where carries(.Ok: allocator) {
+        let _handle = copy(allocator)
+        if name != "enabled" || input.fail_at == 3 {
+            return .Err(.Field)
+        }
+        return .Ok(true)
+    }
+}

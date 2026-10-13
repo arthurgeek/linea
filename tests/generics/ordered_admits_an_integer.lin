@@ -1,0 +1,29 @@
+// An integer is totally ordered and carries the marker; a type that says only
+// how it orders does not, which is what makes the marker load-bearing.
+struct Key {
+    value: Int64,
+}
+
+impl Equatable for Key {
+    fn equals(self: Key, other: Key) -> Bool {
+        self.value == other.value
+    }
+}
+
+impl Comparable for Key {
+    fn less(self: Key, other: Key) -> Bool {
+        self.value < other.value
+    }
+}
+
+fn smaller[T: Ordered](a: T, b: T) -> Bool {
+    Comparable.less(a, b)
+}
+
+fn main() -> UInt8 {
+    let _ok = smaller(1, 2)
+    let a: Key = .{ value = 1 }
+    let b: Key = .{ value = 2 }
+    let _no = smaller(a, b)
+    0
+}

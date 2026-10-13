@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/modules/a_label_in_another_file_says_which/main.lin:16:13
+   |
+16 |     other.f(7)
+   |             ^ expected `Bool`, found `Int64`
+  ::: tests/modules/a_label_in_another_file_says_which/other/other.lin
+1  | pub fn f(x: Bool) -> UInt8 {
+   |          - expected because of this parameter

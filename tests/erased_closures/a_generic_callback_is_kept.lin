@@ -1,0 +1,22 @@
+import std.mem
+
+// `keep` takes any callable that can be called as the closure it returns and
+// stores it where the caller's allocator says. That may be an arena, whose
+// closures are dropped with it, so the callable must be `Discardable`.
+fn keep[A: Allocator, F: inout fn(value: UInt64) -> UInt64 + Release + Discardable](allocator: A, sink step: F) -> Result[mem.Closure[inout fn(value: UInt64) -> UInt64, A], mem.Oom] where carries(.Ok: allocator, step) {
+    mem.Closure.open(allocator, step)
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    var total = keep(
+        mem.system(),
+        inout [sink sum = UInt64(0)] |value| {
+            sum += value
+            sum
+        },
+    )?
+    let _first = &total(20)
+    let answer = &total(22)
+    total.release()
+    return .Ok(UInt8(answer))
+}

@@ -1,0 +1,18 @@
+// A parameter list names each parameter once, whether it belongs to a
+// function, to a trait's signature, or to a closure; a closure's capture
+// aliases share its list. A second of one spelling could never be named
+// apart from the first.
+pub trait Measure {
+    fn of(self: Self, unit: UInt8, unit: UInt8) -> UInt8
+}
+
+fn sum(b: UInt8, b: UInt8) -> UInt8 {
+    b
+}
+
+fn main() -> UInt8 {
+    let offset = 1
+    let add = |step: UInt8, step: UInt8| step
+    let shift = [held = offset, held = offset] || held
+    sum(1, 2) + add(1, 2) + shift()
+}

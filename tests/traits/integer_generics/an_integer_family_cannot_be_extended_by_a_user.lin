@@ -1,0 +1,7 @@
+struct Number {}
+
+impl Integer for Number {}
+
+fn main() -> UInt8 {
+    0
+}

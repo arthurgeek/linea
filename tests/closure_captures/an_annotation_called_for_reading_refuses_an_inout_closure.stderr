@@ -1,0 +1,5 @@
+error[T-Call]: this closure is declared `inout`, and it is called for reading
+ --> tests/closure_captures/an_annotation_called_for_reading_refuses_an_inout_closure.lin:4:32
+  |
+4 |     let count: fn() -> UInt8 = inout [] || {
+  |                                ^^^^^^^^^^^^^ the type it is given calls it for reading, so it cannot change its captures; give it an `inout fn` type, and call it with `&`

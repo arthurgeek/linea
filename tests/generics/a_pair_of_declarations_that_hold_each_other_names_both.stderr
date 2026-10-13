@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: A contains B contains A
+  --> tests/generics/a_pair_of_declarations_that_hold_each_other_names_both.lin:10:8
+   |
+10 |     y: Wrap[B[T]],
+   |        ^^^^ a value would have to hold one, so it has no size

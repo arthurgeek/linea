@@ -1,0 +1,26 @@
+// The rule turns on whether the place written is itself Linear, and on
+// nothing else about it. `n` is a `UInt8`, so writing it loses nothing: a discardable
+// value is dropped where its scope ends with nothing to do, and sitting inside
+// something that is not discardable changes nothing about it.
+//
+// State is kept per binding rather than per field, so the root being live is
+// not enough to answer this -- the type of the place written is what says
+// whether a linear value sat there. Without that distinction every write to a
+// plain field of a linear struct would be rejected.
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn main() -> UInt8 {
+    var h: Holder = .{ k = mint(7), n = 1 }
+    h.n = 5
+    consume(h)
+}

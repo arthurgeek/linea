@@ -1,0 +1,15 @@
+import std.io
+
+use io.IoError
+use io.println
+
+fn say(name: Str, sink value: UInt8) -> Result[UInt8, IoError] {
+    println(name)?
+    return .Ok(value)
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let arrange: fn(read first: UInt8, read second: UInt8, read base: UInt8 = 3) -> UInt8 = |first, second: UInt8, base = 3| first * 10 + second + base
+    let result = arrange(second: say("second", 2)?, first: say("first", 1)?)
+    return .Ok(result)
+}

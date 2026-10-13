@@ -1,0 +1,28 @@
+// A projected place is written exactly as the path it names is: `g[0] = v`
+// reaches through `g` to `g.cells[0]`, and writing there while it still holds
+// a live Key destroys the value with nothing to dispose of it. [O-Leak]
+// refuses that whether the write is spelled through a field or through a
+// bracket.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+struct Grid {
+    cells: [Key; 2],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = Key
+
+    proj at(inout self: Grid, i: UInt64) -> Key {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+    g[0] = .{ n = 3 }
+    0
+}

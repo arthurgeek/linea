@@ -1,0 +1,32 @@
+@copyable
+struct Config { width: UInt8, enabled: Bool }
+
+let settings: Config = .{ enabled = true, width = 7 }
+
+fn width(config: Config = settings) -> UInt8 {
+    if config.enabled {
+        config.width
+    } else {
+        0
+    }
+}
+
+fn invoke[F: fn(read config: Config = .{ width = 7, enabled = true }) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if invoke(width) != 7 {
+        return 1
+    }
+    if invoke(
+        |config = settings| if config.enabled {
+            config.width
+        } else {
+            0
+        },
+    ) != 7 {
+        return 2
+    }
+    0
+}

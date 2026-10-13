@@ -1,0 +1,15 @@
+enum Colour { Red, Green }
+
+fn shade(c: Colour) -> UInt8 {
+    match read c {
+        Red => 1,
+        Green => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    // The qualified form has always looked the name up. So does this one:
+    // otherwise it lowers to a tag no variant has, and the `match` it feeds
+    // falls through every arm to no answer at all.
+    shade(.Bogus)
+}

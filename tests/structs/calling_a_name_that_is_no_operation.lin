@@ -1,0 +1,10 @@
+// `a.nope()` looks for an operation named `nope`, and `Account` declares none.
+// The call is refused for that, rather than compiled with nothing to call.
+struct Account {
+    balance: UInt8,
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 3 }
+    a.nope()
+}

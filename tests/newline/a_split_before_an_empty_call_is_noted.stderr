@@ -1,0 +1,5 @@
+note[S-Continuation]: the next line begins with `()`, which could have called the expression above
+  --> tests/newline/a_split_before_an_empty_call_is_noted.lin:10:5
+   |
+10 |     ()
+   |     ^ end the previous line with it if that was meant

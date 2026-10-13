@@ -1,0 +1,20 @@
+// A range test that reads only the target's signedness answers for the wrong
+// value. Every value is computed in a machine word, so a `UInt64` above `Int64`'s
+// maximum sits there as a negative number and a signed comparison reads it as
+// small -- while a negative narrow value widened into a `UInt64` is enormous and
+// an unsigned comparison against the target's maximum sees nothing wrong,
+// because there is no maximum below the word to compare against.
+//
+// The check has to know what the value *is*, not only what it is becoming.
+fn negative() -> Int32 {
+    0 - 1
+}
+
+fn main() -> UInt8 {
+    let y: UInt64 = UInt64(negative())
+    if y > 1000 {
+        7
+    } else {
+        3
+    }
+}

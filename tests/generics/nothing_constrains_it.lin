@@ -1,0 +1,22 @@
+// A template is not a type. Where neither context nor a payload says which
+// instantiation is meant, the program is ill-formed rather than quietly
+// standing on the declaration itself.
+//
+// `None` carries nothing, so nothing determines `T`. `Ok(3)` determines `T`
+// and says nothing about `E` -- which is why the rule is "every parameter the
+// payload determines" rather than "some parameter".
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+enum Either[T, E] {
+    Ok(T),
+    Err(E),
+}
+
+fn main() -> UInt8 {
+    let _nothing = Maybe.None
+    let _partial = Either.Ok(3)
+    1
+}

@@ -1,0 +1,65 @@
+struct Envelope[UInt8] {
+    v: UInt8,
+}
+
+struct Envelope[Envelope[UInt8]] {
+    v: Envelope[UInt8],
+}
+
+struct Envelope[Envelope[Envelope[UInt8]]] {
+    v: Envelope[Envelope[UInt8]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[UInt8]]]] {
+    v: Envelope[Envelope[Envelope[UInt8]]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]] {
+    v: Envelope[Envelope[Envelope[Envelope[UInt8]]]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]] {
+    v: Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]],
+}
+
+struct Envelope[Bool] {
+    v: Bool,
+}
+
+struct Envelope[Envelope[Bool]] {
+    v: Envelope[Bool],
+}
+
+struct Envelope[Envelope[Envelope[Bool]]] {
+    v: Envelope[Envelope[Bool]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[Bool]]]] {
+    v: Envelope[Envelope[Envelope[Bool]]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]] {
+    v: Envelope[Envelope[Envelope[Envelope[Bool]]]],
+}
+
+struct Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]] {
+    v: Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]],
+}
+
+fn ;main() -> UInt8 {
+    let a: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]] = .{ v = .{ v = .{ v = .{ v = .{ v = .{ v = 3 } } } } } }
+    let b: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]] = .{ v = .{ v = .{ v = .{ v = .{ v = .{ v = true } } } } } }
+    Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]];;Tag.of(a) + Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]];;Mark.of(b)
+}
+
+fn Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]];;Tag.of(x: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]]) -> UInt8 {
+    x.v.v.v.v.v.v + 10
+}
+
+fn Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]];;Mark.of(x: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]]) -> UInt8 {
+    if x.v.v.v.v.v.v {
+        20
+    } else {
+        40
+    }
+}

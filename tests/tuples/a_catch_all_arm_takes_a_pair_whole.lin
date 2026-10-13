@@ -1,0 +1,7 @@
+// A tuple has one shape, so `_` matches it without testing anything.
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (1, 2)
+    match pair {
+        _ => 3,
+    }
+}

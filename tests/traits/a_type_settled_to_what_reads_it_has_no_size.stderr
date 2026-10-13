@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: S[Box] contains itself
+  --> tests/traits/a_type_settled_to_what_reads_it_has_no_size.lin:14:8
+   |
+14 | struct S[T: Holder] {
+   |        ^ a value of this type would have to hold one, so it has no size

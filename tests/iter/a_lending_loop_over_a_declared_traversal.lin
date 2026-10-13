@@ -1,0 +1,28 @@
+// A type says how it is walked by declaring a traversal beside the projection
+// that reaches its elements: `trav` names the positions and `proj at` says what
+// place each position stands for. A lending loop is the two composed -- the
+// positions run, and the binder is the place the projection names at each one.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[Int64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Grid {
+    trav positions = 0..4
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    var total: UInt8 = 0
+    for read c in g {
+        total += c
+    }
+    total
+}

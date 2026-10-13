@@ -1,0 +1,22 @@
+error[T-Mismatch]: expected `Bool`, found `Box`
+  --> tests/ownership/a_variant_built_for_the_wrong_type_still_takes_its_payload.lin:14:24
+   |
+14 |     let _wrong: Bool = Box.Held(key)
+   |                 ---- expected because of this annotation
+   |                        ^^^^^^^^^^^^^ expected `Bool`, found `Box`
+error[O-Move]: `key` has already been moved
+  --> tests/ownership/a_variant_built_for_the_wrong_type_still_takes_its_payload.lin:15:27
+   |
+14 |     let _wrong: Bool = Box.Held(key)
+   |                                 --- it was taken here
+15 |     let _again = Box.Held(key)
+   |                           ^^^ it was already taken, and a value is taken once
+error[O-Leak]: `_again` (a linear `Box`) is still owned when this path leaves
+  --> tests/ownership/a_variant_built_for_the_wrong_type_still_takes_its_payload.lin:15:9
+   |
+15 |     let _again = Box.Held(key)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+17 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

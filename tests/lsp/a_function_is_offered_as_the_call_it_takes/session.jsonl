@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":true}}}}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Accepting a function writes the call, and a stop per argument. A placeholder\n// is the parameter's declared name, read off the signature rather than guessed\n// at, and the tab order is the order the arguments are written in. A client\n// that advertised snippet support is the one this is written for.\nfn add(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = add(1, 2)\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

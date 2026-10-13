@@ -1,0 +1,23 @@
+trait Wrap {
+    fn wrap[T: Copyable = UInt8](self: Self, extra: T = 1) -> T where carries(extra)
+}
+
+trait Plain {
+    fn plain[T: Copyable](self: Self, extra: T) -> T where carries(extra)
+}
+
+impl Wrap for UInt8 {
+    fn wrap[T: Copyable = UInt16](_self: Self, extra: T) -> T where carries(extra) {
+        copy(extra)
+    }
+}
+
+impl Plain for UInt8 {
+    fn plain[T: Copyable = UInt16](_self: Self, extra: T) -> T where carries(extra) {
+        copy(extra)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

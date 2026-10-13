@@ -1,0 +1,19 @@
+// The pattern names the type being taken apart, so that type flows into what
+// is being taken apart -- exactly as an annotation's does on an ordinary
+// `let`. Without it this was [T-Infer], and the message said to name a type,
+// which the pattern had already done.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let Point { x: a, y: b } = .{ x = 1, y = 2 }
+
+    // Naming it in a binding first still works, and is what the corpus did
+    // everywhere until now.
+    let named: Point = .{ x = 4, y = 8 }
+    let Point { x: c, y: d } = named
+
+    a + b + c + d
+}

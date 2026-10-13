@@ -1,0 +1,14 @@
+// A postfix call reaches an operation only through a trait in scope. `Hash`
+// is not in the prelude, so hashing with a dot needs `use hash.Hash`; the
+// diagnostic names that missing binding. The qualified call needs no `use`.
+import std.hash
+
+fn main() -> UInt8 {
+    let seat = UInt64(12)
+    let digest = seat.hash()
+    if digest == hash.Hash.hash(seat) {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,15 @@
+// Where a structure's fields sit is the compiler's to decide, and the suite
+// reorders declarations to prove that nothing observes it. Handing one across
+// to C would fix that layout at the boundary and make it observable, so what
+// crosses is what the language fixes the representation of: an integer, whose
+// width and signedness are the whole of it.
+struct Pair {
+    a: UInt64,
+    b: UInt64,
+}
+
+extern fn width_of(p: Pair) -> UInt64
+
+fn main() -> UInt8 {
+    UInt8(width_of(.{ a = 1, b = 2 }))
+}

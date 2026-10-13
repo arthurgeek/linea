@@ -1,0 +1,19 @@
+// `double` and `widen` declare no type parameters, so a call names none.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn widen(self: Door) -> UInt8 {
+        self.width + 1
+    }
+}
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let door = Door { width = 3 }
+    door.widen[UInt8]() + double[UInt8](2)
+}

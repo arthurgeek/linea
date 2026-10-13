@@ -1,0 +1,7 @@
+error[O-Move]: `add` has already been moved
+  --> tests/maps/a_named_combine_is_moved_by_its_first_merge.lin:10:25
+   |
+9  |     &totals.merge(7, 5, add).unwrap()
+   |                         --- it was taken here
+10 |     &totals.merge(7, 3, add).unwrap()
+   |                         ^^^ it was already taken, and a value is taken once

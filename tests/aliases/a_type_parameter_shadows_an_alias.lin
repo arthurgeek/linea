@@ -1,0 +1,21 @@
+// A type parameter answers before a module's type of the same name, so a
+// parameter spelled like a generic alias takes no arguments.
+struct Wrap[T] {
+    inner: T,
+}
+
+alias Deeper[U] = Wrap[U]
+
+struct S[Deeper] {
+    v: Wrap[Deeper],
+}
+
+fn get[Deeper: Copyable](w: Wrap[Deeper]) -> Deeper {
+    copy(w.inner)
+}
+
+fn main() -> UInt8 {
+    let d: Deeper[UInt8] = .{ inner = 1 }
+    let s: S[UInt8] = .{ v = .{ inner = 4 } }
+    get(s.v) - d.inner - 3
+}

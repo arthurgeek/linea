@@ -1,0 +1,16 @@
+error[N-Duplicate]: `Ready` is already implemented for `Box`
+  --> tests/traits/coherence_and_requirement_failures_are_independent.lin:13:8
+   |
+11 | impl Ready for Box {}
+   |      ----- already implemented here
+13 | derive Ready for Box
+   |        ^^^^^ a trait is implemented once for a type
+error[T-Derive]: `Box` cannot derive `Ready` because component type `UInt8` does not implement `Required`
+  --> tests/traits/coherence_and_requirement_failures_are_independent.lin:13:8
+   |
+5  | template impl Ready where reflect.components: Required {}
+   |                                               -------- the template requires every component to implement `Required`
+8  |     value: UInt8,
+   |     ----- this component has type `UInt8`
+13 | derive Ready for Box
+   |        ^^^^^ implement `Required` for `UInt8`, or write this implementation by hand

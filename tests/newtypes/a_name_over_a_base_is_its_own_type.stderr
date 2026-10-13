@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Meters`, found `UInt64`
+  --> tests/newtypes/a_name_over_a_base_is_its_own_type.lin:13:11
+   |
+7  | fn wants(_m: Meters) -> UInt8 {
+   |          -- expected because of this parameter
+13 |     wants(raw)
+   |           ^^^ expected `Meters`, found `UInt64`

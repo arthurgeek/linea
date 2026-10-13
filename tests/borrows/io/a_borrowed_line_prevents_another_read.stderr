@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrows/io/a_borrowed_line_prevents_another_read.lin:10:17
+   |
+10 |     let _next = io.BufferedReader.read_line_borrowed(&reader, max_bytes: 64)
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     let length = line.length()
+   |                  ---- the observation is still used here

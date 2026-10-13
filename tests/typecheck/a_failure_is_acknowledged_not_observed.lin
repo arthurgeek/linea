@@ -1,0 +1,51 @@
+// Every way of acknowledging a `Result`, including the one that ignores it.
+//
+// The single `_` arm is the line this rule draws. It names the alternatives and
+// chooses to treat them alike, which is written down and which a reader sees --
+// unlike `let _`, which says the report was never there. Requiring both arms to
+// be inspected would be a rule about how a program reasons rather than whether
+// it dealt with the value, and would make deliberate ignoring unwritable.
+import std.io
+
+use io.IoError
+use io.print
+
+fn ignores_it() -> () {
+    match print("a") {
+        _ => {},
+    }
+}
+
+fn hands_it_on() -> Result[(), IoError] {
+    let n: () = print("b")?
+    return .Ok(n)
+}
+
+fn returns_it() -> Result[(), IoError] {
+    print("c")
+}
+
+fn matches_it() -> UInt8 {
+    match print("d") {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    ignores_it()
+
+    let handed: UInt8 = match hands_it_on() {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+    let returned: UInt8 = match returns_it() {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+
+    // 1 + 1 + 1: one for each of the three below whose `Result` was
+    // acknowledged into this sum. `ignores_it` above discarded its own and
+    // contributes nothing.
+    handed + returned + matches_it()
+}

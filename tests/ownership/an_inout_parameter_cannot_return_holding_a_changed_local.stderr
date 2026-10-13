@@ -1,0 +1,12 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/an_inout_parameter_cannot_return_holding_a_changed_local.lin:3:5
+  |
+3 |     target = borrow local
+  |     ^^^^^^ escape observations only from the signature's declared sources
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/ownership/an_inout_parameter_cannot_return_holding_a_changed_local.lin:4:5
+  |
+1 | fn point_at_local(inout target: borrow UInt64) -> () {
+  |                         ------ this inout parameter still holds the observation when the function returns
+4 |     local = 4
+  |     ^^^^^ keep this place available until the last use of its observation

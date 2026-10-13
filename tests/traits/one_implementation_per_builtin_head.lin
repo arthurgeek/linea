@@ -1,0 +1,23 @@
+// A builtin head is a head, so a trait is implemented once for it. Nobody
+// declares `UInt8` and nothing can alias it, so its spelling is its identity --
+// which is what lets a key hold a head no declaration names.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x
+    }
+}
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x + x
+    }
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    Measure.of(n)
+}

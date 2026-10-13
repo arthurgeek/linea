@@ -1,0 +1,15 @@
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    let values: Vec[UInt8, mem.Handle[mem.SystemAllocator]] = Vec.new_in(handle)
+    Release.release(arena)
+    match Vec.finish(values) {
+        Ok(_) => {},
+        Err(_held) => panic("the vector was not empty"),
+    }
+    0
+}

@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_question_does_not_cross_a_pending_argument.lin:26:25
+   |
+26 |     Option.Some(use2(d, get()?))
+   |                      - it was given up here
+   |                         ^^^^^^ give the value up after this, not before it

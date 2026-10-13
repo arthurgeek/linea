@@ -1,0 +1,28 @@
+// `ticket` is still owned when the `?` leaves early and again where the block
+// ends. It is one report, pointing at the `?`, with the closing brace named
+// beside it.
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+fn seat_for(row: UInt8) -> Option[UInt8] {
+    if row > 3 {
+        .Some(row)
+    } else {
+        .None
+    }
+}
+
+fn admit(row: UInt8) -> Option[UInt8] {
+    let ticket = Ticket { seat = 14 }
+    let seat = seat_for(row)?
+    .Some(seat + ticket.seat)
+}
+
+fn main() -> UInt8 {
+    match admit(5) {
+        Some(seat) => seat,
+        None => 0,
+    }
+}

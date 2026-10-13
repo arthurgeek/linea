@@ -1,0 +1,20 @@
+// A copy made through a borrow is a value of its own. Its `Str` field views the
+// literal the room was built from, not the room, so writing a field of the room
+// afterwards leaves the copy reading what it read when it was made.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let big = borrow hall
+    let booked = copy(*big)
+    hall.seats = 100
+    if booked.name == "hall" {
+        booked.seats + hall.seats
+    } else {
+        0
+    }
+}

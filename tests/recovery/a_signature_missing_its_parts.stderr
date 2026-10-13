@@ -1,0 +1,30 @@
+error[S-Params]: expected `(`
+ --> tests/recovery/a_signature_missing_its_parts.lin:4:10
+  |
+4 | fn takes -> UInt8 {
+  |          ^^ a function declares its parameters
+error[S-Params]: expected `]`
+ --> tests/recovery/a_signature_missing_its_parts.lin:8:14
+  |
+8 | fn generic[T -> UInt8 {
+  |              ^^ a type parameter list is closed
+error[S-Params]: expected `(`
+ --> tests/recovery/a_signature_missing_its_parts.lin:8:14
+  |
+8 | fn generic[T -> UInt8 {
+  |              ^^ a function declares its parameters
+error[N-Unused]: `T` is never used
+ --> tests/recovery/a_signature_missing_its_parts.lin:8:12
+  |
+8 | fn generic[T -> UInt8 {
+  |            ^ name it in this declaration, or remove it
+error[N-Unused]: `takes` is never used
+ --> tests/recovery/a_signature_missing_its_parts.lin:4:4
+  |
+4 | fn takes -> UInt8 {
+  |    ^^^^^ call it, or name it with a leading `_`
+error[N-Unused]: `generic` is never used
+ --> tests/recovery/a_signature_missing_its_parts.lin:8:4
+  |
+8 | fn generic[T -> UInt8 {
+  |    ^^^^^^^ call it, or name it with a leading `_`

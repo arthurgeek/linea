@@ -1,0 +1,28 @@
+// The two construction forms agree: `Percent?(k)` answers `Some` exactly
+// where `Percent(k)` is legal, and `None` exactly where it is refused. This
+// witnesses the runtime half of that property, over a spread of values on
+// and off the boundary; the compile-time half is the two cases beside it.
+type Percent = UInt8 where it in 0..=99
+
+fn matchesSome(sink k: UInt8) -> UInt8 {
+    match Percent?(k) {
+        Some(_p) => 1,
+        None => 0,
+    }
+}
+
+fn matchesNone(sink k: UInt8) -> UInt8 {
+    match Percent?(k) {
+        Some(_p) => 0,
+        None => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = matchesSome(0)
+    let b: UInt8 = matchesSome(50) * 2
+    let c: UInt8 = matchesSome(99) * 4
+    let d: UInt8 = matchesNone(100) * 8
+    let e: UInt8 = matchesNone(200) * 16
+    a + b + c + d + e
+}

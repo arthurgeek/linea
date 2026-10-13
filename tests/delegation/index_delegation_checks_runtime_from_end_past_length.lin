@@ -1,0 +1,9 @@
+struct Board { values: [UInt8; 2] }
+
+impl Index[FromEnd] for Board via values
+
+fn main() -> UInt8 {
+    let board: Board = .{ values = [2, 3] }
+    var distance: UInt64 = 3
+    return board[^distance]
+}

@@ -1,0 +1,115 @@
+// Price a shopping cart through a list of pricing rules and print a receipt.
+// Each rule is a closure that takes a total in cents and returns the new
+// total. The rules capture different numbers, so each closure has a type of
+// its own, yet one vector holds them all.
+import std.io
+import std.mem
+import std.testing
+
+use mem.Closure
+
+// `alias` gives the rule's signature a name. `Pricing` is not a new type:
+// wherever it is written, it means `fn(cents: UInt64) -> UInt64`.
+alias Pricing = fn(cents: UInt64) -> UInt64
+
+// A rule has a name for the receipt and the change it makes to a total.
+// `Closure` keeps anything callable as `Pricing` behind one type, with what it
+// captured stored in memory from the system allocator. A closure must be
+// released, so a rule is too.
+@derive(Release)
+struct Rule {
+    name: Str,
+    apply: Closure[Pricing],
+}
+
+// The checkout's rules, in the order they apply.
+alias Rules = Vec[Rule]
+
+// Take `percent` off a total of at least `threshold` cents. `[sink threshold,
+// sink percent]` gives both numbers to the closure, so it keeps them after
+// this function returns.
+fn percent_off(name: Str, threshold: UInt64, percent: UInt64) -> Result[Rule, mem.Oom] where carries(.Ok: name) {
+    .Ok(
+        .{
+            name = copy(name),
+            apply = Closure.open(
+                mem.system(),
+                [sink threshold, sink percent] |cents| {
+                    if cents >= threshold {
+                        cents - cents * percent / 100
+                    } else {
+                        cents
+                    }
+                },
+            )?,
+        },
+    )
+}
+
+// Add a flat fee, such as shipping.
+fn flat_fee(name: Str, fee: UInt64) -> Result[Rule, mem.Oom] where carries(.Ok: name) {
+    .Ok(.{ name = copy(name), apply = Closure.open(mem.system(), [sink fee] |cents| cents + fee)? })
+}
+
+// A named function captures nothing, and it becomes a rule the same way.
+fn whole_dollars(cents: UInt64) -> UInt64 {
+    cents - cents % 100
+}
+
+// The rules a checkout applies, in order: a discount on large carts, shipping,
+// then rounding down to whole dollars.
+fn checkout_rules() -> Result[Rules, mem.Oom] {
+    var rules: Rules = Vec.new()
+    match add_rules(&rules) {
+        Ok(_) => .Ok(rules),
+        Err(reason) => {
+            rules.release()
+            .Err(reason)
+        },
+    }
+}
+
+// A refused `push` hands the rule back inside its failure. `.settled()`
+// releases that rule and leaves only the allocator's refusal for `?` to return.
+fn add_rules(inout rules: Rules) -> Result[(), mem.Oom] {
+    &rules.push(percent_off("10% off over $50", threshold: 5000, percent: 10)?).settled()?
+    &rules.push(flat_fee("shipping", fee: 499)?).settled()?
+    &rules.push(.{ name = "whole dollars", apply = Closure.open(mem.system(), whole_dollars)? }).settled()?
+    .Ok(())
+}
+
+// Apply every rule to `cents`, in order. `(rule.apply)(total)` calls the
+// closure the rule holds.
+fn price(rules: Rules, cents: UInt64) -> UInt64 {
+    var total = cents
+    for read rule in rules {
+        total = (rule.apply)(total)
+    }
+    total
+}
+
+test fn a_large_cart_is_discounted_then_shipped() {
+    defer let rules = checkout_rules().unwrap()
+    // 6000 less ten percent is 5400; shipping makes 5899, rounded down to 5800.
+    testing.assert_eq(price(rules, 6000), 5800, "the large cart's price changed")?
+}
+
+test fn a_small_cart_pays_full_price_and_shipping() {
+    defer let rules = checkout_rules().unwrap()
+    // 2000 is under the threshold; shipping makes 2499, rounded down to 2400.
+    testing.assert_eq(price(rules, 2000), 2400, "the small cart's price changed")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let rules = checkout_rules() else |_| {
+        io.eprintln("pricing rules: out of memory")
+        return .Ok(1)
+    }
+    var total: UInt64 = 6000
+    io.println("cart: {total} cents")?
+    for read rule in rules {
+        total = (rule.apply)(total)
+        io.println("{rule.name}: {total} cents")?
+    }
+    .Ok(0)
+}

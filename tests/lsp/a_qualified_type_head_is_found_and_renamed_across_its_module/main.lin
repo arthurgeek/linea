@@ -1,0 +1,12 @@
+// A type named through the module that declares it is a name like any other:
+// the cursor on `Thing` reaches where that module declares it, and renaming it
+// there rewrites the qualified head here and every spelling in that module.
+import pct
+
+fn width(t: pct.Thing) -> UInt8 {
+    t.x
+}
+
+fn main() -> UInt8 {
+    width(pct.thing())
+}

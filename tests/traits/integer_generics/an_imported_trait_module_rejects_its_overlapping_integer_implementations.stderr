@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Tag` for `UInt8`
+  --> tests/traits/integer_generics/an_imported_trait_module_rejects_its_overlapping_integer_implementations/tags/tags.lin:11:6
+   |
+5  | impl[T: Integer] Tag for T {
+   |                  --- the other implementation
+11 | impl Tag for UInt8 {
+   |      ^^^ no instantiation may answer to two implementations of one trait

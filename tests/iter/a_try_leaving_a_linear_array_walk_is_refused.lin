@@ -1,0 +1,30 @@
+// `?` returns where the operand failed, so a walk holding one is a walk that
+// can end before its last position. What is refused is the exit, not how it
+// was spelled.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn keep(sink n: UInt8) -> Option[UInt8] {
+    if n == 2 {
+        return .None
+    }
+    return .Some(n)
+}
+
+fn upto(sink ts: [Token; 3]) -> Option[UInt8] {
+    var total: UInt8 = 0
+    for t in ts {
+        let Token { n: v } = t
+        total += keep(v)?
+    }
+    return .Some(total)
+}
+
+fn main() -> UInt8 {
+    match upto([.{ n = 1 }, .{ n = 2 }, .{ n = 4 }]) {
+        Some(v) => v,
+        None => 0,
+    }
+}

@@ -1,0 +1,7 @@
+error[T-Convert]: `UInt8` cannot hold 300
+ --> tests/codegen/conversion_traps.lin:3:5
+  |
+2 |     let x: Int64 = 300
+  |                    --- the value comes from here
+3 |     UInt8(x)
+  |     ^^^^^^^^ this conversion cannot succeed

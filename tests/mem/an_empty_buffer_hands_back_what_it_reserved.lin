@@ -1,0 +1,29 @@
+// A buffer of no bytes still reserves storage, and disposal has to hand back
+// what was reserved rather than what was asked for.
+//
+// The two lengths a buffer carries are equal for every size but this one. A
+// request for nothing is answered with a byte -- an empty buffer still has an
+// address, and an address has to point at something -- so nothing is what the
+// length answers and a byte is what the allocator is owed. Recording the
+// request as the reservation loses that byte.
+//
+// Nothing here can read the reservation: it is `std.mem`'s to know. What this
+// case can do is complete, because the runtime refuses a disposal that names
+// no extent -- so a buffer that recorded the wrong one traps here rather than
+// leaking quietly until an allocator that reads the extent arrives.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+
+    match a.acquire(0) {
+        Err(_) => 1,
+        Ok(b) => {
+            let n = UInt8(b.length())
+            b.release()
+            n
+        },
+    }
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/deferred_arena_release_waits_for_its_allocation.lin:11:11
+   |
+10 |     defer bytes.release()
+   |           ----- the observation is still used here
+11 |     defer arena.release()
+   |           ^^^^^ keep this place available until the last use of its observation

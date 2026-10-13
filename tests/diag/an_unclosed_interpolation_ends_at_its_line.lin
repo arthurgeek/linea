@@ -1,0 +1,8 @@
+// A string literal ends at its line, so an interpolation left open there
+// ends with it. The colon on the next line annotates a binding again rather
+// than beginning a format spec, and only the unclosed literal is reported.
+fn main() -> UInt8 {
+    let _text = "{0
+    let _count: Int64 = 3
+    0
+}

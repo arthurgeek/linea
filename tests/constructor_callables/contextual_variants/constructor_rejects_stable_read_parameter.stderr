@@ -1,0 +1,5 @@
+error[T-Call]: an enum constructor requires one sink parameter without a default
+ --> tests/constructor_callables/contextual_variants/constructor_rejects_stable_read_parameter.lin:4:74
+  |
+4 |     let _wrap: fn(read code: UInt8) -> RenderError where borrows(code) = .Allocation
+  |                                                                          ^^^^^^^^^^^ use a single consuming payload parameter

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let bad = true < false
+    let _ = bad
+    0
+}

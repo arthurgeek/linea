@@ -1,0 +1,10 @@
+error[T-Impl]: `Pad` declares `pad`'s `width` default; an implementation does not restate it
+  --> tests/traits/a_default_is_declared_once_on_the_signature.lin:16:8
+   |
+16 |     fn pad(s: UInt8, width: UInt8 = 3) -> UInt8 {
+   |        ^^^ drop it; the signature declares it
+error[T-Impl]: `Shift` declares `shift`'s `by` and no default for it; an implementation does not add one
+  --> tests/traits/a_default_is_declared_once_on_the_signature.lin:22:8
+   |
+22 |     fn shift(s: UInt8, by: UInt8 = 1) -> UInt8 {
+   |        ^^^^^ declare it on the signature, which is what every call reads

@@ -1,0 +1,11 @@
+// Nothing orders one declaration against another, so a constant naming one
+// written below it is the same program as one naming a constant written above
+// it. What a name is worth is found by following it, which is why reversing
+// these two declarations cannot change what the program answers.
+pub let doubled: UInt8 = base + base
+
+pub let base: UInt8 = 21
+
+fn main() -> UInt8 {
+    doubled
+}

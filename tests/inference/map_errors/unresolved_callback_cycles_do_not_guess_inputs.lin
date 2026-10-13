@@ -1,0 +1,7 @@
+fn pair[T, U, F: fn(sink first: T) -> U, G: fn(sink second: U) -> T](_first: F, _second: G) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    pair(|sink first| UInt16(first), |sink second| UInt8(second))
+}

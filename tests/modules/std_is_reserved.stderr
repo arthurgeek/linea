@@ -1,0 +1,5 @@
+error[M-Import]: `std` says where a path starts, and holds nothing of its own
+ --> tests/modules/std_is_reserved/main.lin:4:8
+  |
+4 | import std
+  |        ^^^ this names no module

@@ -1,0 +1,22 @@
+// A callable type is keyed by its shape: its invocation and its parameters'
+// conventions. Two implementations of one trait at one shape answer the same
+// functions, whatever types their parameters write.
+trait Handle {
+    fn handle(self: Self, input: UInt64) -> UInt64
+}
+
+impl Handle for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, input: UInt64) -> UInt64 {
+        self(input)
+    }
+}
+
+impl Handle for fn(input: UInt8) -> UInt8 {
+    fn handle(_self: Self, input: UInt64) -> UInt64 {
+        input
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

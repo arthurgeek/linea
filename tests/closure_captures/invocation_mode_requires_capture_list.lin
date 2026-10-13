@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let get = read || 0
+    get()
+}

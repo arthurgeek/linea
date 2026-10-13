@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Never`, found `()`
+ --> tests/types/a_never_function_cannot_return_normally.lin:1:21
+  |
+1 | fn _stop() -> Never {}
+  |               ----- expected because of this return type
+  |                     ^^ this body produces nothing

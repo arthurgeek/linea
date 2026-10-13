@@ -1,0 +1,49 @@
+// A text constant and a constant of a named type are borrowed where they are
+// stored. A borrowed pattern and a borrowed match read a constant's parts in
+// place, and a copy of a constant is a separate value to change.
+@copyable
+type Port = UInt16 where it in 1..=65535
+
+@copyable
+enum Shape {
+    Circle(Int64),
+    Square(Int64, Int64),
+}
+
+@copyable
+struct Config {
+    limit: Int64,
+    names: [Str; 2],
+}
+
+let service_name = "api"
+
+let default_port = Port(8080)
+
+let unit_square = Shape.Square(1, 2)
+
+let config: Config = .{ limit = 5, names = ["a", "bc"] }
+
+fn service() -> borrow Str where carries() {
+    borrow service_name
+}
+
+fn port() -> borrow Port where carries() {
+    borrow default_port
+}
+
+fn main() -> UInt8 {
+    let Port(raw) = copy(*port())
+    let sides = match read unit_square {
+        Circle(radius) => radius,
+        Square(width, height) => width + height,
+    }
+    let read Config { limit, names } = config
+    var changed = config
+    changed.limit = 40
+    let text = service()
+    if raw != 8080 || sides != 3 || limit != 5 || names[1] != "bc" || changed.limit != 40 || config.limit != 5 {
+        return 1
+    }
+    UInt8((*text).length())
+}

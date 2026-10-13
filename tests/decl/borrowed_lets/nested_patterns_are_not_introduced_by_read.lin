@@ -1,0 +1,8 @@
+struct Point { x: UInt8 }
+struct Outer { point: Point }
+
+fn main() -> UInt8 {
+    let outer = Outer { point = Point { x = 3 } }
+    let read Outer { point: Point { x } } = outer
+    x
+}

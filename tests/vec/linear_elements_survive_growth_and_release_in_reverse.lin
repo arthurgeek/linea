@@ -1,0 +1,36 @@
+import std.mem
+import std.io
+
+@linear
+struct Token {
+    number: UInt64,
+    check: UInt64,
+}
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let Token { number: number, check: check } = self
+        if check != number + 100 {
+            panic("element changed while moving")
+        }
+        match io.print("{number}\n") { Ok(_) => {}, Err(_) => {} }
+    }
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Token, mem.SystemAllocator] = Vec.new()
+    let positions: Range[UInt64] = 0..12
+    for n in positions {
+        let token: Token = .{ number = n, check = n + 100 }
+        match Vec.push(&values, token) {
+            Ok(_) => {},
+            Err(_) => panic("push failed"),
+        }
+    }
+    match Vec.remove(&values, 5) {
+        Some(token) => token.release(),
+        None => panic("missing element"),
+    }
+    values.release()
+    0
+}

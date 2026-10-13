@@ -1,0 +1,15 @@
+// A re-export cannot change the original type's representation or ownership policy.
+import mid.inner as inner
+
+@opaque
+use inner.helper
+@linear
+use inner.Wrapped
+
+// Both aliases are named here, so what the case reports is the modifiers and
+// nothing else. A `use` nothing names carries [M-Unused] of its own, which is
+// a different mistake and has a case of its own.
+pub fn ping() -> UInt8 {
+    let w: Wrapped = .{ n = 1 }
+    helper(w.n)
+}

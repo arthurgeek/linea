@@ -1,0 +1,53 @@
+trait Build: Release {
+    fn build(fail: Bool) -> Result[Self, Bool]
+}
+
+@linear
+struct Token {}
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let Token {} = self
+    }
+}
+
+impl Build for Token {
+    fn build(fail: Bool) -> Result[Self, Bool] {
+        if fail {
+            return .Err(true)
+        }
+        return .Ok(.{})
+    }
+}
+
+template impl Build where reflect.target: struct, reflect.components: Build {
+    fn build(fail: Bool) -> Result[Self, Bool] {
+        let result: Self = reflect.construct(
+            reflect.product,
+            |component| {
+                let field: component.Type = Build.build(fail)?
+                field.release()
+                field
+            },
+            {
+                if fail {
+                    return .Err(true)
+                }
+            },
+        )
+        return .Ok(result)
+    }
+}
+
+@linear
+struct Triple { first: Token, second: Token, third: Token }
+
+derive Release for Triple
+
+derive Build for Triple
+
+fn main() -> UInt8 {
+    let result: Result[Triple, Bool] = Build.build(false)
+    result.release()
+    0
+}

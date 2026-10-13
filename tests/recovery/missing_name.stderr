@@ -1,0 +1,5 @@
+error[S-Name]: expected a name after `let`
+ --> tests/recovery/missing_name.lin:2:9
+  |
+2 |     let = 1;
+  |         ^ a binding needs a name

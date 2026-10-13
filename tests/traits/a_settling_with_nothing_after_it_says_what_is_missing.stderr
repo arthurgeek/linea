@@ -1,0 +1,10 @@
+error[S-Type]: expected a type
+  --> tests/traits/a_settling_with_nothing_after_it_says_what_is_missing.lin:15:16
+   |
+15 |     type Item =;
+   |                ^ an `=` settles a declared type
+error[T-Impl]: `Measure` declares `Item`, and this implementation does not supply it
+  --> tests/traits/a_settling_with_nothing_after_it_says_what_is_missing.lin:14:6
+   |
+14 | impl Measure for Counter {
+   |      ^^^^^^^ settle it, or drop it from the trait

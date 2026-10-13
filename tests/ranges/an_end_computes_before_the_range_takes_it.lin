@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let a: UInt8 = 2
+    let b: UInt8 = 3
+    let r = a + 1..b * 2
+    r.lo + r.hi
+}

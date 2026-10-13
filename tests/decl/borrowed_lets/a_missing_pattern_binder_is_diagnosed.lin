@@ -1,0 +1,7 @@
+type Label = Str
+
+fn main() -> UInt8 {
+    let label = Label("Ada")
+    let read Label() = label
+    0
+}

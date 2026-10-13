@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A half-written call is the ordinary state of a file an editor asks about, so\n// a call is hinted for as far as it lines up with its signature and stops at\n// the first position that does not. A callee that reaches no declaration has\n// no signature to read, and is hinted not at all.\nfn total(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    total(1) + total(1, 2, 3) + nope(1, 2)\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":0,"character":0},"end":{"line":12,"character":0}}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

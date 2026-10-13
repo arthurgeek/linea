@@ -1,0 +1,27 @@
+struct Box[T] {
+    value: T,
+}
+
+trait Number {
+    fn number(self: Self) -> UInt8
+}
+
+impl Number for Box[UInt8] {
+    fn number(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn observed[T](value: Box[T]) -> UInt8
+where Box[T]: Number {
+    Number.number(value) + Number.number(borrow value)
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 3 }
+    if observed(box) == 6 {
+        0
+    } else {
+        1
+    }
+}

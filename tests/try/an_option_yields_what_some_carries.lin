@@ -1,0 +1,18 @@
+// `?` on a `Some` yields what it carries and control continues. The two paths
+// exit differently, so the golden says which one ran -- a case whose paths
+// agree proves nothing about the operator.
+fn some() -> Option[UInt8] {
+    Option.Some(7)
+}
+
+fn go() -> Option[UInt8] {
+    let n = some()?
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

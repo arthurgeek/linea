@@ -1,0 +1,27 @@
+import std.mem
+
+@linear
+struct Ticket { number: UInt64 }
+
+fn main() -> UInt8 {
+    var tickets: Vec[Ticket, mem.SystemAllocator] = Vec.new()
+    Vec.push(&tickets, .{ number = 11 }).unwrap()
+    Vec.push(&tickets, .{ number = 22 }).unwrap()
+    Vec.push(&tickets, .{ number = 33 }).unwrap()
+    var iterator = tickets.as_slice().iterate()
+    let first = Iterator.next(&iterator).unwrap()
+    let second = Iterator.next(&iterator).unwrap()
+    iterator.release()
+    let observed = first.number + second.number
+    var settled: UInt64 = 0
+    while tickets.length() > 0 {
+        let { number } = Vec.remove(&tickets, 0).unwrap()
+        settled += number
+    }
+    Vec.finish(tickets).unwrap()
+    if observed == 33 && settled == 66 {
+        0
+    } else {
+        1
+    }
+}

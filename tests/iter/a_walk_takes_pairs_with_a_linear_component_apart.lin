@@ -1,0 +1,20 @@
+// Taking a pair apart in a `for` gives each binder its component, so a linear
+// first component is settled by `eat` on every iteration.
+@linear
+struct Ticket {
+    id: UInt8,
+}
+
+fn eat(sink t: Ticket) -> UInt8 {
+    let Ticket { id } = t
+    id
+}
+
+fn main() -> UInt8 {
+    let pairs = [(Ticket { id = 1 }, UInt8(10)), (Ticket { id = 2 }, UInt8(20))]
+    var total: UInt8 = 0
+    for (t, n) in pairs {
+        total += eat(t) + n
+    }
+    total - 33
+}

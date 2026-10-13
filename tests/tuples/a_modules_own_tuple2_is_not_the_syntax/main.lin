@@ -1,0 +1,29 @@
+// A module may declare its own `Tuple2`. Tuple syntax still names the tuple
+// type the language supplies, so the two are different types, each with its
+// own implementation of a trait.
+struct Tuple2[A, B] {
+    left: A,
+    right: B,
+}
+
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl[A, B] Show for (A, B) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[A, B] Show for Tuple2[A, B] {
+    fn show(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let syntax: (UInt8, Bool) = (1, true)
+    let own: Tuple2[UInt8, Bool] = .{ left = 1, right = true }
+    syntax.show() + own.show() - 3
+}

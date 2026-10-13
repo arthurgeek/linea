@@ -1,0 +1,18 @@
+// `steps[chosen](5)` reads the function stored at a position known only at
+// run time, then calls it.
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn triple(value: UInt8) -> UInt8 {
+    value * 3
+}
+
+fn pick(steps: [fn(value: UInt8) -> UInt8; 2], chosen: UInt64) -> UInt8 {
+    steps[chosen](5)
+}
+
+fn main() -> UInt8 {
+    let steps = [double, triple]
+    pick(steps, 1) - pick(steps, 0) - 5
+}

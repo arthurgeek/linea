@@ -1,0 +1,3 @@
+enum Step { Half, // cheap
+            Whole }
+fn main()->UInt8{ 1 }

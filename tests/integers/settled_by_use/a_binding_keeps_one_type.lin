@@ -1,0 +1,14 @@
+fn narrow(value: UInt8) -> UInt8 {
+    value
+}
+
+fn wide(value: UInt16) -> UInt16 {
+    value
+}
+
+fn main() -> UInt8 {
+    let k = 5
+    let _first = narrow(k)
+    let _second = wide(k)
+    0
+}

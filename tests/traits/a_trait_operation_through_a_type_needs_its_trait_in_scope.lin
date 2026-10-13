@@ -1,0 +1,13 @@
+// `Hash` is not in the prelude, so `UInt64.hash(seat)` reaches no operation
+// until `use hash.Hash` brings the trait into scope. The report names that
+// `use`; writing the call through the trait's path needs none.
+import std.hash
+
+fn main() -> UInt8 {
+    let seat = UInt64(12)
+    if UInt64.hash(seat) == hash.Hash.hash(seat) {
+        0
+    } else {
+        1
+    }
+}

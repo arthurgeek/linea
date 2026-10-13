@@ -1,0 +1,27 @@
+trait Deliver[T] {
+    fn deliver(self: Self) -> T
+}
+
+trait Build[T] {
+    fn build(source: T) -> Self
+}
+
+impl[T, U: Build[T]] Deliver[U] for T {
+    fn deliver(self: T) -> U {
+        Build.build(self)
+    }
+}
+
+trait Other {
+    fn deliver(self: Self) -> UInt8
+}
+
+impl Other for UInt8 {
+    fn deliver(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(0).deliver()
+}

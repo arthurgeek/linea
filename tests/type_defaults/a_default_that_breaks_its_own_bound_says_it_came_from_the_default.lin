@@ -1,0 +1,11 @@
+trait Mark {
+    fn mark(self: Self) -> UInt8
+}
+
+fn f[T: Mark = UInt8](_n: T = 1) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    f()
+}

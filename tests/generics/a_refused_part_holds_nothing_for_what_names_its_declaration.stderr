@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: D contains itself
+  --> tests/generics/a_refused_part_holds_nothing_for_what_names_its_declaration.lin:12:8
+   |
+12 |     p: Pair[T, D[T]],
+   |        ^^^^ a value would have to hold one, so it has no size

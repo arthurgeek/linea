@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares `of` taking 1 parameter(s), and this takes 2
+  --> tests/traits/an_impl_takes_what_the_signature_takes.lin:15:8
+   |
+15 |     fn of(x: Self, n: UInt8) -> UInt8 {
+   |        ^^ take what the signature takes

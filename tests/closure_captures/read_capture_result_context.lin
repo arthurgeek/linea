@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let owner = UInt8(3)
+    let result = read [read _owner = owner] || 0
+    result()
+}

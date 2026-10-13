@@ -1,0 +1,5 @@
+error[S-Destructure]: `read` binds the parts of a pattern
+ --> tests/decl/borrowed_lets/a_borrowed_name_is_refused_without_moving_its_place.lin:7:9
+  |
+7 |     let read _ = point
+  |         ^^^^ write a struct, newtype or tuple pattern after `let read`

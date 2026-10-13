@@ -1,0 +1,20 @@
+// An unsuffixed literal meets the default of a function's type parameter as it
+// meets a struct's: `W { v = 5 }` is a `W[UInt8]`, and so is `two(5)` a
+// `UInt8`.
+struct W[T = UInt8] {
+    v: T,
+}
+
+fn two[T: Copyable = UInt8](a: T, _b: T = 1) -> T where carries(a) {
+    copy(a)
+}
+
+fn narrow(x: UInt8) -> UInt8 {
+    x
+}
+
+fn main() -> UInt8 {
+    let w = W { v = 5 }
+    let z = two(5)
+    narrow(w.v) + narrow(z) - 10
+}

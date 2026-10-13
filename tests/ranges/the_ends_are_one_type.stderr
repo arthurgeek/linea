@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `Int64`
+ --> tests/ranges/the_ends_are_one_type.lin:4:16
+  |
+4 |     let r = a..b
+  |             - expected because of this end
+  |                ^ expected `UInt8`, found `Int64`

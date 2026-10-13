@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"resolveProvider":false},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"documentSymbolProvider":true,"codeActionProvider":{"codeActionKinds":["quickfix"]},"documentFormattingProvider":true,"renameProvider":true,"foldingRangeProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","variable","number","string","comment","operator"],"tokenModifiers":["declaration","readonly","defaultLibrary","linear"]},"full":true},"inlayHintProvider":{"resolveProvider":false}}}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","id":2,"result":{"uri":"main.lin","range":{"start":{"line":6,"character":7},"end":{"line":6,"character":11}}}}
+{"jsonrpc":"2.0","id":3,"result":{"uri":"main.lin","range":{"start":{"line":12,"character":8},"end":{"line":12,"character":15}}}}
+{"jsonrpc":"2.0","id":4,"result":[{"uri":"main.lin","range":{"start":{"line":6,"character":7},"end":{"line":6,"character":11}}},{"uri":"main.lin","range":{"start":{"line":13,"character":13},"end":{"line":13,"character":17}}}]}
+{"jsonrpc":"2.0","id":5,"result":{"contents":{"kind":"plaintext","value":"()"},"range":{"start":{"line":13,"character":4},"end":{"line":13,"character":19}}}}
+{"jsonrpc":"2.0","id":6,"result":[{"position":{"line":12,"character":15},"label":": Counter","kind":1},{"position":{"line":13,"character":12},"label":"⟨inout self⟩","kind":2}]}
+{"jsonrpc":"2.0","id":7,"result":null}

@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `hash`
+ --> tests/lsp/a_name_two_modules_are_called_is_offered_as_either_import/main.lin:4:5
+  |
+4 |     hash.digest()
+  |     ^^^^ no binding with this name is in scope

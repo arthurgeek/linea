@@ -1,0 +1,8 @@
+error[O-Leak]: the base's `ticket` (a linear `Option[Ticket]`) is replaced and never settled
+  --> tests/struct_update/a_wrapped_linear_field_is_not_replaced.lin:20:27
+   |
+20 |     let moved = Booking { ticket = .None, ..booking }
+   |                           ^^^^^^ this field replaces the base's value
+   |                                             ------- the base is taken here
+   |
+   = help: settle the base's `ticket` before building from it, or let the base supply it

@@ -1,0 +1,46 @@
+// `Pair[T]` implements `Release` only where `T` does. A `Pair[Crate]` meets
+// that bound, so `pair.release()` is named as what settles it; a
+// `Pair[Parcel]` does not, so nothing is named for it.
+@linear
+struct Crate {
+    kilograms: UInt8,
+}
+
+impl Release for Crate {
+    fn release(sink self: Self) -> () {
+        let Crate { kilograms: _ } = self
+    }
+}
+
+@linear
+struct Parcel {
+    grams: UInt8,
+}
+
+@linear
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl[T: Release] Release for Pair[T] {
+    fn release(sink self: Self) -> () {
+        let Pair { first, second } = self
+        first.release()
+        second.release()
+    }
+}
+
+fn weigh(pair: Pair[Crate]) -> UInt8 {
+    pair.first.kilograms + pair.second.kilograms
+}
+
+fn count(parcels: Pair[Parcel]) -> UInt8 {
+    parcels.first.grams + parcels.second.grams
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[Crate] = .{ first = Crate { kilograms = 4 }, second = Crate { kilograms = 5 } }
+    let parcels: Pair[Parcel] = .{ first = Parcel { grams = 1 }, second = Parcel { grams = 2 } }
+    weigh(pair) + count(parcels)
+}

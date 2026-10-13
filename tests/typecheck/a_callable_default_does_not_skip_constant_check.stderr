@@ -1,0 +1,6 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/typecheck/a_callable_default_does_not_skip_constant_check.lin:1:24
+  |
+1 | let too_large: UInt8 = 300
+  |                ----- expected because of this annotation
+  |                        ^^^ literal is out of range for its type

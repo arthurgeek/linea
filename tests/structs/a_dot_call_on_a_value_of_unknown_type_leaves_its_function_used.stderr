@@ -1,0 +1,6 @@
+error[T-Operands]: expected `Int64`, found `Bool`
+  --> tests/structs/a_dot_call_on_a_value_of_unknown_type_leaves_its_function_used.lin:21:17
+   |
+21 |     let v = 1 + true
+   |             - expected because of this operand
+   |                 ^^^^ expected `Int64`, found `Bool`

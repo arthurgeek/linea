@@ -1,0 +1,22 @@
+// A trait requiring Copyable rejects an explicitly linear implementation.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+@linear
+struct Owned {
+    n: UInt8,
+}
+
+impl Duplicable for Owned {
+    fn tag(self: Owned) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let o: Owned = .{ n = 3 }
+    let t = Duplicable.tag(o)
+    let Owned { n: _ } = o
+    t
+}

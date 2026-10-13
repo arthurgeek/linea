@@ -1,0 +1,13 @@
+enum Shape { Circle, Square, Point }
+
+fn sides(s: Shape) -> UInt8 {
+    match read s {
+        Circle => 0,
+        Square => 4,
+        Point => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    sides(Shape.Square) + sides(Shape.Point)
+}

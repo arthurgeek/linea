@@ -1,0 +1,9 @@
+error[O-Leak]: `x` (a linear `T`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_over_a_parameter_does_not_dispose.lin:12:9
+   |
+11 |     match x {
+   |           - taken apart here
+12 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: name what it holds in the arm, so something can settle it

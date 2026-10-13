@@ -1,0 +1,27 @@
+// `<=` is an order or an equality, so what is emitted is a call, a branch, and
+// a second call the branch reaches only where the first answered false.
+struct Mark {
+    n: UInt8,
+}
+
+impl Equatable for Mark {
+    fn equals(self: Mark, other: Mark) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Comparable for Mark {
+    fn less(self: Mark, other: Mark) -> Bool {
+        self.n < other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 1 }
+    let b: Mark = .{ n = 1 }
+    if a <= b {
+        0
+    } else {
+        1
+    }
+}

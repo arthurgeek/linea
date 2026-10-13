@@ -1,0 +1,14 @@
+struct Missing {
+    key: UInt8,
+}
+
+@derive(From[Missing])
+enum Failure {
+    Absent(Missing),
+    Lost(Missing),
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure.Absent(Missing { key = 1 })
+    0
+}

@@ -1,0 +1,11 @@
+// Consecutive aliases sit together like a list of imports, and one written
+// untidily is spaced the way every declaration is.
+pub alias Step[T] = fn(value: T) -> T
+alias Pair[T] = [T; 2]
+alias Meters = UInt64
+
+fn main() -> UInt8 {
+    let pair: Pair[Meters] = [1, 2]
+    let step: Step[UInt64] = |value| value + 1
+    UInt8(step(pair[0] + pair[1]))
+}

@@ -1,0 +1,13 @@
+// A comment written after a trailing `.` describes the link below it, so it
+// stays above that link when the `.` moves to open it. Each total is 6.
+fn main() -> UInt8 {
+    let steps = [UInt8(1), 2, 3]
+    let first = steps.as_slice().
+        // Add every step.
+        fold(0, |sink total, sink step| total + *step)
+    let second = steps.as_slice().
+        // Add every step, again.
+
+        fold(0, |sink total, sink step| total + *step)
+    first + second - 12
+}

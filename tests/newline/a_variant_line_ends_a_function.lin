@@ -1,0 +1,36 @@
+// A line opening with `.` and a capitalised name names a variant, and one
+// opening with `.{` builds a literal. Neither can continue the line above:
+// an operation and a field start with a lowercase letter, and nothing is
+// followed by a brace. So each is the function's result, with no note, as is
+// the line opening with `(` in `main`.
+struct Point {
+    x: UInt8,
+}
+
+fn half(n: UInt8) -> Result[UInt8, UInt8] {
+    let doubled = n * 2
+    .Ok(doubled / 4)
+}
+
+fn nothing(on: Bool) -> Option[UInt8] {
+    let _seen = on
+    .None
+}
+
+fn origin() -> Point {
+    let x = 2
+    .{ x = x }
+}
+
+fn main() -> UInt8 {
+    let halved = match half(4) {
+        Ok(value) => value,
+        Err(_) => 9,
+    }
+    let missing = match nothing(true) {
+        Some(_) => 9,
+        None => 0,
+    }
+    let total = halved + missing + origin().x
+    (total - 4)
+}

@@ -1,0 +1,201 @@
+import std.mem
+import std.testing
+
+// A path is the byte string the operating system resolves. The runtime passes
+// paths NUL-terminated, so a path holds no NUL byte; any other bytes, including
+// ones that are not UTF-8, are kept exactly. A path borrows the bytes it was
+// made from.
+@(opaque, copyable)
+struct Path {
+    bytes: mem.Slice[UInt8],
+}
+
+// Nul carries the byte offset of the first NUL. InvalidFinalComponent means
+// the path does not end in a file name.
+@(copyable, derive(Debug, Release))
+pub enum PathError {
+    Nul(UInt64),
+    InvalidFinalComponent,
+}
+
+// Components holds the directory part of a path and its final file name.
+struct Components {
+    parent: mem.Slice[UInt8],
+    name: mem.Slice[UInt8],
+}
+
+impl Path {
+    // Accept `bytes` as a path unless it contains a NUL byte. Paths need not be
+    // UTF-8.
+    pub fn from_bytes(bytes: mem.Slice[UInt8]) -> Result[Path, PathError] where carries(.Ok: bytes) {
+        for index in 0..bytes.length() {
+            if bytes[index] == 0 {
+                return .Err(.Nul(index))
+            }
+        }
+        .Ok(.{ bytes = copy(bytes) })
+    }
+}
+
+// Path validation preserves bytes independently of text encoding.
+test fn paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset() {
+    let allocator = mem.system()
+    defer var bytes = allocator.acquire(3).unwrap()
+    &bytes.store_byte(0, 255)
+    &bytes.store_byte(1, 47)
+    &bytes.store_byte(2, 120)
+    let path = Path.from_bytes(bytes.as_slice()).unwrap()
+    testing.assert_eq(path.as_bytes()[0], UInt8(255), "path validation changed an undecodable byte")?
+    testing.assert_eq(path.as_bytes().length(), UInt64(3), "path validation changed its extent")?
+    &bytes.store_byte(1, 0)
+    match Path.from_bytes(bytes.as_slice()) {
+        Ok(_) => return testing.assert(false, "a path accepted NUL"),
+        Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+    }
+    .Ok(())
+}
+
+test fn path_errors_are_independent_of_released_input_bytes() {
+    let allocator = mem.system()
+    let bytes = allocator.acquire(2).unwrap()
+    let error = match Path.from_bytes(bytes.as_slice()) {
+        Err(error) => error,
+        Ok(_) => {
+            bytes.release()
+            return testing.assert(false, "NUL-containing bytes became a path")
+        },
+    }
+    bytes.release()
+    testing.assert(match read error { Nul(offset) => offset == 0, _ => false }, "owned path error depended on input storage")?
+    .Ok(())
+}
+
+impl Path {
+    // Accept text as a path, refusing it at its first NUL byte.
+    pub fn from_str(source: Str) -> Result[Path, PathError] where carries(.Ok: source) {
+        Path.from_bytes(source.as_bytes())
+    }
+}
+
+test fn from_str_accepts_text_and_refuses_an_embedded_nul() {
+    let path = Path.from_str("logs/today.txt").unwrap()
+    testing.assert_eq(path.as_bytes().length(), UInt64(14), "a text path changed its extent")?
+    match Path.from_str("a\0b") {
+        Ok(_) => return testing.assert(false, "a text path accepted NUL"),
+        Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+    }
+    .Ok(())
+}
+
+impl Path {
+    // Return the bytes the path was made from.
+    pub fn as_bytes(self: Self) -> mem.Slice[UInt8] where carries(self) {
+        copy(self.bytes)
+    }
+}
+
+test fn as_bytes_returns_the_bytes_the_path_was_made_from() {
+    let text = "notes/a.txt"
+    let path = Path.from_str(text).unwrap()
+    testing.assert_eq(path.as_bytes(), text.as_bytes(), "a path changed its bytes")?
+    .Ok(())
+}
+
+impl Path {
+    // Split the path at its last slash into a parent directory and a final
+    // name. A path with no slash has the parent ".", and "/a" keeps "/" as its
+    // parent. An empty name, "." or ".." names no file and is refused.
+    fn components(self: Self) -> Result[Components, PathError] where carries(.Ok: self) {
+        let length = self.bytes.length()
+        var start: UInt64 = 0
+        // ASCII slash (47) separates the parent from the final component.
+        for index in 0..length {
+            if self.bytes[index] == 47 {
+                start = index + 1
+            }
+        }
+        let name = self.bytes.subspan(start, count: length - start).unwrap()
+        // ASCII dot is 46; neither an empty name, ".", nor ".." names a file.
+        if name.length() == 0 || (name.length() == 1 && name[0] == 46) || (name.length() == 2 && name[0] == 46 && name[1] == 46) {
+            return .Err(.InvalidFinalComponent)
+        }
+        let parent = if start == 0 {
+            let dot = "."
+            dot.as_bytes()
+        } else {
+            self.bytes.subspan(start: 0, count: start).unwrap()
+        }
+        .Ok(.{ parent = parent, name = name })
+    }
+}
+
+test fn path_components_preserve_a_root_parent_and_reject_special_final_names() {
+    let path = Path.from_str("/a").unwrap()
+    let parts = path.components().unwrap()
+    testing.assert_eq(parts.parent.length(), UInt64(1), "root parent was removed")?
+    testing.assert_eq(parts.name[0], UInt8(97), "final component changed")?
+    let relative = Path.from_str("a").unwrap().components().unwrap()
+    testing.assert_eq(relative.parent[0], UInt8(46), "relative parent was not dot")?
+    for source in ["", "/", "a/", ".", "..", "a/.."] {
+        testing.assert(Path.from_str(source).unwrap().components().is_err(), "an invalid final component was accepted")?
+    }
+    .Ok(())
+}
+
+impl Display for PathError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Nul(offset) => "path contains NUL at byte {offset}".fmt(&w),
+            InvalidFinalComponent => &w.write_str("path must end in a file name other than dot or dot-dot"),
+        }
+    }
+}
+
+impl Display for Path {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match Str.from_bytes(self.bytes) {
+            Ok(value) => value.fmt(&w),
+            Err(_) => {
+                // Index each four-bit nibble into the lowercase hexadecimal alphabet.
+                let digits = "0123456789abcdef"
+                for index in 0..self.bytes.length() {
+                    let byte = self.bytes[index]
+                    // Printable ASCII is 32..126; escape backslash (92) too.
+                    if byte >= 32 && byte < 127 && byte != 92 {
+                        let one = self.bytes.subspan(start: index, count: 1).unwrap()
+                        &w.write_str(Str.from_bytes(one).unwrap())?
+                    } else {
+                        &w.write_str(r"\x")?
+                        let high = UInt64(byte / 16)
+                        let low = UInt64(byte % 16)
+                        &w.write_str(digits.slice(from: high, to: high + 1).unwrap())?
+                        &w.write_str(digits.slice(from: low, to: low + 1).unwrap())?
+                    }
+                }
+                return .Ok(())
+            },
+        }
+    }
+}
+
+impl Debug for Path {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.fmt(&w)
+    }
+}
+
+test fn path_display_escapes_undecodable_bytes_without_losing_them() {
+    let allocator = mem.system()
+    defer var bytes = allocator.acquire(3).unwrap()
+    &bytes.store_byte(0, 97)
+    &bytes.store_byte(1, 255)
+    &bytes.store_byte(2, 92)
+    let path = Path.from_bytes(bytes.as_slice()).unwrap()
+    var writer = testing.Recorder.of(allocator, 32).unwrap()
+    let rendered = path.fmt(&writer)
+    let equal = writer.holds(r"a\xff\x5c")
+    writer.release()
+    testing.assert(rendered.is_ok(), "rendering a byte path failed")?
+    testing.assert(equal, "path rendering lost undecodable bytes or escape markers")?
+    .Ok(())
+}

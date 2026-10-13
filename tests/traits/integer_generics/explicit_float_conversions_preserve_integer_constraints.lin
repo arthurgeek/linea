@@ -1,0 +1,17 @@
+fn to_float[T: Integer](value: T) -> Float64 {
+    Float64(value)
+}
+
+fn from_float[T: Integer](_witness: T, value: Float64) -> T {
+    T(value)
+}
+
+fn main() -> UInt8 {
+    let truncated = from_float(UInt8(0), 3.75)
+    let negative = from_float(Int16(0), -12.75)
+    if truncated == UInt8(3) && negative == Int16(-12) && to_float(truncated) == 3.0 && to_float(negative) == -12.0 {
+        0
+    } else {
+        1
+    }
+}

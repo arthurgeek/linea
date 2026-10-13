@@ -1,0 +1,15 @@
+// A phantom type argument is not an owned component. The ordinary handle
+// remains discardable even when that argument is linear.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+struct Handle[phantom Tag] {
+    slot: UInt8,
+}
+
+fn main() -> UInt8 {
+    let h: Handle[Key] = .{ slot = 7 }
+    h.slot + h.slot
+}

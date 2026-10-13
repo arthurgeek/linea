@@ -1,0 +1,12 @@
+error[T-Derive]: no variant of `Vacant` wraps exactly `UInt8`
+ --> tests/derive_from/a_from_derive_help_names_an_enum_with_no_variants.lin:1:9
+  |
+1 | @derive(From[UInt8])
+  |         ^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Vacant` has no variants
+error[N-Unused]: `Vacant` is never used
+ --> tests/derive_from/a_from_derive_help_names_an_enum_with_no_variants.lin:2:6
+  |
+2 | enum Vacant {}
+  |      ^^^^^^ name it in an annotation, or remove it

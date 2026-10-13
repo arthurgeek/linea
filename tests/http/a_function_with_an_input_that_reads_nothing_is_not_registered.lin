@@ -1,0 +1,23 @@
+// `route` registers a function whose inputs are all extractors. A parameter of
+// a type that implements no `http.Extract` leaves the function without an
+// `Endpoint`, and the registration says so.
+import std.http
+
+struct Visitor {
+    name: Str,
+}
+
+fn greet(visitor: Visitor, request: http.Request) -> Result[http.Response, http.Error] where carries(request) {
+    http.text(request, "hello {visitor.name}")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", greet)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

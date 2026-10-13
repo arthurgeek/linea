@@ -1,0 +1,5 @@
+error[N-NotAValue]: `Measure` is a trait, and a trait is not a value
+ --> tests/modules/a_trait_reached_through_a_module_is_not_a_value/main.lin:8:14
+  |
+8 |     let _v = pct.Measure
+  |              ^^^^^^^^^^^ reach an operation through it, or name a value

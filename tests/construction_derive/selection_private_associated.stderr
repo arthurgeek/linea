@@ -1,0 +1,5 @@
+error[T-Impl]: `hidden.Box` has no available associated type `Item`
+ --> tests/construction_derive/selection_private_associated/main.lin:4:16
+  |
+4 |     let value: hidden.Box.Item = 7
+  |                ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

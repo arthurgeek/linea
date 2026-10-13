@@ -1,0 +1,5 @@
+error[T-Try]: `?` needs an `Option` or a `Result`, and this is `Celsius`
+ --> tests/structs/named_literals/a_named_literal_is_not_a_fallible_constructor.lin:4:20
+  |
+4 |     let _reading = Celsius { value = 20.0 }?
+  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^ `?` works over exactly those two types

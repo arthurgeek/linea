@@ -1,0 +1,24 @@
+struct List { n: UInt8 }
+
+impl List {
+    fn push(inout self: Self, value: UInt8) -> () {
+        self.n += value
+    }
+
+    fn length(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+struct Holder { list: List }
+
+impl Holder {
+    fn tryIt(self: Self) -> UInt8 {
+        self.list.length()
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder = .{ list = .{ n = 0 } }
+    holder.tryIt()
+}

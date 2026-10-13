@@ -1,0 +1,19 @@
+trait Echo[A: Copyable] {
+    fn echo(_self: Self, input: A) -> A where carries(input)
+}
+
+impl[A: Copyable] Echo[A] for UInt64 {
+    fn echo(_self: UInt64, input: A) -> A where carries(input) {
+        copy(input)
+    }
+}
+
+impl Echo[UInt8] for UInt64 {
+    fn echo(_self: UInt64, input: UInt8) -> UInt8 where carries() {
+        input
+    }
+}
+
+fn main() -> UInt8 {
+    Echo.echo(UInt64(1), UInt8(0))
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `C` requires `Lookup[Marker]`, and `Board` does not implement it
+  --> tests/traits/a_bound_naming_a_sibling_parameter_is_discharged_at_what_it_settles_to.lin:31:5
+   |
+31 |     reach(b, m)
+   |     ^^^^^ implement it for that type, or drop the bound

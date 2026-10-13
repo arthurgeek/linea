@@ -1,0 +1,7 @@
+error[T-Derive]: this derive trait is repeated
+ --> tests/traits/attached_derives/aliases_do_not_duplicate_a_trait_request/main.lin:5:16
+  |
+4 | @derive(first.Tagged)
+  |               ------ this trait was already requested here
+5 | @derive(second.Tagged)
+  |                ^^^^^^ a type derives each trait once

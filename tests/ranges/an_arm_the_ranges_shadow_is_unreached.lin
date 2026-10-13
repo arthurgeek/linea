@@ -1,0 +1,12 @@
+// `0..=255` already covers every `UInt8`, so `7` after it reaches no value:
+// the interval it names is already inside the union the earlier arm built.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=255 => 1,
+        7 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(7)
+}

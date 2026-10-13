@@ -1,0 +1,7 @@
+error[O-Uncommitted]: `(Ticket, UInt8)` has not been given `ticket` yet, and control leaves here
+  --> tests/tuples/an_abrupt_component_settles_the_earlier_ones.lin:19:13
+   |
+17 |         ticket,
+   |         ------ it was given up here
+19 |             return 1
+   |             ^^^^^^^^ give the value up after this, not before it

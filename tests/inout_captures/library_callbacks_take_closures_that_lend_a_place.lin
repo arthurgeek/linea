@@ -1,0 +1,128 @@
+import std.io
+import std.mem
+import std.collections
+import std.testing
+
+// The standard library's operations that call a callback without keeping it
+// take one called `inout`, so a closure written in the call may change a
+// place it is lent `inout`. Each lend ends with the call. `upsert` and
+// `each_allocation_failure` hold both of their callbacks at once, so those are
+// lent different places.
+fn main() -> Result[UInt8, io.IoError] {
+    var calls: UInt64 = 0
+
+    let present: Option[UInt64] = .Some(4)
+    let doubled = present.map(
+        inout [inout calls] |sink value| {
+            calls += 1
+            value * 2
+        },
+    )
+    let chained = doubled.and_then(
+        inout [inout calls] |sink value| -> Option[UInt64] {
+            calls += 1
+            .Some(value + 1)
+        },
+    )
+    let absent: Option[UInt64] = .None
+    let fallback = absent.unwrap_or_else(
+        inout [inout calls] || {
+            calls += 1
+            UInt64(0)
+        },
+    )
+    io.println("option: {chained.unwrap_or(0)} {fallback} after {calls}")?
+
+    let parsed: Result[UInt64, UInt8] = .Ok(6)
+    let scaled = parsed.map(
+        inout [inout calls] |sink value| {
+            calls += 1
+            value * 10
+        },
+    )
+    let checked = scaled.and_then(
+        inout [inout calls] |sink value| -> Result[UInt64, UInt8] {
+            calls += 1
+            .Ok(value + 1)
+        },
+    )
+    let refused: Result[UInt64, UInt8] = .Err(3)
+    let described = refused.map_err(
+        inout [inout calls] |sink code| {
+            calls += 1
+            UInt64(code) * 100
+        },
+    )
+    let recovered = described.unwrap_or_else(
+        inout [inout calls] |sink code| {
+            calls += 1
+            code + 1
+        },
+    )
+    io.println("result: {checked.unwrap_or(0)} {recovered} after {calls}")?
+
+    let built = mem.Vec.from_fn(
+        mem.system(),
+        3,
+        inout [inout calls] |index| {
+            calls += 1
+            index * index
+        },
+    ) else |_| {
+        return .Ok(1)
+    }
+    let length = built.length()
+    built.release()
+    io.println("vec: {length} elements after {calls}")?
+
+    var totals: collections.Map[UInt64, UInt64, mem.SystemAllocator] = collections.Map.new()
+    &totals.insert(1, 10).unwrap().release()
+    &totals.merge(
+        1,
+        5,
+        inout [inout calls] |sink current, sink incoming| {
+            calls += 1
+            current + incoming
+        },
+    ).unwrap()
+    let updated = &totals.update(
+        1,
+        inout [inout calls] |sink total| {
+            calls += 1
+            total * 2
+        },
+    )
+    var made: UInt64 = 0
+    &totals.upsert(
+        2,
+        inout [inout made] |query: UInt64, _allocator: mem.SystemAllocator| -> Result[collections.Entry[UInt64, UInt64], mem.Oom] where carries() {
+            made += 1
+            .Ok(.{ key = query, value = 1 })
+        },
+        inout [inout calls] |sink total| {
+            calls += 1
+            total + 1
+        },
+    ).unwrap()
+    let first = *totals.get(1).unwrap()
+    let second = *totals.get(2).unwrap()
+    totals.release()
+    io.println("map: {first} {second} {updated} after {calls}, {made} made")?
+
+    var judged: UInt64 = 0
+    let walked = testing.each_allocation_failure(
+        mem.system(),
+        inout [inout calls] |allocator| -> Result[(), mem.Oom] {
+            calls += 1
+            let held = allocator.acquire(8)?
+            held.release()
+            .Ok(())
+        },
+        inout [inout judged] |_error| {
+            judged += 1
+            true
+        },
+    )
+    io.println("testing: {walked.is_ok()} after {calls}, {judged} judged")?
+    .Ok(0)
+}

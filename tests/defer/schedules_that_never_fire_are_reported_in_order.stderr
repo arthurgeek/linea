@@ -1,0 +1,30 @@
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:18:11
+   |
+18 |     defer take(a)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:22:11
+   |
+22 |     defer take(b)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:26:11
+   |
+26 |     defer take(c)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:30:11
+   |
+30 |     defer take(d)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:34:11
+   |
+34 |     defer take(e)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/schedules_that_never_fire_are_reported_in_order.lin:38:11
+   |
+38 |     defer take(f)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it

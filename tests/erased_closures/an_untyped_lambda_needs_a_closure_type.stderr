@@ -1,0 +1,5 @@
+error[T-Infer]: the type of parameter `value` cannot be inferred without an expected callable type
+ --> tests/erased_closures/an_untyped_lambda_needs_a_closure_type.lin:7:47
+  |
+7 |     let next = mem.Closure.open(mem.system(), [sink step] |value| value + step)?
+  |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ write the parameter type

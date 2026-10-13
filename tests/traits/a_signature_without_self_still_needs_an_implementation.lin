@@ -1,0 +1,7 @@
+trait Number {
+    fn value() -> UInt8
+}
+
+fn main() -> UInt8 {
+    Number.value()
+}

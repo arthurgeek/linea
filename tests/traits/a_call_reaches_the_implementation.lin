@@ -1,0 +1,20 @@
+// `Measure.of(a)` names the trait, and the argument's type decides which
+// implementation runs, at the call, with nothing to look up at run time.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

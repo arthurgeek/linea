@@ -1,0 +1,27 @@
+// A hatch is copied byte for byte, and a list writes its elements one at a
+// time. A comment above an element belongs to it, but a field list flushed
+// pending comments at the boundary *after* an element -- so the copy re-emitted
+// the field the loop had just written, and the type came back with that field
+// twice. The formatter may not destroy source it can parse.
+struct Pair {
+// linea fmt: off
+    a: UInt8,
+// linea fmt: on
+    b: UInt8,
+}
+
+enum Colour {
+// linea fmt: off
+    Red,
+// linea fmt: on
+    Green,
+}
+
+fn main() -> UInt8 {
+    let p: Pair = .{ a = 1, b = 2 }
+    let c: Colour = Colour.Green
+    match c {
+        Red => p.a,
+        Green => p.b,
+    }
+}

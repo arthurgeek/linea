@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `nosuchname`
+ --> tests/types/a_constant_naming_nothing_is_said_once.lin:4:20
+  |
+4 | pub let x: UInt8 = nosuchname
+  |                    ^^^^^^^^^^ no binding with this name is in scope

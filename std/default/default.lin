@@ -1,0 +1,157 @@
+import std.testing
+
+// Default builds the value a type starts from when a caller has nothing more
+// specific to give: zero for a number, false for Bool, empty text for Str and
+// None for an Option. A struct derives it when every field has a default.
+//
+// A collection that owns storage, such as Vec, String or Map, does not
+// implement Default: it needs an allocator the caller chooses, so it is
+// opened with `Vec.new_in(allocator)` instead.
+pub trait Default {
+    fn default() -> Self
+}
+
+// A derived default builds every field from its own type's default. The
+// derive applies to structs; an enum names which variant it starts from by
+// implementing Default itself.
+template impl Default where
+    reflect.target: struct,
+    reflect.components: Default,
+{
+    fn default() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Default.default()
+                value
+            },
+            {},
+        )
+    }
+}
+
+impl Default for () {
+    fn default() -> () {}
+}
+
+impl Default for Int8 {
+    fn default() -> Int8 {
+        0
+    }
+}
+
+impl Default for Int16 {
+    fn default() -> Int16 {
+        0
+    }
+}
+
+impl Default for Int32 {
+    fn default() -> Int32 {
+        0
+    }
+}
+
+impl Default for Int64 {
+    fn default() -> Int64 {
+        0
+    }
+}
+
+impl Default for UInt8 {
+    fn default() -> UInt8 {
+        0
+    }
+}
+
+impl Default for UInt16 {
+    fn default() -> UInt16 {
+        0
+    }
+}
+
+impl Default for UInt32 {
+    fn default() -> UInt32 {
+        0
+    }
+}
+
+impl Default for UInt64 {
+    fn default() -> UInt64 {
+        0
+    }
+}
+
+impl Default for Float64 {
+    fn default() -> Float64 {
+        0.0
+    }
+}
+
+impl Default for Bool {
+    fn default() -> Bool {
+        false
+    }
+}
+
+impl Default for Str {
+    fn default() -> Str {
+        ""
+    }
+}
+
+impl[T] Default for Option[T] {
+    fn default() -> Option[T] {
+        .None
+    }
+}
+
+test fn numbers_default_to_zero() {
+    let small = Int8.default()
+    let count = UInt64.default()
+    let ratio = Float64.default()
+    testing.assert_eq(small, Int8(0), "Int8 did not default to zero")?
+    testing.assert_eq(count, UInt64(0), "UInt64 did not default to zero")?
+    testing.assert_eq(ratio, 0.0, "Float64 did not default to zero")?
+}
+
+test fn bool_text_and_option_default_to_empty_values() {
+    let flag = Bool.default()
+    let label = Str.default()
+    let chosen: Option[UInt8] = Option.default()
+    testing.assert_eq(flag, false, "Bool did not default to false")?
+    testing.assert_eq(label, "", "Str did not default to empty text")?
+    testing.assert_eq(chosen, Option.None, "Option did not default to None")?
+}
+
+// Preferences derives Default, so every field of a new form starts from its
+// own type's default.
+@derive(Default)
+struct Preferences {
+    volume: UInt8,
+    muted: Bool,
+    nickname: Str,
+    theme: Option[Str],
+}
+
+test fn a_derived_default_builds_each_field_from_its_default() {
+    let fresh = Preferences.default()
+    testing.assert_eq(fresh.volume, UInt8(0), "the volume did not start at zero")?
+    testing.assert(!fresh.muted, "the form started muted")?
+    testing.assert_eq(fresh.nickname, "", "the nickname did not start empty")?
+    testing.assert(fresh.theme.is_none(), "a theme was chosen before the user chose one")?
+}
+
+// Generic code asks for a starting value through a `Default` bound.
+fn chosen_or_default[T: Default](sink choice: Option[T]) -> T where carries(choice) {
+    match choice {
+        Some(value) => value,
+        None => T.default(),
+    }
+}
+
+test fn generic_code_starts_from_a_default() {
+    testing.assert_eq(chosen_or_default(Option.Some(UInt8(7))), UInt8(7), "a chosen value was replaced")?
+    let unset: Option[UInt8] = .None
+    testing.assert_eq(chosen_or_default(unset), UInt8(0), "an unset value did not start from zero")?
+}

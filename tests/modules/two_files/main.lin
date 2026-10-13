@@ -1,0 +1,6 @@
+// A module is a directory. These two files share one namespace: neither
+// imports the other, and neither is declared to be part of anything.
+fn main() -> UInt8 {
+    let base: UInt8 = quarter(20)
+    base + offset()
+}

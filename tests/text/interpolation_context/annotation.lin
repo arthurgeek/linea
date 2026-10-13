@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _text: Str = "hello {1}"
+    0
+}

@@ -1,0 +1,21 @@
+fn main() -> UInt8 {
+    let braced = || -> where
+        carries(),
+    {
+        7
+    }
+    let expression = || -> UInt8 where
+        carries(),
+    8
+    let typed: (fn() -> UInt8 where
+        carries(),
+    ) = || 9
+    let factory = || -> fn() -> UInt8 where
+        carries(),
+    || 10
+    if braced() == 7 && expression() == 8 && typed() == 9 && factory()() == 10 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,12 @@
+// A component carries only the source its own position names, so swapping
+// the components of a tuple breaks the contract.
+fn wrong(a: borrow UInt8, b: borrow UInt8) -> (borrow UInt8, borrow UInt8) where carries(._0: a), carries(._1: b) {
+    (copy(b), copy(a))
+}
+
+fn main() -> UInt8 {
+    let v: UInt8 = 6
+    let w: UInt8 = 2
+    let (first, second) = wrong(borrow v, borrow w)
+    *first + *second
+}

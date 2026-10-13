@@ -1,0 +1,25 @@
+enum Colour { Red, Green }
+
+enum Shape { Circle(UInt8), Square }
+
+// The annotation is the only thing naming `Colour`, so a type named in an
+// annotation and nowhere else has to count as used -- or this form could not
+// be written without also writing the qualified one somewhere.
+fn shade(c: Colour) -> UInt8 {
+    match read c {
+        Red => 1,
+        Green => 2,
+    }
+}
+
+fn size(s: Shape) -> UInt8 {
+    match read s {
+        Circle(n) => n,
+        Square => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Colour = .Green
+    shade(c) + size(.Circle(40))
+}

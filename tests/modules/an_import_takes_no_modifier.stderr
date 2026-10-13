@@ -1,0 +1,10 @@
+error[M-Import]: no directory named `tests/modules/an_import_takes_no_modifier/inner` holds a `.lin` file
+ --> tests/modules/an_import_takes_no_modifier/mid/mid.lin:4:12
+  |
+4 | pub import inner
+  |            ^^^^^ cannot import it
+error[S-Entry]: an import takes no modifier
+ --> tests/modules/an_import_takes_no_modifier/mid/mid.lin:4:1
+  |
+4 | pub import inner
+  | ^^^ an import binds a module here, and `pub use` carries a name onward

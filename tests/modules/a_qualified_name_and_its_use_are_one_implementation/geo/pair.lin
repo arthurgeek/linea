@@ -1,0 +1,4 @@
+pub struct Pair[T] {
+    first: T,
+    second: T,
+}

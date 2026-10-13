@@ -1,0 +1,5 @@
+error[T-Derive]: this derive entry is not supported
+ --> tests/traits/a_derive_must_be_written_in_the_targets_module/main.lin:6:17
+  |
+6 | derive protocol.Marker for Item
+  |                 ^^^^^^ this derivation requires a target declared in the same module

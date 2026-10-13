@@ -1,0 +1,14 @@
+error[O-Copy]: `[Key; 2]` does not permit copying
+  --> tests/projections/a_linear_element_is_not_range_copied.lin:12:26
+   |
+12 |     let held: [Key; 2] = copy(a[0..2])
+   |                          ^^^^^^^^^^^^^ move the value, or declare a copyable representation
+error[O-Leak]: `a` (a linear `[Key; 2]`) is still owned when this path leaves
+  --> tests/projections/a_linear_element_is_not_range_copied.lin:11:9
+   |
+11 |     let a: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+   |         ^ never settled on the path that reaches the end of this block
+14 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

@@ -1,0 +1,5 @@
+error[T-Default]: a default cannot have the parameter type `T`
+ --> tests/traits/integer_generics/a_symbolic_integer_bound_is_not_a_parameter_default.lin:1:36
+  |
+1 | fn _minimum[T: Integer](value: T = T.min) -> Int64 {
+  |                                    ^^^^^ the parameter type is settled by the call

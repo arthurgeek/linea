@@ -1,0 +1,21 @@
+trait HasCallback {
+    type Callback
+}
+
+struct Source {
+    marker: UInt8,
+}
+
+impl HasCallback for Source {
+    type Callback = fn(value: UInt8) -> UInt8
+}
+
+fn apply[I: HasCallback](_source: I, callback: I.Callback, sink value: UInt8) -> UInt8
+where I.Callback: fn(value: UInt8) -> UInt8 {
+    callback(value)
+}
+
+fn main() -> UInt8 {
+    let source: Source = .{ marker = 0 }
+    apply(source, |value| value + 1, 4)
+}

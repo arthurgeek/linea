@@ -1,0 +1,9 @@
+import vault
+
+fn main() -> UInt8 {
+    let account = vault.deposit(vault.open("ada"), 5)
+    // Outside `vault`, building an `Account` from a base is refused as any
+    // literal of it is.
+    let richer = vault.Account { balance = 100, ..account }
+    UInt8(vault.balance(richer))
+}

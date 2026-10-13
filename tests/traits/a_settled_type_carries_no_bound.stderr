@@ -1,0 +1,5 @@
+error[S-Entry]: a settled type carries no bound
+  --> tests/traits/a_settled_type_carries_no_bound.lin:29:14
+   |
+29 |     type Iter: Stepper = Counter
+   |              ^ the trait that declares it says what it requires

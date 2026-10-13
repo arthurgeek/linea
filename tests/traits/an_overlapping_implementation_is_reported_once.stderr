@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Badge` for `Guest`
+  --> tests/traits/an_overlapping_implementation_is_reported_once.lin:34:6
+   |
+14 | impl[T: Seated] Badge for T {
+   |                 ----- the other implementation
+34 | impl Badge for Guest {}
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

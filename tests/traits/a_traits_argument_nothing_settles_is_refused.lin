@@ -1,0 +1,29 @@
+// A trait's parameter written only as a signature's return type is settled by
+// what the call is asked for. A binding with no annotation takes its type from
+// the expression and asks it for nothing, so nothing there settles the
+// parameter — and the implementation a call reaches is keyed by what it
+// settled, so the call is refused where it is written rather than reaching a
+// body picked by nothing.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Bool {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Envelope[Bool] = .{ v = true }
+    let held = Innermost.of(b)
+    if held {
+        13
+    } else {
+        3
+    }
+}

@@ -1,0 +1,52 @@
+// A trait's operation is reached through a type that implements it, as
+// `Limits.default()`, or through the trait, as `Default.default()`. Written
+// through the type, the call's `Self` is that type, so nothing else has to
+// say which implementation runs.
+import std.text
+
+use text.Parse
+
+@(copyable, derive(Default))
+struct Limits {
+    connections: UInt8,
+    backlog: UInt8,
+}
+
+@copyable
+struct Money {
+    cents: UInt64,
+}
+
+impl From[UInt64] for Money {
+    fn from(sink source: UInt64) -> Money {
+        .{ cents = source }
+    }
+}
+
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let limits = Limits { connections = 4, ..Limits.default() }
+    let price = Money.from(1250)
+    let port = UInt16.parse("8080") else |_| {
+        return 1
+    }
+    let small = UInt8.try_from(price.cents / 125) else {
+        return 2
+    }
+    let account: Account = .{ balance = 3 }
+    // 4 + 0 + 10 + 3 + 80
+    limits.connections + limits.backlog + small + Account.of(account) + UInt8.try_from(port / 101).unwrap()
+}

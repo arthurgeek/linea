@@ -1,0 +1,20 @@
+// A store whose last byte falls past the length traps. The offset itself is
+// inside the buffer -- eight bytes wide at offset eight needs sixteen and the
+// buffer holds twelve -- so what is checked is the whole of the store, not
+// where it starts.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(12) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store(&b, 8, 41)
+            b.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

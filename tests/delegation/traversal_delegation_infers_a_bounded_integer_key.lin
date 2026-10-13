@@ -1,0 +1,29 @@
+struct Board[I] {
+    values: [UInt8; 2],
+    key: I,
+}
+
+impl[I: Integer] Index[I] for Board[I] via values
+
+impl[I: Integer + Ordered + Steppable] Board[I] {
+    trav positions via values
+}
+
+fn main() -> UInt8 {
+    var small: Board[UInt8] = .{ values = [2, 3], key = 1 }
+    var wide: Board[Int16] = .{ values = [4, 5], key = 0 }
+    for inout value in small {
+        value += 1
+    }
+    for inout value in wide {
+        value += 2
+    }
+    var total: UInt8 = 0
+    for read value in small {
+        total += value
+    }
+    for read value in wide {
+        total += value
+    }
+    return total + small[small.key] + wide[wide.key] - 30
+}

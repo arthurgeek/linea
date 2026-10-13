@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking an `iter.Map[Protocol, UInt8, <closure>]` abandons it where the walk ends, and it is linear
+  --> tests/iter/a_linear_callable_adapter_is_not_a_walk.lin:25:18
+   |
+25 |     for _item in mapped {}
+   |                  ^^^^^^ it holds a `Protocol`, which is linear
+   |
+   = help: walk it lent with `for _item in &mapped`, then settle `mapped` after the loop

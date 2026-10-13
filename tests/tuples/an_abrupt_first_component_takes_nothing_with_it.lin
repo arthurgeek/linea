@@ -1,0 +1,34 @@
+// A component that leaves before a later one is given to the literal leaves
+// the later one with its owner: the early path releases `ticket` itself and
+// returns, and the other path builds the pair and takes it apart.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn build(early: Bool, sink ticket: Ticket) -> UInt8 {
+    let pair: (UInt8, Ticket) = (
+        if early {
+            Release.release(ticket)
+            return 1
+        } else {
+            2
+        },
+        ticket,
+    )
+    let (n, held) = pair
+    Release.release(held)
+    n
+}
+
+fn main() -> UInt8 {
+    let stopped = build(true, .{ number = 1 })
+    let built = build(false, .{ number = 2 })
+    stopped + built - 3
+}

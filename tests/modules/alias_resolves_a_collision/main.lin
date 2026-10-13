@@ -1,0 +1,6 @@
+import util.hash
+import crypto.hash as ch
+
+fn main() -> UInt8 {
+    hash.digest() + ch.digest()
+}

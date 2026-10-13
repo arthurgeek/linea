@@ -1,0 +1,51 @@
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct Word {}
+
+impl Display for Word {
+    fn fmt[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "raw")
+    }
+}
+
+@copyable
+struct Point {
+    x: UInt8,
+    y: Word,
+}
+
+derive Display for Point
+
+@copyable
+type Meters = UInt8
+
+derive Display for Meters
+
+@copyable
+enum Shape {
+    Empty,
+    Pair(UInt8, Word),
+}
+
+derive Display for Shape
+
+fn main() -> Result[UInt8, IoError] {
+    let point: Point = .{ x = 1, y = .{} }
+    let none: Option[Str] = .None
+    let some: Option[Str] = .Some("debug")
+    let meters = Meters(7)
+    let empty: Shape = .Empty
+    let pair: Shape = .Pair(2, .{})
+
+    println("{point}")?
+    println("{none:?}")?
+    println("{some:?}")?
+    println("{meters}")?
+    println("{empty}")?
+    println("{pair}")?
+    return .Ok(0)
+}

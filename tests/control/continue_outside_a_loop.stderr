@@ -1,0 +1,5 @@
+error[S-Break]: `continue` is outside a loop
+ --> tests/control/continue_outside_a_loop.lin:2:5
+  |
+2 |     continue
+  |     ^^^^^^^^ there is no loop for this to continue

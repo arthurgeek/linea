@@ -1,0 +1,16 @@
+// A constant is built afresh wherever it is read, so a constant built from a
+// type's parts needs the type to be copyable. `Percent` is declared here, so
+// the fix is to mark it `@copyable`; `ScalarPosition` is the standard
+// library's, and is not copyable.
+import std.text
+
+type Percent = UInt8 where it in 0..=100
+
+let house_discount: Percent = Percent(10)
+
+let start: text.ScalarPosition = .{ value = 65, offset = 0 }
+
+fn main() -> UInt8 {
+    let Percent(rate) = house_discount
+    UInt8(start.offset) + rate
+}

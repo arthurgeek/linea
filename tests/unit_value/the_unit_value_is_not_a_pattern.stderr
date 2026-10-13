@@ -1,0 +1,10 @@
+error[S-Match]: `()` is not a pattern
+ --> tests/unit_value/the_unit_value_is_not_a_pattern.lin:5:9
+  |
+5 |         () => 0,
+  |         ^ the unit type has one value; write `_` to match it
+error[T-Cover]: this `match` does not cover every variant
+ --> tests/unit_value/the_unit_value_is_not_a_pattern.lin:4:5
+  |
+4 |     match () {
+  |     ^^^^^^^^^^ add the missing arms, or a `_`

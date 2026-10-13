@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Option[Option[UInt8]]`, found `Option[UInt8]`
+  --> tests/aliases/a_nested_alias_is_the_type_it_names.lin:12:11
+   |
+3  | fn inner(sink nested: Opt[Opt[UInt8]]) -> UInt8 {
+   |               ------ expected because of this parameter
+12 |     inner(flat)
+   |           ^^^^ expected `Option[Option[UInt8]]`, found `Option[UInt8]`

@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `UInt8` already produces a scalar snapshot when read
+ --> tests/decl/borrowed_lets/an_unwrapped_scalar_still_rejects_explicit_copy.lin:6:5
+  |
+6 |     copy(raw)
+  |     ^^^^^^^^^ remove `copy` and read the value directly

@@ -1,0 +1,13 @@
+enum Letter {
+    T,
+}
+
+fn ;main() -> UInt8 {
+    let n: UInt8 = 3
+    ;id[UInt8](n)
+}
+
+fn ;id[UInt8](sink v: UInt8) -> UInt8 {
+    let _letter = Letter.T
+    v
+}

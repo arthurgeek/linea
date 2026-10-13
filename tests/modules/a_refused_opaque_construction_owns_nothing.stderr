@@ -1,0 +1,10 @@
+error[M-Opaque]: `Ticket` is opaque outside `box`
+ --> tests/modules/a_refused_opaque_construction_owns_nothing/main.lin:9:27
+  |
+9 |     let _forged: Ticket = .{ seat = 3 }
+  |                           ^^^^^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Ticket` is opaque outside `box`
+  --> tests/modules/a_refused_opaque_construction_owns_nothing/main.lin:10:20
+   |
+10 |     let _written = Ticket { seat = 4 }
+   |                    ^^^^^^^^^^^^^^^^^^^ only its own module can build one

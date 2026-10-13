@@ -1,0 +1,5 @@
+error[T-Operands]: `T` is not a number
+  --> tests/traits/a_generated_operand_error_points_to_the_derive.lin:14:24
+   |
+14 | derive[T: Discardable] Remainder for Mark[T]
+   |                        ^^^^^^^^^ arithmetic is defined over integers

@@ -1,0 +1,14 @@
+error[T-UnknownOperation]: `double` is a function, not an operation of `UInt8`
+ --> tests/modules/a_function_suggestion_does_not_qualify_through_a_shadowing_local/main.lin:8:5
+  |
+8 |     n.double() + shapes
+  |     ^^^^^^^^ `shapes` is shadowed here; write `import shapes as` another name and call `double` through it
+error[T-UnknownOperation]: `double` is a function, not an operation of `UInt8`
+  --> tests/modules/a_function_suggestion_does_not_qualify_through_a_shadowing_local/main.lin:12:5
+   |
+11 | fn again(shapes: UInt8) -> UInt8 {
+   |          ------ this parameter `shapes` shadows `shapes`, the import of `shapes`
+12 |     shapes.double()
+   |     ^^^^^^^^^^^^^ `shapes` is shadowed here; write `import shapes as` another name and call `double` through it
+   |
+   = help: inside this scope `shapes` is the parameter, not the module; write `import shapes as` another name to reach the module here

@@ -1,0 +1,16 @@
+import std.http
+import std.mem
+
+// The router may keep its handlers in an arena, which drops them, so a
+// handler cannot own a vector from the system allocator. The state
+// `http.with_state` owns can, and it is released with the server.
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let seen: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let _registered = &router.route_raw(
+        "GET /seen",
+        [sink seen] |inout _, request| http.text(request, "{seen.length()} seen"),
+    )
+    router.release()
+    0
+}

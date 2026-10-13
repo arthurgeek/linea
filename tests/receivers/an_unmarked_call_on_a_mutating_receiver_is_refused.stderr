@@ -1,0 +1,7 @@
+error[S-Mutation]: this receiver is mutated, so the call is marked `&`
+  --> tests/receivers/an_unmarked_call_on_a_mutating_receiver_is_refused.lin:13:5
+   |
+6  |     fn add(inout self: Self, amount: UInt8) -> () {
+   |                  ---- declared `inout`
+13 |     counter.add(2)
+   |     ^^^^^^^ write `&counter.add(...)`

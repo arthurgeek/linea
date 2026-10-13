@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/marked_path_aliases.lin:15:23
+   |
+15 |     replace(&o.inner, o.inner.y) + o.z
+   |             -------- mutated by this argument
+   |                       ^^^^^^^^^ already passed `&` here

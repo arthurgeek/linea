@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    var values = [UInt8(1), UInt8(2)]
+    let wide = values.length(extra: 0)
+    let marked = &values.length()
+    UInt8(wide + marked)
+}

@@ -1,0 +1,7 @@
+error[T-Bound]: `Show` requires `Self` to implement it, and `Holder[S]` does not
+  --> tests/traits/a_bound_a_caller_never_promised_is_not_discharged.lin:30:15
+   |
+30 |     Show.show(h)
+   |               ^ implement it for that type, or reach the operation on one that does
+   |
+   = help: `Holder[T]` implements `Show` when `T` implements `Show`, and `S` does not

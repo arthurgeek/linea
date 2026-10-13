@@ -1,0 +1,12 @@
+fn nested[T](sink value: T) -> Option[Option[T]] where carries(.Some.Some: value) {
+    .Some(.Some(value))
+}
+
+fn value() -> Option[UInt8] {
+    let value: UInt8 = nested(7)??
+    return .Some(value)
+}
+
+fn main() -> UInt8 {
+    value().unwrap()
+}

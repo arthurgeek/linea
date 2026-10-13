@@ -1,0 +1,12 @@
+// A tuple pattern takes apart a tuple; a struct is taken apart by its field
+// names.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let point = Point { x = 1, y = 2 }
+    let (x, y) = point
+    x + y
+}

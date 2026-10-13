@@ -1,0 +1,27 @@
+// The same rule where one implementation stands for a whole family rather than
+// for a settled head. What the trait's parameter settles to is read off the
+// receiver, so the condition picks the member of the family it names and each
+// member is one body.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl[T: Copyable] Innermost[T] for Envelope[T] {
+    fn of(x: Self) -> T {
+        copy(x.v)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Envelope[UInt8] = .{ v = 3 }
+    let b: Envelope[Bool] = .{ v = true }
+    if Innermost.of(b) {
+        Innermost.of(a) + 10
+    } else {
+        Innermost.of(a)
+    }
+}

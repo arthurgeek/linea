@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// After a dot the answer is what may follow it, and nothing else: the scope's\n// own names are not offered there, because none of them can be written after a\n// dot. What may follow it is a field of the value and an operation applicable\n// to it, and a type nothing implements still holds its fields.\nstruct Coins {\n    n: UInt8,\n    mark: UInt8,\n}\n\nfn main() -> UInt8 {\n    let coppers: Coins = .{ n = 3, mark = 1 }\n    coppers.n\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":11,"character":12}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

@@ -1,0 +1,100 @@
+// Equality is opt-in: implement equals or explicitly derive it from the
+// type's fields and variants.
+pub trait Equatable {
+    fn equals(self: Self, other: Self) -> Bool
+}
+
+// Derived equality holds when both values are the same variant and every
+// component of that variant is equal.
+template impl Equatable where reflect.components: Equatable {
+    fn equals(self: Self, other: Self) -> Bool {
+        match read self {
+            reflect.case => match read other {
+                reflect.same_case => {
+                    for component in reflect.components {
+                        if !Equatable.equals(component.of(self), component.of(other)) {
+                            return false
+                        }
+                    }
+                    true
+                },
+                reflect.other_case => false,
+            },
+        }
+    }
+}
+
+// Equivalent marks an equality that is reflexive, symmetric, and transitive.
+// It adds these laws to Equatable without adding another operation.
+pub trait Equivalent: Equatable {}
+
+template impl Equivalent where
+    reflect.components: Equivalent,
+    reflect.supertraits: derived,
+{}
+
+// Comparable is a strict partial order that agrees with equality. Some pairs
+// may be incomparable, and no value is less than itself. Equal values order
+// the same way against every other value.
+// `<=` combines less and equals; `>` reverses the operands of less.
+pub trait Comparable: Equatable {
+    fn less(self: Self, other: Self) -> Bool
+}
+
+// Derived ordering compares variant positions first, then the components of
+// equal variants in declaration order. The first component pair that is
+// unequal decides; an incomparable pair makes neither value less.
+template impl Comparable where
+    reflect.components: Comparable,
+    reflect.supertraits: derived,
+{
+    fn less(self: Self, other: Self) -> Bool {
+        let self_case = reflect.ordinal_of(self)
+        let other_case = reflect.ordinal_of(other)
+        if self_case < other_case {
+            return true
+        }
+        if other_case < self_case {
+            return false
+        }
+        match read self {
+            reflect.case => match read other {
+                reflect.same_case => {
+                    for component in reflect.components {
+                        if Comparable.less(component.of(self), component.of(other)) {
+                            return true
+                        }
+                        if Comparable.less(component.of(other), component.of(self)) {
+                            return false
+                        }
+                        if !Equatable.equals(component.of(self), component.of(other)) {
+                            return false
+                        }
+                    }
+                    false
+                },
+                reflect.other_case => false,
+            },
+        }
+    }
+}
+
+// Ordered is a total order: for every pair, exactly one of less(a, b),
+// less(b, a), or equals(a, b) holds. Equivalent also requires reflexive
+// equality.
+pub trait Ordered: Comparable + Equivalent {}
+
+template impl Ordered where
+    reflect.components: Ordered,
+    reflect.supertraits: derived,
+{}
+
+// Steppable gives a value its successor through forward and its predecessor
+// through backward, which ascending and descending ranges use to advance.
+// Range iteration stops at its endpoint without calling forward on the
+// largest value or backward on the smallest.
+pub trait Steppable {
+    fn forward(self: Self) -> Self
+
+    fn backward(self: Self) -> Self
+}

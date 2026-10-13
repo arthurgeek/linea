@@ -1,0 +1,30 @@
+// An array bound written twice at the same length is one bound: `Lookup[[UInt8; 4]]`
+// admits exactly what it admits, and comparing it against itself is what
+// `[N-Ambiguous]` would need two of.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[[UInt8; 4]] for Board {
+    type Elem = UInt8
+
+    fn at(_self: Board, i: [UInt8; 4]) -> UInt8 {
+        i[0]
+    }
+}
+
+fn first[C: Lookup[[UInt8; 4]] + Lookup[[UInt8; 4]]](c: C, i: [UInt8; 4]) -> C.Elem {
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let i: [UInt8; 4] = [9, 0, 0, 0]
+    first(b, i)
+}

@@ -1,0 +1,8 @@
+// Two statements on one line with nothing between them. A newline would have
+// separated them and so would a `;`; sharing a line, they have neither. This
+// is what is left of the mistake that used to be "a missing semicolon" -- the
+// rest of it became legal when a newline began ending a statement.
+fn main() -> UInt8 {
+    let x: UInt8 = 1 let y: UInt8 = 2
+    y
+}

@@ -1,0 +1,7 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    let points = [Point { x = 1 }]
+    let _moved = points[0] { x = 2 }
+    0
+}

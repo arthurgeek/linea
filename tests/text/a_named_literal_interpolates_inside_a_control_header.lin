@@ -1,0 +1,9 @@
+struct Point { x: UInt8, y: UInt8 }
+
+fn main() -> UInt8 {
+    // The interpolation's braces delimit the literal, so the literal's own
+    // brace does not open the match arms.
+    match "{Point { x = 1, y = 2 }.x}" {
+        _ => 0,
+    }
+}

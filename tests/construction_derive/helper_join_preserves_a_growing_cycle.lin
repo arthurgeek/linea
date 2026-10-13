@@ -1,0 +1,52 @@
+trait Make[A: Copyable]: Copyable {
+    fn make(input: A) -> Self where carries(input)
+}
+
+@copyable
+struct Leaf[A: Copyable] {
+    value: A,
+}
+
+@copyable
+struct Branch[A: Copyable] {
+    value: A,
+}
+
+impl[A: Copyable] Make[A] for Leaf[A] {
+    fn make(input: A) -> Self where carries(input) {
+        .{ value = copy(input) }
+    }
+}
+
+impl[A: Copyable] Make[A] for Branch[A] {
+    fn make(input: A) -> Self where carries(input) {
+        let next: Branch[A] = .{ value = copy(input) }
+        let _result = cycle(next)
+        return .{ value = copy(input) }
+    }
+}
+
+fn build[A: Copyable, T: Make[A]](input: A) -> T where carries(input) {
+    Make.make(input)
+}
+
+fn later[A: Copyable, T: Make[A]](input: A, _seed: T) -> UInt8 {
+    let _value: T = build(input)
+    return 0
+}
+
+fn route[A: Copyable, X: Make[A], Y: Make[A]](input: A, _x: X, y: Y) -> UInt8 {
+    let _later = later(input, y)
+    let _first: X = build(input)
+    return 0
+}
+
+fn cycle[A: Copyable](input: A) -> UInt8 {
+    let leaf: Leaf[A] = .{ value = copy(input) }
+    let branch: Branch[A] = .{ value = copy(input) }
+    return route(input, leaf, branch)
+}
+
+fn main() -> UInt8 {
+    cycle(UInt8(7))
+}

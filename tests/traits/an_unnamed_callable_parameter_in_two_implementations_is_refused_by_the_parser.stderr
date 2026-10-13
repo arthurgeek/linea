@@ -1,0 +1,27 @@
+error[S-Params]: expected `:`
+ --> tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin:7:20
+  |
+7 | impl Takes[fn(UInt8) -> UInt8] for Probe {}
+  |                    ^ a parameter is always annotated
+error[S-Params]: expected `:`
+ --> tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin:9:20
+  |
+9 | impl Takes[fn(UInt8) -> UInt8] for Probe {}
+  |                    ^ a parameter is always annotated
+error[N-Unused]: `T` is never used
+ --> tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin:5:13
+  |
+5 | trait Takes[T] {}
+  |             ^ name it in this declaration, declare it `phantom`, or remove it
+error[N-Duplicate]: `Takes` is already implemented for `Probe` with the same arguments
+ --> tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin:9:6
+  |
+7 | impl Takes[fn(UInt8) -> UInt8] for Probe {}
+  |      ----- already implemented here
+9 | impl Takes[fn(UInt8) -> UInt8] for Probe {}
+  |      ^^^^^ a trait is implemented once per arguments and type
+error[N-Unused]: `Probe` is never used
+ --> tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin:3:8
+  |
+3 | struct Probe {}
+  |        ^^^^^ name it in an annotation, or remove it

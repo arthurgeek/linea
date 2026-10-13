@@ -1,0 +1,10 @@
+error[M-Import]: no module named `plants` is imported here
+ --> tests/modules/a_use_from_a_module_not_imported_is_reported_once/main.lin:3:5
+  |
+3 | use plants.Plant
+  |     ^^^^^^ add `import plants` before this `use`
+error[M-Import]: no module named `plants` is imported here
+ --> tests/modules/a_use_from_a_module_not_imported_is_reported_once/main.lin:4:5
+  |
+4 | use plants.grow
+  |     ^^^^^^ add `import plants` before this `use`

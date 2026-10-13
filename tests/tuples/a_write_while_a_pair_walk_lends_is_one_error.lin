@@ -1,0 +1,10 @@
+// A write to the array a `for read` walk lends is one mistake, though both
+// components of the pair are in use.
+fn main() -> UInt8 {
+    var pairs = [(1, 2), (3, 4)]
+    for read (first, second) in pairs {
+        pairs[0] = (5, 6)
+        let _sum = first + second
+    }
+    0
+}

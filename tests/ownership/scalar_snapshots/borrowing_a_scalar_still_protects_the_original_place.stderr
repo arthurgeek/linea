@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/ownership/scalar_snapshots/borrowing_a_scalar_still_protects_the_original_place.lin:4:5
+  |
+4 |     number = 9
+  |     ^^^^^^ keep this place available until the last use of its observation
+5 |     if *view == 7 {
+  |        ----- the observation is still used here

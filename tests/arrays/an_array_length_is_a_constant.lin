@@ -1,0 +1,17 @@
+// [T-ArraySize]. The length is part of the type, so it is settled where the
+// type is written: a value read at run time cannot say what a type is. A
+// binding is immutable here and still says nothing, because what it was
+// initialised with is a parameter and a parameter is whatever the caller
+// passed.
+//
+// This is what lets the bound be folded into a comparison the compiler can
+// settle, which is why an index it settles costs nothing when the program runs.
+fn sized(k: UInt8) -> UInt8 {
+    let n: UInt8 = k
+    let _xs: [UInt8; n] = [1, 2, 3]
+    n
+}
+
+fn main() -> UInt8 {
+    sized(3)
+}

@@ -1,0 +1,12 @@
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner }
+
+fn main() -> UInt8 {
+    // Permission belongs to the name at the root, so a `let` refuses at any
+    // depth. A field carrying its own permission is a rule that does not
+    // exist yet, and the one deciding which of the two wins would come with it.
+    let o: Outer = .{ inner = .{ y = 1 } }
+    o.inner.y = 7
+    o.inner.y
+}

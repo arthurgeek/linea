@@ -1,0 +1,22 @@
+// An operation the compiler provides, such as comparing two integers, is a
+// value like one a program writes, in a generic body as well as at a known
+// type.
+fn same_twice[T: Equatable](first: T, second: T) -> Bool {
+    let equal = Equatable.equals
+    equal(first, second)
+}
+
+fn main() -> UInt8 {
+    let equal = Equatable.equals
+    var matches: UInt8 = 0
+    if equal(UInt8(3), UInt8(3)) {
+        matches += 1
+    }
+    if same_twice(UInt16(7), UInt16(7)) {
+        matches += 1
+    }
+    if !same_twice(true, false) {
+        matches += 1
+    }
+    matches
+}

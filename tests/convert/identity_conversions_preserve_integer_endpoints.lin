@@ -1,0 +1,115 @@
+fn main() -> UInt8 {
+    let int8_min: Option[Int8] = TryFrom.try_from(Int8.min)
+    match int8_min {
+        Some(value) => if value != Int8.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let int8_max: Option[Int8] = TryFrom.try_from(Int8.max)
+    match int8_max {
+        Some(value) => if value != Int8.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let int16_min: Option[Int16] = TryFrom.try_from(Int16.min)
+    match int16_min {
+        Some(value) => if value != Int16.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let int16_max: Option[Int16] = TryFrom.try_from(Int16.max)
+    match int16_max {
+        Some(value) => if value != Int16.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let int32_min: Option[Int32] = TryFrom.try_from(Int32.min)
+    match int32_min {
+        Some(value) => if value != Int32.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let int32_max: Option[Int32] = TryFrom.try_from(Int32.max)
+    match int32_max {
+        Some(value) => if value != Int32.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let int64_min: Option[Int64] = TryFrom.try_from(Int64.min)
+    match int64_min {
+        Some(value) => if value != Int64.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let int64_max: Option[Int64] = TryFrom.try_from(Int64.max)
+    match int64_max {
+        Some(value) => if value != Int64.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint8_min: Option[UInt8] = TryFrom.try_from(UInt8.min)
+    match uint8_min {
+        Some(value) => if value != UInt8.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint8_max: Option[UInt8] = TryFrom.try_from(UInt8.max)
+    match uint8_max {
+        Some(value) => if value != UInt8.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint16_min: Option[UInt16] = TryFrom.try_from(UInt16.min)
+    match uint16_min {
+        Some(value) => if value != UInt16.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint16_max: Option[UInt16] = TryFrom.try_from(UInt16.max)
+    match uint16_max {
+        Some(value) => if value != UInt16.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint32_min: Option[UInt32] = TryFrom.try_from(UInt32.min)
+    match uint32_min {
+        Some(value) => if value != UInt32.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint32_max: Option[UInt32] = TryFrom.try_from(UInt32.max)
+    match uint32_max {
+        Some(value) => if value != UInt32.max {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint64_min: Option[UInt64] = TryFrom.try_from(UInt64.min)
+    match uint64_min {
+        Some(value) => if value != UInt64.min {
+            return 1
+        },
+        None => return 1,
+    }
+    let uint64_max: Option[UInt64] = TryFrom.try_from(UInt64.max)
+    match uint64_max {
+        Some(value) => if value != UInt64.max {
+            return 1
+        },
+        None => return 1,
+    }
+    0
+}

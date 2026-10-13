@@ -1,0 +1,5 @@
+error[T-Const]: `first` names itself through `second`
+ --> tests/constants/aggregates/record_cycle.lin:6:22
+  |
+6 | let second: Config = first
+  |                      ^^^^^ a constant's value cannot be worked out from itself

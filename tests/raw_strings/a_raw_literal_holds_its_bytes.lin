@@ -1,0 +1,40 @@
+// A raw literal `r"…"` holds the bytes between its quotes exactly: a `{` opens
+// no interpolation and a backslash begins no escape. Hashes around the quotes,
+// `r#"…"#`, let the text hold a `"`; the literal ends at a quote followed by
+// as many hashes as opened it.
+import std.io
+
+use io.IoError
+use io.println
+
+// A raw literal is a `Str` constant like any other literal.
+let greeting_route = r"GET /greet/{name}"
+
+// A parameter default takes a raw literal as it takes any constant.
+fn print_route(pattern: Str = r"GET /echo/{name}") -> Result[(), IoError] {
+    println(pattern)
+}
+
+// A raw literal of one scalar is that scalar's number at a range end.
+fn describe(byte: UInt8) -> Str {
+    match byte {
+        r"\"..=r"\" => "a backslash",
+        _ => "another byte",
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println(greeting_route)?
+    print_route()?
+    println(r#"{"ok":true,"items":[1,2]}"#)?
+    println(r"C:\temp\new.txt and \u{e1} stay as written")?
+    println(r##"a "# inside needs two hashes"##)?
+    println(r########"eight is the most: "####### stays text"########)?
+    println(describe(92))?
+
+    // `r` alone is still a name.
+    let r = 3
+    let empty = r""
+    println("{r} {empty.length()} {r"}".length()}")?
+    return .Ok(0)
+}

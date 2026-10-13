@@ -1,0 +1,10 @@
+// [T-TryAnswer]. `main` answers with `UInt8`, and a `?` here would return an
+// `Option`. This is the same rule that catches a `Result` used in a function
+// answering an `Option`, which is why `main` needs no case of its own.
+fn some() -> Option[UInt8] {
+    Option.Some(7)
+}
+
+fn main() -> UInt8 {
+    some()?
+}

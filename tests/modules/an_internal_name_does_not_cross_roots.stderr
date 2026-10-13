@@ -1,0 +1,5 @@
+error[M-Vis]: `write_slice_fd` is internal to another root
+ --> tests/modules/an_internal_name_does_not_cross_roots.lin:5:17
+  |
+5 |     let _ = mem.write_slice_fd(text.as_bytes(), 1)
+  |                 ^^^^^^^^^^^^^^ only modules in the same root may name it

@@ -1,0 +1,17 @@
+// `make` takes no parameters, so a postfix call has nowhere to pass the door
+// it is written on. The call is refused for the argument it would pass,
+// rather than as a field the type does not have.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn make() -> Door {
+        .{ width = 4 }
+    }
+}
+
+fn main() -> UInt8 {
+    let door = Door.make()
+    door.make().width
+}

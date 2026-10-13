@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    later()
+}
+
+fn later() -> UInt8 {
+    9
+}

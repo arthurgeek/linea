@@ -1,0 +1,5 @@
+error[T-Const]: `round` names itself
+ --> tests/types/a_constant_names_itself.lin:5:24
+  |
+5 | pub let round: UInt8 = round + round
+  |                        ^^^^^^^^^^^^^ a constant's value cannot be worked out from itself

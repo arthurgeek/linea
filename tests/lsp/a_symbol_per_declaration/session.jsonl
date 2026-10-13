@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// One declaration of every kind a file can hold, so the outline has to name\n// each of them and say what it is.\nimport counters\n\nuse counters.one\n\npub let limit: UInt8 = 9\n\nstruct Account {\n    balance: UInt8,\n}\n\nenum Colour {\n    Red,\n    Green,\n}\n\ntrait Measure {\n    fn of(x: Self) -> UInt8\n}\n\nimpl Measure for Account {\n    fn of(x: Self) -> UInt8 {\n        x.balance\n    }\n}\n\nfn main() -> UInt8 {\n    let a: Account = .{ balance = limit }\n    let c: Colour = Colour.Red\n    match c {\n        Red => Measure.of(a) + one(),\n        Green => 0,\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"main.lin"}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"counters/tally.lin"}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

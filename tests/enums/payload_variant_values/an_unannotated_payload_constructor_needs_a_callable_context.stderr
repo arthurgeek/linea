@@ -1,0 +1,5 @@
+error[T-Infer]: `Code` carries 1 value(s), and nothing here says whether this builds it or names its constructor
+ --> tests/enums/payload_variant_values/an_unannotated_payload_constructor_needs_a_callable_context.lin:4:17
+  |
+4 |     let _make = Failure.Code
+  |                 ^^^^^^^^^^^^ supply its values, or give the binding a callable type

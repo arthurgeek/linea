@@ -1,0 +1,23 @@
+// An impl's member constructs through the parse like anything else -- there
+// is no bypass to reach a newtype's representation from inside its own
+// module either, because there is nothing to bypass: `Percent?` is the only
+// door even here.
+type Percent = UInt8 where it in 0..=99
+
+impl Percent {
+    pub fn widen(sink n: UInt8) -> Option[Percent] {
+        Percent?(n)
+    }
+}
+
+fn main() -> UInt8 {
+    let some: UInt8 = match Percent.widen(50) {
+        Some(_p) => 1,
+        None => 0,
+    }
+    let none: UInt8 = match Percent.widen(150) {
+        Some(_p) => 0,
+        None => 1,
+    }
+    some + none * 2
+}

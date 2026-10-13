@@ -1,0 +1,40 @@
+// A second writer whose failure is nothing the operating system said. Two
+// implementations settle `Error` two ways, and each call reaches its own.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+// What a writer over no transport fails with. There is no errno here because
+// nothing was asked of an operating system, which is why `IoError` belongs to
+// the descriptor and not to the trait.
+struct Closed {
+    at: UInt64,
+}
+
+// Takes nothing anywhere, and counts what it turned away so the refusal can say
+// which write it was.
+struct Refuses {
+    seen: UInt64,
+}
+
+impl Writer for Refuses {
+    type Error = Closed
+
+    fn write_str(inout self: Refuses, _s: Str) -> Result[(), Closed] {
+        self.seen += 1
+        return .Err(.{ at = self.seen })
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var r: Refuses = .{ seen = 0 }
+    match Writer.write_str(&r, "no") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+    var w: Descriptor = stdout()
+    Writer.write_str(&w, "yes\n")?
+    return .Ok(0)
+}

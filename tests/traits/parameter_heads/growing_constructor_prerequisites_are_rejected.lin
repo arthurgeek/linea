@@ -1,0 +1,16 @@
+trait Route {
+    fn route(self: Self) -> UInt8
+}
+
+struct Box[T] { value: T }
+
+impl[T] Route for Box[T] where Box[Box[T]]: Route {
+    fn route(_self: Box[T]) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let value: Box[UInt8] = .{ value = 0 }
+    Route.route(value)
+}

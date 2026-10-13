@@ -1,0 +1,14 @@
+import std.mem
+
+// `&` lends an iterator to the walk; a vector is a collection, not an
+// iterator, so it has nothing to lend.
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    defer readings.release()
+    &readings.push(3).unwrap()
+    var total: UInt64 = 0
+    for reading in &readings {
+        total += reading
+    }
+    UInt8(total)
+}

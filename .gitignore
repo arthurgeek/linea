@@ -1,0 +1,18 @@
+.direnv
+zig-out
+.zig-cache
+*.o
+*.a
+a.out
+
+# Where the build unpacks a dependency it was given. The tarball it comes from
+# lives in Zig's own cache outside the tree; this is the extracted copy, and a
+# build recreates it from `build.zig.zon` whenever it is missing -- so what
+# pins the dependency is the hash in that file, and this is an artefact of
+# having built rather than part of what was written.
+zig-pkg/
+
+# tree-sitter build outputs. `grammar.js` is the source; a regenerated parser.c
+# is a six-figure-line diff that makes a grammar change unreviewable, and a
+# generated file in the tree can disagree with what it was generated from.
+editor-support/tree-sitter-linea/src/

@@ -1,0 +1,10 @@
+// The bounds settle where the place is formed, because the place's type is
+// what they name: a bound the checker cannot settle there leaves `[UInt8; ?]`,
+// which is not a type. A `var` holds whatever ran last, so it settles nothing.
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    var hi: UInt64 = 2
+    hi += 1
+    let head: [UInt8; 2] = copy(a[0..hi])
+    head[0] + head[1] + a[3]
+}

@@ -1,0 +1,21 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    fn take(sink self: Holder[T]) -> T {
+        let Holder { value } = self
+        value
+    }
+}
+
+fn unwrap[T](sink holder: Holder[T]) -> T {
+    let take: fn(sink holder: Holder[T]) -> T = Holder.take
+    take(holder)
+}
+
+fn main() -> UInt8 {
+    let small: Holder[UInt8] = .{ value = 3 }
+    let large: Holder[UInt64] = .{ value = 4 }
+    unwrap(small) + UInt8(unwrap(large)) - 7
+}

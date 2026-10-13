@@ -1,0 +1,5 @@
+impl Measure for Account {
+    fn of(x: Account) -> UInt8 {
+        x.balance
+    }
+}

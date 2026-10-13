@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Lookup` and `Lookup` both declare `Elem`, and a type carrying both bounds reads it through neither
+ --> tests/traits/tuples_of_different_arity_are_different_bound_arguments.lin:5:90
+  |
+5 | fn _ambiguous[C: Lookup[(UInt8, Bool)] + Lookup[Tuple3[UInt8, Bool, Str]]](_shelf: C) -> C.Elem {
+  |                                                                                          ^^^^^^ bound it by one of them

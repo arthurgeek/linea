@@ -1,0 +1,28 @@
+import std.io
+import std.mem
+
+use mem.Closure
+use mem.SystemAllocator
+
+// `Pricing` is another name for the function type, so a `Closure` of it is
+// the same type as one written with the signature spelled out.
+alias Pricing = fn(cents: UInt64) -> UInt64
+
+struct Rule {
+    name: Str,
+    apply: Closure[Pricing, SystemAllocator],
+}
+
+fn spelled_out(sink apply: Closure[fn(cents: UInt64) -> UInt64, SystemAllocator]) -> Rule {
+    Rule { name = "fee", apply }
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let fee: UInt64 = 499
+    let rule = spelled_out(Closure.open(mem.system(), [sink fee] |cents| cents + fee)?)
+    let total = (rule.apply)(1000)
+    let _printed = io.println("{rule.name}: {total}")
+    let Rule { name: _, apply } = rule
+    apply.release()
+    .Ok(0)
+}

@@ -1,0 +1,34 @@
+// An attached derive applies where the enum does, so a source naming the
+// enum's parameter selects the variant that holds the same parameter.
+struct Report[T] {
+    detail: T,
+}
+
+@derive(From[Report[T]])
+enum Failure[T] {
+    Reported(Report[T]),
+    Silent,
+}
+
+fn check(detail: UInt8) -> Result[UInt8, Report[UInt8]] {
+    if detail > 5 {
+        .Err(Report[UInt8] { detail = detail })
+    } else {
+        .Ok(detail)
+    }
+}
+
+fn run(detail: UInt8) -> Result[UInt8, Failure[UInt8]] {
+    let checked = check(detail)?
+    .Ok(checked)
+}
+
+fn main() -> UInt8 {
+    match run(8) {
+        Err(failure) => match failure {
+            Reported(report) => report.detail - 8,
+            Silent => 1,
+        },
+        Ok(_) => 2,
+    }
+}

@@ -1,0 +1,16 @@
+struct Box[T = UInt8] {
+    value: T,
+}
+
+impl[T] Box[T] {
+    fn empty() -> Self {
+        panic("x")
+    }
+}
+
+fn main() -> UInt8 {
+    let _b = Box.empty()
+    let c: Box[String] = Box.empty()
+    let _d: Box[UInt8] = c
+    0
+}

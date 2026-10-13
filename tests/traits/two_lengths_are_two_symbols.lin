@@ -1,0 +1,23 @@
+// A generic member instantiated at two array lengths lowers to two
+// functions, and a symbol that is not injective is a program the assembler
+// refuses after `check` accepted it. Each call reaches the instantiation its
+// argument's length names, and each instantiation earns its own symbol.
+struct Holder {
+    n: UInt8,
+}
+
+impl Holder {
+    pub fn give[T](h: Holder, _u: T) -> UInt8 {
+        h.n
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    let two: [UInt8; 2] = [1, 2]
+    let four: [UInt8; 4] = [1, 2, 3, 4]
+    let a = Holder.give(h, two)
+    let b = Holder.give(h, four)
+    let _h = h
+    a + b
+}

@@ -1,0 +1,15 @@
+// A comment inside an import is written before the line, not after it. The
+// alias sits past the path's end, so a comment between `as` and it was first
+// seen while the line was being ended -- and one seen there is placed after
+// the declaration it was written inside, which walks it one declaration down
+// every time the file is formatted. Formatting is a normal form, so a shape
+// with no fixed point is not a cosmetic complaint.
+import m as
+    // between as and the alias
+    other
+
+use m.A
+
+fn main() -> UInt8 {
+    0
+}

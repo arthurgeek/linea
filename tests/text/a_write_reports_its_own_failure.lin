@@ -1,0 +1,16 @@
+// A write that does not happen answers with the error the operating system
+// gave, and the program hands it on.
+//
+// Descriptor 9 is never open, so the write fails with EBADF. What `?` passes on
+// is a `Descriptor`'s `Error`, which is the errno the write reported.
+import std.io
+
+use io.descriptor
+use io.Descriptor
+use io.IoError
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = descriptor(9)
+    Writer.write_str(&w, "nowhere")?
+    return .Ok(0)
+}

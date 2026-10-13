@@ -1,0 +1,30 @@
+type Percent = UInt8 where it in 0..=100
+
+fn base(percent: Percent) -> UInt8 {
+    let read Percent(raw) = percent
+    raw
+}
+
+fn matched_base(percent: Percent) -> UInt8 {
+    match read percent { Percent(raw) => raw }
+}
+
+fn check(raw: UInt8) -> Bool {
+    match Percent?(raw) {
+        Some(percent) => {
+            let snapshot = base(percent)
+            let matched = matched_base(percent)
+            let Percent(owned) = percent
+            snapshot == owned && snapshot == matched && snapshot == raw
+        },
+        None => raw > 100,
+    }
+}
+
+fn main() -> UInt8 {
+    if check(0) && check(73) && check(100) && check(101) {
+        0
+    } else {
+        1
+    }
+}

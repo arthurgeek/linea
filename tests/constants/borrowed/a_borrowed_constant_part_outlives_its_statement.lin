@@ -1,0 +1,32 @@
+// A field or an element of a module constant is borrowed from the constant's
+// own storage, so the borrow may be kept after the statement, across loop
+// iterations and after the loop ends.
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+@copyable
+struct Config {
+    limit: Int64,
+}
+
+let config: Config = .{ limit = 7 }
+
+let limits = [Int64(4), Int64(9), Int64(2)]
+
+fn main() -> UInt8 {
+    let configured = reading(config.limit)
+    let second = reading(limits[1])
+    var highest = reading(limits[0])
+    for i in 1..3 {
+        let next = reading(limits[i])
+        if *next.value > *highest.value {
+            highest = next
+        }
+    }
+    UInt8(*configured.value + *second.value + *highest.value)
+}

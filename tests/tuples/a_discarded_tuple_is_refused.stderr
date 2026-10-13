@@ -1,0 +1,5 @@
+error[T-Discard]: this expression produces an `(Int64, Int64)` that is discarded
+ --> tests/tuples/a_discarded_tuple_is_refused.lin:4:5
+  |
+4 |     (1, 2)
+  |     ^^^^^^ bind it with `let _ =` to discard it deliberately

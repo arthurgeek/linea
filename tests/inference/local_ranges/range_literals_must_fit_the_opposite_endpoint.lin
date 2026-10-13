@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let end: UInt8 = 4
+    let range = 256..end
+    range.hi
+}

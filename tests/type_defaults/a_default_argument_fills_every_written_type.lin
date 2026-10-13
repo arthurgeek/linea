@@ -1,0 +1,36 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+alias Rack[T] = Shelf[T]
+
+@derive(Release)
+struct Depot {
+    main: Shelf[UInt8],
+    spare: Rack[UInt16],
+}
+
+fn empty() -> Shelf[UInt8] {
+    .{ items = Vec.new() }
+}
+
+fn count(sink shelf: Shelf[UInt8, SystemAllocator]) -> UInt64 {
+    let total = shelf.items.length()
+    shelf.release()
+    total
+}
+
+fn main() -> UInt8 {
+    let depot: Depot = .{ main = empty(), spare = .{ items = Vec.new() } }
+    let Depot { main, spare } = depot
+    let explicit: Shelf[UInt8, SystemAllocator] = main
+    let total = count(explicit) + spare.items.length()
+    spare.release()
+    UInt8(total) + 4
+}

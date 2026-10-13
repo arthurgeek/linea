@@ -1,0 +1,24 @@
+// `name_of` returns a copy of the name its argument carries. The argument is
+// read through the borrow `big`, so the result is a value of its own and
+// writing `hall.seats` afterwards leaves it reading the name it was made from.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn name_of(r: Room) -> Str where carries(r) {
+    copy(r.name)
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let big = borrow hall
+    let n = name_of(*big)
+    hall.seats = 100
+    if n == "hall" {
+        hall.seats
+    } else {
+        0
+    }
+}

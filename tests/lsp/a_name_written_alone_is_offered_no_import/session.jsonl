@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// An import binds a module, and a module is reached only through a qualified\n// access. A name written on its own is not one, so an import would leave the\n// name as undefined as it was.\nfn main() -> UInt8 {\n    ledger\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":4,"character":4},"end":{"line":4,"character":10}},"context":{"diagnostics":[{"range":{"start":{"line":4,"character":4},"end":{"line":4,"character":10}},"severity":1,"code":"N-Undefined","source":"linea","message":"undefined name `ledger`"}]}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

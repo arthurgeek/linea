@@ -1,0 +1,20 @@
+error[N-Undefined]: undefined name `N`
+  --> tests/traits/an_implementations_length_is_a_name_like_any_other.lin:13:19
+   |
+13 | impl Give[[UInt8; N]] for Holder {
+   |                   ^ no binding with this name is in scope
+error[N-Undefined]: undefined name `M`
+  --> tests/traits/an_implementations_length_is_a_name_like_any_other.lin:19:19
+   |
+19 | impl Give[[UInt8; M]] for Holder {
+   |                   ^ no binding with this name is in scope
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/traits/an_implementations_length_is_a_name_like_any_other.lin:13:19
+   |
+13 | impl Give[[UInt8; N]] for Holder {
+   |                   ^ this is not a constant
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/traits/an_implementations_length_is_a_name_like_any_other.lin:19:19
+   |
+19 | impl Give[[UInt8; M]] for Holder {
+   |                   ^ this is not a constant

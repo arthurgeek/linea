@@ -1,0 +1,12 @@
+// A name is where the resolver says it was declared, whatever kind of name it
+// is: a local at the `let` that bound it, a parameter where the signature
+// wrote it, and a function at its own name. A cursor on something that is not
+// a name reaches nothing at all.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = add(1, 2)
+    total
+}

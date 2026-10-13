@@ -1,0 +1,20 @@
+// Nothing declares `lookup`, but `&ticket` only lends `ticket` and `holder.row`
+// only reads a number out of `holder`, so neither can be taken by the call.
+// Both are still owned where `main` ends.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+@linear
+struct Holder {
+    row: UInt8,
+}
+
+fn main() -> UInt8 {
+    var ticket = Ticket.Seat(1)
+    let holder = Holder { row = 2 }
+    let _lent = lookup(&ticket)
+    let _read = lookup(holder.row)
+    0
+}

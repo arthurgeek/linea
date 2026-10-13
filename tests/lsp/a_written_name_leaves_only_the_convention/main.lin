@@ -1,0 +1,21 @@
+// A name written at the call is the half a reader can already see, so the hint
+// keeps the half they cannot: `account: after` is answered by `sink` alone, and
+// `tally: seen` by nothing at all. The names run out of declaration order and
+// each hint still sits against the argument its parameter takes, because the
+// pairing is the one the checker settled. `rounds` is filled from its
+// declaration and there is nothing written here to hint about.
+struct Account {
+    balance: UInt8,
+}
+
+fn settle(sink account: Account, fee: UInt8, tally: UInt8, rounds: UInt8 = 2) -> UInt8 {
+    account.balance + fee + tally + rounds
+}
+
+fn main() -> UInt8 {
+    let after: Account = .{ balance = 7 }
+    let before: Account = .{ balance = 5 }
+    let owed: UInt8 = 1
+    let seen: UInt8 = 3
+    settle(tally: seen, account: after, fee: owed) + settle(before, 2, 4)
+}

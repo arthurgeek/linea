@@ -1,0 +1,266 @@
+import std.testing
+
+// Hash gives a value a 64-bit digest. Equal values must have equal hashes.
+// Hashes are noncryptographic and are not a persistent encoding; their values
+// may change between library versions. Hashing is deterministic and unkeyed,
+// so a caller who chooses many keys can force collisions, and randomizing a
+// finished digest could not separate keys that already collide.
+pub trait Hash: Equivalent {
+    fn hash(self: Self) -> UInt64
+}
+
+// A Hasher computes digest = digest * multiplier + (byte + 1) modulo 2^64 over
+// a stream of bytes, starting from initial_digest. Adding one to each byte
+// makes a zero byte change the digest. The digest is kept as two 32-bit limbs,
+// each below limb_base (2^32), so every intermediate product fits in checked
+// UInt64 arithmetic.
+let limb_base: UInt64 = 4294967296
+
+// 65599 is the prime multiplier of the sdbm string hash, a multiplier long
+// used for hashing short byte strings.
+let multiplier: UInt64 = 65599
+
+// 5381 is the starting value of the djb2 string hash, the matching choice of
+// seed from the same family of byte-string hashes.
+let initial_digest: UInt64 = 5381
+
+@opaque
+struct Hasher {
+    low: UInt64,
+    high: UInt64,
+}
+
+impl Hasher {
+    // Start an empty stream.
+    pub fn new() -> Hasher {
+        .{ low = initial_digest, high = 0 }
+    }
+}
+
+test fn hasher_new_starts_with_an_empty_stream() {
+    let first = Hasher.new()
+    let second = Hasher.new()
+    let empty_digest: UInt64 = 5381
+    testing.assert_eq(first.finish(), empty_digest, "empty stream has the wrong initial digest")?
+    testing.assert_eq(second.finish(), empty_digest, "new hash state retained another stream")?
+}
+
+impl Hasher {
+    // Add one byte to the stream. The low limb's carry moves into the high
+    // limb, and the high limb's carry past 2^32 is dropped, which is the
+    // reduction modulo 2^64.
+    pub fn write_byte(inout self: Self, byte: UInt8) -> () {
+        let product = self.low * multiplier + UInt64(byte) + 1
+        self.high = (self.high * multiplier + product / limb_base) % limb_base
+        self.low = product % limb_base
+    }
+}
+
+test fn hasher_write_byte_preserves_byte_extremes_and_limb_carries() {
+    var zero = Hasher.new()
+    &zero.write_byte(0)
+    let zero_digest: UInt64 = 352988220
+    testing.assert_eq(zero.finish(), zero_digest, "a zero byte was omitted")?
+    var maximum = Hasher.new()
+    &maximum.write_byte(255)
+    let maximum_digest: UInt64 = 352988475
+    testing.assert_eq(maximum.finish(), maximum_digest, "the high byte bit was lost")?
+    for _i in 0..7 {
+        &maximum.write_byte(255)
+    }
+    // This is the eight-byte polynomial reduced modulo 2^64 with every limb
+    // carry applied.
+    let eight_bytes_digest: UInt64 = 11751299930513722117
+    testing.assert_eq(maximum.finish(), eight_bytes_digest, "byte hashing lost a carry or failed to wrap")?
+    var mixed = Hasher.new()
+    for byte in [UInt8(0), 1, 127, 128, 254, 255] {
+        &mixed.write_byte(byte)
+    }
+    let mixed_digest: UInt64 = 12447061161526545416
+    testing.assert_eq(mixed.finish(), mixed_digest, "mixed bytes changed the polynomial remainder")?
+}
+
+test fn long_streams_keep_checked_arithmetic_in_range() {
+    var first = Hasher.new()
+    var second = Hasher.new()
+    for _i in 0..10000 {
+        &first.write_byte(255)
+        &second.write_byte(255)
+    }
+    testing.assert_eq(first.finish(), second.finish(), "identical streams have different hashes")?
+    &second.write_byte(0)
+    testing.assert(first.finish() != second.finish(), "a trailing zero was lost")?
+}
+
+impl Hasher {
+    // Feed all eight bytes in little-endian order, independent of host layout.
+    pub fn write_u64(inout self: Self, value: UInt64) -> () {
+        var remaining = value
+        for _i in 0..8 {
+            &self.write_byte(UInt8(remaining % 256))
+            remaining = remaining / 256
+        }
+    }
+}
+
+test fn hasher_write_u64_preserves_all_bytes_in_little_endian_order() {
+    // Its little-endian bytes are 8, 7, 6, 5, 4, 3, 2, 1.
+    let little_endian_word: UInt64 = 72623859790382856
+    var word = Hasher.new()
+    &word.write_u64(little_endian_word)
+    var bytes = Hasher.new()
+    for byte in [UInt8(8), 7, 6, 5, 4, 3, 2, 1] {
+        &bytes.write_byte(byte)
+    }
+    let expected_word_digest: UInt64 = 8137289761530033153
+    testing.assert_eq(word.finish(), expected_word_digest, "word hashing changed the polynomial remainder")?
+    testing.assert_eq(word.finish(), bytes.finish(), "word hashing omitted or reordered bytes")?
+    var other = Hasher.new()
+    &other.write_u64(little_endian_word + 1)
+    testing.assert(word.finish() != other.finish(), "different input words were conflated")?
+}
+
+impl Hasher {
+    // Return the digest of the bytes written so far. The stream is unchanged,
+    // so writing may continue after it.
+    pub fn finish(self: Self) -> UInt64 {
+        self.high * limb_base + self.low
+    }
+}
+
+test fn hasher_finish_observes_without_resetting_or_consuming_the_stream() {
+    var state = Hasher.new()
+    &state.write_byte(255)
+    let first = state.finish()
+    let again = state.finish()
+    for _i in 0..7 {
+        &state.write_byte(255)
+    }
+    let one_byte_digest: UInt64 = 352988475
+    let eight_bytes_digest: UInt64 = 11751299930513722117
+    testing.assert_eq(first, one_byte_digest, "finish returned the wrong digest")?
+    testing.assert_eq(again, first, "finish reset or changed the state")?
+    testing.assert_eq(state.finish(), eight_bytes_digest, "writing after finish lost the existing prefix")?
+}
+
+// An integer hashes a sign byte and then its magnitude as eight little-endian
+// bytes, so the same number hashes alike at every width.
+impl[T: Integer + Equivalent] Hash for T {
+    fn hash(self: Self) -> UInt64 {
+        var state = Hasher.new()
+        if self < T(0) {
+            &state.write_byte(1)
+            // Add before negating so the signed minimum stays representable.
+            &state.write_u64(UInt64(-(self + T(1))) + 1)
+        } else {
+            &state.write_byte(0)
+            &state.write_u64(UInt64(self))
+        }
+        state.finish()
+    }
+}
+
+fn check_integer_hash[T: Integer + Hash](_sample: T) -> Result[(), testing.Failure] {
+    testing.assert_eq(T.min.hash(), T.min.hash(), "hashing the minimum is not deterministic")?
+    testing.assert(T.min.hash() != T.max.hash(), "integer boundaries were conflated")?
+    testing.assert(T(0).hash() != T(1).hash(), "adjacent integers were conflated")?
+    .Ok(())
+}
+
+test fn integer_hashes_accept_every_width_and_signed_boundary() {
+    check_integer_hash(Int8(0))?
+    check_integer_hash(Int16(0))?
+    check_integer_hash(Int32(0))?
+    check_integer_hash(Int64(0))?
+    check_integer_hash(UInt8(0))?
+    check_integer_hash(UInt16(0))?
+    check_integer_hash(UInt32(0))?
+    check_integer_hash(UInt64(0))?
+    testing.assert(Int64(-1).hash() != Int64(1).hash(), "the integer sign was lost")?
+    let observed: Int64 = -7
+    testing.assert_eq(Hash.hash(borrow observed), observed.hash(), "an observation hashed its address instead of its value")?
+}
+
+impl Hash for Bool {
+    fn hash(self: Self) -> UInt64 {
+        var state = Hasher.new()
+        &state.write_byte(
+            if self {
+                1
+            } else {
+                0
+            },
+        )
+        state.finish()
+    }
+}
+
+test fn boolean_hashes_distinguish_values() {
+    testing.assert(Hash.hash(false) != Hash.hash(true), "Boolean values were conflated")?
+}
+
+impl Hash for () {
+    fn hash(_self: ()) -> UInt64 {
+        Hasher.new().finish()
+    }
+}
+
+test fn unit_hashes_are_deterministic() {
+    testing.assert_eq(Hash.hash(()), Hasher.new().finish(), "unit hashing added bytes")?
+}
+
+// Derived hashing feeds the variant's position and then each component's
+// hash in declaration order, so different variants and reordered fields hash
+// differently.
+template impl Hash where
+    reflect.components: Hash,
+    reflect.supertraits: derived,
+{
+    fn hash(self: Self) -> UInt64 {
+        var state = Hasher.new()
+        Hasher.write_u64(&state, reflect.ordinal_of(self))
+        match read self {
+            reflect.case => {
+                for component in reflect.components {
+                    Hasher.write_u64(&state, Hash.hash(component.of(self)))
+                }
+            },
+        }
+        state.finish()
+    }
+}
+
+@derive(Equatable, Equivalent, Hash)
+struct HashPair { first: UInt64, second: UInt64 }
+
+@derive(Equatable, Equivalent, Hash)
+enum HashChoice { First(UInt64), Second(UInt64) }
+
+@derive(Equatable, Equivalent, Hash)
+type HashWrapper = UInt64
+
+@derive(Equatable, Equivalent, Hash)
+type PositiveHash = UInt8 where it in 1..=255
+
+struct GenericHash[T] { value: T }
+
+derive[T: Equatable] Equatable for GenericHash[T]
+
+derive[T: Equivalent] Equivalent for GenericHash[T]
+
+derive[T: Hash] Hash for GenericHash[T]
+
+test fn structural_hashing_preserves_field_order_and_variant_identity() {
+    let first = HashPair { first = 1, second = 2 }
+    let equal = HashPair { first = 1, second = 2 }
+    let swapped = HashPair { first = 2, second = 1 }
+    testing.assert_eq(first.hash(), equal.hash(), "equal structures have different hashes")?
+    testing.assert(first.hash() != swapped.hash(), "field order was lost")?
+    testing.assert(HashChoice.First(1).hash() != HashChoice.Second(1).hash(), "variant identity was lost")?
+    testing.assert(HashChoice.First(1).hash() != HashChoice.First(2).hash(), "variant payloads were lost")?
+    testing.assert(HashWrapper(7).hash() != HashWrapper(8).hash(), "newtype bases were lost")?
+    testing.assert(PositiveHash(1).hash() != PositiveHash(255).hash(), "refined newtype bases were lost")?
+    let generic = GenericHash[UInt64] { value = 7 }
+    let different = GenericHash[UInt64] { value = 8 }
+    testing.assert(generic.hash() != different.hash(), "generic components were lost")?
+}

@@ -1,0 +1,20 @@
+import std.mem
+
+// `inout fn(...)` is a type wherever a type is written: a field holds one,
+// and a vector takes one as its element type.
+struct Step {
+    run: inout fn(value: UInt64) -> UInt64,
+}
+
+fn main() -> UInt8 {
+    var step = Step { run = inout [] |value| value * 2 }
+    var steps: Vec[inout fn(value: UInt64) -> UInt64, mem.SystemAllocator] = Vec.new()
+    let pushed = Vec.push(&steps, copy(step.run)).is_ok()
+    let doubled = &(step.run)(21)
+    steps.release()
+    if pushed {
+        UInt8(doubled)
+    } else {
+        1
+    }
+}

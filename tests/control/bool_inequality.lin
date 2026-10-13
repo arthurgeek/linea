@@ -1,0 +1,9 @@
+// `!=` is a call on `Equatable` and `Bool` implements it, so equality reaches
+// a two-valued type even though no ordering does.
+fn main() -> UInt8 {
+    if true != false {
+        0
+    } else {
+        1
+    }
+}

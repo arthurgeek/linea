@@ -1,0 +1,9 @@
+error[O-Leak]: `locker` (a linear `vault.Locker`) is still owned when this path leaves
+ --> tests/ownership/leak_reports/a_trait_out_of_scope_is_named_with_its_use/main.lin:6:9
+  |
+6 |     let locker = vault.open(3)
+  |         ^^^^^^ never settled on the path that reaches the end of this block
+8 | }
+  | - the block ends here
+  |
+  = help: settle it first with `locker.close()` after `use vault.Close`, or take it apart with `let Locker { deposit: _ } = locker`

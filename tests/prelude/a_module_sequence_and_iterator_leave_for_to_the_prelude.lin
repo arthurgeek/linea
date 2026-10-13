@@ -1,0 +1,29 @@
+// A module may declare its own `Sequence` and `Iterator` traits. A `for` loop
+// still walks a sequence through the standard library's traits.
+trait Sequence {
+    fn count(self: Self) -> UInt8
+}
+
+trait Iterator {
+    fn step(self: Self) -> UInt8
+}
+
+impl Sequence for UInt8 {
+    fn count(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl Iterator for UInt8 {
+    fn step(self: UInt8) -> UInt8 {
+        self + 1
+    }
+}
+
+fn main() -> UInt8 {
+    var total = UInt8(0)
+    for word in "tea and cake".split(" ").unwrap() {
+        total = total + UInt8(word.length())
+    }
+    total + Sequence.count(UInt8(3)) + Iterator.step(UInt8(0))
+}

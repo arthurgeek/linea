@@ -1,0 +1,24 @@
+@copyable
+struct Label {
+    name: Str,
+}
+
+let label: Label = .{ name = "t\u{65}a\n\0\\" }
+
+fn length(value: Label = label) -> UInt64 {
+    value.name.length()
+}
+
+fn invoke[F: fn(read value: Label = .{ name = "tea\u{a}\u{0}\u{5c}" }) -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if invoke(length) != 6 {
+        return 1
+    }
+    if label.name != "tea\n\0\\" {
+        return 2
+    }
+    0
+}

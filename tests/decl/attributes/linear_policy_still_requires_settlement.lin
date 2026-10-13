@@ -1,0 +1,7 @@
+@linear
+struct Ticket { value: UInt8 }
+
+fn main() -> UInt8 {
+    let ticket = Ticket { value = 7 }
+    ticket.value
+}

@@ -1,0 +1,6 @@
+enum RenderError { Allocation(UInt8) }
+
+fn main() -> UInt8 {
+    let _wrap: fn(sink code: UInt8, sink other: UInt8) -> RenderError = .Allocation
+    0
+}

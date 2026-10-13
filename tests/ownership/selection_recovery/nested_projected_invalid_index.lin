@@ -1,0 +1,17 @@
+struct Cell { value: UInt8 }
+
+struct Grid { cells: [Cell; 1] }
+
+impl Index[UInt64] for Grid {
+    type Elem = Cell
+
+    proj at(inout self: Grid, i: UInt64) -> Cell {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let grid: Grid = .{ cells = [.{ value = 1 }] }
+    let _wrong: Bool = grid[9].value
+    0
+}

@@ -1,0 +1,10 @@
+// `_` declares no name, so a parameter list may hold it more than once, in a
+// function and in a closure.
+fn third(_: UInt8, _: UInt8, last: UInt8) -> UInt8 {
+    last
+}
+
+fn main() -> UInt8 {
+    let middle = |_: UInt8, mid: UInt8, _: UInt8| mid
+    third(1, 2, 7) + middle(1, 3, 5) - 10
+}

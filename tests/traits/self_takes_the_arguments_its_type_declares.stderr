@@ -1,0 +1,10 @@
+error[T-Bound]: `Option` takes 1 type argument(s), and was given 0
+  --> tests/traits/self_takes_the_arguments_its_type_declares.lin:16:18
+   |
+16 | impl Measure for Option {
+   |                  ^^^^^^ give it the arguments it declares
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Option[UInt8]` does not
+  --> tests/traits/self_takes_the_arguments_its_type_declares.lin:27:16
+   |
+27 |     Measure.of(a)
+   |                ^ implement it for that type, or reach the operation on one that does

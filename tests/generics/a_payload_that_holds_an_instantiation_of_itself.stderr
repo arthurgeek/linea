@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Tree contains itself
+  --> tests/generics/a_payload_that_holds_an_instantiation_of_itself.lin:10:13
+   |
+10 |     Node(T, Wrap[Tree[T]]),
+   |             ^^^^ a value would have to hold one, so it has no size

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/text/a_borrowed_value_cannot_change_while_an_interpolation_holds_it.lin:22:5
+   |
+22 |     name = Name { text = "Grace" }
+   |     ^^^^ keep this place available until the last use of its observation
+23 |     println(greeting)?
+   |             -------- the observation is still used here

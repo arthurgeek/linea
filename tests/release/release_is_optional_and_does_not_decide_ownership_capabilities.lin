@@ -1,0 +1,86 @@
+// Linear decides whether a value must be consumed, while Release says only
+// that one ordinary consuming operation is available. A transaction and a
+// promise have contextual terminal operations and no Release; Plain is affine
+// without Release; Stamp is copyable even though it implements Release.
+@linear
+struct Transaction {
+    code: UInt8,
+}
+
+@linear
+struct Promise {
+    code: UInt8,
+}
+
+struct Plain {
+    code: UInt8,
+}
+
+@copyable
+struct Stamp {
+    code: UInt8,
+}
+
+impl Release for Stamp {
+    fn release(sink self: Self) -> () {
+        let Stamp { code: _code } = self
+    }
+}
+
+fn commit(sink tx: Transaction) -> UInt8 {
+    let Transaction { code } = tx
+    code
+}
+
+fn rollback(sink tx: Transaction, inout count: UInt8) -> () {
+    let Transaction { code: _code } = tx
+    count = count + 1
+}
+
+fn choose(commit_now: Bool, inout rolled_back: UInt8) -> UInt8 {
+    let tx: Transaction = .{ code = 7 }
+    defer rollback(tx, &rolled_back)
+
+    if commit_now {
+        let committed = commit(tx)
+        return committed
+    }
+    0
+}
+
+fn fulfill(sink promise: Promise, value: UInt8) -> UInt8 {
+    let Promise { code } = promise
+    code + value
+}
+
+fn cancel(sink promise: Promise, reason: UInt8) -> UInt8 {
+    let Promise { code } = promise
+    code + reason
+}
+
+fn observe(plain: Plain) -> UInt8 {
+    plain.code
+}
+
+fn discard[T: Release](sink value: T) -> () {
+    value.release()
+}
+
+fn main() -> UInt8 {
+    var rolled_back: UInt8 = 0
+    let committed = choose(true, &rolled_back)
+    let stayed = choose(false, &rolled_back)
+
+    let plain: Plain = .{ code = 2 }
+    let seen = observe(plain)
+
+    let stamp: Stamp = .{ code = 3 }
+    let duplicate = copy(stamp)
+    discard(stamp)
+    duplicate.release()
+
+    let fulfilled = fulfill(.{ code = 1 }, 4)
+    let cancelled = cancel(.{ code = 2 }, 6)
+
+    committed + stayed + rolled_back + seen + fulfilled + cancelled
+}

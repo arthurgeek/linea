@@ -1,0 +1,9 @@
+// A bracket over anything but an array names the place that type's `Index`
+// implementation projects, so a type implementing none has no place for one to
+// name. The refusal is [T-Bound], which is the rule a comparison over a type
+// without `Comparable` is refused by -- one rule for a missing implementation,
+// whichever operator asked for it.
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    copy(n[0])
+}

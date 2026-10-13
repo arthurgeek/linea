@@ -1,0 +1,5 @@
+error[O-Lent]: this writes a place the construct around it is lending
+ --> tests/tuples/a_write_while_a_pair_walk_lends_is_one_error.lin:6:9
+  |
+6 |         pairs[0] = (5, 6)
+  |         ^^^^^^^^^^^^^^^^^ write it after the construct ends, or take what it names instead of lending it

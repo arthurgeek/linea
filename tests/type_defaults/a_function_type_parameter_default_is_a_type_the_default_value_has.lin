@@ -1,0 +1,8 @@
+// A default value is checked against the default of its parameter's type.
+fn pass[S: Release = UInt8](sink state: S = ()) -> S where carries(state) {
+    state
+}
+
+fn main() -> UInt8 {
+    pass()
+}

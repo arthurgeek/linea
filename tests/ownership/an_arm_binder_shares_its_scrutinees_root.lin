@@ -1,0 +1,24 @@
+// [N-Aliased] compares roots and paths, and a name a `match` pattern binds was
+// a root of its own -- so it shared a root with nothing and `f(&e, p)` read as
+// two unrelated places. `match read e { Round(p) => ... }` binds `p` to part
+// of `e`: one write through `&e` reaches both, and what the callee sees for
+// its second argument would depend on the order the arguments happen to be
+// evaluated in.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+enum Shape {
+    Round(Pair),
+}
+
+fn grow(inout s: Shape, p: Pair) -> UInt8 {
+    s = Shape.Round(.{ a = 9, b = 9 })
+    p.a
+}
+
+fn main() -> UInt8 {
+    var e: Shape = .Round(.{ a = 1, b = 2 })
+    match read e { Round(p) => grow(&e, p) }
+}

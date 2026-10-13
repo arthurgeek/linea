@@ -1,0 +1,14 @@
+// A selection that is not called reaches a field, and an operation is not a
+// field, so selecting one of a sealed type's operations is refused the way it
+// is for any type: the report names the function value that exists. It says
+// nothing about the sealed representation, which the selection never reached.
+import box_office
+
+use box_office.Ticket
+
+fn main() -> UInt8 {
+    let ticket = Ticket.sell(14)
+    let _refund = ticket.refund
+    let _trim = "  aisle ".trim_ascii
+    Ticket.refund(ticket)
+}

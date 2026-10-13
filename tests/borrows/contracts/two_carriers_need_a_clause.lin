@@ -1,0 +1,26 @@
+// With two carrier parameters neither is the default, and the signature names
+// the source it means.
+@carrier
+struct Session {
+    user: Str,
+}
+
+@carrier
+struct Visit {
+    page: Str,
+}
+
+fn first(session: Session, visit: Visit) -> Str {
+    if visit.page.length() > 0 {
+        copy(session.user)
+    } else {
+        copy(session.user)
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let visit = Visit { page = "/" }
+    let _first = first(session, visit)
+    0
+}

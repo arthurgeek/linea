@@ -1,0 +1,30 @@
+// A trait member whose answer is a type: the implementation binds it, and
+// every other member is checked under that binding.
+//
+// Inside the trait's own braces the bare name `Item` names that declaration,
+// the way `Self` names the type an implementation is for. It spells what
+// `Self.Item` spells and is read the same way, so the signature the trait
+// writes and the one the implementation supplies are compared under the one
+// binding the implementation gave.
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+
+    fn get(self: Box) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Box = .{ n = 7 }
+    Holder.get(b)
+}

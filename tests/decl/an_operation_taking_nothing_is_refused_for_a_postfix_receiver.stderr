@@ -1,0 +1,5 @@
+error[T-Arity]: `Door.make` takes no arguments
+  --> tests/decl/an_operation_taking_nothing_is_refused_for_a_postfix_receiver.lin:16:5
+   |
+16 |     door.make().width
+   |     ^^^^^^^^^ a postfix call passes its receiver as the first argument

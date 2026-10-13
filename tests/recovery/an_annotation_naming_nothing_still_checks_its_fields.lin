@@ -1,0 +1,30 @@
+// `Nope` names nothing, so no literal typed by it says what its fields hold.
+// Each field's value is still checked on its own.
+fn take(_given: Nope) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _one: Nope = .{
+        x = {
+            let w: UInt8 = "t"
+            w
+        },
+    }
+    let _many: [Nope; 1] = [
+        .{
+            x = {
+                let v: UInt8 = "u"
+                v
+            },
+        },
+    ]
+    take(
+        .{
+            x = {
+                let u: UInt8 = "v"
+                u
+            },
+        },
+    )
+}

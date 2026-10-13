@@ -1,0 +1,3 @@
+export fn linea_trap(num: Int32) -> Int32 {
+    num
+}

@@ -1,0 +1,10 @@
+error[S-String]: a comment interrupts a multi-line literal
+ --> tests/multiline_strings/a_comment_or_blank_line_interrupts_a_literal.lin:4:9
+  |
+4 |         // a comment cannot sit inside the text
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ move it above or below the literal
+error[S-String]: a blank line interrupts a multi-line literal
+ --> tests/multiline_strings/a_comment_or_blank_line_interrupts_a_literal.lin:9:9
+  |
+9 |         \\1 | 2
+  |         ^^^^^^^ the literal continues here; an empty line of text is written `\\`

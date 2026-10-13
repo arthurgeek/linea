@@ -1,0 +1,33 @@
+// A family read at a settled head supplies `Give[UInt8]` for `Holder[UInt8]`,
+// and the settled implementation below supplies `Give[Bool]` for the same head.
+// The arguments differ where the two meet, so no instantiation makes both
+// answer and these are two implementations rather than one.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        3
+    }
+}
+
+impl Give[Bool] for Holder[UInt8] {
+    fn give(_self: Holder[UInt8], u: Bool) -> UInt8 {
+        if u {
+            4
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 0 }
+    let n: UInt8 = 1
+    Give.give(h, n) + Give.give(h, true)
+}

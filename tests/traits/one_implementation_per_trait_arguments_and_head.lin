@@ -1,0 +1,32 @@
+// The same trait, the same arguments, the same head: one key, so the second of
+// these is the first written twice. The arguments are what can make two
+// implementations for one type two keys, and writing the same ones is writing
+// the same implementation.
+trait _Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl _Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count + t
+    }
+}
+
+impl _Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        if t > 0 {
+            x.count
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    c.count
+}

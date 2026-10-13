@@ -1,0 +1,26 @@
+// A head applies a constructor, so what it supplies is what that constructor
+// declares -- in both directions. A head given more arguments than the type
+// takes names no type, and neither does one given arguments by a type that
+// takes none.
+//
+// The trait declares nothing: the head is refused for what it names, whatever
+// stands inside the braces.
+trait Show {}
+
+struct Coins[T] {
+    v: T,
+}
+
+struct Account {
+    n: UInt8,
+}
+
+impl Show for Coins[UInt8, UInt8] {}
+
+impl Show for Account[UInt8] {}
+
+fn main() -> UInt8 {
+    let c: Coins[UInt8] = .{ v = 1 }
+    let a: Account = .{ n = 2 }
+    c.v + a.n
+}

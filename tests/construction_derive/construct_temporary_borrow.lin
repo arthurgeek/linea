@@ -1,0 +1,26 @@
+trait Build {
+    fn build() -> Self
+}
+
+template impl Build where reflect.target: struct {
+    fn build() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let local: UInt64 = 7
+                let field: component.Type = borrow local
+                field
+            },
+            {},
+        )
+    }
+}
+
+struct View { value: borrow UInt64 }
+
+derive Build for View
+
+fn main() -> UInt8 {
+    let view: View = Build.build()
+    UInt8(*view.value)
+}

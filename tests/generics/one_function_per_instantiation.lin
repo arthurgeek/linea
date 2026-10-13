@@ -1,0 +1,25 @@
+// Monomorphisation: a generic declaration does not survive code generation.
+// Each instantiation a program reaches becomes its own function, so the two
+// written here become four, and every call names the copy it reaches rather
+// than the declaration it was written against.
+//
+// The set is reachability, which is why a generic function nothing calls costs
+// nothing -- and why a body that calls itself with a larger type argument has
+// no set at all.
+fn show[T: Copyable](x: T) -> T {
+    copy(x)
+}
+
+fn twice[T: Copyable](x: T) -> T {
+    show(show(x))
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let b: Bool = true
+    if twice(b) {
+        twice(a)
+    } else {
+        0
+    }
+}

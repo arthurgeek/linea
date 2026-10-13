@@ -1,0 +1,6 @@
+error[T-Operands]: expected `UInt8`, found `Bool`
+ --> tests/assign/the_operands_are_numbers.lin:5:10
+  |
+5 |     v += true
+  |     - expected because of this operand
+  |          ^^^^ expected `UInt8`, found `Bool`

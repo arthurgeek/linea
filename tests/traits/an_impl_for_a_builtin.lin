@@ -1,0 +1,32 @@
+// A trait's own module may implement it for a primitive. No module declares
+// `UInt8`, so the type side is owned by nobody and the trait side is the whole of
+// what admits this -- which is [M-Impl] unchanged, asked about a side that
+// does not exist.
+//
+// Two builtins, because a head that is not a declaration still has to tell
+// them apart: the two implementations below are one trait for two types, and a
+// key that recorded "some builtin" would read them as one written twice.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x
+    }
+}
+
+impl Measure for Bool {
+    fn of(x: Self) -> UInt8 {
+        if x {
+            4
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    Measure.of(n) + Measure.of(true)
+}

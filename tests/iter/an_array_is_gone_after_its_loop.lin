@@ -1,0 +1,11 @@
+// The value written after `in` sits in a consuming position whatever it is, so
+// an array a walk took is an array no later expression may name -- not the
+// array, and not a place inside it.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 4]
+    var total: UInt8 = 0
+    for x in xs {
+        total += x
+    }
+    total + xs[0]
+}

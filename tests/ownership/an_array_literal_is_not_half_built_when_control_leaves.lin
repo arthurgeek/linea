@@ -1,0 +1,16 @@
+// An array literal takes all its elements and completes as one, so it holds a
+// transfer open as a call does. `d` is in the array and the array is never
+// built.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn go(sink d: Key) -> UInt8 {
+    let _pair = [d, return 7]
+    8
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

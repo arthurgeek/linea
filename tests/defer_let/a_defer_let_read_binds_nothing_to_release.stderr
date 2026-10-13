@@ -1,0 +1,5 @@
+error[S-DeferLet]: `defer let` cannot bind by `read`
+  --> tests/defer_let/a_defer_let_read_binds_nothing_to_release.lin:10:15
+   |
+10 |     defer let read Size { width, height } = size
+   |               ^^^^ a `read` binding owns nothing to release; write `let read`

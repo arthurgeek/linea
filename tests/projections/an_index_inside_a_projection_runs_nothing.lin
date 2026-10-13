@@ -1,0 +1,24 @@
+// A projection's body is spliced into every site that reaches it, so what a
+// bracket in it holds runs once per site and in a position nobody wrote. An
+// index there names and computes; it does not call.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+fn pick() -> UInt64 {
+    2
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, _i: UInt64) -> UInt8 {
+        self.cells[pick()]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

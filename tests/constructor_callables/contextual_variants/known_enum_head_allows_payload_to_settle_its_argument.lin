@@ -1,0 +1,10 @@
+enum Wrap[T] { Value(T) }
+
+fn apply[T, F: fn(sink value: UInt8) -> Wrap[T]](callback: F) -> Wrap[T]
+where carries(callback) {
+    return callback(7)
+}
+
+fn main() -> UInt8 {
+    match apply(.Value) { Value(value) => value }
+}

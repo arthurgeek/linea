@@ -1,0 +1,13 @@
+// `where carries()` promises an independent result, and a type that promises
+// it is spelled with the clause, since without one the result would carry
+// `text`.
+fn keep(text: Str) -> Str {
+    copy(text)
+}
+
+fn take(_f: fn(text: Str) -> Str where carries()) -> () {}
+
+fn main() -> UInt8 {
+    take(keep)
+    0
+}

@@ -1,0 +1,5 @@
+note[S-Continuation]: the next line begins with `.`, which could have continued the expression above
+  --> tests/newline/a_caseless_name_after_a_dot_is_noted.lin:11:5
+   |
+11 |     ._1
+   |     ^ end the previous line with it if that was meant

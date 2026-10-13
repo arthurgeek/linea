@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let first = borrow number
+    let second = borrow first
+    let once = copy(*second)
+    let _wrong: UInt8 = once
+    number
+}

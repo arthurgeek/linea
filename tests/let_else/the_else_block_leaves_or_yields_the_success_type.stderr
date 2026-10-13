@@ -1,0 +1,13 @@
+error[T-Mismatch]: expected a block that leaves or yields `UInt16`, found `Bool`
+  --> tests/let_else/the_else_block_leaves_or_yields_the_success_type.lin:18:9
+   |
+17 |     let port = parse(0) else |_| {
+   |                         ---- an `else` block leaves, or yields what a success carries
+18 |         true
+   |         ^^^^ expected a block that leaves or yields `UInt16`, found `Bool`
+error[T-Mismatch]: expected a block that leaves or yields `UInt16`, found `()`
+  --> tests/let_else/the_else_block_leaves_or_yields_the_success_type.lin:20:35
+   |
+20 |     let other = parse(1) else |_| {}
+   |                          ---- an `else` block leaves, or yields what a success carries
+   |                                   ^^ this body produces nothing

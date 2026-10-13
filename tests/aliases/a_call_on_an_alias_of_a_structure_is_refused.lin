@@ -1,0 +1,12 @@
+// A call on an alias is the call on the type it names, so an alias of a
+// structure is refused as the structure's own name is.
+struct Point {
+    x: Int64,
+}
+
+alias Spot = Point
+
+fn main() -> UInt8 {
+    let _p = Spot(3)
+    0
+}

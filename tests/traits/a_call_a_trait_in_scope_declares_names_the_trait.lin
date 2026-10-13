@@ -1,0 +1,11 @@
+// `Release` is in scope and declares `release`, but `Ticket` does not
+// implement it, so `Ticket` has no operation of that name.
+struct Ticket {
+    seat: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket { seat = 3 }
+    ticket.release()
+    0
+}

@@ -1,0 +1,8 @@
+// A tuple pattern takes a tuple apart, so the expected callable must pass one.
+fn apply[F: fn(read value: UInt8) -> UInt8](value: UInt8, check: F) -> UInt8 {
+    check(value)
+}
+
+fn main() -> UInt8 {
+    apply(3, |(a, _)| a)
+}

@@ -1,0 +1,13 @@
+struct Tag[K = UInt8] {
+    kind: K,
+}
+
+struct Labelled[T, L = Tag] {
+    value: T,
+    label: L,
+}
+
+fn main() -> UInt8 {
+    let held: Labelled[UInt8] = .{ value = 3, label = .{ kind = 4 } }
+    held.value + held.label.kind
+}

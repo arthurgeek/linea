@@ -1,0 +1,20 @@
+// `bump` changes its receiver, and what `fresh()` returns is no place to
+// lend: the value is bound to a `var` first.
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+}
+
+fn fresh() -> Counter {
+    Counter { count = 0 }
+}
+
+fn main() -> UInt8 {
+    fresh().bump()
+    0
+}

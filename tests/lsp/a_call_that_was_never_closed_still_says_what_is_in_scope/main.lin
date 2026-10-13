@@ -1,0 +1,13 @@
+// The state a completion is asked from: a call the parser never closed, which
+// it recovers from rather than failing. The call is unfinished and the body
+// around it is not, so what is offered is what the nearest scope the resolver
+// recorded holds.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    let total = add(
+    total
+}

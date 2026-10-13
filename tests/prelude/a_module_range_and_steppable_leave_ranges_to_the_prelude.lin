@@ -1,0 +1,24 @@
+// A module may declare its own `Range` and `Steppable`. `lo..hi` still builds
+// the standard library's range and steps through its `Steppable`.
+struct Range {
+    width: UInt8,
+}
+
+trait Steppable {
+    fn stride(self: Self) -> UInt8
+}
+
+impl Steppable for Range {
+    fn stride(self: Range) -> UInt8 {
+        self.width
+    }
+}
+
+fn main() -> UInt8 {
+    var total = UInt8(0)
+    for step in UInt8(1)..4 {
+        total = total + step
+    }
+    let own = Range { width = 4 }
+    total + own.stride()
+}

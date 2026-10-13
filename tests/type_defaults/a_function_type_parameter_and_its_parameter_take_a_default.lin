@@ -1,0 +1,22 @@
+@derive(Release)
+struct Tally {
+    visits: UInt8,
+}
+
+// `state` is `()` when a call gives none, and the call's own value otherwise.
+fn pass[S: Release = ()](_label: UInt8, sink state: S = ()) -> S where carries(state) {
+    state
+}
+
+fn count(sink tally: Tally) -> UInt8 {
+    let visits = tally.visits
+    tally.release()
+    visits
+}
+
+fn main() -> UInt8 {
+    let _nothing = pass(1)
+    let kept = pass(2, state: Tally { visits = 4 })
+    let _named: () = pass(3, state: ())
+    count(kept) + 3
+}

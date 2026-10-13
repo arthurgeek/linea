@@ -1,0 +1,5 @@
+import std.hash
+
+fn main() -> UInt8 {
+    UInt8(hash.Hash.hash(1.0) % 256)
+}

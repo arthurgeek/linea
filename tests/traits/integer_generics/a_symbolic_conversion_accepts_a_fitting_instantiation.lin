@@ -1,0 +1,11 @@
+fn converted[T: Integer](_type_witness: T) -> T {
+    T(256)
+}
+
+fn main() -> UInt8 {
+    if converted(UInt16(0)) == UInt16(256) {
+        0
+    } else {
+        1
+    }
+}

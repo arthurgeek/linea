@@ -1,0 +1,5 @@
+error[T-Mismatch]: `Fixed` writes `Pair[T, UInt8]` here, and this is a `Pair[UInt16, UInt16]`
+  --> tests/aliases/a_generic_alias_pattern_keeps_what_the_alias_writes.lin:14:9
+   |
+14 |     let Fixed { a, b: _ } = pair
+   |         ^^^^^^^^^^^^^^^^^ the alias fixes this type

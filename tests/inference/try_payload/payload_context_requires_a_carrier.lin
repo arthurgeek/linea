@@ -1,0 +1,8 @@
+fn identity[T](sink value: T) -> T where carries(value) {
+    value
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: UInt64 = identity(7)?
+    return .Ok(UInt8(value))
+}

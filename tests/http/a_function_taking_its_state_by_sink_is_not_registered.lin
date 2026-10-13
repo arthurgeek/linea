@@ -1,0 +1,23 @@
+// The state is lent `inout`, so a function that takes its first parameter by
+// `sink` is not one `route` accepts.
+import std.http
+
+@derive(Release)
+struct Counter {
+    count: UInt64,
+}
+
+fn consume(sink counter: Counter, request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "{counter.count}")
+}
+
+fn main() -> UInt8 {
+    var router: http.Router[Counter] = http.Router.new()
+    let routed = &router.route("GET /", consume)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

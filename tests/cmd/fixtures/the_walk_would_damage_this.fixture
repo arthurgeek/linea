@@ -1,0 +1,13 @@
+// Not named `.lin`, so the corpus does not walk it as a case. It is here to be
+// pointed at: a region cutting through a binary chain is a shape the walk gets
+// wrong, and what this records is that `fmt` refuses to write rather than
+// destroying the file. Delete it when the walk handles the shape, and the
+// command case beside it will say so by failing.
+fn main() -> u8 {
+    let p = 1 +
+// linea fmt: off
+        2 +
+// linea fmt: on
+        3
+    u8(p)
+}

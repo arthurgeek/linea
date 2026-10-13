@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let x = 300
+    UInt8(x)
+}

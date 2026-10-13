@@ -1,0 +1,8 @@
+// A settled reference names a type through what settles it, and what settles it
+// is an implementation. Written where there is none -- an ordinary function,
+// which no `impl` encloses -- `Self` names nothing, so the settled reference
+// has nothing to be read through and the head is where that is said.
+fn main() -> UInt8 {
+    let _n: Self.Item = 3
+    0
+}

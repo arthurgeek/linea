@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares `scaled`, and this implementation does not supply it
+  --> tests/traits/an_impl_supplies_every_signature.lin:15:6
+   |
+15 | impl Measure for Account {
+   |      ^^^^^^^ supply a body for it, or drop it from the trait

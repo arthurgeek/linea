@@ -1,0 +1,28 @@
+// The `&` in `&counter.advance().doubled()` marks the receiver of the first
+// call, `advance`, and `doubled` reads what `advance` returned.
+struct Counter {
+    count: UInt8,
+}
+
+struct Step {
+    reached: UInt8,
+}
+
+impl Counter {
+    fn advance(inout self: Self) -> Step {
+        self.count += 1
+        Step { reached = self.count }
+    }
+}
+
+impl Step {
+    fn doubled(self: Self) -> UInt8 {
+        self.reached * 2
+    }
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 4 }
+    let first = &counter.advance().doubled()
+    first + &counter.advance().doubled()
+}

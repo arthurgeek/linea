@@ -1,0 +1,7 @@
+import a
+
+fn main() -> UInt8 {
+    // A module is a scope, not a value. There is nothing for this to mean.
+    let m = a
+    a.f()
+}

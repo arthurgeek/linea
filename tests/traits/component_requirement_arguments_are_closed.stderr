@@ -1,0 +1,5 @@
+error[T-Template]: `Generic` takes 1 type argument(s), and was given 0
+ --> tests/traits/component_requirement_arguments_are_closed.lin:9:56
+  |
+9 | template impl Ready where reflect.components: Required[Generic] {}
+  |                                                        ^^^^^^^ give it the arguments it declares

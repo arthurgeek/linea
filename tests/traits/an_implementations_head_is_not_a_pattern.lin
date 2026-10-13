@@ -1,0 +1,26 @@
+// A head is the constructor applied to the implementation's own parameters,
+// each once and in order. A head that is a pattern puts two implementations in
+// reach of one type with neither more specific, and a parameter the head leaves
+// unapplied is one no receiver can settle.
+//
+// The trait declares nothing, because what an implementation supplies is not
+// what this asks: the head is refused whatever stands inside the braces.
+trait Show {}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl[T] Show for Pair[T, UInt8] {}
+
+impl[T] Show for Pair[T, T] {}
+
+impl[T, U] Show for Pair[U, T] {}
+
+impl[T, U, V] Show for Pair[T, U] {}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8, UInt8] = .{ a = 0, b = 1 }
+    p.a
+}

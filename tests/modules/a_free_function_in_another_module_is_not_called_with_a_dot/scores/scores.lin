@@ -1,0 +1,4 @@
+// Doubles a score, for the rounds that count twice.
+pub fn double(points: UInt8) -> UInt8 {
+    points * 2
+}

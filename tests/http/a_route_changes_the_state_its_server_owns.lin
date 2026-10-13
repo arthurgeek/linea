@@ -1,0 +1,55 @@
+// `http.with_state` owns the state, lends it through the router to every
+// route as `inout app`, and releases it with the rest of the server. `seen`
+// is memory from the system allocator, which a route's captures cannot hold.
+import std.http
+import std.io
+import std.mem
+
+use http.Handler
+use mem.Owner
+
+@derive(Release)
+struct App {
+    visits: UInt64,
+    seen: Vec[UInt64, mem.SystemAllocator],
+}
+
+fn count[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    app.visits += 1
+    let _pushed = &app.seen.push(app.visits)
+    http.text(request, "visit {app.visits}")
+}
+
+fn visits[P: Allocator](app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "{app.seen.length()} seen")
+}
+
+fn answer[H: http.Handler[(), mem.SystemAllocator]](inout server: H, target: Str) -> () {
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
+    var nothing = {}
+    match &server.serve_http(&nothing, sent.request()) {
+        Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+        Err(_) => io.println("refused").unwrap(),
+    }
+    arena.release()
+}
+
+fn main() -> UInt8 {
+    var router: http.Router[App, mem.SystemAllocator] = http.Router.new()
+    let counted = &router.route_raw("GET /count", count)
+    // A route that only reads the state takes it `inout` like every route,
+    // and a lambda passes it on to `visits`, which reads it.
+    let listed = &router.route_raw("GET /seen", |inout app, request| visits(app, request))
+    var server = http.with_state(App { visits = 0, seen = Vec.new() }, router)
+    answer(&server, "/count")
+    answer(&server, "/count")
+    answer(&server, "/seen")
+    let total = server.state().visits
+    server.release()
+    if counted.is_ok() && listed.is_ok() && total == 2 {
+        0
+    } else {
+        1
+    }
+}

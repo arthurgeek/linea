@@ -1,0 +1,222 @@
+import std.collections
+import std.fmt
+import std.mem
+import std.testing
+
+// RouteError says why a pattern was not registered. `InvalidPattern` is a
+// pattern that is not `[METHOD ]PATH` as a router reads it; `Duplicate` repeats
+// the method and shape of a registered pattern, whatever its names. `?` turns a
+// refused allocation into `RouteError.Allocation`.
+@(copyable, derive(Equatable, Debug, Release, From[mem.Oom]))
+pub enum RouteError {
+    InvalidPattern,
+    Duplicate,
+    Allocation(mem.Oom),
+}
+
+impl RouteError {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self { Allocation(_) => true, _ => false }
+    }
+}
+
+impl Display for RouteError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let reason = match read self {
+            InvalidPattern => "the pattern is not [METHOD ]PATH",
+            Duplicate => "a pattern with the same method and shape is already registered",
+            Allocation(_) => "no memory to register the pattern",
+        }
+        &w.write_str(reason)
+    }
+}
+
+test fn a_route_error_displays_its_reason() {
+    defer let invalid = fmt.render_owned(mem.system(), RouteError.InvalidPattern).unwrap()
+    defer let duplicate = fmt.render_owned(mem.system(), RouteError.Duplicate).unwrap()
+    defer let allocation = fmt.render_owned(mem.system(), RouteError.Allocation(.Exhausted)).unwrap()
+    testing.assert_eq(invalid.view(), "the pattern is not [METHOD ]PATH", "the invalid pattern reason changed")?
+    testing.assert_eq(duplicate.view(), "a pattern with the same method and shape is already registered", "the duplicate reason changed")?
+    testing.assert_eq(allocation.view(), "no memory to register the pattern", "the allocation reason changed")?
+    .Ok(())
+}
+
+// A segment is one part of a pattern's path: a literal, `{name}`, or
+// `{name...}`.
+@(copyable, derive(Equatable, Debug))
+enum Segment {
+    Literal(Str),
+    Parameter(Str),
+    Remainder(Str),
+}
+
+// A Pattern is a route pattern split into its method and its path. `path` holds
+// the segments between the leading `/` and, for a subtree, the trailing one.
+@(copyable, derive(Equatable, Debug))
+struct Pattern {
+    method: Option[Method],
+    path: Str,
+    subtree: Bool,
+}
+
+// Read `[METHOD ]PATH`. The method is one `Method` names other than `Other`.
+// Every segment of the path is a literal holding no brace, `{name}` or
+// `{name...}`, and only the last may be `{name...}`. No segment is empty,
+// except that a path ending in `/` is a subtree. No name is repeated; the
+// names are checked in one pass through a map sized by the pattern.
+fn parse_pattern[A: Allocator](pattern: Str, allocator: A) -> Result[Pattern, RouteError] where carries(.Ok: pattern) {
+    let parts = match pattern.find(" ") {
+        Some(at) => {
+            let method = method_of(pattern.slice(0, at).unwrap())
+            if method == Method.Other {
+                return .Err(.InvalidPattern)
+            }
+            Pattern { method = .Some(method), path = pattern.slice(at + 1, pattern.length()).unwrap(), subtree = false }
+        },
+        None => Pattern { method = .None, path = copy(pattern), subtree = false },
+    }
+    if !parts.path.starts_with("/") {
+        return .Err(.InvalidPattern)
+    }
+    let subtree = parts.path.ends_with("/")
+    let end = if subtree {
+        parts.path.length() - 1
+    } else {
+        parts.path.length()
+    }
+    let path = if end <= 1 {
+        ""
+    } else {
+        parts.path.slice(1, end).unwrap()
+    }
+    // Only `/` names the root; `//` is an empty segment.
+    if path.length() == 0 && parts.path.length() != 1 {
+        return .Err(.InvalidPattern)
+    }
+    let checked = check_segments(path, subtree, allocator)
+    checked?
+    .Ok(.{ method = copy(parts.method), path, subtree })
+}
+
+test fn a_pattern_splits_into_its_method_and_path() {
+    let plain = parse_pattern(r"/items/{id}", mem.system())
+    let method = parse_pattern("POST /items", mem.system())
+    let subtree = parse_pattern("GET /static/", mem.system())
+    let root = parse_pattern("/", mem.system())
+    let rest = parse_pattern(r"/files/{path...}", mem.system())
+    testing.assert_eq(plain, .Ok(Pattern { method = .None, path = r"items/{id}", subtree = false }), "a plain pattern changed")?
+    testing.assert_eq(method, .Ok(Pattern { method = .Some(.Post), path = "items", subtree = false }), "a method pattern changed")?
+    testing.assert_eq(subtree, .Ok(Pattern { method = .Some(.Get), path = "static", subtree = true }), "a subtree changed")?
+    testing.assert_eq(root, .Ok(Pattern { method = .None, path = "", subtree = true }), "the root subtree changed")?
+    testing.assert_eq(rest, .Ok(Pattern { method = .None, path = r"files/{path...}", subtree = false }), "a remainder pattern changed")?
+    .Ok(())
+}
+
+test fn a_malformed_pattern_is_refused() {
+    for pattern in ["", "items", "BREW /x", "get /x", "/a//b", "//", r"/{}", r"/{...}", r"/a{b}", r"/{a}}", r"/{rest...}/b", r"/{rest...}/", r"/{a}/{a}", r"/{a}/{a...}"] {
+        testing.assert_eq(parse_pattern(pattern, mem.system()), .Err(.InvalidPattern), pattern)?
+    }
+    .Ok(())
+}
+
+// Refuse a path whose segments are not a pattern's. An empty `path` is the
+// root, which only a subtree names.
+fn check_segments[A: Allocator](path: Str, subtree: Bool, allocator: A) -> Result[(), RouteError] {
+    if path.length() == 0 {
+        if subtree {
+            return .Ok(())
+        }
+        return .Err(.InvalidPattern)
+    }
+    var names: collections.Map[Str, (), A] = collections.Map.new_in(allocator)
+    var start: UInt64 = 0
+    var outcome: Result[(), RouteError] = .Ok(())
+    while outcome.is_ok() {
+        let end = segment_end(path, start)
+        let last = end == path.length()
+        outcome = match segment_of(path.slice(start, end).unwrap()) {
+            Some(segment) => check_segment(&names, segment, last && !subtree),
+            None => .Err(.InvalidPattern),
+        }
+        if last {
+            break
+        }
+        start = end + 1
+    }
+    names.release()
+    outcome
+}
+
+// Refuse a `{name...}` that is not last, and a name used before. `last` says
+// whether the segment ends a path that is not a subtree.
+fn check_segment[A: Allocator](inout names: collections.Map[Str, (), A], segment: Segment, last: Bool) -> Result[(), RouteError] where retains(names: segment) {
+    let name = match copy(segment) {
+        Literal(_) => return .Ok(()),
+        Parameter(name) => name,
+        Remainder(name) => {
+            if !last {
+                return .Err(.InvalidPattern)
+            }
+            name
+        },
+    }
+    let replaced = &names.insert(name, ()).settled()?
+    if replaced.is_some() {
+        return .Err(.InvalidPattern)
+    }
+    .Ok(())
+}
+
+// Return the byte where the segment of `path` starting at `start` ends: the
+// next `/`, or the end of `path`.
+fn segment_end(path: Str, start: UInt64) -> UInt64 {
+    path.find("/", start).unwrap_or(path.length())
+}
+
+test fn a_segment_ends_at_the_next_slash() {
+    testing.assert_eq(segment_end("a/bc/d", 0), UInt64(1), "the first segment changed")?
+    testing.assert_eq(segment_end("a/bc/d", 2), UInt64(4), "a middle segment changed")?
+    testing.assert_eq(segment_end("a/bc/d", 5), UInt64(6), "the last segment changed")?
+    testing.assert_eq(segment_end("a/", 2), UInt64(2), "an empty last segment changed")?
+    .Ok(())
+}
+
+// Return what one pattern segment is, or `None` when it is none of the three:
+// empty, an empty name, or a brace outside the ones around a name.
+fn segment_of(segment: Str) -> Option[Segment] where carries(.Some: segment) {
+    if segment.length() == 0 {
+        return .None
+    }
+    if !segment.starts_with(r"{") || !segment.ends_with(r"}") {
+        if segment.find(r"{").is_some() || segment.find(r"}").is_some() {
+            return .None
+        }
+        return .Some(.Literal(copy(segment)))
+    }
+    let inner = segment.slice(1, segment.length() - 1)?
+    let remainder = inner.ends_with("...")
+    let name = if remainder {
+        inner.slice(0, inner.length() - 3)?
+    } else {
+        inner
+    }
+    if name.length() == 0 || name.find(r"{").is_some() || name.find(r"}").is_some() {
+        return .None
+    }
+    if remainder {
+        return .Some(.Remainder(name))
+    }
+    .Some(.Parameter(name))
+}
+
+test fn a_segment_is_a_literal_a_parameter_or_a_remainder() {
+    testing.assert_eq(segment_of("items"), Option.Some(Segment.Literal("items")), "a literal changed")?
+    testing.assert_eq(segment_of(r"{id}"), Option.Some(Segment.Parameter("id")), "a parameter changed")?
+    testing.assert_eq(segment_of(r"{path...}"), Option.Some(Segment.Remainder("path")), "a remainder changed")?
+    testing.assert_eq(segment_of(r"{}"), .None, "an empty name was accepted")?
+    testing.assert_eq(segment_of(r"a{b}"), .None, "a brace inside a literal was accepted")?
+    testing.assert_eq(segment_of(""), .None, "an empty segment was accepted")?
+    .Ok(())
+}

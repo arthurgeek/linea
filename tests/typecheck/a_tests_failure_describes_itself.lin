@@ -1,0 +1,13 @@
+struct Silent {
+    x: UInt8,
+}
+
+// A failure is rendered when the test fails, so a type that never says how it
+// reads leaves nothing to report.
+test fn a_thing_holds() -> Result[(), Silent] {
+    return .Err(.{ x = 1 })
+}
+
+fn main() -> UInt8 {
+    0
+}

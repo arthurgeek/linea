@@ -1,0 +1,34 @@
+// A line opening with `else` continues the nearest construct that can take
+// it. After an `if` initializer that is the `if`, and a second `else` then
+// belongs to the binding.
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn pick(flag: Bool) -> UInt8 {
+    let chosen: UInt8 = if flag {
+        7
+    } else {
+        9
+    }
+    chosen
+}
+
+fn search(flag: Bool) -> UInt8 {
+    let found = if flag {
+        find(1)
+    } else {
+        find(8)
+    } else {
+        return 40
+    }
+    found
+}
+
+fn main() -> UInt8 {
+    pick(true) + pick(false) + search(true) + search(false)
+}

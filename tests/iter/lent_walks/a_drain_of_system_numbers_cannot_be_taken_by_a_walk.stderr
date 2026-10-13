@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking a `mem.Drain[UInt64, mem.SystemAllocator]` abandons it where the walk ends, and it is linear
+ --> tests/iter/lent_walks/a_drain_of_system_numbers_cannot_be_taken_by_a_walk.lin:7:20
+  |
+7 |     for reading in readings.drain() {
+  |                    ^^^^^^^^^^^^^^^^ it holds storage from `mem.SystemAllocator`, which must be released
+  |
+  = help: bind it, `var pending = readings.drain()`, walk it lent with `for reading in &pending`, then settle `pending` with `release()`

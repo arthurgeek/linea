@@ -1,0 +1,12 @@
+// A type names a thing rather than a value, so a name that reaches one means
+// nothing on its own -- there is nothing for it to evaluate to, the same
+// reason a function name alone means nothing. Naming a type where a value
+// belongs was accepted and left the expression with no type at all.
+struct Coins {
+    count: UInt8,
+}
+
+fn main() -> UInt8 {
+    let _held = Coins
+    0
+}

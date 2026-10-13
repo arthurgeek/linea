@@ -1,0 +1,5 @@
+error[N-TypeAlias]: `Boxed` is an alias, and an implementation names a type's own declaration
+ --> tests/aliases/an_impl_through_a_generic_alias_is_refused.lin:7:22
+  |
+7 | impl[T] Describe for Boxed[T] {
+  |                      ^^^^^ write it for the type the alias names, `Option[T]`

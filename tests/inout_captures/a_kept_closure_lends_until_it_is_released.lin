@@ -1,0 +1,17 @@
+import std.mem
+
+// `mem.Closure.open` keeps the closure in system memory. Its lend of `count`
+// lasts until `release`, after which `main` reads the count.
+fn main() -> Result[UInt8, mem.Oom] {
+    var count: UInt8 = 0
+    var tick: mem.Closure[inout fn() -> (), mem.SystemAllocator] = mem.Closure.open(
+        mem.system(),
+        inout [inout count] || {
+            count += 1
+        },
+    )?
+    &tick()
+    &tick()
+    tick.release()
+    .Ok(count)
+}

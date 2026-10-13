@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let row: [UInt8; 2] = [1, 2]
+    let _grid: [[UInt8; _]; _] = [row]
+    0
+}

@@ -1,0 +1,6 @@
+// [T-ArrayLength]. The type says how many, and a run of values says nothing
+// about how many a type wants.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2]
+    xs[0]
+}

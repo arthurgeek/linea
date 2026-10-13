@@ -1,0 +1,20 @@
+@copyable
+struct Config {
+    width: UInt8,
+    enabled: Bool,
+}
+
+trait Selected[phantom F] {}
+
+struct Holder {}
+
+let defaults: Config = .{ enabled = true, width = 7 }
+
+impl Selected[fn(read config: Config = defaults) -> UInt8] for Holder {}
+
+impl Selected[fn(read config: Config = .{ width = 7, enabled = true }) -> UInt8] for Holder {}
+
+fn main() -> UInt8 {
+    let _holder: Holder = .{}
+    0
+}

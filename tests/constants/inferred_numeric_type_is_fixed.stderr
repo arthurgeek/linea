@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Int64`
+ --> tests/constants/inferred_numeric_type_is_fixed.lin:4:5
+  |
+3 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+4 |     value
+  |     ^^^^^ expected `UInt8`, found `Int64`

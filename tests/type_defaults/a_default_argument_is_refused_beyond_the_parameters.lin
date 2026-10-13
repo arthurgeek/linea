@@ -1,0 +1,16 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+fn _crowded(_shelf: Shelf[UInt8, SystemAllocator, UInt8]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

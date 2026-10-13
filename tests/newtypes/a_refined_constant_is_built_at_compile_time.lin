@@ -1,0 +1,36 @@
+// Building a newtype from a constant is itself a constant expression, so a
+// module constant and a parameter default can hold one. The compiler proves
+// `Percent(50)` is in range where it is written.
+@copyable
+type Percent = UInt8 where it in 0..=100
+
+@copyable
+type Meters = UInt8
+
+@copyable
+struct Size { width: UInt8, height: UInt8 }
+
+@copyable
+type Frame = Size
+
+let cap: Percent = Percent(50)
+
+let doubled: Percent = Percent(25 * 2)
+
+let run: Meters = Meters(7)
+
+let frame: Frame = Frame(Size { width = 2, height = 3 })
+
+fn scale(value: UInt8, by: Percent = Percent(10)) -> UInt8 {
+    let Percent(percent) = copy(by)
+    value / 10 * percent / 10
+}
+
+fn main() -> UInt8 {
+    let Percent(limit) = cap
+    let Percent(twice) = doubled
+    let Meters(length) = run
+    let Frame(size) = frame
+    // 50 + 50 + 7 + 2 * 3 + 5 + 25 = 143
+    limit + twice + length + size.width * size.height + scale(50) + scale(50, by: cap)
+}

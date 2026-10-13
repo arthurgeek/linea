@@ -1,0 +1,29 @@
+// `Self.Out` in `produced`'s result and in what `out` returns inside it are one
+// type, the one the implementation `produced` runs through settles: here
+// `UInt32`, from `Source[UInt8]`.
+trait Source[K] {
+    type Out
+
+    fn out(self: Self, key: K) -> Self.Out where carries()
+
+    fn produced(self: Self, key: K) -> Self.Out where carries() {
+        self.out(key)
+    }
+}
+
+struct Pump {
+    base: UInt8,
+}
+
+impl Source[UInt8] for Pump {
+    type Out = UInt32
+
+    fn out(self: Self, key: UInt8) -> UInt32 where carries() {
+        UInt32(key) + UInt32(self.base)
+    }
+}
+
+fn main() -> UInt8 {
+    let pump = Pump { base = 4 }
+    UInt8(pump.produced(1))
+}

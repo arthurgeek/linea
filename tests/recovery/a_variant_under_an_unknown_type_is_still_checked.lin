@@ -1,0 +1,21 @@
+// `Nope` names nothing, so no variant written where one is expected can say
+// which enum it belongs to. Its values are still checked on their own.
+fn main() -> UInt8 {
+    let _one: Nope = .Some(
+        {
+            let z: UInt8 = "s"
+            z
+        },
+    )
+    let _many: [Nope; 1] = [
+        .Some(
+            .{
+                x = {
+                    let y: UInt8 = "t"
+                    y
+                },
+            },
+        ),
+    ]
+    0
+}

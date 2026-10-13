@@ -1,0 +1,34 @@
+// The program the design is for: a disposal written once, reaching the tail and
+// the exit a failing `?` creates invisibly. The second call's inner
+// allocation is refused, so its `?` leaves abruptly -- and the schedule is
+// what disposes of the outer buffer on that edge. The two calls answer
+// different
+// numbers, so the status says both paths ran.
+import std.mem
+
+use mem.Oom
+use mem.system
+
+fn fill(n: UInt64, extra: UInt64) -> Result[UInt64, Oom] {
+    let a = system()
+    var b = a.acquire(n)?
+    defer b.release()
+
+    let c = a.acquire(extra)?
+    c.release()
+
+    mem.Buffer.store(&b, 0, 7)
+    Result.Ok(b.load(0))
+}
+
+fn main() -> UInt8 {
+    let ok: UInt8 = match fill(8, 8) {
+        Ok(n) => UInt8(n),
+        Err(_) => 99,
+    }
+    let refused: UInt8 = match fill(8, 9223372036854775808) {
+        Ok(_) => 99,
+        Err(_) => 6,
+    }
+    ok + refused
+}

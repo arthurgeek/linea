@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    copy(number)
+}

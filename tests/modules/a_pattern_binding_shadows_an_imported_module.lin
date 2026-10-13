@@ -1,0 +1,12 @@
+// The arm binds `text` to the string inside `Some`, so `text.length()` in that
+// arm measures it.
+import std.text
+
+fn main() -> UInt8 {
+    let _unused: Option[text.ParseError] = .None
+    let found: Option[Str] = .Some("four")
+    match found {
+        Some(text) => UInt8.try_from(text.length()).unwrap_or(0),
+        None => 0,
+    }
+}

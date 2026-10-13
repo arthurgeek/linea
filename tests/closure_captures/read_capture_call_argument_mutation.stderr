@@ -1,0 +1,6 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/closure_captures/read_capture_call_argument_mutation.lin:9:9
+  |
+9 |     get(change(&number))
+  |     --- the observation is still used here
+  |         ^^^^^^^^^^^^^^^ keep this place available until the last use of its observation

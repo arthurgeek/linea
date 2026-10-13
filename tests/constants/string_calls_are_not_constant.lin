@@ -1,0 +1,5 @@
+let value = Str.length("text")
+
+fn main() -> UInt8 {
+    UInt8(value)
+}

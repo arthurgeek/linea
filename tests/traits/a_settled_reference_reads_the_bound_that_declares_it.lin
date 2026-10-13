@@ -1,0 +1,40 @@
+// A parameter carrying two bounds carries two traits, and only one of them
+// declares the name: the reference is read through that one. Which bound the
+// name comes from is what the bounds say, so a second bound the reference says
+// nothing about takes nothing away from the first.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+trait Show {
+    fn spell(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+impl Show for Counter {
+    fn spell(x: Self) -> UInt8 {
+        x.at + 1
+    }
+}
+
+fn measured[W: Measure + Show](v: W) -> W.Item {
+    Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 3 }
+    measured(c) + Show.spell(c)
+}

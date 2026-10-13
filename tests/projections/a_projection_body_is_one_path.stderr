@@ -1,0 +1,5 @@
+error[T-Projection]: a projection's body is a place, which is one path rather than a sequence of statements
+  --> tests/projections/a_projection_body_is_one_path.lin:12:9
+   |
+12 |         let k = i
+   |         ^^^^^^^^^ reach the place from `self` by field selection and indexing, and nothing else

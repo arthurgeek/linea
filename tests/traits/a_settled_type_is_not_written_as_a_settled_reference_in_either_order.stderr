@@ -1,0 +1,10 @@
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_is_not_written_as_a_settled_reference_in_either_order.lin:29:17
+   |
+29 |     type Item = Self.Other
+   |                 ^^^^^^^^^^ write the type itself
+error[T-Impl]: a settled type is not written as a settled reference
+  --> tests/traits/a_settled_type_is_not_written_as_a_settled_reference_in_either_order.lin:38:17
+   |
+38 |     type Item = Self.Other
+   |                 ^^^^^^^^^^ write the type itself

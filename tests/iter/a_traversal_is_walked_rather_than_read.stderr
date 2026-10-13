@@ -1,0 +1,5 @@
+error[T-Lend]: `positions` names a traversal, which is walked rather than read
+  --> tests/iter/a_traversal_is_walked_rather_than_read.lin:15:15
+   |
+15 |     let _it = Grid.positions
+   |               ^^^^^^^^^^^^^^ walk the type with `for read` or `for inout`

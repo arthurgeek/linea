@@ -1,0 +1,22 @@
+// The payload types differ across the `?`: the operand carries a `UInt8` and
+// what the function answers with is built here. What has to agree is the
+// constructor and the error type, and nothing about the payload.
+enum Bad {
+    Broken,
+}
+
+fn ok() -> Result[UInt8, Bad] {
+    Result.Ok(5)
+}
+
+fn go() -> Result[UInt8, Bad] {
+    let n = ok()?
+    Result.Ok(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Ok(n) => n,
+        Err(_) => 0,
+    }
+}

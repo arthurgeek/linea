@@ -1,0 +1,38 @@
+// A declared type with no bound answers nothing, so an operation on it is
+// [T-Bound]. `Writer.Error` is this case, and this is what keeps it refused.
+trait Elem {
+    fn one(sink self: Self) -> UInt8
+}
+
+trait Holder {
+    type Iter
+
+    fn get(self: Self) -> Self.Iter
+}
+
+struct Thing { n: UInt8 }
+
+struct Box { _n: UInt8 }
+
+impl Elem for Thing {
+    fn one(sink self: Thing) -> UInt8 {
+        self.n
+    }
+}
+
+impl Holder for Box {
+    type Iter = Thing
+
+    fn get(_self: Box) -> Self.Iter {
+        .{ n = 7 }
+    }
+}
+
+fn use_it[H: Holder](h: H) -> UInt8 {
+    Elem.one(Holder.get(h))
+}
+
+fn main() -> UInt8 {
+    let b: Box = .{ _n = 1 }
+    use_it(b)
+}

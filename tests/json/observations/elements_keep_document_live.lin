@@ -1,0 +1,14 @@
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    var document = json.Value.array(mem.system())
+    json.Value.append(&document, json.Value.boolean(mem.system(), true)).unwrap()
+    let elements = document.elements().unwrap()
+    document.release()
+    if elements[UInt64(0)].as_bool().unwrap() {
+        0
+    } else {
+        1
+    }
+}

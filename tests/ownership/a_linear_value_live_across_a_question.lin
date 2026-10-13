@@ -1,0 +1,33 @@
+// A Linear value live *across* a `?`. The succeeding path gives `k` to
+// something that takes it; the failing path leaves the function without ever
+// reaching that, so `k` is held where control goes and nothing consumes it.
+//
+// [O-Leak] is asked at the exit edge `?` contributes, exactly as at a
+// `return`, and that is what this pins: delete the edge and this program is
+// accepted with a `Key` lost. A value that only exists *after* the `?` says
+// nothing about the edge, because the failing path never carried it.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn get() -> Option[UInt8] {
+    Option.Some(2)
+}
+
+fn go(sink k: Key) -> Option[UInt8] {
+    let n = get()?
+    Option.Some(take(k) + n)
+}
+
+fn main() -> UInt8 {
+    match go(.{ n = 3 }) {
+        Some(v) => v,
+        None => 0,
+    }
+}

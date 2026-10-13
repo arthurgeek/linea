@@ -1,0 +1,3 @@
+pub fn thing() -> UInt8 {
+    7
+}

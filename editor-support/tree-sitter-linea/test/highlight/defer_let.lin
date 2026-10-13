@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    defer let count: UInt8 = 4
+//  ^ keyword.control
+//        ^ keyword.storage
+    defer var next: UInt8 = 1
+//  ^ keyword.control
+//        ^ keyword.storage
+    defer count.release()
+//  ^ keyword.control
+    next
+}

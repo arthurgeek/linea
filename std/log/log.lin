@@ -1,0 +1,448 @@
+import std.fmt
+import std.fs
+import std.io
+import std.mem
+import std.testing
+import std.time
+
+use io.Descriptor
+use mem.Owner
+
+// A `Level` says how much a log line matters: `Debug` for detail wanted
+// while investigating, `Info` for ordinary events, `Warn` for something
+// unexpected the program recovered from, and `Error` for a failure. A logger
+// writes the lines at its minimum level and above. Display writes the level
+// in capitals, as a line shows it: `DEBUG`, `INFO`, `WARN`, `ERROR`.
+// Levels compare in the order they are declared, from `Debug` to `Error`.
+@(copyable, derive(Equatable, Comparable, Debug))
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Display for Level {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(match read self {
+            Debug => "DEBUG",
+            Info => "INFO",
+            Warn => "WARN",
+            Error => "ERROR",
+        })
+    }
+}
+
+test fn a_level_displays_in_capitals() {
+    defer let named = fmt.render_owned(mem.system(), "{Level.Debug} {Level.Info} {Level.Warn} {Level.Error}").unwrap()
+    testing.assert_eq(named.view(), "DEBUG INFO WARN ERROR", "a level's name changed")?
+    .Ok(())
+}
+
+// A `Sink` is where a logger writes its lines: standard error, a file, or
+// anything else that can take a line through a read-only receiver. Writing a
+// line changes where the sink points, such as a file's contents, and not the
+// sink itself, which is what lets a logger log without being lent mutably and
+// be copied wherever its sink can be.
+pub trait Sink {
+    type Error
+
+    // Write `line` whole, or report why it could not be written.
+    fn write_line(self: Self, line: Str) -> Result[(), Self.Error] where carries()
+}
+
+// A descriptor is a number naming an open file, so writing through a copy of
+// it writes to the same file.
+impl Sink for Descriptor {
+    type Error = io.IoError
+
+    fn write_line(self: Self, line: Str) -> Result[(), io.IoError] where carries() {
+        var out = copy(self)
+        &out.write_str(line)
+    }
+}
+
+test fn a_descriptor_sink_reports_a_refused_line() {
+    let refused = match io.descriptor(-1).write_line("lost\n") {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    testing.assert(refused, "a line written to no descriptor was accepted")?
+    .Ok(())
+}
+
+// A `Logger` writes one line per event to the sink its caller chose. A line
+// is the time in RFC 3339, the level, the message, and the fields in the
+// order given:
+//
+//     2026-09-25T09:31:02Z INFO listening port=8080
+//
+// Logging reads the logger and never changes it, so a logger is passed and
+// copied like any value: a logger to standard error copies freely, and a
+// logger that owns its sink, such as a file, moves and is released once.
+//
+// A line below the minimum level costs one comparison: it reads no clock,
+// formats nothing and allocates nothing. A line at or above it is built in a
+// buffer from the allocator the caller gave and handed to the sink in one
+// write, so lines from one program never interleave within a line.
+// Releasing a logger releases its sink: a file is closed, and standard error,
+// which the logger does not own, is left open. The derived `Release` requires
+// only `S: Release`, and discards the allocator and the level.
+@(opaque, copyable, derive(Release))
+struct Logger[S: Sink, A: Allocator = mem.SystemAllocator] {
+    output: S,
+    allocator: A,
+    minimum: Level,
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `open` makes a logger that writes the lines at `minimum` and above to
+    // `output`, building each line in a buffer from `allocator`.
+    pub fn open(sink output: S, allocator: A, minimum: Level) -> Logger[S, A] where carries(output, allocator) {
+        .{ output, allocator = copy(allocator), minimum }
+    }
+}
+
+test fn a_logger_writes_to_the_sink_it_was_given() {
+    let file = capture()
+    let logger = file.logger(minimum: .Info)
+    logger.info("listening", field("port", 8080))
+    logger.release()
+    defer let written = file.finish()
+    testing.assert_eq(written.view(), "INFO listening port=8080\n", "the line changed")?
+    .Ok(())
+}
+
+// `to_stderr` makes a logger that writes the lines at `minimum` and above to
+// standard error, building each in a buffer from `allocator`. The logger does
+// not own standard error, so it copies freely and needs no release.
+pub fn to_stderr[A: Allocator](allocator: A, minimum: Level) -> Logger[io.Descriptor, A] where carries(allocator) {
+    Logger.open(io.stderr(), allocator, minimum)
+}
+
+test fn a_logger_to_standard_error_copies_freely() {
+    let logger = to_stderr(mem.system(), minimum: .Error)
+    let kept = copy(logger)
+    logger.debug("not written", ())
+    testing.assert_eq([kept.enabled(.Warn), kept.enabled(.Error)], [false, true], "the enabled levels changed")?
+    .Ok(())
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `enabled` says whether a line at `level` would be written. A caller
+    // whose fields are costly to compute can ask first.
+    pub fn enabled(self: Self, level: Level) -> Bool {
+        level >= self.minimum
+    }
+}
+
+test fn a_logger_is_enabled_at_its_minimum_level_and_above() {
+    let logger = to_stderr(mem.system(), minimum: .Warn)
+    let enabled = [logger.enabled(.Debug), logger.enabled(.Info), logger.enabled(.Warn), logger.enabled(.Error)]
+    testing.assert_eq(enabled, [false, false, true, true], "the enabled levels changed")?
+    .Ok(())
+}
+
+// A `LogError` says why a line was not written: the allocator could not hold
+// it, or the sink refused it. Nothing of such a line is written.
+@copyable
+pub enum LogError[E] {
+    Memory(mem.Oom),
+    Sink(E),
+}
+
+impl[E] LogError[E] {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self { Memory(_) => true, Sink(_) => false }
+    }
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `log` writes a line at `level` with `message` and `fields`, when the
+    // level is enabled, and reports a line that could not be written. Pass
+    // `()` for a line with no fields. `debug`, `info`, `warn` and `error`
+    // write at their own level and drop a line that could not be written, so
+    // call `log` where a lost line must be noticed.
+    pub fn log[F: Fields](self: Self, level: Level, message: Str, fields: F) -> Result[(), LogError[S.Error]] where carries() {
+        if !self.enabled(level) {
+            return .Ok(())
+        }
+        var line: Line[A] = .{ text = String.new_in(self.allocator), escaping = false }
+        let built = write_line(&line, time.now(), level, message, fields)
+        let written: Result[(), LogError[S.Error]] = match built {
+            Ok(_) => match self.output.write_line(line.text.view()) {
+                Ok(_) => .Ok(()),
+                Err(error) => .Err(.Sink(error)),
+            },
+            Err(error) => .Err(.Memory(error)),
+        }
+        line.release()
+        written
+    }
+}
+
+// A line below the minimum is not written, and building it asks the
+// allocator for nothing.
+test fn a_line_below_the_minimum_level_is_not_written() {
+    let file = capture()
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let logger = Logger.open(file.open(), log.allocator(), minimum: .Warn)
+    let ignored = logger.log(.Info, "ignored", field("count", 3).and("path", "/items")).is_ok()
+    let attempts_below = log.attempts()
+    let kept = logger.log(.Error, "kept", ()).is_ok()
+    logger.release()
+    log.release()
+    defer let written = file.finish()
+    testing.assert(ignored && kept, "a line was refused")?
+    testing.assert_eq(attempts_below, UInt64(0), "a line below the minimum asked for memory")?
+    testing.assert_eq(written.view(), "ERROR kept\n", "a line below the minimum was written")?
+    .Ok(())
+}
+
+// A line the allocator cannot hold is reported and nothing of it is written;
+// the next line is written whole, and every line's buffer is released.
+test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
+    let file = capture()
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let logger = Logger.open(file.open(), log.allocator(), minimum: .Info)
+    log.refuse_attempt(log.attempts() + 1)
+    let refused = match logger.log(.Info, "refused", ()) {
+        Err(error) => match read error {
+            Memory(_) => true,
+            Sink(_) => false,
+        },
+        Ok(_) => false,
+    }
+    logger.info("kept", ())
+    logger.release()
+    let settled = log.all_disposed()
+    log.release()
+    defer let written = file.finish()
+    testing.assert(refused, "the refused line was not reported")?
+    testing.assert_eq(written.view(), "INFO kept\n", "a refused line was written in part")?
+    testing.assert(settled, "a line buffer was not released")?
+    .Ok(())
+}
+
+// A line the sink refuses is reported by `log` and dropped by `error`.
+test fn a_line_the_sink_refuses_is_reported() {
+    let logger = Logger.open(io.descriptor(-1), mem.system(), minimum: .Info)
+    let reported = match logger.log(.Error, "lost", ()) {
+        Err(error) => match read error {
+            Sink(_) => true,
+            Memory(_) => false,
+        },
+        Ok(_) => false,
+    }
+    logger.error("lost again", ())
+    testing.assert(reported, "a refused line was not reported")?
+    .Ok(())
+}
+
+test fn a_line_is_built_in_an_arena() {
+    // Each line's buffer comes from the arena, which reclaims it only when
+    // the arena is released.
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let file = capture()
+    let logger = Logger.open(file.open(), arena.handle(), minimum: .Info)
+    let first = logger.log(.Info, "listening", field("port", 8080)).is_ok()
+    let second = logger.log(.Warn, "slow", field("path", "/items").and("count", 3)).is_ok()
+    logger.release()
+    defer let written = file.finish()
+    testing.assert(first && second, "a line built in an arena was refused")?
+    testing.assert_eq(written.view(), "INFO listening port=8080\nWARN slow path=/items count=3\n", "a line built in an arena changed")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_line() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), LogError[io.IoError]] {
+            let file = capture()
+            let logger = Logger.open(file.open(), allocator, minimum: .Info)
+            let outcome = logger.log(.Info, "a message long enough to grow the line", field("path", "/items/42").and("count", 3))
+            logger.release()
+            let written = file.finish()
+            written.release()
+            outcome
+        },
+        LogError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing line was reported as failing")?
+    .Ok(())
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `debug` writes a line at `Level.Debug`, and drops it if it cannot.
+    pub fn debug[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+        let _dropped = self.log(.Debug, message, fields)
+    }
+}
+
+test fn debug_writes_a_debug_line() {
+    defer let line = logged_at(.Debug)
+    testing.assert_eq(line.view(), "DEBUG checked count=3\n", "the debug line changed")?
+    .Ok(())
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `info` writes a line at `Level.Info`, and drops it if it cannot.
+    pub fn info[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+        let _dropped = self.log(.Info, message, fields)
+    }
+}
+
+test fn info_writes_an_info_line() {
+    defer let line = logged_at(.Info)
+    testing.assert_eq(line.view(), "INFO checked count=3\n", "the info line changed")?
+    .Ok(())
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `warn` writes a line at `Level.Warn`, and drops it if it cannot.
+    pub fn warn[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+        let _dropped = self.log(.Warn, message, fields)
+    }
+}
+
+test fn warn_writes_a_warn_line() {
+    defer let line = logged_at(.Warn)
+    testing.assert_eq(line.view(), "WARN checked count=3\n", "the warn line changed")?
+    .Ok(())
+}
+
+impl[S: Sink, A: Allocator] Logger[S, A] {
+    // `error` writes a line at `Level.Error`, and drops it if it cannot.
+    pub fn error[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+        let _dropped = self.log(.Error, message, fields)
+    }
+}
+
+test fn error_writes_an_error_line() {
+    defer let line = logged_at(.Error)
+    testing.assert_eq(line.view(), "ERROR checked count=3\n", "the error line changed")?
+    .Ok(())
+}
+
+// `logged_at` writes `checked count=3` through the method for `level` of a
+// logger that writes every level, and returns what it wrote without its time.
+fn logged_at(level: Level) -> String {
+    let file = capture()
+    let logger = file.logger(minimum: .Debug)
+    match read level {
+        Debug => logger.debug("checked", field("count", 3)),
+        Info => logger.info("checked", field("count", 3)),
+        Warn => logger.warn("checked", field("count", 3)),
+        Error => logger.error("checked", field("count", 3)),
+    }
+    logger.release()
+    file.finish()
+}
+
+// A line starts with the time the event was logged, in RFC 3339 to the second.
+test fn a_line_starts_with_the_time_it_was_written() {
+    let file = capture()
+    let logger = file.logger(minimum: .Info)
+    let before = time.now()
+    logger.info("timed", ())
+    let after = time.now()
+    logger.release()
+    defer let written = file.finish_with_times()
+    let stamp = written.slice(0, 20).unwrap_or("")
+    defer let earliest = fmt.render_owned(mem.system(), before).unwrap()
+    defer let latest = fmt.render_owned(mem.system(), after).unwrap()
+    testing.assert(stamp == earliest.view() || stamp == latest.view(), "the line did not start with the time it was written")?
+    testing.assert_eq(written.slice(20, 21), Option.Some(" "), "the time was not followed by a space")?
+    .Ok(())
+}
+
+// `write_line` builds one line in `line`: the time, the level, the message
+// and the fields, and a line ending.
+fn write_line[F: Fields, A: Allocator](inout line: Line[A], stamp: time.Timestamp, level: Level, message: Str, fields: F) -> Result[(), mem.Oom] where carries() {
+    "{stamp} {level} ".fmt(&line.text)?
+    write_message(&line, message)?
+    fields.visit(&line)?
+    &line.text.append("\n")
+}
+
+// A `Capture` is a scratch file a test in the library logs into and reads
+// back, since a sink that kept lines in memory would have to change itself
+// to take one.
+internal struct Capture {
+    path: String,
+}
+
+// `capture` names a new scratch file.
+internal fn capture() -> Capture {
+    .{ path = fs.scratch_path() }
+}
+
+impl Capture {
+    // `open` creates the file, empty, for a logger to own.
+    internal fn open(self: Self) -> fs.File {
+        let path = fs.Path.from_str(self.path.view()).unwrap()
+        fs.File.create(mem.system(), path, policy: .Replace).unwrap()
+    }
+
+    // `logger` opens a logger over the file that allocates from the system.
+    internal fn logger(self: Self, minimum: Level) -> Logger[fs.File] {
+        Logger.open(self.open(), mem.system(), minimum)
+    }
+
+    // `finish_with_times` returns what was written, removes the file and
+    // releases the capture.
+    internal fn finish_with_times(sink self: Self) -> String {
+        let Capture { path: owned } = self
+        let path = fs.Path.from_str(owned.view()).unwrap()
+        let bytes = fs.read_file(mem.system(), path, max_bytes: 1048576).unwrap()
+        fs.remove_scratch(path)
+        var written = String.new()
+        &written.append(Str.from_bytes(bytes.as_slice()).unwrap()).unwrap()
+        bytes.release()
+        owned.release()
+        written
+    }
+
+    // `finish` returns what was written with the 20-character timestamp and
+    // the space after it taken off each line, and the value of each
+    // `duration=` field written as `D`, since the time a line is written and
+    // how long an exchange takes vary from run to run.
+    internal fn finish(sink self: Self) -> String {
+        let written = self.finish_with_times()
+        let lines = without_times(written.view())
+        written.release()
+        lines
+    }
+}
+
+// `without_times` copies logged lines with their timestamps taken off and
+// each `duration=` value written as `D`.
+fn without_times(written: Str) -> String {
+    var copied = String.new()
+    var rest = copy(written)
+    loop {
+        let end = rest.find("\n") else {
+            break
+        }
+        let line = rest.slice(21, end).unwrap_or("")
+        match line.find("duration=") {
+            Some(start) => {
+                let value_start = start + 9
+                let after = line.slice(value_start, line.length()).unwrap_or("")
+                let value_end = match after.find(" ") {
+                    Some(offset) => value_start + offset,
+                    None => line.length(),
+                }
+                &copied.append(line.slice(0, value_start).unwrap_or("")).unwrap()
+                &copied.append("D").unwrap()
+                &copied.append(line.slice(value_end, line.length()).unwrap_or("")).unwrap()
+            },
+            None => &copied.append(line).unwrap(),
+        }
+        &copied.append("\n").unwrap()
+        rest = rest.slice(end + 1, rest.length()).unwrap_or("")
+    }
+    copied
+}

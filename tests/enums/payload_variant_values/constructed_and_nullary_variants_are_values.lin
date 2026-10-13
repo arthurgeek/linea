@@ -1,0 +1,22 @@
+enum Mode {
+    Preserve,
+    Exact(UInt64),
+}
+
+fn bits(mode: Mode) -> UInt64 {
+    match read mode {
+        Preserve => 0,
+        Exact(value) => value,
+    }
+}
+
+fn main() -> UInt8 {
+    let exact: Mode = .Exact(5)
+    let preserve: Mode = Mode.Preserve
+    let build: fn(sink value: UInt64) -> Mode = Mode.Exact
+    if bits(exact) == 5 && bits(preserve) == 0 && bits(build(7)) == 7 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,26 @@
+// A Copyable requirement inherited through a trait permits copying the
+// generic receiver.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+@copyable
+struct Loose {
+    n: UInt8,
+}
+
+impl Duplicable for Loose {
+    fn tag(self: Loose) -> UInt8 {
+        self.n
+    }
+}
+
+fn twice[T: Duplicable](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let l: Loose = .{ n = 3 }
+    let m: Loose = twice(l)
+    Duplicable.tag(m)
+}

@@ -1,0 +1,17 @@
+enum Slot[A, B] {
+    Empty,
+    Full(A),
+    Other(B),
+}
+
+alias Boxed[A] = Slot[A, UInt8]
+
+fn main() -> UInt8 {
+    let fits: Slot[UInt16, UInt8] = Boxed.Empty
+    let _differs: Slot[UInt16, UInt32] = Boxed.Empty
+    match fits {
+        Empty => 0,
+        Full(_) => 1,
+        Other(_) => 2,
+    }
+}

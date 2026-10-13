@@ -1,0 +1,4 @@
+@derive(Debug)
+struct 1 { x: UInt8 }
+
+fn main() -> UInt8 { 0 }

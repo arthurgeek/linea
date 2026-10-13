@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `W.Item`
+  --> tests/traits/a_settled_reference_off_a_bound_is_no_number.lin:24:5
+   |
+23 | fn _counts[W: Measure](v: W.Item) -> UInt8 {
+   |                                      ----- expected because of this return type
+24 |     v + 1
+   |     ^ expected `UInt8`, found `W.Item`

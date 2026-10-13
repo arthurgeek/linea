@@ -1,0 +1,8 @@
+// A statement ends where it looks like it ends. The block's value is still its
+// last expression, which is the rule's one exception and the reason `x + y`
+// below is not a fourth statement.
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    let y: UInt8 = 2
+    x + y
+}

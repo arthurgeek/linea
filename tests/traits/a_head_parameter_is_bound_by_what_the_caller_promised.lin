@@ -1,0 +1,30 @@
+// A generic implementation discharges both an ordinary trait bound and a
+// Copyable capability bound from the promises made by its caller.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl Show for UInt8 {
+    fn show(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+impl[T: Show + Copyable] Show for Holder[T] {
+    fn show(self: Self) -> UInt8 {
+        Show.show(self.v) + 1
+    }
+}
+
+fn wrapped[S: Show + Copyable](h: Holder[S]) -> UInt8 {
+    Show.show(h)
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 5 }
+    wrapped(h)
+}

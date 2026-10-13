@@ -1,0 +1,13 @@
+trait Lift[T] {
+    fn lift(sink value: T) -> Self
+}
+
+template impl[S] Lift[S] where reflect.target: enum {
+    fn lift(sink _value: S) -> Self {
+        reflect.wrap(UInt8(1))
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

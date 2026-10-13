@@ -1,0 +1,24 @@
+trait Mark {}
+
+struct Wrapper[T] {
+    value: T,
+}
+
+impl Mark for Wrapper[UInt8] {}
+
+struct Selected[T] {
+    value: T,
+}
+
+trait Ready {}
+
+impl[T] Ready for Selected[T]
+where Wrapper[T]: Mark {}
+
+fn accept[R: Ready](_value: R) -> () {}
+
+fn main() -> UInt8 {
+    let selected: Selected[Bool] = .{ value = true }
+    accept(selected)
+    0
+}

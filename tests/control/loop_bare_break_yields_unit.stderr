@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/control/loop_bare_break_yields_unit.lin:3:9
+  |
+2 |     let x: UInt8 = loop {
+  |            ----- expected because of this annotation
+3 |         break
+  |         ^^^^^ this `break` carries no value

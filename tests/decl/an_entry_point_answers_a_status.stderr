@@ -1,0 +1,5 @@
+error[S-Entry]: a program's `main` answers `UInt8` on success, which is the exit status
+ --> tests/decl/an_entry_point_answers_a_status.lin:8:14
+  |
+8 | fn main() -> Result[Str, IoError] {
+  |              ^^^^^^ this one answers `Str`

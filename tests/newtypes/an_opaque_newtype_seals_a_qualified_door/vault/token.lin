@@ -1,0 +1,6 @@
+@opaque
+type Token = UInt64
+
+pub fn mint() -> Token {
+    Token(1)
+}

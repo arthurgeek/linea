@@ -1,0 +1,8 @@
+// `double` belongs to the `scores` module and is not an operation of
+// `UInt8`, so the call is written through the module: `scores.double(n)`.
+import scores
+
+fn main() -> UInt8 {
+    let n: UInt8 = 4
+    n.double()
+}

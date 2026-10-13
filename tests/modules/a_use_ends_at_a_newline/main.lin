@@ -1,0 +1,16 @@
+// A re-export ends where a statement does: at a `;`, at the newline after it,
+// or at the end of the file. It is a declaration rather than a statement, and
+// nothing about that makes a different terminator worth learning -- which is
+// what `import` beside it already says.
+//
+// The two were written by one rule and had drifted to two: `import` learned
+// the newline and `use` was left demanding the `;` that every other
+// declaration had stopped needing.
+import inner
+
+use inner.Thing
+
+fn main() -> UInt8 {
+    let t: Thing = .{ v = 3 }
+    t.v
+}

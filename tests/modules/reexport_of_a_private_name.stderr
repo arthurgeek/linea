@@ -1,0 +1,5 @@
+error[M-Vis]: `Hidden` is private to `inner`
+ --> tests/modules/reexport_of_a_private_name/main.lin:5:15
+  |
+5 | pub use inner.Hidden
+  |               ^^^^^^ declare it `pub` in its own module, or do not name it here

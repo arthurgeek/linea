@@ -1,0 +1,53 @@
+// The shapes where "does this determine its own type" is not one token.
+//
+// A literal waits and a name answers, and the interesting cases are the ones
+// built out of both: a literal inside parentheses still waits, arithmetic
+// answers as soon as either side does, and a negation says whatever it wraps.
+// Each of these settles a type parameter or takes what one was settled to, and
+// getting either backwards is a program refused for a reason nobody can read.
+fn same[T: Equatable](a: T, b: T) -> Bool {
+    a == b
+}
+
+fn eight() -> UInt8 {
+    8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 8
+    let h: Holder = .{ n = 8 }
+    let signed: Int64 = -8
+
+    // Parentheses wrap a literal, which still waits: what is inside decides.
+    let grouped = same(n, (8))
+    let twice_grouped = same(n, ((8)))
+
+    // A negation says what it wraps -- here a literal, so it waits too.
+    let negated = same(signed, -8)
+
+    // Arithmetic over two literals waits; arithmetic naming anything does not.
+    let both_wait = same(n, 4 + 4)
+    let one_speaks = same(n, n + 0)
+    let wrapped_speaks = same(n, (n) + 0)
+
+    // A call, a field and a conversion each answer for themselves, so each
+    // settles `T` and the literal beside it takes what they settled.
+    let called = same(eight(), 8)
+    let field = same(h.n, 8)
+    let converted = same(UInt8(8), 8)
+
+    // Text and truth answer for themselves in the other direction: nothing is
+    // waiting, and the parameter is settled by either side.
+    let text = same("olá", "olá")
+    let truth = same(true, 1 == 1)
+
+    if grouped && twice_grouped && negated && both_wait && one_speaks && wrapped_speaks && called && field && converted && text && truth {
+        0
+    } else {
+        1
+    }
+}

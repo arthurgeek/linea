@@ -1,0 +1,29 @@
+// A deferred expression runs at every exit, and one error in it is still one
+// error: it is reported once, however many paths leave the scope.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> () {
+    let Key { n: _n } = k
+}
+
+fn go(flag: Bool) -> UInt8 {
+    let k: Key = .{ n = 7 }
+    let j: Key = .{ n = 8 }
+    defer {
+        take(k)
+        take(k)
+    }
+    if flag {
+        take(j)
+        return 1
+    }
+    take(j)
+    2
+}
+
+fn main() -> UInt8 {
+    go(true)
+}

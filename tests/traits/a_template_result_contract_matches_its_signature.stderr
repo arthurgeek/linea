@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the implementation's sources exceed the trait signature
+ --> tests/traits/a_template_result_contract_matches_its_signature.lin:7:8
+  |
+7 |     fn get(_self: Self) -> Str where borrows(_self) {
+  |        ^^^ declare these sources on the trait signature or remove the extra effects

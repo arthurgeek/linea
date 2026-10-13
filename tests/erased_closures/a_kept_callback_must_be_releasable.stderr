@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Release`, and `<closure>` does not implement it
+  --> tests/erased_closures/a_kept_callback_must_be_releasable.lin:12:30
+   |
+12 |     let reveal = mem.Closure.open(
+   |                              ^^^^ implement it for that type, or drop the bound

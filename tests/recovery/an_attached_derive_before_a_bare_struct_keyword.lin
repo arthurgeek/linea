@@ -1,0 +1,4 @@
+fn main() -> UInt8 { 0 }
+
+@derive(Debug)
+struct

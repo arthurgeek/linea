@@ -1,0 +1,8 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_match_tracks_what_a_payload_binds/main.lin:13:13
+   |
+13 |         Has(k) => tag(k),
+   |             ^ never settled on the path that reaches the end of its scope
+   |                   ------ its scope ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

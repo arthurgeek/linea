@@ -1,0 +1,12 @@
+// Parentheses preserve a field place. An aggregate field cannot move out of
+// its owner through a parenthesized path.
+@copyable
+struct Part { value: UInt8 }
+
+struct Outer { part: Part, number: UInt8 }
+
+fn main() -> UInt8 {
+    let owner: Outer = .{ part = .{ value = 2 }, number = 1 }
+    let taken: Part = (owner).part
+    taken.value + owner.number
+}

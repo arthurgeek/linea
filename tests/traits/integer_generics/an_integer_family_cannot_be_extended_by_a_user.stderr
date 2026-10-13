@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Integer`
+ --> tests/traits/integer_generics/an_integer_family_cannot_be_extended_by_a_user.lin:3:6
+  |
+3 | impl Integer for Number {}
+  |      ^^^^^^^ no trait with this name is declared here
+error[N-Unused]: `Number` is never used
+ --> tests/traits/integer_generics/an_integer_family_cannot_be_extended_by_a_user.lin:1:8
+  |
+1 | struct Number {}
+  |        ^^^^^^ name it in an annotation, or remove it

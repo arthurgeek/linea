@@ -1,0 +1,10 @@
+error[S-Separator]: expected `;` or a newline
+ --> tests/recovery/a_block_skipped_after_a_statement_closes_only_itself.lin:7:19
+  |
+7 |         score + 1 oops {
+  |                   ^^^^ this statement ends here
+error[T-Discard]: this expression produces an `Int64` that is discarded
+ --> tests/recovery/a_block_skipped_after_a_statement_closes_only_itself.lin:7:9
+  |
+7 |         score + 1 oops {
+  |         ^^^^^^^^^ bind it with `let _ =` to discard it deliberately

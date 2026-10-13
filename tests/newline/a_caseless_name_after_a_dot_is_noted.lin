@@ -1,0 +1,19 @@
+// `_1` has no case, so it may name a variant as well as a field, and a line
+// opening with `._1` is not known to continue the line above. It begins a
+// statement, here the function's result, and is noted.
+enum Lane {
+    _1,
+    Two,
+}
+
+fn first() -> Lane {
+    let _chosen = true
+    ._1
+}
+
+fn main() -> UInt8 {
+    match first() {
+        _1 => 0,
+        Two => 2,
+    }
+}

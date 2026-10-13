@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Handle[Bool]` for `fn(read UInt64) -> UInt64`
+  --> tests/traits/callable_heads/two_callable_heads_of_one_shape_answer_one_function_once.lin:13:6
+   |
+7  | impl[T] Handle[T] for fn(input: UInt64) -> UInt64 {
+   |         ------ the other implementation
+13 | impl Handle[Bool] for fn(input: UInt64) -> UInt64 {
+   |      ^^^^^^ no instantiation may answer to two implementations of one trait

@@ -1,0 +1,40 @@
+==================
+A trait provides an operation with its body
+==================
+
+trait Gauge {
+    fn size(self: Self) -> UInt16
+
+    fn twice(self: Self) -> UInt16 {
+        self.size() * 2
+    }
+}
+
+---
+
+(source_file
+  (trait_declaration
+    name: (type_identifier)
+    (signature
+      name: (identifier)
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (self_type)))
+      return_type: (type_identifier))
+    (provided_operation
+      name: (identifier)
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (self_type)))
+      return_type: (type_identifier)
+      body: (block
+        (expression_statement
+          (binary_expression
+            (call_expression
+              callee: (field_expression
+                (identifier)
+                field: (identifier))
+              (argument_list))
+            (integer_literal)))))))

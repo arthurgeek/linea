@@ -1,0 +1,25 @@
+// An explicitly linear component imposes an obligation on its ordinary
+// wrapper even when every type argument is copyable.
+@linear
+struct Cell[T] {
+    v: T,
+}
+
+struct Outer[T] {
+    c: Cell[T],
+}
+
+fn look[T: Copyable](_o: Outer[T]) -> UInt8 {
+    7
+}
+
+fn f[T: Copyable](x: T) -> UInt8 {
+    let o: Outer[T] = .{ c = .{ v = copy(x) } }
+    let p: Outer[T] = copy(o)
+    look(o) + look(p)
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    f(n)
+}

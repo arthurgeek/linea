@@ -1,0 +1,24 @@
+// A value moved into a call that has not begun is owned by nobody. `d` was
+// given up and `use2` never started, so the state this returns into holds a
+// linear value with no owner.
+//
+// The fix is the order, which is the tell that this is a rule about evaluation
+// rather than about `return`.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn go(sink d: Key) -> UInt8 {
+    use2(d, return 7)
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

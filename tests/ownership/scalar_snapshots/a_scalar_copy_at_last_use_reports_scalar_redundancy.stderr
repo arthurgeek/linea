@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `UInt8` already produces a scalar snapshot when read
+ --> tests/ownership/scalar_snapshots/a_scalar_copy_at_last_use_reports_scalar_redundancy.lin:3:5
+  |
+3 |     copy(number)
+  |     ^^^^^^^^^^^^ remove `copy` and read the value directly

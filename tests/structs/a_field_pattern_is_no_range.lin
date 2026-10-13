@@ -1,0 +1,7 @@
+// A range in a field's place would compare the field against it. A struct
+// pattern binds names, so the range is refused and `lo` is never tested.
+fn main() -> UInt8 {
+    match 5..UInt8(9) {
+        Range { lo: 300..=400, hi, inclusive: _ } => hi,
+    }
+}

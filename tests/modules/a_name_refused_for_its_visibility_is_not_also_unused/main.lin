@@ -1,0 +1,12 @@
+// Naming a private declaration from another module is refused for its
+// visibility, and that is the one report: the name was written, so the
+// declaration is not also reported unused.
+import tally
+
+use tally.Tally
+use tally.reset
+
+fn main() -> UInt8 {
+    let count = Tally.fresh()
+    count.total + Tally.secret() + reset()
+}

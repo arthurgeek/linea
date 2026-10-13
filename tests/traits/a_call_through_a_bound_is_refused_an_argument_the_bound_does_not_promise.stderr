@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/a_call_through_a_bound_is_refused_an_argument_the_bound_does_not_promise.lin:21:17
+   |
+11 |     fn of(x: Self, a: A) -> UInt8
+   |                    - expected because of this parameter
+21 |     Holds.of(w, true)
+   |                 ^^^^ expected `UInt8`, found `Bool`

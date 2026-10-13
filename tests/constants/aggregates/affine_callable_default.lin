@@ -1,0 +1,11 @@
+struct Config {
+    amount: UInt8,
+}
+
+fn _invoke[F: fn(read config: Config = .{ amount = 7 }) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    0
+}

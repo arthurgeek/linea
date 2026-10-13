@@ -1,0 +1,11 @@
+fn invoke[F: fn(read value: Str = "á") -> UInt64](callback: F) -> UInt64 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if invoke(|value = "\u{e1}"| value.length()) == 2 {
+        0
+    } else {
+        1
+    }
+}

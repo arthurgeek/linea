@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Release`, and `Plain` does not implement it
+  --> tests/release/a_discardable_type_without_release_does_not_meet_the_bound.lin:13:5
+   |
+13 |     discard(plain)
+   |     ^^^^^^^ implement it for that type, or drop the bound

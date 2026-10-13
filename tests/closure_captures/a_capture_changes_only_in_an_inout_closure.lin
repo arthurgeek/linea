@@ -1,0 +1,9 @@
+// A closure changes what it captured only when it is declared `inout`, which
+// its caller must then call with `&`. `count` is not, so `seen` cannot change.
+fn main() -> UInt8 {
+    let count = [sink seen = UInt8(0)] || {
+        seen += 1
+        seen
+    }
+    count()
+}

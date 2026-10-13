@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let callback = [] || UInt8(0)
+    &callback()
+}

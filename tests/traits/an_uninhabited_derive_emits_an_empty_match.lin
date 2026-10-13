@@ -1,0 +1,19 @@
+trait Consume {
+    fn consume(sink self: Self) -> UInt8
+}
+
+template impl Consume {
+    fn consume(sink _self: Self) -> UInt8 {
+        match _self {}
+    }
+}
+
+enum Empty {}
+
+derive Consume for Empty
+
+fn _holds(_empty: Empty) -> () {}
+
+fn main() -> UInt8 {
+    0
+}

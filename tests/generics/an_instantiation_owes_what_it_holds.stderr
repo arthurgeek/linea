@@ -1,0 +1,10 @@
+error[N-Unused]: `dup` is never used
+  --> tests/generics/an_instantiation_owes_what_it_holds.lin:12:4
+   |
+12 | fn dup[T](b: Box[T]) -> Box[T] {
+   |    ^^^ call it, or name it with a leading `_`
+error[O-Copy]: `Box[T]` does not permit copying
+  --> tests/generics/an_instantiation_owes_what_it_holds.lin:13:5
+   |
+13 |     copy(b)
+   |     ^^^^^^^ move the value, or declare a copyable representation

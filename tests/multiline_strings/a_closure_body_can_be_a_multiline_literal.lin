@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let title = |_n: UInt8|
+        \\Chapter
+    UInt8(title(1).length()) - 7
+}

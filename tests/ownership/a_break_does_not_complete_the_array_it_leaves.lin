@@ -1,0 +1,17 @@
+// A `break` inside an array element leaves the array half built, so the value
+// already given to the array is owned by nobody after the loop.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn go(sink d: Key) -> UInt8 {
+    let n = loop {
+        let _pair = [d, break 7]
+    }
+    n
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

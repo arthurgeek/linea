@@ -1,0 +1,10 @@
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/inference/map_errors/unresolved_callback_cycles_do_not_guess_inputs.lin:6:10
+  |
+6 |     pair(|sink first| UInt16(first), |sink second| UInt8(second))
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^ settle every input type before this callable value
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/inference/map_errors/unresolved_callback_cycles_do_not_guess_inputs.lin:6:38
+  |
+6 |     pair(|sink first| UInt16(first), |sink second| UInt8(second))
+  |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^ settle every input type before this callable value

@@ -1,0 +1,24 @@
+struct Sh[T, K = UInt8] {
+    a: T,
+    k: K,
+}
+
+trait Takes[phantom X] {
+    fn takes(_self: Self) -> UInt8
+}
+
+struct Counter {}
+
+impl Takes[Sh[UInt8]] for Counter {
+    fn takes(_self: Self) -> UInt8 {
+        4
+    }
+}
+
+fn both[C: Takes[Sh[UInt8]] + Takes[Sh[UInt8, UInt8]]](counter: C) -> UInt8 {
+    counter.takes()
+}
+
+fn main() -> UInt8 {
+    both(Counter {})
+}

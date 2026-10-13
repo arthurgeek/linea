@@ -1,0 +1,7 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `Account.of(a)` reaches `Measure`'s operation through the type, so hovering\n// `of` there describes the call, and renaming it edits the signature, the\n// implementation, every call however it is written, and the function value\n// `Account.of`.\nstruct Account {\n    balance: UInt8,\n}\n\ntrait Measure {\n    fn of(x: Self) -> UInt8\n}\n\nimpl Measure for Account {\n    fn of(x: Self) -> UInt8 {\n        x.balance\n    }\n}\n\nfn main() -> UInt8 {\n    let a: Account = .{ balance = 1 }\n    let measure = Account.of\n    Account.of(a) + a.of() + Measure.of(a) + measure(a)\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":21,"character":13}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":21,"character":13}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":21,"character":13},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":21,"character":13},"newName":"size"}}
+{"jsonrpc":"2.0","id":6,"method":"shutdown"}

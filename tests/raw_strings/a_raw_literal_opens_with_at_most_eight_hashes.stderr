@@ -1,0 +1,11 @@
+error[S-String]: a raw literal opens with at most 8 `#`, and this one opens with 9
+ --> tests/raw_strings/a_raw_literal_opens_with_at_most_eight_hashes.lin:2:16
+  |
+2 |     let nine = r#########"nine"#########
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^ open it with fewer `#`
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/raw_strings/a_raw_literal_opens_with_at_most_eight_hashes.lin:1:20
+  |
+1 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+  |                    ^ this body produces nothing

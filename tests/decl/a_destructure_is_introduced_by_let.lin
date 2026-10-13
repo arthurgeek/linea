@@ -1,0 +1,15 @@
+// Only `let` takes a value apart. The keyword reached nothing here: both
+// spellings parsed to the same node, so the binders were bound as `let` bound
+// them and assigning one was refused by a message naming a keyword the line
+// does not contain.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p: Point = .{ x = 1, y = 2 }
+    var Point { x: a, y: b } = p
+    a = 3
+    a + b
+}

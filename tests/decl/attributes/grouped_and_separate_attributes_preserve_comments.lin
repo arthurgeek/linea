@@ -1,0 +1,14 @@
+@(copyable, derive(Equatable))
+// The second request remains attached to the same type.
+@derive(Debug)
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let first = Point { value = 7 }
+    let second = copy(first)
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

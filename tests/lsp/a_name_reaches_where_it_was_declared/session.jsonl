@@ -1,0 +1,7 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A name is where the resolver says it was declared, whatever kind of name it\n// is: a local at the `let` that bound it, a parameter where the signature\n// wrote it, and a function at its own name. A cursor on something that is not\n// a name reaches nothing at all.\nfn add(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = add(1, 2)\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":4}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":6}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":0,"character":25}}}
+{"jsonrpc":"2.0","id":6,"method":"shutdown"}

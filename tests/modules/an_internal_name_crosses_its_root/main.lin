@@ -1,0 +1,5 @@
+import inner
+
+fn main() -> UInt8 {
+    inner.value()
+}

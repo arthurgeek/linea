@@ -1,0 +1,14 @@
+// Writing one field of an element chosen at run time changes that field in
+// `cells` and nothing after the array, so a view of `tail` is still good.
+struct Cell { a: UInt8, b: UInt8 }
+
+struct Grid { cells: [Cell; 2], tail: [UInt8; 2] }
+
+fn main() -> UInt8 {
+    var g = Grid { cells = [Cell { a = 1, b = 2 }, Cell { a = 3, b = 4 }], tail = [UInt8(5), 6] }
+    let s = g.tail.as_slice()
+    var i: UInt64 = 1
+    i = i - 1
+    g.cells[i].b = 9
+    UInt8(s.length())
+}

@@ -1,0 +1,17 @@
+// Each iteration makes its own closure, whose lend of `count` ends inside
+// that iteration, so the loop may read `count` between them.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var total: UInt8 = 0
+    var round: UInt8 = 0
+    while round < 3 {
+        var tick = inout [inout count] || {
+            count += 1
+        }
+        &tick()
+        &tick()
+        total += count
+        round += 1
+    }
+    total
+}

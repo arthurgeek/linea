@@ -1,0 +1,16 @@
+import std.mem
+
+use mem.Buffer
+use mem.system
+
+fn abandon[A: Allocator](sink bytes: Buffer[A]) -> UInt8 {
+    if bytes.length() == 0 {
+        0
+    } else {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    abandon(system().acquire(0).unwrap())
+}

@@ -1,0 +1,5 @@
+error[T-Default]: a default cannot have the type `Box[T]`, which depends on a type parameter
+ --> tests/constants/aggregates/open_aggregate_default.lin:4:38
+  |
+4 | fn _take[T: Copyable](_box: Box[T] = .{ value = 1 }) -> () {}
+  |                                      ^^^^^^^^^^^^^^ a default is one value, and this type is settled by the call

@@ -1,0 +1,23 @@
+trait Allowed {}
+
+struct Tag {}
+
+impl Allowed for Tag {}
+
+struct Board[T] {
+    values: [UInt8; 2],
+    tag: T,
+}
+
+impl[T: Allowed] Index[UInt8] for Board[T] via values
+
+impl[T] Index[Int16] for Board[T] via values
+
+fn second[T](board: Board[T]) -> UInt8 {
+    board[1]
+}
+
+fn main() -> UInt8 {
+    let board = Board[Tag] { values = [7, 9], tag = Tag {} }
+    second(board)
+}

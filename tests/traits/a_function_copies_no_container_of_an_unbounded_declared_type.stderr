@@ -1,0 +1,5 @@
+error[O-Copy]: `Wrap[W]` does not permit copying
+  --> tests/traits/a_function_copies_no_container_of_an_unbounded_declared_type.lin:32:5
+   |
+32 |     copy(w)
+   |     ^^^^^^^ move the value, or declare a copyable representation

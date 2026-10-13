@@ -1,0 +1,32 @@
+// A handler whose clause names a source other than the request does not meet
+// the `Endpoint` contract, the same as before the request was a carrier.
+import std.http
+
+@derive(Release)
+struct Author {
+    name: Str,
+}
+
+impl[P: Allocator] http.Extract[P] for Author {
+    fn extract(request: http.Request[P]) -> Result[Author, http.Error[P]] where carries(request) {
+        let name = request.header("X-Author") else {
+            return .Err(http.error(request, .Unauthorized, "no author"))
+        }
+        return .Ok(.{ name })
+    }
+}
+
+fn hello(author: Author, request: http.Request) -> Result[http.Response, http.Error] where carries(author) {
+    http.text(request, "hello {author.name}")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", hello)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

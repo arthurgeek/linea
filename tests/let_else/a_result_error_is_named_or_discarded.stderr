@@ -1,0 +1,5 @@
+error[T-LetElse]: a failed `Result[UInt8, Fault]` carries an error, and this `else` binds none
+  --> tests/let_else/a_result_error_is_named_or_discarded.lin:16:27
+   |
+16 |     let found = lookup(3) else {
+   |                           ^^^^ name it with `else |error|`, or discard it with `else |_|`

@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Self`
+ --> tests/traits/self_outside_an_impl.lin:9:13
+  |
+9 | fn weigh(x: Self) -> UInt8 {
+  |             ^^^^ `Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit

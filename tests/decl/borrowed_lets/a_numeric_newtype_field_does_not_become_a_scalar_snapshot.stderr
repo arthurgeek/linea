@@ -1,0 +1,5 @@
+error[O-Move]: `count` is a lend, and this takes it
+  --> tests/decl/borrowed_lets/a_numeric_newtype_field_does_not_become_a_scalar_snapshot.lin:14:12
+   |
+14 |     number(count)
+   |            ^^^^^ `copy` it, or use the plain form of the construct, which does take the value

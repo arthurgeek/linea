@@ -1,0 +1,15 @@
+fn apply[F: fn(value: Float64) -> Float64](value: Float64, operation: F) -> Float64 {
+    operation(value)
+}
+
+fn main() -> UInt8 {
+    let root: fn(value: Float64) -> Float64 = |number| number.sqrt()
+    let power: fn(base: Float64, exponent: Float64) -> Float64 = |number, degree| number.pow(degree)
+    if apply(81.0, root) != 9.0 {
+        return 1
+    }
+    if power(base: 2.0, exponent: 3.0) != 8.0 {
+        return 2
+    }
+    0
+}

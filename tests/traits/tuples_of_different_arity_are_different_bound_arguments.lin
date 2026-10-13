@@ -1,0 +1,11 @@
+trait Lookup[phantom I] {
+    type Elem
+}
+
+fn _ambiguous[C: Lookup[(UInt8, Bool)] + Lookup[Tuple3[UInt8, Bool, Str]]](_shelf: C) -> C.Elem {
+    panic("unreachable")
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,26 @@
+// `Door` declares `close` itself and through `Shut`. Writing the call out
+// names the trait, so `Shut.close(door)` runs the trait's operation.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    Shut.close(door) + Door.close(door)
+}

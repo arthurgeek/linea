@@ -1,0 +1,35 @@
+// A marked argument asks of every implementation on the path exactly what an
+// assignment asks, and the innermost one is where the place actually sits.
+struct Inner {
+    cells: [UInt8; 3],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[UInt64] for Inner {
+    type Elem = UInt8
+
+    proj at(self: Inner, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Index[UInt64] for Outer {
+    type Elem = UInt8
+
+    proj at(inout self: Outer, i: UInt64) -> UInt8 {
+        self.inner[i]
+    }
+}
+
+fn bump(inout x: UInt8) -> () {
+    x = x + 10
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ cells = [1, 2, 3] } }
+    bump(&o[1])
+    o[1]
+}

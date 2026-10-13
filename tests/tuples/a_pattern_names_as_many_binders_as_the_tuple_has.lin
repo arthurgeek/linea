@@ -1,0 +1,6 @@
+// A tuple pattern names one binder for each component of the tuple.
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (1, 2)
+    let (a, b, c) = pair
+    a + b + c
+}

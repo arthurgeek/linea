@@ -1,0 +1,9 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let _take = mem.slot_take
+    let _put = mem.slot_put
+    let _place = mem.slot_place
+    let _shape: mem.SlotType[UInt8] = .Type
+    0
+}

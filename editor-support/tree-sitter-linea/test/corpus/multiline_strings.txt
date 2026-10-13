@@ -1,0 +1,28 @@
+===================
+Consecutive backslash lines are one string literal
+===================
+
+fn letter() -> Str {
+    let body =
+        \\Dear {name}, "quoted" \n // text
+        \\
+    let one = \\single
+    body
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (string_literal))
+      (let_statement
+        (identifier)
+        (string_literal))
+      (expression_statement
+        (identifier)))))

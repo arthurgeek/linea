@@ -1,0 +1,5 @@
+error[T-Bound]: `Shelf` takes 1 to 2 type argument(s), and was given 0
+  --> tests/type_defaults/a_default_argument_does_not_excuse_a_required_one.lin:10:21
+   |
+10 | fn _nothing(_shelf: Shelf) -> UInt8 {
+   |                     ^^^^^ give it the arguments it declares

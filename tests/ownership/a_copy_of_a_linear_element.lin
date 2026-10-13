@@ -1,0 +1,14 @@
+// [O-LinearCopy]. `copy` duplicates, and a Linear value is not duplicated --
+// an element of an array no more than a field of a structure.
+//
+// [O-Leak] beside it is the array itself, which nothing can take apart yet.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+    let _other = copy(ks[0])
+    0
+}

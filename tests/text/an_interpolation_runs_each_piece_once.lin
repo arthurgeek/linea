@@ -1,0 +1,27 @@
+// A piece runs once where the literal is written, whether the literal is bound
+// to a name first or handed straight to what renders it.
+//
+// The two are written differently and are not the same path through lowering,
+// so the property needs saying of both. `an_interpolation_evaluates_once` says
+// it of a literal bound to a name; this says it of one written at the call.
+//
+// `bump` answers the same number every time, so what the status records is how
+// many times it ran rather than what it returned. One piece, one render: run
+// where it is written it is 1, and run again where it renders it would be 2.
+import std.io
+
+use io.IoError
+use io.println
+
+fn bump(inout n: Int64) -> Int64 {
+    n += 1
+    7
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var n: Int64 = 0
+
+    println("{bump(&n)}")?
+
+    return .Ok(UInt8(n))
+}

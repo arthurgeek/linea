@@ -1,0 +1,5 @@
+error[T-Refine]: 1000 is not in 100..=999 for http.Code
+ --> tests/newtypes/a_status_code_past_three_digits_is_refused.lin:6:36
+  |
+6 |     let status = http.Status.Other(http.Code(1000))
+  |                                    ^^^^^^^^^^^^^^^ this value is outside the type's range

@@ -1,0 +1,26 @@
+// Every other member is checked against the trait's signature under the
+// binding. `-> Item` is the trait asking for whatever this implementation
+// settled `Item` to, so an implementation binding `UInt8` and returning
+// something else disagrees with its own answer -- and what it is held to is
+// the type it bound, named in the report.
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+
+    fn get(self: Box) -> Box {
+        .{ n = self.n }
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

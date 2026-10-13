@@ -1,0 +1,17 @@
+import std.collections
+import std.mem
+
+@linear
+struct Ticket { id: UInt8 }
+
+fn main() -> UInt8 {
+    var values: collections.Map[UInt8, Ticket, mem.SystemAllocator] = collections.Map.new()
+    match collections.Map.insert(&values, 1, .{ id = 7 }).unwrap() {
+        None => {},
+        Some(entry) => {
+            let { key: _, value } = entry
+            let Ticket { id: _ } = value
+        },
+    }
+    0
+}

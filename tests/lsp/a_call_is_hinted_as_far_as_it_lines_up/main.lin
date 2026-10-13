@@ -1,0 +1,11 @@
+// A half-written call is the ordinary state of a file an editor asks about, so
+// a call is hinted for as far as it lines up with its signature and stops at
+// the first position that does not. A callee that reaches no declaration has
+// no signature to read, and is hinted not at all.
+fn total(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    total(1) + total(1, 2, 3) + nope(1, 2)
+}

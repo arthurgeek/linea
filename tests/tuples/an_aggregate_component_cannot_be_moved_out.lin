@@ -1,0 +1,11 @@
+// A scalar component is read by snapshot, but an aggregate component cannot
+// be moved out of its tuple through the field; take the tuple apart instead.
+struct Ticket {
+    number: UInt8,
+}
+
+fn main() -> UInt8 {
+    let t: (UInt8, Ticket) = (1, .{ number = 2 })
+    let moved = t._1
+    moved.number
+}

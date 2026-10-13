@@ -1,0 +1,14 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var total: UInt8 = 0
+    var round: UInt8 = 0
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    while round < 3 {
+        &tick()
+        total += count
+        round += 1
+    }
+    total
+}

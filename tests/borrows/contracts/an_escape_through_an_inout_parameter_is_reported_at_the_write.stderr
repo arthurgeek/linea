@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/borrows/contracts/an_escape_through_an_inout_parameter_is_reported_at_the_write.lin:6:5
+  |
+6 |     target = .Some(borrow local)
+  |     ^^^^^^ escape observations only from the signature's declared sources

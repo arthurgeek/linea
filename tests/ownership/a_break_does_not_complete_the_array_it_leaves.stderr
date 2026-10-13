@@ -1,0 +1,20 @@
+error[O-Loop]: `d` is moved inside a loop, so this would run more than once
+  --> tests/ownership/a_break_does_not_complete_the_array_it_leaves.lin:10:22
+   |
+10 |         let _pair = [d, break 7]
+   |                      ^ consume it outside the loop, or restructure until it is consumed once
+error[O-Uncommitted]: `array literal` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_break_does_not_complete_the_array_it_leaves.lin:10:25
+   |
+10 |         let _pair = [d, break 7]
+   |                      - it was given up here
+   |                         ^^^^^^^ give the value up after this, not before it
+error[O-Leak]: `d` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_break_does_not_complete_the_array_it_leaves.lin:8:12
+   |
+8  | fn go(sink d: Key) -> UInt8 {
+   |            ^ never settled on the path that reaches the end of this block
+13 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Key { n: _ } = d`, or give it to something that takes it

@@ -1,0 +1,28 @@
+// Inside `first`, `_1` is the type parameter, so `_1.get(h)` calls the
+// operation its bound `Carry` declares. Outside it, `_1.zero()` calls the
+// function of the imported module `_1`. A name with no letter has no case, so
+// it is the one spelling a module and a type parameter can share.
+import _1
+
+trait Carry {
+    fn get(s: Self) -> UInt8
+}
+
+struct Holder {
+    v: UInt8,
+}
+
+impl Carry for Holder {
+    fn get(s: Self) -> UInt8 {
+        s.v
+    }
+}
+
+fn first[_1: Carry](h: _1) -> UInt8 {
+    _1.get(h)
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .{ v = 4 }
+    first(held) + _1.zero()
+}

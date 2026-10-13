@@ -1,0 +1,42 @@
+// A program may name its types whatever it likes, including what the library
+// named its own.
+//
+// Nothing here imports anything, so nothing here can be ambiguous with
+// anything. What makes that worth a case is how the postfix form finds an
+// operation: it collects every block declaring a member of that name and then
+// asks which of them the receiver's type owns. The asking is what has to be
+// keyed on the module that *wrote* the block -- read against the module doing
+// the reading instead, a program's `impl SystemAllocator` answers for the
+// library's, and the library stops compiling in files the program cannot see.
+//
+// `dispose`, `length` and `store` are the names to pick: the library reaches
+// all three through the postfix form on types with exactly these names.
+struct SystemAllocator {
+    n: UInt8,
+}
+
+impl SystemAllocator {
+    fn dispose(s: SystemAllocator) -> UInt8 {
+        s.n
+    }
+}
+
+struct Buffer {
+    held: UInt8,
+}
+
+impl Buffer {
+    fn length(b: Buffer) -> UInt8 {
+        b.held
+    }
+
+    fn store(b: Buffer, v: UInt8) -> UInt8 {
+        b.held + v
+    }
+}
+
+fn main() -> UInt8 {
+    let s: SystemAllocator = .{ n = 5 }
+    let b: Buffer = .{ held = 3 }
+    s.dispose() + b.length() + b.store(1)
+}

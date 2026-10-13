@@ -1,0 +1,15 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// `Vec` implements `Equatable` for no arguments at all, so `Bag[T]` could
+// never compare, whatever `T` is. The derive is refused at the field instead
+// of at every later use.
+@derive(Equatable)
+struct Bag[T] {
+    items: Vec[T, SystemAllocator],
+}
+
+fn main() -> UInt8 {
+    0
+}

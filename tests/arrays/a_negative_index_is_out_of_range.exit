@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/arrays/a_negative_index_is_out_of_range.lin:10:5

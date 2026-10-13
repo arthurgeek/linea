@@ -1,0 +1,10 @@
+// A primitive is an ordinary name, so declaring one again is the rule a name
+// declared twice breaks rather than a rule about reserved words. Nothing about
+// `UInt8` is special except that the compiler put it in scope.
+struct UInt8 {
+    count: UInt8,
+}
+
+fn main() -> UInt8 {
+    0
+}

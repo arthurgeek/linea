@@ -1,0 +1,5 @@
+extern fn close(fd: Int64) -> Int64
+
+pub fn close_other(fd: Int64) -> Int64 {
+    close(fd)
+}

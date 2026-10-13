@@ -1,0 +1,15 @@
+error[T-Bound]: `create` takes 1 type argument(s), and was given 2
+  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:21:27
+   |
+21 |     let _too_many = create[UInt8, Bool]
+   |                           ^^^^^^^^^^^^^ it declares only `P`
+error[T-Bound]: `W` requires `Weighed`, and `UInt8` does not implement it
+  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:22:31
+   |
+22 |     let _unweighed = heaviest[UInt8]
+   |                               ^^^^^ implement it for that type, or drop the bound
+error[T-Index]: this bracket holds a list, and an index is one value
+  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:24:20
+   |
+24 |     let _indexed = values[UInt8, Bool]
+   |                    ^^^^^^^^^^^^^^^^^^^ index one position at a time, as in `grid[row][column]`

@@ -1,0 +1,9 @@
+error[O-Leak]: `_ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/iteration/a_filtered_linear_output_requires_consumption.lin:10:9
+   |
+10 |     let _ticket = Iterator.next(&mapped).unwrap()
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+12 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Ticket { number: _ } = _ticket`, or give it to something that takes it

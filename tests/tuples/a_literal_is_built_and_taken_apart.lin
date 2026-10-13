@@ -1,0 +1,10 @@
+// A tuple is built by listing its components and taken apart by position.
+fn main() -> UInt8 {
+    let pair: (UInt8, Bool) = (3, true)
+    let (n, flag) = pair
+    if flag {
+        n - 3
+    } else {
+        1
+    }
+}

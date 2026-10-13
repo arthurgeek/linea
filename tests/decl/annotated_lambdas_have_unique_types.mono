@@ -1,0 +1,12 @@
+fn ;main() -> UInt8 {
+    let first = |value: UInt8| value
+    let second = |value: UInt8| value
+    closure.0(2) + closure.1(3)
+}
+
+fn closure.0(read value: UInt8) -> UInt8 {
+    value
+}
+fn closure.1(read value: UInt8) -> UInt8 {
+    value
+}

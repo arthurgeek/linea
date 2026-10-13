@@ -1,0 +1,21 @@
+// An implementation whose result is not its signature's cannot adopt the
+// signature's contract, which targets the signature's `.Ok`. The mismatch is
+// its one error.
+trait Maker {
+    fn make(self: Self, text: Str) -> Result[Str, Str] where carries(.Ok: text)
+}
+
+struct Note {
+    body: Str,
+}
+
+impl Maker for Note {
+    fn make(self: Self, _text: Str) -> Str {
+        copy(self.body)
+    }
+}
+
+fn main() -> UInt8 {
+    let _made = Note { body = "n" }.make("t")
+    0
+}

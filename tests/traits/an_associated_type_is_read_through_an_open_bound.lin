@@ -1,0 +1,31 @@
+// A bound's arguments need not be settled. `C.Elem` is read through `Lookup`
+// at whatever `I` is, and the call that instantiates `reach` is what settles
+// `I` -- so the declared type is read through the trait at the bound's
+// arguments as written, ground or not.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn reach[I, C: Lookup[I]](c: C, i: I) -> C.Elem where carries(c, i) {
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    let i: UInt64 = 3
+    reach(b, i)
+}

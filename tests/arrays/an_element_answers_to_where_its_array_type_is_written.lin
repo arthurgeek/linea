@@ -1,0 +1,10 @@
+// An array written where a type is expected takes that type, so an element
+// that does not fit is held against the annotation or parameter that gave it.
+fn total(prices: [UInt8; 2]) -> UInt8 {
+    prices[0] + prices[1]
+}
+
+fn main() -> UInt8 {
+    let _counts: [UInt8; 2] = [1, true]
+    total([2, false])
+}

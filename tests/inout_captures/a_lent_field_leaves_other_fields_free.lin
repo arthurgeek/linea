@@ -1,0 +1,17 @@
+// Lending one field `inout` leaves the record's other fields free to read
+// while the closure is in use.
+struct Survey {
+    limit: UInt8,
+    counted: UInt8,
+}
+
+fn main() -> UInt8 {
+    var survey = Survey { limit = 3, counted = 0 }
+    var count = inout [inout counted = survey.counted] |value: UInt8| {
+        counted += 1
+        value
+    }
+    let first = &count(survey.limit)
+    let second = &count(survey.limit)
+    first + second + survey.counted
+}

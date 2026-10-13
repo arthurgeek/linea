@@ -1,0 +1,5 @@
+error[T-Projection]: `at` is a projection, and a projection is reached through a bracket rather than a call
+  --> tests/projections/a_projection_is_reached_through_a_bracket.lin:27:13
+   |
+27 |     let t = Index.at(&g, k)
+   |             ^^^^^^^^^^^^^^^ write the bracket its trait gives the value

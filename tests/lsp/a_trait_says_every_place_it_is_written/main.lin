@@ -1,0 +1,25 @@
+// A bound and an `impl` header name a trait outside every expression, and the
+// call below names it as one.
+// All four are places this trait is used.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+fn total[T: Measure](a: T) -> UInt8 {
+    Measure.of(a)
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 4 }
+    total(c)
+}

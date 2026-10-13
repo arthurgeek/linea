@@ -1,0 +1,34 @@
+// A type parameter reaches the operations its bounds declare, so `T.default()`
+// under `T: Default` builds the value the instantiated type starts from, and
+// `T.from(n)` converts through the implementation the bound promises.
+// `T.default` without a call is a function value.
+fn fresh[T: Default]() -> T {
+    T.default()
+}
+
+fn made[T: Default]() -> T {
+    let make = T.default
+    make()
+}
+
+fn converted[T: From[UInt8]](n: UInt8) -> T {
+    T.from(n)
+}
+
+@copyable
+struct Meters {
+    value: UInt8,
+}
+
+impl From[UInt8] for Meters {
+    fn from(sink source: UInt8) -> Meters {
+        .{ value = source }
+    }
+}
+
+fn main() -> UInt8 {
+    let zero: UInt8 = fresh()
+    let other: UInt8 = made()
+    let length: Meters = converted(9)
+    zero + other + length.value
+}

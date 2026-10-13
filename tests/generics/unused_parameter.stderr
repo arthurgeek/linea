@@ -1,0 +1,5 @@
+error[N-Unused]: `T` is never used
+ --> tests/generics/unused_parameter.lin:4:13
+  |
+4 | struct Held[T] {
+  |             ^ name it in this declaration, declare it `phantom`, or remove it

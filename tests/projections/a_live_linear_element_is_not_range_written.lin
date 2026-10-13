@@ -1,0 +1,15 @@
+// Assigning into a range place writes the whole place, so it writes over every
+// element the bounds name. [O-Leak] refuses that while those elements still
+// hold live linear values, exactly as it refuses writing over one of them:
+// the write destroys what is there with nothing to dispose of it.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    var a: [Key; 4] = [.{ n = 1 }, .{ n = 2 }, .{ n = 3 }, .{ n = 4 }]
+    let pair: [Key; 2] = [.{ n = 5 }, .{ n = 6 }]
+    a[0..2] = pair
+    0
+}

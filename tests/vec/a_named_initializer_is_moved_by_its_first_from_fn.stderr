@@ -1,0 +1,7 @@
+error[O-Move]: `square` has already been moved
+  --> tests/vec/a_named_initializer_is_moved_by_its_first_from_fn.lin:10:50
+   |
+7  |     let small = mem.Vec.from_fn(mem.system(), 2, square) else |_| {
+   |                                                  ------ it was taken here
+10 |     let large = mem.Vec.from_fn(mem.system(), 4, square) else |_| {
+   |                                                  ^^^^^^ it was already taken, and a value is taken once

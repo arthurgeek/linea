@@ -1,0 +1,20 @@
+// Two arguments settling one parameter differently, reported at the second --
+// which is where the disagreement becomes visible, and not at the declaration,
+// which was right about everything.
+fn pick[T: Copyable](a: T, b: T) -> T where carries(a) {
+    copy(a)
+}
+
+// And a parameter no argument determines. `[T-Infer]` rather than a guess:
+// nothing here says what it is, and a rule that reached further would make
+// where the diagnostic lands depend on how far the compiler searched.
+fn nothing[T: Copyable](n: UInt8) -> UInt8 {
+    n
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    let bad: UInt8 = pick(n, true)
+    let worse: UInt8 = nothing(2)
+    bad + worse
+}

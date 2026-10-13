@@ -1,0 +1,32 @@
+trait Visit[C] {
+    fn visit(self: Self, context: C, remaining: UInt8) -> UInt8
+}
+
+@copyable
+struct Context[A: Copyable] {
+    value: A,
+}
+
+@copyable
+struct Receiver[A: Copyable] {
+    value: A,
+}
+
+impl[A: Copyable] Visit[Context[A]] for Receiver[A] {
+    fn visit(self: Self, context: Context[A], remaining: UInt8) -> UInt8 {
+        if remaining == 0 {
+            return 0
+        }
+        return Visit.visit(self, context, remaining - 1) + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let receiver: Receiver[UInt8] = .{ value = 7 }
+    let context: Context[UInt8] = .{ value = 2 }
+    if Visit.visit(receiver, context, 3) == 3 {
+        0
+    } else {
+        1
+    }
+}

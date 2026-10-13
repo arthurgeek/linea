@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/http/a_route_cannot_keep_a_request_view_in_the_state.lin:12:5
+   |
+12 |     app.last = request.path()
+   |     ^^^^^^^^ escape observations only from the signature's declared sources

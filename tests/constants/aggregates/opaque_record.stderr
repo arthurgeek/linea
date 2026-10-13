@@ -1,0 +1,5 @@
+error[M-Opaque]: `Path` is opaque outside `fs`
+ --> tests/constants/aggregates/opaque_record.lin:3:21
+  |
+3 | let path: fs.Path = .{}
+  |                     ^^^ only its own module can build one

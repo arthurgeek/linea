@@ -1,0 +1,24 @@
+// An iterator known only through its `Iterator` bound is its own sequence, so
+// it offers every walking operation and a `for` walks it directly.
+import std.io
+
+// Weigh any iterator's items at two units each.
+fn weight[I: Iterator + Discardable](sink values: I) -> UInt64 where I.Item: Discardable {
+    values.map(|sink _value| UInt64(2)).fold(0, |sink total, sink units| total + units)
+}
+
+// Count the items of any iterator whose items may be dropped.
+fn count[I: Iterator + Discardable](sink values: I) -> UInt64 where I.Item: Discardable {
+    var total: UInt64 = 0
+    for _value in values {
+        total += 1
+    }
+    total
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let weighed = weight(UInt64(1)..4)
+    let counted = count(UInt8(0)..5)
+    io.println("{weighed} {counted}")?
+    .Ok(0)
+}

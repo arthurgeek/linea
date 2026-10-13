@@ -1,0 +1,27 @@
+// `defer let lamp = ...` binds `lamp` and schedules `lamp.release()` for the
+// end of the scope, so a later `defer let` releases first.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    defer let first: Lamp = .{ id = 1 }
+    defer let second: Lamp = .{ id = 2 }
+    defer let third = Lamp { id = 3 }
+    0
+}

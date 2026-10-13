@@ -1,0 +1,10 @@
+// `for (a, b) in pairs` moves each pair out of the array and gives `a` the
+// first component and `b` the second.
+fn main() -> UInt8 {
+    let pairs = [(1, 2), (3, 4), (5, 6)]
+    var total: UInt8 = 0
+    for (a, b) in pairs {
+        total += a * 10 + b
+    }
+    total - 102
+}

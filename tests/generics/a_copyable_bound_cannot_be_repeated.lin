@@ -1,0 +1,11 @@
+// The second of two identical demands asks for nothing the first did not. A
+// bound narrows what a name may stand for, so one narrowing it to what it is
+// already narrowed to is a word in the position of a requirement.
+fn _twice[T: Copyable + Copyable](x: T) -> UInt8 {
+    let _a = copy(x)
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

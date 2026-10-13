@@ -1,0 +1,21 @@
+fn observe(number: UInt8) -> borrow UInt8 where borrows(number) {
+    borrow number
+}
+
+fn apply[F: fn(read item: UInt8) -> borrow UInt8 where borrows(item)](value: UInt8, transform: F) -> borrow UInt8 where borrows(value), carries(transform) {
+    transform(item: value)
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let selected: fn(read value: UInt8) -> borrow UInt8 where borrows(value) = observe
+    let lambda: fn(read value: UInt8) -> borrow UInt8 where borrows(value) = |number| -> where borrows(number) borrow number
+    let first = selected(value: number)
+    let second = lambda(value: number)
+    let third = apply(number, |entry| -> where borrows(entry) borrow entry)
+    if *first == 7 && *second == 7 && *third == 7 {
+        0
+    } else {
+        1
+    }
+}

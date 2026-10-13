@@ -1,0 +1,10 @@
+// [T-ArraySize]. What a length may be written as is exactly what the
+// constant-expression list admits, and that list admits a conversion of a
+// constant expression. A conversion whose target holds the number is worth
+// that number, so the type is settled where it is written.
+let n: UInt8 = UInt8(3)
+
+fn main() -> UInt8 {
+    let xs: [UInt8; UInt32(n)] = [1, 2, 4]
+    xs[2]
+}

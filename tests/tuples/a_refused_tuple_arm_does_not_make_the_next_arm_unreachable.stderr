@@ -1,0 +1,10 @@
+error[S-Tuple]: a tuple pattern binds a name or `_` to each component
+ --> tests/tuples/a_refused_tuple_arm_does_not_make_the_next_arm_unreachable.lin:7:13
+  |
+7 |         (a, 1) => a,
+  |             ^ a pattern binds names and compares nothing; bind a name here and compare it in the body
+error[S-Tuple]: a tuple has two to eight components
+  --> tests/tuples/a_refused_tuple_arm_does_not_make_the_next_arm_unreachable.lin:11:9
+   |
+11 |         (a) => a,
+   |         ^ bind one value with `let a = …`

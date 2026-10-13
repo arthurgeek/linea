@@ -1,0 +1,7 @@
+error[O-Move]: `defaults` has already been moved
+  --> tests/struct_update/the_base_is_taken.lin:10:5
+   |
+8  |     let tuned = Settings { retries = 5, ..defaults }
+   |                                           -------- it was taken here
+10 |     defaults.retries + tuned.retries
+   |     ^^^^^^^^^^^^^^^^ it was already taken, and a value is taken once

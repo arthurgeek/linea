@@ -1,0 +1,27 @@
+// The other half of the same rule. A bound the member drops is a promise every
+// caller was given and the body is not held to, so the body is checked against
+// less than the signature declares -- and the parameter it declares admits
+// arguments the signature refuses.
+struct Note {
+    at: UInt8,
+}
+
+trait Sink {
+    fn take(inout self: Self, n: UInt8) -> UInt8
+}
+
+trait Emit {
+    fn put[W: Sink](self: Self, inout w: W) -> UInt8
+}
+
+impl Emit for Note {
+    fn put[W](self: Note, inout _w: W) -> UInt8 {
+        self.at
+    }
+}
+
+fn main() -> UInt8 {
+    let n: Note = .{ at = 5 }
+    let Note { at: v } = n
+    v
+}

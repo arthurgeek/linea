@@ -1,0 +1,5 @@
+let value = 1
+
+fn main() -> UInt8 {
+    value
+}

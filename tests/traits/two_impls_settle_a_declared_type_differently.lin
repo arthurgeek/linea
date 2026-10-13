@@ -1,0 +1,49 @@
+// What `Self.Item` means is a question the implementation answers, so two
+// implementations answering it differently give one signature two return types.
+// One implementation would exercise the machinery and say nothing about which
+// answer it read: every settled reference resolves correctly when there is only
+// one answer.
+//
+// The types are what tell them apart. A `Bool` is not a `UInt8` and neither
+// stands for the other, so a call that read the wrong implementation's answer
+// is a program that does not compile rather than one that computes something
+// else -- and the exit status says which value each call produced.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Coins {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.count
+    }
+}
+
+impl Measure for Notes {
+    type Item = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.count > 4
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: Notes = .{ count = 9 }
+    if Measure.of(n) {
+        Measure.of(c) + 10
+    } else {
+        Measure.of(c)
+    }
+}

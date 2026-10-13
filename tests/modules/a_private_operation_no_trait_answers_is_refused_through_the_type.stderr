@@ -1,0 +1,5 @@
+error[M-Vis]: `close` is private to `door`
+  --> tests/modules/a_private_operation_no_trait_answers_is_refused_through_the_type/main.lin:11:15
+   |
+11 |     door.Door.close(d)
+   |               ^^^^^ declare it `pub` in its own module, or do not name it here

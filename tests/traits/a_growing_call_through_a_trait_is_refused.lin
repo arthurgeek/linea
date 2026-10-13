@@ -1,0 +1,27 @@
+// A call written through a trait reaches whatever implementation answers it,
+// so a cycle running through one is a cycle. `walk` hands itself `Wrap[S]`
+// where it was given `S`, which stands for a function per level however the
+// call is dispatched.
+struct Wrap[T] {
+    v: T,
+}
+
+trait Walk {
+    fn walk[S](self: Self, sink s: S) -> UInt8
+}
+
+struct Runner {
+    _n: UInt8,
+}
+
+impl Walk for Runner {
+    fn walk[S](self: Runner, sink s: S) -> UInt8 {
+        let w: Wrap[S] = .{ v = s }
+        Walk.walk(self, w)
+    }
+}
+
+fn main() -> UInt8 {
+    let r: Runner = .{ _n = 0 }
+    Walk.walk(r, 1)
+}

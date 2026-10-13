@@ -1,0 +1,47 @@
+// The same two types, reached by moving a part rather than by comparing two. A
+// value of `Holder[Counter]`'s part standing where `Holder[Flag]`'s is wanted
+// is what it would be with both written out: each instantiation settles the
+// part through its own argument, so nothing crosses from one to the other.
+struct Counter {
+    at: UInt8,
+}
+
+struct Flag {
+    on: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+impl Measure for Flag {
+    type Item = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.on == 1
+    }
+}
+
+struct Holder[W: Measure] {
+    v: W.Item,
+}
+
+fn _moved(sink a: Holder[Counter]) -> Holder[Flag] {
+    let out: Holder[Flag] = .{ v = a.v }
+    out
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

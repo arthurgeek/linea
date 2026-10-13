@@ -1,0 +1,30 @@
+error[T-Mismatch]: expected `fn(sink UInt16, read UInt8 = 2) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+  --> tests/decl/a_generic_named_function_signature_is_exact.lin:10:78
+   |
+10 |     let _convention: fn(sink value: UInt16, read _by: UInt8 = 2) -> UInt16 = metadata
+   |                      ----------------------------------------------------- expected because of this annotation
+   |                                                                              ^^^^^^^^ expected `fn(sink UInt16, read UInt8 = 2) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+error[T-Mismatch]: expected `fn(read UInt16, read UInt8) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+  --> tests/decl/a_generic_named_function_signature_is_exact.lin:11:80
+   |
+11 |     let _default_presence: fn(read value: UInt16, read _by: UInt8) -> UInt16 = metadata
+   |                            ------------------------------------------------- expected because of this annotation
+   |                                                                                ^^^^^^^^ expected `fn(read UInt16, read UInt8) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+error[T-Mismatch]: expected `fn(read UInt16, read UInt8 = 3) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+  --> tests/decl/a_generic_named_function_signature_is_exact.lin:12:81
+   |
+12 |     let _default_value: fn(read value: UInt16, read _by: UInt8 = 3) -> UInt16 = metadata
+   |                         ----------------------------------------------------- expected because of this annotation
+   |                                                                                 ^^^^^^^^ expected `fn(read UInt16, read UInt8 = 3) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+error[T-Mismatch]: expected `fn(read UInt16) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+  --> tests/decl/a_generic_named_function_signature_is_exact.lin:13:52
+   |
+13 |     let _arity: fn(read value: UInt16) -> UInt16 = metadata
+   |                 -------------------------------- expected because of this annotation
+   |                                                    ^^^^^^^^ expected `fn(read UInt16) -> UInt16`, found `fn(read UInt16, read UInt8 = 2) -> UInt16`
+error[T-Mismatch]: expected `fn(read UInt8, read UInt16) -> UInt16`, found `fn(read fn(read UInt16) -> UInt16, read UInt16) -> UInt16`
+  --> tests/decl/a_generic_named_function_signature_is_exact.lin:14:83
+   |
+14 |     let _callable_kind: fn(read _selected: UInt8, read value: UInt16) -> UInt16 = higher
+   |                         ------------------------------------------------------- expected because of this annotation
+   |                                                                                   ^^^^^^ expected `fn(read UInt8, read UInt16) -> UInt16`, found `fn(read fn(read UInt16) -> UInt16, read UInt16) -> UInt16`

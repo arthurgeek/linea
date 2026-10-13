@@ -1,0 +1,52 @@
+error[T-Bound]: `T` requires `Copyable`, and `Pair[Plain]` does not have that capability
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:38:18
+   |
+38 |     for _step in keep(first) {}
+   |                  ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-For]: `Pair[Plain]` implements no `Sequence`
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:38:18
+   |
+38 |     for _step in keep(first) {}
+   |                  ^^^^^^^^^^^ a `for` walks what a `Sequence` says how to walk
+error[T-Bound]: `T` requires `Copyable`, and `Pair[Plain]` does not have that capability
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:40:18
+   |
+40 |     for _step in wrap(second) {}
+   |                  ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-For]: `Option[Pair[Plain]]` implements no `Sequence`
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:40:18
+   |
+40 |     for _step in wrap(second) {}
+   |                  ^^^^^^^^^^^^ a `for` walks what a `Sequence` says how to walk
+error[T-Bound]: `T` requires `Copyable`, and `Pair[Plain]` does not have that capability
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:42:19
+   |
+42 |     let wrapped = wrap(third)
+   |                   ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-UnknownOperation]: `Option[Pair[Plain]]` has no operation `shout`
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:43:5
+   |
+43 |     wrapped.shout()
+   |     ^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-Bound]: `T` requires `Copyable`, and `Pair[Plain]` does not have that capability
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:45:18
+   |
+45 |     for _step in pick(fourth, UInt8(3)) {}
+   |                  ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-For]: `UInt8` implements no `Sequence`
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:45:18
+   |
+45 |     for _step in pick(fourth, UInt8(3)) {}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^ a `for` walks what a `Sequence` says how to walk
+error[T-Bound]: `T` requires `Copyable`, and `Pair[Plain]` does not have that capability
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:47:5
+   |
+47 |     keep(fifth).release()
+   |     ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-Bound]: `release` comes from `Release`, and `Pair[Plain]` does not implement it
+  --> tests/generics/a_bound_refused_call_with_a_generic_result_hides_nothing.lin:47:5
+   |
+47 |     keep(fifth).release()
+   |     ^^^^^^^^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Pair[T]` implements `Release` when `T` implements `Release`, and `Plain` does not

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// While `Gauge.` is still being written, the dot offers what `Gauge` declares,\n// `reset`, and the operations of the traits in scope it implements, among them\n// `default`, which its derived `Default` gives it.\n@(copyable, derive(Default))\nstruct Gauge {\n    level: UInt8,\n}\n\nimpl Gauge {\n    fn reset(level: UInt8) -> Gauge {\n        .{ level = level }\n    }\n}\n\nfn main() -> UInt8 {\n    let gauge = Gauge.reset(3)\n    Gauge.\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":16,"character":10}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

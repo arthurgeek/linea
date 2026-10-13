@@ -1,0 +1,26 @@
+struct Box[T] { value: T }
+
+trait Route[Target] {
+    fn route(self: Self, target: Target) -> UInt8
+}
+
+impl[T, U] Route[Box[U]] for T where T: Route[U] {
+    fn route(self: T, target: Box[U]) -> UInt8 {
+        1 + Route.route(self, target.value)
+    }
+}
+
+impl[T] Route[UInt8] for T {
+    fn route(_self: T, target: UInt8) -> UInt8 {
+        target
+    }
+}
+
+fn main() -> UInt8 {
+    let target: Box[Box[UInt8]] = .{ value = .{ value = 7 } }
+    if UInt8(0).route(target) == 9 {
+        0
+    } else {
+        1
+    }
+}

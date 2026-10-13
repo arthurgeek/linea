@@ -1,0 +1,27 @@
+// [O-Move] names where the value was taken as well as where it is taken
+// again. A reader who is told only the second has to find the first, and the
+// two are as far apart as the program is long.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn go() -> UInt8 {
+    let k: Key = .{ n = 7 }
+
+    let first = take(k)
+    let padding = first + 1
+    let more = padding + 1
+
+    let second = take(k)
+    second + more
+}
+
+fn main() -> UInt8 {
+    go()
+}

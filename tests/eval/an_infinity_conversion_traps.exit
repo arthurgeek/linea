@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/eval/an_infinity_conversion_traps.lin:5:14

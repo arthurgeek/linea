@@ -1,0 +1,48 @@
+// A parameter written `Self` admits no default. `Self` is a type parameter
+// bounded by the trait, settled by the call that reaches the operation, so
+// there is no value of it to work out where the signature is written -- and a
+// signature is the one place a written `Self` stands for a type no token in
+// the declaration names. The call spelling makes no difference: a settled type
+// and a bound read the same signature.
+struct Big {
+    a: UInt64,
+    b: UInt64,
+}
+
+trait Pad {
+    fn pad(s: Self, extra: Self = 1) -> UInt8
+}
+
+impl Pad for Big {
+    fn pad(s: Big, extra: Big) -> UInt8 {
+        if s.a == extra.a {
+            1
+        } else {
+            2
+        }
+    }
+}
+
+trait Widen {
+    fn widen(s: Self, by: Self = 1) -> UInt8
+}
+
+impl Widen for Big {
+    fn widen(s: Big, by: Big) -> UInt8 {
+        if s.b == by.b {
+            1
+        } else {
+            2
+        }
+    }
+}
+
+fn widened[T: Widen](x: T) -> UInt8 {
+    Widen.widen(x)
+}
+
+fn main() -> UInt8 {
+    let a: Big = .{ a = 1, b = 2 }
+    let b: Big = .{ a = 1, b = 2 }
+    a.pad() + widened(b)
+}

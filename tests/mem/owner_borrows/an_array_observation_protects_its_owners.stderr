@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/an_array_observation_protects_its_owners.lin:11:5
+   |
+11 |     first.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+13 |     for handle in handles {
+   |                   ------- the observation is still used here

@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `zero` is declared by `Gauge`, which is not in scope here
+ --> tests/traits/a_bound_reaches_only_the_type_it_bounds/main.lin:7:17
+  |
+7 |     let _tank = gauge.Tank.zero()
+  |                 ^^^^^^^^^^^^^^^ write `use gauge.Gauge`: an operation is reached through the trait that declares it

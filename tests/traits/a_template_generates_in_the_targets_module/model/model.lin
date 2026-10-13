@@ -1,0 +1,13 @@
+import protocol
+
+@opaque
+struct Item {
+    value: UInt8,
+}
+
+derive protocol.Label for Item
+
+pub fn label() -> UInt8 {
+    let item: Item = .{ value = 0 }
+    protocol.Label.label(item)
+}

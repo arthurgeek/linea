@@ -1,0 +1,15 @@
+// A call that reaches nothing is reported once. Its `&` arguments are
+// still at a call site, so they draw no report of their own.
+struct Counter {
+    count: UInt8,
+}
+
+let limit: UInt8 = 3
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    var other = Counter { count = 0 }
+    counter.missing(&other)
+    limit(&other)
+    counter.count + other.count
+}

@@ -1,0 +1,5 @@
+error[T-Index]: this bracket holds types, and only a generic function's or method's call takes them
+  --> tests/type_arguments/a_field_is_indexed_by_one_value.lin:13:5
+   |
+13 |     rack.steps[UInt8, Bool](1)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ an index is one value

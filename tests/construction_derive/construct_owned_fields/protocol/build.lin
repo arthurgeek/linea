@@ -1,0 +1,32 @@
+import helpers
+
+pub use helpers.Fields
+pub use helpers.Input
+pub use helpers.Failure
+pub use helpers.FromField
+
+pub trait FromFields[Heap: Allocator]: Release {
+    fn build(input: Input, allocator: Heap) -> Result[Self, Failure] where carries(.Ok: allocator)
+}
+
+template impl[Storage: Allocator] FromFields[Storage] where
+    reflect.target: struct,
+    reflect.components: FromField[Storage],
+{
+    fn build(input: Input, allocator: Storage) -> Result[Self, Failure] where carries(.Ok: allocator) {
+        var fields = Fields.open(input, allocator)
+        defer fields.release()
+        let built: Self = reflect.construct(
+            reflect.product,
+            |component| {
+                let owned: component.Type = Fields.field(&fields, component.name)?
+                defer owned.release()
+                owned
+            },
+            {
+                fields.finish()?
+            },
+        )
+        return .Ok(built)
+    }
+}

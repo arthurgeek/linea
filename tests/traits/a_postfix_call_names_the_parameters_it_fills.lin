@@ -1,0 +1,30 @@
+// A postfix call names parameters the way any other call does. The receiver
+// fills the first and is never named; the rest may arrive in any order once
+// they say which parameter they are for.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn between(x: Self, low: UInt8, high: UInt8) -> UInt8
+}
+
+impl Measure for Account {
+    fn between(x: Self, low: UInt8, high: UInt8) -> UInt8 {
+        if x.balance < low {
+            low
+        } else {
+            if x.balance > high {
+                high
+            } else {
+                x.balance
+            }
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 9 }
+    let b: Account = .{ balance = 9 }
+    a.between(high: 5, low: 2) + Measure.between(b, high: 20, low: 2)
+}

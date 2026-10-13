@@ -1,0 +1,8 @@
+@copyable
+enum Mode { Size(UInt8) }
+
+let mode: Mode = .Size(256)
+
+fn main() -> UInt8 {
+    match read mode { Size(value) => value }
+}

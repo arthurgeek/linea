@@ -1,0 +1,50 @@
+// `Door[T]` and `Gate[T]` each declare `close` themselves and implement
+// `Shut`. `Door`'s implementation only calls `close` through the generic alias
+// `Frame` with the same arguments, so a postfix call runs the same code
+// whichever `close` it reaches and nothing is reported. `Gate`'s computes
+// something else, and that is reported.
+@copyable
+struct Door[T] {
+    width: T,
+}
+
+impl[T: Copyable] Door[T] {
+    fn close(self: Door[T]) -> T {
+        copy(self.width)
+    }
+}
+
+@copyable
+struct Gate[T] {
+    width: T,
+}
+
+impl[T: Copyable] Gate[T] {
+    fn close(self: Gate[T]) -> T {
+        copy(self.width)
+    }
+}
+
+alias Frame[T] = Door[T]
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door[UInt8] {
+    fn close(x: Self) -> UInt8 {
+        Frame.close(x)
+    }
+}
+
+impl Shut for Gate[UInt8] {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door[UInt8] = .{ width = 4 }
+    let gate: Gate[UInt8] = .{ width = 2 }
+    door.close() + gate.close()
+}

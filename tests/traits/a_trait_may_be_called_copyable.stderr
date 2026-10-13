@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Copyable`, and `Ledger` does not implement it
+  --> tests/traits/a_trait_may_be_called_copyable.lin:17:5
+   |
+17 |     weigh(l)
+   |     ^^^^^ implement it for that type, or drop the bound

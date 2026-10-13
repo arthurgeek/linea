@@ -1,0 +1,11 @@
+// The walk reads the array through its slice on every pass, so the body
+// cannot write an element, even one the walk has already passed.
+fn main() -> UInt8 {
+    var values = [UInt8(1), 2, 3]
+    var total: UInt8 = 0
+    for value in values.as_slice() {
+        values[0] = 5
+        total += *value
+    }
+    total
+}

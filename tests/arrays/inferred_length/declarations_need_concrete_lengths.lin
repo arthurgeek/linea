@@ -1,0 +1,10 @@
+struct Table { values: [UInt8; _] }
+
+fn values(_input: [UInt8; _]) -> [UInt8; _] {
+    [1, 2]
+}
+
+fn main() -> UInt8 {
+    let table: Table = .{ values = values([1, 2]) }
+    table.values[0]
+}

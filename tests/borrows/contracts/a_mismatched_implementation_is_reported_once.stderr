@@ -1,0 +1,5 @@
+error[T-Impl]: `Maker` declares `make` returning `Result[Str, Str]`, and this returns `Str`
+  --> tests/borrows/contracts/a_mismatched_implementation_is_reported_once.lin:13:8
+   |
+13 |     fn make(self: Self, _text: Str) -> Str {
+   |        ^^^^ return the type the signature declares

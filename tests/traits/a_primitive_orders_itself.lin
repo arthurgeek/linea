@@ -1,0 +1,21 @@
+// A primitive answers the comparison traits without any source declaring so,
+// the way it answers to its own name. Called at two types, so the `.mono`
+// golden says the body was instantiated once per type and the `.ssa` golden
+// says each instantiation reached its own implementation -- which is a signed
+// comparison in one and an unsigned one in the other, and is decided below the
+// dump that names the instantiations.
+fn smaller[T: Comparable](a: T, b: T) -> Bool {
+    Comparable.less(a, b)
+}
+
+fn main() -> UInt8 {
+    let wide: Int64 = 2
+    let other: Int64 = 9
+    let narrow: UInt8 = 3
+    let beside: UInt8 = 1
+    if smaller(wide, other) && !smaller(narrow, beside) {
+        6
+    } else {
+        0
+    }
+}

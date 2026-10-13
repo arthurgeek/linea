@@ -1,0 +1,16 @@
+// A component that neither implements `Release` nor is discardable leaves
+// nothing to settle it with, so the derive is refused at that field.
+@linear
+struct Lock {}
+
+@(linear, derive(Release))
+struct Door {
+    width: UInt64,
+    lock: Lock,
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 3, lock = .{} }
+    door.release()
+    0
+}

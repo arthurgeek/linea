@@ -1,0 +1,18 @@
+program decls=2
+  decl function "add" tokens 2..20
+    param read "a" : UInt8
+    param read "b" : UInt8
+    returns UInt8
+    expr %3 block tokens 15..20
+      expr %2 add tokens 16..19
+        expr %0 name_ref tokens 16..17 "a"
+        expr %1 name_ref tokens 18..19 "b"
+  decl function "main" tokens 20..38
+    returns UInt8
+    expr %8 block tokens 26..38
+      expr %7 call tokens 27..37
+        expr %4 name_ref tokens 27..28 "add"
+        name "a"
+        expr %5 int_literal tokens 31..32 "40"
+        name "b"
+        expr %6 int_literal tokens 35..36 "2"

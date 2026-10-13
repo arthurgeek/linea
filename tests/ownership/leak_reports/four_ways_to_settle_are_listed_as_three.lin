@@ -1,0 +1,43 @@
+// A help line names at most three of the operations that settle a value, in
+// the order they are declared, and marks that there are more. An operation
+// that takes more than the value itself is written with its other arguments
+// left out, and `renew` is not named: it hands back another lease to settle.
+@linear
+struct Lease {
+    months: UInt8,
+}
+
+impl Lease {
+    pub fn sign(months: UInt8) -> Lease {
+        .{ months = months }
+    }
+
+    pub fn renew(sink self: Lease, months: UInt8) -> Lease {
+        let Lease { months: held } = self
+        Lease { months = held + months }
+    }
+
+    pub fn sublet(sink self: Lease, tenant: UInt8) -> UInt8 {
+        let Lease { months } = self
+        months + tenant
+    }
+
+    pub fn end(sink self: Lease) -> UInt8 {
+        let Lease { months } = self
+        months
+    }
+
+    pub fn transfer(sink self: Lease) -> UInt8 {
+        let Lease { months } = self
+        months
+    }
+
+    pub fn forfeit(sink self: Lease) -> () {
+        let Lease { months: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let lease = Lease.sign(12)
+    lease.months
+}

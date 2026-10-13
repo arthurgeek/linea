@@ -1,0 +1,11 @@
+// `copy(f)` duplicates a function value, and the copy is called with the
+// labels `f` was bound with.
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn main() -> UInt8 {
+    let f = add_one
+    let g = copy(f)
+    g(value: 3) + f(value: 1)
+}

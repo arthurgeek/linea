@@ -1,0 +1,16 @@
+enum Refusal { Code(UInt8) }
+
+fn refuse(sink code: UInt8) -> Refusal {
+    .Code(code + 2)
+}
+
+fn attempt[A: Discardable](make: fn(sink code: UInt8) -> A) -> Result[UInt8, A] {
+    .Err(make(3))
+}
+
+fn main() -> UInt8 {
+    match attempt(refuse) {
+        Ok(_) => 1,
+        Err(refusal) => match refusal { Code(code) => code - 5 },
+    }
+}

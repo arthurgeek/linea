@@ -1,0 +1,9 @@
+error[O-Leak]: `parcels` (a linear `Pair[Parcel]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/an_operation_whose_block_bound_fails_is_not_named.lin:41:9
+   |
+41 |     let parcels: Pair[Parcel] = .{ first = Parcel { grams = 1 }, second = Parcel { grams = 2 } }
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+43 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

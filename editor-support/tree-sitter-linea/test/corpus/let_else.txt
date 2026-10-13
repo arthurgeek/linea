@@ -1,0 +1,116 @@
+==================
+A binding handles its initializer's failure
+==================
+
+fn main() -> UInt8 {
+    let port = parse(text) else |_| {
+        8080
+    }
+    let listener = listen(port) else |error| {
+        return 1
+    }
+    let first = values.first() else {
+        return 0
+    }
+    let Size { width } = measure() else |_| {
+        return 2
+    }
+    let chosen = if ready { a } else { b } else {
+        return 3
+    }
+    first
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)))
+        (let_else
+          (wildcard_pattern)
+          (block
+            (expression_statement
+              (integer_literal)))))
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)))
+        (let_else
+          (identifier)
+          (block
+            (expression_statement
+              (return_expression
+                (integer_literal))))))
+      (let_statement
+        (identifier)
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (argument_list))
+        (let_else
+          (block
+            (expression_statement
+              (return_expression
+                (integer_literal))))))
+      (let_statement
+        (struct_pattern
+          (type_identifier)
+          (field_pattern
+            (identifier)))
+        (call_expression
+          (identifier)
+          (argument_list))
+        (let_else
+          (wildcard_pattern)
+          (block
+            (expression_statement
+              (return_expression
+                (integer_literal))))))
+      (let_statement
+        (identifier)
+        (if_expression
+          (identifier)
+          (block
+            (expression_statement
+              (identifier)))
+          (block
+            (expression_statement
+              (identifier))))
+        (let_else
+          (block
+            (expression_statement
+              (return_expression
+                (integer_literal))))))
+      (expression_statement
+        (identifier)))))
+
+==================
+A constant takes an else as a binding does
+==================
+
+let port = find() else { 80 }
+
+---
+
+(source_file
+  (constant_declaration
+    (identifier)
+    (call_expression
+      (identifier)
+      (argument_list))
+    (let_else
+      (block
+        (expression_statement
+          (integer_literal))))))

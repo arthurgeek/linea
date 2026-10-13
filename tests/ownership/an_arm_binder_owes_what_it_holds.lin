@@ -1,0 +1,26 @@
+// An arm's binder owns what the variant carried, exactly as a structure's
+// binder owns what the field held -- so it owes what that owes.
+//
+// It was bound nowhere, lived nowhere, and died nowhere. The leak rule is
+// asked where a binding's scope ends, and this binding had no scope, so a
+// Linear payload named by an arm and then dropped was a leak nothing saw. The
+// same value taken apart by a destructuring `let` was caught, which is how
+// close the two are and how far apart they had drifted.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+@linear
+enum Holder {
+    Empty,
+    Full(Key),
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .Full(Key.Forged(4))
+    match held {
+        Empty => 0,
+        Full(k) => 1,
+    }
+}

@@ -1,0 +1,9 @@
+error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/iter/a_wildcard_in_a_walk_pattern_leaks_a_linear_component.lin:11:10
+   |
+11 |     for (_, n) in pairs {
+   |          ^ `_` does not settle `_0`
+13 |     }
+   |     - the block ends here
+   |
+   = help: give it to something that takes it

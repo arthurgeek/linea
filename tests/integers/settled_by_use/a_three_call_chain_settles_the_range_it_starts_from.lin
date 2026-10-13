@@ -1,0 +1,20 @@
+// Every call in the chain walks the range at the type its last call is used
+// at: `iterate`, `filter` and `find` all run over `Range[UInt32]` for `narrow`,
+// over `Range[UInt64]` for `wide`, and over `Range[Int64]` where nothing says
+// otherwise. Each search finds 3.
+fn main() -> UInt8 {
+    let narrow: Option[UInt32] = (0..6).iterate().filter(|i| i % 2 == 1).find(|i| i > 2)
+    let wide: Option[UInt64] = (0..6).iterate().filter(|i| i % 2 == 1).find(|i| i > 2)
+    let plain = (0..6).iterate().filter(|i| i % 2 == 1).find(|i| i > 2)
+    let total: UInt32 = (0..6).filter(|i| i > 0).filter(|i| i % 2 == 0).fold(0, |sink sum, sink i| sum + i)
+    match narrow {
+        Some(a) => match wide {
+            Some(b) => match plain {
+                Some(c) => UInt8(a) + UInt8(b) + UInt8(c) + UInt8(total),
+                None => 0,
+            },
+            None => 0,
+        },
+        None => 0,
+    }
+}

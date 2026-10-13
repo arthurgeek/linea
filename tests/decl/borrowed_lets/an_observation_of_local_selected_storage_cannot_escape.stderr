@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/decl/borrowed_lets/an_observation_of_local_selected_storage_cannot_escape.lin:6:5
+  |
+6 |     borrow x
+  |     ^^^^^^^^ escape observations only from the signature's declared sources

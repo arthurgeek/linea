@@ -1,0 +1,9 @@
+error[O-Leak]: `_` (a linear `Key`) is still owned when this path leaves
+  --> tests/let_else/a_linear_error_cannot_be_discarded/main.lin:12:9
+   |
+11 |     let n = open(1) else |_| {
+   |                           - `_` does not settle it
+12 |         return 1
+   |         ^^^^^^ still owned here
+   |
+   = help: give it to something that takes it

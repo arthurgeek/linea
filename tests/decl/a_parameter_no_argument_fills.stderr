@@ -1,0 +1,7 @@
+error[T-MissingArgument]: `a` receives no argument
+ --> tests/decl/a_parameter_no_argument_fills.lin:9:5
+  |
+4 | fn add(a: UInt8, b: UInt8) -> UInt8 {
+  |        - declared here
+9 |     add(b: 2)
+  |     ^^^^^^^^^ every parameter receives one

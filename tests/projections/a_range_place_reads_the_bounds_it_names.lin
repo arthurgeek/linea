@@ -1,0 +1,11 @@
+// A range in a bracket forms a place rather than building a value: its bounds
+// settle where the bracket is written and fold into an offset, so naming one
+// there observes it exactly as an ordinary index does. Bounds given up into a
+// value would leave a place former spending what it only counted with, and the
+// name would be unusable after a bracket that read nothing at all.
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let lo: UInt64 = 1
+    let mid: [UInt8; 2] = copy(a[lo..3])
+    mid[0] + mid[1] + a[lo]
+}

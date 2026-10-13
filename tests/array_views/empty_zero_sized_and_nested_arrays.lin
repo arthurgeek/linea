@@ -1,0 +1,17 @@
+struct Empty {}
+
+fn main() -> UInt8 {
+    let empty: [UInt8; 0] = []
+    let markers: [Empty; 3] = [.{}, .{}, .{}]
+    let nested = [[UInt8(3), UInt8(5)], [UInt8(7), UInt8(9)]]
+    let none = empty.as_slice()
+    let units = markers.as_slice()
+    let rows = nested.as_slice()
+    let last = units.subspan(start: 2, count: 1).unwrap()
+    let _unit = last.get(0).unwrap()
+    if none.length() == 0 && none.get(0).is_none() && units.length() == 3 && rows[1][0] == 7 {
+        0
+    } else {
+        1
+    }
+}

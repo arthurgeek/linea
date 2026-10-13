@@ -1,0 +1,13 @@
+// A dotted name is a type's name and takes what that type declares: the module
+// before the dot says where the declaration is and nothing about how many
+// arguments it wants, so a name written without them is the same mistake it is
+// written as a word in scope.
+import pct
+
+fn widest(_p: pct.Pair) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    widest(.{ a = 1, b = 2 })
+}

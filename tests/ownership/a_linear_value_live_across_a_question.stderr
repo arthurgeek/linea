@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/a_linear_value_live_across_a_question.lin:24:18
+   |
+23 | fn go(sink k: Key) -> Option[UInt8] {
+   |            - acquired here
+24 |     let n = get()?
+   |                  ^ still owned here
+   |
+   = help: take it apart with `let Key { n: _ } = k`, or give it to something that takes it

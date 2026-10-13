@@ -1,0 +1,6 @@
+import bank
+
+fn main() -> UInt8 {
+    let account = bank.Account.open(7)
+    account.balance
+}

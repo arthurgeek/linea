@@ -1,0 +1,17 @@
+// The compiler writes the only call to a test. A test something called would be
+// reached from the entry point like any other function and would ship, so the
+// claim that nothing shipped holds one is a rule rather than a description.
+import std.io
+
+use io.IoError
+use io.println
+
+test fn a_thing_holds() -> Result[(), IoError] {
+    println("the test ran")?
+    return .Ok({})
+}
+
+fn main() -> Result[UInt8, IoError] {
+    a_thing_holds()?
+    return .Ok(0)
+}

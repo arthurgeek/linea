@@ -1,0 +1,17 @@
+// `Blank` is in scope and `gauge.Gauge` is reached through the bound; both
+// declare `reading`, so `level.reading()` names neither. The report writes
+// each trait's call as this module spells it, `gauge.Gauge.reading(…)` for the
+// trait it names only through its module.
+import gauge
+
+trait Blank {
+    fn reading(self: Self) -> UInt8
+}
+
+fn _level_of[G: gauge.Gauge + Blank](level: G) -> UInt8 {
+    level.reading()
+}
+
+fn main() -> UInt8 {
+    0
+}

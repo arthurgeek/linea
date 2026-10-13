@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/decl/attributes/attributes_do_not_attach_to_statements.lin:2:5
+  |
+2 |     @copyable
+  |     ^^^^^^^^^ this is not the start of an expression

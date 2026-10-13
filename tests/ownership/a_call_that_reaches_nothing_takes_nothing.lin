@@ -1,0 +1,20 @@
+// `postbox` names no module, so `Address` reaches nothing, and nothing
+// declares `lookup`. A call that reaches nothing has no signature to say
+// whether it takes its arguments, so `text` is still there for each later use.
+import postbox
+import std.io
+
+use postbox.Address
+
+fn main() -> Result[UInt8, io.IoError] {
+    let typed = ["ada@example.com", "not an address"]
+    for text in typed {
+        match Address.of(text) {
+            Some(_) => io.println("{text} is an address.")?,
+            None => io.println("{text} is not an address.")?,
+        }
+        let _found = lookup(text)
+        io.println("looked up {text}")?
+    }
+    return .Ok(0)
+}

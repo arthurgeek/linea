@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `UInt8` already produces a scalar snapshot when read
+ --> tests/ownership/scalar_snapshots/a_concrete_scalar_copy_in_a_generic_body_is_redundant.lin:2:17
+  |
+2 |     let saved = copy(number)
+  |                 ^^^^^^^^^^^^ remove `copy` and read the value directly

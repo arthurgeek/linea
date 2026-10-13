@@ -1,0 +1,10 @@
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair: (Ticket, UInt8) = (.{ number = 4 }, 1)
+    let (_, n) = pair
+    n
+}

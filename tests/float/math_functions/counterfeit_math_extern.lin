@@ -1,0 +1,6 @@
+extern fn linea_math_sqrt(value: Float64) -> Float64
+
+fn main() -> UInt8 {
+    let _result = linea_math_sqrt(4.0)
+    0
+}

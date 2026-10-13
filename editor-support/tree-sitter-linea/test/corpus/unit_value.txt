@@ -1,0 +1,66 @@
+==================
+The unit value is written as its type is
+==================
+
+let nothing: () = ()
+
+fn finish(early: Option[UInt8]) -> Result[(), Int64] {
+    keep(())
+    let wrapped = wrap[()](())
+    match early {
+        Some(_) => .Ok(()),
+        None => {},
+    }
+}
+
+---
+
+(source_file
+  (constant_declaration
+    (identifier)
+    (unit_type)
+    (unit_expression))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))))
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (unit_type)
+        (type_identifier)))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (unit_expression))))
+      (let_statement
+        (identifier)
+        (call_expression
+          (instantiation_expression
+            (identifier)
+            (type_arguments
+              (unit_type)))
+          (argument_list
+            (unit_expression))))
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (wildcard_pattern))
+            (call_expression
+              (variant_reference
+                (type_identifier))
+              (argument_list
+                (unit_expression))))
+          (match_arm
+            (type_identifier)
+            (block)))))))

@@ -1,0 +1,10 @@
+error[O-CopyDead]: `a` is not read after this, so this copy has no effect
+ --> tests/ownership/a_copy_nothing_reads.lin:7:13
+  |
+7 |     let b = copy(a)
+  |             ^^^^^^^ write the move instead
+error[O-CopyDead]: `b` is not read after this, so this copy has no effect
+ --> tests/ownership/a_copy_nothing_reads.lin:8:13
+  |
+8 |     let c = copy(b)
+  |             ^^^^^^^ write the move instead

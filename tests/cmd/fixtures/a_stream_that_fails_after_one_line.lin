@@ -1,0 +1,51 @@
+// Serve `GET /report`, a body that is streamed one line and then fails, on the
+// port the command line names, for as many requests as it names.
+import std.env
+import std.http
+import std.io
+import std.log
+import std.mem
+import std.net
+import std.text
+
+use net.Acceptor
+
+fn report[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.stream(request, write_report)
+}
+
+// Write one line, then fail as a report whose data ran out would.
+fn write_report[P: Allocator](inout body: http.BodyWriter[P]) -> Result[(), http.Error[P]] {
+    Writer.write_str(&body, "first line\n")?
+    return .Err(http.error(body.request(), .InternalServerError, "the report's data ran out"))
+}
+
+fn main() -> UInt8 {
+    let args = env.args()
+    let port = match args.at(1) {
+        Some(port) => {
+            let parsed: Result[UInt16, text.ParseError] = port.parse()
+            match parsed {
+                Ok(port) => port,
+                Err(_) => return 64,
+            }
+        },
+        None => {
+            io.eprintln("usage: a_stream_that_fails_after_one_line PORT")
+            return 64
+        },
+    }
+    var router = http.Router.new()
+    http.Router.route_raw(&router, "GET /report", report).unwrap()
+    let listener = net.listen(net.loopback(port)).unwrap()
+    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let bound = listener.local_address().unwrap()
+    logger.info("listening", log.field("address", bound))
+    var server = http.logged(logger, router)
+    defer server.release()
+    let limits = http.Limits { connections = .Some(1), ..Default.default() }
+    match http.serve(listener, &server, mem.system(), limits) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

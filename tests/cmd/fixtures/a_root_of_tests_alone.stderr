@@ -1,0 +1,5 @@
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/cmd/fixtures/a_root_of_tests_alone/main.lin:6:12
+  |
+6 | import std.io
+  |            ^^ found 0

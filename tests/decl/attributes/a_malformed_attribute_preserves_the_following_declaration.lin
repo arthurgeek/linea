@@ -1,0 +1,4 @@
+@
+struct Good { value: UInt8 }
+
+fn main() -> UInt8 { Good { value = 7 }.value - 7 }

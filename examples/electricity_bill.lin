@@ -1,0 +1,119 @@
+// Bill electricity meter readings that arrive as JSON. `json.decode` builds a
+// `Reading` from each document and `Str.parse` reads its meter number,
+// and each library reports failure with its own error type. A `From`
+// implementation turns each of those into `BillError`, so every step
+// propagates its failure with a plain `?`.
+import std.io
+import std.json
+import std.mem
+import std.testing
+import std.text
+
+// A module-level `let` declares a constant every function can read: the
+// tariff of 23 cents for each kilowatt-hour used.
+let cents_per_kwh: UInt64 = 23
+
+// `@(copyable, derive(…))` applies several attributes at once. Equatable and
+// Debug let the tests compare whole results with `testing.assert_eq`.
+// `From[text.ParseError]` derives the conversion that wraps a meter number's
+// parse error in `MeterNumber`, so `?` converts it.
+@(copyable, derive(Equatable, Debug, From[text.ParseError]))
+enum BillError {
+    Document(json.ParseError),
+    Reading(json.DecodeReason),
+    MeterNumber(text.ParseError),
+    Allocation,
+    RunsBackward,
+}
+
+// A reading arrives as `{"meter":"0042","previous":1200,"current":1375}`.
+// Meter numbers are sent as text so leading zeros survive, and the counters
+// as whole numbers. `json.Decode[A]` builds a `Reading` from such a document
+// and refuses a missing field, text where a number belongs, and a counter
+// that is fractional or negative. The meter number's text is allocated with
+// `A`, and `Release` frees it.
+@derive(Release, json.Decode[A])
+struct Reading[A: Allocator = mem.SystemAllocator] {
+    meter: String[A],
+    previous: UInt64,
+    current: UInt64,
+}
+
+// This implementation chooses what to keep of a decode error. A function
+// returning `Result[T, BillError]` can then write `?` after a call that fails
+// with `json.DecodeError`, and the `?` returns what `from` made of it. Running out of memory, while parsing or while decoding, becomes
+// `Allocation`. A decode error owns the path to the field at fault, so `from`
+// keeps only its reason, which leaves `BillError` copyable and comparable,
+// and releases the rest.
+impl[A: Allocator] From[json.DecodeError[A]] for BillError {
+    fn from(sink source: json.DecodeError[A]) -> BillError {
+        match source {
+            Parse(error) => if error.ran_out_of_memory() {
+                BillError.Allocation
+            } else {
+                BillError.Document(error)
+            },
+            Value(failure) => {
+                let reason = failure.reason()
+                failure.release()
+                BillError.Reading(reason)
+            },
+            Allocation => .Allocation,
+        }
+    }
+}
+
+@(copyable, derive(Equatable, Debug))
+struct Bill {
+    meter: UInt64,
+    kwh: UInt64,
+    cents: UInt64,
+}
+
+fn bill(document: Str) -> Result[Bill, BillError] {
+    // The annotation tells `json.decode` to build a `Reading`. It fails with
+    // `json.DecodeError`, which `?` converts.
+    defer let reading: Reading = json.decode(mem.system(), document)?
+    // Text that is not a number is a `text.ParseError`, which `?` converts.
+    let meter: UInt64 = reading.meter.parse()?
+    if reading.current < reading.previous {
+        return .Err(.RunsBackward)
+    }
+    let kwh = reading.current - reading.previous
+    .Ok(.{ meter, kwh, cents = kwh * cents_per_kwh })
+}
+
+test fn a_reading_is_billed_by_the_kilowatt_hours_used() {
+    let billed = bill(r#"{"meter":"0042","previous":1200,"current":1375}"#)
+    testing.assert_eq(billed, .Ok(.{ meter = 42, kwh = 175, cents = 4025 }), "the bill changed")?
+}
+
+test fn each_library_error_becomes_its_bill_error() {
+    testing.assert_eq(bill(r#"{"meter":"0042""#), .Err(.Document(.{ kind = .Syntax, offset = 15 })), "a truncated document was accepted")?
+    testing.assert_eq(bill(r#"{"meter":"0042","previous":1.5,"current":2}"#), .Err(.Reading(.NotInteger)), "a fractional reading was accepted")?
+    testing.assert_eq(bill(r#"{"meter":"00A2","previous":1,"current":2}"#), .Err(.MeterNumber(.Syntax(2))), "a lettered meter number was accepted")?
+}
+
+test fn a_meter_that_runs_backward_is_refused() {
+    testing.assert_eq(bill(r#"{"meter":"0042","previous":9,"current":8}"#), .Err(.RunsBackward), "a backward reading was billed")?
+    testing.assert_eq(bill(r#"{"meter":"0042","current":8}"#), .Err(.Reading(.MissingField)), "a missing reading was billed")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // A raw literal, `r#"…"#`, holds JSON as it reads: its braces start no
+    // interpolation and its quotes need no backslashes.
+    let readings = [
+        r#"{"meter":"0042","previous":1200,"current":1375}"#,
+        r#"{"meter":"0107","previous":880,"current":904}"#,
+        r#"{"meter":"01O7","previous":880,"current":904}"#,
+        r#"{"meter":"0215","previous":500,"current":512.5}"#,
+        r#"{"meter":"0301","previous":500"#,
+    ]
+    for document in readings {
+        match bill(document) {
+            Ok(billed) => io.println("meter {billed.meter}: {billed.kwh} kWh, {billed.cents} cents")?,
+            Err(error) => io.println("reading refused: {error:?}")?,
+        }
+    }
+    .Ok(0)
+}

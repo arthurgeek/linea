@@ -1,0 +1,5 @@
+error[M-Opaque]: `Buffer` is opaque outside `mem`
+  --> tests/mem/a_buffer_cannot_be_forged.lin:13:43
+   |
+13 |     let forged: Buffer[SystemAllocator] = .{ at = 4096, len = 8, allocated = 8, allocator = system() }
+   |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

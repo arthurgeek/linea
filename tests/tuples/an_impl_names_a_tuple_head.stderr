@@ -1,0 +1,5 @@
+error[M-Impl]: `Tuple2` is declared in `tuple`
+  --> tests/tuples/an_impl_names_a_tuple_head.lin:14:6
+   |
+14 | impl (UInt8, Bool) {
+   |      ^^^^^^^^^^^^^ write the `impl` in the module that declares the type

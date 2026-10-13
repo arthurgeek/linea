@@ -1,0 +1,14 @@
+// The indirection is one step, and a re-export of a re-export is what makes
+// that a claim rather than a description. Resolving modules in the order they
+// are numbered bound the outer `use` to the inner one before anything had
+// resolved it -- to a `use` declaration, which has no parameters and no type,
+// so the call through it was an arity error.
+//
+// Following the chain where it is found needs no ordering to be true.
+import mid
+
+pub use mid.helper
+
+fn main() -> UInt8 {
+    helper(1)
+}

@@ -1,0 +1,24 @@
+// The binding may take the success apart, as any destructuring `let` does.
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+enum Fault {
+    Unknown,
+}
+
+fn measure(code: UInt8) -> Result[Size, Fault] {
+    if code == 3 {
+        Result.Ok(Size { width = 4, height = 5 })
+    } else {
+        Result.Err(Fault.Unknown)
+    }
+}
+
+fn main() -> UInt8 {
+    let Size { width, height } = measure(3) else |_| {
+        return 1
+    }
+    width * height
+}

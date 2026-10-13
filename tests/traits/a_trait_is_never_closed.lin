@@ -1,0 +1,13 @@
+// The brace that opens a trait is the brace that has to close it. Without it
+// the trait swallows what follows -- `main` is read as an operation the trait
+// provides, and the program is left declaring no entry point.
+//
+// Two reports for one missing brace, which is the shape of a delimiter
+// mistake: the parser cannot know where the trait was meant to end, so it
+// says what it found rather than guessing.
+trait _Measure {
+    fn of(x: Self) -> UInt8
+
+fn main() -> UInt8 {
+    0
+}

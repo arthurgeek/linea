@@ -1,0 +1,12 @@
+// A comment written after a logical operator's operand belongs to the line it
+// was written on, and nothing about the operator reaches past it.
+fn main() -> UInt8 {
+    let t: Bool = true
+    let f: Bool = false
+    let b: Bool = t && f // whether both hold
+    if b {
+        1
+    } else {
+        0
+    }
+}

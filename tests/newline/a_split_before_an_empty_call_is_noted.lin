@@ -1,0 +1,12 @@
+// A newline ends `let _ = launch`, so `()` on the next line is the unit value
+// standing alone rather than a call, and `launch` never runs. Both readings
+// compile, so the parser notes the line that could have continued the binding.
+fn launch() -> UInt8 {
+    panic("launched")
+}
+
+fn main() -> UInt8 {
+    let _ = launch
+    ()
+    0
+}

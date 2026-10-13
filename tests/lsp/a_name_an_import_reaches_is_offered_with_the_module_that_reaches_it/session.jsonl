@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A name in another module is reached by naming that module, so that is the\n// text offered: an import binds the module's name and nothing else, and a bare\n// `size` here would be a name no import can make work.\nimport ledger\n\nfn main() -> UInt8 {\n    twice(ledger.size())\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"helper.lin","languageId":"linea","version":1,"text":"// The same module, a file that wrote no import. An import binds a module name\n// inside the file that wrote it, so `ledger` is a name nothing has bound here,\n// and it is offered the way any module nobody imported is: carrying the import\n// that would bind it.\nfn twice(n: UInt8) -> UInt8 {\n    n + n\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":4}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"helper.lin"},"position":{"line":5,"character":5}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

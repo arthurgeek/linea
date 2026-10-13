@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/missing_initialiser.lin:2:13
+  |
+2 |     let x = ;
+  |             ^ this is not the start of an expression

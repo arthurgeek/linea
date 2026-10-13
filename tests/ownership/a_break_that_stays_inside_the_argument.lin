@@ -1,0 +1,35 @@
+// The loop is the argument, so leaving it does not leave the call: `d` is
+// pending, the `break` hands the loop's value to `use2`, and the call begins
+// immediately after. The transfer closes where it always did.
+//
+// Reading every `break` as abrupt completion refuses this, which is the same
+// widening the trap case beside it guards against: a loop computing an
+// argument is ordinary, and its only fix would be reordering for a reason a
+// reader cannot see.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn key() -> Key {
+    .{ n = 2 }
+}
+
+fn go(sink d: Key) -> UInt8 {
+    use2(
+        d,
+        loop {
+            break key()
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

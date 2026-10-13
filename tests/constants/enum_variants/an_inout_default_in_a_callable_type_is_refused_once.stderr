@@ -1,0 +1,5 @@
+error[S-Default]: only a `read` or `sink` parameter may carry a default
+ --> tests/constants/enum_variants/an_inout_default_in_a_callable_type_is_refused_once.lin:5:35
+  |
+5 | fn _accept[F: fn(inout lock: Lock = .Open) -> UInt8](_call: F) -> UInt8 {
+  |                                   ^ this parameter is `inout`

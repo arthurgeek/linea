@@ -1,0 +1,31 @@
+// A bound names a trait at its arguments, so the type that trait declares is
+// named through it: `C.Elem` is the `Elem` the implementation `Lookup[UInt64]`
+// settled, not the `Elem` of some other argument the same type might answer
+// for.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn first[C: Lookup[UInt64]](c: C) -> C.Elem {
+    let i: UInt64 = 0
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    first(b)
+}

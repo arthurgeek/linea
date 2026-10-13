@@ -1,0 +1,68 @@
+fn signed_byte(value: Int8) -> Int64 {
+    Int64(Float64(value))
+}
+
+fn signed_half(value: Int16) -> Int64 {
+    Int64(Float64(value))
+}
+
+fn signed_word(value: Int32) -> Int64 {
+    Int64(Float64(value))
+}
+
+fn signed_wide(value: Int64) -> Int64 {
+    Int64(Float64(value))
+}
+
+fn unsigned_byte(value: UInt8) -> UInt64 {
+    UInt64(Float64(value))
+}
+
+fn unsigned_half(value: UInt16) -> UInt64 {
+    UInt64(Float64(value))
+}
+
+fn unsigned_word(value: UInt32) -> UInt64 {
+    UInt64(Float64(value))
+}
+
+fn unsigned_wide(value: UInt64) -> UInt64 {
+    UInt64(Float64(value))
+}
+
+fn main() -> UInt8 {
+    if signed_byte(-128) != -128 || signed_byte(127) != 127 {
+        return 1
+    }
+    if signed_half(-32768) != -32768 || signed_half(32767) != 32767 {
+        return 2
+    }
+    if signed_word(-2147483648) != -2147483648 || signed_word(2147483647) != 2147483647 {
+        return 3
+    }
+    if unsigned_byte(0) != 0 || unsigned_byte(255) != 255 {
+        return 4
+    }
+    if unsigned_half(0) != 0 || unsigned_half(65535) != 65535 {
+        return 5
+    }
+    if unsigned_word(0) != 0 || unsigned_word(4294967295) != 4294967295 {
+        return 6
+    }
+    if signed_wide(-9223372036854775808) != -9223372036854775808 {
+        return 7
+    }
+    if signed_wide(-9007199254740993) != -9007199254740992 {
+        return 8
+    }
+    if signed_wide(9007199254740993) != 9007199254740992 {
+        return 9
+    }
+    if unsigned_wide(9007199254740993) != 9007199254740992 {
+        return 10
+    }
+    if unsigned_wide(18446744073709549568) != 18446744073709549568 {
+        return 11
+    }
+    0
+}

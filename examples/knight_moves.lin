@@ -1,0 +1,207 @@
+// Find the shortest knight routes from the corner of a chessboard.
+// Starting at a corner, find the number of reachable squares, the greatest
+// minimum move count, and the number of squares at that distance.
+//
+// Three runtime-sized tables share an arena: distances, counts by distance,
+// and a queue. `arena.handle()` provides the allocator used to construct
+// their vectors. These integer vectors need no individual release; releasing
+// the outer arena frees its backing block.
+//
+// The queue belongs to a nested arena so its lifetime ends after the search.
+// The other tables remain available while the result is computed. The nested
+// arena uses the outer arena's storage, which is reclaimed at outer release.
+import std.mem
+import std.testing
+import std.io
+
+use mem.Arena
+use mem.Oom
+use mem.Owner
+use mem.system
+use io.IoError
+use io.println
+
+let standard_side: UInt64 = 8
+
+// The result contains only numbers, so it remains usable after the arenas
+// and their vectors are no longer available.
+@derive(Equatable, Debug)
+struct Reach {
+    /// Counts every square the knight can reach, including the starting square.
+    reached: UInt64,
+    /// Holds the most moves that any reachable square needs by its shortest route.
+    farthest: UInt64,
+    /// Counts the squares that need exactly `farthest` moves.
+    at_farthest: UInt64,
+}
+
+// Split a square number into its row and column as signed integers, so the
+// knight's moves can step below zero. A pair fits because the order, row
+// then column, is clear from the name; `let (row, column) = ...` takes it apart.
+fn square_to_row_col(square: UInt64, side: UInt64) -> (Int64, Int64) {
+    (Int64(square / side), Int64(square % side))
+}
+
+// Summarise a search on a `side`-by-`side` board.
+// Square `k` is at row `k / side`, column `k % side`; the start is square 0.
+// Typed vectors use element indexes, so no byte-offset arithmetic is needed.
+fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
+    // Return before accessing square 0 when the board is empty.
+    if side == 0 {
+        return .Ok(.{ reached = 0, farthest = 0, at_farthest = 0 })
+    }
+
+    // Each square needs three eight-byte entries: distance, count and queue.
+    // The extra 128 bytes budget 64 bytes for each arena's bookkeeping and
+    // alignment; this is spare capacity, not an exact arena header size.
+    let max_squares = (UInt64.max - 128) / 3 / 8
+    if side > max_squares / side {
+        return .Err(Oom.Exhausted)
+    }
+
+    let squares = side * side
+    let table_bytes = squares * 8
+
+    // Reserve space for three tables and the arena bookkeeping. `Arena.open`
+    // returns an arena even if allocation fails; `Vec.filled` then returns `Err`.
+    // The deferred release runs on normal exits, including returns from `?`.
+    defer let arena = Arena.open(system(), size: table_bytes * 3 + 128)
+    let memory = arena.handle()
+
+    // A shortest path visits no square twice, so `squares + 1` can mark an
+    // unreached square. `Vec.filled` initializes every entry to the supplied
+    // value and allocates exactly the requested capacity.
+    let unreached = squares + 1
+    var distance = Vec.filled(memory, count: squares, value: unreached)?
+
+    var counted = Vec.filled(memory, count: squares, value: UInt64(0))?
+
+    distance[0] = 0
+
+    // End the queue's lifetime after the search, including allocation errors.
+    // Its storage remains reserved in the outer arena until outer release.
+    {
+        // Reserve the queue table plus its 64-byte bookkeeping/alignment allowance.
+        let search = Arena.open(arena.handle(), size: table_bytes + 64)
+        let search_memory = search.handle()
+        var queue = Vec.filled(search_memory, count: squares, value: UInt64(0))?
+
+        // Eight moves combine two squares on one axis and one on the other.
+        // Signed offsets represent moves in all directions. Check the new
+        // row and column before converting them to unsigned square indexes.
+        let down = [-2, -2, -1, -1, 1, 1, 2, 2]
+        let across = [-1, 1, -2, 2, -2, 2, -1, 1]
+
+        // Process squares in queue order, adding unvisited neighbours at
+        // the back. This reaches each square by a shortest path.
+        queue[0] = 0
+        var front: UInt64 = 0
+        var back: UInt64 = 1
+        while front < back {
+            let square = queue[front]
+            front += 1
+
+            let so_far = distance[square]
+            let (row, column) = square_to_row_col(square, side)
+
+            for m in 0..down.length() {
+                let r = row + down[m]
+                let c = column + across[m]
+                if r >= 0 && r < Int64(side) && c >= 0 && c < Int64(side) {
+                    let next = UInt64(r) * side + UInt64(c)
+                    if distance[next] == unreached {
+                        distance[next] = so_far + 1
+                        queue[back] = next
+                        back += 1
+                    }
+                }
+            }
+        }
+    }
+
+    var reached: UInt64 = 0
+    var farthest: UInt64 = 0
+    for k in 0..squares {
+        let d = distance[k]
+        if d != unreached {
+            reached += 1
+            counted[d] += 1
+            if d > farthest {
+                farthest = d
+            }
+        }
+    }
+
+    let at_farthest = counted[farthest]
+
+    // Build the result from the numbers. The outer arena's deferred release
+    // reclaims the storage of all three tables before returning.
+    .Ok(.{
+        reached,
+        farthest,
+        at_farthest,
+    })
+}
+
+// All 64 squares are reachable. Only the opposite corner takes six moves.
+test fn a_corner_reaches_every_square_of_a_full_board() {
+    let expected: Result[Reach, Oom] = .Ok(.{ reached = 64, farthest = 6, at_farthest = 1 })
+    testing.assert_eq(reach_from_a_corner(8), expected, "a full board must have one square six moves from the corner")?
+}
+
+// On a three-by-three board, the centre is unreachable. The other eight
+// squares are reachable; only the opposite corner takes four moves.
+test fn a_square_no_move_reaches_is_left_out_of_the_count() {
+    let expected: Result[Reach, Oom] = .Ok(.{ reached = 8, farthest = 4, at_farthest = 1 })
+    testing.assert_eq(reach_from_a_corner(3), expected, "a three-by-three board must reach eight squares with one four moves away")?
+}
+
+// On one-by-one and two-by-two boards, only the starting corner is reachable.
+// An empty board has no reachable squares.
+test fn a_board_with_no_move_on_it_reaches_only_the_corner() {
+    let stationary: Result[Reach, Oom] = .Ok(.{ reached = 1, farthest = 0, at_farthest = 1 })
+    let empty: Result[Reach, Oom] = .Ok(.{ reached = 0, farthest = 0, at_farthest = 0 })
+    testing.assert_eq(reach_from_a_corner(1), stationary, "a one-square board must reach only its starting square")?
+    testing.assert_eq(reach_from_a_corner(2), stationary, "a knight cannot move on a two-by-two board")?
+    testing.assert_eq(reach_from_a_corner(0), empty, "an empty board has no reachable squares")?
+}
+
+// An oversized allocation returns `Err(Oom.Exhausted)` to the caller.
+test fn a_board_too_wide_to_hold_is_refused_as_a_value() {
+    let oversized = reach_from_a_corner(100000000)
+    testing.assert(oversized.is_err(), "a board of ten quadrillion squares must report an allocation failure")?
+}
+
+test fn a_default_board_matches_an_explicit_eight_by_eight_board() {
+    testing.assert_eq(reach_from_a_corner(), reach_from_a_corner(side: 8), "the default board differs from an explicit eight-by-eight board")?
+}
+
+test fn an_unrepresentable_board_is_refused_as_a_value() {
+    // 876706529 is the first side whose three tables exceed a 64-bit byte count;
+    // 1518500250 is the first whose single eight-byte table exceeds that count.
+    // The maximum side also exercises overflow of the square count itself.
+    let sides = [876706529, 1518500250, UInt64.max]
+    let expected: Result[Reach, Oom] = .Err(Oom.Exhausted)
+    for side in sides {
+        testing.assert_eq(reach_from_a_corner(side), expected, "an unrepresentable board must report an allocation failure")?
+    }
+}
+
+// Print the summary or an allocation error for one board.
+fn report(side: UInt64 = standard_side) -> Result[(), IoError] {
+    match reach_from_a_corner(side) {
+        Err(_) => println("{side} by {side}: the memory for the search was refused")?,
+        Ok(r) => println("{side} by {side}: {r.reached} squares reached, the farthest {r.farthest} moves off, {r.at_farthest} of them that far")?,
+    }
+
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, IoError] {
+    // Each call releases its arenas before the next board is processed.
+    report(side: 3)?
+    report(side: 5)?
+    report()?
+
+    .Ok(0)
+}

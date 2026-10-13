@@ -1,0 +1,11 @@
+struct Entry { value: UInt8 }
+
+fn take(sink entry: Entry) -> UInt8 {
+    entry.value
+}
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ value = 7 }
+    let view = borrow entry
+    take(*view)
+}

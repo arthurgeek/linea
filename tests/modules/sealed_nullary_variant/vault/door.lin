@@ -1,0 +1,11 @@
+// Outside this module a `Door` is only obtained from `shut`.
+@opaque
+enum Door { Open(UInt8), Closed }
+
+pub fn shut() -> Door {
+    Door.Closed
+}
+
+pub fn width(door: Door) -> UInt8 {
+    match read door { Open(gap) => gap, Closed => 0 }
+}

@@ -1,0 +1,11 @@
+program decls=1
+  decl function "main" tokens 0..21
+    returns UInt8
+    expr %6 block tokens 6..21
+      stmt %0 let_decl tokens 7..17 "callback"
+        expr %3 lambda tokens 10..17 params=0 -> UInt8
+          expr %2 block tokens 13..17
+            expr %1 return_ tokens 14..16
+              expr %0 int_literal tokens 15..16 "7"
+      expr %5 call tokens 17..20
+        expr %4 name_ref tokens 17..18 "callback"

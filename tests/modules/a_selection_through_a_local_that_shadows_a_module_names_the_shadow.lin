@@ -1,0 +1,25 @@
+// Inside `check` and `length_of`, `text` is the parameter, so no selection
+// below reaches the module `text`: `ParseError` is not part of a `Str`,
+// `validate_utf8` is not an operation of one, and a `Note` has no `size`.
+// Importing the module under an alias reaches it there.
+import std.text
+
+struct Note {
+    body: Str,
+}
+
+fn check(text: Str) -> UInt8 {
+    let _failure = text.ParseError.Syntax(0)
+    text.validate_utf8()
+    0
+}
+
+fn length_of(text: Note) -> UInt64 {
+    text.size
+}
+
+fn main() -> UInt8 {
+    let _none: Option[text.ParseError] = .None
+    let note: Note = .{ body = "ok" }
+    check(note.body) + UInt8.try_from(length_of(note)).unwrap_or(0)
+}

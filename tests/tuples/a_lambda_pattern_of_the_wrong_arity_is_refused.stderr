@@ -1,0 +1,5 @@
+error[T-Arity]: expected 2 name(s), found 3
+ --> tests/tuples/a_lambda_pattern_of_the_wrong_arity_is_refused.lin:8:20
+  |
+8 |     apply((3, 4), |(a, b, _)| a + b)
+  |                    ^^^^^^^^^ a tuple pattern binds every component by position

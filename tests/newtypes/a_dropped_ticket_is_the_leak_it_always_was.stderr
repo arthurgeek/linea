@@ -1,0 +1,9 @@
+error[O-Leak]: `t` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/newtypes/a_dropped_ticket_is_the_leak_it_always_was.lin:11:9
+   |
+11 |     let t = Ticket(7)
+   |         ^ never settled on the path that reaches the end of this block
+14 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Ticket(_) = t`, or give it to something that takes it

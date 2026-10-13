@@ -1,0 +1,13 @@
+// Two literals spelling the same text share one blob of bytes. Nothing can
+// observe that they do: `Str` is `opaque`, so no program reads an address, and
+// two of them are told apart by their bytes rather than by identity.
+//
+// The status counts bytes and says nothing about the sharing -- the `.ssa`
+// beside this case is what asserts it, and it holds two blobs for three
+// literals.
+fn main() -> UInt8 {
+    let a: Str = "hi"
+    let b: Str = "hi"
+    let c: Str = "other"
+    UInt8(Str.length(a) + Str.length(b) + Str.length(c))
+}

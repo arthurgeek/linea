@@ -1,0 +1,12 @@
+@copyable
+struct Settings {
+    name: Str,
+    retries: UInt8,
+}
+
+fn main() -> UInt8 {
+    let defaults: Settings = .{ name = "sync", retries = 3 }
+    // `copy(defaults)` gives the literal a copy, so `defaults` stays usable.
+    let tuned = Settings { retries = 5, ..copy(defaults) }
+    defaults.retries + tuned.retries
+}

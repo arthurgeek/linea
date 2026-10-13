@@ -1,0 +1,11 @@
+// A positional argument after a named one says two incompatible things about
+// where it goes, so there is no pairing to attempt past it. [S-Args] is the
+// whole of what is wrong, and every parameter it leaves looking unfilled is
+// that one mistake counted again.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    add(a: 2, 40)
+}

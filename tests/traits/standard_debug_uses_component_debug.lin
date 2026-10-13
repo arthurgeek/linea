@@ -1,0 +1,34 @@
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct Word {}
+
+impl Display for Word {
+    fn fmt[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "raw")
+    }
+}
+
+impl Debug for Word {
+    fn debug[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "debug")
+    }
+}
+
+@copyable
+struct Point {
+    x: UInt8,
+    word: Word,
+}
+
+derive (Display, Debug) for Point
+
+fn main() -> Result[UInt8, IoError] {
+    let point: Point = .{ x = 1, word = .{} }
+    println("{point}")?
+    println("{point:?}")?
+    return .Ok(0)
+}

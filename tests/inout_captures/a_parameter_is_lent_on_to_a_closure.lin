@@ -1,0 +1,18 @@
+// `restock` lends its `inout` parameter on to a closure. The caller sees
+// every change the closure made.
+fn restock(inout shelf: UInt8, crates: UInt8) -> () {
+    var unload = inout [inout shelf] |crate: UInt8| {
+        shelf += crate
+    }
+    var left = crates
+    while left > 0 {
+        &unload(4)
+        left -= 1
+    }
+}
+
+fn main() -> UInt8 {
+    var shelf: UInt8 = 2
+    restock(&shelf, 3)
+    shelf
+}

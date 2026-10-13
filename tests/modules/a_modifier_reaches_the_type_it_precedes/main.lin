@@ -1,0 +1,51 @@
+// The whole legal modifier surface in one file, so that refusing the spellings
+// that say nothing cannot quietly refuse the ones that do.
+//
+// `pub` reaches a function, a re-export, a trait and a type; `opaque` and
+// `linear` reach a `struct` or an `enum`, together or apart, and say what the
+// representation is and what its values owe.
+import inner
+
+pub use inner.Wrapped
+
+pub trait _Measure {
+    fn of(x: Self) -> UInt8
+}
+
+@opaque
+struct Sealed {
+    n: UInt8,
+}
+
+@linear
+enum Owed {
+    Held(UInt8),
+}
+
+@linear
+pub enum Both {
+    Carried(UInt8),
+}
+
+pub fn unwrap(w: Wrapped) -> UInt8 {
+    inner.take(w)
+}
+
+fn spend(sink o: Owed) -> UInt8 {
+    match o {
+        Held(n) => n,
+    }
+}
+
+fn spendBoth(sink b: Both) -> UInt8 {
+    match b {
+        Carried(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let sealed: Sealed = .{ n = 1 }
+    let owed: Owed = .Held(2)
+    let both: Both = .Carried(4)
+    sealed.n + spend(owed) + spendBoth(both) + unwrap(inner.wrap(8))
+}

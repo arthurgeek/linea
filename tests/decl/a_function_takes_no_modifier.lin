@@ -1,0 +1,14 @@
+// A function cannot declare representation or ownership policy.
+@opaque
+fn sealed() -> UInt8 {
+    1
+}
+
+@linear
+fn owed() -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    sealed() + owed()
+}

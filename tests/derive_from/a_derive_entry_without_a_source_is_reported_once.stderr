@@ -1,0 +1,5 @@
+error[T-Derive]: this derive entry is not supported
+ --> tests/derive_from/a_derive_entry_without_a_source_is_reported_once.lin:2:9
+  |
+2 | @derive(From[])
+  |         ^^^^ supply exactly the type arguments the trait declares

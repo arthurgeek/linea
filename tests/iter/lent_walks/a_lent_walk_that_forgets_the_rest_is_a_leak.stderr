@@ -1,0 +1,9 @@
+error[O-Leak]: `pending` (a linear `mem.Drain[UInt64, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/iter/lent_walks/a_lent_walk_that_forgets_the_rest_is_a_leak.lin:7:9
+   |
+7  |     var pending = readings.drain()
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+16 | }
+   | - the block ends here
+   |
+   = help: settle it first with `pending.release()`

@@ -1,0 +1,10 @@
+error[T-Derive]: `Token` cannot derive `Equivalent` because its `Equatable` implementation is handwritten
+  --> tests/traits/standard_equivalent_requires_structural_equality.lin:11:8
+   |
+11 | derive Equivalent for Token
+   |        ^^^^^^^^^^ replace the handwritten prerequisite with a derive, or write this implementation by hand
+  ::: std/cmp/cmp.lin
+L  | pub trait Equivalent: Equatable {}
+   |                       --------- this is a direct supertrait
+L  |     reflect.supertraits: derived,
+   |             ----------- the template requires derived evidence for every direct supertrait

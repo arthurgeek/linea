@@ -1,0 +1,8 @@
+import vault
+
+fn main() -> UInt8 {
+    let ticket = vault.Ticket.issue(7)
+    let number = ticket.number()
+    ticket.release()
+    number - 7
+}

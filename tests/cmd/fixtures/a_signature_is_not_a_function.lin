@@ -1,0 +1,31 @@
+// A signature declares an operation and supplies no body, so there is no
+// function to emit for one. A function emitted for a signature would carry an
+// empty body -- one that returns zero -- and a call that reached it would be a
+// program that runs and answers that.
+//
+// The dump names the implementation's member and never the signature the call
+// was written against, which is what says the two were told apart. The walk
+// that reaches a signature with no call naming it at all is a program with no
+// entry point, and `dump-mir` stops before lowering one -- so that half of the
+// rule is asserted in `lower.zig`, against the pass rather than the command.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+pub fn total(a: Account) -> UInt8 {
+    Measure.of(a)
+}
+
+fn main() -> UInt8 {
+    total(.{ balance = 7 })
+}

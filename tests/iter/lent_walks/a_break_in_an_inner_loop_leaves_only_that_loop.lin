@@ -1,0 +1,23 @@
+import std.io
+import std.mem
+
+// The `break` leaves only the inner loop, so the lent walk still reaches every
+// batch and `finish` succeeds.
+fn main() -> Result[UInt8, io.IoError] {
+    var batches: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &batches.push(3).unwrap()
+    &batches.push(5).unwrap()
+    var pending = batches.drain()
+    var counted: UInt64 = 0
+    for size in &pending {
+        for step in UInt64(0)..100 {
+            if step == size {
+                break
+            }
+            counted += 1
+        }
+    }
+    pending.finish().unwrap()
+    io.println("counted {counted}")?
+    .Ok(0)
+}

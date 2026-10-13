@@ -1,0 +1,13 @@
+import api
+
+use api.Route
+
+impl[T] Route for T {
+    fn route(_self: T) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

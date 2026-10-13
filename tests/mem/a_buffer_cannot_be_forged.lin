@@ -1,0 +1,16 @@
+// The address in a buffer is an integer the program cannot supply. `opaque`
+// is what says so: a literal building a `Buffer` from numbers of its own is
+// refused, and every check on `store` and `load` rests on that refusal --
+// an address that did not come from the allocator would make them
+// decoration.
+import std.mem
+
+use mem.Buffer
+use mem.SystemAllocator
+use mem.system
+
+fn main() -> UInt8 {
+    let forged: Buffer[SystemAllocator] = .{ at = 4096, len = 8, allocated = 8, allocator = system() }
+    forged.release()
+    0
+}

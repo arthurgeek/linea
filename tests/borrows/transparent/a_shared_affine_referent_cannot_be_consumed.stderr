@@ -1,0 +1,5 @@
+error[O-Move]: this read-only observation cannot give away the value it observes
+  --> tests/borrows/transparent/a_shared_affine_referent_cannot_be_consumed.lin:10:10
+   |
+10 |     take(*view)
+   |          ^^^^^ read the observation, or copy a copyable referent

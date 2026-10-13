@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let x: UInt8 = loop {}
+    x
+}

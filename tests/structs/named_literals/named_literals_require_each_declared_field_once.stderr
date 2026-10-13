@@ -1,0 +1,15 @@
+error[T-DuplicateField]: `first` is given twice
+ --> tests/structs/named_literals/named_literals_require_each_declared_field_once.lin:4:35
+  |
+4 |     let _pair = Pair { first = 1, first = 2, other = 3 }
+  |                                   ^^^^^ already given above
+error[T-UnknownField]: `Pair` has no field `other`
+ --> tests/structs/named_literals/named_literals_require_each_declared_field_once.lin:4:46
+  |
+4 |     let _pair = Pair { first = 1, first = 2, other = 3 }
+  |                                              ^^^^^ not a field of this type
+error[T-MissingField]: `second` is not given a value
+ --> tests/structs/named_literals/named_literals_require_each_declared_field_once.lin:4:17
+  |
+4 |     let _pair = Pair { first = 1, first = 2, other = 3 }
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ every field is given one

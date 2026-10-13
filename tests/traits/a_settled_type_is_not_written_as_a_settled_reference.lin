@@ -1,0 +1,31 @@
+// What an implementation settles is a type, and a settled reference is read
+// through what an implementation settled — so a settled type written as one
+// asks the question it is answering. `Self.Item` here is whatever this line is
+// about to decide, and reading it means reading this line before it exists.
+//
+// Refused wherever it is written inside the type, because a settled reference
+// under a constructor is the same question one level in.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    type Held
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = Self.Item
+    type Held = Option[Self.Item]
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

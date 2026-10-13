@@ -1,0 +1,5 @@
+error[T-Projection]: a projection answers a projection a trait declares, and this `impl` names no trait
+ --> tests/projections/a_projection_implements_a_trait.lin:9:10
+  |
+9 |     proj at(inout self: Grid, i: UInt64) -> UInt8 {
+  |          ^^ declare it on a trait and implement that trait here, or write it as an `fn`

@@ -1,0 +1,32 @@
+// The other half of the same scope. An iteration ends where the body does, and
+// a Linear element still held there is a value nothing disposed of -- reported
+// at the binder, which is where a reader changes what the value became.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+struct Tokens {
+    left: UInt8,
+}
+
+impl Iterator for Tokens {
+    type Item = Token
+
+    fn next(inout self: Tokens) -> Option[Token] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left = self.left - 1
+        return .Some(.{ n = self.left })
+    }
+}
+
+fn main() -> UInt8 {
+    let ts: Tokens = .{ left = 3 }
+    var total: UInt8 = 0
+    for t in ts {
+        total += t.n
+    }
+    total
+}

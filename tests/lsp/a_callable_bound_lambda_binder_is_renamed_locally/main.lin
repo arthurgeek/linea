@@ -1,0 +1,7 @@
+fn apply[F: fn(read value: UInt8) -> UInt8](f: F) -> UInt8 {
+    f(value: 1)
+}
+
+fn main() -> UInt8 {
+    apply(|value: UInt8| value)
+}

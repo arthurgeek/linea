@@ -1,0 +1,13 @@
+// `continue` ends an iteration rather than the walk, so the places after the
+// one it skipped are still reached.
+fn main() -> UInt8 {
+    let xs: [UInt8; 6] = [0, 1, 2, 3, 4, 5]
+    var total: UInt8 = 0
+    for x in xs {
+        if x == 3 {
+            continue
+        }
+        total += x
+    }
+    total
+}

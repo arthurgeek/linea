@@ -1,0 +1,12 @@
+// Nothing runs where a constant is declared, so its initialiser has to be
+// computable without running anything. A call is not: which body it reaches is
+// a question the language answers, and what that body returns is not.
+fn nine() -> UInt8 {
+    9
+}
+
+pub let most: UInt8 = nine()
+
+fn main() -> UInt8 {
+    most
+}

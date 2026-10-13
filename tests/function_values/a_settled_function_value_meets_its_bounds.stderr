@@ -1,0 +1,14 @@
+error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capability
+  --> tests/function_values/a_settled_function_value_meets_its_bounds.lin:28:16
+   |
+28 |     let same = identity
+   |                ^^^^^^^^ use a type meeting the capability requirement, or relax the bound
+29 |     let _ticket = same(Ticket { number = 1 })
+   |                        --------------------- `T` settled to `Ticket` here
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Pebble` does not
+  --> tests/function_values/a_settled_function_value_meets_its_bounds.lin:30:16
+   |
+30 |     let size = Measure.size
+   |                ^^^^^^^^^^^^ implement it for that type, or reach the operation on one that does
+31 |     let _grams = size(Pebble { grams = 3 })
+   |                       -------------------- `Self` settled to `Pebble` here

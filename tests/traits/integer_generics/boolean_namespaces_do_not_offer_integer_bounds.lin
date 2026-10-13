@@ -1,0 +1,7 @@
+fn _minimum() -> Bool {
+    Bool.min
+}
+
+fn main() -> UInt8 {
+    0
+}

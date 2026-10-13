@@ -1,0 +1,3 @@
+pub struct Reading[T] {
+    value: T,
+}

@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Holder[K] contains itself
+  --> tests/traits/a_settlement_read_through_a_bound_holds_what_it_settles.lin:11:8
+   |
+11 | struct Holder[W: Measure] {
+   |        ^^^^^^ a value of this type would have to hold one, so it has no size

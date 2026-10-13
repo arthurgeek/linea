@@ -1,0 +1,80 @@
+import std.testing
+
+// `Limits` bounds what one request may make a server hold or wait for. A line
+// counts its bytes including the CRLF or LF that ends it, and the body counts
+// bytes. `max_query_pairs` bounds how many `name=value` pairs a query may
+// hold, and `max_form_pairs` how many a body sent as
+// `application/x-www-form-urlencoded` may, since the server decodes each into
+// the arena. Timeouts are milliseconds, and zero waits forever.
+// `read_timeout_ms` bounds the whole request, head and body together, counted
+// from the moment the connection is accepted, so a client that sends a byte at
+// a time is cut off as surely as a silent one. `write_timeout_ms` bounds each
+// write separately. `request_arena_bytes` is the size of
+// the arena requests are served from: the request is read into it, the
+// handler builds its response in it, and it is rewound once the response is
+// written. `connections` ends serving after that many connections; `.None`
+// serves until the process ends.
+@copyable
+pub struct Limits {
+    max_line_bytes: UInt64,
+    max_headers: UInt64,
+    max_query_pairs: UInt64,
+    max_form_pairs: UInt64,
+    max_body_bytes: UInt64,
+    request_arena_bytes: UInt64,
+    read_timeout_ms: UInt64,
+    write_timeout_ms: UInt64,
+    connections: Option[UInt64],
+}
+
+// The default limits allow 8 KiB lines, 100 headers, 100 query pairs, 100 form
+// pairs, a 1 MiB body, a 48 MiB arena and five-second timeouts. The arena holds
+// what a handler makes of a request within the other limits, which is more
+// than the request:
+//
+// - Reading the largest request they admit, 101 lines of 8 KiB and a 1 MiB
+//   body sent as a form, reserves up to about 5.2 MiB, as `smallest_arena`
+//   counts it, most of it the head's text growing by doubling and the form's
+//   duplicated text.
+// - Decoding a JSON body with `http.Json` reserves up to 31 MiB for the
+//   100,000 values `json.decode` admits, about 316 bytes a value, since an
+//   array's storage doubles as it grows and keeps what it outgrew, and about
+//   3 MiB for the text of a body a megabyte long. Both fit in 200 KiB and
+//   1 MiB, so the body limit does not bound them.
+// - The response takes the rest: 48 MiB holds both of those together and
+//   leaves about 8 MiB.
+//
+// The arena is carved from the parent once, and its memory is not touched
+// until a request uses it. Rewinding zeroes only what a request used, so a
+// small request does not pay for the arena's size. `serve` uses these limits
+// when its caller gives none.
+let standard_limits: Limits = .{
+    max_line_bytes = 8192,
+    max_headers = 100,
+    max_query_pairs = 100,
+    max_form_pairs = 100,
+    max_body_bytes = 1048576,
+    request_arena_bytes = 50331648,
+    read_timeout_ms = 5000,
+    write_timeout_ms = 5000,
+    connections = .None,
+}
+
+// `Limits.default()` gives the standard limits described above. Write only the
+// limits a server changes and take the rest from the default:
+// `Limits { connections = .Some(1), ..Limits.default() }`.
+impl Default for Limits {
+    fn default() -> Limits {
+        standard_limits
+    }
+}
+
+test fn the_default_limits_bound_lines_headers_and_bodies() {
+    let limits = Limits.default()
+    testing.assert_eq(limits.max_line_bytes, UInt64(8192), "the line bound changed")?
+    testing.assert_eq(limits.max_headers, UInt64(100), "the header bound changed")?
+    testing.assert_eq(limits.max_query_pairs, UInt64(100), "the query bound changed")?
+    testing.assert_eq(limits.max_form_pairs, UInt64(100), "the form bound changed")?
+    testing.assert_eq(limits.max_body_bytes, UInt64(1048576), "the body bound changed")?
+    testing.assert(limits.connections.is_none(), "the default limits end serving")?
+}

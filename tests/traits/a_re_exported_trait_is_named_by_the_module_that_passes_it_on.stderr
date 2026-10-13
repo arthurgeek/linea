@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `pending_bytes` is declared by `ByteWriter`, which is not in scope here
+ --> tests/traits/a_re_exported_trait_is_named_by_the_module_that_passes_it_on.lin:7:11
+  |
+7 |     UInt8(err.pending_bytes())
+  |           ^^^^^^^^^^^^^^^^^ write `use io.ByteWriter`: an operation is reached through the trait that declares it

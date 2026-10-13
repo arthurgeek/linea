@@ -1,0 +1,28 @@
+// The lowered half of `an_impl_from_the_traits_module`, which is accepted and
+// never lowered because its `main` answers with a constant.
+//
+// [M-Impl] lets either module write a trait implementation, so the module
+// holding one says nothing about what it names. Naming the head from the token
+// written at the `impl` -- resolved through whatever that module can see --
+// spelled a type by the module holding the `impl` rather than by the module
+// declaring the type, and the two differ exactly here. The `.mono` golden is
+// what records it: the head of the member and the type of its parameter are
+// the same type and are spelled alike.
+import account
+
+use account.Account
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

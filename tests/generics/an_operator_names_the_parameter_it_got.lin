@@ -1,0 +1,24 @@
+// Equality over a parameter carrying no bound that promises it, in a
+// declaration taking two parameters. The message names the parameter the
+// operand was written as, rather than whichever parameter the declaration
+// wrote first.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn f[A: Copyable, B](x: A, sink y: B) -> B where carries(y) {
+    let _u: A = copy(x)
+    if y == y {
+        y
+    } else {
+        y
+    }
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    let p: Pair = .{ a = 3, b = 2 }
+    let r: Pair = f(n, p)
+    r.a
+}

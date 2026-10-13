@@ -1,0 +1,49 @@
+fn byte_or_absent(text: Str, index: UInt64) -> UInt64 {
+    match Str.byte(text, index) {
+        Some(byte) => UInt64(byte),
+        None => 256,
+    }
+}
+
+fn main() -> UInt8 {
+    if byte_or_absent("", 0) != 256 {
+        return 1
+    }
+    if byte_or_absent("", 18446744073709551615) != 256 {
+        return 2
+    }
+    if byte_or_absent("A", 0) != 65 {
+        return 3
+    }
+    if byte_or_absent("A", 1) != 256 {
+        return 4
+    }
+    if byte_or_absent("A", 18446744073709551615) != 256 {
+        return 5
+    }
+    if byte_or_absent("😀", 0) != 240 {
+        return 6
+    }
+    if byte_or_absent("😀", 1) != 159 {
+        return 7
+    }
+    if byte_or_absent("😀", 2) != 152 {
+        return 8
+    }
+    if byte_or_absent("😀", 3) != 128 {
+        return 9
+    }
+    if byte_or_absent("😀", 4) != 256 {
+        return 10
+    }
+    if byte_or_absent("😀", 18446744073709551615) != 256 {
+        return 11
+    }
+    if byte_or_absent("\u{0}", 0) != 0 {
+        return 12
+    }
+    if byte_or_absent("\u{0}", 1) != 256 {
+        return 13
+    }
+    0
+}

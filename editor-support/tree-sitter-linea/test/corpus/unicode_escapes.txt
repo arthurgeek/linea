@@ -1,0 +1,31 @@
+===================
+Unicode escapes remain text beside interpolations
+===================
+
+fn show(value: UInt8) -> Str {
+    "\u{0}\u{7f}\u{A0}\u{10ffff} {value} \n \" \\ {{"
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (expression_statement
+        (string_literal
+          (escape_sequence)
+          (escape_sequence)
+          (escape_sequence)
+          (escape_sequence)
+          (interpolation
+            (identifier))
+          (escape_sequence)
+          (escape_sequence)
+          (escape_sequence)
+          (escaped_open_brace))))))

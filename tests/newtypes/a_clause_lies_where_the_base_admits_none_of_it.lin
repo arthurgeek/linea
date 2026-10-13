@@ -1,0 +1,9 @@
+// A clause narrows what the base admits and cannot reach past it. A range
+// the base can hold no value of admits nothing, so it is refused where it is
+// written -- the same refusal an empty range gets, and for the same reason.
+type Bad = UInt8 where it in 500..=600
+
+fn main() -> UInt8 {
+    let _b = Bad?(50)
+    0
+}

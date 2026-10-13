@@ -1,0 +1,10 @@
+// A newline already ends the statement before a line that opens with `(`, so
+// a `;` written there says nothing and the formatter drops it.
+fn high() -> UInt8 {
+    let hi = 2;
+    (hi)
+}
+
+fn main() -> UInt8 {
+    high() - 2
+}

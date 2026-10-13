@@ -1,0 +1,66 @@
+@copyable
+struct Pair { first: UInt64, second: UInt64 }
+
+fn rotate(n: UInt64, pair: Pair) -> Pair {
+    if n == 0 {
+        copy(pair)
+    } else {
+        let next: Pair = .{ first = pair.second, second = pair.first }
+        rotate(n - 1, next)
+    }
+}
+
+fn forward(pair: Pair) -> Pair {
+    rotate(7, pair)
+}
+
+fn joined(choice: UInt64, pair: Pair) -> Pair {
+    if choice == 0 {
+        rotate(8, pair)
+    } else {
+        rotate(9, pair)
+    }
+}
+
+fn observes_after_call(inout pair: Pair) -> Pair {
+    let answer = rotate(1, pair)
+    pair = .{ first = 42, second = 43 }
+    answer
+}
+
+fn assigns_caller_storage(input: Pair, inout output: Pair) -> Pair {
+    output = rotate(1, input)
+    let answer = copy(output)
+    output.first = output.first + 1
+    answer
+}
+
+fn matches(pair: Pair, first: UInt64, second: UInt64) -> Bool {
+    pair.first == first && pair.second == second
+}
+
+fn main() -> UInt8 {
+    var pair: Pair = .{ first = 11, second = 19 }
+    let odd = forward(pair)
+    if !matches(odd, 19, 11) || !matches(pair, 11, 19) {
+        return 1
+    }
+    let even = joined(0, pair)
+    let another = joined(1, pair)
+    if !matches(even, 11, 19) || !matches(another, 19, 11) {
+        return 2
+    }
+    let held = observes_after_call(&pair)
+    if !matches(held, 19, 11) || !matches(pair, 42, 43) {
+        return 3
+    }
+    var output: Pair = .{ first = 0, second = 0 }
+    let copied = assigns_caller_storage(pair, &output)
+    if !matches(copied, 43, 42) || !matches(output, 44, 42) {
+        return 4
+    }
+    if !matches(pair, 42, 43) {
+        return 5
+    }
+    0
+}

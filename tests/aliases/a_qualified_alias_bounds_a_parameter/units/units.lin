@@ -1,0 +1,2 @@
+// A published alias of a function type bounds a parameter in another module.
+pub alias Step = fn(value: UInt8) -> UInt8

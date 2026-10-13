@@ -1,0 +1,5 @@
+error[T-Literal]: `Int8` cannot hold -129
+  --> tests/projections/inferred_index/unique_key_rejects_negative_overflow.lin:13:10
+   |
+13 |     cell[-129]
+   |          ^^^^ value is out of range for its type

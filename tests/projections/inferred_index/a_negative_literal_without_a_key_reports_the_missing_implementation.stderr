@@ -1,0 +1,5 @@
+error[T-Bound]: `Cell` does not implement `Index[Int64]`
+ --> tests/projections/inferred_index/a_negative_literal_without_a_key_reports_the_missing_implementation.lin:7:5
+  |
+7 |     cell[-1]
+  |     ^^^^ implement it for those arguments, or settle them to ones that are

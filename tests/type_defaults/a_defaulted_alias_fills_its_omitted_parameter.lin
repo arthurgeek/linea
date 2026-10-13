@@ -1,0 +1,14 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+alias Rack[T, A: Allocator = SystemAllocator] = Vec[T, A]
+
+fn main() -> UInt8 {
+    let racks: Rack[UInt8] = Vec.new()
+    let same: Vec[UInt8, SystemAllocator] = racks
+    let total = same.length()
+    same.release()
+    UInt8(total) + 8
+}

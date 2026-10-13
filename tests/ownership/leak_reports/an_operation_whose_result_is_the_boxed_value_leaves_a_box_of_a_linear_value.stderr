@@ -1,0 +1,9 @@
+error[O-Leak]: `_held` (a linear `Box[Ticket]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/an_operation_whose_result_is_the_boxed_value_leaves_a_box_of_a_linear_value.lin:22:9
+   |
+22 |     let _held: Box[Ticket] = .{ item = Ticket { code = 3 } }
+   |         ^^^^^ never settled on the path that reaches the end of this block
+26 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

@@ -1,0 +1,16 @@
+// An index the compiler settles needs no check: the length is part of the type
+// and the index is written down, so the comparison would be one whose answer is
+// in the program.
+//
+// The status here pins the addressing and says nothing about the folding: a
+// folded index and a checked one compute the same answer, so no status could.
+// What the absence rests on is a test in lowering that counts the checks a
+// module holds, in both directions -- either alone is met by a compiler that
+// never checks or by one that always does.
+//
+// A numeric array element produces a snapshot when used as the result.
+// The array remains available after that observation.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [4, 5, 6]
+    xs[1]
+}

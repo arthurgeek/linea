@@ -1,0 +1,18 @@
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Owner
+use mem.SystemAllocator
+use mem.system
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    defer arena.release()
+    let values: Vec[Vec[UInt8, SystemAllocator], Handle[SystemAllocator]] = Vec.new_in(arena.handle())
+    if values.length() == 0 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,12 @@
+// A value of this type would have to hold one, so it has no size. Computing
+// that size requires the size, which is why this is diagnosed rather than
+// attempted: before the rule existed the compiler accepted it and laid the
+// payload out as a single word.
+enum List {
+    Cons(List),
+    Nil,
+}
+
+fn main() -> UInt8 {
+    0
+}

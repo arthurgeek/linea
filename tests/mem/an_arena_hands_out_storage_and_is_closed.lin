@@ -1,0 +1,41 @@
+// An arena on the system allocator: opened, used, closed.
+//
+// The caller chooses what backs it and never sees the slab. What it holds is a
+// handle, which owns nothing and goes wherever an allocation is wanted, and the
+// storage returns to the system where the arena is closed.
+//
+// Every taking is deferred, so a refusal leaves by the same door as an answer:
+// the second acquisition may fail, and what the first one lent goes back on
+// that path too. The closes are what the order of the `defer`s decides -- the
+// arena's was written first, so it runs last, after everything it lent is
+// discharged.
+import std.mem
+
+use mem.Arena
+use mem.Oom
+use mem.Owner
+use mem.system
+
+fn work() -> Result[UInt64, Oom] {
+    let arena = Arena.open(system(), 4096)
+    defer arena.release()
+
+    let a = arena.handle()
+
+    var first = a.acquire(64)?
+    defer first.release()
+
+    var second = a.acquire(32)?
+    defer second.release()
+
+    mem.Buffer.store(&first, 0, 40)
+    mem.Buffer.store(&second, 0, 2)
+    return .Ok(first.load(0) + second.load(0))
+}
+
+fn main() -> UInt8 {
+    match work() {
+        Err(_) => 1,
+        Ok(n) => UInt8(n),
+    }
+}

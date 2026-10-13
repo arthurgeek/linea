@@ -1,0 +1,35 @@
+// Handing a linear value to something that takes it is not always the value's
+// last stop: `recut` takes one and answers with another, so the obligation is
+// discharged and a fresh one is created in the same statement. Only `burn`
+// ends the chain.
+//
+// The distinction is what a mutation turns on. Repeating a disposal is how the
+// suite shows that taking a value twice is caught -- and repeating this one
+// would bind a second `Key` the program has nowhere to give away, so the leak
+// the mutation invented would be reported beside the double move it claims and
+// neither citation would be evidence about the other. The mutation therefore
+// steps over the statement that answers with a linear value and repeats the
+// one that answers with a number.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn recut(sink k: Key) -> Key {
+    match k {
+        Forged(n) => Key.Forged(n + 1),
+    }
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let first: Key = .Forged(7)
+    let second: Key = recut(first)
+    let spent: UInt8 = burn(second)
+    spent - 5
+}

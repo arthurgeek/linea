@@ -1,0 +1,36 @@
+// One call through a trait is the argument of another, so two implementations
+// run and each is named where its own path begins. The note belongs to the
+// head of the path it settles, which is what keeps the inner call from being
+// read as the outer one's answer.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+trait Wrap {
+    fn into(n: Self) -> Coins
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+impl Wrap for Notes {
+    fn into(n: Self) -> Coins {
+        .{ count = n.count }
+    }
+}
+
+fn main() -> UInt8 {
+    let n: Notes = .{ count = 3 }
+    Measure.of(Wrap.into(n))
+}

@@ -1,0 +1,7 @@
+fn f() -> UInt8 {
+    return true
+}
+
+fn main() -> UInt8 {
+    f()
+}

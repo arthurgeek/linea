@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let route   =   r"GET /echo/{name}"
+    let body = r#"{"ok":true}"#
+    let path= r"C:\temp\"
+    UInt8(route.length()+body.length() + path.length() - 35)
+}

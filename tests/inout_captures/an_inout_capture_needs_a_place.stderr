@@ -1,0 +1,5 @@
+error[T-Lend]: an `inout` capture requires a place
+ --> tests/inout_captures/an_inout_capture_needs_a_place.lin:6:37
+  |
+6 |     var tick = inout [inout count = start()] || {
+  |                                     ^^^^^^^ bind the value before capturing it

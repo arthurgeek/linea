@@ -1,0 +1,5 @@
+error[S-Escape]: an escape names one of `n`, `t`, `r`, `0`, a backslash, a quote, or `u{...}`
+ --> tests/text/an_escape_names_something.lin:5:25
+  |
+5 |     UInt8(Str.length("a\qb"))
+  |                         ^ this escape means nothing

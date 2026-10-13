@@ -1,0 +1,12 @@
+fn a() -> UInt8 {
+    let hidden: UInt8 = 1
+    hidden
+}
+
+fn b() -> UInt8 {
+    hidden
+}
+
+fn main() -> UInt8 {
+    a() + b()
+}

@@ -1,0 +1,12 @@
+// The representation is sealed outside this module: nothing elsewhere may
+// build a `Key`, take one apart, or depend on what it holds.
+@opaque
+enum Key { Forged(UInt8) }
+
+pub fn mint(id: UInt8) -> Key {
+    Key.Forged(id)
+}
+
+pub fn tag(k: Key) -> UInt8 {
+    match read k { Forged(n) => n }
+}

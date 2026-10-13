@@ -1,0 +1,26 @@
+// The inferred dump reads the checker's answers back into the source, in
+// positions the grammar has no syntax for. A call carries no type arguments
+// and a braced literal names no type, so which instantiation either reached is
+// invisible in the source and unreadable in MIR -- the one is too abstract and
+// the other is a different language.
+//
+// It is a reading, not a source file: `wrap[UInt8](small)` does not parse back.
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+struct Cell[T] { v: T }
+
+fn wrap[T: Copyable](x: T) -> Cell[T] {
+    .{ v = copy(x) }
+}
+
+fn main() -> UInt8 {
+    let small: UInt8 = 3
+    let d = wrap(small)
+    let _wide = wrap(300)
+    let _none: Maybe[Bool] = Maybe.None
+    let _some = Maybe.Some(true)
+    d.v
+}

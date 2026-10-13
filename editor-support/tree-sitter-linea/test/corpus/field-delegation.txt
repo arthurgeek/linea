@@ -1,0 +1,64 @@
+==================
+Field delegation and traversal forwarding
+==================
+
+impl Index[UInt64] for Board via scores;
+impl Index[FromEnd] for Board via scores
+impl Board {
+    trav positions via scores;
+}
+
+---
+
+(source_file
+  (impl_block
+    (trait_reference (type_identifier) (type_arguments (type_identifier)))
+    (type_identifier)
+    (identifier))
+  (impl_block
+    (trait_reference (type_identifier) (type_arguments (type_identifier)))
+    (type_identifier)
+    (identifier))
+  (impl_block
+    (type_identifier)
+    (traversal_declaration (identifier) (identifier))))
+
+==================
+Via remains an identifier
+==================
+
+fn via(via: UInt8) -> UInt8 { via }
+impl Index[UInt64] for Board via via
+impl Board { trav via via via }
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list (parameter (identifier) (type_identifier)))
+    (type_identifier)
+    (block (expression_statement (identifier))))
+  (impl_block
+    (trait_reference (type_identifier) (type_arguments (type_identifier)))
+    (type_identifier)
+    (identifier))
+  (impl_block
+    (type_identifier)
+    (traversal_declaration (identifier) (identifier))))
+
+==================
+Qualified generic delegation
+==================
+
+impl[T: Copyable] lookup.Index[UInt64] for Board[T] via scores
+
+---
+
+(source_file
+  (impl_block
+    (type_parameters (type_parameter (type_identifier) (bound (trait_reference (type_identifier)))))
+    (trait_reference (identifier) (type_identifier) (type_arguments (type_identifier)))
+    (type_identifier)
+    (type_arguments (type_identifier))
+    (identifier)))

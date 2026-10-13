@@ -1,0 +1,29 @@
+// `Box[UInt8]` declares `get` itself; `Box[T]` reaches `get` through `Shut`.
+// The type's own operation shadows the trait's only for the instantiation it
+// is declared for, so `flag.get()` on a `Box[Bool]` reaches the trait's while
+// `byte.get()` on a `Box[UInt8]` reaches the type's own.
+struct Box[T] {
+    item: T,
+}
+
+impl Box[UInt8] {
+    fn get(self: Box[UInt8]) -> UInt8 {
+        self.item
+    }
+}
+
+trait Shut {
+    fn get(x: Self) -> UInt8
+}
+
+impl[T] Shut for Box[T] {
+    fn get(_x: Self) -> UInt8 {
+        5
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Box[Bool] = .{ item = true }
+    let byte: Box[UInt8] = .{ item = 4 }
+    flag.get() + byte.get()
+}

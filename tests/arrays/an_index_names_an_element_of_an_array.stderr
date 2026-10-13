@@ -1,0 +1,5 @@
+error[T-Bound]: `UInt8` does not implement `Index[UInt64]`
+ --> tests/arrays/an_index_names_an_element_of_an_array.lin:8:10
+  |
+8 |     copy(n[0])
+  |          ^ implement it for those arguments, or settle them to ones that are

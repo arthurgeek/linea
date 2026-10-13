@@ -1,0 +1,5 @@
+error[T-Const]: `value` is not a constant expression
+ --> tests/constants/string_calls_are_not_constant.lin:1:13
+  |
+1 | let value = Str.length("text")
+  |             ^^^^^^^^^^^^^^^^^^ give it something the language can work out without running anything

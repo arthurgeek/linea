@@ -1,0 +1,26 @@
+// One implementation per trait, trait arguments and head constructor. Two that
+// could answer for one type is refused where the second is written, not where a
+// call reaches it.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Show for Holder[T] {
+    fn show(self: Holder[T]) -> UInt8 {
+        1
+    }
+}
+
+impl[T] Show for Holder[T] {
+    fn show(self: Holder[T]) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,33 @@
+// A call is checked against the signature and reaches the body, so the names a
+// call may write are the signature's. An implementation renaming a parameter
+// declares a name no argument can spell and leaves the one every argument
+// spells written nowhere in the body it reaches.
+//
+// A `_` the signature carries is part of that name, and dropping it is a
+// rename like any other: a signature has no body to leave a value unused in,
+// so the marker there says nothing about a body and everything about what a
+// call writes. The marker means something on the other side alone.
+trait Pad {
+    fn pad(s: Self, width: UInt8) -> UInt8
+}
+
+trait Weigh {
+    fn weigh(s: Self, _grams: UInt8) -> UInt8
+}
+
+impl Pad for UInt8 {
+    fn pad(s: UInt8, w: UInt8) -> UInt8 {
+        s + w
+    }
+}
+
+impl Weigh for UInt8 {
+    fn weigh(s: UInt8, grams: UInt8) -> UInt8 {
+        s + grams
+    }
+}
+
+fn main() -> UInt8 {
+    let c: UInt8 = 3
+    c.pad(width: 1) + c.weigh(_grams: 1)
+}

@@ -1,0 +1,34 @@
+// `Self.Item` is the type the implementation settled, and a signature may be
+// written in terms of it before any implementation exists. The trait says only
+// that the type is there; what it is, is read at the use site through the
+// implementation the call reached.
+//
+// Written under a constructor as well as alone, because every written type
+// flows through the same reading: `Option[Self.Item]` is `Option` given what
+// the implementation settled, and nothing about the settled reference is
+// special to the position it sits in.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Option[Self.Item]
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Option[Self.Item] {
+        .Some(x.at)
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    match Measure.of(c) {
+        None => 0,
+        Some(n) => n,
+    }
+}

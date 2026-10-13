@@ -1,0 +1,10 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/expression_errors_preserve_following_lines.lin:2:28
+  |
+2 |     let first: UInt8 = 1 + / 2
+  |                            ^^^ this is not the start of an expression
+error[S-Expr]: expected an expression
+ --> tests/recovery/expression_errors_preserve_following_lines.lin:3:29
+  |
+3 |     let second: UInt8 = 3 + / 4
+  |                             ^^^ this is not the start of an expression

@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/an_escape_is_reported_at_the_value_that_escapes.lin:15:5
+   |
+15 |     station.name.view()
+   |     ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

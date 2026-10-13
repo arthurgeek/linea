@@ -1,0 +1,35 @@
+// The values are evaluated where the literal is written, once each, in the
+// order they appear -- and not where it renders.
+//
+// So a literal bound and rendered twice computes its pieces once, and one that
+// is never rendered computes them anyway. That is what makes an interpolation a
+// value rather than a recipe: holding it holds what it will say, not a promise
+// to work it out later.
+//
+// `tick` answers the same number every time, so what the status records is how
+// many times it ran rather than what it returned. Two calls in the literal and
+// two renders: evaluated at the literal it is 2, evaluated at each render it
+// would be 4.
+import std.io
+
+use io.IoError
+use io.println
+
+fn tick(inout n: Int64) -> Int64 {
+    n += 1
+    7
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var calls: Int64 = 0
+    let twice = "a={tick(&calls)} b={tick(&calls)}"
+
+    // Rendered twice, and what it says is recorded both times: a value that
+    // recomputed its pieces would still print two identical lines, so the
+    // count below is what tells them apart -- and the text is what says the
+    // second render had anything left to render at all.
+    println(twice)?
+    println(twice)?
+
+    return .Ok(UInt8(calls))
+}

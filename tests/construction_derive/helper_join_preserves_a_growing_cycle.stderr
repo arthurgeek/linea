@@ -1,0 +1,10 @@
+error[T-PolyRec]: this call instantiates `cycle` with more than it was given
+  --> tests/construction_derive/helper_join_preserves_a_growing_cycle.lin:24:23
+   |
+24 |         let _result = cycle(next)
+   |                       ^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
+error[T-PolyRec]: this call instantiates `route` with more than it was given
+  --> tests/construction_derive/helper_join_preserves_a_growing_cycle.lin:47:12
+   |
+47 |     return route(input, leaf, branch)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

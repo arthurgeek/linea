@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Self`
+ --> tests/traits/a_settled_reference_is_written_off_self.lin:6:13
+  |
+6 |     let _n: Self.Item = 3
+  |             ^^^^ `Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit

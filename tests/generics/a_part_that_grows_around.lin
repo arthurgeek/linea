@@ -1,0 +1,16 @@
+// Reaching the declaration again is what the rule asks about rather than
+// naming it, so a cycle through two declarations is held to the measure a
+// cycle through one is. `B`'s part grows `B`'s own parameter and `A` holds `B`
+// again, so the chain never closes even though neither declaration names
+// itself.
+struct A[T] {
+    v: B[T],
+}
+
+struct B[T] {
+    v: A[A[T]],
+}
+
+fn main() -> UInt8 {
+    0
+}

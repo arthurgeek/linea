@@ -1,0 +1,10 @@
+enum Colour { Red, Green, Blue }
+
+fn same(sink c: Colour) -> Colour {
+    c
+}
+
+fn main() -> UInt8 {
+    let _ = same(Colour.Green)
+    0
+}

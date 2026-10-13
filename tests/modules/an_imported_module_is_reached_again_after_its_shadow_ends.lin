@@ -1,0 +1,15 @@
+// The block's `text` shadows the module only until the block ends. After it,
+// `text.ParseError.Syntax(1)` is the module's type again.
+import std.text
+
+fn main() -> UInt8 {
+    let length = {
+        let text = "abc"
+        text.length()
+    }
+    let failure = text.ParseError.Syntax(length)
+    match failure {
+        Syntax(at) => UInt8.try_from(at).unwrap_or(0),
+        _ => 0,
+    }
+}

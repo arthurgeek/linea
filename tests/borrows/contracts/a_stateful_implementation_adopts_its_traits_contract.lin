@@ -1,0 +1,46 @@
+// An implementation that writes no clause promises what its trait's signature
+// promises. `Greeter` holds text, so inferring a contract would find two
+// sources; adopting `carries(.Ok: request)` lets a direct call's greeting
+// outlive the greeter's own text.
+import std.io
+import std.mem
+
+struct Request {
+    path: Str,
+    name: Str,
+}
+
+enum Failure {
+    NotFound,
+}
+
+trait Handler {
+    fn handle(self: Self, request: Request) -> Result[Str, Failure] where carries(.Ok: request)
+}
+
+struct Greeter {
+    route: Str,
+}
+
+impl Handler for Greeter {
+    fn handle(self: Self, request: Request) -> Result[Str, Failure] {
+        if request.path != self.route {
+            return .Err(.NotFound)
+        }
+        return .Ok(copy(request.name))
+    }
+}
+
+fn main() -> UInt8 {
+    let route = "/hello".to_owned(mem.system()).unwrap()
+    let greeter = Greeter { route = route.view() }
+    let greeted = greeter.handle(Request { path = "/hello", name = "world" })
+    route.release()
+    match greeted {
+        Ok(name) => {
+            let _printed = io.println("hello, {name}")
+            0
+        },
+        Err(_) => 1,
+    }
+}

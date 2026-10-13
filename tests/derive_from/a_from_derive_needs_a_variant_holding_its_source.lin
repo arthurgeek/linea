@@ -1,0 +1,18 @@
+struct Missing {
+    key: UInt8,
+}
+
+struct Malformed {
+    line: UInt8,
+}
+
+@derive(From[Malformed])
+enum Failure {
+    Absent(Missing),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure.Unknown
+    0
+}

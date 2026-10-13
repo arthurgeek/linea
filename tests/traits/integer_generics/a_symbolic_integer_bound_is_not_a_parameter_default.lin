@@ -1,0 +1,7 @@
+fn _minimum[T: Integer](value: T = T.min) -> Int64 {
+    Int64(value)
+}
+
+fn main() -> UInt8 {
+    0
+}

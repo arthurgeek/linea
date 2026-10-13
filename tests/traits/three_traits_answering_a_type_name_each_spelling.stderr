@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Starter`, `Empty` and `Plain` all declare `blank` for `Meal`
+  --> tests/traits/three_traits_answering_a_type_name_each_spelling.lin:44:16
+   |
+44 |     let meal = Meal.blank()
+   |                ^^^^^^^^^^ write `Starter.blank(…)`, `Empty.blank(…)` or `Plain.blank(…)`, which says which trait it goes through
+error[N-Ambiguous]: `Starter`, `Empty` and `Plain` all declare `blank` for `Meal`
+  --> tests/traits/three_traits_answering_a_type_name_each_spelling.lin:45:26
+   |
+45 |     meal.courses + serve(Meal.blank)
+   |                          ^^^^^^^^^^ write `Starter.blank`, `Empty.blank` or `Plain.blank`, which says which trait it goes through

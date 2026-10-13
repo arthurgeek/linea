@@ -1,0 +1,7 @@
+// A float literal can end an expression, so the newline after `1.5` ends the
+// binding. `-2.0` is a statement of its own, not a subtraction from `1.5`.
+fn main() -> UInt8 {
+    let f = 1.5
+    -2.0
+    UInt8(f.round())
+}

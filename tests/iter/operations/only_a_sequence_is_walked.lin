@@ -1,0 +1,11 @@
+// The walking operations belong to every Sequence, and a number is not one:
+// neither the operation nor its written form through `Sequence` reaches a
+// `UInt64`.
+fn main() -> UInt8 {
+    let count = UInt64(3)
+    let doubled = count.map(|sink value| value * 2)
+    let written = Sequence.map(count, |sink value| value * 2)
+    let _unused = doubled
+    let _also = written
+    0
+}

@@ -1,0 +1,13 @@
+// A range in index position is the existing range value written where an index
+// goes, so the tree keeps both ends and the operator between them and the
+// formatter prints back what was written.
+//
+// Written badly on purpose: the spacing inside the brackets is the formatter's
+// to settle, and the exclusive and inclusive spellings have to come back as
+// the two that were written.
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let head: [UInt8; 2] = copy(a[0..2])
+    a[2..=3] = [7, 8]
+    head[0] + head[1] + a[2] + a[3]
+}

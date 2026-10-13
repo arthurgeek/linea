@@ -1,0 +1,30 @@
+// `Self` inside a generic implementation is the head applied to the
+// implementation's own parameters, so a signature written with `Self` and one
+// written with the head spelled out are one signature. Each call binds those
+// parameters from the receiver, so the body a call reaches is the one that
+// instantiation's, and `Holder[UInt8]` is what stands where `Self` was written.
+trait Swap {
+    fn same(sink self: Self) -> Self
+
+    fn twin(sink self: Self) -> Self
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Swap for Holder[T] {
+    fn same(sink self: Self) -> Self {
+        self
+    }
+
+    fn twin(sink self: Holder[T]) -> Holder[T] {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 3 }
+    let g: Holder[UInt8] = Swap.twin(Swap.same(h))
+    g.v
+}

@@ -1,0 +1,26 @@
+// `?` on an `Option[UInt8]` in a function answering `Option[Bool]`. The
+// constructor agrees and the payloads do not, which is legal: the failing path
+// of an `Option` carries nothing, so nothing about a payload reaches the
+// caller.
+//
+// A rule that required the payloads to agree passes every other case here and
+// refuses this one, which is the only reason it exists.
+fn some() -> Option[UInt8] {
+    Option.Some(7)
+}
+
+fn go() -> Option[Bool] {
+    let n = some()?
+    Option.Some(n == 7)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(b) => if b {
+            1
+        } else {
+            2
+        },
+        None => 0,
+    }
+}

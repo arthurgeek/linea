@@ -1,0 +1,39 @@
+import std.mem
+
+// A derived `Release` releases each component that implements `Release` and
+// discards one that is discardable without it: the allocator `A` is copyable
+// because every allocator is, and so are the octets and the stamp.
+@copyable
+struct Stamp {
+    at: UInt64,
+}
+
+@(linear, derive(Release))
+struct Pool[A: Allocator] {
+    allocator: A,
+    items: Vec[UInt64, A],
+    octets: [UInt8; 4],
+    stamp: Stamp,
+}
+
+fn open[A: Allocator](allocator: A) -> Pool[A] where carries(allocator) {
+    .{ allocator = copy(allocator), items = Vec.new_in(allocator), octets = [127, 0, 0, 1], stamp = .{ at = 9 } }
+}
+
+// A generic body releases `Pool[A]` for any allocator, because the discard is
+// decided at the derive rather than for each allocator.
+fn close[A: Allocator](sink pool: Pool[A]) -> () {
+    pool.release()
+}
+
+fn main() -> UInt8 {
+    var pool = open(mem.system())
+    Vec.push(&pool.items, 5).unwrap()
+    let count = pool.items.length()
+    close(pool)
+    if count == 1 {
+        0
+    } else {
+        1
+    }
+}

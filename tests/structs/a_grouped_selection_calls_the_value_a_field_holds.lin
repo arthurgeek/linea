@@ -1,0 +1,21 @@
+// `door.width()` calls the operation `width`. The field `width` holds a
+// function, and `(door.width)()` calls that function: the parentheses make
+// the selection a value before it is called.
+struct Door {
+    width: fn() -> UInt8,
+}
+
+impl Door {
+    fn width(self: Door) -> UInt8 {
+        (self.width)() + 10
+    }
+}
+
+fn three() -> UInt8 {
+    3
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = three }
+    door.width() - (door.width)() - 10
+}

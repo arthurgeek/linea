@@ -1,0 +1,14 @@
+// A result with two eligible sources and no clause is one error: the body is
+// not also checked against a contract nobody declared.
+fn pick(left: Str, right: Str) -> Str {
+    if right.length() > 0 {
+        copy(left)
+    } else {
+        copy(right)
+    }
+}
+
+fn main() -> UInt8 {
+    let _picked = pick("a", "b")
+    0
+}

@@ -1,0 +1,20 @@
+struct Point { x: UInt8, y: UInt8 }
+
+// A parameter written back through is reached by address, and that is true
+// whatever its type. It is a different question from whether the type is held
+// in memory: answering one with the other hands the slot the bytes of a value
+// and then reads them as a pointer.
+fn bump(inout p: Point) -> () {
+    p.x = p.x + 1
+}
+
+fn main() -> UInt8 {
+    var p: Point = .{ x = 1, y = 2 }
+    bump(&p)
+    bump(&p)
+
+    // Twice, so a call that copied rather than wrote back would answer 4
+    // rather than 5 -- a wrong number rather than a crash, which is the shape
+    // that survives review.
+    p.x + p.y
+}

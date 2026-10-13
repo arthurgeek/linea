@@ -1,0 +1,26 @@
+// A monomorphised symbol spells an array component length-first, in digits,
+// and the digits are what the length is worth rather than how it was written.
+// `n` names 4, so the instantiation this call reaches is spelled the same one
+// `[UInt8; 4]` would reach -- one type, one symbol, whichever spelling the
+// program used.
+struct Holder {
+    n: UInt8,
+}
+
+let n: UInt8 = 2 + 2
+
+impl Holder {
+    pub fn give[T](h: Holder, _u: T) -> UInt8 {
+        h.n
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    let named: [UInt8; n] = [1, 2, 3, 4]
+    let four: [UInt8; 4] = [5, 6, 7, 8]
+    let a = Holder.give(h, named)
+    let b = Holder.give(h, four)
+    let _h = h
+    a + b
+}

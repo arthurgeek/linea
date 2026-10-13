@@ -1,0 +1,9 @@
+// A pattern parameter's convention is written like a name's: the callee passes
+// the pair `sink`, so the lambda says `sink`.
+fn apply[F: fn(sink pair: (UInt8, UInt8)) -> UInt8](sink pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn main() -> UInt8 {
+    apply((3, 4), |(a, b)| a + b)
+}

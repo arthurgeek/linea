@@ -1,0 +1,12 @@
+alias Bad = Nope
+
+@derive(From[Bad])
+enum Failure {
+    Byte(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure.Unknown
+    0
+}

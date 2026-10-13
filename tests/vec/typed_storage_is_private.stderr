@@ -1,0 +1,20 @@
+error[M-Vis]: `slot_take` is private to `mem`
+ --> tests/vec/typed_storage_is_private.lin:4:21
+  |
+4 |     let _take = mem.slot_take
+  |                     ^^^^^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `slot_put` is private to `mem`
+ --> tests/vec/typed_storage_is_private.lin:5:20
+  |
+5 |     let _put = mem.slot_put
+  |                    ^^^^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `slot_place` is private to `mem`
+ --> tests/vec/typed_storage_is_private.lin:6:22
+  |
+6 |     let _place = mem.slot_place
+  |                      ^^^^^^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `SlotType` is private to `mem`
+ --> tests/vec/typed_storage_is_private.lin:7:21
+  |
+7 |     let _shape: mem.SlotType[UInt8] = .Type
+  |                     ^^^^^^^^ declare it `pub` in its own module, or do not name it here

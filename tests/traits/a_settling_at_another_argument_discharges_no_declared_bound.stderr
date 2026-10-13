@@ -1,0 +1,5 @@
+error[T-Bound]: `Elem` requires `Lookup[UInt64]`, and `Board` does not implement it
+  --> tests/traits/a_settling_at_another_argument_discharges_no_declared_bound.lin:28:17
+   |
+28 |     type Elem = Board
+   |                 ^^^^^ implement it for that type, or drop the bound

@@ -1,0 +1,9 @@
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    bump(&x)
+    x
+}

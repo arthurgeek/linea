@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/storage_growth_retains_borrowed_element_owners.lin:9:5
+   |
+9  |     number = 8
+   |     ^^^^^^ keep this place available until the last use of its observation
+10 |     let first = *values[0]
+   |                 ---------- the observation is still used here

@@ -1,0 +1,18 @@
+// Writing freed storage to standard output aborts rather than reporting an
+// I/O error or writing whatever the storage holds.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+
+extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+fn main() -> UInt8 {
+    let at = linea_alloc(8, 8)
+    linea_free(at, 8, 8)
+    let written = linea_write_some(1, at, 8)
+    if written < 0 {
+        1
+    } else {
+        0
+    }
+}

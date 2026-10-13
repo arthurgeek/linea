@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/inout_captures/a_for_loop_over_a_lending_pipeline_keeps_the_lend.lin:15:28
+   |
+8  |         inout [inout inspected] |parcel| {
+   |                      --------- lent `inout` here
+14 |     for weight in accepted {
+   |                   -------- the loop's next pass takes its next element from this value, which holds the lend
+15 |         total += *weight + inspected
+   |                            ^^^^^^^^^ this uses the place while it is lent
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

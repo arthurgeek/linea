@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the constructor result carries its payload's owner dependencies
+ --> tests/constructor_callables/contextual_variants/borrowed_payload_cannot_promise_independence.lin:4:75
+  |
+4 |     let _wrap: fn(sink value: borrow UInt64) -> Failure where carries() = .Refused
+  |                                                                           ^^^^^^^^ the callable contract must carry the payload into the result

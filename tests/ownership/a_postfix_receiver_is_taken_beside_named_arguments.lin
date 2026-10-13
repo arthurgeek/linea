@@ -1,0 +1,27 @@
+// A postfix call's receiver is its first argument, so the convention that
+// parameter declares is what decides the receiver's fate: `read` lends it and
+// `sink` takes it, and the dot says nothing about which. The arguments after
+// the receiver are the rest of the list and may name what they fill, which
+// reaches no further than the receiver -- the value is given away once, and
+// the weights say which parameter each remaining argument landed in.
+@linear
+struct Vial {
+    fill: UInt8,
+}
+
+impl Vial {
+    fn level(v: Vial) -> UInt8 {
+        v.fill
+    }
+
+    fn drain(sink v: Vial, high: UInt8, low: UInt8) -> UInt8 {
+        let Vial { fill: f } = v
+        f + high * 10 + low
+    }
+}
+
+fn main() -> UInt8 {
+    let vial: Vial = .{ fill = 1 }
+    let before = vial.level()
+    vial.drain(low: 2, high: 3) + before
+}

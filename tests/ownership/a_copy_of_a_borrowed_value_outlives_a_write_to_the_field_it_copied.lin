@@ -1,0 +1,20 @@
+// The write lands on the same field the copy read. The copy keeps the old
+// value, and the owner reads the new one.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let big = borrow hall
+    let booked = copy(*big)
+    hall.name = "studio"
+    hall.seats = 100
+    if booked.name == "hall" && hall.name == "studio" {
+        booked.seats + hall.seats
+    } else {
+        0
+    }
+}

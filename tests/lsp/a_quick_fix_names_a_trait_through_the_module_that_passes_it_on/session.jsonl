@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `ByteWriter` is passed on by `std.io`, which this file imports, so the\n// quick fix writes the `use` through `io`.\nimport std.io\n\nfn main() -> UInt8 {\n    let err = io.stderr()\n    UInt8(err.pending_bytes())\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":6,"character":10},"end":{"line":6,"character":27}},"context":{"diagnostics":[{"range":{"start":{"line":6,"character":10},"end":{"line":6,"character":27}},"severity":1,"code":"T-UnknownOperation","source":"linea","message":"`pending_bytes` is declared by `ByteWriter`, which is not in scope here"}]}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

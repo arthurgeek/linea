@@ -1,0 +1,5 @@
+error[T-Impl]: a callable head names at most 60 parameters
+ --> tests/traits/callable_heads/a_callable_head_names_at_most_sixty_parameters.lin:7:17
+  |
+7 | impl Handle for fn(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9 ...
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ name a callable type with fewer parameters

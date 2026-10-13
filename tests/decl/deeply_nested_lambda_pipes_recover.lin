@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _deep = |_p0: UInt8| |_p1: UInt8| |_p2: UInt8| |_p3: UInt8| |_p4: UInt8| |_p5: UInt8| |_p6: UInt8| |_p7: UInt8| |_p8: UInt8| |_p9: UInt8| |_p10: UInt8| |_p11: UInt8| |_p12: UInt8| |_p13: UInt8| |_p14: UInt8| |_p15: UInt8| |_p16: UInt8| |_p17: UInt8| |_p18: UInt8| |_p19: UInt8| |_p20: UInt8| |_p21: UInt8| |_p22: UInt8| |_p23: UInt8| |_p24: UInt8| |_p25: UInt8| |_p26: UInt8| |_p27: UInt8| |_p28: UInt8| |_p29: UInt8| |_p30: UInt8| |_p31: UInt8| 1
+    0
+}

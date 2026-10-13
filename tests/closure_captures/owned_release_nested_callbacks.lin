@@ -1,0 +1,28 @@
+import std.io
+
+@linear
+struct Token { number: UInt8 }
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let { number } = self
+        match io.print("{number}") { Ok(_) => {}, Err(_) => {} }
+    }
+}
+
+fn settle[F: Release](sink callback: F) -> () {
+    let wrapped = [sink _callback = callback] || {}
+    Release.release(wrapped)
+}
+
+fn main() -> UInt8 {
+    let first: Token = .{ number = 1 }
+    let inner = [sink first] || first.number
+    let second: Token = .{ number = 2 }
+    let outer = [sink inner, sink second] || {
+        let _number = inner() + second.number
+        panic("releasing nested callbacks invoked a body")
+    }
+    settle(outer)
+    0
+}

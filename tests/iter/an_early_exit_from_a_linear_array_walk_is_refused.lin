@@ -1,0 +1,22 @@
+// A walk over an array moves each element out of its place, so a walk that
+// leaves before its last position leaves those places holding values nothing
+// took. Where the element is Linear that is a leak, and it is refused at the
+// walk rather than at the exit: no one `break` is the mistake, running a walk
+// that can end early over places that oblige disposal is.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 3] = [.{ n = 1 }, .{ n = 2 }, .{ n = 4 }]
+    var total: UInt8 = 0
+    for t in ts {
+        let Token { n: v } = t
+        total += v
+        if total > 2 {
+            break
+        }
+    }
+    total
+}

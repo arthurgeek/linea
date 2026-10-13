@@ -1,0 +1,17 @@
+import std.mem
+
+// `kept` is a copy of the view, so it observes the readings as the view does,
+// and the push before its last use is refused.
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(4).unwrap()
+    var total: UInt64 = 0
+    for pass in UInt64(0)..3 {
+        let view = readings.as_slice()
+        let kept = copy(view)
+        &readings.push(pass).unwrap()
+        total += kept[0] + view.length()
+    }
+    readings.release()
+    UInt8(total)
+}

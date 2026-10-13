@@ -1,0 +1,29 @@
+// `&` in a chain marks the first call. In `&list.first().push(1)` it lends
+// `list` to `first`, which only reads it, and `push` would change the
+// value `first` returned, which is no place to lend.
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn first(self: Self) -> Counter {
+        Counter { count = self.count }
+    }
+
+    fn take(inout self: Self) -> Counter {
+        Counter { count = self.count }
+    }
+
+    fn push(inout self: Self, x: UInt8) -> UInt8 {
+        self.count += x
+        self.count
+    }
+}
+
+fn main() -> UInt8 {
+    var list = Counter { count = 1 }
+    let a = &list.first().push(1)
+    let b = list.first().push(1)
+    let c = &list.take().push(1)
+    a + b + c
+}

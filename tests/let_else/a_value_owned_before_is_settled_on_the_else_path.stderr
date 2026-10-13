@@ -1,0 +1,9 @@
+error[O-Leak]: `key` (a linear `Key`) is still owned when this path leaves
+  --> tests/let_else/a_value_owned_before_is_settled_on_the_else_path/main.lin:14:9
+   |
+12 |     let key = mint(7)
+   |         --- acquired here
+14 |         return 1
+   |         ^^^^^^ still owned here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

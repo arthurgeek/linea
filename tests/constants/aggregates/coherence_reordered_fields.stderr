@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Selected` is already implemented for `Holder` with the same arguments
+  --> tests/constants/aggregates/coherence_reordered_fields.lin:15:6
+   |
+13 | impl Selected[fn(read config: Config = defaults) -> UInt8] for Holder {}
+   |      -------- already implemented here
+15 | impl Selected[fn(read config: Config = .{ width = 7, enabled = true }) -> UInt8] for Holder {}
+   |      ^^^^^^^^ a trait is implemented once per arguments and type

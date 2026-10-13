@@ -1,0 +1,38 @@
+// A constant in an interpolation's braces is read from its static storage, so
+// the literal depends on nothing: a closure may return it, and it may be
+// rendered by a later statement.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Name {
+    text: Str,
+}
+
+// `Mode` cannot be copied, because `Named` owns a `Name`, so the literal
+// borrows `quiet` where it is stored instead of copying it.
+enum Mode {
+    Quiet,
+    Named(Name),
+}
+
+impl Display for Mode {
+    fn fmt[W: Writer](self: Mode, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        match read self {
+            Quiet => &w.write_str("quiet"),
+            Named(name) => &w.write_str(name.text),
+        }
+    }
+}
+
+let quiet = Mode.Quiet
+
+let service = "api"
+
+fn main() -> Result[UInt8, IoError] {
+    let describe = || "{service} runs {quiet}"
+    let line = describe()
+    println(line)?
+    return .Ok(0)
+}

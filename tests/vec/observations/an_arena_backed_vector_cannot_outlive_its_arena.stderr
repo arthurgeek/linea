@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/an_arena_backed_vector_cannot_outlive_its_arena.lin:9:21
+   |
+9  |     Release.release(arena)
+   |                     ^^^^^ keep this place available until the last use of its observation
+10 |     match Vec.finish(values) {
+   |                      ------ the observation is still used here

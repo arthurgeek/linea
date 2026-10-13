@@ -1,0 +1,7 @@
+error[T-For]: `Vec[UInt64, mem.SystemAllocator]` implements no `Sequence`
+  --> tests/iter/a_refused_walk_takes_nothing.lin:10:18
+   |
+10 |     for cents in prices {
+   |                  ^^^^^^ a `for` walks what a `Sequence` says how to walk
+   |
+   = help: look at each element with `for read cents in prices`, change each in place with `for inout cents in prices`, walk a view of it with `for cents in prices.as_slice()`, or take its elements out with `prices.drain()`

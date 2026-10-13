@@ -1,0 +1,6 @@
+// A pattern parameter takes its type from the expected callable. A lambda
+// bound to a name has none, so the parameter is annotated.
+fn main() -> UInt8 {
+    let add = |(a, b)| a + b
+    add((1, 2))
+}

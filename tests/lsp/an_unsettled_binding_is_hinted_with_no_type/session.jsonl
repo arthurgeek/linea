@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A binding whose initialiser the checker could not type is left unhinted, as\n// hover and completion leave it, and a settled binding is hinted as usual.\nfn main() -> UInt8 {\n    let settled = 7\n    let unsettled = nope()\n    settled\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":0,"character":0},"end":{"line":8,"character":0}}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

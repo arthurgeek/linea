@@ -1,0 +1,18 @@
+import std.mem
+
+// `inout` invocation lets each call change the count the closure owns, and
+// `&counter()` marks that the call changes it.
+fn main() -> Result[UInt8, mem.Oom] {
+    var counter: mem.Closure[inout fn() -> UInt8, mem.SystemAllocator] = mem.Closure.open(
+        mem.system(),
+        inout [sink count = UInt8(0)] || {
+            count += 1
+            count
+        },
+    )?
+    let _first = &counter()
+    let _second = &counter()
+    let third = &counter()
+    counter.release()
+    return .Ok(third)
+}

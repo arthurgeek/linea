@@ -1,0 +1,5 @@
+error[S-Entry]: a settled type carries no visibility
+  --> tests/traits/a_settled_type_carries_no_visibility.lin:15:5
+   |
+15 |     pub type Item = UInt8
+   |     ^^^ it is reachable wherever the trait it settles is

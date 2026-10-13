@@ -1,0 +1,42 @@
+// An implementation names a head constructor and is generic over it, so one
+// `impl[T: Measure] Measure for Option[T]` stands for a family. Which member a
+// call reaches is settled per instantiation: `T` binds from the receiver's
+// argument, so `Self` is `Option[UInt8]` at one call and `Option[Bool]` at the
+// next, and the implementation's own bound is discharged against whatever
+// bound it -- which is what decides that the body reaches `UInt8`'s answer at
+// one call and `Bool`'s at the other.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for UInt8 {
+    fn of(x: UInt8) -> UInt8 {
+        x
+    }
+}
+
+impl Measure for Bool {
+    fn of(x: Bool) -> UInt8 {
+        if x {
+            10
+        } else {
+            20
+        }
+    }
+}
+
+impl[T: Measure] Measure for Option[T] {
+    fn of(x: Self) -> UInt8 {
+        match read x {
+            None => 0,
+            Some(v) => Measure.of(v),
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Option[UInt8] = .Some(3)
+    let b: Option[Bool] = .Some(true)
+    let c: Option[UInt8] = .None
+    Measure.of(a) + Measure.of(b) + Measure.of(c)
+}

@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/a_malformed_line_follows_a_complete_statement.lin:3:5
+  |
+3 |     / 2
+  |     ^^^ this is not the start of an expression

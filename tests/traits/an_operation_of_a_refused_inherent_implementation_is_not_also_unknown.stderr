@@ -1,0 +1,5 @@
+error[M-Impl]: `Counter` is declared in `lib`
+ --> tests/traits/an_operation_of_a_refused_inherent_implementation_is_not_also_unknown/main.lin:8:6
+  |
+8 | impl Counter {
+  |      ^^^^^^^ write the `impl` in the module that declares the type

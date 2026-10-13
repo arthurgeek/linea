@@ -1,0 +1,15 @@
+// The array holds a closure lent `n`, and the loop takes each element from it,
+// so the body cannot read `n` while the walk goes on.
+fn main() -> UInt8 {
+    var n: UInt8 = 0
+    let bump = inout [inout n] || {
+        n += 1
+    }
+    var total: UInt8 = 0
+    for tick in [bump] {
+        var calling = tick
+        &calling()
+        total += n
+    }
+    total
+}

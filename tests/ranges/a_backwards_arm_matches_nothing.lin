@@ -1,0 +1,13 @@
+// `9..0` is backwards, so it is empty: no value is both at least 9 and less
+// than 0. An arm over an empty interval reaches nothing, the same as an arm
+// an earlier one already covers.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        9..0 => 1,
+        _ => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(7)
+}

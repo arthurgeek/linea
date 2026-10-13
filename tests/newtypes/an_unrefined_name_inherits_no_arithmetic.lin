@@ -1,0 +1,13 @@
+// A clause is not what withholds the operator. An unrefined newtype admits
+// every value its base does and still defines no arithmetic of its own, so
+// the sum is refused here exactly as it is where a range is written.
+type Byte = UInt8
+
+fn add(sink a: Byte, sink b: Byte) -> Byte {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let Byte(n) = add(Byte(200), Byte(100))
+    n
+}

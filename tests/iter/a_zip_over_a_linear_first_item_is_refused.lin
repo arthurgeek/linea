@@ -1,0 +1,39 @@
+// `zip` draws from the first sequence before the second, so when the second ends
+// first it disposes of the first sequence's item. A linear `Job` cannot be
+// disposed of, so `jobs.zip(...)` is refused at the call.
+@linear
+struct Job {
+    id: UInt8,
+}
+
+impl Release for Job {
+    fn release(sink self: Job) -> () {
+        let Job { id: _ } = self
+    }
+}
+
+struct Jobs {
+    next_id: UInt8,
+}
+
+impl Iterator for Jobs {
+    type Item = Job
+
+    fn next(inout self: Jobs) -> Option[Job] {
+        if self.next_id == 3 {
+            return .None
+        }
+        self.next_id += 1
+        .Some(.{ id = self.next_id })
+    }
+}
+
+fn main() -> UInt8 {
+    let jobs = Jobs { next_id = 0 }
+    var total: UInt8 = 0
+    for (job, n) in jobs.zip(UInt8(1)..3) {
+        total += n + job.id
+        job.release()
+    }
+    total - 6
+}

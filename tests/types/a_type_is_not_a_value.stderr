@@ -1,0 +1,5 @@
+error[N-NotAValue]: `Coins` is a type, and a type is not a value
+  --> tests/types/a_type_is_not_a_value.lin:10:17
+   |
+10 |     let _held = Coins
+   |                 ^^^^^ name a value of that type

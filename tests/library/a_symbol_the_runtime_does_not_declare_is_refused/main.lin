@@ -1,0 +1,5 @@
+extern fn linea_frobnicate(value: Int64) -> Int64
+
+export fn call_it(value: Int64) -> Int64 {
+    linea_frobnicate(value)
+}

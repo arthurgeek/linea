@@ -1,0 +1,13 @@
+// An import and a re-export end their line the way every other declaration
+// does, so a comment the author left on that line is found before the line
+// ends. Ending it without looking left the comment pending, and it surfaced
+// above the declaration below as though it described that one. The `;` the
+// formatter drops is still part of the line it ended, so the search has to
+// reach past it.
+import inner // where the names come from
+
+use inner.Thing // re-exported for the module above
+
+fn main() -> UInt8 {
+    0
+}

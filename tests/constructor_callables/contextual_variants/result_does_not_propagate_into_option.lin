@@ -1,0 +1,12 @@
+enum RenderError { Allocation(UInt8) }
+
+fn render() -> Option[UInt8] {
+    let source: Result[UInt8, UInt8] = .Err(7)
+    let mapped: Result[UInt8, RenderError] = source.map_err(.Allocation)
+    let value = mapped?
+    return .Some(value)
+}
+
+fn main() -> UInt8 {
+    match render() { Some(_) => 0, None => 1 }
+}

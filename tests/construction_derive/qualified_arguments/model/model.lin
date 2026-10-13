@@ -1,0 +1,16 @@
+import protocol as operations
+import tokens as symbols
+
+@opaque
+struct Box[T] {
+    value: T,
+}
+
+derive[T] operations.Echo[symbols.Token] for Box[T]
+
+pub fn run() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 1 }
+    let input: symbols.Token = .{ value = 7 }
+    let answer = operations.Echo.echo(box, input)
+    answer.value
+}

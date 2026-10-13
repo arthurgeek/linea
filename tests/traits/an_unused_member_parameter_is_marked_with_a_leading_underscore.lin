@@ -1,0 +1,22 @@
+// A trait implementation's parameter must keep the trait signature's name, so
+// `_` alone cannot stand in for it. A leading `_` marks it unused and still
+// matches, so that is what the diagnostic offers.
+trait Shape {
+    fn scale(self: Self, by: Int32) -> Int32
+}
+
+struct Square {
+    side: Int32,
+}
+
+impl Shape for Square {
+    fn scale(self: Self, by: Int32) -> Int32 {
+        self.side
+    }
+}
+
+fn main() -> UInt8 {
+    let square = Square { side = 3 }
+    let _scaled = square.scale(by: 2)
+    0
+}

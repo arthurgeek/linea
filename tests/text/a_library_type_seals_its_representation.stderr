@@ -1,0 +1,15 @@
+error[M-Opaque]: `Descriptor` is opaque outside `core`
+  --> tests/text/a_library_type_seals_its_representation.lin:23:9
+   |
+23 |     let Descriptor(_number) = out
+   |         ^^^^^^^^^^^^^^^^^^^ only its own module can take one apart
+error[M-Opaque]: `Failure` is opaque outside `testing`
+  --> tests/text/a_library_type_seals_its_representation.lin:25:33
+   |
+25 |     let said: testing.Failure = .{ said = "built by hand" }
+   |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Failure` is opaque outside `testing`
+  --> tests/text/a_library_type_seals_its_representation.lin:26:22
+   |
+26 |     let _read = copy(said.said)
+   |                      ^^^^^^^^^ only its own module can read its parts

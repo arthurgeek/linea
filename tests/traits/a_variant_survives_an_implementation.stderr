@@ -1,0 +1,5 @@
+error[N-Case]: functions start with a lowercase letter
+  --> tests/traits/a_variant_survives_an_implementation.lin:21:8
+   |
+21 |     fn Red(c: Self) -> UInt8
+   |        ^^^ rename it `red`

@@ -1,0 +1,12 @@
+// A newtype is its own type rather than a number, so a constant of one cannot
+// count an array's elements even where it holds an integer.
+@copyable
+type Count = UInt64
+
+let three: Count = Count(3)
+
+fn main() -> UInt8 {
+    let named: [UInt8; three] = [1, 2, 3]
+    let written: [UInt8; Count(2)] = [1, 2]
+    named[0] + written[0]
+}

@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// What could be written at a point is what the resolver's chain makes visible\n// there: the parameters of the function the cursor is in, the locals declared\n// around it, the module's own declarations, and the names the compiler puts in\n// every scope. Each carries the type the checker settled, where it settled one.\nfn add(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = add(1, 2)\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":5}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":9}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":20}}}
+{"jsonrpc":"2.0","id":5,"method":"shutdown"}

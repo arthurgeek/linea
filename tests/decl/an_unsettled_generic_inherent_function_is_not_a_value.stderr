@@ -1,0 +1,5 @@
+error[T-Infer]: the expected callable signature does not say what `T` is
+  --> tests/decl/an_unsettled_generic_inherent_function_is_not_a_value.lin:12:31
+   |
+12 |     let make: fn() -> UInt8 = Holder.empty
+   |                               ^^^^^^^^^^^^ no value represents an unselected function family

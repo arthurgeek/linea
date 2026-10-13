@@ -1,0 +1,41 @@
+// An alias and the type it names are one type: a value of either is a value
+// of both, in a parameter, a result, an annotation and a type argument. A
+// named literal and a pattern may be headed by the alias too.
+struct Point {
+    x: Int64,
+    y: Int64,
+}
+
+type Score = UInt8
+
+alias Meters = UInt64
+alias Spot = Point
+alias Reading = Option[Meters]
+alias Pair = [Meters; 2]
+alias Points = Score
+
+fn double(m: Meters) -> UInt64 {
+    m * 2
+}
+
+fn origin() -> Spot {
+    Spot { x = 3, y = 4 }
+}
+
+fn first(readings: Pair) -> Reading {
+    .Some(readings[0])
+}
+
+fn main() -> UInt8 {
+    let d: UInt64 = 21
+    let m: Meters = double(d)
+    let q: Point = origin()
+    let Spot { x, y } = q
+    let Points(bonus) = Score(2)
+    let pair: [UInt64; 2] = [m, 0]
+    let found: Option[UInt64] = first(pair)
+    match found {
+        Some(v) => UInt8(v) - 42 + UInt8(x + y) + bonus,
+        None => 1,
+    }
+}

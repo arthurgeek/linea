@@ -1,0 +1,86 @@
+import std.io
+
+// `fold`, `for_each`, `any`, `all`, `find`, `find_map` and `find_counted`
+// take a callback called `inout`, so a closure written in the call may change
+// a place it is lent `inout`. Each lend ends with the call, and `main` reads
+// the count after it.
+fn main() -> Result[UInt8, io.IoError] {
+    let weights = [UInt64(1200), 3500, 6400, 5000, 900]
+
+    var folded: UInt64 = 0
+    let total = weights.as_slice().fold(
+        UInt64(0),
+        inout [inout folded] |sink sum, sink weight| {
+            folded += 1
+            sum + *weight
+        },
+    )
+    io.println("fold: {total} g from {folded} parcels")?
+
+    var visited: UInt64 = 0
+    var heaviest: UInt64 = 0
+    weights.as_slice().for_each(
+        inout [inout visited, inout heaviest] |sink weight| {
+            visited += 1
+            if *weight > heaviest {
+                heaviest = *weight
+            }
+        },
+    )
+    io.println("for_each: {heaviest} g heaviest of {visited}")?
+
+    var checked_any: UInt64 = 0
+    let oversized = weights.as_slice().any(
+        inout [inout checked_any] |sink weight| {
+            checked_any += 1
+            *weight > 6000
+        },
+    )
+    io.println("any: {oversized} after {checked_any}")?
+
+    var checked_all: UInt64 = 0
+    let light = weights.as_slice().all(
+        inout [inout checked_all] |sink weight| {
+            checked_all += 1
+            *weight < 4000
+        },
+    )
+    io.println("all: {light} after {checked_all}")?
+
+    var checked_find: UInt64 = 0
+    let first_heavy = weights.as_slice().find(
+        inout [inout checked_find] |weight| {
+            checked_find += 1
+            *weight >= 5000
+        },
+    )
+    let found = match first_heavy {
+        Some(weight) => *weight,
+        None => 0,
+    }
+    io.println("find: {found} g after {checked_find}")?
+
+    var checked_map: UInt64 = 0
+    let surcharge = weights.as_slice().find_map(
+        inout [inout checked_map] |sink weight| -> Option[UInt64] {
+            checked_map += 1
+            if *weight > 6000 {
+                .Some(*weight - 6000)
+            } else {
+                .None
+            }
+        },
+    )
+    io.println("find_map: {surcharge.unwrap_or(0)} g over after {checked_map}")?
+
+    var checked_counted: UInt64 = 0
+    var walking = weights.as_slice().iterate()
+    let report = &walking.find_counted(
+        inout [inout checked_counted] |weight| {
+            checked_counted += 1
+            *weight < 1000
+        },
+    )
+    io.println("find_counted: {report.inspected} inspected after {checked_counted}")?
+    .Ok(0)
+}

@@ -1,0 +1,6 @@
+error[T-Literal]: `UInt8` cannot hold 256
+ --> tests/inference/local_ranges/range_literals_must_fit_the_opposite_endpoint.lin:3:17
+  |
+3 |     let range = 256..end
+  |                 ^^^ literal is out of range for its type
+  |                      --- expected because of this end

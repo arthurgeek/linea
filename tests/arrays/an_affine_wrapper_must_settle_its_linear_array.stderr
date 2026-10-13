@@ -1,0 +1,9 @@
+error[O-Leak]: `_b` (a linear `Bag`) is still owned when this path leaves
+  --> tests/arrays/an_affine_wrapper_must_settle_its_linear_array.lin:13:9
+   |
+13 |     let _b: Bag = .{ ts = [.{ it = 1 }, .{ it = 2 }] }
+   |         ^^ never settled on the path that reaches the end of this block
+15 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

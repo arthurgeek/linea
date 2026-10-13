@@ -1,0 +1,7 @@
+error[T-For]: `Board` implements no `Sequence`
+  --> tests/delegation/a_delegated_traversal_does_not_add_consuming_iteration.lin:12:18
+   |
+12 |     for value in board {
+   |                  ^^^^^ a `for` walks what a `Sequence` says how to walk
+   |
+   = help: look at each element with `for read value in board`

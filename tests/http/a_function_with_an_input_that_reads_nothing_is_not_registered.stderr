@@ -1,0 +1,7 @@
+error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read visitor: Visitor, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request)` does not implement it
+  --> tests/http/a_function_with_an_input_that_reads_nothing_is_not_registered.lin:16:26
+   |
+16 |     let routed = &router.route("GET /", greet)
+   |                          ^^^^^ implement it for that type, or drop the bound
+   |
+   = help: `fn(read a: A, read request: Request[P]) -> Result[Response[P], Error[P]] where carries(request)` implements `Endpoint[(), SystemAllocator]` when `A` implements `Extract[SystemAllocator]`, and `Visitor` does not

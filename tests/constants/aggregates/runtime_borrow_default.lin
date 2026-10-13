@@ -1,0 +1,9 @@
+@copyable
+struct View { value: borrow UInt8 }
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let view: View = .{ value = borrow number }
+    let read_value = |view: View = view| *view.value
+    read_value()
+}

@@ -1,0 +1,30 @@
+// The neighbour of the case that leaks. The value is given away before the
+// `?`, so the failing path carries no obligation and the succeeding one has
+// nothing left to do -- which is what says the rule is about what is held
+// where control leaves, rather than about `?` having an edge at all.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn get() -> Option[UInt8] {
+    Option.Some(2)
+}
+
+fn go(sink k: Key) -> Option[UInt8] {
+    let held = take(k)
+    let n = get()?
+    Option.Some(held + n)
+}
+
+fn main() -> UInt8 {
+    match go(.{ n = 3 }) {
+        Some(v) => v,
+        None => 0,
+    }
+}

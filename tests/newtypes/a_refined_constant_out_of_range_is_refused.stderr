@@ -1,0 +1,5 @@
+error[T-Refine]: 150 is not in 0..=100 for Percent
+ --> tests/newtypes/a_refined_constant_out_of_range_is_refused.lin:6:20
+  |
+6 | let cap: Percent = Percent(150)
+  |                    ^^^^^^^^^^^^ this value is outside the type's range

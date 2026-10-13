@@ -1,0 +1,12 @@
+import std.mem
+
+use mem.AllocationLog
+
+fn main() -> UInt8 {
+    let log = AllocationLog.open(mem.system(), 0).unwrap()
+    let buffer = log.allocator().acquire(64).unwrap()
+    // Disposing the buffer records into the log, so the log must still be live.
+    log.release()
+    buffer.release()
+    0
+}

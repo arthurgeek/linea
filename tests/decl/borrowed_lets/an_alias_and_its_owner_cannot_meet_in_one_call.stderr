@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/borrowed_lets/an_alias_and_its_owner_cannot_meet_in_one_call.lin:10:19
+   |
+10 |     shift(&point, x)
+   |           ------ mutated by this argument
+   |                   ^ already passed `&` here

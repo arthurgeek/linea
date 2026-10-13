@@ -1,0 +1,57 @@
+// A refusal while rendering a debug piece leaves before the later display
+// piece. The selective writer forwards everything but `D`, so an incorrect
+// continuation prints `L` and makes the otherwise empty output differ.
+import std.io
+
+use io.Descriptor
+use io.stdout
+
+struct Refused {
+    why: UInt8,
+}
+
+struct Selective {
+    out: Descriptor,
+}
+
+impl Writer for Selective {
+    type Error = Refused
+
+    fn write_str(inout self: Selective, s: Str) -> Result[(), Refused] {
+        if s == "D" {
+            return .Err(.{ why = 1 })
+        }
+        match Writer.write_str(&self.out, s) {
+            Ok(_) => .Ok({}),
+            Err(_) => .Err(.{ why = 2 }),
+        }
+    }
+}
+
+@copyable
+struct DebugPiece {}
+
+impl Debug for DebugPiece {
+    fn debug[W: Writer](_self: DebugPiece, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "D")
+    }
+}
+
+@copyable
+struct DisplayPiece {}
+
+impl Display for DisplayPiece {
+    fn fmt[W: Writer](_self: DisplayPiece, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "L")
+    }
+}
+
+fn main() -> UInt8 {
+    var w: Selective = .{ out = stdout() }
+    let debug_piece: DebugPiece = .{}
+    let later: DisplayPiece = .{}
+    match Display.fmt("{debug_piece:?}{later}", &w) {
+        Ok(_) => 0,
+        Err(_) => 3,
+    }
+}

@@ -1,0 +1,29 @@
+// The borrow comes back from a call that borrows from both arguments. A copy of
+// what it points at is independent of both rooms, so the winner can be written
+// while the copy is still read.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn larger(first: Room, second: Room) -> borrow Room where borrows(first, second) {
+    if first.seats >= second.seats {
+        borrow first
+    } else {
+        borrow second
+    }
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let studio = Room { name = "studio", seats = 30 }
+    let big = larger(hall, studio)
+    let booked = copy(*big)
+    hall.seats = 100
+    if booked.name == "hall" {
+        booked.seats + hall.seats
+    } else {
+        0
+    }
+}

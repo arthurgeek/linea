@@ -1,0 +1,24 @@
+// The place-formers are field selection and indexing, and what a bracket holds
+// is an ordinary expression over what is in scope: a parameter, and arithmetic
+// over one. Nothing runs and nothing chooses a path, which is the whole of what
+// the body may not do. The arithmetic is spliced into each site and reaches the
+// backend, so the exit status is what pins which element it named.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i + 1]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    // The arithmetic is the implementation's, so the place the site reaches is
+    // one past the number it wrote: the first bracket names the second element
+    // and the second names the fourth.
+    g[0] + g[2]
+}

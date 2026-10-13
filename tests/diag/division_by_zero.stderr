@@ -1,0 +1,5 @@
+error[T-DivideByZero]: division by zero
+ --> tests/diag/division_by_zero.lin:2:7
+  |
+2 |     1 / 0
+  |       ^ the right operand is zero

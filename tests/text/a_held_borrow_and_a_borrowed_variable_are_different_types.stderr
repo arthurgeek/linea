@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `{interpolation copy borrow Name}`, found `{interpolation borrow Name}`
+  --> tests/text/a_held_borrow_and_a_borrowed_variable_are_different_types.lin:24:12
+   |
+24 |     line = "hi {name}"
+   |     ---- expected because of this binding
+   |            ^^^^^^^^^^^ expected `{interpolation copy borrow Name}`, found `{interpolation borrow Name}`
+   |
+   = help: one literal borrows a variable it cannot copy and the other holds a copy of a `borrow` of it; interpolate the variable in both, or the `borrow` in both

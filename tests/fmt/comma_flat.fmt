@@ -1,0 +1,5 @@
+enum Step { Half, Whole }
+
+fn main() -> UInt8 {
+    1
+}

@@ -1,0 +1,5 @@
+error[T-Infer]: the type of this variant cannot be determined
+ --> tests/inference/map_errors/a_shorthand_callback_result_requires_a_known_enum.lin:5:48
+  |
+5 |     let _mapped = failure.map_err(|sink error| .Wrapped(UInt16(error)))
+  |                                                ^^^^^^^^ name its enum, or give the binding a type

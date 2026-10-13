@@ -1,0 +1,19 @@
+@opaque
+// <- punctuation.delimiter
+// ^ keyword.storage.modifier
+struct Account { balance: Int64 }
+@(linear, derive(fmt.Debug, Release))
+// ^ keyword.storage.modifier
+//         ^ keyword.storage.type
+//                    ^ type
+//                           ^ type
+enum Resource { Open(UInt64), Closed }
+@copyable
+// ^ keyword.storage.modifier
+@derive(Equatable)
+// ^ keyword.storage.type
+//      ^ type
+pub type Count = UInt64
+@carrier
+// ^ keyword.storage.modifier
+struct Session { user: Str }

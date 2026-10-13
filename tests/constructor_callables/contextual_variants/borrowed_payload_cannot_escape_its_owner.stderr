@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/constructor_callables/contextual_variants/borrowed_payload_cannot_escape_its_owner.lin:7:12
+  |
+7 |     return mapped
+  |            ^^^^^^ escape observations only from the signature's declared sources

@@ -1,0 +1,25 @@
+error[S-Test]: a test is not called by name
+  --> tests/decl/ineligible_functions_are_not_values.lin:12:46
+   |
+12 |     let _test: fn() -> Result[(), IoError] = checked
+   |                                              ^^^^^^^ the compiler writes the only call to a test, so a program naming one would ship it
+error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+ --> tests/decl/ineligible_functions_are_not_values.lin:9:11
+  |
+9 | extern fn foreign(value: UInt8) -> UInt8
+  |           ^^^^^^^ call it through the standard library, which declares the ones that exist
+error[N-NotAValue]: `checked` is a test, and a test is not a value
+  --> tests/decl/ineligible_functions_are_not_values.lin:12:46
+   |
+12 |     let _test: fn() -> Result[(), IoError] = checked
+   |                                              ^^^^^^^ a test is run by `linea test`, never named
+error[N-NotAValue]: `foreign` is an `extern`, and an `extern` is not a value
+  --> tests/decl/ineligible_functions_are_not_values.lin:13:51
+   |
+13 |     let _extern: fn(read value: UInt8) -> UInt8 = foreign
+   |                                                   ^^^^^^^ call it; its body is outside this program
+error[N-NotAValue]: `at` is a projection, and a projection is not a value
+  --> tests/decl/ineligible_functions_are_not_values.lin:14:23
+   |
+14 |     let _projection = Index.at
+   |                       ^^^^^^^^ reach the place it names through a bracket

@@ -1,0 +1,10 @@
+error[M-Unused]: `shapes` is never used
+ --> tests/modules/an_import_reached_only_through_a_shadowing_local_is_unused/main.lin:4:8
+  |
+4 | import shapes
+  |        ^^^^^^ remove the import
+error[T-UnknownOperation]: `double` is a function, not an operation of `UInt8`
+ --> tests/modules/an_import_reached_only_through_a_shadowing_local_is_unused/main.lin:8:5
+  |
+8 |     n.double() + shapes
+  |     ^^^^^^^^ `shapes` is shadowed here; write `import shapes as` another name and call `double` through it

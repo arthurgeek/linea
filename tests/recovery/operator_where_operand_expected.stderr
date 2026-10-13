@@ -1,0 +1,10 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/operator_where_operand_expected.lin:2:9
+  |
+2 |     a + / b
+  |         ^^^ this is not the start of an expression
+error[N-Undefined]: undefined name `a`
+ --> tests/recovery/operator_where_operand_expected.lin:2:5
+  |
+2 |     a + / b
+  |     ^ no binding with this name is in scope

@@ -1,0 +1,43 @@
+// A `match` takes its scrutinee where it is written, so nothing is left
+// waiting on the call the `match` sits inside. `h` is gone by the first arm,
+// and the `return` in that arm crosses no open transfer.
+//
+// Reading a scrutinee as an operand of the construct around it refuses this,
+// and names `mix` for a value `mix` was never offered. The other operand is a
+// number so that the scrutinee is the only thing a misreading could name.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+enum Holder {
+    Both(Key, Key),
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn mix(a: UInt8, sink b: Key) -> UInt8 {
+    let Key { n: y } = b
+    a + y
+}
+
+fn go(sink h: Holder) -> UInt8 {
+    mix(
+        0,
+        match h {
+            Both(p, q) => {
+                let n = use2(p, q)
+                return n
+            },
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    go(Holder.Both(.{ n = 1 }, .{ n = 2 }))
+}

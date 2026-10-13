@@ -1,0 +1,19 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"fn upper[T: Integer](_witness: T) -> T {\n    T.max\n}\n\nfn lower[T: Integer](_witness: T) -> T {\n    T.min\n}\n\nfn main() -> UInt8 {\n    let highest = UInt8.max\n    let lowest = UInt8.min\n    if upper(UInt8(0)) == highest && lower(UInt8(0)) == lowest {\n        0\n    } else {\n        1\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":1,"character":6}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":1,"character":6}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":1,"character":6}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":1,"character":6},"newName":"limit"}}
+{"jsonrpc":"2.0","id":6,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":6}}}
+{"jsonrpc":"2.0","id":7,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":6}}}
+{"jsonrpc":"2.0","id":8,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":6}}}
+{"jsonrpc":"2.0","id":9,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":6},"newName":"limit"}}
+{"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24}}}
+{"jsonrpc":"2.0","id":11,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24}}}
+{"jsonrpc":"2.0","id":12,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24}}}
+{"jsonrpc":"2.0","id":13,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24},"newName":"limit"}}
+{"jsonrpc":"2.0","id":14,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":23}}}
+{"jsonrpc":"2.0","id":15,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":23}}}
+{"jsonrpc":"2.0","id":16,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":23}}}
+{"jsonrpc":"2.0","id":17,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":23},"newName":"limit"}}
+{"jsonrpc":"2.0","id":18,"method":"shutdown"}

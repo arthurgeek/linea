@@ -1,0 +1,13 @@
+program decls=1
+  decl function "main" tokens 0..23
+    returns UInt8
+    expr %8 block tokens 6..23
+      stmt %0 let_decl tokens 7..12 "text"
+        expr %0 str_literal tokens 10..12 "\\\\first {line}\n          \\\\\"second\" \\n"
+      expr %7 call tokens 12..22
+        expr %1 name_ref tokens 12..13 "UInt8"
+        expr %6 sub tokens 14..21
+          expr %4 call tokens 14..19
+            expr %3 field tokens 14..17 "length"
+              expr %2 name_ref tokens 14..15 "text"
+          expr %5 int_literal tokens 20..21 "24"

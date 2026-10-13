@@ -1,0 +1,32 @@
+// A match asks what shape a value has, and the bound says nothing about the
+// shape of what it settles. Every arm names a variant of an enum the type is
+// not known to be, so there is no arm the body checked once could write.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _shapes[W: Measure](sink v: W.Item) -> UInt8 {
+    match v {
+        Dark => 0,
+        Light => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

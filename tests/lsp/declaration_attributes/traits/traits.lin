@@ -1,0 +1,11 @@
+pub trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+pub struct Unrelated { value: UInt8 }

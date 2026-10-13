@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let r = 0..9
+    let s = 0..=9
+    let t = 1.foo
+    0
+}

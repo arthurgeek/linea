@@ -1,0 +1,7 @@
+@linear
+enum Ticket { Code(UInt8) }
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Code(7)
+    match ticket { Code(value) => value - 7 }
+}

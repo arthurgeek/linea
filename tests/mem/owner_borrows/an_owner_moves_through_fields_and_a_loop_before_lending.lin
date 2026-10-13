@@ -1,0 +1,22 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+@linear
+struct Box { owner: Arena[mem.SystemAllocator] }
+
+fn main() -> UInt8 {
+    let initial = Arena.open(system(), 64)
+    let wrapped: Box = .{ owner = initial }
+    let forwarded = loop {
+        break wrapped
+    }
+    let Box { owner: owner } = forwarded
+    let bytes = owner.handle().acquire(8).unwrap()
+    let length = bytes.length()
+    bytes.release()
+    owner.release()
+    UInt8(length)
+}

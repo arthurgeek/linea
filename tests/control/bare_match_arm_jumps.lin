@@ -1,0 +1,16 @@
+fn main() -> UInt8 {
+    var iterations: UInt8 = 0
+    loop {
+        iterations += 1
+        let item: Option[UInt8] = if iterations < 3 {
+            .Some(iterations)
+        } else {
+            .None
+        }
+        match item {
+            Some(_) => continue,
+            None => break,
+        }
+    }
+    iterations
+}

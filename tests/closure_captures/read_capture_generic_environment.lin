@@ -1,0 +1,22 @@
+fn apply[F: fn(read item: UInt8) -> UInt8](callback: F, item: UInt8) -> UInt8 {
+    callback(item)
+}
+
+fn exercise[T](first: T, second: UInt8) -> UInt8 {
+    let captured = read [read first, read offset = second] |item: UInt8| {
+        let nested = read [read first, read offset] || {
+            let _observed = borrow first
+            offset + 1
+        }
+        item + nested()
+    }
+    apply(captured, 3)
+}
+
+fn main() -> UInt8 {
+    if exercise(UInt64(10), 4) == 8 && exercise(UInt8(2), 1) == 5 {
+        0
+    } else {
+        1
+    }
+}

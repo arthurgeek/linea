@@ -1,0 +1,24 @@
+// A re-exported name is a type wherever it is written, not only where it is
+// constructed. The checker resolved a written type by rescanning a module's
+// own declarations, so an alias was found by nothing and read as poison --
+// and poison suppresses every check about it. A `Bool` passed where this enum
+// was declared compiled, and the program it produced dereferenced the value 1.
+//
+// Which declaration a name means is the resolver's question, so it answers it
+// once for every name a module can write: its own, what it re-exported, and
+// what the prelude gave it.
+import inner
+
+pub use inner.Maybe
+
+fn twice(sink o: Maybe[UInt8]) -> UInt8 {
+    match o {
+        None => 1,
+        Some(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Bool = true
+    twice(flag)
+}

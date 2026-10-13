@@ -1,0 +1,15 @@
+struct Cell[T] { value: T }
+
+fn value[T: Copyable](cell: Cell[T]) -> T {
+    let read Cell { value: item } = cell
+    copy(item)
+}
+
+fn main() -> UInt8 {
+    let cell = Cell[UInt8] { value = 17 }
+    if value(cell) == 17 && value(cell) == 17 {
+        0
+    } else {
+        1
+    }
+}

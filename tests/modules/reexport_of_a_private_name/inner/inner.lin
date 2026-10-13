@@ -1,0 +1,9 @@
+enum Hidden {
+    A,
+}
+
+pub fn ping(h: Hidden) -> UInt8 {
+    match read h {
+        A => 1,
+    }
+}

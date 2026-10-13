@@ -1,0 +1,29 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+impl[A: Allocator] Shelf[UInt8, A] {
+    fn blank() -> Self {
+        panic("no shelf is built")
+    }
+}
+
+fn _count[B: Allocator](_allocator: B) -> UInt64 {
+    let shelf = Shelf.blank()
+    let length = shelf.items.length()
+    shelf.release()
+    length
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf.blank()
+    let length = shelf.items.length()
+    shelf.release()
+    UInt8(length)
+}

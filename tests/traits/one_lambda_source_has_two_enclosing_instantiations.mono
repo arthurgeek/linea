@@ -1,0 +1,21 @@
+fn ;main() -> UInt8 {
+    let _truth = ;apply[Bool](true)
+    ;apply[UInt8](UInt8(7))
+}
+
+fn ;apply[Bool](sink value: Bool) -> Bool {
+    let identity = |sink item: Bool| item
+    closure.0[Bool](value)
+}
+
+fn ;apply[UInt8](sink value: UInt8) -> UInt8 {
+    let identity = |sink item: UInt8| item
+    closure.0[UInt8](value)
+}
+
+fn closure.0[Bool](sink item: Bool) -> Bool {
+    item
+}
+fn closure.0[UInt8](sink item: UInt8) -> UInt8 {
+    item
+}

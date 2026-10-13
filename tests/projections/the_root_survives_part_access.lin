@@ -1,0 +1,27 @@
+// Reading and writing a part through a projection are not events on the root:
+// `g[0]` and `g[1] = ...` reach into `g` without touching the obligation `g`
+// itself carries, so the binding is exactly as whole afterward as it was
+// before, and consuming it in full still succeeds.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn total(sink g: Grid) -> UInt8 {
+    let Grid { cells } = g
+    cells[0] + cells[1] + cells[2] + cells[3]
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4] }
+    let a = g[0]
+    g[1] = a + 1
+    total(g)
+}

@@ -1,0 +1,16 @@
+@copyable
+enum Choice[T] { None, Some(T) }
+
+let choice: Choice[UInt64] = .Some(700)
+
+fn select(value: Choice[UInt64] = choice) -> UInt64 {
+    match read value { None => 0, Some(number) => number }
+}
+
+fn main() -> UInt8 {
+    if select() == 700 {
+        0
+    } else {
+        1
+    }
+}

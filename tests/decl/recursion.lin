@@ -1,0 +1,11 @@
+fn countdown(n: UInt8) -> UInt8 {
+    if n == 0 {
+        7
+    } else {
+        countdown(n - 1)
+    }
+}
+
+fn main() -> UInt8 {
+    countdown(5)
+}

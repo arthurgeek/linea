@@ -1,0 +1,9 @@
+fn first[A, B, C](sink triple: (A, B, C)) -> A where B: Discardable, C: Discardable {
+    let (a, _, _) = triple
+    a
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = first((7, true, 1))
+    a - 7
+}

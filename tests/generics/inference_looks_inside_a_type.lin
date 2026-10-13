@@ -1,0 +1,30 @@
+// A type parameter is settled wherever it stands, not only where it is the
+// whole of a written type: `read o: Maybe[T]` handed an `Maybe[Bool]` says
+// exactly what `read x: T` handed a `Bool` says.
+//
+// Matching only the whole made every function over a generic type uncallable,
+// which is every method `Maybe` and `Result` have. Nesting is the same
+// question one level down, so `Cell[Maybe[T]]` settles `T` too.
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+struct Cell[T] { v: T }
+
+fn count[T](o: Maybe[T]) -> UInt8 {
+    match read o {
+        None => 0,
+        Some(_) => 1,
+    }
+}
+
+fn peel[T](c: Cell[Maybe[T]]) -> UInt8 {
+    count(c.v)
+}
+
+fn main() -> UInt8 {
+    let a: Maybe[Bool] = Maybe.Some(true)
+    let n: Cell[Maybe[UInt8]] = .{ v = Maybe.None }
+    count(a) + peel(n)
+}

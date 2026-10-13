@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/borrows/contracts/an_ambiguous_source_names_its_candidates.lin:8:8
+  |
+8 |     fn lookup(self: Self, key: Str) -> Option[Str] {
+  |        ^^^^^^ the result may borrow from `self` or `key`; add `where borrows(self)` or `where borrows(key)`, or list several sources in one clause

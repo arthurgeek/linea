@@ -1,0 +1,52 @@
+// An associated result may be a byte or an aggregate. Each instantiation
+// passes the complete value to the matching trait implementation.
+struct Coins {
+    count: UInt8,
+}
+
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+trait Holds[A] {
+    type Item
+
+    fn of(x: Self, a: A) -> Self.Item where carries()
+
+    fn total(x: Self, a: A, sink v: Self.Item) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    type Item = Pair
+
+    fn of(x: Self, a: UInt8) -> Self.Item where carries() {
+        .{ left = x.count, right = a }
+    }
+
+    fn total(_x: Self, _a: UInt8, sink v: Self.Item) -> UInt8 {
+        v.left + v.right
+    }
+}
+
+impl Holds[Bool] for Coins {
+    type Item = UInt8
+
+    fn of(x: Self, _a: Bool) -> Self.Item where carries() {
+        x.count
+    }
+
+    fn total(_x: Self, _a: Bool, sink v: Self.Item) -> UInt8 {
+        v
+    }
+}
+
+fn wrap[A](c: Coins, a: A) -> UInt8 {
+    Holds.total(c, a, Holds.of(c, a))
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: UInt8 = 4
+    wrap(c, n)
+}

@@ -1,0 +1,5 @@
+extern fn linea_raw_load8(at: UInt64, len: UInt64, i: UInt64) -> UInt8
+
+export fn call_it(value: Int64) -> Int64 {
+    Int64(linea_raw_load8(UInt64(value), 1, 0))
+}

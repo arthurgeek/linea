@@ -1,0 +1,22 @@
+import std.testing
+import std.io
+
+use io.IoError
+use io.println
+
+fn square(num: UInt8) -> UInt8 {
+    num * num
+}
+
+test fn a_square_is_a_number_times_itself() -> Result[(), testing.Failure] {
+    testing.assert_eq(square(3), 9, "three squared is nine")?
+
+    return .Ok(())
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let answer = square(3)
+    println("3 squared is {answer}")?
+
+    return .Ok(0)
+}

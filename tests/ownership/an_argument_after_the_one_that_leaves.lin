@@ -1,0 +1,26 @@
+// The same two operands the other way round. Nothing is pending when control
+// leaves, because the key has not been given up yet -- which is the whole of
+// the difference between this and the case beside it.
+//
+// The key is written where it is used rather than taken as a parameter: a
+// value a function was handed is its to account for however it leaves, so a
+// parameter here would be a leak, which is a different rule and would say
+// nothing about this one.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn go() -> UInt8 {
+    use2(return 7, .{ n = 2 })
+}
+
+fn main() -> UInt8 {
+    go()
+}

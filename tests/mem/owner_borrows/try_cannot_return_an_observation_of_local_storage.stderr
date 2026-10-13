@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/mem/owner_borrows/try_cannot_return_an_observation_of_local_storage.lin:7:5
+  |
+7 |     fail(local)?
+  |     ^^^^^^^^^^^ escape observations only from the signature's declared sources

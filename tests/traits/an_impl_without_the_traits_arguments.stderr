@@ -1,0 +1,5 @@
+error[T-Impl]: `Holds` takes 1 type argument(s), and this supplies 0
+  --> tests/traits/an_impl_without_the_traits_arguments.lin:16:6
+   |
+16 | impl Holds for Coins {
+   |      ^^^^^ supply the arguments it declares

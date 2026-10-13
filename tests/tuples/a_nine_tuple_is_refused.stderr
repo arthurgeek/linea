@@ -1,0 +1,10 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_nine_tuple_is_refused.lin:3:20
+  |
+3 |     let _literal = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+  |                    ^ give a struct names past eight parts
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_nine_tuple_is_refused.lin:4:17
+  |
+4 |     let _typed: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = Default.default()
+  |                 ^ give a struct names past eight parts

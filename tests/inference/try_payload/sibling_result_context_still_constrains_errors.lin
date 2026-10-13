@@ -1,0 +1,28 @@
+fn success[T](sink value: T) -> Result[T, UInt8] where carries(.Ok: value) {
+    .Ok(value)
+}
+
+fn flexible[T, E](sink value: T) -> Result[T, E] where carries(.Ok: value) {
+    .Ok(value)
+}
+
+fn choose(flag: Bool) -> Result[UInt8, UInt8] {
+    let value: UInt64 = (if flag {
+        success(7)
+    } else {
+        flexible(8)
+    })?
+    return .Ok(UInt8(value))
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let first = choose(true)?
+    let second = choose(false)?
+    return .Ok(
+        if first == 7 && second == 8 {
+            0
+        } else {
+            1
+        },
+    )
+}

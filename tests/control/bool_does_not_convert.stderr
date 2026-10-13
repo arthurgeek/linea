@@ -1,0 +1,5 @@
+error[T-Convert]: `Bool` does not convert to `UInt8`
+ --> tests/control/bool_does_not_convert.lin:2:13
+  |
+2 |     let n = UInt8(true)
+  |             ^^^^^^^^^^^ a conversion is between numbers

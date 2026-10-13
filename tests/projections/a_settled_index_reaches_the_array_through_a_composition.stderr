@@ -1,0 +1,10 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_settled_index_reaches_the_array_through_a_composition.lin:31:7
+   |
+31 |     o[9] = 200
+   |       ^ the length is 3, so the last index is 2
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_settled_index_reaches_the_array_through_a_composition.lin:32:7
+   |
+32 |     o[9]
+   |       ^ the length is 3, so the last index is 2

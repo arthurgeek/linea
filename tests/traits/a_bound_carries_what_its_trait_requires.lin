@@ -1,0 +1,39 @@
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+trait Ranked: Same {
+    fn under(self: Self, other: Self) -> Bool
+}
+
+struct Mark {
+    n: UInt8,
+}
+
+impl Same for Mark {
+    fn alike(self: Mark, other: Mark) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Ranked for Mark {
+    fn under(self: Mark, other: Mark) -> Bool {
+        self.n < other.n
+    }
+}
+
+// The bound names `Ranked` and the body reads `Same`, which every `Ranked`
+// type has.
+fn either[T: Ranked](a: T, b: T) -> Bool {
+    Same.alike(a, b) || Ranked.under(a, b)
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 1 }
+    let b: Mark = .{ n = 2 }
+    if either(a, b) {
+        3
+    } else {
+        0
+    }
+}

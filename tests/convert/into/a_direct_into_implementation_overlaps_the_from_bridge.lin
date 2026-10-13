@@ -1,0 +1,15 @@
+struct Celsius { degrees: Int64 }
+
+struct Kelvin { degrees: Int64 }
+
+impl Into[Kelvin] for Celsius {
+    fn into(sink self: Celsius) -> Kelvin where carries(self) {
+        .{ degrees = self.degrees + 273 }
+    }
+}
+
+fn main() -> UInt8 {
+    let boiling = Celsius { degrees = 100 }
+    let kelvin: Kelvin = boiling.into()
+    UInt8(kelvin.degrees - 373)
+}

@@ -1,0 +1,33 @@
+@copyable
+pub enum Mode {
+    Plain,
+    Sized(UInt8),
+}
+
+@copyable
+pub struct Options {
+    mode: Mode,
+    title: Str,
+}
+
+let defaults: Options = .{ mode = .Sized(9), title = "report" }
+
+pub let exported = defaults
+
+pub fn amount(options: Options = defaults) -> UInt8 {
+    match read options.mode {
+        Plain => 0,
+        Sized(number) => number,
+    }
+}
+
+@(opaque, copyable)
+struct Token {
+    value: UInt8,
+}
+
+pub let token: Token = .{ value = 23 }
+
+pub fn token_value(value: Token = token) -> UInt8 {
+    value.value
+}

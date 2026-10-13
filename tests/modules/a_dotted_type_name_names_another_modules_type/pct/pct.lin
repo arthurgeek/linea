@@ -1,0 +1,14 @@
+pub struct Thing {
+    x: UInt8,
+}
+
+pub struct Pair[T] {
+    a: T,
+    b: T,
+}
+
+pub type Score = UInt8 where it in 0..=99
+
+pub fn thing() -> Thing {
+    .{ x = 3 }
+}

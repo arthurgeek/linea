@@ -1,0 +1,16 @@
+// `&counter.bump()` reaches the operation `bump` and lends it `counter`.
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    &counter.bump()
+    counter.count
+}

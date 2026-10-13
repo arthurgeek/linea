@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/constants/enum_variants/enum_constant_is_not_an_array_count.lin:6:26
+  |
+6 |     let _values: [UInt8; count] = [1]
+  |                          ^^^^^ this is not a number

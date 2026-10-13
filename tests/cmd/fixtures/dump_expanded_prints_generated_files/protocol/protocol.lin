@@ -1,0 +1,7 @@
+pub trait First {}
+
+template impl First {}
+
+pub trait Second {}
+
+template impl Second {}

@@ -1,0 +1,35 @@
+trait Counter {
+    fn count(self: Self) -> UInt8
+
+    fn advance(inout self: Self) -> ()
+}
+
+struct State { number: UInt8 }
+
+impl Counter for State {
+    fn count(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn advance(inout self: Self) -> () {
+        self.number += 1
+    }
+}
+
+impl Counter for borrow State {
+    fn count(_self: Self) -> UInt8 {
+        9
+    }
+
+    fn advance(inout _self: Self) -> () {}
+}
+
+fn main() -> UInt8 {
+    let state: State = .{ number = 7 }
+    let view = borrow state
+    if view.count() + Counter.count(view) == 18 {
+        0
+    } else {
+        1
+    }
+}

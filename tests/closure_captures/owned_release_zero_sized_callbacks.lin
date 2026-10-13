@@ -1,0 +1,12 @@
+fn settle[F: Release](sink callback: F) -> () {
+    Release.release(callback)
+}
+
+fn main() -> UInt8 {
+    let empty = || {
+        panic("release invoked an empty callback")
+    }
+    let callback = [sink _empty = empty, sink _unit = {}] || {}
+    settle(callback)
+    0
+}

@@ -1,0 +1,21 @@
+// `Thing.top` folds the way an array's length does: a name the constant
+// table answers, read where a range pattern's bound is read. `0..=Thing.top`
+// and `10..=255` cover `UInt8` between them.
+struct Thing {
+    count: UInt8,
+}
+
+impl Thing {
+    pub let top: UInt8 = 9
+}
+
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=Thing.top => 1,
+        10..=255 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(3) + classify(200)
+}

@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/defer/a_merge_disagreement_leaves_the_schedule_alone.lin:20:5
+   |
+20 |     if flag {
+   |     ^^^^^^^^^ consume it on the other path too, or on neither

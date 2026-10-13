@@ -1,0 +1,20 @@
+// The walking operations are `Sequence`'s own, so a module's names cannot hide
+// them: this module declares `Walk` and `Search` and still chains.
+struct Walk {
+    steps: UInt64,
+}
+
+struct Search {
+    found: UInt64,
+}
+
+fn main() -> UInt8 {
+    let steps = [UInt64(1200), 800, 2400]
+    let walk = Walk { steps = steps.as_slice().fold(0, |sink total, sink step| total + *step) }
+    let search = Search { found = steps.as_slice().filter(|step| *step > 1000).fold(0, |sink count, sink _step| count + 1) }
+    if walk.steps == 4400 && search.found == 2 {
+        0
+    } else {
+        1
+    }
+}

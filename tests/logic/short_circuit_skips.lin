@@ -1,0 +1,12 @@
+// The right operand of `&&` does not run when the left is false. Observable
+// rather than claimed: `bump` would make the answer 1 if it ran.
+fn bump(inout n: UInt8) -> Bool {
+    n = n + 1
+    true
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 0
+    let _unused = false && bump(&n)
+    n
+}

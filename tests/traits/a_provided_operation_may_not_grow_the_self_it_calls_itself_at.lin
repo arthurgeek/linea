@@ -1,0 +1,48 @@
+// `Crate[T].Up` is `Crate[[T; 1]]`, so each call of `depth` on `self.up()`
+// runs at a `Self` one array taller than the last and would need a body for
+// every height. `named_depth` recurses the same way through the trait's name.
+trait Nested {
+    type Up: Nested + Copyable
+
+    fn tag(self: Self) -> UInt8
+
+    fn up(self: Self) -> Self.Up
+
+    fn depth(self: Self, steps: UInt8) -> UInt8 {
+        if steps == 0 {
+            self.tag()
+        } else {
+            self.up().depth(steps - 1) + 1
+        }
+    }
+
+    fn named_depth(self: Self, steps: UInt8) -> UInt8 {
+        if steps == 0 {
+            self.tag()
+        } else {
+            Nested.named_depth(self.up(), steps - 1) + 1
+        }
+    }
+}
+
+@copyable
+struct Crate[T] {
+    content: T,
+}
+
+impl[T: Copyable] Nested for Crate[T] {
+    type Up = Crate[[T; 1]]
+
+    fn tag(_self: Self) -> UInt8 {
+        1
+    }
+
+    fn up(self: Self) -> Crate[[T; 1]] {
+        Crate[[T; 1]] { content = [copy(self.content)] }
+    }
+}
+
+fn main() -> UInt8 {
+    let crate = Crate[UInt8] { content = 1 }
+    crate.depth(3) + crate.named_depth(3)
+}

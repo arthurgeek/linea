@@ -1,0 +1,32 @@
+// A postfix call two traits declare the operation for is ambiguous, and the
+// written-out form is what accepting it writes. The receiver is already written
+// and already placed, so it fills the first argument; every parameter after it
+// that nobody has written becomes a stop, in the order the parameters take.
+trait Measure {
+    fn of(self: Self, fee: UInt8) -> UInt8
+}
+
+trait Weigh {
+    fn of(self: Self, fee: UInt8) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn of(self: Self, fee: UInt8) -> UInt8 {
+        self.n + fee
+    }
+}
+
+impl Weigh for Coins {
+    fn of(self: Self, fee: UInt8) -> UInt8 {
+        self.n + fee
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.of()
+}

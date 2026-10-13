@@ -1,0 +1,33 @@
+// What a literal rendered at the call emits.
+//
+// A literal bound to a name and one written at the call are two paths through
+// lowering, and the corpus recorded the code for neither of them at the call.
+// So the fragments could be built twice and dropped, and every golden held
+// still while the emitted program carried the waste.
+//
+// One piece of text and one interpolation, which is the smallest literal that
+// has both a run of bytes to write and a value to render. It is rendered into
+// a writer that counts the bytes it is given, so the program holds the
+// rendering and nothing else.
+struct Tally {
+    bytes: UInt64,
+}
+
+impl Writer for Tally {
+    type Error = Never
+
+    fn write_str(inout self: Tally, s: Str) -> Result[(), Never] where carries() {
+        self.bytes += s.length()
+        return .Ok({})
+    }
+}
+
+fn main() -> UInt8 {
+    let answer: UInt8 = 6
+    var tally = Tally { bytes = 0 }
+
+    match Display.fmt("answer {answer}", &tally) {
+        Ok(_) => UInt8(tally.bytes),
+        Err(never) => never,
+    }
+}

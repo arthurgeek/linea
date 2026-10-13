@@ -1,0 +1,15 @@
+// Owning heap memory is owing it. A buffer no path disposes of is refused
+// before
+// the program runs, by the rule every linear value already answers to --
+// nothing about memory needed a rule of its own.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(8) {
+        Ok(b) => UInt8(b.length()),
+        Err(_) => 0,
+    }
+}

@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `inout fn(read Failure) -> Bool`, found `fn(read Oom) -> Bool`
+  --> tests/allocation_failure_walks/an_asserting_body_cannot_pass_the_oom_predicate.lin:18:9
+   |
+18 |         testing.oom_is_a_refusal,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^ expected `inout fn(read Failure) -> Bool`, found `fn(read Oom) -> Bool`
+  ::: std/testing/testing.lin
+L  | ...  inout fn(error: E) -> Bool](backing: H, sink body: F, sink is_refusal: R) -> Result[UInt64, Failure] where
+   |                                                                 ---------- expected because of this parameter

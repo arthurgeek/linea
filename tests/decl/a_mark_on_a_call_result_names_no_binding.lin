@@ -1,0 +1,14 @@
+// `&` marks a place, and what a call returns is not one. The call is still
+// resolved, so `fresh` is used.
+fn bump(inout n: UInt8) -> () {
+    n += 1
+}
+
+fn fresh() -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    bump(&(fresh()))
+    0
+}

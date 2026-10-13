@@ -1,0 +1,10 @@
+fn bad() -> [borrow UInt8; 1] {
+    let number: UInt8 = 7
+    let views: [borrow UInt8; _] = [borrow number]
+    views
+}
+
+fn main() -> UInt8 {
+    let views = bad()
+    *views[0]
+}

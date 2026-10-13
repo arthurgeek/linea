@@ -1,0 +1,5 @@
+error[T-Impl]: `Holder` declares `get` returning `UInt8`, and this returns `Box`
+  --> tests/traits/a_member_answers_to_the_binding.lin:19:8
+   |
+19 |     fn get(self: Box) -> Box {
+   |        ^^^ return the type the signature declares

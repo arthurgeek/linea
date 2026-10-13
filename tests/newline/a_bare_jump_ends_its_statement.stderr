@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/newline/a_bare_jump_ends_its_statement.lin:6:5
+  |
+5 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+6 |     return
+  |     ^^^^^^ this `return` carries no value

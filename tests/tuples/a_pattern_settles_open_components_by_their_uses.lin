@@ -1,0 +1,17 @@
+// A tuple pattern over a value whose components are still open settles each
+// component by how its binder is used. A component that cannot take the type
+// a use or an annotation gives it is reported at that component, never as a
+// tuple whose type cannot be determined.
+fn main() -> UInt8 {
+    let c = true
+    let (a, b) = if c {
+        (1, 2)
+    } else {
+        (3, 4)
+    }
+    let n: UInt8 = a
+    let (x, _s) = ("x", 1)
+    let m: UInt8 = x
+    let _p: (UInt8, Str) = ("x", 1)
+    n + b + m
+}

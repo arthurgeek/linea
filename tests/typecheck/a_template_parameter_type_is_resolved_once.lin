@@ -1,0 +1,15 @@
+// A template member's written type is resolved once, with the template's open
+// `Self`, so a length that is not a number is one report.
+trait Weigh {
+    fn weigh(self: Self, parts: [Int64; 3]) -> Int64
+}
+
+template impl Weigh {
+    fn weigh(_self: Self, _parts: [Int64; "3"]) -> Int64 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

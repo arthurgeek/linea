@@ -1,0 +1,5 @@
+error[O-Copy]: `Arena[mem.SystemAllocator]` does not permit copying
+ --> tests/mem/owner_borrows/an_arena_cannot_duplicate_ownership.lin:8:21
+  |
+8 |     let duplicate = copy(owner)
+  |                     ^^^^^^^^^^^ move the value, or declare a copyable representation

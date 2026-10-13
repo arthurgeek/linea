@@ -1,0 +1,9 @@
+let too_large: UInt8 = 300
+
+struct _Holder {
+    callback: fn(read value: UInt8 = too_large) -> UInt8,
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+struct Pair[A, B] { first: A, second: B }
+
+fn main() -> UInt8 {
+    let _omitted = Pair { first = 1, second = 2 }
+    let _partial = Pair[UInt8] { first = 1, second = 2 }
+    0
+}

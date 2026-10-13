@@ -1,0 +1,10 @@
+@copyable
+type Count = UInt8
+
+fn main() -> UInt8 {
+    let original = Count(7)
+    let moved = original
+    let Count(first) = original
+    let Count(second) = moved
+    first + second
+}

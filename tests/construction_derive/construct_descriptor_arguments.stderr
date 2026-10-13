@@ -1,0 +1,10 @@
+error[T-Reflection]: write `component.Type` without arguments
+  --> tests/construction_derive/construct_descriptor_arguments.lin:16:28
+   |
+16 |                 let value: component[Undefined].Type = Zero.zero()
+   |                            ^^^^^^^^^ this is not a construction component type
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_descriptor_arguments.lin:32:22
+   |
+32 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

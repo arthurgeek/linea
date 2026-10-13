@@ -1,0 +1,20 @@
+// The same rule as the binary operators, which is the point: a negation is an
+// operation over numbers, so it takes one. It was left out when they were
+// checked, and every failure they close was reachable through it -- a struct
+// under `-` negated its own address and read through the result, and an enum
+// under `-` produced a tag no variant has, which fell out of an exhaustive
+// `match` into a slot nothing had written.
+struct P {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn mk() -> P {
+    .{ x = 1, y = 2 }
+}
+
+fn main() -> UInt8 {
+    let p: P = mk()
+    let q: P = -p
+    q.x + q.y
+}

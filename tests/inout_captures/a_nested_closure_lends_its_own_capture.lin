@@ -1,0 +1,15 @@
+// `outer` has `count` lent from `main`; inside its body, `inner` lends that
+// capture on again for as long as `inner` is used.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var outer = inout [inout count] || {
+        var inner = inout [inout count] || {
+            count += 2
+        }
+        &inner()
+        count += 1
+    }
+    &outer()
+    &outer()
+    count
+}

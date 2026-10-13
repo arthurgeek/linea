@@ -1,0 +1,7 @@
+error[O-Capture]: this name is not declared in the closure capture list
+ --> tests/decl/a_plain_lambda_captures_nothing.lin:3:25
+  |
+3 |     let read_value = || value
+  |                         ^^^^^ this name belongs to an enclosing body
+  |
+  = help: write `[value]` before the parameters to read it where it is, or `[sink value]` to move it into the closure

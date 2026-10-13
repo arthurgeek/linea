@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let items = [UInt8(4), 5, 6]
+    let i = 1
+    items[i] - 5
+}

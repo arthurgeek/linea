@@ -1,0 +1,37 @@
+// An alias applied inside another alias's arguments is applied first, and
+// each alias substitutes its own arguments: `Opt[Opt[UInt8]]` is
+// `Option[Option[UInt8]]`, and `Swap` hands its arguments to `Pair` in the
+// other order.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+alias Opt[T] = Option[T]
+alias Swap[X, Y] = Pair[Y, X]
+alias Two[T] = [T; 2]
+alias Grid[U] = Two[Two[U]]
+
+fn depth(sink nested: Opt[Opt[UInt8]]) -> UInt8 {
+    match nested {
+        Some(inner) => match inner {
+            Some(value) => value,
+            None => 1,
+        },
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let inner: Option[UInt8] = .Some(4)
+    let nested: Opt[Opt[UInt8]] = .Some(inner)
+    let swapped: Swap[UInt8, Bool] = .{ first = true, second = 2 }
+    let grid: Grid[UInt8] = [[1, 0], [0, 3]]
+    let spelled: [[UInt8; 2]; 2] = grid
+    let bonus = if swapped.first {
+        swapped.second
+    } else {
+        0
+    }
+    depth(nested) + bonus + spelled[0][0] + spelled[1][1]
+}

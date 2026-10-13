@@ -1,0 +1,41 @@
+enum Choice { Left, Right }
+
+fn success[T](sink value: T) -> Result[T, UInt8] where carries(.Ok: value) {
+    .Ok(value)
+}
+
+fn values(flag: Bool) -> Result[UInt8, UInt8] {
+    let first: UInt64 = ({
+        success(1)
+    })?
+    let second: UInt64 = (if flag {
+        success(2)
+    } else {
+        success(3)
+    })?
+    let choice: Choice = if flag {
+        .Left
+    } else {
+        .Right
+    }
+    let third: UInt64 = (match choice { Left => success(4), Right => success(5) })?
+    let code: UInt8 = if flag {
+        1
+    } else {
+        2
+    }
+    let fourth: UInt64 = (match code { 1 => success(6), _ => success(7) })?
+    return .Ok(UInt8(first + second + third + fourth))
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let first = values(true)?
+    let second = values(false)?
+    return .Ok(
+        if first == 13 && second == 16 {
+            0
+        } else {
+            1
+        },
+    )
+}

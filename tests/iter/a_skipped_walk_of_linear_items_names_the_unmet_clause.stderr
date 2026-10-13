@@ -1,0 +1,7 @@
+error[T-For]: `iter.Skip[Jobs]` is no `Iterator`, so it has nothing to lend to a walk
+  --> tests/iter/a_skipped_walk_of_linear_items_names_the_unmet_clause.lin:35:17
+   |
+35 |     for job in &remaining {
+   |                 ^^^^^^^^^ walk it without `&`, or lend the walk an iterator over it
+   |
+   = help: `iter.Skip[I]` implements `Iterator` when `I.Item` is `Discardable`, and `Job` is not

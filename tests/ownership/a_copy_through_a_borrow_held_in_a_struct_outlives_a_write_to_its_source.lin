@@ -1,0 +1,23 @@
+// The borrow of the room is a field of another struct. Copying through it
+// makes a value of its own all the same.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+struct Pick {
+    room: borrow Room,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let pick = Pick { room = borrow hall }
+    let booked = copy(*pick.room)
+    hall.seats = 100
+    if booked.name == "hall" {
+        booked.seats + hall.seats
+    } else {
+        0
+    }
+}

@@ -1,0 +1,10 @@
+error[T-Reflection]: use the descriptor as `component.of(subject)`
+  --> tests/construction_derive/construct_descriptor_runtime.lin:16:35
+   |
+16 |                 let _descriptor = component
+   |                                   ^^^^^^^^^ a component descriptor is not a runtime value
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_descriptor_runtime.lin:33:22
+   |
+33 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

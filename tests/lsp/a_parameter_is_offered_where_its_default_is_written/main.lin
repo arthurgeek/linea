@@ -1,0 +1,18 @@
+// A default is the one thing written directly in a parameter list that names
+// values, so it is the one place in a declaration where the declaration's own
+// parameters can be written. A return type and a parameter's written type name
+// types, so a parameter offered there would be a name that cannot stand where
+// it would be accepted.
+let seed: UInt8 = 4
+
+fn pad(s: UInt8, width: UInt8 = seed) -> UInt8 {
+    s + width
+}
+
+fn plain(n: UInt8) -> UInt8 {
+    n + 1
+}
+
+fn main() -> UInt8 {
+    pad(1) + plain(2)
+}

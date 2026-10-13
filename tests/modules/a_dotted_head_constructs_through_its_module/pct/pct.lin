@@ -1,0 +1,1 @@
+pub type Score = UInt8 where it in 0..=99

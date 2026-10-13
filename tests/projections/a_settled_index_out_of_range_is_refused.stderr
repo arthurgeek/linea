@@ -1,0 +1,10 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_settled_index_out_of_range_is_refused.lin:20:7
+   |
+20 |     g[9] = 200
+   |       ^ the length is 4, so the last index is 3
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_settled_index_out_of_range_is_refused.lin:21:7
+   |
+21 |     g[9]
+   |       ^ the length is 4, so the last index is 3

@@ -1,0 +1,36 @@
+// An empty brace group is one line wherever it is written -- a structure with
+// no fields, a trait that promises something and declares nothing, and an
+// implementation of such a trait. A brace opening a line of its own says
+// something follows it, and nothing does.
+struct _Empty {
+}
+
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+trait Settled: Same {
+}
+
+struct Mark {
+    n: UInt8,
+}
+
+impl Same for Mark {
+    fn alike(self: Mark, other: Mark) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Settled for Mark {
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 1 }
+    let b: Mark = .{ n = 1 }
+    if Same.alike(a, b) {
+        0
+    } else {
+        1
+    }
+}

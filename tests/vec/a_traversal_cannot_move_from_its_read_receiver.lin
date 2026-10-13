@@ -1,0 +1,26 @@
+// [O-Move]. A traversal lends its receiver while it builds the positions.
+struct Window {
+    positions: Range[UInt64],
+    values: [UInt8; 2],
+}
+
+impl Window {
+    trav positions(self: Self) = self.positions
+}
+
+impl Index[UInt64] for Window {
+    type Elem = UInt8
+
+    proj at(self: Self, i: UInt64) -> UInt8 {
+        self.values[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let window: Window = .{ positions = UInt64(0)..UInt64(2), values = [1, 2] }
+    var sum: UInt8 = 0
+    for read value in window {
+        sum += value
+    }
+    sum
+}

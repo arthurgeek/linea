@@ -1,0 +1,7 @@
+error[N-Immutable]: `o` is declared with `let`
+  --> tests/structs/assign_through_a_let.lin:10:5
+   |
+9  |     let o: Outer = .{ inner = .{ y = 1 } }
+   |         - declared with `let` here
+10 |     o.inner.y = 7
+   |     ^ this binding cannot be assigned

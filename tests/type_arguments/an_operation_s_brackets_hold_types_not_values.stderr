@@ -1,0 +1,10 @@
+error[N-NotAType]: the brackets before `parse`'s call hold its type arguments, and this is a value
+ --> tests/type_arguments/an_operation_s_brackets_hold_types_not_values.lin:5:28
+  |
+5 |     let _first = "7".parse[3]()
+  |                            ^ the brackets before a call hold types
+error[N-NotAType]: the brackets before `parse`'s call hold its type arguments, and this is a value
+ --> tests/type_arguments/an_operation_s_brackets_hold_types_not_values.lin:6:29
+  |
+6 |     let _second = "7".parse[limit + 1]()
+  |                             ^^^^^^^^^ the brackets before a call hold types

@@ -1,0 +1,17 @@
+enum Colour { Red(UInt8), Green }
+
+enum Shape { Circle(Colour), Square }
+
+fn main() -> UInt8 {
+    // A payload that carries values of its own, which the rule that used to
+    // guard the layout refused outright. What makes it safe is not that rule
+    // but the one that replaced it: a cycle is what cannot be laid out, and
+    // that is now checked directly.
+    match Shape.Circle(Colour.Red(9)) {
+        Circle(c) => match c {
+            Red(n) => n,
+            Green => 1,
+        },
+        Square => 0,
+    }
+}

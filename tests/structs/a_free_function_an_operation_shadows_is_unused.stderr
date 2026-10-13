@@ -1,0 +1,5 @@
+error[N-Unused]: `total` is never used
+  --> tests/structs/a_free_function_an_operation_shadows_is_unused.lin:14:4
+   |
+14 | fn total(value: UInt8) -> UInt8 {
+   |    ^^^^^ call it, or name it with a leading `_`

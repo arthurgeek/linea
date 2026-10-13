@@ -1,0 +1,5 @@
+error[T-UnknownField]: `s.Door` has no field `open`
+ --> tests/modules/a_value_selection_of_an_operation_names_the_path_its_import_binds/main.lin:8:19
+  |
+8 |     let _opener = door.open
+  |                   ^^^^^^^^^ `open` is an operation of `Door`, not a field; where a function is expected, write `s.Door.open`, which takes the receiver as its first argument

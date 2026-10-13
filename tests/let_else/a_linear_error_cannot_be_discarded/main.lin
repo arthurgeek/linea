@@ -1,0 +1,15 @@
+// `_` says the error will not be used, which does not dispose of a linear one.
+fn open(n: UInt8) -> Result[UInt8, Key] {
+    if n > 2 {
+        Result.Ok(n)
+    } else {
+        Result.Err(mint(n))
+    }
+}
+
+fn main() -> UInt8 {
+    let n = open(1) else |_| {
+        return 1
+    }
+    n
+}

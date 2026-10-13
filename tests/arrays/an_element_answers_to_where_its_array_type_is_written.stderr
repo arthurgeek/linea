@@ -1,0 +1,13 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/arrays/an_element_answers_to_where_its_array_type_is_written.lin:8:35
+  |
+8 |     let _counts: [UInt8; 2] = [1, true]
+  |                  ---------- expected because of this annotation
+  |                                   ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/arrays/an_element_answers_to_where_its_array_type_is_written.lin:9:15
+  |
+3 | fn total(prices: [UInt8; 2]) -> UInt8 {
+  |          ------ expected because of this parameter
+9 |     total([2, false])
+  |               ^^^^^ expected `UInt8`, found `Bool`

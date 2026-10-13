@@ -1,0 +1,34 @@
+// A Copyable type parameter does not grant duplication of a different
+// concrete linear component held in the same wrapper.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Bad[T: Copyable] {
+    p: Pair[Key, T],
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k { Forged(n) => n }
+}
+
+fn f[T: Copyable](sink x: T) -> UInt8 {
+    let b: Bad[T] = .{ p = .{ a = Key.Forged(3), b = x } }
+    let c: Bad[T] = copy(b)
+    let Bad { p: p1 } = b
+    let Bad { p: p2 } = c
+    let Pair { a: k1, b: _z1 } = p1
+    let Pair { a: k2, b: _z2 } = p2
+    burn(k1) + burn(k2)
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    f(n)
+}

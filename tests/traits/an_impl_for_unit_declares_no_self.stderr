@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Self`
+ --> tests/traits/an_impl_for_unit_declares_no_self.lin:8:21
+  |
+8 |     fn value(_self: Self) -> UInt8 {
+  |                     ^^^^ `Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit

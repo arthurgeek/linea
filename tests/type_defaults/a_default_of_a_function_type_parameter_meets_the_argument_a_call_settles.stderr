@@ -1,0 +1,5 @@
+error[T-Mismatch]: in this call to `pass`, `S` is `UInt8`, and the default of `state` has the type `()`
+ --> tests/type_defaults/a_default_of_a_function_type_parameter_meets_the_argument_a_call_settles.lin:8:23
+  |
+8 |     let wide: UInt8 = pass()
+  |                       ^^^^^^ write the argument, or let nothing else settle the type

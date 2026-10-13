@@ -1,0 +1,35 @@
+@copyable
+struct Crate {
+    kilos: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    Crate;;Weighed.total[Bool](Crate { kilos = 1 }, true, 1)
+}
+
+fn Crate;;Weighed.total[Bool](self: Crate, _tag: Bool, n: UInt8) -> UInt8 {
+    let scaled = [self] |m: UInt8| {
+        let step = [self] |k: UInt8| self.weight() + k
+        twice(step, m) + step(m)
+    }
+    ;twice[closure0[Bool]$3aimpl[]$3aCrate](scaled, n) + closure.0[Bool][Crate](n)
+}
+
+fn ;twice[closure0[Bool]$3aimpl[]$3aCrate](f: closure0[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
+    closure.0[Bool][Crate](n) + closure.0[Bool][Crate](n)
+}
+
+fn closure.0[Bool][Crate](read m: UInt8) -> UInt8 {
+    let step = [self] |k: UInt8| self.weight() + k
+    ;twice[closure1[Bool]$3aimpl[]$3aCrate](step, m) + closure.1[Bool][Crate](m)
+}
+fn ;twice[closure1[Bool]$3aimpl[]$3aCrate](f: closure1[Bool]:impl[]:Crate, n: UInt8) -> UInt8 {
+    closure.1[Bool][Crate](n) + closure.1[Bool][Crate](n)
+}
+
+fn closure.1[Bool][Crate](read k: UInt8) -> UInt8 {
+    Crate;;Weighed.weight(self) + k
+}
+fn Crate;;Weighed.weight(self: Crate) -> UInt8 {
+    self.kilos
+}

@@ -1,0 +1,7 @@
+error[T-Default]: a default is built again at every call that omits it, so `Mode` must be copyable
+ --> tests/constants/enum_variants/an_affine_payload_variant_is_not_a_constant_default.lin:3:24
+  |
+3 | fn select(mode: Mode = Mode.Exact(384)) -> UInt8 {
+  |                        ^^^^^^^^^^^^^^^ built from the parts of `Mode`, which is not copyable
+  |
+  = help: mark `Mode` `@copyable`

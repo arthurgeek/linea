@@ -1,0 +1,22 @@
+enum Wrapped[T] { Value(T) }
+
+struct Box[T] { value: T }
+
+impl[T] Box[T] {
+    fn wrap(sink self: Self) -> Wrapped[T] where carries(self) {
+        let make: fn(sink payload: T) -> Wrapped[T] where carries(payload) = Wrapped.Value
+        let Box { value } = self
+        make(value)
+    }
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt64] = .{ value = 41 }
+    match box.wrap() {
+        Value(value) => if value == 41 {
+            0
+        } else {
+            1
+        },
+    }
+}

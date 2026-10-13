@@ -1,0 +1,22 @@
+// A type that says how it equals and not how it orders is not ordered. The
+// operator is a call on the trait, so a type with no implementation of it has
+// nothing for the call to reach.
+struct Name {
+    n: UInt8,
+}
+
+impl Equatable for Name {
+    fn equals(self: Name, other: Name) -> Bool {
+        self.n == other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Name = .{ n = 1 }
+    let b: Name = .{ n = 2 }
+    if a < b {
+        1
+    } else {
+        0
+    }
+}

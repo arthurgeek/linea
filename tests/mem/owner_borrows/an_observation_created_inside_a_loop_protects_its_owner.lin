@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    var owner: UInt64 = 7
+    var total: UInt64 = 0
+    var count: UInt8 = 0
+    while count < 2 {
+        let view = borrow owner
+        owner += 1
+        total += *view
+        count += 1
+    }
+    UInt8(total)
+}

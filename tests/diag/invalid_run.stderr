@@ -1,0 +1,5 @@
+error[S-Char]: unexpected character '#'
+ --> tests/diag/invalid_run.lin:2:13
+  |
+2 |     let x = ###;
+  |             ^^^ not a valid token

@@ -1,0 +1,10 @@
+error[S-Brace]: expected `}`
+  --> tests/traits/a_trait_is_never_closed.lin:13:3
+   |
+13 | }
+   |   ^ this trait is never closed
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/traits/a_trait_is_never_closed.lin:9:8
+  |
+9 |     fn of(x: Self) -> UInt8
+  |        ^^ found 0

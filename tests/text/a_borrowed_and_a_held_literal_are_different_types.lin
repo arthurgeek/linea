@@ -1,0 +1,32 @@
+// A literal borrows a variable it cannot copy but holds a value computed in
+// its braces, so the two are different types even when they render the same
+// type of value. Binding the computed value to a variable first gives both
+// literals the same type.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn guest() -> Name {
+    .{ text = "Ada" }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let host = Name { text = "Bob" }
+    var line = "hi {host}"
+    println(line)?
+    line = "hi {guest()}"
+    println(line)?
+    return .Ok(0)
+}

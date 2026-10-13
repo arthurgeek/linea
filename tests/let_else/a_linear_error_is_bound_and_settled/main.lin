@@ -1,0 +1,18 @@
+// The error binding owns the error, so a linear one is settled inside the
+// `else` block.
+fn open(n: UInt8) -> Result[UInt8, Key] {
+    if n > 2 {
+        Result.Ok(n)
+    } else {
+        Result.Err(mint(n + 20))
+    }
+}
+
+fn main() -> UInt8 {
+    let n = open(1) else |key| {
+        let code = tag(key)
+        release(key)
+        return code
+    }
+    n
+}

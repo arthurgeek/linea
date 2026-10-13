@@ -1,0 +1,9 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// The name an `else` binds holds what the failure carried: hover says so where\n// it is declared and where it is read, and a hint writes the type beside it.\nenum Fault {\n    Missing,\n}\n\nfn lookup(key: UInt8) -> Result[UInt8, Fault] {\n    if key == 3 {\n        Result.Ok(40)\n    } else {\n        Result.Err(Fault.Missing)\n    }\n}\n\nfn code(sink fault: Fault) -> UInt8 {\n    match fault {\n        Missing => 2,\n    }\n}\n\nfn main() -> UInt8 {\n    let found = lookup(3) else |error| {\n        return code(error)\n    }\n    found\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":21,"character":32}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":22,"character":20}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":24,"character":4}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":22,"character":20}}}
+{"jsonrpc":"2.0","id":6,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"main.lin"}}}
+{"jsonrpc":"2.0","id":7,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":0,"character":0},"end":{"line":40,"character":0}}}}
+{"jsonrpc":"2.0","id":8,"method":"shutdown"}

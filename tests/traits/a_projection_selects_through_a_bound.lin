@@ -1,0 +1,46 @@
+// A projection is selected from a type whose bounds declare it, and that
+// question is asked again at each step: `O.Mid` because `Outer` bounds `Mid`
+// by `Inner`, and `O.Mid.Item` because `Inner` declares `Item`.
+trait Inner {
+    type Item
+
+    fn peek(sink self: Self) -> Self.Item
+}
+
+trait Outer {
+    type Mid: Inner
+
+    fn mid(self: Self) -> Self.Mid
+}
+
+struct Leaf { n: UInt8 }
+
+struct Middle { _n: UInt8 }
+
+struct Top { _n: UInt8 }
+
+impl Inner for Middle {
+    type Item = Leaf
+
+    fn peek(sink _self: Middle) -> Self.Item {
+        .{ n = 5 }
+    }
+}
+
+impl Outer for Top {
+    type Mid = Middle
+
+    fn mid(_self: Top) -> Self.Mid {
+        .{ _n = 2 }
+    }
+}
+
+fn deep[O: Outer](o: O) -> O.Mid.Item {
+    Inner.peek(Outer.mid(o))
+}
+
+fn main() -> UInt8 {
+    let t: Top = .{ _n = 1 }
+    let l: Leaf = deep(t)
+    l.n
+}

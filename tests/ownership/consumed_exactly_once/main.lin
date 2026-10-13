@@ -1,0 +1,12 @@
+// The shape the stage exists to accept: minted once, lent freely, given away
+// exactly once, on every path.
+fn main() -> UInt8 {
+    let k = mint(7)
+    let t = tag(k)
+    if t == 7 {
+        release(k)
+    } else {
+        release(k)
+    }
+    t
+}

@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `T` is
+ --> tests/aliases/a_generic_alias_head_leaves_a_parameter_open.lin:8:17
+  |
+8 |     let names = SysVec.new_in(mem.system())
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it

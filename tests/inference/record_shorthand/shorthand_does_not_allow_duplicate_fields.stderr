@@ -1,0 +1,5 @@
+error[T-DuplicateField]: `key` is given twice
+ --> tests/inference/record_shorthand/shorthand_does_not_allow_duplicate_fields.lin:5:33
+  |
+5 |     let _entry: Entry = .{ key, key = 9 }
+  |                                 ^^^ already given above

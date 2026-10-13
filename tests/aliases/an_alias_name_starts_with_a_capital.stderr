@@ -1,0 +1,5 @@
+error[N-Case]: types start with a capital letter
+ --> tests/aliases/an_alias_name_starts_with_a_capital.lin:1:7
+  |
+1 | alias meters = UInt64
+  |       ^^^^^^ rename it `Meters`

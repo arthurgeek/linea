@@ -1,0 +1,7 @@
+// A walk whose head returns never runs its body, so the binder is accepted
+// without a sequence to take an element from.
+fn main() -> UInt8 {
+    for item in return 7 {
+        let _copy = item
+    }
+}

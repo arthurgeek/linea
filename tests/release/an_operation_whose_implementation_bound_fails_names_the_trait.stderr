@@ -1,0 +1,14 @@
+error[T-Bound]: `release` comes from `Release`, and `Vec[Plain, mem.SystemAllocator]` does not implement it
+  --> tests/release/an_operation_whose_implementation_bound_fails_names_the_trait.lin:26:5
+   |
+26 |     values.release()
+   |     ^^^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Vec[T, A]` implements `Release` when `T` implements `Release`, and `Plain` does not
+error[T-Bound]: `release` comes from `Release`, and `Pair[Plain]` does not implement it
+  --> tests/release/an_operation_whose_implementation_bound_fails_names_the_trait.lin:28:5
+   |
+28 |     pair.release()
+   |     ^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Pair[T]` implements `Release` when `T` implements `Release`, and `Plain` does not

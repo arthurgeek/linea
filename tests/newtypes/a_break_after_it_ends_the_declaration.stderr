@@ -1,0 +1,10 @@
+error[S-Separator]: a line break ends this refinement clause
+ --> tests/newtypes/a_break_after_it_ends_the_declaration.lin:3:32
+  |
+3 | pub type Percent = UInt8 where it
+  |                                ^^ a refinement clause is written on the line `where` opens
+error[S-Entry]: a program is a list of declarations
+ --> tests/newtypes/a_break_after_it_ends_the_declaration.lin:4:5
+  |
+4 |     in 0..=99
+  |     ^^ expected `fn` here

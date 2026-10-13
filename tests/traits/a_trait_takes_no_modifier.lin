@@ -1,0 +1,14 @@
+// A trait declares signatures, not a representation or ownership policy.
+@opaque
+trait _Sealed {
+    fn of(x: Self) -> UInt8
+}
+
+@linear
+trait _Owed {
+    fn of(x: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

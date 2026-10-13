@@ -1,0 +1,408 @@
+import std.collections
+import std.fmt
+import std.io
+import std.json as json_format
+import std.mem
+import std.release
+import std.testing
+import std.text as strings
+
+use release.Settle
+
+// A handler returns an `Error` when it answers without a response of its own.
+// The error holds the status to send and, optionally, a message for the body,
+// stored in the request's arena; without one the body is the status's reason
+// phrase. Either is sent as plain text followed by a newline, after any
+// headers the error was given with `set_header`. `?` converts the library's
+// own errors into one, so a handler propagates a failed step with the status
+// that answers it. The type names the arena's parent allocator `P` because a
+// message it renders lives in that arena.
+@opaque
+struct Error[P: Allocator = mem.SystemAllocator] {
+    answer: Status,
+    text: Option[String[mem.Handle[P]]],
+    headers: Option[ResponseHeaders[mem.Handle[P]]],
+}
+
+impl[P: Allocator] Error[P] {
+    // `Error.new` makes an error that answers `status` with its reason phrase.
+    pub fn new(status: Status) -> Error[P] {
+        .{ answer = copy(status), text = .None, headers = .None }
+    }
+}
+
+test fn a_new_error_has_its_status_and_no_message() {
+    let error: Error = Error.new(.NotFound)
+    testing.assert_eq(error.status(), Status.NotFound, "the status changed")?
+    testing.assert_eq(error.message(), .None, "a new error had a message")?
+    .Ok(())
+}
+
+// `error` makes an error that answers `status` with `message`, which it renders
+// into `request`'s arena. The message is any `Display` value, such as an
+// interpolated literal quoting the request. When the arena cannot hold it, the
+// error keeps its status and answers with the reason phrase.
+pub fn error[P: Allocator, M: Display](request: Request[P], status: Status, message: M) -> Error[P] {
+    var rendered = String.new_in(request.allocator())
+    match message.fmt(&rendered) {
+        Ok(_) => .{ answer = copy(status), text = .Some(rendered), headers = .None },
+        Err(_) => .{ answer = copy(status), text = .None, headers = .None },
+    }
+}
+
+test fn an_error_renders_its_message_into_the_arena() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "PUT", "/items/7", body: "").unwrap()
+    let request = sent.request()
+    let method = request.method_text()
+    let error = error(request, .MethodNotAllowed, "only GET, not {method}")
+    testing.assert_eq(error.status(), Status.MethodNotAllowed, "the status changed")?
+    testing.assert_eq(error.message(), Option.Some("only GET, not PUT"), "the message changed")?
+    .Ok(())
+}
+
+// A message the arena cannot hold leaves the status with its reason phrase.
+test fn an_error_whose_message_does_not_fit_keeps_its_status() {
+    // The request's head fills eight of this arena's 56 usable bytes.
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let long = Vec.filled(mem.system(), 512, UInt8(120)).unwrap()
+    let error = error(sent.request(), .BadRequest, Str.from_bytes(long.as_slice()).unwrap())
+    testing.assert_eq(error.status(), Status.BadRequest, "the status changed")?
+    testing.assert_eq(error.message(), .None, "a message past the arena was kept")?
+    .Ok(())
+}
+
+impl[P: Allocator] Error[P] {
+    // `status` returns the status this error answers with.
+    pub fn status(self: Self) -> Status {
+        copy(self.answer)
+    }
+}
+
+test fn status_returns_the_status_the_error_answers_with() {
+    let error: Error = Error.new(.UnsupportedMediaType)
+    testing.assert_eq(error.status(), Status.UnsupportedMediaType, "the status changed")?
+    .Ok(())
+}
+
+impl[P: Allocator] Error[P] {
+    // `message` returns the message the handler gave, or `None` when the body is
+    // the reason phrase.
+    pub fn message(self: Self) -> Option[Str] where borrows(.Some: self) {
+        match read self.text {
+            Some(message) => .Some(message.view()),
+            None => .None,
+        }
+    }
+}
+
+test fn an_error_reads_its_status_and_message() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let explained = error(sent.request(), .Forbidden, "no entry")
+    let bare: Error = Error.new(.Forbidden)
+    testing.assert_eq(explained.status(), Status.Forbidden, "the status changed")?
+    testing.assert_eq(explained.message(), Option.Some("no entry"), "the message changed")?
+    testing.assert_eq(bare.message(), .None, "an error without a message had one")?
+    .Ok(())
+}
+
+// Set `name: value` in `kept`, opening the list in `allocator` when there is
+// none yet.
+fn set_kept_header[A: Allocator](inout kept: Option[ResponseHeaders[A]], allocator: A, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(kept: allocator) {
+    let previous = kept
+    var headers = match previous {
+        Some(headers) => headers,
+        None => ResponseHeaders.open(allocator),
+    }
+    let set = &headers.set(name, value)
+    kept = .Some(headers)
+    set
+}
+
+impl[P: Allocator] Error[P] {
+    // `set_header` sends the header `name: value` with this error, storing
+    // both in `request`'s arena, and replaces any value `name` already has,
+    // compared under ASCII case folding. A 401 names the scheme its client
+    // should authenticate with this way, in `WWW-Authenticate`. A name that is
+    // not a token, a value holding a line break, and a header the server
+    // writes itself are refused, as they are for a response.
+    pub fn set_header(inout self: Self, request: Request[P], name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: request) {
+        set_kept_header(&self.headers, request.allocator(), name, value)
+    }
+}
+
+test fn an_error_sends_the_headers_it_is_given() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    var refused = error(sent.request(), .Unauthorized, "who are you?")
+    testing.assert_eq(refused.header("WWW-Authenticate"), .None, "a new error had a header")?
+    &refused.set_header(sent.request(), "WWW-Authenticate", "Basic").unwrap()
+    &refused.set_header(sent.request(), "www-authenticate", "Bearer").unwrap()
+    let framing = &refused.set_header(sent.request(), "Content-Length", "3")
+    testing.assert_eq(refused.header("WWW-Authenticate"), Option.Some("Bearer"), "the header was not replaced")?
+    testing.assert_eq(framing, .Err(.Framing), "a framing header was set")?
+    testing.assert_eq(refused.message(), Option.Some("who are you?"), "the message changed")?
+    .Ok(())
+}
+
+impl[P: Allocator] Error[P] {
+    // `header` returns the first value of the header `name` this error sends,
+    // compared under ASCII case folding.
+    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
+        match read self.headers {
+            Some(headers) => headers.get(name),
+            None => .None,
+        }
+    }
+}
+
+test fn header_compares_names_under_ascii_case_folding() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    var busy = error(sent.request(), .ServiceUnavailable, "try again soon")
+    &busy.set_header(sent.request(), "Retry-After", "5").unwrap()
+    testing.assert_eq(busy.header("retry-after"), Option.Some("5"), "a header name matched only in its own case")?
+    testing.assert_eq(busy.header("Location"), .None, "a header that was never set was found")?
+    .Ok(())
+}
+
+// An error reads as its status, and its message when it has one, such as
+// "400 Bad Request: the body is not JSON".
+impl[P: Allocator] Display for Error[P] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let code = self.answer.code()
+        let reason = self.answer.reason()
+        if reason.length() == 0 {
+            "{code}".fmt(&w)?
+        } else {
+            "{code} {reason}".fmt(&w)?
+        }
+        match read self.text {
+            Some(message) => ": {message}".fmt(&w),
+            None => .Ok(()),
+        }
+    }
+}
+
+test fn an_error_displays_its_status_and_message() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/echo", body: "").unwrap()
+    let plain: Error = Error.new(.NotFound)
+    let unnamed: Error = Error.new(.Other(Code(299)))
+    let explained = error(sent.request(), .BadRequest, "the body is not JSON")
+    defer let named = fmt.render_owned(mem.system(), plain).unwrap()
+    defer let bare = fmt.render_owned(mem.system(), unnamed).unwrap()
+    defer let messaged = fmt.render_owned(mem.system(), explained).unwrap()
+    testing.assert_eq(named.view(), "404 Not Found", "a named status changed")?
+    testing.assert_eq(bare.view(), "299", "a status without a phrase changed")?
+    testing.assert_eq(messaged.view(), "400 Bad Request: the body is not JSON", "a message was not shown")?
+    .Ok(())
+}
+
+// A failed read or write of the connection is the server's own failure, so it
+// answers 500.
+impl[P: Allocator] From[io.IoError] for Error[P] {
+    fn from(sink _source: io.IoError) -> Error[P] {
+        Error.new(.InternalServerError)
+    }
+}
+
+test fn an_io_error_answers_500() {
+    let failure = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 3 }
+    let error: Error = failure.into()
+    testing.assert_eq(error.status(), Status.InternalServerError, "an I/O error did not answer 500")?
+    .Ok(())
+}
+
+// A flush of a streamed body that could not send what was buffered is a
+// failed write of the connection, so it answers 500 as one does.
+impl[P: Allocator] From[io.WriteFailure[io.IoError]] for Error[P] {
+    fn from(sink _source: io.WriteFailure[io.IoError]) -> Error[P] {
+        Error.new(.InternalServerError)
+    }
+}
+
+test fn a_failed_flush_answers_500() {
+    let failure: io.WriteFailure[io.IoError] = .{ kind = .NoProgress, reason = .None, written = 0 }
+    let error: Error = failure.into()
+    testing.assert_eq(error.status(), Status.InternalServerError, "a failed flush did not answer 500")?
+    .Ok(())
+}
+
+// Running out of memory, most often the request's arena, answers 500.
+impl[P: Allocator] From[mem.Oom] for Error[P] {
+    fn from(sink _source: mem.Oom) -> Error[P] {
+        Error.new(.InternalServerError)
+    }
+}
+
+test fn running_out_of_memory_answers_500() {
+    let error: Error = mem.Oom.Exhausted.into()
+    testing.assert_eq(error.status(), Status.InternalServerError, "running out of memory did not answer 500")?
+    .Ok(())
+}
+
+// An upsert that runs out of memory, or whose factory builds an entry under
+// the wrong key, answers 500; a factory's own error converts as it would on its
+// own.
+impl[P: Allocator, E: Into[Error[P]]] From[collections.UpsertReason[E]] for Error[P] {
+    fn from(sink source: collections.UpsertReason[E]) -> Error[P] {
+        match source {
+            Allocation(_) => Error.new(.InternalServerError),
+            Factory(error) => error.into(),
+            KeyMismatch => Error.new(.InternalServerError),
+        }
+    }
+}
+
+test fn an_upsert_reason_answers_with_its_cause() {
+    let full: collections.UpsertReason[mem.Oom] = .Allocation(.Exhausted)
+    let refused: collections.UpsertReason[strings.Utf8Error] = .Factory(.{ offset = 2 })
+    let mismatched: collections.UpsertReason[mem.Oom] = .KeyMismatch
+    let answers: [Error; 3] = [full.into(), refused.into(), mismatched.into()]
+    testing.assert_eq(answers[0].status(), Status.InternalServerError, "a full map did not answer 500")?
+    testing.assert_eq(answers[1].status(), Status.BadRequest, "a factory error lost its own answer")?
+    testing.assert_eq(answers[2].status(), Status.InternalServerError, "a mismatched key did not answer 500")?
+    .Ok(())
+}
+
+// A document refusing a change is the handler's own mistake or a full arena,
+// so it answers 500.
+impl[P: Allocator] From[json_format.MutationReason] for Error[P] {
+    fn from(sink _source: json_format.MutationReason) -> Error[P] {
+        Error.new(.InternalServerError)
+    }
+}
+
+test fn a_refused_document_change_answers_500() {
+    defer var list = json_format.Value.array(mem.system())
+    let refused = &list.insert("summary", json_format.Value.boolean(mem.system(), true))
+    let status = match refused {
+        Ok(previous) => {
+            previous.release()
+            Status.Ok
+        },
+        Err(failure) => {
+            let error: Error = failure.settle().into()
+            error.status()
+        },
+    }
+    testing.assert_eq(status, Status.InternalServerError, "a refused document change did not answer 500")?
+    .Ok(())
+}
+
+// A body that is not UTF-8, as `Request.text` reports it, is the client's
+// mistake, so it answers 400.
+impl[P: Allocator] From[strings.Utf8Error] for Error[P] {
+    fn from(sink _source: strings.Utf8Error) -> Error[P] {
+        Error.new(.BadRequest)
+    }
+}
+
+test fn a_body_that_is_not_utf8_answers_400() {
+    let error: Error = strings.Utf8Error { offset = 1 }.into()
+    testing.assert_eq(error.status(), Status.BadRequest, "a body that is not UTF-8 did not answer 400")?
+    .Ok(())
+}
+
+// A body that is not JSON is the client's mistake and answers 400; a parser
+// that ran out of memory answers 500.
+impl[P: Allocator] From[json_format.ParseError] for Error[P] {
+    fn from(sink source: json_format.ParseError) -> Error[P] {
+        if source.ran_out_of_memory() {
+            return Error.new(.InternalServerError)
+        }
+        Error.new(.BadRequest)
+    }
+}
+
+test fn a_body_that_is_not_json_answers_400() {
+    let refused = match json_format.parse(mem.system(), "not json") {
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "text that is not JSON parsed")
+        },
+        Err(error) => error,
+    }
+    let error: Error = refused.into()
+    testing.assert_eq(error.status(), Status.BadRequest, "a body that is not JSON did not answer 400")?
+    .Ok(())
+}
+
+// `decode_status` is the status that answers a JSON body that did not
+// decode: 400 for a body that is not JSON, 422 for a document that is JSON
+// but not the handler's type, and 500 when decoding ran out of memory, most
+// often the request's arena.
+fn decode_status[A: Allocator](failure: json_format.DecodeError[A]) -> Status {
+    if failure.ran_out_of_memory() {
+        return .InternalServerError
+    }
+    match read failure {
+        Parse(_) => .BadRequest,
+        _ => .UnprocessableContent,
+    }
+}
+
+// A body that did not decode answers the status `decode_status` gives it.
+impl[P: Allocator, A: Allocator] From[json_format.DecodeError[A]] for Error[P] {
+    fn from(sink source: json_format.DecodeError[A]) -> Error[P] {
+        let status = decode_status(source)
+        source.release()
+        Error.new(status)
+    }
+}
+
+test fn a_decode_error_answers_by_whose_mistake_it_is() {
+    let shaped: Result[UInt64, json_format.DecodeError] = json_format.decode(mem.system(), r#"{"x":1}"#)
+    let wrong: Error = match shaped {
+        Ok(_) => return testing.assert(false, "an object decoded as a number"),
+        Err(error) => error.into(),
+    }
+    let malformed: Result[UInt64, json_format.DecodeError] = json_format.decode(mem.system(), r"{")
+    let broken: Error = match malformed {
+        Ok(_) => return testing.assert(false, "an unclosed object decoded"),
+        Err(error) => error.into(),
+    }
+    let exhausted: json_format.DecodeError = .Allocation
+    let full: Error = exhausted.into()
+    testing.assert_eq(wrong.status(), Status.UnprocessableContent, "a document of the wrong shape did not answer 422")?
+    testing.assert_eq(broken.status(), Status.BadRequest, "a body that is not JSON did not answer 400")?
+    testing.assert_eq(full.status(), Status.InternalServerError, "running out of memory did not answer 500")?
+    .Ok(())
+}
+
+// Encoding a response body into the arena fails only when the arena is full
+// or the value cannot be written as JSON, both the server's own failure.
+impl[P: Allocator] From[json_format.EncodeError[mem.Oom]] for Error[P] {
+    fn from(sink _source: json_format.EncodeError[mem.Oom]) -> Error[P] {
+        Error.new(.InternalServerError)
+    }
+}
+
+test fn a_failed_encoding_answers_500() {
+    let failed: json_format.EncodeError[mem.Oom] = .NonFiniteNumber
+    let error: Error = failed.into()
+    testing.assert_eq(error.status(), Status.InternalServerError, "a failed encoding did not answer 500")?
+    .Ok(())
+}
+
+// A request that could not be read answers the status that refuses it, and a
+// connection that failed while reading answers 500.
+impl[P: Allocator] From[RequestError] for Error[P] {
+    fn from(sink source: RequestError) -> Error[P] {
+        match source.status() {
+            Some(status) => Error.new(status),
+            None => Error.new(.InternalServerError),
+        }
+    }
+}
+
+test fn a_request_error_answers_its_status() {
+    let refused: Error = RequestError.Status(.ContentTooLarge).into()
+    let closed: Error = RequestError.Closed.into()
+    testing.assert_eq(refused.status(), Status.ContentTooLarge, "a refusal changed its status")?
+    testing.assert_eq(closed.status(), Status.InternalServerError, "a closed connection did not answer 500")?
+    .Ok(())
+}

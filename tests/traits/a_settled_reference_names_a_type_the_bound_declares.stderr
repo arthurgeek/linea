@@ -1,0 +1,10 @@
+error[T-Impl]: `Measure` declares no `Weight`
+  --> tests/traits/a_settled_reference_names_a_type_the_bound_declares.lin:23:31
+   |
+23 | fn _weighed[W: Measure](_v: W.Weight) -> UInt8 {
+   |                               ^^^^^^ declare it on the trait, or name one it declares
+error[T-Impl]: `Measure` declares `of` as an operation, and a settled reference names a type
+  --> tests/traits/a_settled_reference_names_a_type_the_bound_declares.lin:27:30
+   |
+27 | fn _called[W: Measure](_v: W.of) -> UInt8 {
+   |                              ^^ name a type the trait declares

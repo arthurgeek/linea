@@ -1,0 +1,17 @@
+@linear
+struct Ticket { code: UInt8 }
+
+enum Failure { Refused(Ticket) }
+
+fn main() -> UInt8 {
+    let wrap: fn(sink value: Ticket) -> Failure = .Refused
+    let ticket: Ticket = .{ code = 7 }
+    let wrapped = wrap(ticket)
+    let Ticket { code } = ticket
+    match wrapped {
+        Refused(owned) => {
+            let Ticket { code: _code } = owned
+        },
+    }
+    code
+}

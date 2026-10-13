@@ -1,0 +1,11 @@
+// A format mode is part of an interpolation type: the same held value cannot
+// make display and debug literals one branch result with two behaviours.
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    let _message = if true {
+        "{x:?}"
+    } else {
+        "{x}"
+    }
+    0
+}

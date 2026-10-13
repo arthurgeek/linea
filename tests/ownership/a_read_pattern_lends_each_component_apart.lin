@@ -1,0 +1,10 @@
+// A `read` tuple pattern lends only the components it binds, so the
+// component it ignores can be rewritten while the other binder is live.
+struct T { n: UInt8 }
+
+fn main() -> UInt8 {
+    var place: (T, T) = (.{ n = 1 }, .{ n = 2 })
+    let read (a, _b) = place
+    place._1 = .{ n = 5 }
+    a.n - 1
+}

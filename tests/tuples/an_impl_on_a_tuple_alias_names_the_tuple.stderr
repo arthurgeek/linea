@@ -1,0 +1,5 @@
+error[N-TypeAlias]: `Pair` is an alias, and an implementation names a type's own declaration
+  --> tests/tuples/an_impl_on_a_tuple_alias_names_the_tuple.lin:10:16
+   |
+10 | impl First for Pair {
+   |                ^^^^ write it for the type the alias names, `(UInt8, Str)`

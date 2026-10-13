@@ -1,0 +1,18 @@
+// An explicitly linear newtype requires consumption even with a scalar base.
+// Reading the value does not settle its obligation.
+@linear
+type Ticket = UInt8
+
+fn peek(_t: Ticket) -> UInt8 {
+    0
+}
+
+fn go() -> UInt8 {
+    let t = Ticket(7)
+    let seen = peek(t)
+    seen
+}
+
+fn main() -> UInt8 {
+    go()
+}

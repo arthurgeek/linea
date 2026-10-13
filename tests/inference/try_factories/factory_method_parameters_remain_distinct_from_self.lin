@@ -1,0 +1,20 @@
+trait Factory {
+    fn make[T](input: T) -> Result[Self, UInt8]
+}
+
+impl Factory for UInt64 {
+    fn make[T](_input: T) -> Result[Self, UInt8] {
+        .Ok(7)
+    }
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: UInt64 = Factory.make(UInt16(9))?
+    return .Ok(
+        if value == 7 {
+            0
+        } else {
+            1
+        },
+    )
+}

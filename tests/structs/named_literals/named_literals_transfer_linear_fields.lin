@@ -1,0 +1,13 @@
+@linear
+struct Token { value: UInt8 }
+
+@linear
+struct Parcel { token: Token }
+
+fn main() -> UInt8 {
+    let token = Token { value = 7 }
+    let parcel = Parcel { token }
+    let Parcel { token: moved } = parcel
+    let Token { value } = moved
+    value - 7
+}

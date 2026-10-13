@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Takes` is already implemented for `Counter` with the same arguments
+  --> tests/type_defaults/a_defaulted_alias_and_its_expansion_are_one_implementation_key.lin:20:6
+   |
+14 | impl Takes[Rack[UInt8]] for Counter {
+   |      ----- already implemented here
+20 | impl Takes[Vec[UInt8, SystemAllocator]] for Counter {
+   |      ^^^^^ a trait is implemented once per arguments and type

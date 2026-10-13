@@ -1,0 +1,28 @@
+// A declared trait named Linear grants behavior, not a capability.
+// The ordinary wrapper inherits its concrete component obligation.
+trait Linear {
+    fn of(x: Self) -> UInt8
+}
+
+@linear
+struct Handle {
+    n: UInt8,
+}
+
+impl Linear for Handle {
+    fn of(x: Self) -> UInt8 {
+        x.n
+    }
+}
+
+struct Cell[T: Linear] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let h: Handle = .{ n = 3 }
+    let c: Cell[Handle] = .{ v = h }
+    let Cell { v: got } = c
+    let Handle { n: k } = got
+    k
+}

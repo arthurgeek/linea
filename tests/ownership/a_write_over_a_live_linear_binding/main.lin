@@ -1,0 +1,52 @@
+// Writing over a binding that still holds a linear value destroys it. Writing
+// is not moving: a move leaves the obligation with the value, so there is
+// still somewhere it can be discharged, while a write puts a different value
+// where the old one was and leaves nothing holding the old one.
+//
+// The rule reads the place and not the operator, and a whole binding is a
+// place like a field of one is -- the two differ in how much is lost, not in
+// whether anything is. All three shapes below are one binding written while
+// full: a bare local, a struct whose braces hold a linear field, and an enum
+// whose payload is one.
+@linear
+enum Box { Has(Key) }
+
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn plain() -> UInt8 {
+    var k = mint(7)
+    k = mint(9)
+    release(k)
+    0
+}
+
+fn whole() -> UInt8 {
+    var h: Holder = .{ k = mint(7), n = 1 }
+    h = .{ k = mint(9), n = 2 }
+    consume(h)
+}
+
+fn boxed() -> UInt8 {
+    var b = Box.Has(mint(7))
+    b = Box.Has(mint(9))
+    match b {
+        Has(inner) => {
+            release(inner)
+        },
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    plain() + whole() + boxed()
+}

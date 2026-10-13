@@ -1,0 +1,15 @@
+error[M-Opaque]: `Vault` is opaque outside `vault`
+ --> tests/modules/a_contract_cannot_name_a_sealed_field/main.lin:5:54
+  |
+5 | fn peek(held: vault.Vault) -> Str where carries(held.secret) {
+  |                                                      ^^^^^^ only its own module's contracts can name its parts
+error[M-Opaque]: `Vault` is opaque outside `vault`
+ --> tests/modules/a_contract_cannot_name_a_sealed_field/main.lin:9:59
+  |
+9 | fn reseal(sink secret: Str) -> vault.Vault where carries(.secret: secret) {
+  |                                                           ^^^^^^ only its own module's contracts can name its parts
+error[M-Opaque]: `Vault` is opaque outside `vault`
+  --> tests/modules/a_contract_cannot_name_a_sealed_field/main.lin:13:70
+   |
+13 | fn keep(inout held: vault.Vault, note: Str) -> () where retains(held.secret: note) {
+   |                                                                      ^^^^^^ only its own module's contracts can name its parts

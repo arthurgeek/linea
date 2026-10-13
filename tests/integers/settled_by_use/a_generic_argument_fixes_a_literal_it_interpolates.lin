@@ -1,0 +1,13 @@
+fn keep[T](sink value: T) -> T {
+    value
+}
+
+fn narrow(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let k = 5
+    let _kept = keep("{k}")
+    narrow(k)
+}

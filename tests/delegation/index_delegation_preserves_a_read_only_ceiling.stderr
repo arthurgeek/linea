@@ -1,0 +1,7 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/delegation/index_delegation_preserves_a_read_only_ceiling.lin:21:5
+   |
+12 |     proj at(self: Inner, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+21 |     outer[0] = 4
+   |     ^^^^^^^^ this place cannot be assigned

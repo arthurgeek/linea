@@ -1,0 +1,5 @@
+error[O-Move]: only part of `t` is named here
+ --> tests/tuples/an_aggregate_component_cannot_be_moved_out.lin:9:17
+  |
+9 |     let moved = t._1
+  |                 ^^^^ move the whole binding, or `copy` this part out of it

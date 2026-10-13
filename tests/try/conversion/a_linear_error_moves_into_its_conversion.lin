@@ -1,0 +1,40 @@
+// A linear error is moved into `From.from` by `?`. The conversion settles
+// it, and the converted error is the function's to settle in turn.
+@linear
+struct Refusal {
+    code: UInt8,
+}
+
+@linear
+struct Failure {
+    code: UInt8,
+}
+
+impl From[Refusal] for Failure {
+    fn from(sink source: Refusal) -> Failure {
+        let Refusal { code } = source
+        return .{ code = code + 1 }
+    }
+}
+
+fn attempt(value: UInt8) -> Result[UInt8, Refusal] {
+    if value > 5 {
+        return .Err(.{ code = value })
+    }
+    return .Ok(value)
+}
+
+fn run(value: UInt8) -> Result[UInt8, Failure] {
+    let accepted = attempt(value)?
+    return .Ok(accepted)
+}
+
+fn main() -> UInt8 {
+    match run(9) {
+        Ok(value) => value,
+        Err(failure) => {
+            let Failure { code } = failure
+            code
+        },
+    }
+}

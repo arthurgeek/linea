@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/traits/self_is_the_head_where_the_trait_names_nothing.lin:9:9
+  |
+9 | impl[T] Nope for Holder[T] {
+  |         ^^^^ no trait with this name is declared here

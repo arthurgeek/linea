@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let explicit = [read [] || UInt8(0)]
+    let plain = [|| UInt8(0)]
+    explicit[0]() + plain[0]()
+}

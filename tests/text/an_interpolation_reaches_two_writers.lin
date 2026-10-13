@@ -1,0 +1,62 @@
+// One interpolation written once inside a generic body, rendered at two
+// writers. `Display.fmt` is generic over the writer alone, so the literal's
+// shape is one type and each call instantiates it at a different `W.Error`.
+//
+// The two errors are deliberately different widths: the descriptor's carries a
+// single number and `Wide` carries four. Each instantiation holds the answer of
+// a piece in a slot of its own before the merge, and a slot typed for the other
+// instantiation is wide enough for one of them and not the other. The program
+// reads a field out of the wide one, so a slot that came from the wrong
+// instantiation is a number the program prints wrong rather than a shape only
+// the dump would show.
+import std.io
+
+use io.Descriptor
+use io.stdout
+
+struct Wide {
+    at: Int64,
+    also: Int64,
+    again: Int64,
+    last: Int64,
+}
+
+struct Counting {
+    out: Descriptor,
+    left: Int64,
+}
+
+impl Writer for Counting {
+    type Error = Wide
+
+    fn write_str(inout self: Counting, s: Str) -> Result[(), Wide] {
+        if self.left <= 0 {
+            return .Err(.{ at = 1, also = 2, again = 3, last = 4 })
+        }
+        self.left = self.left - 1
+        match Writer.write_str(&self.out, s) {
+            Ok(_) => .Ok({}),
+            Err(_) => .Err(.{ at = 9, also = 9, again = 9, last = 9 }),
+        }
+    }
+}
+
+fn note[W: Writer](inout w: W, n: Int64) -> Result[(), W.Error] {
+    Display.fmt("n={n}!\n", &w)
+}
+
+fn main() -> UInt8 {
+    var d: Descriptor = stdout()
+    let first: UInt8 = match note(&d, 1) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+
+    var c: Counting = .{ out = stdout(), left = 2 }
+    let second: UInt8 = match note(&c, 2) {
+        Ok(_) => 0,
+        Err(e) => UInt8(e.last),
+    }
+
+    first + second
+}

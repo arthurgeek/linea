@@ -1,0 +1,14 @@
+fn snapshot(view: borrow UInt8) -> UInt8 where carries() {
+    return *view
+}
+
+fn main() -> UInt8 {
+    var number: UInt8 = 7
+    let saved = snapshot(borrow number)
+    number = 9
+    if saved == 7 && number == 9 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,2 @@
+trap
+linea: panic: the reactor overheated at tests/erased_closures/a_closure_that_never_returns_ends_the_program.lin:10:13

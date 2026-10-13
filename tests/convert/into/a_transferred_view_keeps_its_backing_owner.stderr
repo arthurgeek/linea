@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/convert/into/a_transferred_view_keeps_its_backing_owner.lin:18:5
+   |
+18 |     owner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+19 |     UInt8(view.text.length())
+   |           --------- the observation is still used here

@@ -1,0 +1,8 @@
+// A module is named by its directory, and every element of an import's path
+// names one, so each starts with a lowercase letter even where an alias gives
+// the module another name here.
+import Sub as sub
+
+fn main() -> UInt8 {
+    sub.helper() - 5
+}

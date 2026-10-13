@@ -1,0 +1,31 @@
+// A bound written twice names one trait, and one trait declaring the name is
+// no ambiguity: the reference reaches the one declaration it always reached.
+// Writing a bound twice says nothing the once did not, which is what it says
+// everywhere else -- a parameter bounded twice by a trait is a parameter the
+// language admits and this is not the place that stops admitting it.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn measured[W: Measure + Measure](v: W) -> W.Item {
+    Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    measured(c)
+}

@@ -1,0 +1,14 @@
+// A template cannot borrow its receiver when the trait promises independence.
+trait View {
+    fn get(self: Self) -> Str where carries()
+}
+
+template impl View {
+    fn get(_self: Self) -> Str where borrows(_self) {
+        ""
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

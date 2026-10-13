@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `(UInt8, Str)`, found `Int64`
+ --> tests/tuples/an_annotation_underlines_the_whole_tuple.lin:4:31
+  |
+4 |     let _pair: (UInt8, Str) = 1
+  |                ------------ expected because of this annotation
+  |                               ^ expected `(UInt8, Str)`, found `Int64`

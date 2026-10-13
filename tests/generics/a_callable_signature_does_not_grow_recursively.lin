@@ -1,0 +1,11 @@
+// A callable stores only a code pointer, but resolving its signature still
+// instantiates every type the signature names. That instantiation must close.
+struct S[T] {
+    f: fn(read x: S[S[T]]) -> UInt8,
+}
+
+fn _use(_s: S[UInt8]) -> () {}
+
+fn main() -> UInt8 {
+    0
+}

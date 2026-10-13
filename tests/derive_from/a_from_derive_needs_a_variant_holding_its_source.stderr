@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Failure` wraps exactly `Malformed`
+ --> tests/derive_from/a_from_derive_needs_a_variant_holding_its_source.lin:9:9
+  |
+9 | @derive(From[Malformed])
+  |         ^^^^^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Failure` has `Absent(Missing)`, `Unknown`

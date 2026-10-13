@@ -1,0 +1,5 @@
+error[T-Phantom]: `_Tag` is not unused, and an underscore does not stand for `phantom`
+ --> tests/generics/an_underscore_does_not_stand_for_phantom.lin:6:15
+  |
+6 | struct Handle[_Tag] {
+  |               ^^^^ declare it `phantom`: the type system reads it for identity

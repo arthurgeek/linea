@@ -1,0 +1,3 @@
+trap
+about to stop
+linea: index out of bounds at tests/text/a_trap_after_a_complaint_says_it_once.lin:14:5

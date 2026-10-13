@@ -1,0 +1,10 @@
+error[S-Separator]: expected `;` or a newline
+  --> tests/newline/a_destructuring_let_ends_like_any_binding.lin:19:30
+   |
+19 |     let P { x: a, y: b } = p m = a
+   |                              ^ this binding ends here
+error[N-Unused]: `a` is never used
+  --> tests/newline/a_destructuring_let_ends_like_any_binding.lin:19:16
+   |
+19 |     let P { x: a, y: b } = p m = a
+   |                ^ bind it as `_` if the value is not wanted

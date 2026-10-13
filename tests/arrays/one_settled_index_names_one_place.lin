@@ -1,0 +1,15 @@
+// Two brackets over one array whose numbers settle to the same element name one
+// place, so the argument that reads it would be handed whatever the argument
+// that mutates it had already written. Which element a caret names is the length
+// less the count it wrote, so the two spellings reach one element of a four-long
+// array and the rule is about the element rather than about the spelling.
+fn two(inout a: UInt8, b: UInt8) -> UInt8 {
+    a = 9
+    b
+}
+
+fn main() -> UInt8 {
+    var xs: [UInt8; 4] = [1, 2, 3, 4]
+    var ys: [UInt8; 4] = [1, 2, 3, 4]
+    two(&xs[0], xs[0]) + two(&ys[^1], ys[3])
+}

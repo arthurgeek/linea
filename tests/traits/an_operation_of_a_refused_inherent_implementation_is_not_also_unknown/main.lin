@@ -1,0 +1,17 @@
+// An inherent `impl` for another module's type is refused where it is written.
+// Calling the operation it declares is the same mistake, so only the `impl` is
+// reported.
+import lib
+
+use lib.Counter
+
+impl Counter {
+    fn peek(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let counter = lib.start()
+    counter.peek()
+}

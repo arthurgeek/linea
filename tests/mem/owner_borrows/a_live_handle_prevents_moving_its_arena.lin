@@ -1,0 +1,15 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 64)
+    let handle = arena.handle()
+    let moved = arena
+    let bytes = handle.acquire(8).unwrap()
+    bytes.release()
+    moved.release()
+    0
+}

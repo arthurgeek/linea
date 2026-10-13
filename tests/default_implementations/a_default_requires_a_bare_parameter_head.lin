@@ -1,0 +1,16 @@
+trait Selected {
+    fn selected(self: Self) -> UInt8
+}
+
+struct Box[T] { value: T }
+
+default impl[T] Selected for Box[T] {
+    fn selected(_self: Box[T]) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let value: Box[Bool] = .{ value = false }
+    Selected.selected(value)
+}

@@ -1,0 +1,33 @@
+// A trait's parameter written only as a signature's return type is settled by
+// what the call is asked for. A condition is asked for a `Bool`, so a call
+// standing in one settles the parameter to `Bool` and reaches the
+// implementation that key names.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl Innermost[UInt8] for Envelope[UInt8] {
+    fn of(x: Self) -> UInt8 {
+        x.v
+    }
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Bool {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Envelope[UInt8] = .{ v = 3 }
+    let b: Envelope[Bool] = .{ v = true }
+    if Innermost.of(b) {
+        Innermost.of(a) + 10
+    } else {
+        Innermost.of(a)
+    }
+}

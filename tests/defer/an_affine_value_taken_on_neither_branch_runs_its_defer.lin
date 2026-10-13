@@ -1,0 +1,28 @@
+// A `defer` of an affine value that no branch gives away runs once, at the end
+// of the scope, whichever branch ran.
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key, inout locked: UInt8) -> () {
+    let Key { n } = k
+    locked = locked + n
+}
+
+fn go(flag: Bool, inout locked: UInt8) -> UInt8 {
+    let k: Key = .{ n = 3 }
+    defer lock(k, &locked)
+    if flag {
+        1
+    } else {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    var a: UInt8 = 0
+    let first = go(true, &a)
+    var b: UInt8 = 0
+    let second = go(false, &b)
+    a + first + b * 2 + second
+}

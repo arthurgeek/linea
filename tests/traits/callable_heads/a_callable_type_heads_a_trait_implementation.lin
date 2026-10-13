@@ -1,0 +1,49 @@
+// A trait is implemented for a callable type, so a function value that has the
+// shape the implementation names is passed where the trait is required. The
+// shape is the invocation, the parameters' conventions and the result: one
+// implementation answers each shape, and a stateless function and a stateful
+// one are two shapes.
+trait Handle[S] {
+    fn handle(self: Self, inout state: S, input: UInt64) -> UInt64
+}
+
+impl[S] Handle[S] for fn(inout state: S, input: UInt64) -> UInt64 {
+    fn handle(self: Self, inout state: S, input: UInt64) -> UInt64 {
+        self(&state, input)
+    }
+}
+
+impl[S] Handle[S] for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, inout _state: S, input: UInt64) -> UInt64 {
+        self(input)
+    }
+}
+
+struct Counter {
+    total: UInt64,
+}
+
+fn add(inout counter: Counter, input: UInt64) -> UInt64 {
+    counter.total += input
+    counter.total
+}
+
+fn double(input: UInt64) -> UInt64 {
+    input * 2
+}
+
+fn run[S, H: Handle[S]](inout state: S, handler: H, input: UInt64) -> UInt64 {
+    handler.handle(&state, input)
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { total = 0 }
+    let first = run(&counter, add, 3)
+    let second = run(&counter, add, 4)
+    let doubled = run(&counter, double, 5)
+    if first == 3 && second == 7 && doubled == 10 && counter.total == 7 {
+        0
+    } else {
+        1
+    }
+}

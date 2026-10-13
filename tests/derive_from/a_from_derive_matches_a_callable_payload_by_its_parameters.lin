@@ -1,0 +1,17 @@
+@derive(From[fn(_x: UInt8) -> UInt8])
+enum Step {
+    Apply(fn(_x: UInt8) -> UInt8),
+    Skip,
+}
+
+fn double(x: UInt8) -> UInt8 {
+    x * 2
+}
+
+fn main() -> UInt8 {
+    let step = Step.from(double)
+    match step {
+        Apply(apply) => apply(4) - 8,
+        Skip => 1,
+    }
+}

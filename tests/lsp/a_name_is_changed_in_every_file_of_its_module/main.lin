@@ -1,0 +1,5 @@
+// A module's files see each other's declarations, so a rename of a name one
+// file declares edits that file and every file that uses it.
+fn main() -> UInt8 {
+    size() + twice()
+}

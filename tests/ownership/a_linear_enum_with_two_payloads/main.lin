@@ -1,0 +1,28 @@
+// Each arm binds its own payload, and only that arm can reach it. Binding them
+// all before the branch made every binder live on every arm, so each was moved
+// on its own arm and untouched on the others -- and the join had no answer for
+// a linear value that one path took and another never had. Both arms reported
+// it, and a linear enum carrying a payload in more than one variant could not
+// be written at all.
+@linear
+enum Box {
+    A(Key),
+    B(Key),
+}
+
+fn eat(sink b: Box) -> UInt8 {
+    match b {
+        A(k) => {
+            release(k)
+            1
+        },
+        B(j) => {
+            release(j)
+            2
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    eat(Box.A(mint(1))) + eat(Box.B(mint(2)))
+}

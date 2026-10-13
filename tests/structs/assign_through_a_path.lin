@@ -1,0 +1,14 @@
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+
+    // A path of any length, written the way it is read: the same address is
+    // computed either way, and only the last step differs.
+    o.inner.y = 7
+    o.z = 3
+
+    o.inner.y + o.z
+}

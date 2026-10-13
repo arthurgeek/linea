@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/a_mark_inside_an_argument.lin:17:20
+   |
+17 |     pair(bump(&x), x)
+   |               -- mutated by this argument
+   |                    ^ already passed `&` here

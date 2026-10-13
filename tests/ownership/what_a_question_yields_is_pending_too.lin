@@ -1,0 +1,33 @@
+// The same rule about what `?` yields rather than about a named value. The
+// payload existed inside the `Option`, the `?` took the enum apart, and what
+// came out is a value the call holds and no place names -- so it is owed to
+// `use2` exactly as a written argument would be, and the `return` beside it
+// crosses that transfer.
+//
+// A rule following only named values accepts this: nothing here is called
+// anything.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn get() -> Option[Key] {
+    Option.Some(.{ n = 1 })
+}
+
+fn go() -> Option[UInt8] {
+    Option.Some(use2(get()?, return Option.None))
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

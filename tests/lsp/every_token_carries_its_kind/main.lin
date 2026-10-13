@@ -1,0 +1,5 @@
+// Every kind a token can carry that a program holds.
+fn main() -> UInt8 {
+    let n: UInt8 = 7 + 1
+    n
+}

@@ -1,0 +1,5 @@
+error[S-Encoding]: save the file as UTF-8
+ --> tests/text/source_is_utf8.lin:6:23
+  |
+6 |     UInt8(Str.length("ÿ"))
+  |                       ^ this byte begins no UTF-8 sequence

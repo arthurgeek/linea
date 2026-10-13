@@ -1,0 +1,21 @@
+// Selecting `:?` requires Debug even when the same value can be displayed.
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct DisplayOnly {}
+
+impl Display for DisplayOnly {
+    fn fmt[W: Writer](_self: DisplayOnly, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "display")
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let value: DisplayOnly = .{}
+    println("{value}")?
+    println("{value:?}")?
+    return .Ok(0)
+}

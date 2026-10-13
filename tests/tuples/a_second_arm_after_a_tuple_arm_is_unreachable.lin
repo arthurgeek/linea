@@ -1,0 +1,9 @@
+// A tuple pattern covers every value of its tuple, so an arm written after it
+// can never be chosen.
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (1, 2)
+    match pair {
+        (a, b) => a + b,
+        _ => 0,
+    }
+}

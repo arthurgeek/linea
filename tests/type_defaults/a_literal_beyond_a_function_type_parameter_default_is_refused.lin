@@ -1,0 +1,7 @@
+fn two[T: Copyable = UInt8](a: T) -> T where carries(a) {
+    copy(a)
+}
+
+fn main() -> UInt8 {
+    two(300)
+}

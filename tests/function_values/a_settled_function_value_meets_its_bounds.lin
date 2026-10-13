@@ -1,0 +1,34 @@
+trait Measure {
+    fn size(self: Self) -> UInt8
+}
+
+struct Rope {
+    length: UInt8,
+}
+
+impl Measure for Rope {
+    fn size(self: Rope) -> UInt8 {
+        self.length
+    }
+}
+
+struct Pebble {
+    grams: UInt8,
+}
+
+struct Ticket {
+    number: UInt8,
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let same = identity
+    let _ticket = same(Ticket { number = 1 })
+    let size = Measure.size
+    let _grams = size(Pebble { grams = 3 })
+    let length = Measure.size
+    length(Rope { length = 3 })
+}

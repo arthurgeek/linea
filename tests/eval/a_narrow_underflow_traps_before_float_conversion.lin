@@ -1,0 +1,8 @@
+fn convert(value: Int8) -> Float64 {
+    Float64(value - 1)
+}
+
+fn main() -> UInt8 {
+    let _answer = convert(-128)
+    0
+}

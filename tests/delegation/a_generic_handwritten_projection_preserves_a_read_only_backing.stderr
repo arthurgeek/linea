@@ -1,0 +1,5 @@
+error[N-Immutable]: an indexed write reaches a read-only projection
+ --> tests/delegation/a_generic_handwritten_projection_preserves_a_read_only_backing.lin:8:5
+  |
+8 |     proj at(self: Inner, i: UInt64) -> UInt8 {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the concrete backing implementation must permit mutation

@@ -1,0 +1,13 @@
+import std.mem
+
+@derive(Release)
+struct Shelf[T, A: Allocator = mem.SystemAllocator] {
+    items: Vec[T, A],
+}
+
+fn main() -> UInt8 {
+    let s: Shelf[UInt8] = .{ items = Vec.new() }
+    let total = s.items.length()
+    s.release()
+    UInt8(total) + 3
+}

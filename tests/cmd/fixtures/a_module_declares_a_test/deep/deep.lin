@@ -1,0 +1,29 @@
+// A module below the root, so the tests it declares are named by the path that
+// reaches them rather than by their own names alone.
+//
+// Two of them, and neither writes anything: what this fixture is read for is
+// the entry point the compiler builds, and a test that printed would bury it
+// under the whole of the text machinery. Two, because one arm cannot show that
+// a name selects a call -- with a single test, a dispatcher that ignored the
+// name entirely would emit the same thing.
+import std.io
+
+use io.IoError
+
+pub fn doubled(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+test fn doubling_two_gives_four() -> Result[(), IoError] {
+    if doubled(2) != 4 {
+        return .Err(IoError.from_os(.Write, 1))
+    }
+    return .Ok({})
+}
+
+test fn doubling_one_gives_two() -> Result[(), IoError] {
+    if doubled(1) != 2 {
+        return .Err(IoError.from_os(.Write, 2))
+    }
+    return .Ok({})
+}

@@ -1,0 +1,59 @@
+trait Count: Copyable {
+    fn count(self: Self) -> UInt8
+}
+
+impl Count for UInt8 {
+    fn count(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+@copyable
+struct Entry[K: Count, V: Count] {
+    key: K,
+    value: V,
+}
+
+@copyable
+struct Rack[E: Count, A: Count] {
+    element: E,
+    allocator: A,
+}
+
+@copyable
+struct Bucket[K: Count, V: Count, A: Count] {
+    key: K,
+    value: V,
+    allocator: A,
+}
+
+impl[K: Count, V: Count] Count for Entry[K, V] {
+    fn count(self: Self) -> UInt8 {
+        Count.count(self.key) + Count.count(self.value)
+    }
+}
+
+impl[E: Count, A: Count] Count for Rack[E, A] {
+    fn count(self: Self) -> UInt8 {
+        Count.count(self.element) + Count.count(self.allocator)
+    }
+}
+
+impl[K: Count, V: Count, A: Count] Count for Bucket[K, V, A] {
+    fn count(self: Self) -> UInt8 {
+        let rack: Rack[Entry[K, V], A] = .{
+            element = .{ key = copy(self.key), value = copy(self.value) },
+            allocator = copy(self.allocator),
+        }
+        return Count.count(rack)
+    }
+}
+
+fn main() -> UInt8 {
+    let bucket: Bucket[UInt8, UInt8, UInt8] = .{ key = 1, value = 2, allocator = 3 }
+    if Count.count(bucket) == 6 {
+        0
+    } else {
+        1
+    }
+}

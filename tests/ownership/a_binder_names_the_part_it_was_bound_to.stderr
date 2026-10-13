@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/a_binder_names_the_part_it_was_bound_to.lin:20:54
+   |
+20 |     match read e { Pair { a: x, b: y } => grow(&e.a, x) + y.v }
+   |                                                ---- mutated by this argument
+   |                                                      ^ already passed `&` here

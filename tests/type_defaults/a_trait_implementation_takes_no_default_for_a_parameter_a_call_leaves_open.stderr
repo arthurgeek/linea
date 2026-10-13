@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `T` is
+  --> tests/type_defaults/a_trait_implementation_takes_no_default_for_a_parameter_a_call_leaves_open.lin:16:18
+   |
+16 |     let _boxed = Box.make()
+   |                  ^^^ give the binding a type, or annotate the signature it comes from

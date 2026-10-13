@@ -1,0 +1,20 @@
+// A projection is expanded into the path it names before anything is lowered,
+// so what reaches the backend is a field offset and an element offset. There is
+// no call in the generated code, and no artifact of any kind stands for the
+// projection: the construct has evaporated by the time MIR is built.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    g[2]
+}

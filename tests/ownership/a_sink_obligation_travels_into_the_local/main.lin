@@ -1,0 +1,20 @@
+// A `sink` parameter's obligation travels into whatever local its value is
+// moved to, so writing over that local loses it there. The obligation belongs
+// to the value, not to the binding it arrived in -- which is what stops a
+// function that promises to dispose of something from moving it one step
+// sideways and writing over it.
+//
+// `release(j)` disposes of the value the write put there, not of the one the
+// caller handed over, so the function still returns having consumed its
+// argument zero times.
+fn eat(sink k: Key) -> UInt8 {
+    var j = k
+    j = mint(2)
+    release(j)
+    0
+}
+
+fn main() -> UInt8 {
+    let k = mint(7)
+    eat(k)
+}

@@ -1,0 +1,13 @@
+// Two arms that touch are one covered stretch, and an arm spanning their
+// meeting point adds nothing: the intervals merge where they touch, so the
+// third arm here is unreachable ground however it straddles the seam. A
+// per-arm containment test would miss this -- only the merged set knows.
+fn main() -> UInt8 {
+    let b: UInt8 = 7
+    match b {
+        0..=9 => 1,
+        10..=19 => 2,
+        5..=15 => 3,
+        _ => 4,
+    }
+}

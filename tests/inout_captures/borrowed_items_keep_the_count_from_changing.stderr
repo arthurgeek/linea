@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/inout_captures/borrowed_items_keep_the_count_from_changing.lin:15:5
+   |
+15 |     inspected = 0
+   |     ^^^^^^^^^ keep this place available until the last use of its observation
+16 |     let count = values.length()
+   |                 ------ the observation is still used here

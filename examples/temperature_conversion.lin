@@ -1,0 +1,111 @@
+// Convert Fahrenheit sensor readings to Celsius for a greenhouse report.
+import std.io
+import std.testing
+
+// Float literals are not constant expressions, so the operating range is
+// returned by functions rather than declared as module constants.
+fn minimum_setpoint() -> Float64 {
+    5.0
+}
+
+fn maximum_setpoint() -> Float64 {
+    35.0
+}
+
+struct Fahrenheit {
+    value: Float64,
+}
+
+struct Celsius {
+    value: Float64,
+}
+
+struct ThermostatSetting {
+    celsius: Celsius,
+}
+
+// `From` takes its source with `sink`, so converting a reading uses it up.
+impl From[Fahrenheit] for Celsius {
+    fn from(sink source: Fahrenheit) -> Celsius {
+        let Fahrenheit { value } = source
+        .{ value = (value - 32.0) / 1.8 }
+    }
+}
+
+// A thermostat has an application-specific operating range. TryFrom observes
+// the Celsius reading and reports refusal without consuming that reading.
+impl TryFrom[Celsius] for ThermostatSetting {
+    fn try_from(x: Celsius) -> Option[ThermostatSetting] {
+        if x.value >= minimum_setpoint() && x.value <= maximum_setpoint() {
+            .Some(.{ celsius = .{ value = x.value } })
+        } else {
+            .None
+        }
+    }
+}
+
+test fn freezing_and_boiling_have_the_expected_celsius_values() {
+    let freezing = Fahrenheit { value = 32.0 }
+    let boiling = Fahrenheit { value = 212.0 }
+    let cold = Celsius.from(freezing)
+    let hot: Celsius = boiling.into()
+    testing.assert_eq(cold.value, 0.0, "water freezes at zero Celsius")?
+    testing.assert_eq(hot.value, 100.0, "water boils at one hundred Celsius")?
+}
+
+test fn thermostat_conversion_accepts_only_its_supported_range() {
+    let below_source = Celsius { value = 4.9 }
+    let minimum_source = Celsius { value = minimum_setpoint() }
+    let maximum_source = Celsius { value = maximum_setpoint() }
+    let above_source = Celsius { value = 35.1 }
+    let below = ThermostatSetting.try_from(below_source)
+    let minimum = ThermostatSetting.try_from(minimum_source)
+    let maximum = ThermostatSetting.try_from(maximum_source)
+    let above = ThermostatSetting.try_from(above_source)
+    testing.assert(below.is_none(), "thermostat accepted a setpoint below its operating range")?
+    testing.assert(minimum.is_some(), "thermostat rejected its minimum setpoint")?
+    testing.assert(maximum.is_some(), "thermostat rejected its maximum setpoint")?
+    testing.assert(above.is_none(), "thermostat accepted a setpoint above its operating range")?
+}
+
+test fn thermostat_conversion_observes_its_source() {
+    let source = Celsius { value = 20.0 }
+    let accepted = ThermostatSetting.try_from(source)
+    testing.assert_eq(source.value, 20.0, "TryFrom consumed its observed Celsius source")?
+    testing.assert(accepted.is_some(), "thermostat rejected a supported setpoint")?
+}
+
+test fn thermostat_conversion_rejects_nonfinite_values() {
+    let zero = 0.0
+    let one = 1.0
+    let nan_source = Celsius { value = zero / zero }
+    let infinite_source = Celsius { value = one / zero }
+    let rejected_nan = ThermostatSetting.try_from(nan_source)
+    let rejected_infinite = ThermostatSetting.try_from(infinite_source)
+    testing.assert(rejected_nan.is_none(), "thermostat accepted NaN")?
+    testing.assert(rejected_infinite.is_none(), "thermostat accepted infinity")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let readings: [Fahrenheit; _] = [
+        .{ value = 32.0 },
+        .{ value = 68.0 },
+        .{ value = 86.0 },
+        .{ value = 104.0 },
+    ]
+    for reading in readings {
+        let original = reading.value
+        // From defines the total Fahrenheit-to-Celsius relationship once;
+        // Into supplies its source-oriented spelling from that implementation.
+        let converted: Celsius = reading.into()
+        // TryInto comes from the TryFrom implementation the way Into comes
+        // from From. It only observes the Celsius value, so the report can
+        // still use it.
+        let setting: Option[ThermostatSetting] = converted.try_into()
+        match setting {
+            Some(accepted) => io.println("{original} F = {converted.value} C; thermostat accepts {accepted.celsius.value} C")?,
+            None => io.println("{original} F = {converted.value} C; thermostat rejects this setpoint")?,
+        }
+    }
+    .Ok(0)
+}

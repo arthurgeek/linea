@@ -1,0 +1,54 @@
+// A module may declare its own `Result`, `Option`, `Str` and `Writer` and
+// still derive the standard traits. A derived implementation reaches the
+// standard library's declarations by identity, so this module's own types
+// never stand in for them. The entry point names the standard `Result`
+// through its module.
+import std.hash
+import std.io
+import std.result
+
+// A match result in a table-tennis league.
+struct Result {
+    home: UInt8,
+    away: UInt8,
+}
+
+enum Option {
+    Singles,
+    Doubles,
+}
+
+struct Str {
+    court: UInt8,
+}
+
+struct Writer {
+    lines: UInt8,
+}
+
+@(copyable, derive(Debug, Display, Equatable, Equivalent, Comparable, hash.Hash, Default))
+struct Score {
+    points: UInt8,
+    games: UInt8,
+}
+
+fn main() -> result.Result[UInt8, io.IoError] {
+    let first = Score { points = 9, games = 3 }
+    let second = Score { points = 11, games = 2 }
+    let empty: Score = Default.default()
+    io.println("{first} {second:?} {empty}")?
+    let played = Result { home = first.games, away = second.games }
+    let kind = Option.Doubles
+    let table = Str { court = 4 }
+    let log = Writer { lines = 1 }
+    let same_hash = hash.Hash.hash(first) != hash.Hash.hash(second)
+    var code = UInt8(0)
+    if first < second && first != second && same_hash {
+        code = played.home + played.away + table.court + log.lines
+    }
+    match kind {
+        Singles => {},
+        Doubles => code = code + 1,
+    }
+    return .Ok(code)
+}

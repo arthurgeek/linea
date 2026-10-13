@@ -1,0 +1,11 @@
+// An empty `[borrow Never; 0]` is written with `borrow Never` as its element
+// type, so matching it against `[borrow T; 0]` settles `T` as `Never` through
+// the borrow.
+fn length[T](items: [borrow T; 0]) -> UInt64 {
+    items.length()
+}
+
+fn main() -> UInt8 {
+    let none: [borrow Never; 0] = []
+    UInt8(length(none))
+}

@@ -1,0 +1,18 @@
+fn lower[T: Integer](_type_witness: T) -> Int64 {
+    Int64(T.min)
+}
+
+fn upper[T: Integer](_type_witness: T) -> UInt64 {
+    UInt64(T.max)
+}
+
+fn main() -> UInt8 {
+    let largest_unsigned: UInt64 = 18446744073709551615
+    // Each instantiation uses its own signedness and width for both limits.
+    let correct = lower(Int8(0)) == -128 && upper(Int8(0)) == UInt64(127) && lower(Int16(0)) == -32768 && upper(Int16(0)) == UInt64(32767) && lower(Int32(0)) == -2147483648 && upper(Int32(0)) == UInt64(2147483647) && lower(Int64(0)) == -9223372036854775808 && upper(Int64(0)) == UInt64(9223372036854775807) && lower(UInt8(0)) == 0 && upper(UInt8(0)) == UInt64(255) && lower(UInt16(0)) == 0 && upper(UInt16(0)) == UInt64(65535) && lower(UInt32(0)) == 0 && upper(UInt32(0)) == UInt64(4294967295) && lower(UInt64(0)) == 0 && upper(UInt64(0)) == largest_unsigned
+    if correct {
+        0
+    } else {
+        1
+    }
+}

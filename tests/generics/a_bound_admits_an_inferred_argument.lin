@@ -1,0 +1,24 @@
+// A bound is a claim about every instantiation, so it holds wherever one is
+// made. It was checked where a type was written down and where a call settled
+// one, but not where a constructor's payload settled one -- so the same
+// program was refused with the annotation and accepted without it. `Maybe[T:
+// Copyable]` may not hold a `Key`, whichever of the two spellings reaches it.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+enum Maybe[T: Copyable] {
+    Nothing,
+    Just(T),
+}
+
+fn main() -> UInt8 {
+    let m = Maybe.Just(Key.Forged(1))
+    match m {
+        Nothing => 0,
+        Just(k) => match k {
+            Forged(n) => n,
+        },
+    }
+}

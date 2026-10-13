@@ -1,0 +1,27 @@
+trait Required[phantom I] {}
+
+trait Ready {}
+
+struct Generic[T] {
+    value: T,
+}
+
+template impl Ready where reflect.components: Required[Generic] {}
+
+struct First {
+    value: UInt8,
+}
+
+struct Second {
+    value: UInt8,
+}
+
+derive Ready for First
+
+derive Ready for Second
+
+fn main() -> UInt8 {
+    let _first: First = .{ value = 0 }
+    let _second: Second = .{ value = 0 }
+    0
+}

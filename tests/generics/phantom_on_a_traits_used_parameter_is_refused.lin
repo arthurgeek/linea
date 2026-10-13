@@ -1,0 +1,10 @@
+// A trait's parameter appearing in a signature is read there, and `phantom`
+// says it is read nowhere -- the same false claim a struct's field exposes,
+// one form over, told in the trait's own terms.
+pub trait Relate[phantom T] {
+    fn to(s: Self, other: T) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

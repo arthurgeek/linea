@@ -1,0 +1,23 @@
+// A `return` leaves the walk exactly as a `break` does, and leaves the places
+// past it holding the same values nothing took. Which keyword ends the walk
+// early says nothing about what the walk abandoned.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+fn upto(sink ts: [Token; 3]) -> UInt8 {
+    var total: UInt8 = 0
+    for t in ts {
+        let Token { n: v } = t
+        total += v
+        if total > 2 {
+            return total
+        }
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    upto([.{ n = 1 }, .{ n = 2 }, .{ n = 4 }])
+}

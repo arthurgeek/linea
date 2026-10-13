@@ -1,0 +1,6 @@
+// A highlight is what `references` says, narrowed to the document it was
+// asked about: the same name is used in a sibling file, and a highlight of
+// this document does not say so.
+fn main() -> UInt8 {
+    size() + twice()
+}

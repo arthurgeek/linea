@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/inout_captures/recovered_captures_keep_the_place_from_changing.lin:8:5
+  |
+8 |     count = 5
+  |     ^^^^^ keep this place available until the last use of its observation
+9 |     *lent
+  |     ----- the observation is still used here

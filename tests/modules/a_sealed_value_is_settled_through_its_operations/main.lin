@@ -1,0 +1,10 @@
+// The ticket reaches the end of `main` still owned. The report writes its type
+// as this module must, through `box_office`; the help names the operations
+// this module can call to settle it, and does not suggest taking it apart,
+// which only `box_office` may do.
+import box_office
+
+fn main() -> UInt8 {
+    let ticket = box_office.Ticket.sell(14)
+    box_office.seat_of(ticket)
+}

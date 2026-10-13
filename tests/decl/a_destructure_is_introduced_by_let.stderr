@@ -1,0 +1,12 @@
+error[S-Destructure]: use `let` to take a value apart
+  --> tests/decl/a_destructure_is_introduced_by_let.lin:12:5
+   |
+12 |     var Point { x: a, y: b } = p
+   |     ^^^ a destructuring binding is introduced by `let`
+error[N-Immutable]: `a` is declared with `let`
+  --> tests/decl/a_destructure_is_introduced_by_let.lin:13:5
+   |
+12 |     var Point { x: a, y: b } = p
+   |                    - declared with `let` here
+13 |     a = 3
+   |     ^ this binding cannot be assigned

@@ -1,0 +1,19 @@
+trait Label {
+    fn label(self: Self) -> UInt8
+}
+
+default impl[T: Copyable] Label for T {
+    fn label(_self: T) -> UInt8 {
+        1
+    }
+}
+
+default impl[T: Integer] Label for T {
+    fn label(_self: T) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    Label.label(3)
+}

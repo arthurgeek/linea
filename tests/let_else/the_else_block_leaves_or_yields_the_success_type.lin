@@ -1,0 +1,26 @@
+// An `else` block that completes supplies the binding's value, so it must
+// yield what the success carries. A block that yields anything else neither
+// leaves nor supplies a value.
+enum Fault {
+    Empty,
+}
+
+fn parse(digits: UInt8) -> Result[UInt16, Fault] {
+    if digits == 0 {
+        Result.Err(Fault.Empty)
+    } else {
+        Result.Ok(3)
+    }
+}
+
+fn main() -> UInt8 {
+    let port = parse(0) else |_| {
+        true
+    }
+    let other = parse(1) else |_| {}
+    if port == other {
+        0
+    } else {
+        1
+    }
+}

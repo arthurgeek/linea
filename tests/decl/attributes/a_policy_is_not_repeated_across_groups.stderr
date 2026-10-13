@@ -1,0 +1,5 @@
+error[S-Entry]: an attribute is written once
+ --> tests/decl/attributes/a_policy_is_not_repeated_across_groups.lin:2:3
+  |
+2 | @(copyable)
+  |   ^^^^^^^^ remove the repeated `copyable`

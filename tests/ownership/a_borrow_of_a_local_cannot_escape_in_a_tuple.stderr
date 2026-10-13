@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/a_borrow_of_a_local_cannot_escape_in_a_tuple.lin:5:5
+  |
+5 |     (borrow local, 1)
+  |     ^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

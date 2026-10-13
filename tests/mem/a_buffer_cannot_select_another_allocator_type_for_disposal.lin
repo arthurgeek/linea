@@ -1,0 +1,37 @@
+// Selecting a disposal implementation cannot change the buffer's allocator type.
+import std.mem
+
+use mem.Buffer
+use mem.Oom
+use mem.system
+
+@copyable
+enum Elsewhere { Only }
+
+impl Allocator for Elsewhere {
+    type Obligation = ()
+
+    fn acquire(_self: Elsewhere, _size: UInt64) -> Result[Buffer[Elsewhere], Oom] {
+        .Err(Oom.Exhausted)
+    }
+
+    fn dispose(sink b: Buffer[Elsewhere]) -> () {
+        let _length = b.length()
+        panic("this allocator never hands out buffers")
+    }
+}
+
+fn dispose_elsewhere(sink buffer: Buffer[Elsewhere]) -> () {
+    Allocator.dispose(buffer)
+}
+
+fn main() -> UInt8 {
+    let allocator = system()
+    match allocator.acquire(8) {
+        Err(_) => 0,
+        Ok(buffer) => {
+            dispose_elsewhere(buffer)
+            1
+        },
+    }
+}

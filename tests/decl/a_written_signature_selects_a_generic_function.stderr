@@ -1,0 +1,15 @@
+error[T-Infer]: the expected callable signature does not say what `U` is
+  --> tests/decl/a_written_signature_selects_a_generic_function.lin:19:105
+   |
+19 |     let _incomplete: fn(read value: fn(read other: UInt8) -> UInt8) -> fn(read other: UInt8) -> UInt8 = incomplete
+   |                                                                                                         ^^^^^^^^^^ no value represents an unselected function family
+error[T-Mismatch]: `T` would be both `UInt8` and `UInt16` under this callable signature
+  --> tests/decl/a_written_signature_selects_a_generic_function.lin:20:64
+   |
+20 |     let _conflicting_result: fn(read value: UInt8) -> UInt16 = family
+   |                                                                ^^^^^^ the expected signature does not select one instantiation
+error[T-Bound]: `T` requires `Copyable`, and `Token` does not have that capability
+  --> tests/decl/a_written_signature_selects_a_generic_function.lin:21:58
+   |
+21 |     let _outside_bound: fn(read value: Token) -> Token = bounded
+   |                                                          ^^^^^^^ use a type meeting the capability requirement, or relax the bound

@@ -1,0 +1,25 @@
+// A bracket on a container is the projection its `Index` implementation
+// declares, spliced into the site: `g[0]` names the place `g.cells[0]` names,
+// so it is read, assigned and lent exactly as that path is.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn bump(inout x: UInt8) -> () {
+    x = x + 10
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4] }
+    g[0] = 40
+    bump(&g[1])
+    g[0] + g[1] + g[2]
+}

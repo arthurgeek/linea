@@ -1,0 +1,6 @@
+import vault
+
+fn main() -> UInt8 {
+    let _wrap: fn(sink code: UInt8) -> vault.Error = .Allocation
+    0
+}

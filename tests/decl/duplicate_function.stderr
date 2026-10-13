@@ -1,0 +1,5 @@
+error[N-Duplicate]: `f` is already declared
+ --> tests/decl/duplicate_function.lin:5:4
+  |
+5 | fn f() -> UInt8 {
+  |    ^ a name is declared once

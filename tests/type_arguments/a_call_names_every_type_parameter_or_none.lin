@@ -1,0 +1,12 @@
+// `pair` declares `A` and `B`. A call names both in brackets, or neither and
+// lets its arguments settle them; naming only `A` is refused.
+fn pair[A, B: Discardable](sink first: A, _second: B) -> A where carries(first) {
+    first
+}
+
+fn main() -> UInt8 {
+    let _both = pair[Bool, UInt8](true, 3)
+    let _neither = pair(true, 3)
+    let _one = pair[Bool](true, 3)
+    0
+}

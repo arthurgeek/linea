@@ -1,0 +1,5 @@
+error[N-Variant]: `Allocation` is not a variant of `ExpectedError`
+ --> tests/constructor_callables/contextual_variants/expected_enum_must_contain_the_variant.lin:7:56
+  |
+7 |     let _wrap: fn(sink code: UInt8) -> ExpectedError = .Allocation
+  |                                                        ^^^^^^^^^^^ not a variant of the expected constructor result

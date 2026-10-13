@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Show` is already implemented for `Tuple2`
+  --> tests/tuples/one_implementation_covers_every_tuple_of_an_arity.lin:17:6
+   |
+11 | impl Show for (First, UInt8) {
+   |      ---- already implemented here
+17 | impl Show for (Second, UInt8) {
+   |      ^^^^ a trait is implemented once for all tuples of one arity

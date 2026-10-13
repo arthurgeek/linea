@@ -1,0 +1,42 @@
+import std.io
+
+struct First {}
+
+struct Later {}
+
+impl Equatable for First {
+    fn equals(_self: First, _other: First) -> Bool {
+        match io.println("first") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        false
+    }
+}
+
+impl Equatable for Later {
+    fn equals(_self: Later, _other: Later) -> Bool {
+        match io.println("later") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+        true
+    }
+}
+
+struct Pair {
+    first: First,
+    later: Later,
+}
+
+derive Equatable for Pair
+
+fn main() -> UInt8 {
+    let left: Pair = .{ first = .{}, later = .{} }
+    let right: Pair = .{ first = .{}, later = .{} }
+    if Equatable.equals(left, right) {
+        1
+    } else {
+        0
+    }
+}

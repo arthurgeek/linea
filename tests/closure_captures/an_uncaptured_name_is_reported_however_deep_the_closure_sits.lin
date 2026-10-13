@@ -1,0 +1,30 @@
+// Each inner closure uses `count` without capturing it. Its enclosing
+// closure is refused for a reason of its own, and both errors are reported.
+fn wrong_result(count: UInt8) -> UInt8 {
+    let outer = || -> UInt8 {
+        let inner = || count + 1
+        inner() + "one"
+    }
+    outer()
+}
+
+fn wrong_annotation(count: UInt8) -> UInt8 {
+    let _outer: UInt8 = || {
+        let inner = || count + 2
+        inner()
+    }
+    0
+}
+
+fn unknown_callee(count: UInt8) -> UInt8 {
+    lookup(
+        || {
+            let inner = || count + 3
+            inner()
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    wrong_result(1) + wrong_annotation(2) + unknown_callee(3)
+}

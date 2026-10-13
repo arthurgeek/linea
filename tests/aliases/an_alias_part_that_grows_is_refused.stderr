@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `S` with more than `Deeper` was given
+ --> tests/aliases/an_alias_part_that_grows_is_refused.lin:7:19
+  |
+7 | alias Deeper[U] = S[Option[U]]
+  |                   ^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

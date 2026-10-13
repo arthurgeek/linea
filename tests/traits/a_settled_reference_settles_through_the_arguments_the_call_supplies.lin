@@ -1,0 +1,51 @@
+// Associated types settle using both the receiver and the supplied trait
+// arguments. Each Holds implementation produces and consumes its own Item.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[A] {
+    type Item
+
+    fn of(x: Self, a: A) -> Self.Item where carries()
+
+    fn score(x: Self, a: A, sink v: Self.Item) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    type Item = UInt8
+
+    fn of(x: Self, a: UInt8) -> Self.Item where carries() {
+        x.count + a
+    }
+
+    fn score(_x: Self, _a: UInt8, sink v: Self.Item) -> UInt8 {
+        v
+    }
+}
+
+impl Holds[Bool] for Coins {
+    type Item = Bool
+
+    fn of(_x: Self, a: Bool) -> Self.Item where carries() {
+        a
+    }
+
+    fn score(_x: Self, _a: Bool, sink v: Self.Item) -> UInt8 {
+        if v {
+            4
+        } else {
+            0
+        }
+    }
+}
+
+fn wrap[A](c: Coins, a: A) -> UInt8 {
+    Holds.score(c, a, Holds.of(c, a))
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: UInt8 = 0
+    wrap(c, n) + wrap(c, true)
+}

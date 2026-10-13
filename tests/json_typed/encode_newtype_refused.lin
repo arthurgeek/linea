@@ -1,0 +1,13 @@
+import std.json
+
+type Count = UInt8
+
+derive json.Encode for Count
+
+fn main() -> UInt8 {
+    let value = Count(1)
+    var output = String.new()
+    json.encode(&output, value).unwrap()
+    output.release()
+    return 0
+}

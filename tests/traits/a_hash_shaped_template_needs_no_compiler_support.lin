@@ -1,0 +1,45 @@
+// A user trait with a Hash-shaped structural operation needs no compiler-known
+// name or branch: its library-owned template uses the same erased reflection.
+trait Fingerprint {
+    fn fingerprint(self: Self) -> UInt64
+}
+
+impl Fingerprint for UInt64 {
+    fn fingerprint(self: UInt64) -> UInt64 {
+        self
+    }
+}
+
+template impl Fingerprint where reflect.components: Fingerprint {
+    fn fingerprint(self: Self) -> UInt64 {
+        var answer: UInt64 = 0
+        match read self {
+            reflect.case => {
+                for component in reflect.components {
+                    answer = answer + Fingerprint.fingerprint(component.of(self))
+                }
+            },
+        }
+        answer
+    }
+}
+
+struct Point {
+    x: UInt64,
+    y: UInt64,
+}
+
+derive Fingerprint for Point
+
+enum Shape {
+    Empty,
+    Pair(UInt64, Point),
+}
+
+derive Fingerprint for Shape
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 2, y = 3 }
+    let shape: Shape = .Pair(5, point)
+    UInt8(Fingerprint.fingerprint(shape))
+}

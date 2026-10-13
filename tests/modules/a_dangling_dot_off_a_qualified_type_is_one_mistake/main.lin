@@ -1,0 +1,11 @@
+// A qualified type left of a dangling dot is still the base of a selection,
+// not the value position: the dot with nothing after it is the parser's
+// mistake to report, and the type underneath the qualifier is not a second
+// one. An unqualified `Thing.` reports the dangling dot alone, and a
+// qualifier in front changes nothing about which mistake this is.
+import pct
+
+fn main() -> UInt8 {
+    let _v = pct.Thing.
+    0
+}

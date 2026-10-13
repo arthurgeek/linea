@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrow_storage/a_copied_view_keeps_its_vector_from_growing.lin:12:9
+   |
+12 |         &readings.push(pass).unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+13 |         total += kept[0] + view.length()
+   |                  ------- the observation is still used here

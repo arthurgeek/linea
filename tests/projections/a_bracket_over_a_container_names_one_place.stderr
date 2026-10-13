@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/projections/a_bracket_over_a_container_names_one_place.lin:25:16
+   |
+25 |     two(&g[0], g[1])
+   |         ----- mutated by this argument
+   |                ^^^^ already passed `&` here

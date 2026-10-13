@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Score` is already implemented for `Mark`
+  --> tests/traits/attached_derives/an_attached_derive_conflicts_with_an_explicit_implementation.lin:11:9
+   |
+11 | @derive(Score)
+   |         ^^^^^ a trait is implemented once for a type
+14 | impl Score for Mark {
+   |      ----- already implemented here

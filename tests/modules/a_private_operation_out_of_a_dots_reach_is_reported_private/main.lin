@@ -1,0 +1,9 @@
+// `Door` declares `close`, but privately, so a postfix call from here cannot
+// take it. The call is refused for that reason rather than as a field the
+// type does not have.
+import door
+
+fn main() -> UInt8 {
+    let d = door.Door.make(4)
+    d.close()
+}

@@ -1,0 +1,5 @@
+error[T-Lend]: `Grid` declares no traversal
+  --> tests/iter/a_walk_over_a_type_without_a_traversal_is_refused_once.lin:18:22
+   |
+18 |     for read cell in grid {
+   |                      ^^^^ declare one with `trav`, beside the projection its positions index

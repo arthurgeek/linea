@@ -1,0 +1,9 @@
+type Count = UInt64
+
+fn invalid() -> borrow UInt64 where carries() {
+    match read Count(19) { Count(value) => borrow value }
+}
+
+fn main() -> UInt8 {
+    UInt8(*invalid())
+}

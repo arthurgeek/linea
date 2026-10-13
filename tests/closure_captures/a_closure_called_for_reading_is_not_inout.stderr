@@ -1,0 +1,5 @@
+error[T-Call]: this closure is declared `inout`, and `apply` calls it for reading
+  --> tests/closure_captures/a_closure_called_for_reading_is_not_inout.lin:10:9
+   |
+10 |         inout [sink seen = UInt8(0)] || {
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `apply` calls its callback for reading, so the callback cannot change its captures; pass the closure to a function whose callback is an `inout fn`, or keep what changes in a value `apply` lends it

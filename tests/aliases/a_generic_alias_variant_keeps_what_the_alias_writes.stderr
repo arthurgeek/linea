@@ -1,0 +1,5 @@
+error[T-Mismatch]: `Failing` writes `Result[T, Int64]` here, and this is a `Result[UInt8, Str]`
+ --> tests/aliases/a_generic_alias_variant_keeps_what_the_alias_writes.lin:4:59
+  |
+4 |     let fail: fn(sink value: Str) -> Result[UInt8, Str] = Failing.Err
+  |                                                           ^^^^^^^^^^^ the alias fixes this type

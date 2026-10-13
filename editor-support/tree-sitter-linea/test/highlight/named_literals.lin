@@ -1,0 +1,11 @@
+fn make(value: UInt8) -> Cell {
+    let cell = Cell { value }
+//             ^ type
+//                    ^ variable.other.member
+    let nested = boxes.Cell[UInt8] { value = cell.value }
+//                     ^ type
+//                          ^ type.builtin
+//                                   ^ variable.other.member
+//                                                ^ variable.other.member
+    nested
+}

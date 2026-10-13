@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/ownership/a_read_pattern_lends_both_components.lin:6:5
+  |
+6 |     place._0 = 9
+  |     ^^^^^^^^ keep this place available until the last use of its observation
+7 |     a + b
+  |     - the observation is still used here

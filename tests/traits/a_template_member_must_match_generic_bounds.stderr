@@ -1,0 +1,5 @@
+error[T-Template]: `Structural` does not bound `value`'s `T` by `Second`
+  --> tests/traits/a_template_member_must_match_generic_bounds.lin:10:8
+   |
+10 |     fn value[T: Second](_self: Self, _value: T) -> UInt8 {
+   |        ^^^^^ drop it; the signature is what every call is checked against

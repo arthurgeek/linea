@@ -1,0 +1,39 @@
+// `Self` in a return type, in two `impl` blocks over two generic types. What
+// an instantiation is called is decided by the declaration it reaches, so both
+// of these are named by the type they instantiate rather than by the four
+// letters written at the use site.
+//
+// Named from the token instead, both are a `Self[UInt8]`: one generic function
+// called with each mints one symbol twice, and the program is refused by the
+// assembler under an I/O status rather than by anything that knows what it is
+// looking at. Which spelling wins also depends on whichever site interned the
+// pair first, so an unrelated declaration decides a function's symbol.
+struct Cell[T] {
+    v: T,
+}
+
+struct Box[T] {
+    v: T,
+}
+
+impl Cell[UInt8] {
+    fn zero() -> Self {
+        .{ v = 1 }
+    }
+}
+
+impl Box[UInt8] {
+    fn zero() -> Self {
+        .{ v = 2 }
+    }
+}
+
+fn id[T](sink x: T) -> T {
+    x
+}
+
+fn main() -> UInt8 {
+    let a: Cell[UInt8] = id(Cell.zero())
+    let b: Box[UInt8] = id(Box.zero())
+    a.v + b.v
+}

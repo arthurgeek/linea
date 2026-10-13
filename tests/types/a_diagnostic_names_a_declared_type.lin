@@ -1,0 +1,62 @@
+// How a type is spelled in a message is one question, and the pool is what
+// answers it. `TypeId.nameOf` answers for the builtins alone -- its own doc
+// says so -- and every message that asked it printed `<compound>` for anything
+// a program declared, which names no type at all.
+//
+// The sibling cases for these rules all compare a builtin, so each exercised
+// only the half where the two agreed. This one reaches every message with a
+// declared type.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn make() -> Pair {
+    .{ a = 1, b = 2 }
+}
+
+fn discards() -> UInt8 {
+    make()
+    3
+}
+
+fn condition() -> UInt8 {
+    if make() {
+        1
+    } else {
+        0
+    }
+}
+
+fn arms() -> UInt8 {
+    if 1 > 0 {
+        make()
+    }
+    3
+}
+
+fn loops() -> UInt8 {
+    while false {
+        make()
+    }
+    3
+}
+
+fn converts() -> UInt8 {
+    let p: Pair = make()
+    UInt8(p)
+}
+
+fn orders() -> UInt8 {
+    let p: Pair = make()
+    let q: Pair = make()
+    if p < q {
+        1
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    discards() + condition() + arms() + loops() + converts() + orders()
+}

@@ -1,0 +1,68 @@
+// Process a batch of payments against an available balance. Each transaction
+// must be committed or rolled back after it leaves the vector.
+import std.mem
+import std.io
+
+@linear
+struct Transaction {
+    recipient: Str,
+    // Payment amounts and the available balance are measured in whole cents.
+    amount: UInt64,
+}
+
+fn commit(sink transaction: Transaction) -> Result[(), io.IoError] {
+    let { recipient, amount } = transaction
+    io.println("Paid {recipient}: {amount} cents.")
+}
+
+fn rollback(sink transaction: Transaction) -> Result[(), io.IoError] {
+    let { recipient, amount } = transaction
+    io.println("Declined {recipient}: {amount} cents (insufficient funds).")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `Vec.from_fn` allocates room for all three payments before building
+    // any, so a failed allocation never leaves a `@linear` transaction unsettled.
+    // The annotation gives the struct literals below their type.
+    let payments: Vec[Transaction] = Vec.from_fn(
+        mem.system(),
+        count: 3,
+        initializer: |index| match index {
+            0 => .{ recipient = "rent", amount = 7000 },
+            1 => .{ recipient = "equipment", amount = 5000 },
+            _ => .{ recipient = "internet", amount = 1200 },
+        },
+    ) else |_| {
+        io.eprintln("not enough memory for the payment batch")
+        return .Ok(1)
+    }
+
+    var balance: UInt64 = 10000
+    var output: Result[(), io.IoError] = .Ok(())
+    // `drain` hands the payments over in the order they were queued, and
+    // `for transaction in &pending` lends the drain to the loop, so `finish`
+    // can still check it afterwards.
+    var pending = payments.drain()
+    for transaction in &pending {
+        // Each branch must commit the payment or roll it back.
+        let wrote = if transaction.amount <= balance {
+            balance -= transaction.amount
+            commit(transaction)
+        } else {
+            rollback(transaction)
+        }
+        // Keep going after a print error, so every payment is still decided.
+        if wrote.is_err() {
+            output = wrote
+        }
+    }
+
+    // `finish` succeeds only once every payment has been handed over.
+    match pending.finish() {
+        Ok(_) => {},
+        Err(_) => panic("unprocessed payments remain"),
+    }
+    output?
+    io.println("Balance remaining: {balance} cents.")?
+    .Ok(0)
+}

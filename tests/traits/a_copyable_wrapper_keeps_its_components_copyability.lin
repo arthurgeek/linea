@@ -1,0 +1,27 @@
+// A conditional copyable wrapper can duplicate a copyable component that
+// also implements an ordinary trait.
+@copyable
+struct Weight {
+    grams: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Weight {
+    fn of(x: Self) -> UInt8 {
+        x.grams
+    }
+}
+
+@copyable
+struct Scale[T: Measure] {
+    load: T,
+}
+
+fn main() -> UInt8 {
+    let s: Scale[Weight] = .{ load = .{ grams = 3 } }
+    let twin = copy(s)
+    s.load.grams + twin.load.grams
+}

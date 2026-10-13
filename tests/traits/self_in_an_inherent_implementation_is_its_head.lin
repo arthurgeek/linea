@@ -1,0 +1,17 @@
+// An inherent implementation names a head the way one naming a trait does, so
+// `Self` inside it is that head: the constructor applied to what the head
+// wrote. Writing `Coins[UInt8]` where `Self` stands writes the same type.
+struct Coins[T] {
+    n: T,
+}
+
+impl Coins[UInt8] {
+    pub fn count(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins[UInt8] = .{ n = 4 }
+    Coins.count(c)
+}

@@ -1,0 +1,19 @@
+@linear
+enum Token {
+    One,
+}
+
+trait Duplicable
+where Self: Copyable {
+    fn duplicate(self: Self) -> Self
+}
+
+impl Duplicable for Token {
+    fn duplicate(_self: Token) -> Token {
+        panic("not called")
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,18 @@
+// A trait signature whose sources are ambiguous is reported at the trait. The
+// implementation adopts that undeclared contract and adds no error of its own.
+trait Chooser {
+    fn choose(self: Self, left: Str, right: Str) -> Str
+}
+
+struct First {}
+
+impl Chooser for First {
+    fn choose(_self: Self, left: Str, _right: Str) -> Str {
+        copy(left)
+    }
+}
+
+fn main() -> UInt8 {
+    let _chosen = First {}.choose("a", "b")
+    0
+}

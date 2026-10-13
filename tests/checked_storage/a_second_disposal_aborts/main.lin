@@ -1,0 +1,12 @@
+// Disposing of one allocation twice aborts rather than handing its storage
+// to two later owners.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+
+fn main() -> UInt8 {
+    let at = linea_alloc(16, 8)
+    linea_free(at, 16, 8)
+    linea_free(at, 16, 8)
+    0
+}

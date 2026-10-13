@@ -1,0 +1,5 @@
+error[N-NotCallable]: this expression has type `UInt8`, which carries no callable signature
+ --> tests/structs/a_field_holding_no_function_cannot_be_called.lin:9:16
+  |
+9 |     let size = (b.f)()
+  |                ^^^^^ this field holds no callable value

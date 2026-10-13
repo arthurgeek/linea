@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Box` has no operation `size`
+ --> tests/structs/a_method_call_does_not_reach_a_field_holding_no_function.lin:9:5
+  |
+9 |     box.size()
+  |     ^^^^^^^^ `size` is a field holding `UInt8`, and a call does not reach a field

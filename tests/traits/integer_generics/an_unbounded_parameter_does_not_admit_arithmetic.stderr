@@ -1,0 +1,5 @@
+error[T-Operands]: `T` is not a number
+ --> tests/traits/integer_generics/an_unbounded_parameter_does_not_admit_arithmetic.lin:2:10
+  |
+2 |     left + right
+  |          ^ arithmetic is defined over integers

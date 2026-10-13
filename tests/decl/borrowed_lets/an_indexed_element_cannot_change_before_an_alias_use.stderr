@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/decl/borrowed_lets/an_indexed_element_cannot_change_before_an_alias_use.lin:6:5
+  |
+6 |     points[0].x = 9
+  |     ^^^^^^^^^^^ keep this place available until the last use of its observation
+7 |     x
+  |     - the observation is still used here

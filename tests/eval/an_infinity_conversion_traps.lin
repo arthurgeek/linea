@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let one = 1.0
+    let zero = 0.0
+    let infinity = one / zero
+    let _n = Int64(infinity)
+    0
+}

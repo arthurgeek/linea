@@ -1,0 +1,6 @@
+error[T-Literal]: `UInt8` cannot hold 256
+ --> tests/constants/aggregates/payload_overflow.lin:4:24
+  |
+4 | let mode: Mode = .Size(256)
+  |                  ----- expected because of what this variant carries
+  |                        ^^^ literal is out of range for its type

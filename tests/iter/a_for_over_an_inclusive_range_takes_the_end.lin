@@ -1,0 +1,11 @@
+// `..=` includes its end, so a walk over one yields the end as its last
+// element. The pair with the half-open case: the walk reads the range's own
+// answer about where it stops rather than deciding it.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..=5
+    var total: UInt8 = 0
+    for x in xs {
+        total += x
+    }
+    total
+}

@@ -1,0 +1,33 @@
+// A head position naming a parameter another position already bound binds
+// nothing: the first position decides what the family is generic over and the
+// rest of them settle. Two positions writing into one binding would leave the
+// last of them deciding what the whole family binds, and a member would be
+// lowered at a type its receiver never supplied there.
+//
+// Enforced where the head is read rather than assumed where a binding is
+// filled. A repeated name is reported and the pass keeps walking, because a
+// tree is always complete and every pass below one has to hold -- so an
+// invariant a diagnostic was supposed to guarantee is one nothing guarantees.
+//
+// Reached only through a trait that takes arguments of its own, because what
+// an implementation supplied for them is settled by binding the head first.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl[_T, _T] Give[_T] for Pair[_T, _T] {
+    fn give(_self: Self, _u: _T) -> UInt8 {
+        5
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8, UInt8] = .{ a = 1, b = 2 }
+    let n: UInt8 = 1
+    Give.give(p, n)
+}

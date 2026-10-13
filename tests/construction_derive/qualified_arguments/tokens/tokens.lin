@@ -1,0 +1,4 @@
+@copyable
+pub struct Token {
+    value: UInt8,
+}

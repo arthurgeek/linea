@@ -1,0 +1,9 @@
+trait Integer {}
+
+fn _convert[T: Integer](value: T) -> UInt8 {
+    UInt8(value)
+}
+
+fn main() -> UInt8 {
+    0
+}

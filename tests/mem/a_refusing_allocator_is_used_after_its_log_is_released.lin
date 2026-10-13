@@ -1,0 +1,17 @@
+import std.mem
+
+use mem.AllocationLog
+
+fn main() -> UInt8 {
+    let log = AllocationLog.open(mem.system(), 0).unwrap()
+    let allocator = log.allocator()
+    // Releasing the log frees what the handle records into.
+    log.release()
+    match allocator.acquire(64) {
+        Ok(buffer) => {
+            buffer.release()
+            1
+        },
+        Err(_) => 2,
+    }
+}

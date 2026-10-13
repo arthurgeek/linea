@@ -1,0 +1,23 @@
+fn main() -> UInt8 {
+    let zero = 0.0
+    let nan = zero / zero
+    if nan == nan {
+        return 1
+    }
+    if nan < nan {
+        return 2
+    }
+    if nan <= nan {
+        return 3
+    }
+    if nan > nan {
+        return 4
+    }
+    if nan >= nan {
+        return 5
+    }
+    if !(nan != nan) {
+        return 6
+    }
+    0
+}

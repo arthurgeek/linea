@@ -1,0 +1,8 @@
+@copyable
+pub struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { value = 7 }
+    let other = copy(point)
+    other.value - point.value
+}

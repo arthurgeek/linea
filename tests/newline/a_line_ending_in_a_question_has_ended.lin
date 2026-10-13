@@ -1,0 +1,23 @@
+// `?` ends an expression, so a newline after one ends the statement. The `-`
+// below is a negation of its own rather than a subtraction from what `?`
+// yielded, and the note says so rather than the parser choosing for the author.
+//
+// Without `question` among the tokens a statement can end with, the line
+// continues: `let n = some()? - n` names `n` inside its own initialiser, and
+// what this case records is a different program entirely.
+fn some() -> Option[Int64] {
+    Option.Some(9)
+}
+
+fn go() -> Option[Int64] {
+    let n = some()?
+    -n
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(_) => 1,
+        None => 0,
+    }
+}

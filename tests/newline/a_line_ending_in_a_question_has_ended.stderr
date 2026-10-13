@@ -1,0 +1,10 @@
+note[S-Continuation]: the next line begins with `-`, which could have continued the expression above
+  --> tests/newline/a_line_ending_in_a_question_has_ended.lin:14:5
+   |
+14 |     -n
+   |     ^ end the previous line with it if that was meant
+error[T-Discard]: this expression produces an `Int64` that is discarded
+  --> tests/newline/a_line_ending_in_a_question_has_ended.lin:14:5
+   |
+14 |     -n
+   |     ^^ bind it with `let _ =` to discard it deliberately

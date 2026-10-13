@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/codegen/minus_one_times_signed_minimum_traps.lin:2:9

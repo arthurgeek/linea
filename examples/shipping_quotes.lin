@@ -1,0 +1,95 @@
+// Quote parcel delivery from a rate card. Weights are grams; prices are cents.
+import std.io
+import std.testing
+
+// `@copyable` permits explicit `copy(...)` of these types, which lets `main`
+// duplicate the rate card and edit the duplicate.
+@copyable
+enum Service {
+    Standard,
+    Express,
+}
+
+@copyable
+struct Rate {
+    base_cents: UInt64,
+    per_kg_cents: UInt64,
+}
+
+@copyable
+struct Tariff {
+    maximum_grams: UInt64,
+    rates: [Rate; 2],
+}
+
+// A constant can hold nested records and arrays. The type annotation supplies
+// the field and element types for these contextual literals.
+let rate_card: Tariff = .{
+    maximum_grams = 20000,
+    rates = [
+        .{ base_cents = 300, per_kg_cents = 125 },
+        .{ base_cents = 650, per_kg_cents = 200 },
+    ],
+}
+
+// Omitted arguments select standard delivery and the published rate card.
+// Named arguments override either choice independently.
+fn quote(weight_grams: UInt64, service: Service = .Standard, tariff: Tariff = rate_card) -> Option[UInt64] {
+    if weight_grams == 0 || weight_grams > tariff.maximum_grams {
+        return .None
+    }
+    let index: UInt64 = match service {
+        Standard => 0,
+        Express => 1,
+    }
+    // Charge each started kilogram; subtract before rounding to avoid overflow.
+    let kilograms = (weight_grams - 1) / 1000 + 1
+    // `borrow` names the selected rate in place instead of copying it out.
+    let rate = borrow tariff.rates[index]
+    .Some(rate.base_cents + kilograms * rate.per_kg_cents)
+}
+
+test fn quotes_charge_each_started_kilogram() {
+    testing.assert_eq(quote(1000), .Some(425), "one kilogram uses one weight charge")?
+    testing.assert_eq(quote(1001), .Some(550), "a partial kilogram adds one weight charge")?
+    testing.assert_eq(quote(1001, service: .Express), .Some(1050), "express uses its own rate")?
+    testing.assert_eq(quote(0), .None, "an empty parcel has no shipping quote")?
+    testing.assert_eq(quote(20000), .Some(2800), "a parcel at the weight limit is accepted")?
+    testing.assert_eq(quote(20001), .None, "an overweight parcel has no shipping quote")?
+}
+
+test fn a_custom_tariff_keeps_the_published_card_unchanged() {
+    var local = copy(rate_card)
+    local.rates[0].base_cents = 200
+    local.maximum_grams = 5000
+    testing.assert_eq(quote(1000, tariff: local), .Some(325), "the local base charge was ignored")?
+    testing.assert_eq(quote(5001, tariff: local), .None, "the local weight limit was ignored")?
+    testing.assert_eq(quote(1000), .Some(425), "customizing a copy changed the rate card")?
+}
+
+fn print_quote(label: Str, price: Option[UInt64]) -> Result[(), io.IoError] {
+    match read price {
+        Some(cents) => {
+            let dollars = cents / 100
+            let remainder = cents % 100
+            // `:02` pads the cents to two digits, so 1205 cents prints as $12.05.
+            io.println("{label}: ${dollars}.{remainder:02}")?
+        },
+        None => io.println("{label}: weight outside the delivery limit")?,
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    print_quote("Standard, 2.5 kg", quote(2500))?
+    print_quote("Express, 2.5 kg", quote(2500, service: .Express))?
+    print_quote("Standard, 21 kg", quote(21000))?
+
+    // copy creates a separate tariff that can be edited without changing
+    // the constant or the default used by other calls.
+    var local = copy(rate_card)
+    local.rates[0].base_cents = 200
+    local.maximum_grams = 5000
+    print_quote("Local, 2.5 kg", quote(2500, tariff: local))?
+    .Ok(0)
+}

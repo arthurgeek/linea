@@ -1,0 +1,26 @@
+// `take` returns what the box holds. For a `Box[Ticket]` that is a linear
+// `Ticket`, so taking the box with `take` hands back something still owed,
+// and the report does not name it.
+@linear
+struct Ticket {
+    code: UInt8,
+}
+
+@linear
+struct Box[T] {
+    item: T,
+}
+
+impl[T] Box[T] {
+    fn take(sink self: Self) -> T {
+        let Box { item } = self
+        item
+    }
+}
+
+fn main() -> UInt8 {
+    let _held: Box[Ticket] = .{ item = Ticket { code = 3 } }
+    let used: Box[Ticket] = .{ item = Ticket { code = 4 } }
+    let Ticket { code } = used.take()
+    code
+}

@@ -1,0 +1,8 @@
+// `^k` names the k-th place from the end: `a[^1]` is the last element and
+// `a[^2]` the one before it. What it counts back by is an ordinary expression,
+// so a parenthesised one counts back by whatever that works out to.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    var k: UInt64 = 1
+    a[^1] + a[^2] + a[^(k + 1)]
+}

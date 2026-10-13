@@ -1,0 +1,21 @@
+import std.io
+
+struct Observed { number: borrow UInt64 }
+
+impl Display for Observed {
+    fn fmt[W: Writer](self: Observed, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Display.fmt(*self.number, &w)
+    }
+}
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 7
+    let value: Observed = .{ number = borrow owner }
+    var writer = io.descriptor(-1)
+    let failed = match Display.fmt(value, &writer) { Ok(_) => false, Err(_) => true }
+    if failed {
+        0
+    } else {
+        1
+    }
+}

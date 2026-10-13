@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Parse`, and `Bool` does not implement it
+ --> tests/type_arguments/a_type_argument_meets_its_bound.lin:3:30
+  |
+3 |     let _flag = "true".parse[Bool]()
+  |                              ^^^^ implement it for that type, or drop the bound

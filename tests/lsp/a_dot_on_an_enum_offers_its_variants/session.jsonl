@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A dot on an enum's name opens the namespace that name is written for, and\n// what may follow it is a variant, `Colour.Red`, or an operation of a trait\n// the enum implements. What a value of the enum holds is a different\n// question, asked of a value, and the enum's name is not one.\nenum Colour { Red, Green }\n\nfn shade(c: Colour) -> UInt8 {\n    match read c {\n        Red => 1,\n        Green => 0,\n    }\n}\n\nfn main() -> UInt8 {\n    shade(Colour.Red)\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":14,"character":17}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

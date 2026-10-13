@@ -1,0 +1,22 @@
+// An implementation whose head applies settled arguments declares no
+// parameters of its own, so it binds nothing and answers for exactly the one
+// type its head names. The same rule as a family's, with nothing to bind.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl Show for Pair[UInt8, Bool] {
+    fn show(self: Pair[UInt8, Bool]) -> UInt8 {
+        self.a
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8, Bool] = .{ a = 5, b = true }
+    Show.show(p)
+}

@@ -1,0 +1,11 @@
+error[S-String]: unterminated string literal
+ --> tests/diag/unterminated_string.lin:2:13
+  |
+2 |     let s = "unterminated
+  |             ^^^^^^^^^^^^^ string starts here and is never closed
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/diag/unterminated_string.lin:1:20
+  |
+1 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+  |                    ^ this body produces nothing

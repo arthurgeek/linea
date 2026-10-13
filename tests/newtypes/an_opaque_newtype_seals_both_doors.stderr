@@ -1,0 +1,15 @@
+error[M-Opaque]: `Token` is opaque outside `vault`
+  --> tests/newtypes/an_opaque_newtype_seals_both_doors/main.lin:10:14
+   |
+10 |     let _a = Token(1)
+   |              ^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Token` is opaque outside `vault`
+  --> tests/newtypes/an_opaque_newtype_seals_both_doors/main.lin:11:14
+   |
+11 |     let _b = Token?(1)
+   |              ^^^^^^^^^ only its own module can build one
+error[M-Opaque]: `Token` is opaque outside `vault`
+  --> tests/newtypes/an_opaque_newtype_seals_both_doors/main.lin:12:9
+   |
+12 |     let Token(_x) = t
+   |         ^^^^^^^^^ only its own module can take one apart

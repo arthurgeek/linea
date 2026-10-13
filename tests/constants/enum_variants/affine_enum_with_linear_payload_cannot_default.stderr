@@ -1,0 +1,5 @@
+error[T-Default]: a constant of `Choice` would be built where nothing settles it
+ --> tests/constants/enum_variants/affine_enum_with_linear_payload_cannot_default.lin:6:28
+  |
+6 | fn inspect(value: Choice = .Empty) -> UInt8 {
+  |                            ^^^^^^ a value of this type must be settled, so it cannot be a constant

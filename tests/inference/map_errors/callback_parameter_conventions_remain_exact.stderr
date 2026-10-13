@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `inout fn(sink UInt8) -> UInt16`, found `fn(read UInt8) -> UInt16`
+ --> tests/inference/map_errors/callback_parameter_conventions_remain_exact.lin:7:35
+  |
+7 |     let _mapped = failure.map_err(widen)
+  |                                   ^^^^^ expected `inout fn(sink UInt8) -> UInt16`, found `fn(read UInt8) -> UInt16`
+ ::: std/result/result.lin
+L |     pub fn map_err[U, F: inout fn(sink error: E) -> U](sink self: Self, sink transform: F) -> Result[T, U] where carries ...
+  |                                                                              --------- expected because of this parameter

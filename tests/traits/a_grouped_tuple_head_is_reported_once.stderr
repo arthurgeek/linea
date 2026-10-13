@@ -1,0 +1,10 @@
+error[S-Name]: expected a type name, `()` or a tuple; `(T)` groups a type
+  --> tests/traits/a_grouped_tuple_head_is_reported_once.lin:11:21
+   |
+11 | impl[A, B] Show for ((A, B)) {
+   |                     ^ an implementation names the type that satisfies the trait
+error[S-Name]: expected a type name, `()` or a tuple; `(T)` groups a type
+  --> tests/traits/a_grouped_tuple_head_is_reported_once.lin:14:25
+   |
+14 | derive[A, B] Marker for ((A, B))
+   |                         ^ a derive request names its target type

@@ -1,0 +1,15 @@
+enum RenderError { Allocation(borrow UInt64) }
+
+fn escaped() -> Result[UInt8, RenderError] {
+    let owner: UInt64 = 7
+    let source: Result[UInt8, borrow UInt64] = .Err(borrow owner)
+    let mapped: Result[UInt8, RenderError] = source.map_err(.Allocation)
+    return mapped
+}
+
+fn main() -> UInt8 {
+    match escaped() {
+        Ok(_) => 0,
+        Err(error) => match error { Allocation(value) => UInt8(*value) },
+    }
+}

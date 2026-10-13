@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/type_defaults/a_function_type_parameter_default_is_a_type_the_default_value_has.lin:2:45
+  |
+2 | fn pass[S: Release = UInt8](sink state: S = ()) -> S where carries(state) {
+  |                                  ----- expected because of this parameter
+  |                                             ^^ expected `UInt8`, found `()`

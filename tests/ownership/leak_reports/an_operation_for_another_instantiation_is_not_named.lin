@@ -1,0 +1,36 @@
+// `unload` is declared only for `Pair[Crate]`. A `Pair[Parcel]` cannot be
+// passed to it, so the help does not name it.
+@linear
+struct Crate {
+    kilograms: UInt8,
+}
+
+@linear
+struct Parcel {
+    grams: UInt8,
+}
+
+@linear
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl Pair[Crate] {
+    pub fn unload(sink self: Pair[Crate]) -> UInt8 {
+        let Pair { first, second } = self
+        let Crate { kilograms: a } = first
+        let Crate { kilograms: b } = second
+        a + b
+    }
+}
+
+fn count(parcels: Pair[Parcel]) -> UInt8 {
+    parcels.first.grams + parcels.second.grams
+}
+
+fn main() -> UInt8 {
+    let crates: Pair[Crate] = .{ first = Crate { kilograms = 4 }, second = Crate { kilograms = 5 } }
+    let parcels: Pair[Parcel] = .{ first = Parcel { grams = 1 }, second = Parcel { grams = 2 } }
+    crates.unload() + count(parcels)
+}

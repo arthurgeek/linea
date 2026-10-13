@@ -1,0 +1,17 @@
+@opaque
+type Label = Str
+
+fn main() -> UInt8 {
+    let wrapped: Option[Label] = .Some(Label("delivery"))
+    match wrapped {
+        Some(label) => {
+            let Label(text) = label
+            if text == "delivery" {
+                0
+            } else {
+                1
+            }
+        },
+        None => 2,
+    }
+}

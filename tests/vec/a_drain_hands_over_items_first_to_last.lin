@@ -1,0 +1,24 @@
+import std.io
+import std.mem
+
+use mem.Owner
+
+// Items hand over first to last. A `break` abandons the rest of the drain,
+// which is allowed because arena-held numbers need no settling.
+fn main() -> Result[UInt8, io.IoError] {
+    let arena = mem.Arena.open(mem.system(), 256)
+    defer arena.release()
+    var readings: Vec[UInt64, mem.Handle[mem.SystemAllocator]] = Vec.new_in(arena.handle())
+    for reading in UInt64(10)..15 {
+        &readings.push(reading).unwrap()
+    }
+    let last = &readings.pop().unwrap()
+    io.println("popped {last}")?
+    for reading in readings.drain() {
+        if reading == 13 {
+            break
+        }
+        io.println("drained {reading}")?
+    }
+    .Ok(0)
+}

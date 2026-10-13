@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/typecheck/a_template_parameter_type_is_resolved_once.lin:8:43
+  |
+8 |     fn weigh(_self: Self, _parts: [Int64; "3"]) -> Int64 {
+  |                                           ^^^ this is not a number

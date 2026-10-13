@@ -1,0 +1,14 @@
+// A struct pattern binds each field to a name. A literal where a name belongs
+// would ask the arm to compare the field, and a pattern compares nothing, so
+// the arm is refused rather than run for a value it seems to exclude.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair = Pair { a = 5, b = 2 }
+    match pair {
+        Pair { a: 1, b } => b,
+    }
+}

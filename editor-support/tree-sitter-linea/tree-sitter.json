@@ -1,0 +1,20 @@
+{
+  "grammars": [
+    {
+      "name": "linea",
+      "camelcase": "Linea",
+      "scope": "source.linea",
+      "path": ".",
+      "file-types": [
+        "lin"
+      ],
+      "highlights": [
+        "queries/highlights.scm"
+      ]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "description": "Linea grammar for tree-sitter"
+  }
+}

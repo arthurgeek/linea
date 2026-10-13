@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `Chain` with more than `Chain` was given
+  --> tests/traits/a_part_that_grows_by_a_projection.lin:25:11
+   |
+25 |     rest: Chain[S.Next],
+   |           ^^^^^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

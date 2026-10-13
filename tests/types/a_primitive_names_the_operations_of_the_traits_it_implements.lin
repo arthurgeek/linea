@@ -1,0 +1,17 @@
+// A primitive reaches the operations of the traits it implements through its
+// name, as a declared type does: `UInt8.show` is `Show`'s operation with
+// `Self` settled to `UInt8`, and so a function taking a `UInt8`.
+trait Show {
+    fn show(sink self: Self) -> UInt8
+}
+
+impl Show for UInt8 {
+    fn show(sink self: UInt8) -> UInt8 {
+        self + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let show = UInt8.show
+    show(6)
+}

@@ -1,0 +1,42 @@
+// A lending walk names places inside one value. The head runs once, before the
+// first position: a walk that rebuilt it per position would lend places of a
+// different value each time, and a write through one would be lost with the
+// value it was made in.
+//
+// The projection here names the same place at every position, so what the walk
+// does is visible in the arithmetic: three positions writing through one place
+// count to three, and three positions each writing through a place of their own
+// count to one and never get past it.
+struct Cell {
+    n: UInt8,
+}
+
+impl Index[Int64] for Cell {
+    type Elem = UInt8
+
+    proj at(inout self: Cell, _i: Int64) -> UInt8 {
+        self.n
+    }
+}
+
+impl Cell {
+    trav positions = 0..3
+}
+
+fn fresh() -> Cell {
+    .{ n = 0 }
+}
+
+fn main() -> UInt8 {
+    let counted = for inout c in fresh() {
+        c = c + 1
+        if c == 3 {
+            break c
+        }
+    }
+
+    match counted {
+        Some(v) => v,
+        None => 9,
+    }
+}

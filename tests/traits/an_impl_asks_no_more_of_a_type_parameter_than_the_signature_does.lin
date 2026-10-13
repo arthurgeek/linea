@@ -1,0 +1,27 @@
+// A bound is what an argument is held to as much as what the body may rely on,
+// and the signature is what every call is checked against. A trait bound the
+// member adds is relied on by the body and asked of nothing, so the body calls
+// through an implementation no argument was ever required to have.
+struct Tag {
+    at: UInt8,
+}
+
+trait Sink {
+    fn take(inout self: Self, n: UInt8) -> UInt8
+}
+
+trait Render {
+    fn draw[W](self: Self, inout w: W) -> UInt8
+}
+
+impl Render for Tag {
+    fn draw[W: Sink](self: Tag, inout w: W) -> UInt8 {
+        Sink.take(&w, self.at)
+    }
+}
+
+fn main() -> UInt8 {
+    let t: Tag = .{ at = 3 }
+    let Tag { at: n } = t
+    n
+}

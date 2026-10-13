@@ -1,0 +1,15 @@
+error[T-Const]: `a` names itself through `b`
+  --> tests/traits/an_implementations_array_length_is_settled_where_it_is_written.lin:12:16
+   |
+12 | let b: UInt8 = a
+   |                ^ a constant's value cannot be worked out from itself
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/traits/an_implementations_array_length_is_settled_where_it_is_written.lin:22:19
+   |
+22 | impl Give[[UInt8; a]] for Holder {
+   |                   ^ this is not a constant
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/traits/an_implementations_array_length_is_settled_where_it_is_written.lin:28:19
+   |
+28 | impl Give[[UInt8; b]] for Holder {
+   |                   ^ this is not a constant

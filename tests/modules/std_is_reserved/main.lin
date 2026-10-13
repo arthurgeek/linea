@@ -1,0 +1,8 @@
+// `std` names the standard library wherever it appears, so a directory of that
+// name beside this one does not capture it -- and the root alone names no
+// module, whatever sits under it here.
+import std
+
+fn main() -> UInt8 {
+    std.f()
+}

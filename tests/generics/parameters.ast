@@ -1,0 +1,28 @@
+program decls=4
+  decl enum_ "Holder" tokens 7..21
+    variant "Empty" : T
+    type param "T"
+  decl struct_ "Pair" tokens 21..43
+    type param "A"
+    type param "B" : Copyable
+    field "x" : A
+    field "y" : B
+  decl function "first" tokens 43..74
+    type param "A" : Copyable
+    type param "B" : Copyable
+    param read "p" : Pair[A, B]
+    returns A
+    expr %3 block tokens 66..74
+      expr %2 copy_ tokens 67..73
+        expr %1 field tokens 69..72 "x"
+          expr %0 name_ref tokens 69..70 "p"
+  decl function "main" tokens 74..95
+    returns UInt8
+    expr %11 block tokens 80..95
+      expr %10 call tokens 81..94
+        expr %4 name_ref tokens 81..82 "first"
+        expr %9 struct_literal tokens 83..93
+          expr %5 name_ref tokens 85..86 "x"
+          expr %6 int_literal tokens 87..88 "1"
+          expr %7 name_ref tokens 89..90 "y"
+          expr %8 bool_literal tokens 91..92 "true"

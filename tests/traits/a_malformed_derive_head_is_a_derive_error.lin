@@ -1,0 +1,15 @@
+trait Structural {}
+
+template impl Structural {}
+
+struct Pair[A, B] {
+    left: A,
+    right: B,
+}
+
+derive[T] Structural for Pair[T, T]
+
+fn main() -> UInt8 {
+    let _pair: Pair[UInt8, UInt8] = .{ left = 0, right = 0 }
+    0
+}

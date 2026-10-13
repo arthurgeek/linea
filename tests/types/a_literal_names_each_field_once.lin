@@ -1,0 +1,9 @@
+// A literal gives every field a value, and none of them twice. Both halves are
+// asked at once because both are answered by the same walk over what was
+// written against what the type declares.
+struct Point { x: UInt8, y: UInt8, z: UInt8 }
+
+fn main() -> UInt8 {
+    let p: Point = .{ x = 1, x = 2 }
+    p.x
+}

@@ -1,0 +1,46 @@
+import protocol
+import helpers
+import model
+import std.mem
+import std.io
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    for stage in UInt8(0)..5 {
+        io.println("stage {stage}").unwrap()
+        let bytes = "tea".to_owned(mem.system()).unwrap()
+        let input: helpers.Input = .{ bytes = bytes.view(), fail_at = stage }
+        let built: Result[model.Settings[mem.SystemAllocator], helpers.Failure] = protocol.FromFields.build(input, mem.system())
+        bytes.release()
+        match built {
+            Ok(settings) => {
+                let valid = settings.valid() && stage == 0
+                settings.release()
+                if !valid {
+                    return 1
+                }
+            },
+            Err(_) => if stage == 0 {
+                return 2
+            },
+        }
+    }
+    io.println("allocation refusal").unwrap()
+    let arena = mem.Arena.open(mem.system(), 16)
+    let input: helpers.Input = .{ bytes = "tea", fail_at = 0 }
+    let built: Result[model.Settings[mem.Handle[mem.SystemAllocator]], helpers.Failure] = protocol.FromFields.build(input, arena.handle())
+    let refused = match built {
+        Err(error) => match error { Allocation => true, _ => false },
+        Ok(settings) => {
+            settings.release()
+            false
+        },
+    }
+    arena.release()
+    return if refused {
+        0
+    } else {
+        3
+    }
+}

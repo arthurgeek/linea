@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: S contains itself
+  --> tests/generics/a_part_that_holds_itself_across_modules/main.lin:11:8
+   |
+11 |     b: Box[S[T]],
+   |        ^^^ a value would have to hold one, so it has no size

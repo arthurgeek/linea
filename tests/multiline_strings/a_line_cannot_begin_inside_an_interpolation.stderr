@@ -1,0 +1,5 @@
+error[S-String]: a multi-line literal cannot begin inside an interpolation
+ --> tests/multiline_strings/a_line_cannot_begin_inside_an_interpolation.lin:2:28
+  |
+2 |     let greeting = "hello {\\world}"
+  |                            ^^ an interpolation closes on its own line

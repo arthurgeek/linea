@@ -1,0 +1,7 @@
+// [T-Infer]. An array literal reads its type off its elements, and an empty one
+// has none to read -- so this is the one array literal that still needs to be
+// told what it builds.
+fn main() -> UInt8 {
+    let _xs = []
+    0
+}

@@ -1,0 +1,31 @@
+// A function whose parameters differ in count or convention from every
+// implementation's shape does not implement the trait, and the bound names the
+// callable type it was given.
+trait Handle[S] {
+    fn handle(self: Self, inout state: S, input: UInt64) -> UInt64
+}
+
+impl[S] Handle[S] for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, inout _state: S, input: UInt64) -> UInt64 {
+        self(input)
+    }
+}
+
+fn pair(left: UInt64, right: UInt64) -> UInt64 {
+    left + right
+}
+
+fn consume(sink input: UInt64) -> UInt64 {
+    input
+}
+
+fn run[S, H: Handle[S]](inout state: S, handler: H) -> UInt64 {
+    handler.handle(&state, 1)
+}
+
+fn main() -> UInt8 {
+    var state = ()
+    let _pair = run(&state, pair)
+    let _consume = run(&state, consume)
+    0
+}

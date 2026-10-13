@@ -1,0 +1,13 @@
+trait Lift[T] {
+    fn lift(sink value: T) -> Self
+}
+
+template impl[S] Lift[S] {
+    fn lift(sink value: S) -> Self {
+        reflect.wrap(value)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

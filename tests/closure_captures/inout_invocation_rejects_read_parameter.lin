@@ -1,0 +1,8 @@
+fn apply[F: fn() -> UInt8](callback: F) -> UInt8 {
+    &callback()
+}
+
+fn main() -> UInt8 {
+    let callback = [] || UInt8(0)
+    apply(callback)
+}

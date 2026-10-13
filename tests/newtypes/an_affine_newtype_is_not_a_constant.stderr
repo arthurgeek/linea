@@ -1,0 +1,7 @@
+error[T-Const]: a constant is copied wherever it is read, so `Ticket` must be copyable
+ --> tests/newtypes/an_affine_newtype_is_not_a_constant.lin:5:21
+  |
+5 | let first: Ticket = Ticket(1)
+  |                     ^^^^^^^^^ built from the parts of `Ticket`, which is not copyable
+  |
+  = help: mark `Ticket` `@copyable`

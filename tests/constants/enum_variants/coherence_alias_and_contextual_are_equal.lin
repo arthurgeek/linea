@@ -1,0 +1,16 @@
+enum Mode { Preserve, Replace }
+
+let selected = Mode.Preserve
+
+trait Select[phantom F] {}
+
+struct Holder {}
+
+impl Select[fn(read mode: Mode = selected) -> UInt8] for Holder {}
+
+impl Select[fn(read mode: Mode = .Preserve) -> UInt8] for Holder {}
+
+fn main() -> UInt8 {
+    let _holder = Holder {}
+    0
+}

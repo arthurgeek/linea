@@ -1,0 +1,11 @@
+pub struct Wrapped {
+    n: UInt8,
+}
+
+pub fn wrap(n: UInt8) -> Wrapped {
+    .{ n = n }
+}
+
+pub fn take(w: Wrapped) -> UInt8 {
+    w.n
+}

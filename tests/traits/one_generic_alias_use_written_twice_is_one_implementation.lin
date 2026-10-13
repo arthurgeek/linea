@@ -1,0 +1,32 @@
+// Writing `Give[Swap[UInt8, Bool]]` twice implements `Give` for `Holder` at one
+// argument twice.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+alias Swap[A, B] = Pair[B, A]
+
+trait Give[T] {
+    fn give(_self: Self, x: T) -> UInt8
+}
+
+struct Holder {
+    value: UInt8,
+}
+
+impl Give[Swap[UInt8, Bool]] for Holder {
+    fn give(_self: Self, x: Swap[UInt8, Bool]) -> UInt8 {
+        x.second
+    }
+}
+
+impl Give[Swap[UInt8, Bool]] for Holder {
+    fn give(_self: Self, x: Swap[UInt8, Bool]) -> UInt8 {
+        x.second + 1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

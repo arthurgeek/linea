@@ -1,0 +1,6 @@
+import vault
+
+fn main() -> UInt8 {
+    let k = vault.mint(7)
+    match read k { Forged(_) => 0 }
+}

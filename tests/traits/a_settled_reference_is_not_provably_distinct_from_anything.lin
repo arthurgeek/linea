@@ -1,0 +1,34 @@
+// `T.A` is opaque at the declaration: nothing here knows what an
+// implementation of `Pair` will settle `A` to, so nothing can prove it
+// differs from `Bool`. Some `X: Pair` may settle `A` to `Bool`, and at
+// `Holder[X]` both implementations would answer `Give[Bool]` -- so the two
+// are refused rather than let a program silently pick one.
+trait Pair {
+    type A
+
+    fn a(self: Self) -> Self.A
+}
+
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T: Pair] Give[T.A] for Holder[T] {
+    fn give(_self: Self, _u: T.A) -> UInt8 {
+        1
+    }
+}
+
+impl[U: Pair] Give[Bool] for Holder[U] {
+    fn give(_self: Self, _u: Bool) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

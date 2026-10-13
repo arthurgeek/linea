@@ -1,0 +1,42 @@
+// `impl[I: Inner] Outer for I` defines `Out` as `I.Item`, so for any `T`
+// bounded by both traits, `T.Out` is `T.Item`. `take` returns a `Box`'s item
+// through `Outer`.
+trait Inner {
+    type Item
+
+    fn item(self: Self) -> Self.Item
+}
+
+trait Outer {
+    type Out
+
+    fn out(self: Self) -> Self.Out
+}
+
+impl[I: Inner] Outer for I {
+    type Out = I.Item
+
+    fn out(self: Self) -> I.Item {
+        self.item()
+    }
+}
+
+struct Box {
+    value: UInt8,
+}
+
+impl Inner for Box {
+    type Item = UInt8
+
+    fn item(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn take[T: Inner + Outer](t: T) -> T.Out {
+    t.out()
+}
+
+fn main() -> UInt8 {
+    take(Box { value = 7 })
+}

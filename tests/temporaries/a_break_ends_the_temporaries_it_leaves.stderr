@@ -1,0 +1,9 @@
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+  --> tests/temporaries/a_break_ends_the_temporaries_it_leaves.lin:14:23
+   |
+14 |         break reading(base + 2)
+   |                       ^^^^^^^^ this temporary ends with its statement
+16 |     UInt8(*found.value)
+   |           ------------ and a value borrowing it is used here
+   |
+   = help: bind the value with `let` first, and borrow the binding

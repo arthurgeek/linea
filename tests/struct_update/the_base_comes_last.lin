@@ -1,0 +1,12 @@
+@copyable
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let small: Size = .{ width = 1, height = 1 }
+    let wide = Size { ..copy(small), width = 8 }
+    let tall = Size { height = 8, ..small, ..copy(wide) }
+    wide.width + tall.height
+}

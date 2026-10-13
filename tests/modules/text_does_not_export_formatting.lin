@@ -1,0 +1,6 @@
+import std.text
+
+fn main() -> UInt8 {
+    let _debug = text.Debug
+    0
+}

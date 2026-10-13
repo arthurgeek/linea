@@ -1,0 +1,7 @@
+// "ab" is two scalars, not one, so it is not converted: it stays `Str`,
+// and the ordinary [T-Mismatch] refuses the range built from it.
+fn main() -> UInt8 {
+    let r = "ab".."z"
+    let _ = r
+    0
+}

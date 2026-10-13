@@ -1,0 +1,5 @@
+error[T-Bound]: a test's failure is rendered when it fails, so it implements `Display`
+ --> tests/typecheck/a_tests_failure_describes_itself.lin:7:28
+  |
+7 | test fn a_thing_holds() -> Result[(), Silent] {
+  |                            ^^^^^^ `Silent` does not

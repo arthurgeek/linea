@@ -1,0 +1,20 @@
+program decls=1
+  decl function "main" tokens 0..38
+    returns UInt8
+    expr %12 block tokens 6..38
+      stmt %0 let_decl tokens 7..24 "add"
+        expr %4 lambda tokens 10..24 params=2
+          param read "lhs" : UInt8
+          param read "rhs" : UInt8
+          expr %3 block tokens 19..24
+            expr %2 add tokens 20..23
+              expr %0 name_ref tokens 20..21 "lhs"
+              expr %1 name_ref tokens 22..23 "rhs"
+      stmt %1 let_decl tokens 24..29 "constant"
+        expr %6 lambda tokens 27..29 params=0
+          expr %5 int_literal tokens 28..29 "3"
+      expr %11 call tokens 29..37
+        expr %7 name_ref tokens 29..30 "add"
+        expr %9 call tokens 31..34
+          expr %8 name_ref tokens 31..32 "constant"
+        expr %10 int_literal tokens 35..36 "4"

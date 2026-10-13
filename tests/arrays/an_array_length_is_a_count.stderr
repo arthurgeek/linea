@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is not negative
+ --> tests/arrays/an_array_length_is_a_count.lin:3:22
+  |
+3 |     let _xs: [UInt8; 0 - 1] = [1]
+  |                      ^^^^^ this is negative

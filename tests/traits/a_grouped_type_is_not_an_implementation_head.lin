@@ -1,0 +1,15 @@
+// An implementation head is a type name, `()` or a tuple. `(UInt8)` groups a
+// type and names none, so the head is written without its parentheses.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(3).show() - 1
+}

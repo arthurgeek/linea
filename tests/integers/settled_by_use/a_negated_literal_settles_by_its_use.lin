@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let below = -1
+    let small: Int8 = below
+    UInt8(small + 1)
+}

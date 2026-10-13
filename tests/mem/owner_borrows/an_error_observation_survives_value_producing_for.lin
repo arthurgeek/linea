@@ -1,0 +1,39 @@
+struct Token { number: UInt8 }
+
+struct Failure { view: borrow UInt64 }
+
+impl Token {
+    fn close(sink self: Token) -> () {
+        let Token { number: _number } = self
+    }
+}
+
+fn fail(sink failure: Failure) -> Result[Token, Failure] where carries(.Err: failure) {
+    .Err(failure)
+}
+
+fn work(sink failure: Failure) -> Result[UInt8, Failure] where carries(.Err: failure) {
+    let pending = fail(failure)
+    let selected = for index in UInt8(0)..1 {
+        let _index = index
+        break pending
+    }
+    let answer = match selected {
+        Some(value) => value,
+        None => return .Ok(0),
+    }
+    let token = answer?
+    token.close()
+    return .Ok(0)
+}
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 7
+    match work(.{ view = borrow owner }) {
+        Ok(value) => value,
+        Err(failure) => {
+            let Failure { view: view } = failure
+            UInt8(*view)
+        },
+    }
+}

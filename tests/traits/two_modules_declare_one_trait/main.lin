@@ -1,0 +1,16 @@
+// Two modules declaring one name is most of what a module is for, and a trait
+// is no exception: this `Measure` is not `account`'s, so the implementation
+// written there answers for that one and for nothing here. Matched by the name
+// alone, the call below reached a body written against a trait it never named.
+import account
+
+use account.Account
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

@@ -1,0 +1,6 @@
+enum Reading[T: Integer] { Accepted(T) }
+
+fn main() -> UInt8 {
+    let _accept: fn(sink value: Bool) -> Reading[Bool] = .Accepted
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Const]: `value` names itself
+ --> tests/constants/inferred_self_cycle.lin:1:13
+  |
+1 | let value = value
+  |             ^^^^^ a constant's value cannot be worked out from itself

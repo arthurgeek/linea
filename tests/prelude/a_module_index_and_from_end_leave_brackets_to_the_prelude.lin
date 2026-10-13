@@ -1,0 +1,21 @@
+// A module may declare its own `Index` trait and `FromEnd` type. Brackets
+// still call the standard library's `Index`, and `^1` still counts from the end.
+trait Index {
+    fn position(self: Self) -> UInt64
+}
+
+struct FromEnd {
+    back: UInt64,
+}
+
+impl Index for FromEnd {
+    fn position(self: FromEnd) -> UInt64 {
+        self.back
+    }
+}
+
+fn main() -> UInt8 {
+    let scores = [UInt8(4), 7, 9]
+    let own = FromEnd { back = 2 }
+    scores[0] + scores[^1] + UInt8(own.position())
+}

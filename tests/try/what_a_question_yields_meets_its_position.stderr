@@ -1,0 +1,20 @@
+error[T-Mismatch]: expected `Big`, found `UInt8`
+  --> tests/try/what_a_question_yields_meets_its_position.lin:23:19
+   |
+23 |     let _n: Big = some()?
+   |             --- expected because of this annotation
+   |                   ^^^^^^^ expected `Big`, found `UInt8`
+error[T-Mismatch]: expected `Big`, found `UInt8`
+  --> tests/try/what_a_question_yields_meets_its_position.lin:28:29
+   |
+18 | fn wants_a_big(_b: Big) -> UInt8 {
+   |                -- expected because of this parameter
+28 |     Option.Some(wants_a_big(some()?))
+   |                             ^^^^^^^ expected `Big`, found `UInt8`
+error[T-Mismatch]: expected `Option[Bool]`, found `UInt8`
+  --> tests/try/what_a_question_yields_meets_its_position.lin:32:5
+   |
+31 | fn as_a_tail() -> Option[Bool] {
+   |                   ------ expected because of this return type
+32 |     some()?
+   |     ^^^^^^^ expected `Option[Bool]`, found `UInt8`

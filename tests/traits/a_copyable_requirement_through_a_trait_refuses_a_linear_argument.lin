@@ -1,0 +1,22 @@
+// A generic call requiring a trait with a Copyable bound rejects a linear
+// argument that cannot satisfy that trait.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+@linear
+struct Owned {
+    n: UInt8,
+}
+
+fn twice[T: Duplicable](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let o: Owned = .{ n = 3 }
+    let p: Owned = twice(o)
+    let Owned { n: a } = o
+    let Owned { n: b } = p
+    a + b
+}

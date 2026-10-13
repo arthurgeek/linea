@@ -1,0 +1,41 @@
+// Every one of the six operators over an unsigned primitive is the comparison
+// instruction it has always been, and so is equality over `Bool`. One function
+// per operator, so what the golden records is the opcode each becomes -- an
+// operator that quietly became a call on the trait it names would be a call in
+// every loop of every program, and there is no pass here that would take it
+// back out.
+fn eq(a: UInt8, b: UInt8) -> Bool {
+    a == b
+}
+
+fn ne(a: UInt8, b: UInt8) -> Bool {
+    a != b
+}
+
+fn lt(a: UInt8, b: UInt8) -> Bool {
+    a < b
+}
+
+fn le(a: UInt8, b: UInt8) -> Bool {
+    a <= b
+}
+
+fn gt(a: UInt8, b: UInt8) -> Bool {
+    a > b
+}
+
+fn ge(a: UInt8, b: UInt8) -> Bool {
+    a >= b
+}
+
+fn alike(a: Bool, b: Bool) -> Bool {
+    a == b
+}
+
+fn main() -> UInt8 {
+    if eq(1, 1) && !ne(1, 1) && lt(1, 2) && le(2, 2) && gt(2, 1) && ge(2, 2) && alike(true, true) {
+        7
+    } else {
+        0
+    }
+}

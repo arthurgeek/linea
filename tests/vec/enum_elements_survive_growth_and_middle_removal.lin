@@ -1,0 +1,52 @@
+import std.mem
+
+@linear
+enum Promise {
+    Pending(UInt64, UInt8),
+    Ready(UInt64),
+}
+
+fn settle(sink promise: Promise) -> UInt64 {
+    match promise {
+        Pending(id, check) => {
+            if check != 19 {
+                panic("enum payload changed")
+            }
+            id
+        },
+        Ready(id) => id,
+    }
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Promise, mem.SystemAllocator] = Vec.new()
+    let positions: Range[UInt64] = 0..20
+    for id in positions {
+        let promise: Promise = if id % 2 == 0 {
+            .Pending(id, 19)
+        } else {
+            .Ready(id)
+        }
+        match Vec.push(&values, promise) { Ok(_) => {}, Err(_) => panic("push failed") }
+    }
+    let removed = match Vec.remove(&values, 7) { Some(p) => p, None => panic("missing middle element") }
+    if settle(removed) != 7 {
+        panic("wrong middle element")
+    }
+    var expected: UInt64 = 0
+    while values.length() > 0 {
+        if expected == 7 {
+            expected += 1
+        }
+        let promise = match Vec.remove(&values, 0) { Some(p) => p, None => panic("missing element") }
+        if settle(promise) != expected {
+            panic("growth or gap closing changed the enum")
+        }
+        expected += 1
+    }
+    match Vec.finish(values) { Ok(_) => {}, Err(_) => panic("vector did not drain") }
+    if expected != 20 {
+        panic("wrong element count")
+    }
+    0
+}

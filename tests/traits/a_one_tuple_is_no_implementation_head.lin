@@ -1,0 +1,15 @@
+// A tuple has at least two components, so `(UInt8,)` is refused where it is
+// written. The head names no type, and the refusal is the only report.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8,) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

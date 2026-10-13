@@ -1,0 +1,21 @@
+import std.mem
+
+struct Reading { number: UInt8 }
+
+fn main() -> UInt8 {
+    let reading: Reading = .{ number = 7 }
+    let positions = 0..2
+    let { values, iterator: _remaining } = positions.map(
+        [reading] |sink item| {
+            let _ = item
+            borrow reading
+        },
+    ).collect(mem.system()).unwrap()
+    let intact = values.length() == 2 && values[0].number == 7 && values[1].number == 7
+    values.release()
+    if intact {
+        0
+    } else {
+        1
+    }
+}

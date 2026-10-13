@@ -1,0 +1,32 @@
+// A binder in a match arm exists inside that arm, so a path through another
+// arm never had it: there is nothing for the two to disagree about at the
+// join, and the arm that bound it consumed it, which is all it owed.
+//
+// Counted as a disagreement, every sum type over a Linear payload became
+// unmatchable -- and so unusable, because taking one apart is the only way to
+// discharge what it holds. Nothing in the corpus showed it: every Linear enum
+// here had one variant, so no arm existed to disagree with.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+@linear
+enum Holder {
+    Empty,
+    Full(Key),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .Full(Key.Forged(4))
+    match held {
+        Empty => 0,
+        Full(k) => burn(k),
+    }
+}

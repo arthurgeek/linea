@@ -1,0 +1,49 @@
+// Each call below is refused because its argument is not Copyable. Its result
+// is written in the refused parameter, but what goes wrong with that result
+// does not follow from the refusal: a `Pair` and an `Option` are no sequence
+// whatever they hold, a `UInt8` is none either, and `Pair[Plain]` lacks
+// `Release` because `Plain` does. Each of those is reported beside the bound.
+@copyable
+struct Plain {
+    value: UInt8,
+}
+
+struct Pair[T] {
+    first: T,
+    second: T,
+}
+
+impl[T: Release] Release for Pair[T] {
+    fn release(sink self: Self) -> () {
+        let Pair { first, second } = self
+        first.release()
+        second.release()
+    }
+}
+
+fn keep[T: Copyable](sink value: T) -> T {
+    value
+}
+
+fn wrap[T: Copyable](sink value: T) -> Option[T] {
+    .Some(value)
+}
+
+fn pick[T: Copyable, U](sink _first: T, sink other: U) -> U where carries(other) {
+    other
+}
+
+fn main() -> UInt8 {
+    let first: Pair[Plain] = .{ first = .{ value = 1 }, second = .{ value = 2 } }
+    for _step in keep(first) {}
+    let second: Pair[Plain] = .{ first = .{ value = 3 }, second = .{ value = 4 } }
+    for _step in wrap(second) {}
+    let third: Pair[Plain] = .{ first = .{ value = 5 }, second = .{ value = 6 } }
+    let wrapped = wrap(third)
+    wrapped.shout()
+    let fourth: Pair[Plain] = .{ first = .{ value = 7 }, second = .{ value = 8 } }
+    for _step in pick(fourth, UInt8(3)) {}
+    let fifth: Pair[Plain] = .{ first = .{ value = 9 }, second = .{ value = 10 } }
+    keep(fifth).release()
+    0
+}

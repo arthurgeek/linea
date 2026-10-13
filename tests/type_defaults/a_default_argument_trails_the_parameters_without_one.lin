@@ -1,0 +1,8 @@
+struct _Pair[A = UInt8, B] {
+    first: A,
+    second: B,
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,19 @@
+// `else` cannot begin a statement, so a line that opens with it continues the
+// binding above, as it continues an `if`.
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn main() -> UInt8 {
+    let found = find(4) else {
+        return 1
+    }
+    let missing = find(1) else {
+        return found
+    }
+    missing
+}

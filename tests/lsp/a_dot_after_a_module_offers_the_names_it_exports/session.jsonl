@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A dot after a module offers what that module exports, under the names it\n// exports them by: the qualifier is already written, so the text that goes\n// after the dot is the bare name.\nimport ledger\n\nfn main() -> UInt8 {\n    ledger.size()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":11}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

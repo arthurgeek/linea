@@ -1,0 +1,30 @@
+// A traversal is a member, and a member belongs to an implementation that has
+// to answer for the type it is reached from. `impl Pair[UInt8]` declares an
+// order for one member of the family, so a `Pair[Int64]` reaches it by the
+// head and by nothing else -- the same refusal a function written in that
+// implementation already gets.
+struct Pair[T] {
+    a: T,
+    b: T,
+}
+
+impl[T] Index[Int64] for Pair[T] {
+    type Elem = T
+
+    proj at(inout self: Pair[T], _i: Int64) -> T {
+        self.a
+    }
+}
+
+impl Pair[UInt8] {
+    trav positions = 0..2
+}
+
+fn main() -> UInt8 {
+    let p: Pair[Int64] = .{ a = 21, b = 21 }
+    var total: Int64 = 0
+    for read x in p {
+        total += x
+    }
+    UInt8(total)
+}

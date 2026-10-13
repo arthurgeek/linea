@@ -1,0 +1,22 @@
+// A program whose every slot holds a declared type, so the dump has something
+// to name. Two types rather than one: a dump that named neither would be as
+// wrong for one type as for twenty, and it is telling them apart that a reader
+// of this dump is doing.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+    each: UInt8,
+}
+
+fn total(c: Coins, n: Notes) -> UInt8 {
+    c.count + n.count * n.each
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ count = 3 }
+    let fives: Notes = .{ count = 2, each = 5 }
+    total(coppers, fives)
+}

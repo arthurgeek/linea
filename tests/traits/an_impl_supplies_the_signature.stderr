@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares `of`'s `n` as `UInt8`, and this takes `Ledger`
+  --> tests/traits/an_impl_supplies_the_signature.lin:19:8
+   |
+19 |     fn of(x: Self, n: Ledger) -> UInt8 {
+   |        ^^ take the type the signature declares

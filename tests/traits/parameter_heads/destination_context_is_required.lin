@@ -1,0 +1,26 @@
+trait Deliver[T] {
+    fn deliver(self: Self) -> T
+}
+
+trait Build[T] {
+    fn build(source: T) -> Self
+}
+
+impl[T, U: Build[T]] Deliver[U] for T {
+    fn deliver(self: T) -> U {
+        Build.build(self)
+    }
+}
+
+struct Output {}
+
+impl Build[UInt8] for Output {
+    fn build(_source: UInt8) -> Output {
+        .{}
+    }
+}
+
+fn main() -> UInt8 {
+    let _answer = UInt8(0).deliver()
+    0
+}

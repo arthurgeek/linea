@@ -1,0 +1,23 @@
+struct Page {
+    number: UInt8,
+    body: Str,
+}
+
+@copyable
+enum Kind {
+    Short,
+    Long,
+}
+
+fn describe(kind: Kind) -> Str {
+    match kind { Short => \\brief
+    , Long => \\at
+        \\length
+    }
+}
+
+fn main() -> UInt8 {
+    let page = Page { number = 1, body = \\text
+    }
+    UInt8(page.body.length() + describe(.Long).length() - 13)
+}

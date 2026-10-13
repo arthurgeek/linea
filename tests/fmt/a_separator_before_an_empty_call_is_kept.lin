@@ -1,0 +1,11 @@
+// A `;` before a line opening with `()` answers the note that line would
+// draw, since `()` could have called `launch`, so the formatter keeps it.
+fn launch() -> UInt8 {
+    panic("launched")
+}
+
+fn main() -> UInt8 {
+    let _ = launch;
+    ()
+    0
+}

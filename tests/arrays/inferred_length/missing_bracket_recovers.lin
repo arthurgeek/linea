@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let _values: [UInt8; _
+    let answer: UInt8 = 0
+    answer
+}

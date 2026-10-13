@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let big: Int64 = 9007199254740993
+    let rounded = Float64(big)
+    let back = Int64(rounded)
+    let small = Float64(3)
+    if back == 9007199254740992 && Int64(small) == 3 {
+        0
+    } else {
+        1
+    }
+}

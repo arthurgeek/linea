@@ -1,0 +1,11 @@
+fn invoke[F: sink fn() -> borrow UInt8](sink callback: F) -> borrow UInt8 where carries(callback) {
+    callback()
+}
+
+fn main() -> UInt8 {
+    var number: UInt8 = 7
+    let callback = sink [sink saved = borrow number] || -> where carries(saved) saved
+    let observation = invoke(callback)
+    number = 8
+    *observation + number
+}

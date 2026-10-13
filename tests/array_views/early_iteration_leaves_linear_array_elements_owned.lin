@@ -1,0 +1,21 @@
+@linear
+struct Ticket { value: UInt8 }
+
+fn main() -> UInt8 {
+    let tickets: [Ticket; 2] = [.{ value = 3 }, .{ value = 7 }]
+    var first: UInt8 = 0
+    for ticket in tickets.as_slice().iterate() {
+        first = ticket.value
+        break
+    }
+    var total: UInt8 = 0
+    for ticket in tickets {
+        let Ticket { value } = ticket
+        total += value
+    }
+    if first == 3 && total == 10 {
+        0
+    } else {
+        1
+    }
+}

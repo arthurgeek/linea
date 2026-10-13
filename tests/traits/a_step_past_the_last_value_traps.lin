@@ -1,0 +1,12 @@
+// The last value of a type has no next one. `Steppable.forward` is the checked
+// addition the operator already is, so stepping past the end traps where a
+// wrapping increment would answer with the first value instead -- and the trap
+// is reported at the call, which is the source a reader has.
+fn after[T: Steppable](x: T) -> T {
+    Steppable.forward(x)
+}
+
+fn main() -> UInt8 {
+    let last: UInt8 = 255
+    after(last)
+}

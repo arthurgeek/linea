@@ -1,0 +1,20 @@
+// A projection yields a place, so its body is one: a path rooted at `self`
+// reached by field selection and indexing. Arithmetic over that path computes
+// a value, and a value has no location for an assignment or a lend to reach.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i] + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

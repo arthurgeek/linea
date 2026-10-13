@@ -1,0 +1,12 @@
+// A qualified variant is a value, and a name its enum does not have is not a
+// field of that value.
+@copyable
+enum Light {
+    Off,
+    On,
+}
+
+fn main() -> UInt8 {
+    let _x = Light.Off.Nope
+    0
+}

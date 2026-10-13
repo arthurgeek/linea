@@ -1,0 +1,23 @@
+import std.mem
+
+// The slice `shown` observes `scores` through the closure. Releasing the
+// closure leaves `shown` usable; `scores` is released after its last use.
+fn main() -> UInt8 {
+    var scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let pushed = &scores.push(40).is_ok()
+    let listing = mem.Closure.open(
+        mem.system(),
+        [seen = scores] || -> mem.Slice[UInt64] where borrows(seen) {
+            seen.as_slice()
+        },
+    ).unwrap()
+    let shown = listing()
+    listing.release()
+    let length = shown.length()
+    scores.release()
+    if pushed {
+        UInt8(length)
+    } else {
+        0
+    }
+}

@@ -1,0 +1,20 @@
+// A `return` ends every scope it sits inside, so it is where a value still
+// held is a value nothing disposed of. The rule is per path, not per body: the
+// value here is released on the path that runs to the end, and the early exit
+// jumps over that release.
+//
+// Reported at the binding rather than at the exit, because the span names the
+// value the report is about. Which path skipped its release is what the `if`
+// above the exit already shows.
+fn leaves_early(c: UInt8) -> UInt8 {
+    let k = mint(1)
+    if c == 0 {
+        return 0
+    }
+    release(k)
+    1
+}
+
+fn main() -> UInt8 {
+    leaves_early(0)
+}

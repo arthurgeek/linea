@@ -1,0 +1,27 @@
+fn main() -> UInt8 {
+    let value = 9.0
+    let angle = 0.0
+    let fraction = -2.5
+    if value.sqrt() != 3.0 || Float64.sqrt(4.0) != 2.0 {
+        return 1
+    }
+    if fraction.floor() != -3.0 || fraction.ceil() != -2.0 {
+        return 2
+    }
+    if fraction.trunc() != -2.0 || fraction.round() != -2.0 {
+        return 3
+    }
+    if angle.sin() != 0.0 || angle.cos() != 1.0 {
+        return 4
+    }
+    if angle.exp() != 1.0 || Float64.ln(1.0) != 0.0 {
+        return 5
+    }
+    if Float64.pow(2.0, exponent: 10.0) != 1024.0 {
+        return 6
+    }
+    if !Float64.sqrt(-1.0).is_nan() || !Float64.ln(-1.0).is_nan() {
+        return 7
+    }
+    0
+}

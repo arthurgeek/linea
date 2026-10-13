@@ -1,0 +1,30 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/receivers/a_marked_receiver_is_exclusive.lin:36:18
+   |
+36 |     &counter.add(counter.total())
+   |      ------- mutated as the receiver
+   |                  ^^^^^^^^^^^^^^^ already lent as the receiver of this `&` call
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/receivers/a_marked_receiver_is_exclusive.lin:37:18
+   |
+37 |     &counter.add(counter.count)
+   |      ------- mutated as the receiver
+   |                  ^^^^^^^^^^^^^ already lent as the receiver of this `&` call
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/receivers/a_marked_receiver_is_exclusive.lin:38:21
+   |
+38 |     &counter.absorb(&counter)
+   |      ------- mutated as the receiver
+   |                     ^^^^^^^^ already lent as the receiver of this `&` call
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/receivers/a_marked_receiver_is_exclusive.lin:40:21
+   |
+40 |     let _both = sum(counter.total(), &counter.next())
+   |                     ^^^^^^^^^^^^^^^ this argument accesses the same place
+   |                                      --------------- mutated by this argument
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/receivers/a_marked_receiver_is_exclusive.lin:45:20
+   |
+45 |     &pair.left.add(pair.count())
+   |      --------- mutated as the receiver
+   |                    ^^^^^^^^^^^^ already lent as the receiver of this `&` call

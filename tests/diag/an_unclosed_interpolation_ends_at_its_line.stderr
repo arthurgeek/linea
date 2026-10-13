@@ -1,0 +1,5 @@
+error[S-String]: expected `}`
+ --> tests/diag/an_unclosed_interpolation_ends_at_its_line.lin:6:5
+  |
+6 |     let _count: Int64 = 3
+  |     ^^^ this interpolation is never closed

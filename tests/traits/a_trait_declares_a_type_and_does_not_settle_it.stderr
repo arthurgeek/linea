@@ -1,0 +1,5 @@
+error[S-Entry]: a trait declares a type and does not settle it
+  --> tests/traits/a_trait_declares_a_type_and_does_not_settle_it.lin:10:15
+   |
+10 |     type Item = UInt8
+   |               ^ an implementation says what it is

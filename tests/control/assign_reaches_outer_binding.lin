@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    if true {
+        x = 9
+    }
+    x
+}

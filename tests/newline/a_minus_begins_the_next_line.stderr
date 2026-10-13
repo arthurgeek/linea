@@ -1,0 +1,15 @@
+note[S-Continuation]: the next line begins with `-`, which could have continued the expression above
+ --> tests/newline/a_minus_begins_the_next_line.lin:8:5
+  |
+8 |     -b
+  |     ^ end the previous line with it if that was meant
+error[T-Discard]: this expression produces an `Int64` that is discarded
+ --> tests/newline/a_minus_begins_the_next_line.lin:7:5
+  |
+7 |     a
+  |     ^ bind it with `let _ =` to discard it deliberately
+error[T-Discard]: this expression produces an `Int64` that is discarded
+ --> tests/newline/a_minus_begins_the_next_line.lin:8:5
+  |
+8 |     -b
+  |     ^^ bind it with `let _ =` to discard it deliberately

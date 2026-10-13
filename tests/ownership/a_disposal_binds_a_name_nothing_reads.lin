@@ -1,0 +1,24 @@
+// Disposing of a linear value answers something, and a program that has no
+// use for the answer still has to name it: a call whose value is discarded is
+// not a statement, so the only shape a disposal can take is a binding.
+//
+// The shape matters beyond style. A mutation deletes the statement that hands
+// a linear value away and requires [O-Leak] to fire, and while it looked at
+// bare calls alone it reached three programs -- none of which were this shape,
+// which is the shape nearly every disposal has.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let key: Key = .Forged(7)
+    let _spent = burn(key)
+    3
+}

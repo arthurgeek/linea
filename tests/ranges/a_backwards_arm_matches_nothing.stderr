@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+ --> tests/ranges/a_backwards_arm_matches_nothing.lin:6:9
+  |
+6 |         9..0 => 1,
+  |         ^^^^ this range matches nothing

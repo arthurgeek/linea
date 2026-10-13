@@ -1,0 +1,34 @@
+// [O-Uncommitted], reached through `?` rather than through a written `return`.
+// `d` is given to `use2`, `get()?` may leave before the call begins, and the
+// state control goes to has a `Key` that nobody owns.
+//
+// This is the program §7 of the generics design named when it settled this
+// rule ahead of `?`. It is refused by a rule that was written and merged
+// before `?` existed, and nothing in the ownership pass knows that `?` is what
+// reached it -- which is what makes the rule about the invariant rather than
+// about the syntax exercising it.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn get() -> Option[Key] {
+    Option.Some(.{ n = 1 })
+}
+
+fn go(sink d: Key) -> Option[UInt8] {
+    Option.Some(use2(d, get()?))
+}
+
+fn main() -> UInt8 {
+    match go(.{ n = 2 }) {
+        Some(n) => n,
+        None => 0,
+    }
+}

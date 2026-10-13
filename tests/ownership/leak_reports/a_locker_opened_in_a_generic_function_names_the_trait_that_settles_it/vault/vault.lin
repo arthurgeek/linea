@@ -1,0 +1,21 @@
+// A locker holds one item until it is closed.
+@linear
+pub struct Locker[T] {
+    item: T,
+}
+
+pub fn open[T](sink item: T) -> Locker[T] where carries(item) {
+    .{ item }
+}
+
+// Closing a locker hands back its item.
+pub trait Close[T] {
+    fn close(sink self: Self) -> T where carries(self)
+}
+
+impl[T] Close[T] for Locker[T] {
+    fn close(sink self: Locker[T]) -> T {
+        let Locker { item } = self
+        item
+    }
+}

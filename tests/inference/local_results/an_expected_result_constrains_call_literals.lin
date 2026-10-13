@@ -1,0 +1,11 @@
+// The result annotation supplies the type of the waiting numeric literal.
+struct Cell[T] { v: T }
+
+fn wrap[T: Copyable](x: T) -> Cell[T] {
+    .{ v = copy(x) }
+}
+
+fn main() -> UInt8 {
+    let c: Cell[UInt8] = wrap(5)
+    c.v
+}

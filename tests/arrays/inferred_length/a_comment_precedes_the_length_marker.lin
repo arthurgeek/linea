@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let values: [UInt8;
+    // The literal supplies the length.
+    _] = [1]
+    values[0] - 1
+}

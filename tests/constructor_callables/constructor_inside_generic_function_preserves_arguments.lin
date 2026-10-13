@@ -1,0 +1,18 @@
+enum Wrapped[T] { Value(T) }
+
+fn wrap[T](sink value: T) -> Wrapped[T] where carries(value) {
+    let make: fn(sink payload: T) -> Wrapped[T] where carries(payload) = Wrapped.Value
+    make(value)
+}
+
+fn main() -> UInt8 {
+    let a = wrap(UInt8(3))
+    let b = wrap(UInt64(29))
+    let left = match a { Value(value) => value }
+    let right = match b { Value(value) => value }
+    if left == 3 && right == 29 {
+        0
+    } else {
+        1
+    }
+}

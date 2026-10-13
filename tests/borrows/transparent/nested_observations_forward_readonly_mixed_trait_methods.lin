@@ -1,0 +1,29 @@
+trait Counter {
+    fn count(self: Self) -> UInt8
+
+    fn advance(inout self: Self) -> ()
+}
+
+struct State { number: UInt8 }
+
+impl Counter for State {
+    fn count(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn advance(inout self: Self) -> () {
+        self.number += 1
+    }
+}
+
+fn main() -> UInt8 {
+    var state = State { number = 7 }
+    Counter.advance(&state)
+    let view = borrow state
+    let nested = borrow view
+    if nested.count() == 8 && Counter.count(nested) == 8 && state.number == 8 {
+        0
+    } else {
+        1
+    }
+}

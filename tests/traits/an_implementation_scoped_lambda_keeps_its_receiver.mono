@@ -1,0 +1,20 @@
+struct Holder[UInt8] {
+    value: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 1 }
+    ;Holder[UInt8].apply(holder, 7)
+}
+
+pub fn ;Holder[UInt8].apply(self: Holder[UInt8], sink value: UInt8) -> UInt8 where carries(value) {
+    ;Holder[UInt8].invoke[closure0[]$3aimpl[UInt8]$3aHolder[UInt8]](self, value, |sink value| value)
+}
+
+fn ;Holder[UInt8].invoke[closure0[]$3aimpl[UInt8]$3aHolder[UInt8]](_self: Holder[UInt8], sink value: UInt8, f: closure0[]:impl[UInt8]:Holder[UInt8]) -> UInt8 where carries(value, f) {
+    closure.0[Holder[UInt8]].impl[UInt8](value)
+}
+
+fn closure.0[Holder[UInt8]].impl[UInt8](sink value: UInt8) -> UInt8 {
+    value
+}

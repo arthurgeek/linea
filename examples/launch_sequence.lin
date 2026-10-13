@@ -1,0 +1,48 @@
+// Print the launch checklist in countdown order, ending with ignition.
+import std.testing
+import std.io
+
+use io.IoError
+use io.println
+
+struct Checklist {
+    steps: [Str; 5],
+}
+
+// `via steps` implements `Index` by delegating to the `steps` field, so
+// `launch[i]` reads `launch.steps[i]` without a hand-written method.
+impl Index[Int64] for Checklist via steps
+
+impl Checklist {
+    // `trav positions` tells `for` which indices to visit: the inclusive range
+    // `4..=0` counts down, so the checklist runs from its last step to ignition.
+    trav positions = 4..=0
+}
+
+fn checklist() -> Checklist {
+    .{ steps = ["ignition", "gimbal check", "tanks pressurised", "arms retracted", "hold released"] }
+}
+
+test fn launch_preparations_finish_before_ignition() {
+    let launch = checklist()
+    let sequence = ["hold released", "arms retracted", "tanks pressurised", "gimbal check", "ignition"]
+    var next: UInt64 = 0
+    for read step in launch {
+        testing.assert_eq(step, sequence[next], "launch preparations ran out of order")?
+        next += 1
+    }
+    testing.assert_eq(next, 5, "launch preparations ended before ignition")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let launch = checklist()
+    // Give each of the five checklist steps one second before liftoff.
+    var seconds: UInt8 = 5
+    // `for read` looks at each step and leaves the checklist whole.
+    for read step in launch {
+        println("T-minus {seconds}: {step}")?
+        seconds -= 1
+    }
+    println("T-zero: liftoff")?
+    .Ok(0)
+}

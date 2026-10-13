@@ -1,0 +1,17 @@
+struct Shelf {
+    slots: [UInt8; 4],
+}
+
+impl Index[Int64] for Shelf {
+    type Elem = UInt8
+
+    proj at(self: Shelf, i: Int64) -> UInt8 {
+        self.slots[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf: Shelf = .{ slots = [10, 20, 30, 40] }
+    let position = 3
+    shelf[position] - 40
+}

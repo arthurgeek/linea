@@ -1,0 +1,5 @@
+error[T-Lend]: `_Board` already declares a traversal
+ --> tests/delegation/traversal_delegation_keeps_one_traversal.lin:7:10
+  |
+7 |     trav second via values
+  |          ^^^^^^ a type is walked in one order, and this is a second

@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let first: UInt8 = 1
+    let second: UInt8 = 7
+    var remember = inout [sink saved = borrow first] |value: borrow UInt8| -> where retains(saved: value) {
+        saved = copy(value)
+    }
+    &remember(borrow second)
+    let { saved } = remember.into_captures()
+    *saved
+}

@@ -1,0 +1,15 @@
+struct Source { code: UInt64 }
+
+struct Destination { code: UInt64 }
+
+impl From[Source] for Destination {
+    fn from(sink source: Source) -> Destination where carries(source) {
+        .{ code = source.code }
+    }
+}
+
+fn main() -> UInt8 {
+    let destination: Destination = .{ code = 7 }
+    let source: Source = destination.into()
+    UInt8(source.code)
+}

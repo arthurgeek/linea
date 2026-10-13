@@ -1,0 +1,14 @@
+// `Default` declares `default`, but `Gate` does not implement it, so
+// `Gate.default()` reaches nothing.
+struct Gate {
+    open: Bool,
+}
+
+fn main() -> UInt8 {
+    let gate = Gate.default()
+    if gate.open {
+        1
+    } else {
+        0
+    }
+}

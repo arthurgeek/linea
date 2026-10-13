@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/control/loop_breaks_disagree.lin:6:15
+  |
+2 |     let x: UInt8 = loop {
+  |            ----- expected because of this annotation
+6 |         break true
+  |               ^^^^ expected `UInt8`, found `Bool`

@@ -1,0 +1,28 @@
+error[S-Mutation]: this receiver is not mutated, so the call takes no `&`
+  --> tests/receivers/a_chain_lends_only_the_receiver_at_its_head.lin:25:14
+   |
+9  |     fn first(self: Self) -> Counter {
+   |              ---- declared `read`
+25 |     let a = &list.first().push(1)
+   |              ^^^^ remove the `&` before it
+error[S-Mutation]: this receiver is mutated, and a value that is not a place cannot be lent
+  --> tests/receivers/a_chain_lends_only_the_receiver_at_its_head.lin:25:13
+   |
+17 |     fn push(inout self: Self, x: UInt8) -> UInt8 {
+   |                   ---- declared `inout`
+25 |     let a = &list.first().push(1)
+   |             ^^^^^^^^^^^^^ bind the value to a `var`, then call the operation on it with `&`
+error[S-Mutation]: this receiver is mutated, and a value that is not a place cannot be lent
+  --> tests/receivers/a_chain_lends_only_the_receiver_at_its_head.lin:26:13
+   |
+17 |     fn push(inout self: Self, x: UInt8) -> UInt8 {
+   |                   ---- declared `inout`
+26 |     let b = list.first().push(1)
+   |             ^^^^^^^^^^^^ bind the value to a `var`, then call the operation on it with `&`
+error[S-Mutation]: this receiver is mutated, and a value that is not a place cannot be lent
+  --> tests/receivers/a_chain_lends_only_the_receiver_at_its_head.lin:27:13
+   |
+17 |     fn push(inout self: Self, x: UInt8) -> UInt8 {
+   |                   ---- declared `inout`
+27 |     let c = &list.take().push(1)
+   |             ^^^^^^^^^^^^ bind the value to a `var`, then call the operation on it with `&`

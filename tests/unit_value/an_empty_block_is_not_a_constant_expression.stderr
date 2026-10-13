@@ -1,0 +1,5 @@
+error[T-Const]: `nothing` is not a constant expression
+ --> tests/unit_value/an_empty_block_is_not_a_constant_expression.lin:3:19
+  |
+3 | let nothing: () = {}
+  |                   ^^ an empty block is not a constant; write `()` for the unit value

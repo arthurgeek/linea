@@ -1,0 +1,14 @@
+// `for inout` lends each place writably, and a lend that may write is the only
+// path to what it names for as long as it lasts. A read by another path is a
+// second view of what one path is changing -- the answer [N-Aliased] gives an
+// argument read beside one passed `&`, asked here between a body and the
+// construct around it.
+fn main() -> UInt8 {
+    var xs: [UInt64; 3] = [1, 2, 3]
+    var t: UInt64 = 0
+    for inout x in xs {
+        t += xs[0]
+        x += 1
+    }
+    UInt8(t)
+}

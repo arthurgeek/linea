@@ -1,0 +1,29 @@
+// The schedule belongs to the block the binding is written in, so a loop body
+// releases once per iteration rather than once at the end of the loop.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var next: UInt8 = 0
+    while next < 3 {
+        defer let lamp = Lamp { id = next }
+        next = next + 1
+    }
+    next
+}

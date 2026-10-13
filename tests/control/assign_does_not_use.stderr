@@ -1,0 +1,5 @@
+error[N-Unused]: `x` is never used
+ --> tests/control/assign_does_not_use.lin:2:9
+  |
+2 |     var x: UInt8 = 1
+  |         ^ bind it as `_` if the value is not wanted

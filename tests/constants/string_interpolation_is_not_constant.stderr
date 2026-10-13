@@ -1,0 +1,5 @@
+error[T-Const]: `_text` is not a constant expression
+ --> tests/constants/string_interpolation_is_not_constant.lin:3:13
+  |
+3 | let _text = "value {number}"
+  |             ^^^^^^^^^^^^^^^^ give it something the language can work out without running anything

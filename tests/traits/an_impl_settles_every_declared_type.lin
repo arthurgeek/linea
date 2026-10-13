@@ -1,0 +1,23 @@
+// A trait declares types as well as signatures, and an implementation covers
+// exactly what its trait declares. One it leaves unsettled is a hole nothing
+// else can fill: a bound admitting this type promises the type exists, and a
+// signature naming it would reach nothing.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

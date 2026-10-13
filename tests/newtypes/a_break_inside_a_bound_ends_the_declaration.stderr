@@ -1,0 +1,10 @@
+error[S-Separator]: a line break ends this refinement clause
+ --> tests/newtypes/a_break_inside_a_bound_ends_the_declaration.lin:4:37
+  |
+4 | pub type Percent = Int8 where it in -
+  |                                     ^ a refinement clause is written on the line `where` opens
+error[S-Entry]: a program is a list of declarations
+ --> tests/newtypes/a_break_inside_a_bound_ends_the_declaration.lin:5:5
+  |
+5 |     5..=99
+  |     ^ expected `fn` here

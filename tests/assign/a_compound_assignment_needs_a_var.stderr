@@ -1,0 +1,7 @@
+error[N-Immutable]: `v` is declared with `let`
+ --> tests/assign/a_compound_assignment_needs_a_var.lin:5:5
+  |
+4 |     let v: UInt8 = 1
+  |         - declared with `let` here
+5 |     v += 1
+  |     ^ this binding cannot be assigned

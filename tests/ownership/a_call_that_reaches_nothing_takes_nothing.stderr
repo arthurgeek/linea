@@ -1,0 +1,10 @@
+error[M-Import]: no directory named `tests/ownership/postbox` holds a `.lin` file
+ --> tests/ownership/a_call_that_reaches_nothing_takes_nothing.lin:4:8
+  |
+4 | import postbox
+  |        ^^^^^^^ cannot import it
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/a_call_that_reaches_nothing_takes_nothing.lin:16:22
+   |
+16 |         let _found = lookup(text)
+   |                      ^^^^^^ no binding with this name is in scope

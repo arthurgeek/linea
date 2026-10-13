@@ -1,0 +1,12 @@
+// Each `text` the loop binds is one of the strings, so `text.length()` counts
+// its bytes.
+import std.text
+
+fn main() -> UInt8 {
+    let _unused: Option[text.ParseError] = .None
+    var total: UInt64 = 0
+    for text in ["ab", "cde"] {
+        total = total + text.length()
+    }
+    UInt8.try_from(total).unwrap_or(0)
+}

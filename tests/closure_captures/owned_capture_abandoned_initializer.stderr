@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `closure` has not been given `key` yet, and control leaves here
+  --> tests/closure_captures/owned_capture_abandoned_initializer.lin:12:48
+   |
+12 |     let finish = sink [sink key, sink number = fail()?] || {
+   |                             --- it was given up here
+   |                                                ^^^^^^^ give the value up after this, not before it

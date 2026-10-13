@@ -1,0 +1,28 @@
+struct Choice { small: UInt8, wide: UInt8 }
+
+impl Index[Int8] for Choice {
+    type Elem = UInt8
+
+    proj at(inout self: Choice, _i: Int8) -> UInt8 {
+        self.small
+    }
+}
+
+impl Index[UInt16] for Choice {
+    type Elem = UInt8
+
+    proj at(inout self: Choice, _i: UInt16) -> UInt8 {
+        self.wide
+    }
+}
+
+fn main() -> UInt8 {
+    var choice = Choice { small = 1, wide = 2 }
+    choice[Int8(0)] += 1
+    choice[UInt16(300)] += 1
+    if choice.small == 2 && choice.wide == 3 {
+        0
+    } else {
+        1
+    }
+}

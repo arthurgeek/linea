@@ -1,0 +1,9 @@
+error[O-Leak]: `_ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/a_leak_suggests_release_first.lin:22:9
+   |
+22 |     let _ticket = Ticket { number = 4 }
+   |         ^^^^^^^ never settled on the path that reaches the end of this block
+24 | }
+   | - the block ends here
+   |
+   = help: settle it first with `_ticket.release()` or `_ticket._print()`, or take it apart with `let Ticket { number: _ } = _ticket`

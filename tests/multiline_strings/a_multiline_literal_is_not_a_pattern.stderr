@@ -1,0 +1,5 @@
+error[S-Match]: a multi-line literal is not a pattern
+ --> tests/multiline_strings/a_multiline_literal_is_not_a_pattern.lin:3:9
+  |
+3 |         \\\
+  |         ^^^ write this text as a quoted literal

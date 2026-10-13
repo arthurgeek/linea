@@ -1,0 +1,9 @@
+fn _needs[T](_callback: fn(read value: T) -> T) -> () {}
+
+fn _forwards[U](callback: fn(read value: U) -> U) -> () {
+    _needs(callback)
+}
+
+fn main() -> UInt8 {
+    0
+}

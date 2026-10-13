@@ -1,0 +1,26 @@
+// A result that observes the carrier's own place has the contract
+// `borrows(session)`, and the report of a body that returns something else
+// names that contract.
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn first(session: Session, tag: Str) -> borrow Session {
+    let rebuilt = Session { user = copy(tag) }
+    if session.user.length() > 0 {
+        borrow rebuilt
+    } else {
+        borrow session
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let kept = first(session, "x")
+    if kept.user.length() > 0 {
+        0
+    } else {
+        1
+    }
+}

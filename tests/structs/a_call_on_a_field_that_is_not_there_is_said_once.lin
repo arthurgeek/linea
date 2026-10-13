@@ -1,0 +1,31 @@
+// A method call whose receiver is a field the type does not declare.
+//
+// One mistake, so one diagnostic. The receiver is checked to find out which
+// operations are in play, and checking it is what reports the name; the call
+// then has nothing further to say about the same expression.
+//
+// And nothing is said about the arguments. The postfix form is sugar for a
+// signature, so which of its positions consume is that signature's to say --
+// and a call that reached no operation has no signature to say it. `put`
+// takes its two by `read`, so the call written below moves nothing, and a
+// report that `n` was taken twice would describe the guess rather than the
+// program.
+struct Inner {
+    v: UInt64,
+}
+
+struct Holder {
+    inner: Inner,
+}
+
+impl Inner {
+    fn put(i: Inner, a: UInt64, b: UInt64) -> UInt64 {
+        i.v + a + b
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ inner = .{ v = 1 } }
+    let n: UInt64 = 2
+    UInt8(h.nope.put(n, n))
+}

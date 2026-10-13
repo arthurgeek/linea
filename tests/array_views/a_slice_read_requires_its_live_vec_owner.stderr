@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/array_views/a_slice_read_requires_its_live_vec_owner.lin:7:5
+  |
+7 |     values.release()
+  |     ^^^^^^ keep this place available until the last use of its observation
+8 |     slice[0]
+  |     -------- the observation is still used here

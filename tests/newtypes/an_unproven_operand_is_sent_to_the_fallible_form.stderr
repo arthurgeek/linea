@@ -1,0 +1,5 @@
+error[T-Refine]: `n` is not known to be in 0..=99
+  --> tests/newtypes/an_unproven_operand_is_sent_to_the_fallible_form.lin:11:11
+   |
+11 |     wants(Percent(n))
+   |           ^^^^^^^^^^ make it fallible: `Percent?(n)`

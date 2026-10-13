@@ -1,0 +1,13 @@
+// One symbol space: a name is declared once. An import binds in the file that
+// wrote it, but everything else a module declares is shared by all of them --
+// so `util` here is a function every file sees, and the import below collides
+// with it. Allowing a module binding to sit beside any other declaration of
+// its name let one name mean two things in one file: the function in one
+// position and the module in the next.
+fn util() -> UInt8 {
+    9
+}
+
+fn main() -> UInt8 {
+    util() + helper()
+}

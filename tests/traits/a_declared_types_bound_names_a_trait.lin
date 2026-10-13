@@ -1,0 +1,25 @@
+// An associated-type bound names a built-in capability or a declared trait.
+// An unknown name or an ordinary record type supplies neither.
+struct Counter {
+    at: UInt8,
+}
+
+trait Walk {
+    type Iter: Nonesuch
+    type Held: Counter
+
+    fn iterate(sink self: Self) -> Self.Iter
+}
+
+impl Walk for Counter {
+    type Iter = Counter
+    type Held = UInt8
+
+    fn iterate(sink self: Self) -> Self.Iter {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

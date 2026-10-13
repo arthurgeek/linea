@@ -1,0 +1,14 @@
+// A region opened inside a body and closed after it spans the brace that ends
+// the body. The walk steps over that brace, so the line-ending that would have
+// followed it is what leaves the blank line -- and the separator before the
+// next declaration must not stack a second one on top of it.
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    // linea fmt: off
+    x
+}
+// linea fmt: on
+
+fn _g() -> UInt8 {
+    1
+}

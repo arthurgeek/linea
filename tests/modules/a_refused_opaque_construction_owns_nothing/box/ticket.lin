@@ -1,0 +1,15 @@
+@(opaque, linear)
+struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    pub fn issue(seat: UInt8) -> Ticket {
+        .{ seat }
+    }
+
+    pub fn redeem(sink self: Self) -> UInt8 {
+        let Ticket { seat } = self
+        seat
+    }
+}

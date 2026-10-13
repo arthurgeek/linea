@@ -1,0 +1,28 @@
+// A type's name is not a value of that type. A dot on it offers what the
+// type's inherent `impl` blocks write and the operations of the traits in
+// scope it implements, `Coins.weight` among them, but never a field:
+// `Coins.n` would select a part of a value nobody wrote.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Coins {
+    pub fn minted(n: UInt8) -> Coins {
+        .{ n = n }
+    }
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = Coins.minted(3)
+    Measure.weight(coppers)
+}

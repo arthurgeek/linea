@@ -1,0 +1,20 @@
+// A qualified variant is a value, so a postfix call on it reaches the enum's
+// operation with the variant as its receiver, parenthesized or not.
+@copyable
+enum Light {
+    Off,
+    Level(UInt8),
+}
+
+impl Light {
+    fn brightness(self: Light) -> UInt8 {
+        match read self {
+            Off => 10,
+            Level(n) => n,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    Light.Off.brightness() + (Light.Off).brightness() + Light.Level(3).brightness() + (Light.Level(4)).brightness()
+}

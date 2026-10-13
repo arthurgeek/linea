@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/a_conversion_preserves_the_observation_it_retains.lin:17:5
+   |
+17 |     owner = 9
+   |     ^^^^^ keep this place available until the last use of its observation
+18 |     UInt8(*target.view + owner)
+   |           ------------ the observation is still used here

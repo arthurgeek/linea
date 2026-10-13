@@ -1,0 +1,33 @@
+==================
+Inferred struct destructuring
+==================
+
+fn take() -> UInt8 {
+    let { field, other: renamed } = value
+    let {} = empty
+    field + renamed
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (struct_pattern
+          (field_pattern
+            (identifier))
+          (field_pattern
+            (identifier)
+            (identifier)))
+        (identifier))
+      (let_statement
+        (struct_pattern)
+        (identifier))
+      (expression_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))

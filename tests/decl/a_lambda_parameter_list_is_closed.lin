@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _bad = |value: UInt8 1
+    0
+}

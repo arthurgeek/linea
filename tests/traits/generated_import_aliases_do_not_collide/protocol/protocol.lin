@@ -1,0 +1,13 @@
+pub trait Label {
+    fn label(self: Self) -> UInt8
+}
+
+pub fn seven() -> UInt8 {
+    7
+}
+
+template impl Label {
+    fn label(_self: Self) -> UInt8 {
+        seven()
+    }
+}

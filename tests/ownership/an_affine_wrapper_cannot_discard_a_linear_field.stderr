@@ -1,0 +1,9 @@
+error[O-Leak]: `_h` (a linear `Holder`) is still owned when this path leaves
+  --> tests/ownership/an_affine_wrapper_cannot_discard_a_linear_field/main.lin:9:9
+   |
+9  |     let _h: Holder = .{ k = Key.Forged(1) }
+   |         ^^ never settled on the path that reaches the end of this block
+11 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

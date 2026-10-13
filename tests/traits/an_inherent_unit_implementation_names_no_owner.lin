@@ -1,0 +1,7 @@
+// An inherent implementation belongs with the module that declares its type,
+// and no module declares Unit, so no source module owns this implementation.
+impl () {}
+
+fn main() -> UInt8 {
+    0
+}

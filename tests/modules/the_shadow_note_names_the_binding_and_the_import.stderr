@@ -1,0 +1,23 @@
+error[N-Case]: type parameters start with a capital letter
+  --> tests/modules/the_shadow_note_names_the_binding_and_the_import/main.lin:15:10
+   |
+15 | fn _pick[sh: Carry](held: sh) -> UInt8 {
+   |          ^^ rename it `Sh`
+error[T-UnknownOperation]: `make` is a function, not an operation of `Str`
+  --> tests/modules/the_shadow_note_names_the_binding_and_the_import/main.lin:12:5
+   |
+11 | fn count(sh: Str) -> UInt8 {
+   |          -- this parameter `sh` shadows `sh`, the import of `shapes`
+12 |     sh.make().size
+   |     ^^^^^^^ a dot calls an operation of the value, and a free function is not one
+   |
+   = help: inside this scope `sh` is the parameter, not the module; write `import shapes as` another name to reach the module here
+error[T-UnknownField]: type parameter `sh` has no member `make`
+  --> tests/modules/the_shadow_note_names_the_binding_and_the_import/main.lin:16:5
+   |
+15 | fn _pick[sh: Carry](held: sh) -> UInt8 {
+   |          -- this type parameter `sh` shadows `sh`, the import of `shapes`
+16 |     sh.make().size + Carry.get(held)
+   |     ^^^^^^^ the declared constraints do not provide this member
+   |
+   = help: inside this scope `sh` is the type parameter, not the module; write `import shapes as` another name to reach the module here

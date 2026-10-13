@@ -1,0 +1,23 @@
+enum RenderError { Allocation(UInt8) }
+
+fn first_before_second[E: Discardable, F: fn(sink code: UInt8) -> E, G: fn(sink code: UInt8) -> E](first: F, second: G) -> E where carries(first, second) {
+    let _ = second(2)
+    first(7)
+}
+
+fn second_before_first[E: Discardable, G: fn(sink code: UInt8) -> E, F: fn(sink code: UInt8) -> E](second: G, first: F) -> E where carries(first, second) {
+    let _ = second(2)
+    first(7)
+}
+
+fn main() -> UInt8 {
+    let early = first_before_second((.Allocation), RenderError.Allocation)
+    let late = second_before_first(RenderError.Allocation, .Allocation)
+    let a = match early { Allocation(code) => code }
+    let b = match late { Allocation(code) => code }
+    if a == 7 && b == 7 {
+        0
+    } else {
+        1
+    }
+}

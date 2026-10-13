@@ -1,0 +1,5 @@
+error[T-Derive]: declare `template impl` in the trait's module, or write the implementation by hand
+ --> tests/prelude/a_bare_derive_of_a_shadowed_name_derives_the_modules_trait.lin:8:9
+  |
+8 | @derive(Release)
+  |         ^^^^^^^ this trait has no structural template

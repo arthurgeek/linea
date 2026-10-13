@@ -1,0 +1,11 @@
+enum First { Preserve }
+
+enum Second { Preserve }
+
+fn select(mode: First = Second.Preserve) -> UInt8 {
+    match read mode { Preserve => 0 }
+}
+
+fn main() -> UInt8 {
+    select()
+}

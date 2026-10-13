@@ -1,0 +1,6 @@
+@derive(Equatable[UInt8])
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    Point { value = 0 }.value
+}

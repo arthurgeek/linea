@@ -1,0 +1,14 @@
+import traits
+
+use traits.Score
+
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { value = 3 }
+    point.value
+}
+
+fn _accepts[T: Score](_value: T) -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/closure_captures/captured_destination_protects_input.lin:8:5
+  |
+8 |     second = 8
+  |     ^^^^^^ keep this place available until the last use of its observation
+9 |     let { saved } = remember.into_captures()
+  |                     -------- the observation is still used here

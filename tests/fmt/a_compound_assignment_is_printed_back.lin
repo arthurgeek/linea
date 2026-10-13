@@ -1,0 +1,16 @@
+// The formatter prints what was written. A tree holding `a = a + b` prints
+// `a = a + b`, which is why `a += b` is a construct of its own rather than a
+// spelling the parser normalises away -- and this is the case that would notice
+// if it stopped being one.
+//
+// Written badly on purpose: the spacing around each operator is the formatter's
+// to settle, and the five have to come back as the five that were written.
+fn main() -> UInt8 {
+    var v: UInt8   =   20
+    v+=5
+    v -=  3
+    v*= 2
+    v  /=4
+    v %=  7
+    v
+}

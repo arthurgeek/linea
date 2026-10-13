@@ -1,0 +1,20 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn work() -> Option[UInt8] {
+    let selected = (for index in UInt8(0)..1 {
+        let _index = index
+        break Arena.open(system(), 64)
+    })?
+    let bytes = selected.handle().acquire(8).unwrap()
+    selected.release()
+    bytes.release()
+    return .Some(0)
+}
+
+fn main() -> UInt8 {
+    match work() { Some(value) => value, None => 0 }
+}

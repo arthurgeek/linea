@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Decode[SystemAllocator]`, and `Str` does not implement it
+ --> tests/json_typed/decode_borrowed_text.lin:5:75
+  |
+5 |     let result: Result[Str, json.DecodeError[mem.SystemAllocator]] = json.decode(mem.system(), r#""tea""#)
+  |                                                                           ^^^^^^ implement it for that type, or drop the bound

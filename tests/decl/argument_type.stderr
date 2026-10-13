@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/decl/argument_type.lin:6:7
+  |
+1 | fn f(a: UInt8) -> UInt8 {
+  |      - expected because of this parameter
+6 |     f(true)
+  |       ^^^^ expected `UInt8`, found `Bool`

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let values = [UInt8(1)]
+    let slice = values.as_slice(extra: 0)
+    UInt8(slice.length())
+}

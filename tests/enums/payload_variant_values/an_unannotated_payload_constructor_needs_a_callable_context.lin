@@ -1,0 +1,6 @@
+enum Failure { Code(UInt8) }
+
+fn main() -> UInt8 {
+    let _make = Failure.Code
+    0
+}

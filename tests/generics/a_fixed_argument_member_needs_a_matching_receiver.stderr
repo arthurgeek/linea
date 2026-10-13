@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Pair[A, ()]`, found `Pair[UInt8, Bool]`
+  --> tests/generics/a_fixed_argument_member_needs_a_matching_receiver.lin:16:5
+   |
+9  |     fn first_of(self: Self) -> A where A: Copyable {
+   |                 ---- expected because of this parameter
+16 |     both.first_of()
+   |     ^^^^ expected `Pair[A, ()]`, found `Pair[UInt8, Bool]`

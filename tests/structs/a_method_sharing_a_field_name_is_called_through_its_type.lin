@@ -1,0 +1,16 @@
+// `Door.width(door)` names the operation through its type, and reaches the
+// same operation as `door.width()`.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn width(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 3 }
+    Door.width(door) - door.width()
+}

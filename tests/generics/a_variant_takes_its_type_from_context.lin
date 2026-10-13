@@ -1,0 +1,30 @@
+// `.Some` names a variant and no enum: which one it builds is a question the
+// expectation answers, so an annotation or a return type is enough and the
+// type is written once rather than twice.
+//
+// The prelude is reached the same way anything else is, which is the point of
+// it being ordinary Linea: nothing here knows that `Option` and `Result` were
+// declared somewhere the program cannot see.
+fn ok(n: UInt8) -> Result[UInt8, UInt8] {
+    .Ok(n)
+}
+
+fn main() -> UInt8 {
+    let three: UInt8 = 3
+    let maybe: Option[UInt8] = .Some(three)
+    let failed: Result[UInt8, UInt8] = .Err(three)
+
+    let a: UInt8 = match maybe {
+        None => 0,
+        Some(n) => n,
+    }
+    let b: UInt8 = match failed {
+        Ok(v) => v,
+        Err(e) => e,
+    }
+    let c: UInt8 = match ok(three) {
+        Ok(v) => v,
+        Err(e) => e,
+    }
+    a + b + c
+}

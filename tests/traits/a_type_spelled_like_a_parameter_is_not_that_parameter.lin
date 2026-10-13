@@ -1,0 +1,39 @@
+// A type declared `T` and a parameter written `T` are two things, and an
+// implementation supplying each to one trait supplies two different arguments.
+// The family supplies whatever its receiver settled the head to; the settled
+// head supplies the declared type, whatever any other implementation calls its
+// parameters.
+//
+// Both are implementations of `Give` for `Holder[UInt8]` and neither is the
+// other, so both are reached and each answers its own way.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[A] {
+    a: A,
+}
+
+struct T {
+    v: UInt8,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        5
+    }
+}
+
+impl Give[T] for Holder[UInt8] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ a = 1 }
+    let g: Holder[UInt8] = .{ a = 1 }
+    let n: UInt8 = 1
+    let t: T = .{ v = 2 }
+    Give.give(h, n) + Give.give(g, t)
+}

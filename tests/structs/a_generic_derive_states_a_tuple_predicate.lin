@@ -1,0 +1,20 @@
+// A derive on a generic struct requires each field's type to implement the
+// trait, and a tuple field's type is required as a whole.
+@derive(Equatable)
+struct S[T] {
+    pair: (T, UInt8),
+}
+
+fn same[T](a: S[T], b: S[T]) -> Bool where (T, UInt8): Equatable {
+    a == b
+}
+
+fn main() -> UInt8 {
+    let a: S[Bool] = .{ pair = (true, 1) }
+    let b: S[Bool] = .{ pair = (true, 1) }
+    if same(a, b) {
+        0
+    } else {
+        1
+    }
+}

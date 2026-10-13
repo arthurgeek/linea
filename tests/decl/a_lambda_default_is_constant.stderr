@@ -1,0 +1,5 @@
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/decl/a_lambda_default_is_constant.lin:2:38
+  |
+2 |     let _read_seed = |value: UInt8 = seed| value
+  |                                      ^^^^ this is not a constant

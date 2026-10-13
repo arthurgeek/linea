@@ -1,0 +1,11 @@
+trait Give[phantom U] {
+    type Item
+}
+
+fn _take[
+    F: Give[fn(read value: UInt8 = 1 + 1) -> UInt8] + Give[fn(read value: UInt8 = 2) -> UInt8],
+](_value: F, _item: F.Item) -> () {}
+
+fn main() -> UInt8 {
+    0
+}

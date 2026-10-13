@@ -1,0 +1,10 @@
+error[S-Match]: expected a pattern
+ --> tests/recovery/an_arm_missing_its_pattern.lin:8:9
+  |
+8 |         => 0,
+  |         ^^ an arm begins with a variant, `_`, a number or a string
+error[T-Cover]: this `match` does not cover `Red`
+ --> tests/recovery/an_arm_missing_its_pattern.lin:7:5
+  |
+7 |     match Colour.Red {
+  |     ^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`

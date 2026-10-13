@@ -1,0 +1,43 @@
+// A type parameter discharges a bound wherever it is written, and not only at
+// a call.
+//
+// A bound is a promise about whatever settles the parameter, so a body may
+// name `Holder[S]` for the same reason it may call `Drain.put` on an `S`: the
+// promise is discharged where the argument is supplied. The two readings have
+// to agree, or a generic type with a bound can be written down and never used
+// from a generic function -- which is every container the library would want.
+trait Drain {
+    fn put(self: Self) -> UInt64
+}
+
+struct Counter {
+    seen: UInt64,
+}
+
+impl Drain for Counter {
+    fn put(self: Counter) -> UInt64 {
+        self.seen
+    }
+}
+
+struct Holder[S: Drain + Discardable] {
+    out: S,
+}
+
+// In the signature, where the argument is the enclosing declaration's own
+// parameter.
+fn drained[S: Drain + Discardable](h: Holder[S]) -> UInt64 {
+    Drain.put(h.out)
+}
+
+// And in the body, which is the same question asked at the other place a type
+// is written.
+fn held[S: Drain + Discardable](sink s: S) -> UInt64 {
+    let h: Holder[S] = .{ out = s }
+    drained(h)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ seen = 7 }
+    UInt8(held(c))
+}

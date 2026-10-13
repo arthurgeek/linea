@@ -1,0 +1,26 @@
+trait Scale[F] {
+    fn scale(self: Self, by: F) -> UInt8
+}
+
+@copyable
+struct Meters {
+    length: UInt8,
+}
+
+impl Scale[UInt8] for Meters {
+    fn scale(self: Meters, by: UInt8) -> UInt8 {
+        self.length * by
+    }
+}
+
+impl Scale[Int64] for Meters {
+    fn scale(self: Meters, by: Int64) -> UInt8 {
+        self.length + UInt8(by)
+    }
+}
+
+fn main() -> UInt8 {
+    let distance: Meters = .{ length = 3 }
+    let factor = 2
+    distance.scale(factor) - 5
+}

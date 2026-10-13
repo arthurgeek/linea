@@ -1,0 +1,5 @@
+error[T-Refine]: 500..=600 reaches outside `UInt8`, which `Bad` refines
+ --> tests/newtypes/a_clause_lies_where_the_base_admits_none_of_it.lin:4:6
+  |
+4 | type Bad = UInt8 where it in 500..=600
+  |      ^^^ narrow the range to what the base can hold

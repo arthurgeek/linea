@@ -1,0 +1,19 @@
+// Nothing declares `lookup`, so what that call does with its argument is
+// unknown. `redeem(ticket)` inside it is a known call and takes `ticket`, so
+// the second `redeem(ticket)` uses a ticket already taken.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    let _found = lookup(redeem(ticket))
+    redeem(ticket)
+}

@@ -1,0 +1,43 @@
+// A symbol too long to spell keeps a prefix of the structure and a digest of
+// the whole of it. The prefix alone is not a name: these two heads are the same
+// six carriers, and what tells them apart sits further along than the prefix
+// reaches -- so both symbols keep the same bytes, and the digest is the whole
+// of what makes them two. A scheme keeping the prefix alone spells one name for
+// two bodies.
+//
+// The exit status says which body each call reached: the two answer with
+// different numbers, so a program that ran one of them twice produces a
+// different status rather than the same one.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Tag {
+    fn of(x: Self) -> UInt8
+}
+
+trait Mark {
+    fn of(x: Self) -> UInt8
+}
+
+impl Tag for Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]] {
+    fn of(x: Self) -> UInt8 {
+        x.v.v.v.v.v.v + 10
+    }
+}
+
+impl Mark for Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]] {
+    fn of(x: Self) -> UInt8 {
+        if x.v.v.v.v.v.v {
+            20
+        } else {
+            40
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[UInt8]]]]]] = .{ v = .{ v = .{ v = .{ v = .{ v = .{ v = 3 } } } } } }
+    let b: Envelope[Envelope[Envelope[Envelope[Envelope[Envelope[Bool]]]]]] = .{ v = .{ v = .{ v = .{ v = .{ v = .{ v = true } } } } } }
+    Tag.of(a) + Mark.of(b)
+}

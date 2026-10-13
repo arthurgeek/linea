@@ -1,0 +1,20 @@
+// A bracket routed through a projection generates the code the path the
+// projection names generates, instruction for instruction. The twin beside this
+// case writes that path out by hand, and the two records of what the backend
+// receives differ only in the names taken from the file each was compiled from.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    g[2]
+}

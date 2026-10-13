@@ -1,0 +1,19 @@
+enum Shape { Circle(UInt8), Square }
+
+fn make(n: UInt8) -> Shape {
+    Shape.Circle(n)
+}
+
+fn size(s: Shape) -> UInt8 {
+    match read s {
+        Circle(n) => n,
+        Square => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    // Two values built in one frame and read in another. A variant returned
+    // by address would leave both naming the same storage, and the answer
+    // would be twice the second rather than the sum.
+    size(make(3)) + size(make(40))
+}

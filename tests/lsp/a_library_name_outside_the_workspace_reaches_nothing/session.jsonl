@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// `UInt8.max` is declared in the standard library and the program never wrote\n// it, so what a cursor on it reaches is a file the compiler carries rather\n// than one of the program's own.\nfn main() -> UInt8 {\n    UInt8.max\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":10}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

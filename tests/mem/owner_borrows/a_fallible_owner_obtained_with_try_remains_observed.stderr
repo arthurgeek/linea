@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/a_fallible_owner_obtained_with_try_remains_observed.lin:15:5
+   |
+15 |     owner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+16 |     bytes.release()
+   |     ----- the observation is still used here

@@ -1,0 +1,7 @@
+// `[T; N]` is a type, `[a, b, c]` builds one, and `a[i]` names an element. The
+// length is part of the type, so it is written down rather than carried, and an
+// index the compiler settles needs nothing checked when the program runs.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 3]
+    xs[0] + xs[2]
+}

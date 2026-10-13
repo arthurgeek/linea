@@ -1,0 +1,27 @@
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let owner = "one,two".to_owned(mem.system()).unwrap()
+    let arena = mem.Arena.open(mem.system(), 0)
+    defer arena.release()
+    let source = owner.view().split(",").unwrap()
+    let pending = match source.collect(arena.handle()) {
+        Ok(_) => {
+            owner.release()
+            return 1
+        },
+        Err(refused) => {
+            let { collected: _partial, failure } = refused
+            let { reason: _reason, value } = failure
+            value
+        },
+    }
+    owner.release()
+    if pending == "one" {
+        0
+    } else {
+        1
+    }
+}

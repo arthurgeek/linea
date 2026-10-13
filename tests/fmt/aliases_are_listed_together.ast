@@ -1,0 +1,33 @@
+program decls=4
+  decl pub alias "Step" tokens 2..17
+    type param "T"
+    names fn(read value: T) -> T
+  decl alias "Pair" tokens 17..28
+    type param "T"
+    names [T; 2]
+  decl alias "Meters" tokens 28..32
+    names UInt64
+  decl function "main" tokens 32..82
+    returns UInt8
+    expr %19 block tokens 38..82
+      stmt %0 let_decl tokens 39..52 "pair" : Pair[Meters]
+        expr %3 array_literal tokens 47..52
+          expr %1 int_literal tokens 48..49 "1"
+          expr %2 int_literal tokens 50..51 "2"
+      stmt %1 let_decl tokens 52..66 "step" : Step[UInt64]
+        expr %7 lambda tokens 60..66 params=1
+          param read "value"
+          expr %6 add tokens 63..66
+            expr %4 name_ref tokens 63..64 "value"
+            expr %5 int_literal tokens 65..66 "1"
+      expr %18 call tokens 66..81
+        expr %8 name_ref tokens 66..67 "UInt8"
+        expr %17 call tokens 68..80
+          expr %9 name_ref tokens 68..69 "step"
+          expr %16 add tokens 70..79
+            expr %12 index tokens 70..74
+              expr %10 name_ref tokens 70..71 "pair"
+              expr %11 int_literal tokens 72..73 "0"
+            expr %15 index tokens 75..79
+              expr %13 name_ref tokens 75..76 "pair"
+              expr %14 int_literal tokens 77..78 "1"

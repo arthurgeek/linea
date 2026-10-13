@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `a`
+ --> tests/modules/module_is_not_a_value/main.lin:5:13
+  |
+5 |     let m = a
+  |             ^ no binding with this name is in scope
+error[N-Unused]: `m` is never used
+ --> tests/modules/module_is_not_a_value/main.lin:5:9
+  |
+5 |     let m = a
+  |         ^ bind it as `_` if the value is not wanted

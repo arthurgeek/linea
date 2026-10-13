@@ -1,0 +1,50 @@
+// One settled type written off another, with the two traits declaring their
+// types in opposite orders. Both are refused and the two refusals are the
+// same: what an implementation settled cannot depend on which of its trait's
+// declarations came first, and a reading that settled them in that order would
+// make one of these mean a type and the other mean nothing.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+}
+
+trait Held {
+    type Item
+    type Other
+
+    fn of(x: Self) -> Self.Item
+}
+
+trait Kept {
+    type Other
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Held for Coins {
+    type Item = Self.Other
+    type Other = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.count
+    }
+}
+
+impl Kept for Notes {
+    type Item = Self.Other
+    type Other = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: Notes = .{ count = 4 }
+    Held.of(c) + Kept.of(n)
+}

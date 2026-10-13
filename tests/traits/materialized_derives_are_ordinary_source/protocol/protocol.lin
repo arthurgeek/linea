@@ -1,0 +1,10 @@
+@copyable
+pub struct Remote {
+    n: UInt8,
+}
+
+derive Debug for Remote
+
+pub fn make() -> Remote {
+    .{ n = 9 }
+}

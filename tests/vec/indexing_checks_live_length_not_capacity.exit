@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/vec/indexing_checks_live_length_not_capacity.lin:6:18

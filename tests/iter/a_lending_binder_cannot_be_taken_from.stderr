@@ -1,0 +1,14 @@
+error[O-Move]: `t` is a lend, and this takes it
+  --> tests/iter/a_lending_binder_cannot_be_taken_from.lin:12:30
+   |
+12 |         let Token { n: v } = t
+   |                              ^ `copy` it, or use the plain form of the construct, which does take the value
+error[O-Leak]: `ts` (a linear `[Token; 2]`) is still owned when this path leaves
+  --> tests/iter/a_lending_binder_cannot_be_taken_from.lin:9:9
+   |
+9  |     let ts: [Token; 2] = [.{ n = 1 }, .{ n = 2 }]
+   |         ^^ never settled on the path that reaches the end of this block
+16 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

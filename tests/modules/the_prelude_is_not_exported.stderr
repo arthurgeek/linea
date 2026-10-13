@@ -1,0 +1,5 @@
+error[N-Undefined]: `Option` is not declared in `inner`
+  --> tests/modules/the_prelude_is_not_exported/main.lin:11:22
+   |
+11 |     inner.ping(inner.Option.Some(3))
+   |                      ^^^^^^ no declaration of that name is in that module

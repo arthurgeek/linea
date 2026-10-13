@@ -1,0 +1,5 @@
+error[T-Derive]: a derive's head is the constructor applied to its own parameters
+  --> tests/traits/a_malformed_derive_head_is_a_derive_error.lin:10:26
+   |
+10 | derive[T] Structural for Pair[T, T]
+   |                          ^^^^ receiver arguments are distinct bare parameters in declaration order

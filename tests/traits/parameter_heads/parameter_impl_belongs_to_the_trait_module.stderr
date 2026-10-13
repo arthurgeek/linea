@@ -1,0 +1,5 @@
+error[M-Impl]: a parameter head has no declaring module
+ --> tests/traits/parameter_heads/parameter_impl_belongs_to_the_trait_module/main.lin:5:19
+  |
+5 | impl[T] Route for T {
+  |                   ^ write the implementation where the trait is declared

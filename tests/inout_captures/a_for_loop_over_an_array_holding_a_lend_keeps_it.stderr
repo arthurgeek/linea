@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/inout_captures/a_for_loop_over_an_array_holding_a_lend_keeps_it.lin:12:18
+   |
+5  |     let bump = inout [inout n] || {
+   |                             - lent `inout` here
+9  |     for tick in [bump] {
+   |                 ------ the loop's next pass takes its next element from this value, which holds the lend
+12 |         total += n
+   |                  ^ this uses the place while it is lent
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

@@ -1,0 +1,38 @@
+// The other side of the same edge. A condition that branches but takes nothing
+// leaves the value exactly as it found it, so what follows the loop owns it and
+// may give it away -- and the block the loop branches from has to be the one
+// the condition ended in for that to be what the graph says.
+fn through_an_if() -> UInt8 {
+    let k = mint(3)
+    var n: UInt8 = 0
+    while (if n == 0 {
+        true
+    } else {
+        false
+    }) {
+        n = 1
+    }
+    let t = tag(k)
+    release(k)
+    t
+}
+
+fn through_a_match() -> UInt8 {
+    let k = mint(4)
+    var n: UInt8 = 0
+    while (match Step.Again { Again => n == 0, Stop => false }) {
+        n = 1
+    }
+    let t = tag(k)
+    release(k)
+    t
+}
+
+enum Step {
+    Again,
+    Stop,
+}
+
+fn main() -> UInt8 {
+    through_an_if() + through_a_match()
+}

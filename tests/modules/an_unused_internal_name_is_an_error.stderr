@@ -1,0 +1,5 @@
+error[N-Unused]: `spare` is never used
+ --> tests/modules/an_unused_internal_name_is_an_error.lin:1:13
+  |
+1 | internal fn spare() -> UInt8 {
+  |             ^^^^^ call it, or name it with a leading `_`

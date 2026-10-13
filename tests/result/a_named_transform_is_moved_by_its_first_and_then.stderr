@@ -1,0 +1,6 @@
+error[O-Move]: `halve` has already been moved
+  --> tests/result/a_named_transform_is_moved_by_its_first_and_then.lin:12:49
+   |
+12 |     let halved = first.and_then(halve).and_then(halve)
+   |                                 ----- it was taken here
+   |                                                 ^^^^^ it was already taken, and a value is taken once

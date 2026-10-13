@@ -1,0 +1,26 @@
+// `copy(p.cell)` reads the room that `hall` owns through two borrows and makes a
+// value of its own. Pointing the holder at another room afterwards leaves the
+// copy reading the hall it was made from.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+struct Ref {
+    cell: borrow Room,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    var other = Room { name = "studio", seats = 30 }
+    var holder = Ref { cell = borrow hall }
+    let p = borrow holder
+    let c = copy(p.cell)
+    holder = Ref { cell = borrow other }
+    if c.name == "hall" {
+        c.seats + holder.cell.seats
+    } else {
+        0
+    }
+}

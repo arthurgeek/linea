@@ -1,0 +1,15 @@
+struct Entry {
+    key: UInt8,
+    value: UInt8,
+}
+
+fn main() -> UInt8 {
+    let key: UInt8 = 7
+    let replacement: UInt8 = 9
+    let entry: Entry = .{ key, value = replacement }
+    if entry.key == 7 && entry.value == 9 {
+        0
+    } else {
+        1
+    }
+}

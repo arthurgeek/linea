@@ -1,0 +1,15 @@
+// A constant is a value, not a function, so it is read rather than called.
+// Written down because the shape is one a parser could drift back into: a type
+// name followed by `(` was its own construct once, and nothing should quietly
+// make it one again.
+struct Coins {
+    count: UInt8,
+}
+
+impl Coins {
+    pub let most: UInt8 = 9
+}
+
+fn main() -> UInt8 {
+    Coins.most()
+}

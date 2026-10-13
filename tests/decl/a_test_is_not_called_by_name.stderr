@@ -1,0 +1,5 @@
+error[S-Test]: a test is not called by name
+  --> tests/decl/a_test_is_not_called_by_name.lin:15:5
+   |
+15 |     a_thing_holds()?
+   |     ^^^^^^^^^^^^^ the compiler writes the only call to a test, so a program naming one would ship it

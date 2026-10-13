@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// The state a completion is asked from: a call the parser never closed, which\n// it recovers from rather than failing. The call is unfinished and the body\n// around it is not, so what is offered is what the nearest scope the resolver\n// recorded holds.\nfn add(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    let n: UInt8 = 1\n    let total = add(\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":20}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

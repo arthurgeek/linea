@@ -1,0 +1,8 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    var points = [Point { x = 1 }, Point { x = 2 }]
+    let read Point { x } = points[0]
+    points[0].x = 9
+    x
+}

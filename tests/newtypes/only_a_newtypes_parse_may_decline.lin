@@ -1,0 +1,16 @@
+// `?` before a call's parenthesis marks a newtype's construction declining,
+// and nothing else: a function, a primitive and a struct are all always
+// built, so the `?` here asserts a rule that does not exist for any of them
+// and is refused rather than silently dropped.
+struct Point { x: UInt8, y: UInt8 }
+
+fn double(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    let _a = double?(5)
+    let _b = UInt8?(30)
+    let _c = Point?(1)
+    0
+}

@@ -1,0 +1,10 @@
+error[S-Name]: expected a name after `struct`
+ --> tests/recovery/an_attached_derive_before_a_bare_struct_keyword.lin:4:8
+  |
+4 | struct
+  |        ^ a struct needs a name
+error[S-Struct]: expected `{`
+ --> tests/recovery/an_attached_derive_before_a_bare_struct_keyword.lin:4:8
+  |
+4 | struct
+  |        ^ a struct lists its fields

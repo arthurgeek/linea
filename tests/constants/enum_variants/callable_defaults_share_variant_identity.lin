@@ -1,0 +1,15 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+let preserved = Mode.Preserve
+
+fn select(mode: Mode = preserved) -> UInt8 {
+    match read mode { Preserve => 0, Exact(_) => 1 }
+}
+
+fn invoke[F: fn(read mode: Mode = .Preserve) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    invoke(select) + invoke(|mode = Mode.Preserve| match read mode { Preserve => UInt8(0), Exact(_) => UInt8(1) })
+}

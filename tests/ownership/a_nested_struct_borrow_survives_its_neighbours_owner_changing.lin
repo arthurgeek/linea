@@ -1,0 +1,19 @@
+// A borrow one struct deeper than its sibling: changing its place ends only
+// that borrow, and the sibling at the outer level is still read.
+struct Box { value: UInt64 }
+
+struct Inner { left: borrow UInt64 }
+
+struct Outer { inner: Inner, right: borrow UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    var y = Box { value = 2 }
+    let o = Outer { inner = Inner { left = borrow x.value }, right = borrow y.value }
+    bump(&x)
+    UInt8(*o.right)
+}

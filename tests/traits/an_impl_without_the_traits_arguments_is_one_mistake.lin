@@ -1,0 +1,30 @@
+// An implementation supplying the wrong number of the trait's arguments is
+// refused for that, and its members are left alone — every one of them would
+// be held to a signature written over a `T` that stands for nothing, so what
+// is said about them is a consequence of this mistake rather than a second
+// one. That holds of the pairing as well: the member below supplies the wrong
+// kind, and saying so here would be a second message about a program whose
+// first mistake is that the trait's `T` is missing.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[T] {
+    type Item
+
+    fn held(x: Self, t: T) -> UInt8
+}
+
+impl Holds for Coins {
+    fn Item(x: Self) -> UInt8 {
+        x.count
+    }
+
+    fn held(x: Self, _t: UInt8) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Equatable`, and `Holder[UInt8]` does not implement it
+ --> tests/aliases/a_nested_alias_argument_meets_its_bound.lin:9:12
+  |
+9 |     let s: Same[Held[UInt8]] = .None
+  |            ^^^^ implement it for that type, or drop the bound

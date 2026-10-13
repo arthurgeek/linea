@@ -1,0 +1,5 @@
+error[T-Derive]: this template requires a `struct` target
+ --> tests/construction_derive/a_struct_template_derived_for_an_enum_is_refused_once.lin:4:9
+  |
+4 | @derive(Default)
+  |         ^^^^^^^ derive this trait for the declaration kind required by its template

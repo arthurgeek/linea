@@ -1,0 +1,7 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/delegation/forwarded_traversal_preserves_read_only_indexing.lin:19:5
+   |
+8  |     proj at(self: Self, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+19 |     for inout score in board {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ this walk lends the places it reaches

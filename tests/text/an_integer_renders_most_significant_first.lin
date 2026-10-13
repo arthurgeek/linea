@@ -1,0 +1,24 @@
+// Digits come out most significant first, by dividing by a decreasing power of
+// ten, so each is written the moment it is known and nothing has to be kept
+// anywhere until it can be reversed.
+//
+// The smallest `Int64` is the case that matters. It has no positive
+// counterpart, so a render that took the magnitude first would trap on exactly
+// one input -- and it is the one a reader would try. Reading the digit from the
+// negative side and flipping the digit works for every value.
+//
+// The bytes land on standard output, which the corpus records as a golden.
+import std.io
+
+use io.Descriptor
+use io.eprintln
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+    Display.fmt(0, &w)?
+    Display.fmt(-9223372036854775808, &w)?
+    eprintln("")
+    return .Ok(0)
+}

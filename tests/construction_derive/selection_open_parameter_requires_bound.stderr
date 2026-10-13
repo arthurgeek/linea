@@ -1,0 +1,5 @@
+error[T-Impl]: a settled reference selects `Item` through a bound, and `T` carries none
+ --> tests/construction_derive/selection_open_parameter_requires_bound.lin:1:28
+  |
+1 | fn _consume[T](sink value: T.Item) -> T where carries(value) {
+  |                            ^^^^^^ bound it by the trait that declares the name

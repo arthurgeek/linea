@@ -1,0 +1,10 @@
+// An operation is a function where one is expected, reached through the path
+// this module writes its type by: `shapes.Door.open` here, with the door as
+// its first argument. Calling it through the binding runs the operation.
+import shapes
+
+fn main() -> UInt8 {
+    let door = shapes.door()
+    let opener: fn(d: shapes.Door) -> UInt8 = shapes.Door.open
+    opener(door)
+}

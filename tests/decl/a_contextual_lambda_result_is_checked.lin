@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _predicate: fn(read value: UInt8) -> Bool = |value| value + 1
+    0
+}

@@ -1,0 +1,10 @@
+@copyable
+struct Config { amount: UInt8 }
+
+let first: Config = second
+
+let second: Config = first
+
+fn main() -> UInt8 {
+    first.amount
+}

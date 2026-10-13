@@ -1,0 +1,30 @@
+// Inside `shut`, `T` is known only through its bound, so `item.close()` runs
+// `Shut`'s operation even for a type that declares a `close` of its own.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn shut[T: Shut](item: T) -> UInt8 {
+    item.close()
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    shut(door)
+}

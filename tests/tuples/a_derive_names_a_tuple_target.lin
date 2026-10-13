@@ -1,0 +1,8 @@
+// A derive request may name a tuple as its target. The tuple is the prelude's
+// `Tuple2`, which the standard library declares, so a program's own module
+// cannot derive a trait for it: a derive and its target share a module.
+derive Debug for (UInt8, Bool)
+
+fn main() -> UInt8 {
+    0
+}

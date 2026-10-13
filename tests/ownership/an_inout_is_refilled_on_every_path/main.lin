@@ -1,0 +1,30 @@
+// Moving out of an `inout` parameter is allowed; what the rule asks is that
+// every exit finds it filled again. `drain` releases what it was lent and
+// returns, so the caller's binding is left holding nothing -- and the caller
+// cannot see that, because the signature says the value survives the call.
+//
+// Asked per path rather than at the end of the body: the early `return` is the
+// exit that leaves it empty, and a check reading only the last statement would
+// accept it.
+fn drain(inout k: Key) -> UInt8 {
+    release(k)
+    0
+}
+
+fn early(inout k: Key, c: UInt8) -> UInt8 {
+    release(k)
+    if c == 0 {
+        return 1
+    }
+    k = mint(2)
+    0
+}
+
+fn main() -> UInt8 {
+    var a = mint(1)
+    let x = drain(&a)
+    var b = mint(3)
+    let y = early(&b, 0)
+    release(b)
+    x + y
+}

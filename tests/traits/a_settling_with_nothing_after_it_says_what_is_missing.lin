@@ -1,0 +1,24 @@
+// An `=` with nothing after it. What is expected there is a type, and what a
+// message says about where it is expected has to be true of that place: a
+// declared type is settled by an `=` and carries no `:` anywhere, so a hint
+// naming one points at nothing this line holds.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item =;
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

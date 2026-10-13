@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/decl/borrowed_lets/the_owner_cannot_be_consumed_before_an_alias_use.lin:11:11
+   |
+11 |     close(owner)
+   |           ^^^^^ keep this place available until the last use of its observation
+12 |     value
+   |     ----- the observation is still used here

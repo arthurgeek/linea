@@ -1,0 +1,7 @@
+error[O-Move]: `handle` has already been moved
+  --> tests/mem/owner_borrows/a_consumed_handle_reports_use_after_move.lin:16:17
+   |
+15 |     consume(handle)
+   |             ------ it was taken here
+16 |     let bytes = handle.acquire(8).unwrap()
+   |                 ^^^^^^ it was already taken, and a value is taken once

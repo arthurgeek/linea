@@ -1,0 +1,5 @@
+error[M-Opaque]: `Str` is opaque outside `text`
+  --> tests/text/a_str_cannot_be_forged.lin:10:23
+   |
+10 |     let forged: Str = .{ at = 0, len = 4096 }
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

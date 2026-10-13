@@ -1,0 +1,5 @@
+error[O-Lent]: this writes a place the construct around it is lending
+  --> tests/ownership/a_binder_is_lent_while_the_arm_reads_it.lin:25:48
+   |
+25 |     match read e { Pair { a: x, b: y } => grow(&e.a, y) + x.v }
+   |                                                ^^^^ write it after the construct ends, or take what it names instead of lending it

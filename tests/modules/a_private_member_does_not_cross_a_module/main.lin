@@ -1,0 +1,9 @@
+// [M-Vis] asks whether the declaration reached is private and sits in another
+// module. It asked about the type the member hangs off rather than about the
+// member, and a type reached across a boundary is public by definition -- so
+// every member of a public type was reachable, whatever it was declared.
+import a
+
+fn main() -> UInt8 {
+    a.Thing.secret()
+}

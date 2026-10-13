@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/a_caret_outside_a_bracket_begins_no_expression.lin:6:22
+  |
+6 |     let _k: UInt64 = ^1
+  |                      ^^ this is not the start of an expression

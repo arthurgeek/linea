@@ -1,0 +1,5 @@
+error[T-For]: `Vec[UInt64, mem.SystemAllocator]` is no `Iterator`, so it has nothing to lend to a walk
+  --> tests/iter/lent_walks/a_lent_walk_needs_an_iterator.lin:10:21
+   |
+10 |     for reading in &readings {
+   |                     ^^^^^^^^ walk it without `&`, or lend the walk an iterator over it

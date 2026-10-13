@@ -1,0 +1,10 @@
+error[N-NotAType]: `helper` is not a type
+ --> tests/decl/impl_names_a_type.lin:9:6
+  |
+9 | impl helper {
+  |      ^^^^^^ only a type has an `impl`
+error[N-Undefined]: undefined name `Missing`
+  --> tests/decl/impl_names_a_type.lin:15:6
+   |
+15 | impl Missing {
+   |      ^^^^^^^ no type with this name is declared here

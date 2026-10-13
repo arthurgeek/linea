@@ -1,0 +1,27 @@
+error[M-Opaque]: `Str` is opaque outside `text`
+  --> tests/modules/a_selection_through_a_local_that_shadows_a_module_names_the_shadow.lin:12:20
+   |
+11 | fn check(text: Str) -> UInt8 {
+   |          ---- this parameter `text` shadows `text`, the import of `std.text`
+12 |     let _failure = text.ParseError.Syntax(0)
+   |                    ^^^^^^^^^^^^^^^ only its own module can read its parts
+   |
+   = help: inside this scope `text` is the parameter, not the module; write `import std.text as` another name to reach the module here
+error[T-UnknownOperation]: `validate_utf8` is a function, not an operation of `Str`
+  --> tests/modules/a_selection_through_a_local_that_shadows_a_module_names_the_shadow.lin:13:5
+   |
+11 | fn check(text: Str) -> UInt8 {
+   |          ---- this parameter `text` shadows `text`, the import of `std.text`
+13 |     text.validate_utf8()
+   |     ^^^^^^^^^^^^^^^^^^ a dot calls an operation of the value, and a free function is not one
+   |
+   = help: inside this scope `text` is the parameter, not the module; write `import std.text as` another name to reach the module here
+error[T-UnknownField]: `Note` has no field `size`
+  --> tests/modules/a_selection_through_a_local_that_shadows_a_module_names_the_shadow.lin:18:5
+   |
+17 | fn length_of(text: Note) -> UInt64 {
+   |              ---- this parameter `text` shadows `text`, the import of `std.text`
+18 |     text.size
+   |     ^^^^^^^^^ not a field of this value
+   |
+   = help: inside this scope `text` is the parameter, not the module; write `import std.text as` another name to reach the module here

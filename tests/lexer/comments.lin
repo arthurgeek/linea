@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let x = 1
+    // a full-line comment
+    let y = 2 // a trailing comment
+}

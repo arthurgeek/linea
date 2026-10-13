@@ -1,0 +1,10 @@
+warning[N-Shadowed]: `Door` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/traits/two_traits_beside_the_types_own_operation_leave_it_the_postfix_form.lin:23:8
+   |
+23 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Shut.close(x)`
+warning[N-Shadowed]: `Door` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/traits/two_traits_beside_the_types_own_operation_leave_it_the_postfix_form.lin:29:8
+   |
+29 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Latch.close(x)`

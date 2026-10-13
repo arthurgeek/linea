@@ -1,0 +1,11 @@
+struct Settings {
+    name: Str,
+    retries: UInt8,
+}
+
+fn main() -> UInt8 {
+    let defaults: Settings = .{ name = "sync", retries = 3 }
+    let tuned = Settings { retries = 5, ..defaults }
+    // The base sits in a consuming position, so the literal took `defaults`.
+    defaults.retries + tuned.retries
+}

@@ -1,0 +1,5 @@
+error[T-Call]: an enum constructor requires one sink parameter without a default
+ --> tests/constructor_callables/constructor_requires_sink_parameter.lin:4:51
+  |
+4 |     let _wrap: fn(read value: UInt8) -> Failure = Failure.Refused
+  |                                                   ^^^^^^^^^^^^^^^ use a single consuming payload parameter

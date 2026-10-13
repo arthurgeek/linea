@@ -1,0 +1,5 @@
+error[S-Test]: a test declares no visibility
+ --> tests/decl/a_test_declares_no_visibility.lin:7:1
+  |
+7 | pub test fn a_thing_holds() -> Result[(), IoError] {
+  | ^^^ the compiler writes the only call to a test, so nothing can import it

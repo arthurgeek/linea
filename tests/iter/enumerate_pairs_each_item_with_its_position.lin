@@ -1,0 +1,10 @@
+// `enumerate` pairs each item with its position, counting from zero, and a
+// tuple pattern takes the pair apart in the `for`.
+fn main() -> UInt8 {
+    let weights: [UInt8; 3] = [10, 20, 30]
+    var total: UInt8 = 0
+    for (position, weight) in weights.as_slice().enumerate() {
+        total += UInt8(position) * *weight
+    }
+    total - 80
+}

@@ -1,0 +1,14 @@
+// Linear grants no capability requirement. Writing it beside an existing
+// Copyable requirement is redundant, including through inherited trait bounds.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+fn _twice[T: Duplicable + Linear](x: T) -> UInt8 {
+    let _a = copy(x)
+    Duplicable.tag(x)
+}
+
+fn main() -> UInt8 {
+    0
+}

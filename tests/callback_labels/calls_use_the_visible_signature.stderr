@@ -1,0 +1,40 @@
+error[T-UnknownParameter]: `fn(read value: UInt8) -> UInt8` declares no parameter `number`
+ --> tests/callback_labels/calls_use_the_visible_signature.lin:7:22
+  |
+7 |     let _ = selected(number: 3)
+  |                      ^^^^^^ no such parameter
+error[T-MissingArgument]: `value` receives no argument
+ --> tests/callback_labels/calls_use_the_visible_signature.lin:7:13
+  |
+6 |     let selected: fn(read value: UInt8) -> UInt8 = increment
+  |                           ----- declared here
+7 |     let _ = selected(number: 3)
+  |             ^^^^^^^^^^^^^^^^^^^ every parameter receives one
+error[T-UnknownParameter]: `increment` declares no parameter `value`
+ --> tests/callback_labels/calls_use_the_visible_signature.lin:8:23
+  |
+1 | fn increment(number: UInt8) -> UInt8 {
+  |    --------- declared here
+8 |     let _ = increment(value: 3)
+  |                       ^^^^^ no such parameter
+error[T-MissingArgument]: `number` receives no argument
+ --> tests/callback_labels/calls_use_the_visible_signature.lin:8:13
+  |
+1 | fn increment(number: UInt8) -> UInt8 {
+  |              ------ declared here
+8 |     let _ = increment(value: 3)
+  |             ^^^^^^^^^^^^^^^^^^^ every parameter receives one
+error[T-UnknownParameter]: `this lambda` declares no parameter `value`
+  --> tests/callback_labels/calls_use_the_visible_signature.lin:10:19
+   |
+9  |     let local = |entry: UInt8| entry + 1
+   |                 ------------------------ declared here
+10 |     let _ = local(value: 3)
+   |                   ^^^^^ no such parameter
+error[T-MissingArgument]: `entry` receives no argument
+  --> tests/callback_labels/calls_use_the_visible_signature.lin:10:13
+   |
+9  |     let local = |entry: UInt8| entry + 1
+   |                  ----- declared here
+10 |     let _ = local(value: 3)
+   |             ^^^^^^^^^^^^^^^ every parameter receives one

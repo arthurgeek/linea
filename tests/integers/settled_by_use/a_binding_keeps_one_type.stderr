@@ -1,0 +1,9 @@
+error[T-Mismatch]: expected `UInt16`, found `UInt8`
+  --> tests/integers/settled_by_use/a_binding_keeps_one_type.lin:12:24
+   |
+5  | fn wide(value: UInt16) -> UInt16 {
+   |         ----- expected because of this parameter
+11 |     let _first = narrow(k)
+   |                         - settled to `UInt8` here
+12 |     let _second = wide(k)
+   |                        ^ expected `UInt16`, found `UInt8`

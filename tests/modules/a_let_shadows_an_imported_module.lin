@@ -1,0 +1,10 @@
+// After `let text = ...`, `text.length()` measures that string. A type written
+// in the same scope, `text.ParseError`, still names the module's type, because
+// a local is a value and never a type.
+import std.text
+
+fn main() -> UInt8 {
+    let text = "07:30"
+    let hours: Result[UInt8, text.ParseError] = text.slice(0, 2).unwrap().parse[UInt8]()
+    UInt8.try_from(text.length()).unwrap_or(0) + hours.unwrap_or(0)
+}

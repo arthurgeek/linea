@@ -1,0 +1,49 @@
+// Part of a view, or nothing where that part would not be text.
+//
+// A `Str` is UTF-8 by construction -- [S-Encoding] makes the file it came from
+// UTF-8, and every escape decodes to a scalar -- so a slice that cut a
+// character in half would hand back bytes that are not text and break the
+// invariant every other operation rests on. The ends are looked at for that
+// reason, which is what `byte` exists for and why it had to come first.
+//
+// `Olá!` is five bytes and four characters: `á` is the two at 2 and 3.
+import std.io
+
+use io.IoError
+
+fn main() -> Result[UInt8, IoError] {
+    let s = "Olá!"
+
+    // Between two characters at both ends, so the two ASCII ones come back.
+    let head: UInt64 = match Str.slice(s, 0, 2) {
+        Some(p) => Str.length(p),
+        None => 0,
+    }
+
+    // The end falls inside `á`, which is refused rather than truncated.
+    let split: UInt64 = match Str.slice(s, 2, 3) {
+        Some(_) => 0,
+        None => 1,
+    }
+
+    // The whole of it, because the end of a view begins nothing and is a legal
+    // edge -- which is what keeps this from being a special case.
+    let whole: UInt64 = match Str.slice(s, 0, Str.length(s)) {
+        Some(p) => Str.length(p),
+        None => 0,
+    }
+
+    // Backwards, and past the end. Both nothing, because a caller does the same
+    // thing about each.
+    let backwards: UInt64 = match Str.slice(s, 3, 2) {
+        Some(_) => 0,
+        None => 1,
+    }
+    let past: UInt64 = match Str.slice(s, 0, 99) {
+        Some(_) => 0,
+        None => 1,
+    }
+
+    // 2 + 1 + 5 + 1 + 1.
+    return .Ok(UInt8(head + split + whole + backwards + past))
+}

@@ -1,0 +1,29 @@
+// A trait declares a type and no parameter list beside it, so a settled
+// reference naming one has nothing for an argument to fill. Arguments given
+// to it are refused where arguments given to any type that takes none are.
+trait Measure {
+    type Item
+
+    fn of(self: Self) -> Self.Item
+}
+
+struct Scale {
+    _n: UInt8,
+}
+
+impl Measure for Scale {
+    type Item = UInt8
+
+    fn of(_self: Scale) -> Self.Item {
+        7
+    }
+}
+
+fn take[W: Measure](w: W) -> W.Item[UInt8] {
+    Measure.of(w)
+}
+
+fn main() -> UInt8 {
+    let s: Scale = .{ _n = 1 }
+    take(s)
+}

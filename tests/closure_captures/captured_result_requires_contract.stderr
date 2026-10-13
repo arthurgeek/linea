@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/closure_captures/captured_result_requires_contract.lin:3:51
+  |
+3 |     let callback = [sink saved = borrow first] || copy(saved)
+  |                                                   ^^^^^^^^^^^ escape observations only from the signature's declared sources

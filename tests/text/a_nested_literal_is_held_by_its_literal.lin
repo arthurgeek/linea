@@ -1,0 +1,14 @@
+// A literal written inside another has no other owner, so the outer literal
+// holds it and may be rendered by a later statement.
+import std.io
+
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let x = 7
+    println("[{"x={x}"}]")?
+    let kept = "[{"x={x}"}]"
+    println(kept)?
+    return .Ok(0)
+}

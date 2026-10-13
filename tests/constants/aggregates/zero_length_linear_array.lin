@@ -1,0 +1,12 @@
+@linear
+struct Ticket { serial: UInt64 }
+
+let empty: [Ticket; 0] = []
+
+fn accepted(_tickets: [Ticket; 0] = empty) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    accepted()
+}

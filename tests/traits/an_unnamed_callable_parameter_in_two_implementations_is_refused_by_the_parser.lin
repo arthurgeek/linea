@@ -1,0 +1,13 @@
+// A callable type names each parameter, so a missing name is refused where it is
+// written and the two implementations naming the type are still compared.
+struct Probe {}
+
+trait Takes[T] {}
+
+impl Takes[fn(UInt8) -> UInt8] for Probe {}
+
+impl Takes[fn(UInt8) -> UInt8] for Probe {}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,23 @@
+import std.io.core
+
+pub use core.Writer
+pub use core.Reader
+pub use core.Close
+pub use core.InputFailure
+pub use core.ByteWriter
+pub use core.WriteFailureKind
+pub use core.WriteFailure
+pub use core.write_all
+pub use core.IoOperation
+pub use core.IoCategory
+pub use core.IoError
+pub use core.Descriptor
+pub use core.descriptor
+pub use core.stdin
+pub use core.stdout
+pub use core.stderr
+pub use core.print
+pub use core.line
+pub use core.println
+pub use core.eprint
+pub use core.eprintln

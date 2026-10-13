@@ -1,0 +1,5 @@
+error[T-Infer]: the type of parameter `(a, b)` cannot be inferred without an expected callable type
+ --> tests/tuples/a_lambda_pattern_needs_an_expected_type.lin:4:15
+  |
+4 |     let add = |(a, b)| a + b
+  |               ^^^^^^^^^^^^^^ write the parameter type

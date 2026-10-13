@@ -1,0 +1,36 @@
+// The four passes that ask "what place is this?" each had their own copy of
+// the walk, and each stopped at a parenthesis. Where they disagreed the
+// program still compiled:
+//
+//   - the checker poisoned the assignment without reporting anything, because
+//     the poison meant "already reported where it went wrong" and nothing had;
+//   - lowering then matched neither shape and emitted no store at all.
+//
+// So this file parsed, type-checked, ran, and answered the wrong number. A
+// wrong answer is the worst shape of failure, because nothing is there to
+// notice it.
+struct Inner {
+    y: UInt8,
+}
+
+struct Outer {
+    inner: Inner,
+    z: UInt8,
+}
+
+fn bump(inout i: Inner) -> () {
+    i.y = i.y + 1
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 1
+    (n) = 7
+
+    var o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+    (o.inner.y) = 3
+
+    // And the marked place, which lowered to poison and was written through.
+    bump(&(o.inner))
+
+    n + o.inner.y + o.z
+}

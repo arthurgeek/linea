@@ -1,0 +1,26 @@
+trait Evaluate {
+    fn evaluate(self: Self) -> UInt8
+}
+
+struct Configured[F] {
+    callback: F,
+}
+
+impl[F: fn(read item: UInt8) -> UInt8] Evaluate for Configured[F] {
+    fn evaluate(self: Self) -> UInt8 {
+        (self.callback)(item: 4)
+    }
+}
+
+fn configured[F: fn(read row: UInt8) -> UInt8](sink callback: F) -> Configured[F] {
+    .{ callback = callback }
+}
+
+fn main() -> UInt8 {
+    let settings = configured(|number| number + 1)
+    if settings.evaluate() == 5 {
+        0
+    } else {
+        1
+    }
+}

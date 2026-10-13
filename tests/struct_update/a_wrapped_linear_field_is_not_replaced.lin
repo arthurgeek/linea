@@ -1,0 +1,26 @@
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    let Ticket { seat } = ticket
+    seat
+}
+
+struct Booking {
+    ticket: Option[Ticket],
+    row: UInt8,
+}
+
+fn main() -> UInt8 {
+    let booking: Booking = .{ ticket = .Some(.{ seat = 4 }), row = 2 }
+    // An `Option` holding a linear ticket must be settled too, so replacing
+    // it drops a ticket nothing settles.
+    let moved = Booking { ticket = .None, ..booking }
+    let Booking { ticket, row } = moved
+    match ticket {
+        Some(t) => redeem(t) + row,
+        None => row,
+    }
+}

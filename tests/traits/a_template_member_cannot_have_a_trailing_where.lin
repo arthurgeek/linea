@@ -1,0 +1,14 @@
+trait Structural {
+    fn value[T: Copyable](self: Self, value: T) -> UInt8
+}
+
+template impl Structural {
+    fn value[T](_self: Self, _value: T) -> UInt8
+    where T: Copyable {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Arity]: expected 0 argument(s), found 1
+ --> tests/array_views/array_views_accept_no_extra_arguments.lin:3:17
+  |
+3 |     let slice = values.as_slice(extra: 0)
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^ an array view takes no arguments

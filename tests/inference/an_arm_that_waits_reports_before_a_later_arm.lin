@@ -1,0 +1,18 @@
+// An arm that waits for a later arm to name its type is checked as soon as
+// that arm has named it, so what is wrong in it is reported before what is
+// wrong in the arms written after it.
+fn pick(n: UInt8) -> UInt8 {
+    let chosen = match n {
+        0 => {
+            let _flag: UInt8 = true
+            Option.None
+        },
+        1 => Option.Some(n),
+        _ => Option.Some(true),
+    }
+    chosen.unwrap_or(9)
+}
+
+fn main() -> UInt8 {
+    pick(1)
+}

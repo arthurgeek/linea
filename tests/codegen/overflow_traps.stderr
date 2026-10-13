@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `UInt8`
+ --> tests/codegen/overflow_traps.lin:3:7
+  |
+3 |     x + 100
+  |       ^ the result is not representable

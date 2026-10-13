@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/a_boolean_callable_default_participates_in_coherence.lin:15:6
+   |
+9  | impl Give[fn(read flag: Bool = true) -> Bool] for Holder {
+   |      ---- already implemented here
+15 | impl Give[fn(read flag: Bool = true) -> Bool] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

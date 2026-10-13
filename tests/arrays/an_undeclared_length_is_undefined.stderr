@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Q`
+ --> tests/arrays/an_undeclared_length_is_undefined.lin:5:22
+  |
+5 |     let _xs: [UInt8; Q] = [1, 2, 3]
+  |                      ^ no binding with this name is in scope
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/an_undeclared_length_is_undefined.lin:5:22
+  |
+5 |     let _xs: [UInt8; Q] = [1, 2, 3]
+  |                      ^ this is not a constant

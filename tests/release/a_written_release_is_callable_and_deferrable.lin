@@ -1,0 +1,28 @@
+// A type that writes its own `Release` can end a value with `release()`, and a
+// `defer` can schedule that call for the end of a scope.
+@linear
+struct Session {
+    id: UInt8,
+}
+
+impl Release for Session {
+    fn release(sink self: Self) -> () {
+        let Session { id: _ } = self
+    }
+}
+
+fn ended_by_hand() -> UInt8 {
+    let session = Session { id = 1 }
+    session.release()
+    1
+}
+
+fn ended_by_defer() -> UInt8 {
+    let session = Session { id = 2 }
+    defer session.release()
+    2
+}
+
+fn main() -> UInt8 {
+    ended_by_hand() + ended_by_defer() - 3
+}

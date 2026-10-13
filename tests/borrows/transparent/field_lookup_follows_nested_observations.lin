@@ -1,0 +1,9 @@
+struct Entry { value: UInt8 }
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ value = 7 }
+    let first = borrow entry
+    let second = borrow first
+    let once = copy(*second)
+    once.value + second.value
+}

@@ -1,0 +1,7 @@
+trait _Source[T = UInt8] {
+    fn _next(self: Self) -> T
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,12 @@
+error[T-UnknownField]: `Pair` has no field `missing`
+ --> tests/ownership/selection_recovery/nested_invalid_field.lin:6:18
+  |
+6 |     let _wrong = pair.missing.value
+  |                  ^^^^^^^^^^^^ not a field of this value
+error[O-Move]: `pair` has already been moved
+ --> tests/ownership/selection_recovery/nested_invalid_field.lin:6:18
+  |
+5 |     let moved = pair
+  |                 ---- it was taken here
+6 |     let _wrong = pair.missing.value
+  |                  ^^^^ it was already taken, and a value is taken once

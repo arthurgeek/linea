@@ -1,0 +1,20 @@
+enum Shape {
+    Rect(UInt8, UInt8),
+    Square(UInt8),
+    Point,
+}
+
+fn area(s: Shape) -> UInt8 {
+    match read s {
+        Rect(w, h) => w * h,
+        Square(side) => side * side,
+        Point => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    // Two values in one variant, packed beside each other rather than a word
+    // apart -- so a load that took a whole word at the first would take the
+    // second with it.
+    area(Shape.Rect(3, 4)) + area(Shape.Square(5)) + area(Shape.Point)
+}

@@ -1,0 +1,11 @@
+// A block with no trailing expression produces nothing, and that is a mismatch
+// only where control reaches the end of it. Control does not: the value the
+// binding was to hold leaves the function instead, so there is no binding and
+// no end of block to arrive at.
+fn one() -> UInt8 {
+    let _n: UInt8 = return 1
+}
+
+fn main() -> UInt8 {
+    one() + 2
+}

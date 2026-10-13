@@ -1,0 +1,9 @@
+// `zip` pairs the items of two sequences and stops when either ends, so the
+// longer range here is only walked as far as the shorter one.
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    for (low, high) in (UInt8(1)..3).zip(UInt8(4)..9) {
+        total += low + high
+    }
+    total - 12
+}

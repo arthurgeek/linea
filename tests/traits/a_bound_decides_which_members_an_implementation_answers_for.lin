@@ -1,0 +1,21 @@
+// A bound on an implementation's parameter decides which members of the family
+// it answers for. `Holder[UInt8]` carries `Show` because `UInt8` does, so an
+// operation bounded by `Show` takes it and runs.
+trait Show {}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl Show for UInt8 {}
+
+impl[T: Show] Show for Holder[T] {}
+
+fn shown[S: Show](_s: S) -> UInt8 {
+    5
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 5 }
+    shown(h)
+}

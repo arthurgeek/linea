@@ -1,0 +1,50 @@
+// Price print orders that start from a shop's standard job and change only
+// what each customer asks for.
+import std.io
+
+use io.IoError
+use io.println
+
+// How one print job is set up.
+@copyable
+struct PrintJob {
+    copies: UInt64,
+    pages: UInt64,
+    color: Bool,
+    double_sided: Bool,
+}
+
+// Most customers want one black-and-white copy, printed on both sides.
+let standard_job: PrintJob = .{ copies = 1, pages = 1, color = false, double_sided = true }
+
+// `cents` prices a job: 5 cents a side in black and white or 25 in color, plus
+// 2 cents for each sheet of paper.
+fn cents(job: PrintJob) -> UInt64 {
+    let per_side: UInt64 = if job.color {
+        25
+    } else {
+        5
+    }
+    let sides = job.pages * job.copies
+    let sheets = if job.double_sided {
+        (sides + 1) / 2
+    } else {
+        sides
+    }
+    sides * per_side + sheets * 2
+}
+
+fn main() -> Result[UInt8, IoError] {
+    // `..standard_job` supplies every field the literal does not write, so
+    // each order names only what differs from the standard job.
+    let flyer = PrintJob { pages = 2, copies = 50, color = true, ..standard_job }
+    let report = PrintJob { pages = 12, ..standard_job }
+    // The base can be any value of the type. `copy(report)` gives the draft
+    // its own copy, so `report` is still there to price below.
+    let draft = PrintJob { double_sided = false, ..copy(report) }
+    // An interpolation may compute its value, such as `cents(flyer)`.
+    println("flyer: {cents(flyer)} cents")?
+    println("report: {cents(report)} cents")?
+    println("draft: {cents(draft)} cents")?
+    .Ok(0)
+}

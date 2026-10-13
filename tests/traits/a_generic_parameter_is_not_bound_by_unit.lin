@@ -1,0 +1,14 @@
+// Neither Unit nor this trait's empty argument list determines T.
+trait Value {
+    fn value(self: Self) -> UInt8
+}
+
+impl[T] Value for () {
+    fn value(_self: ()) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    Value.value({})
+}

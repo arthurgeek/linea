@@ -1,0 +1,20 @@
+error[O-Leak]: `Pair.first` (a linear `Token`) is still owned when this path leaves
+  --> tests/construction_derive/construct_missing_cleanup.lin:47:8
+   |
+27 |             |component| {
+   |                         - generated from this template code for `Pair.second`
+43 | struct Pair { first: Token, second: Token }
+   |                             ------ the code was generated for this field
+47 | derive Build for Pair
+   |        ^^^^^ still owned here
+   |
+   = help: give it to something that takes it
+error[O-Leak]: `Pair.second` (a linear `Token`) is still owned when this path leaves
+  --> tests/construction_derive/construct_missing_cleanup.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code
+47 | derive Build for Pair
+   |        ^^^^^ still owned here
+   |
+   = help: give it to something that takes it

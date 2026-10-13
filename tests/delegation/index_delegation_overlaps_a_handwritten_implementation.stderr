@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Index` is already implemented for `Board` with the same arguments
+ --> tests/delegation/index_delegation_overlaps_a_handwritten_implementation.lin:7:6
+  |
+5 | impl Index[UInt64] for Board via scores
+  |      ----- already implemented here
+7 | impl Index[UInt64] for Board {
+  |      ^^^^^ a trait is implemented once per arguments and type

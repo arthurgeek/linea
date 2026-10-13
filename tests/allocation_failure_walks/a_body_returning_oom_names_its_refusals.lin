@@ -1,0 +1,20 @@
+import std.mem
+import std.testing
+
+// A body whose only error is `mem.Oom` fails only when an allocation is
+// refused, so `testing.oom_is_a_refusal` accepts every error it returns from
+// a refused run.
+fn main() -> UInt8 {
+    let walked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), mem.Oom] {
+            let first = allocator.acquire(8)?
+            defer first.release()
+            let second = allocator.acquire(16)?
+            second.release()
+            .Ok(())
+        },
+        testing.oom_is_a_refusal,
+    )
+    UInt8(walked.unwrap_or(0))
+}

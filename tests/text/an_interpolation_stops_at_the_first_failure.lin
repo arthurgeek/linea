@@ -1,0 +1,22 @@
+// A literal renders its pieces in order and stops at the first one the writer
+// refuses -- not because a flag suppressed the rest, but because control never
+// reaches them. Each piece is followed by a branch, and the failing one leaves
+// for the merge with the writer's answer as the literal's.
+//
+// Descriptor 9 is never open, so the first write fails with EBADF and the
+// pieces after it are unreachable.
+import std.io
+
+use io.descriptor
+use io.Descriptor
+
+fn main() -> UInt8 {
+    var bad: Descriptor = descriptor(9)
+    let a: Int64 = 1
+    let b: Int64 = 2
+    let c: Int64 = 3
+    match Display.fmt("{a}{b}{c}", &bad) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

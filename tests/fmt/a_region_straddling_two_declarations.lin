@@ -1,0 +1,22 @@
+// A region opened in one declaration and closed inside a later one. The walk
+// steps over a node that begins inside a region, so a declaration straddling
+// the end would be skipped entirely and everything the copy did not reach --
+// here a whole function body -- would be gone. The region covers the
+// declaration it ends inside instead. A region living wholly within one
+// declaration ends where it says it does.
+struct S {
+    a: UInt8,
+    // linea fmt: off
+    b: UInt8,
+}
+
+fn helper() -> UInt8 {
+    // linea fmt: on
+    3
+}
+
+fn main() -> UInt8 {
+    let v: S = .{ a = 1, b = 2 }
+    let S { a: x, b: y } = v
+    x + y + helper()
+}

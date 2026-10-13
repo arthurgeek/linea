@@ -1,0 +1,19 @@
+// Rewinding an arena hands its storage out again, so it is refused while a
+// buffer from the arena is still in use.
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    var arena = mem.Arena.open(mem.system(), 64)
+    let kept = arena.handle().acquire(8).unwrap()
+    mem.Arena.rewind(&arena)
+    let value = kept.load(0)
+    kept.release()
+    arena.release()
+    if value == 0 {
+        0
+    } else {
+        1
+    }
+}

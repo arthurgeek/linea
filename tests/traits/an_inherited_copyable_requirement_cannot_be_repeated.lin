@@ -1,0 +1,14 @@
+// A Copyable requirement inherited through a trait makes the same
+// capability written beside that trait redundant.
+trait Duplicable: Copyable {
+    fn tag(self: Self) -> UInt8
+}
+
+fn _twice[T: Duplicable + Copyable](x: T) -> UInt8 {
+    let _a = copy(x)
+    Duplicable.tag(x)
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,10 @@
+// `same[UInt8]` fixes `T` before the arguments are read, so `true` is not a
+// `T` here.
+fn same[T](sink value: T) -> T {
+    value
+}
+
+fn main() -> UInt8 {
+    let _flag = same[UInt8](true)
+    0
+}

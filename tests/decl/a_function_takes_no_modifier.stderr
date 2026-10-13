@@ -1,0 +1,10 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/decl/a_function_takes_no_modifier.lin:2:1
+  |
+2 | @opaque
+  | ^ place them before a struct, enum, or newtype
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/decl/a_function_takes_no_modifier.lin:7:1
+  |
+7 | @linear
+  | ^ place them before a struct, enum, or newtype

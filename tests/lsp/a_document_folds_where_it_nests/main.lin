@@ -1,0 +1,37 @@
+// A run of comments folds as one, and this line and the next
+// are that run: they sit on consecutive lines with nothing
+// between them.
+import counters
+
+use counters.one
+
+struct Account {
+    balance: UInt8,
+}
+
+enum Colour {
+    Red,
+    Green,
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = one() }
+    var n: UInt8 = 0
+    while n < 1 {
+        n = n + 1
+    }
+    let c: Colour = Colour.Red
+    let seen: UInt8 = match c {
+        Red => {
+            a.balance
+        },
+        Green => {
+            0
+        },
+    }
+    if seen > n {
+        seen
+    } else {
+        n
+    }
+}

@@ -1,0 +1,11 @@
+// `enumerate` hands out the slice's items still borrowed from `values`, so
+// writing `values` while the walk runs is refused.
+fn main() -> UInt8 {
+    var values = [UInt8(4), 8, 15]
+    var total: UInt8 = 0
+    for (i, x) in values.as_slice().enumerate() {
+        values[0] = 1
+        total += UInt8(i) + *x
+    }
+    total
+}

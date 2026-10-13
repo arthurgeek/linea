@@ -1,0 +1,7 @@
+error[O-Move]: `xs` has already been moved
+  --> tests/iter/an_array_is_gone_after_its_loop.lin:10:13
+   |
+7  |     for x in xs {
+   |              -- it was taken here
+10 |     total + xs[0]
+   |             ^^^^^ it was already taken, and a value is taken once

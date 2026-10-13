@@ -1,0 +1,35 @@
+error[S-Struct]: a type's parts take the type's visibility
+ --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:2:5
+  |
+2 |     pub owner: UInt8,
+  |     ^^^ remove this visibility
+error[S-Entry]: attributes precede the type declaration
+ --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:3:5
+  |
+3 |     @linear
+  |     ^ move this attribute above the declaration
+error[S-Struct]: a struct holds its fields, and `impl Name { .. }` holds what it can do
+ --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:5:5
+  |
+5 |     fn total() -> UInt8 { 0 }
+  |     ^^ a function belongs to an `impl`
+error[S-Struct]: a struct holds its fields, and `impl Name { .. }` holds what it can do
+ --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:6:5
+  |
+6 |     fn width() -> UInt8
+  |     ^^ a function belongs to an `impl`
+error[S-Enum]: a type's parts take the type's visibility
+  --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:11:5
+   |
+11 |     internal Basic,
+   |     ^^^^^^^^ remove this visibility
+error[S-Enum]: an enum lists its variants, and `impl Name { .. }` holds what it can do
+  --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:12:5
+   |
+12 |     pub fn rank() -> UInt8 { 1 },
+   |     ^^^ a function belongs to an `impl`
+error[S-Enum]: an enum lists its variants, and `impl Name { .. }` holds what it can do
+  --> tests/recovery/a_type_body_recovers_at_a_misplaced_member.lin:13:5
+   |
+13 |     internal fn level() -> UInt8
+   |     ^^^^^^^^ a function belongs to an `impl`

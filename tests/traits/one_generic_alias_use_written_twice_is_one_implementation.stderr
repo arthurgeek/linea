@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/one_generic_alias_use_written_twice_is_one_implementation.lin:24:6
+   |
+18 | impl Give[Swap[UInt8, Bool]] for Holder {
+   |      ---- already implemented here
+24 | impl Give[Swap[UInt8, Bool]] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

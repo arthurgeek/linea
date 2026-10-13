@@ -1,0 +1,24 @@
+// A copy of a borrowed value is independent of the place it was read from, but
+// not of what its own borrow field views. Changing `x` while the copy's `cell`
+// is read later is still refused.
+struct Box {
+    value: UInt64,
+}
+
+@copyable
+struct Ref {
+    cell: borrow UInt64,
+}
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    let holder = Ref { cell = borrow x.value }
+    let whole = borrow holder
+    let c = copy(*whole)
+    bump(&x)
+    UInt8(*c.cell)
+}

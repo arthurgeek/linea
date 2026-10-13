@@ -1,0 +1,21 @@
+// A plain interpolation uses Display, so a value with no Debug implementation
+// can be interpolated as long as it implements Display.
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct DisplayOnly {}
+
+impl Display for DisplayOnly {
+    fn fmt[W: Writer](_self: DisplayOnly, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "display-only")
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let value: DisplayOnly = .{}
+    println("{value}")?
+    return .Ok(0)
+}

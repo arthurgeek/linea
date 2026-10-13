@@ -1,0 +1,22 @@
+struct Holder { item: borrow UInt8 }
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let observe = [number] || -> where borrows(number) borrow number
+    let observation = observe()
+    let forward = [sink saved = borrow number] || -> where carries(saved) copy(saved)
+    let forwarded = forward()
+    let consume = sink [sink saved = borrow number] || -> where carries(saved) saved
+    let moved = consume
+    let consumed = moved()
+    let selected = {
+        let holder: Holder = .{ item = borrow number }
+        let extract = [holder] || -> where carries(holder.item) copy(holder.item)
+        extract()
+    }
+    if *observation == *forwarded && *forwarded == *consumed && *consumed == *selected {
+        *selected
+    } else {
+        0
+    }
+}

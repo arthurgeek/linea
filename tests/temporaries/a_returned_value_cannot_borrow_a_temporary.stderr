@@ -1,0 +1,7 @@
+error[O-Temporary]: a returned value cannot borrow a temporary
+  --> tests/temporaries/a_returned_value_cannot_borrow_a_temporary.lin:12:13
+   |
+12 |     reading(42)
+   |             ^^ this temporary ends with its statement, before the caller reads the result
+   |
+   = help: return a value that does not borrow it, or borrow a parameter instead

@@ -1,0 +1,22 @@
+// The settled clause of [T-Index] is asked of the array a projection's path
+// reaches, exactly as it is asked of an array a bracket names outright: the
+// index a reader wrote is the one that fills the path's slot, so an index no
+// element sits at is refused where it is written, whichever side of the
+// assignment the bracket is on.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4] }
+    g[9] = 200
+    g[9]
+}

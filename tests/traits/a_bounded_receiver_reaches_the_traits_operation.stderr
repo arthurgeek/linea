@@ -1,0 +1,5 @@
+warning[N-Shadowed]: `Door` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/traits/a_bounded_receiver_reaches_the_traits_operation.lin:18:8
+   |
+18 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Shut.close(x)`

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let a: Int64 = 100
+    let b: Int64 = 5
+    UInt8(a / b)
+}

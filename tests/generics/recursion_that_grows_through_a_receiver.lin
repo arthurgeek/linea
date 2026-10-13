@@ -1,0 +1,26 @@
+// The measure holds a call to type arguments no larger than the ones its
+// declaration was given, and a member of an implementation generic over its
+// head is given some of them by its receiver. `grow` declares no type
+// parameter of its own: the whole of the growth is in what the head binds, and
+// each call hands the next one a receiver a constructor deeper.
+//
+// Which is what makes the set of instantiations a program reaches finite. Read
+// through the written arguments alone, this call wrote none and grew forever --
+// `check` did not terminate, on a program `dump-inferred` answers in under a
+// second, because the body is checked once and the instantiations are not.
+@copyable
+struct Env[T] {
+    v: T,
+}
+
+impl[T: Copyable] Env[T] {
+    pub fn grow(s: Self) -> UInt8 {
+        let e: Env[Env[T]] = .{ v = copy(s) }
+        e.grow()
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Env[UInt8] = .{ v = 1 }
+    a.grow()
+}

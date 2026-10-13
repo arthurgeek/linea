@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/a_written_clause_binds_its_implementation.lin:15:9
+   |
+15 |         copy(request.name)
+   |         ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

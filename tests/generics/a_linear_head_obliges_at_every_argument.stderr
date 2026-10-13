@@ -1,0 +1,14 @@
+error[O-Copy]: `Outer[T]` does not permit copying
+  --> tests/generics/a_linear_head_obliges_at_every_argument.lin:18:23
+   |
+18 |     let p: Outer[T] = copy(o)
+   |                       ^^^^^^^ move the value, or declare a copyable representation
+error[O-Leak]: `o` (a linear `Outer[T]`) is still owned when this path leaves
+  --> tests/generics/a_linear_head_obliges_at_every_argument.lin:17:9
+   |
+17 |     let o: Outer[T] = .{ c = .{ v = copy(x) } }
+   |         ^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

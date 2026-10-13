@@ -1,0 +1,28 @@
+// A gauge starts from a zero reading and reports how far it has moved in its
+// own unit.
+pub trait Gauge {
+    type Unit
+
+    fn zero() -> Self
+
+    fn reading(self: Self) -> UInt8
+}
+
+// A tank gauge measures litres.
+pub struct Tank {
+    litres: UInt8,
+}
+
+pub struct Litre {}
+
+impl Gauge for Tank {
+    type Unit = Litre
+
+    fn zero() -> Tank {
+        .{ litres = 0 }
+    }
+
+    fn reading(self: Self) -> UInt8 {
+        self.litres
+    }
+}

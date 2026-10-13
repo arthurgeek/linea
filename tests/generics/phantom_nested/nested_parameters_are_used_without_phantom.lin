@@ -1,0 +1,17 @@
+struct Buffer[phantom A] {
+    byte: UInt8,
+}
+
+struct Storage[phantom T, A] {
+    buffer: Buffer[A],
+}
+
+struct Vec[T, A] {
+    allocator: A,
+    storage: Storage[T, A],
+}
+
+fn main() -> UInt8 {
+    let value: Vec[Int64, Bool] = .{ allocator = true, storage = .{ buffer = .{ byte = 0 } } }
+    value.storage.buffer.byte
+}

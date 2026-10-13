@@ -1,0 +1,16 @@
+struct Point { x: UInt8 }
+
+fn selected(point: Point) -> borrow UInt8 where borrows(point) {
+    let read Point { x } = point
+    borrow x
+}
+
+fn main() -> UInt8 {
+    let point = Point { x = 41 }
+    let view = selected(point)
+    if *view == point.x {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let n: UInt8 = true
+    let _ = n
+    0
+}

@@ -1,0 +1,7 @@
+error[N-Immutable]: `x` is declared with `let`
+ --> tests/decl/inout_needs_a_var.lin:7:11
+  |
+6 |     let x: UInt8 = 1
+  |         - declared with `let` here
+7 |     bump(&x)
+  |           ^ this binding cannot be assigned

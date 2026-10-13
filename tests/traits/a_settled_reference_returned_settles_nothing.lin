@@ -1,0 +1,41 @@
+// What a call is asked for settles `Self` where a signature writes it only in
+// what it returns. A settled reference is not that: `Self.Item` is what some
+// implementation settled, and finding which one from the type asked for is a
+// search among implementations rather than a reading of the call -- so the call
+// is refused for settling nothing, exactly as one returning a type nothing
+// reaches is.
+//
+// Both positions, because a written type is read the same way alone and under
+// a constructor.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn zero() -> Self.Item
+
+    fn none_of() -> Option[Self.Item]
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn zero() -> Self.Item {
+        0
+    }
+
+    fn none_of() -> Option[Self.Item] {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    let z: UInt8 = Measure.zero()
+    let n: Option[UInt8] = Measure.none_of()
+    match n {
+        None => z,
+        Some(v) => v,
+    }
+}

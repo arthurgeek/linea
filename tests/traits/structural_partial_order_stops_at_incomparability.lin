@@ -1,0 +1,36 @@
+struct Partial {
+    value: UInt8,
+}
+
+impl Equatable for Partial {
+    fn equals(self: Partial, other: Partial) -> Bool {
+        self.value == other.value
+    }
+}
+
+impl Comparable for Partial {
+    fn less(self: Partial, other: Partial) -> Bool {
+        if self.value == 1 || other.value == 1 {
+            false
+        } else {
+            self.value < other.value
+        }
+    }
+}
+
+struct Pair {
+    first: Partial,
+    later: UInt8,
+}
+
+derive (Equatable, Comparable) for Pair
+
+fn main() -> UInt8 {
+    let left: Pair = .{ first = .{ value = 1 }, later = 0 }
+    let right: Pair = .{ first = .{ value = 2 }, later = 1 }
+    if Comparable.less(left, right) {
+        1
+    } else {
+        0
+    }
+}

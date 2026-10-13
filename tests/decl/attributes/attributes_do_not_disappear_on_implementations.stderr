@@ -1,0 +1,5 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/decl/attributes/attributes_do_not_disappear_on_implementations.lin:4:1
+  |
+4 | @opaque
+  | ^ an impl is behaviour, not a nominal type declaration

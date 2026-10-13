@@ -1,0 +1,15 @@
+error[S-Bracket]: expected `;`
+ --> tests/arrays/an_array_type_missing_its_semicolon_poisons_its_binding.lin:5:20
+  |
+5 |     let xs: [UInt8 3]
+  |                    ^ an array type is written `[T; N]`
+error[S-Equals]: expected `=`
+ --> tests/arrays/an_array_type_missing_its_semicolon_poisons_its_binding.lin:5:20
+  |
+5 |     let xs: [UInt8 3]
+  |                    ^ a binding needs an initialiser
+error[S-Separator]: expected `;` or a newline
+ --> tests/arrays/an_array_type_missing_its_semicolon_poisons_its_binding.lin:5:21
+  |
+5 |     let xs: [UInt8 3]
+  |                     ^ this binding ends here

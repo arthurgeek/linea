@@ -1,0 +1,22 @@
+// `peek` takes a `borrow Door`, so a postfix call on a borrowed door reaches
+// it exactly as `Door.peek(r)` does, whether the borrow is a local or a
+// parameter.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn peek(self: borrow Door) -> UInt8 where carries() {
+        self.width
+    }
+}
+
+fn look(d: borrow Door) -> UInt8 {
+    d.peek()
+}
+
+fn main() -> UInt8 {
+    let d: Door = .{ width = 3 }
+    let r = borrow d
+    r.peek() + look(borrow d)
+}

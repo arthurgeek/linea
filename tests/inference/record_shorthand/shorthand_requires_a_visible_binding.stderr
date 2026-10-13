@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `key`
+ --> tests/inference/record_shorthand/shorthand_requires_a_visible_binding.lin:4:28
+  |
+4 |     let _entry: Entry = .{ key }
+  |                            ^^^ no binding with this name is in scope

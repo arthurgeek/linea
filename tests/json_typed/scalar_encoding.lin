@@ -1,0 +1,12 @@
+import std.json
+
+fn main() -> UInt8 {
+    var output = String.new()
+    defer output.release()
+    json.encode(&output, UInt64.max).unwrap()
+    if output.view() == "18446744073709551615" {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,10 @@
+// A repeated `_` is not a duplicate declaration, but an underscore does not
+// stand for `phantom` either, so a type that never stores its parameters is
+// refused for that.
+struct _Pair[_, _] {
+    first: UInt8,
+}
+
+fn main() -> UInt8 {
+    1
+}

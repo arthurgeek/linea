@@ -1,0 +1,30 @@
+trait Source {
+    type Item
+}
+
+impl[T] Source for borrow T {
+    type Item = T
+}
+
+trait Maker[A: Source] {
+    fn make(_value: A.Item) -> Self
+}
+
+template impl[A: Source] Maker[A] where reflect.target: struct {
+    fn make(_value: A.Item) -> Self {
+        .{}
+    }
+}
+
+struct Record {}
+
+derive[T] Maker[borrow T] for Record
+
+fn accepts[T: Maker[borrow UInt8]](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let record: Record = .{}
+    accepts(record)
+}

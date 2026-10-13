@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A cursor on something that names nothing has nothing to rename, and says so\n// rather than refusing: there is nothing there to change.\nfn main() -> UInt8 {\n    1 + 2\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":4},"newName":"other"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

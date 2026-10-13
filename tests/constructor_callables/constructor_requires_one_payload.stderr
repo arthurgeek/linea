@@ -1,0 +1,5 @@
+error[T-Call]: a callable enum constructor must carry exactly one payload
+ --> tests/constructor_callables/constructor_requires_one_payload.lin:4:51
+  |
+4 |     let _wrap: fn(sink value: UInt8) -> Failure = Failure.Refused
+  |                                                   ^^^^^^^^^^^^^^^ use a closure for this variant

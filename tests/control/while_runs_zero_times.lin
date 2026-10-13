@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    var n: UInt8 = 7
+    while false {
+        n = 0
+    }
+    n
+}

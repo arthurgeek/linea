@@ -1,0 +1,5 @@
+error[N-Duplicate]: `most` is already declared in this type
+  --> tests/types/a_constant_and_a_function_share_a_namespace.lin:11:12
+   |
+11 |     pub fn most(x: Coins) -> UInt8 {
+   |            ^^^^ a name is declared once

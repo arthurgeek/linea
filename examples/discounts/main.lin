@@ -1,0 +1,68 @@
+// Apply a validated discount to an order and prepare an email receipt.
+// Newtypes keep percentages and email addresses distinct from raw input.
+import mail
+import std.io
+import std.testing
+
+use mail.Email
+
+// `type Percent = UInt8 where …` declares a new type whose values must pass the
+// check; `it` names the value being checked. Both 0 (no discount) and 100
+// (free) are valid percentages.
+@derive(Equatable, Debug)
+type Percent = UInt8 where it in 0..=100
+
+fn discounted_price(price: UInt64, sink discount: Percent) -> UInt64 {
+    // Destructuring extracts the validated number for arithmetic.
+    let Percent(percent) = discount
+    let rate = UInt64(percent)
+    // Split whole hundreds from the remainder to avoid multiplying the full
+    // price by the rate. Fractional cents in the discount are rounded down.
+    price - (price / 100) * rate - ((price % 100) * rate) / 100
+}
+
+test fn discounts_reduce_the_order_total() {
+    testing.assert_eq(discounted_price(5000, Percent(15)), 4250, "15% off a 5000-cent order")?
+    testing.assert_eq(discounted_price(5000, Percent(0)), 5000, "zero discount keeps the price")?
+    testing.assert_eq(discounted_price(5000, Percent(100)), 0, "100% discount makes the order free")?
+    testing.assert_eq(discounted_price(99, Percent(15)), 85, "round fractional discount cents down")?
+    testing.assert_eq(discounted_price(0, Percent(15)), 0, "an empty order stays free")?
+}
+
+test fn discount_input_must_be_a_percentage() {
+    // `Percent?(value)` is the fallible constructor: it checks the value when
+    // the program runs and returns None when it is outside the range.
+    testing.assert_eq(Percent?(0), .Some(Percent(0)), "no discount is a valid percentage")?
+    testing.assert_eq(Percent?(15), .Some(Percent(15)), "a valid discount must retain its value")?
+    testing.assert_eq(Percent?(100), .Some(Percent(100)), "a full discount is a valid percentage")?
+    // Check the first percentage above 100 and the largest UInt8 input.
+    for offered in [UInt8(101), 255] {
+        testing.assert_eq(Percent?(offered), .None, "discount cannot exceed 100%")?
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `Percent(15)` takes a literal, so the compiler checks its range.
+    let price: UInt64 = 5000
+    let discounted = discounted_price(price, Percent(15))
+    io.println("Order: {price} cents; after 15% discount: {discounted} cents.")?
+
+    // Offers supplied at run time are checked when the program runs.
+    let offers: [UInt8; _] = [100, 150]
+    for offered in offers {
+        match Percent?(offered) {
+            Some(discount) => {
+                let total = discounted_price(price, discount)
+                io.println("Offer {offered}%: {total} cents to pay.")?
+            },
+            None => io.println("Offer {offered}% rejected: use a percentage from 0 through 100.")?,
+        }
+    }
+
+    // Email's opaque representation requires callers to use its constructor.
+    match Email.of("customer@example.com") {
+        Some(address) => io.println("Send the receipt to {address.address()}.")?,
+        None => io.println("Cannot send the receipt: invalid email address.")?,
+    }
+    .Ok(0)
+}

@@ -1,0 +1,10 @@
+fn clamp(n: UInt8) -> UInt8 {
+    if n > 100 {
+        return 100
+    }
+    n
+}
+
+fn main() -> UInt8 {
+    clamp(200)
+}

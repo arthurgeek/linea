@@ -1,0 +1,18 @@
+// A tuple without a trailing comma stays on one line; a trailing comma puts
+// each component on a line of its own, in a literal, a type and a pattern.
+fn main() -> UInt8 {
+    let flat: (UInt8, UInt8) = (1, 2)
+    let (a, b) = flat
+    let broken: (
+        UInt8,
+        UInt8,
+    ) = (
+        3,
+        4,
+    )
+    let (
+        c,
+        d,
+    ) = broken
+    a + b + c + d - 10
+}

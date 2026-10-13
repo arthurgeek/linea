@@ -1,0 +1,5 @@
+error[S-Entry]: type policies are declaration attributes
+ --> tests/decl/attributes/the_bare_copyable_prefix_is_removed.lin:1:1
+  |
+1 | copyable struct Point { value: UInt8 }
+  | ^^^^^^^^ write `@` before this policy

@@ -1,0 +1,12 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:14:5
+   |
+14 |     inner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+15 |     a
+   |     - the observation is still used here
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:15:5
+   |
+15 |     a
+   |     ^ escape observations only from the signature's declared sources

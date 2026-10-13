@@ -1,0 +1,18 @@
+// `@carrier` marks a struct or an enum and nothing else: not a function, an
+// alias, or a type that renames another.
+@carrier
+fn describe() -> UInt8 {
+    0
+}
+
+@carrier
+alias Meters = UInt64
+
+@carrier
+type Count = UInt8
+
+fn main() -> UInt8 {
+    let _distance: Meters = 0
+    let _count = Count(0)
+    describe()
+}

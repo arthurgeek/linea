@@ -1,0 +1,5 @@
+error[T-Impl]: implementation parameter `_S` cannot be recovered from its key
+ --> tests/traits/integer_generics/an_implementation_parameter_must_be_determined_by_its_key.lin:5:6
+  |
+5 | impl[_S: Integer, T: Integer] Tag for T {
+  |      ^^ place the parameter in the receiver or trait arguments outside associated-type projections

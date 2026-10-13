@@ -1,0 +1,37 @@
+// The control on the refusal above. Where every part of the key is written out,
+// the settled reference is an ordinary type and is checked like one: the
+// implementation settles `Item` to `UInt8`, so answering with it where a `Bool`
+// is written is a mismatch. A refusal that fired on every call reaching a
+// signature would report the missing implementation here instead, and the
+// mismatch would never be found.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[A] {
+    type Item
+
+    fn of(x: Self, a: A) -> Self.Item where carries(x, a)
+}
+
+impl Holds[UInt8] for Coins {
+    type Item = UInt8
+
+    fn of(x: Self, a: UInt8) -> Self.Item {
+        x.count + a
+    }
+}
+
+fn wrap(c: Coins, a: UInt8) -> Bool {
+    Holds.of(c, a)
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: UInt8 = 4
+    if wrap(c, n) {
+        1
+    } else {
+        0
+    }
+}

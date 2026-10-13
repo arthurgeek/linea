@@ -1,0 +1,7 @@
+test fn explicit_unit_is_not_success() {
+    return {}
+}
+
+fn main() -> UInt8 {
+    0
+}

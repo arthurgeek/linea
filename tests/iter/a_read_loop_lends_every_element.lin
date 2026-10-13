@@ -1,0 +1,12 @@
+// A `for read` observes the places it walks instead of taking them. The binder
+// names each element rather than holding a value of its own, so nothing is
+// moved out and the array is still there when the loop ends.
+fn main() -> UInt8 {
+    let xs: [UInt64; 3] = [3, 5, 9]
+    var total: UInt64 = 0
+    for read x in xs {
+        total += x
+    }
+    total += xs[0]
+    UInt8(total)
+}

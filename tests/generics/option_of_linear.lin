@@ -1,0 +1,11 @@
+// Option inherits mandatory consumption from its concrete linear payload.
+// Discarding a populated Option therefore leaks that payload obligation.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn main() -> UInt8 {
+    let _held: Option[Key] = .Some(Key.Forged(1))
+    1
+}

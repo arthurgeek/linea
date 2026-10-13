@@ -1,0 +1,11 @@
+// `_visitor` is never settled, so the help line lists every operation that
+// settles a `net.Connection`, in the order they are declared.
+import std.net
+
+fn _welcome(sink connection: net.Connection) -> () {
+    var _visitor = connection
+}
+
+fn main() -> UInt8 {
+    0
+}

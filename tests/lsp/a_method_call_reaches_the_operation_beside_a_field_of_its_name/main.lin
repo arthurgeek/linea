@@ -1,0 +1,16 @@
+// `door.width()` reaches the operation `width`, and `door.width` without a
+// call reads the field of the same name.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn width(self: Door) -> UInt8 {
+        self.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 3 }
+    door.width() - door.width - 1
+}

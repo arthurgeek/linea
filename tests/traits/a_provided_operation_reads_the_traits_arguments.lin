@@ -1,0 +1,40 @@
+// `measured` is written once in `Scale[K]`, and runs at the `K` the
+// implementation it is reached through supplies. `Crate` answers `Scale` twice,
+// so which `measured` runs is decided by the result the call is expected to
+// give.
+trait Scale[K] {
+    fn unit(self: Self) -> K
+
+    fn measured(self: Self) -> K {
+        self.unit()
+    }
+}
+
+struct Crate {
+    weight: UInt8,
+}
+
+impl Scale[UInt8] for Crate {
+    fn unit(self: Self) -> UInt8 {
+        self.weight
+    }
+}
+
+impl Scale[UInt16] for Crate {
+    fn unit(self: Self) -> UInt16 {
+        UInt16(self.weight) * 100
+    }
+}
+
+// Reach `measured` through a bound on the trait's argument.
+fn pallet[T: Scale[UInt8]](load: T) -> UInt8 {
+    load.measured()
+}
+
+fn main() -> UInt8 {
+    let crate = Crate { weight = 3 }
+    let light: UInt8 = crate.measured()
+    let heavy: UInt16 = crate.measured()
+    // 3 + 3 + 300 / 100
+    light + pallet(crate) + UInt8(heavy / 100)
+}

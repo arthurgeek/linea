@@ -1,0 +1,6 @@
+error[T-Operands]: expected `UInt8`, found `Int64`
+ --> tests/control/comparison_operands_differ.lin:4:19
+  |
+4 |     let bad = a < b
+  |               - expected because of this operand
+  |                   ^ expected `UInt8`, found `Int64`

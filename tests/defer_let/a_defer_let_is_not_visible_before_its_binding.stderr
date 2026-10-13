@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `lamp`
+ --> tests/defer_let/a_defer_let_is_not_visible_before_its_binding.lin:3:18
+  |
+3 |     let before = lamp
+  |                  ^^^^ no binding with this name is in scope

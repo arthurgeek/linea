@@ -1,0 +1,24 @@
+import std.mem
+
+use mem.Owner
+
+// A drain that still owns linear tickets must be finished; handing it to
+// `iterate` gives the same drain back and settles nothing.
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+fn close(sink ticket: Ticket) -> UInt64 {
+    let Ticket { number } = ticket
+    number
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    defer arena.release()
+    let built: Result[Vec[Ticket, mem.Handle[mem.SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: |index| Ticket { number = index })
+    var pending = built.unwrap().drain()
+    let ticket = &pending.next().unwrap()
+    UInt8(close(ticket))
+}

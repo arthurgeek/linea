@@ -1,0 +1,7 @@
+pub struct Wrapped {
+    n: UInt8,
+}
+
+pub fn helper(n: UInt8) -> UInt8 {
+    n
+}

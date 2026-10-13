@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iter/lent_walks/a_lent_walk_invalidates_an_observation_of_its_iterator.lin:36:14
+   |
+36 |     for x in &grower {
+   |              ^^^^^^^ keep this place available until the last use of its observation
+37 |         total += x + view[0]
+   |                      ------- the observation is still used here

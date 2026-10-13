@@ -1,0 +1,29 @@
+// The pin against the other direction. A family may be instantiated as deep as
+// a program writes it out, and a member may call another member on the same
+// receiver as often as it likes: the measure refuses a call that reaches its
+// own declaration with more than it was given, and neither of these does.
+//
+// Depth alone is not growth. Three instantiations are written here and three
+// exist, which is what "finite" means -- the rule is about a call handing
+// itself a receiver a constructor deeper, not about how deep a receiver is.
+@copyable
+struct Env[T] {
+    v: T,
+}
+
+impl[T] Env[T] {
+    pub fn one(_s: Self) -> UInt8 {
+        1
+    }
+
+    pub fn twice(s: Self) -> UInt8 {
+        s.one() + s.one()
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Env[UInt8] = .{ v = 1 }
+    let b: Env[Env[UInt8]] = .{ v = copy(a) }
+    let c: Env[Env[Env[UInt8]]] = .{ v = copy(b) }
+    a.twice() + b.twice() + c.twice()
+}

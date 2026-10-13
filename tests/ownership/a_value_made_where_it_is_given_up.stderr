@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `use2` has not been given this value yet, and control leaves here
+  --> tests/ownership/a_value_made_where_it_is_given_up.lin:24:17
+   |
+24 |     use2(key(), return 7)
+   |          ----- it was given up here
+   |                 ^^^^^^^^ give the value up after this, not before it

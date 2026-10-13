@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    var i: UInt8 = 0
+    let found: UInt8 = loop {
+        i = i + 1
+        if i > 5 {
+            break i
+        }
+    }
+    found
+}

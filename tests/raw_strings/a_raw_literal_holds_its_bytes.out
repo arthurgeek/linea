@@ -1,0 +1,8 @@
+GET /greet/{name}
+GET /echo/{name}
+{"ok":true,"items":[1,2]}
+C:\temp\new.txt and \u{e1} stay as written
+a "# inside needs two hashes
+eight is the most: "####### stays text
+a backslash
+3 0 1

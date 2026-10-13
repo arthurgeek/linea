@@ -1,0 +1,5 @@
+error[T-Literal]: `T` cannot hold -1
+ --> tests/traits/integer_generics/a_negative_contextual_literal_does_not_fit_unsigned_members.lin:2:20
+  |
+2 |     let value: T = -1
+  |                    ^^ value is out of range for its type

@@ -1,0 +1,38 @@
+// The same program as `mono_names_every_copy`, with `Cell` declared above
+// `Opt` instead of below it. One type has one name, so both files must name
+// the nested instantiation identically -- naming it from the notes already on
+// the tokens beside it made the answer depend on which came first, and a note
+// is a complete name, so using one as a head wrote its arguments twice.
+struct Cell[T] {
+    v: T,
+}
+
+impl[T: Copyable] Cell[T] {
+    pub fn get(c: Cell[T]) -> T {
+        copy(c.v)
+    }
+}
+
+fn depth(c: Cell[Opt[UInt8]]) -> UInt8 {
+    match read c.v {
+        None => 0,
+        Some(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Cell[UInt8] = .{ v = 5 }
+    let b: Cell[Bool] = .{ v = true }
+    let nested: Cell[Opt[UInt8]] = .{ v = Opt.Some(2) }
+
+    if Cell.get(b) {
+        Cell.get(a) + depth(nested)
+    } else {
+        0
+    }
+}
+
+enum Opt[T] {
+    None,
+    Some(T),
+}

@@ -1,0 +1,14 @@
+// A module constant lives for the whole program, so a view of it can be
+// returned from a function that takes nothing.
+import std.mem
+
+let small_primes = [UInt64(2), UInt64(3), UInt64(5)]
+
+fn primes() -> mem.Slice[UInt64] where carries() {
+    small_primes.as_slice()
+}
+
+fn main() -> UInt8 {
+    let found = primes()
+    UInt8(found[0] + found[1] + found[2])
+}

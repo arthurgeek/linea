@@ -1,0 +1,11 @@
+// A lambda parameter reads by default, so `|(a, b)|` lends both components of
+// the pair the caller passes and the pair is still whole after the call.
+fn apply[F: fn(read pair: (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn main() -> UInt8 {
+    let pair: (UInt8, UInt8) = (3, 4)
+    let sum = apply(pair, |(a, b)| a + b)
+    sum + pair._0 + pair._1
+}

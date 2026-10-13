@@ -1,0 +1,20 @@
+// A member ignoring a value it takes marks the parameter `_`, which is the
+// only spelling [N-Unused] admits: a `read` parameter leaves a body nothing
+// else to do with the value. The marker is not a rename, so the name under it
+// is the one the signature declares -- and that is the name a call writes,
+// because a signature carrying the marker would put it in every call that
+// names the parameter.
+trait Pad {
+    fn pad(s: Self, width: UInt8 = 8) -> UInt8
+}
+
+impl Pad for UInt8 {
+    fn pad(s: UInt8, _width: UInt8) -> UInt8 {
+        s + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let c: UInt8 = 3
+    c.pad(width: 7)
+}

@@ -1,0 +1,83 @@
+import std.hash
+import std.mem
+import std.testing
+
+use hash.Hash
+use hash.Key
+
+// Text hashes its length and then its UTF-8 bytes, so a text is not confused
+// with its prefix.
+impl hash.Hash for Str {
+    fn hash(self: Self) -> UInt64 {
+        var state = hash.Hasher.new()
+        &state.write_u64(self.length())
+        let bytes = self.as_bytes()
+        for index in 0..bytes.length() {
+            &state.write_byte(bytes[index])
+        }
+        state.finish()
+    }
+}
+
+test fn text_hashes_preserve_utf8_bytes_and_length() {
+    testing.assert("café".hash() != "cafè".hash(), "text hashing ignored UTF-8 bytes")?
+    testing.assert("café".hash() != "café\u{0}".hash(), "a trailing NUL was lost")?
+    testing.assert("".hash() != "\u{0}".hash(), "empty text and a NUL were conflated")?
+}
+
+test fn text_queries_compare_contents() {
+    testing.assert("tea".matches("tea"), "equal text query did not match")?
+    testing.assert(!"tea".matches("coffee"), "different text query matched")?
+}
+
+// Owned text uses the same exact UTF-8 byte equality as its borrowed view.
+impl[A: Allocator] Equatable for String[A] {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.view().equals(other.view())
+    }
+}
+
+impl[A: Allocator] Equivalent for String[A] {}
+
+test fn owned_text_equality_compares_utf8_contents() {
+    defer let first = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer let second = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer let shorter = "café".to_owned(mem.system()).unwrap()
+    defer let different = "cafè\u{0}".to_owned(mem.system()).unwrap()
+    testing.assert(first.equals(second), "equal text in different allocations compared unequal")?
+    testing.assert(!first.equals(shorter), "text equality ignored length")?
+    testing.assert(!first.equals(different), "text equality ignored bytes")?
+}
+
+// Owned text hashes as its view does, so a Str query finds an owned key.
+impl[A: Allocator] hash.Hash for String[A] {
+    fn hash(self: Self) -> UInt64 {
+        self.view().hash()
+    }
+}
+
+test fn equal_owned_and_observed_text_share_a_content_hash() {
+    defer let first = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer let second = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer let shorter = "café".to_owned(mem.system()).unwrap()
+    testing.assert_eq(first.hash(), second.hash(), "equal owned text has different hashes")?
+    testing.assert_eq(first.hash(), first.view().hash(), "owned and observed text hash different bytes")?
+    testing.assert(first.hash() != shorter.hash(), "a trailing NUL was lost")?
+}
+
+// Owned text is a map key that answers borrowed Str queries, so a lookup needs
+// no allocation.
+impl[A: Allocator] hash.Key for String[A] {
+    type Query = Str
+
+    fn matches(self: Self, query: Str) -> Bool {
+        self.view().equals(query)
+    }
+}
+
+test fn owned_text_accepts_unallocated_queries() {
+    defer let key = "café".to_owned(mem.system()).unwrap()
+    testing.assert(key.matches("café"), "equal literal query did not match")?
+    testing.assert(!key.matches("cafè"), "different UTF-8 query matched")?
+    testing.assert_eq(key.hash(), "café".hash(), "matching query and key have different hashes")?
+}

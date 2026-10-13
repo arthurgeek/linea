@@ -1,0 +1,13 @@
+// `oops` cannot follow `score + 1` on its line, so the statement ends there
+// and the rest of the line is skipped. The braces it skips close only
+// themselves, so the loop and `main` go on after them.
+fn main() -> UInt8 {
+    let scores = [3, 4]
+    for score in scores {
+        score + 1 oops {
+            return 1
+        }
+    }
+    let last: UInt8 = 2
+    last
+}

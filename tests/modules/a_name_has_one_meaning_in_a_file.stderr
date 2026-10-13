@@ -1,0 +1,15 @@
+error[N-Duplicate]: `util` is already declared
+ --> tests/modules/a_name_has_one_meaning_in_a_file/main.lin:7:4
+  |
+7 | fn util() -> UInt8 {
+  |    ^^^^ a name is declared once
+error[N-Undefined]: undefined name `util`
+ --> tests/modules/a_name_has_one_meaning_in_a_file/helper.lin:4:5
+  |
+4 |     util() + util.one()
+  |     ^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `util`
+  --> tests/modules/a_name_has_one_meaning_in_a_file/main.lin:12:5
+   |
+12 |     util() + helper()
+   |     ^^^^ no binding with this name is in scope

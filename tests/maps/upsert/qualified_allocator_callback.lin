@@ -1,0 +1,16 @@
+import std.mem
+
+fn call_factory[E, F: fn(query: UInt64, allocator: mem.SystemAllocator) -> Result[UInt64, E] where carries(allocator)](factory: F) -> Result[UInt64, E] where carries(factory) {
+    factory(1, mem.system())
+}
+
+fn main() -> UInt8 {
+    let factory = |query: UInt64, _allocator: mem.SystemAllocator| -> Result[UInt64, mem.Oom] where carries() {
+        .Ok(query)
+    }
+    if call_factory(factory).unwrap() == 1 {
+        0
+    } else {
+        1
+    }
+}

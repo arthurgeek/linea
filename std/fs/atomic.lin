@@ -1,0 +1,380 @@
+import std.mem
+import std.io
+import std.testing
+
+use io.Reader
+
+// Write `bytes` to `path` so a reader sees either the old file or the complete
+// new one: the bytes go to a randomly named temporary file in the same
+// directory, which is then renamed over the destination. Atomic visibility
+// does not imply power-loss durability. The same open parent anchors
+// metadata, exclusive temporary creation, publication and cleanup.
+// Omitted permissions keep an existing destination's mode, and give a new
+// file octal 0666 less the process umask; pass `permissions: .Exact(bits)` to
+// set the ordinary rwx bits instead.
+pub fn save_atomic[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, permissions: SavePermissions = .Preserve) -> Result[(), FsFailure] where carries() {
+    match read permissions {
+        Exact(mode) => if mode > permission_bits {
+            return .Err(FsFailure.new(.InvalidPermissions))
+        },
+        Preserve => {},
+    }
+    let target = prepare(allocator, path)?
+    let observed = mem._mode_at_fd(target.name, target.parent)
+    var mode: Option[UInt64] = .None
+    if observed < 0 {
+        let error = io.IoError.from_os(.Metadata, Int32(-observed))
+        match read error.category {
+            NotFound => {},
+            _ => return complete(target, FsFailure.new(.Io(error))),
+        }
+    } else {
+        mode = .Some(UInt64(observed))
+    }
+    match read permissions {
+        Exact(bits) => mode = .Some(bits),
+        Preserve => {},
+    }
+    var temporary = allocator.acquire(temporary_name_size) else |reason| {
+        return complete(target, FsFailure.new(.Allocation(reason)))
+    }
+    var last_error = io.IoError { operation = .Open, category = .AlreadyExists, code = .None, progress = 0 }
+    for attempt in UInt64(0)..temporary_name_attempts {
+        match random_name(&temporary) {
+            Err(reason) => return finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(reason))),
+            Ok(_) => {},
+        }
+        // Even an improbable equal random name must not create the destination
+        // before publication when that entry did not previously exist.
+        if same_name(temporary, target.name) {
+            if attempt == temporary_name_attempts - 1 {
+                return finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
+            }
+            continue
+        }
+        let opened = mem._open_at_fd(temporary, target.parent, .CreateNew, default_file_mode)
+        if opened < 0 {
+            last_error = io.IoError.from_os(.Open, Int32(-opened))
+            match read last_error.category {
+                AlreadyExists => {
+                    if attempt == temporary_name_attempts - 1 {
+                        return finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
+                    }
+                    continue
+                },
+                _ => return finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error))),
+            }
+        }
+        let fd = Int32(opened)
+        var writer = io.descriptor(fd)
+        match io.write_all(&writer, bytes) {
+            Err(reason) => {
+                let error = io.IoError.from(reason)
+                return finish_atomic(target, temporary, .Some(fd), true, FsFailure.new(.Io(copy(error)), written: error.progress))
+            },
+            Ok(_) => {},
+        }
+        match read mode {
+            Some(bits) => {
+                let answer = linea_set_mode(fd, bits)
+                if answer < 0 {
+                    return finish_atomic(target, temporary, .Some(fd), true, FsFailure.new(.Io(io.IoError.from_os(.Permissions, Int32(-answer))), written: bytes.length()))
+                }
+            },
+            None => {},
+        }
+        match close_descriptor(fd) {
+            Some(reason) => return finish_atomic(target, temporary, .None, true, FsFailure.new(.Io(reason), written: bytes.length())),
+            None => {},
+        }
+        let replace: UInt8 = match read policy { CreateNew => 0, Replace => 1 }
+        let published = mem._publish_at_fd(temporary, target.name, target.parent, replace)
+        if published < 0 {
+            return finish_atomic(target, temporary, .None, true, FsFailure.new(.Io(io.IoError.from_os(.Publish, Int32(-published))), written: bytes.length()))
+        }
+        let success = FsFailure { published = true, written = bytes.length(), ..FsFailure.empty() }
+        return finish_atomic(target, temporary, .None, true, success)
+    }
+    finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
+}
+
+// Reject permission mistakes before allocating scratch or touching a path.
+test fn atomic_save_rejects_special_permission_bits_before_io() {
+    let allocator = mem.system()
+    let path = Path.from_str("/tmp/linea-atomic-must-not-create").unwrap()
+    let contents = "data"
+    // 512 is octal 01000, the sticky bit just above the allowed rwx bits.
+    match save_atomic(allocator, path, contents.as_bytes(), policy: .CreateNew, permissions: .Exact(512)) {
+        Ok(_) => return testing.assert(false, "special permission bits were accepted"),
+        Err(failure) => {
+            testing.assert(!failure.published, "invalid permissions published a file")?
+            testing.assert(match read failure.primary { Some(reason) => match read reason { InvalidPermissions => true, _ => false }, None => false }, "permission error lost its context")?
+        },
+    }
+    .Ok(())
+}
+
+test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permissions() {
+    let allocator = mem.system()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let before = "before"
+    // 416 is octal 0640 (rw-r-----); replacement must preserve these bits.
+    save_atomic(allocator, path, before.as_bytes(), policy: .CreateNew, permissions: .Exact(416)).unwrap()
+    let after = "after"
+    match save_atomic(allocator, path, after.as_bytes(), policy: .CreateNew) {
+        Ok(_) => return testing.assert(false, "create-new replaced an existing entry"),
+        Err(failure) => {
+            testing.assert(!failure.published, "failed no-replace claimed publication")?
+            testing.assert_eq(failure.written, UInt64(5), "publication failure lost temporary write progress")?
+        },
+    }
+    var file = File.open(allocator, path).unwrap()
+    defer var bytes = allocator.acquire(16).unwrap()
+    let received = &file.read_some(&bytes, offset: 0, count: 16)
+    file.close().unwrap()
+    testing.assert_eq(received.unwrap(), UInt64(6), "create conflict changed the old extent")?
+    for index in 0..before.length() {
+        testing.assert_eq(bytes.load_byte(index), before.byte(index).unwrap(), "create conflict changed old contents")?
+    }
+    save_atomic(allocator, path, after.as_bytes(), policy: .Replace).unwrap()
+    var changed = File.open(allocator, path).unwrap()
+    let received_after = &changed.read_some(&bytes, offset: 0, count: 16)
+    changed.close().unwrap()
+    testing.assert_eq(received_after.unwrap(), after.length(), "atomic replace lost the new extent")?
+    for index in 0..after.length() {
+        testing.assert_eq(bytes.load_byte(index), after.byte(index).unwrap(), "atomic replace changed output bytes")?
+    }
+    let target = prepare(allocator, path).unwrap()
+    let mode = mem._mode_at_fd(target.name, target.parent)
+    complete(target, FsFailure.empty()).unwrap()
+    testing.assert_eq(mode, Int64(416), "replacement lost ordinary permissions")?
+    // 384 is octal 0600 (rw-------), an explicit change from the preserved mode.
+    save_atomic(allocator, path, before.as_bytes(), policy: .Replace, permissions: .Exact(384)).unwrap()
+    let replaced = prepare(allocator, path).unwrap()
+    let exact = mem._mode_at_fd(replaced.name, replaced.parent)
+    complete(replaced, FsFailure.empty()).unwrap()
+    testing.assert_eq(exact, Int64(384), "explicit permissions were not exact")?
+    .Ok(())
+}
+
+test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() {
+    let allocator = mem.system()
+    let path = Path.from_str("/dev").unwrap()
+    let contents = "must not be written"
+    match save_atomic(allocator, path, contents.as_bytes(), policy: .Replace) {
+        Ok(_) => return testing.assert(false, "atomic save replaced a directory"),
+        Err(failure) => {
+            testing.assert(!failure.published, "nonregular destination was published")?
+            testing.assert_eq(failure.written, UInt64(0), "nonregular destination reached the write")?
+            testing.assert(match read failure.primary {
+                Some(reason) => match read reason { Io(error) => match read error.operation { Metadata => true, _ => false }, _ => false },
+                None => false,
+            }, "nonregular destination lost the metadata failure")?
+        },
+    }
+    .Ok(())
+}
+
+test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    testing.assert(save_atomic(allocator, path, "tea".as_bytes(), policy: .CreateNew).is_ok(), "an atomic save over an arena failed")?
+    defer let bytes = read_file(mem.system(), path, max_bytes: 8).unwrap()
+    testing.assert_eq(bytes.as_slice(), "tea".as_bytes(), "an atomic save over an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            save_atomic(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path, the file name and the temporary name are the walk's three
+    // acquisitions.
+    testing.assert(checked.unwrap_or(0) == 3, "an atomic save was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+test fn an_atomic_save_reports_scratch_allocation_failure() {
+    // An empty arena refuses every acquisition, so the call fails only if its
+    // scratch comes from the allocator it was given.
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let refused = match save_atomic(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+    }
+    testing.assert(refused, "an atomic save took its scratch from another allocator")?
+    .Ok(())
+}
+
+// permission_bits is octal 0777, the nine ordinary rwx bits. A requested mode
+// with any higher bit, such as setuid or the sticky bit, is refused.
+let permission_bits: UInt64 = 511
+
+// A temporary name is the 12-byte prefix ".linea-save-", 128 random bits
+// written as 32 hex digits, and a terminating NUL: 45 bytes in all.
+let temporary_name_size: UInt64 = 45
+
+// Creating a temporary file makes at most this many attempts, so at most 63
+// retries after a name collision, before reporting the last collision.
+let temporary_name_attempts: UInt64 = 64
+
+// Fill `buffer` with a fresh temporary name. It must hold
+// `temporary_name_size` bytes.
+fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoError] where carries() {
+    let prefix = ".linea-save-"
+    // Nibble values 0..15 index the lowercase hexadecimal alphabet.
+    let digits = "0123456789abcdef"
+    for index in 0..prefix.length() {
+        &buffer.store_byte(index, prefix.byte(index).unwrap())
+    }
+    // The 12-byte prefix is followed by 16 random bytes (128 bits).
+    let answer = mem._random_bytes(&buffer, offset: 12, count: 16)
+    if answer < 0 {
+        return .Err(io.IoError.from_os(.Random, Int32(-answer)))
+    }
+    if answer != 16 {
+        return .Err(.{ operation = .Random, category = .InvalidProgress, code = .None, progress = 0 })
+    }
+    // Expand source indexes 15..0 backwards before overwriting unread bytes.
+    // Each source byte becomes two hex digits, starting at offsets 12 and 13;
+    // division and remainder by 16 select its high and low four-bit nibbles.
+    for index in UInt64(0)..16 {
+        let source = UInt64(15) - index
+        let byte = buffer.load_byte(12 + source)
+        &buffer.store_byte(12 + source * 2, digits.byte(UInt64(byte / 16)).unwrap())
+        &buffer.store_byte(13 + source * 2, digits.byte(UInt64(byte % 16)).unwrap())
+    }
+    // Twelve prefix bytes plus 32 hex digits put the terminating NUL at 44.
+    &buffer.store_byte(44, 0)
+    .Ok(())
+}
+
+test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {
+    let allocator = mem.system()
+    defer var bytes = allocator.acquire(temporary_name_size).unwrap()
+    random_name(&bytes).unwrap()
+    let prefix = ".linea-save-"
+    for index in UInt64(0)..12 {
+        testing.assert_eq(bytes.load_byte(index), prefix.byte(index).unwrap(), "temporary prefix changed")?
+    }
+    // Bytes 12..43 hold ASCII hex: digits 48..57 and letters a..f (97..102).
+    for index in UInt64(12)..44 {
+        let byte = bytes.load_byte(index)
+        testing.assert((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), "temporary name contains a non-hex random digit")?
+    }
+    testing.assert_eq(bytes.load_byte(44), UInt8(0), "temporary name lost its terminator")?
+    .Ok(())
+}
+
+// Compare two NUL-terminated names byte for byte.
+fn same_name[A: Allocator, B: Allocator](left: mem.Buffer[A], right: mem.Buffer[B]) -> Bool {
+    if left.length() != right.length() {
+        return false
+    }
+    for index in 0..left.length() {
+        if left.load_byte(index) != right.load_byte(index) {
+            return false
+        }
+    }
+    true
+}
+
+// Close the temporary file if it is still open, remove it unless it was
+// published, and release the target. Every cleanup error is kept beside the
+// primary failure.
+fn finish_atomic[A: Allocator](sink target: Target[A], sink temporary: mem.Buffer[A], descriptor: Option[Int32], created: Bool, sink failure: FsFailure) -> Result[(), FsFailure] where carries(.Err: failure) {
+    var result = failure
+    match read descriptor {
+        Some(fd) => result.close = close_descriptor(fd),
+        None => {},
+    }
+    if created && !result.published {
+        let removed = mem._unlink_at_fd(temporary, target.parent)
+        if removed < 0 {
+            result.remove = .Some(io.IoError.from_os(.Remove, Int32(-removed)))
+        }
+    }
+    temporary.release()
+    complete(target, result)
+}
+
+test fn atomic_cleanup_retains_primary_close_remove_and_parent_errors() {
+    let allocator = mem.system()
+    let name = "missing"
+    let target = Target[mem.SystemAllocator] { parent = -1, name = mem._terminated(allocator, name.as_bytes()).unwrap() }
+    let temporary = mem._terminated(allocator, name.as_bytes()).unwrap()
+    let primary = FsFailure.new(.Io(io.IoError.from_os(.Write, 9)), written: 3)
+    match finish_atomic(target, temporary, .Some(-1), true, primary) {
+        Ok(_) => return testing.assert(false, "cleanup erased a primary failure"),
+        Err(failure) => {
+            testing.assert(failure.primary.is_some(), "primary failure was lost")?
+            testing.assert(failure.close.is_some(), "file close failure was lost")?
+            testing.assert(failure.remove.is_some(), "temporary removal failure was lost")?
+            testing.assert(failure.parent_close.is_some(), "parent close failure was lost")?
+            testing.assert_eq(failure.written, UInt64(3), "cleanup lost the accepted prefix")?
+            testing.assert(!failure.published, "cleanup claimed publication")?
+        },
+    }
+    .Ok(())
+}
+
+test fn atomic_parent_close_failure_preserves_publication_and_skips_removal() {
+    let allocator = mem.system()
+    let name = "missing"
+    let target = Target[mem.SystemAllocator] { parent = -1, name = mem._terminated(allocator, name.as_bytes()).unwrap() }
+    let temporary = mem._terminated(allocator, name.as_bytes()).unwrap()
+    let published = FsFailure { published = true, written = 7, ..FsFailure.empty() }
+    match finish_atomic(target, temporary, .None, true, published) {
+        Ok(_) => return testing.assert(false, "a failed parent close was hidden"),
+        Err(failure) => {
+            testing.assert(failure.published, "parent close failure lost publication state")?
+            testing.assert(failure.remove.is_none(), "published temporary was removed")?
+            testing.assert_eq(failure.written, UInt64(7), "parent close lost the accepted prefix")?
+        },
+    }
+    .Ok(())
+}
+
+// `scratch_path` names a file in `/tmp` no other test uses, for tests in the
+// library to create, read back and remove with `remove_scratch`. The name is
+// random, so tests running at once never share a file.
+internal fn scratch_path() -> String {
+    let allocator = mem.system()
+    defer var bytes = allocator.acquire(temporary_name_size).unwrap()
+    random_name(&bytes).unwrap()
+    // The name is every byte before the trailing NUL.
+    let name = Str.from_bytes(bytes.as_slice().subspan(start: 0, count: temporary_name_size - 1).unwrap()).unwrap()
+    var owned = "/tmp/".to_owned(allocator).unwrap()
+    &owned.append(name).unwrap()
+    owned
+}
+
+// `remove_scratch` removes a file a test created, and ignores a file that is
+// already gone.
+internal fn remove_scratch(path: Path) -> () {
+    let allocator = mem.system()
+    match prepare(allocator, path) {
+        Err(_) => {},
+        Ok(target) => {
+            let _removed = mem._unlink_at_fd(target.name, target.parent)
+            let _closed = complete(target, FsFailure.empty())
+        },
+    }
+}

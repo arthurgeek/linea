@@ -1,0 +1,11 @@
+// `start` takes no argument, so there is no call that passes `n` to it. The
+// report says `start` is a function and does not suggest a call that would
+// not compile.
+fn start() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 4
+    n.start()
+}

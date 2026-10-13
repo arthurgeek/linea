@@ -1,0 +1,5 @@
+error[T-Mismatch]: in this call to `rec`, `T` is the caller's `T`, and the default of `a` has the type `UInt8`
+ --> tests/type_defaults/a_default_that_meets_the_name_of_its_caller_is_worded_by_its_type.lin:5:5
+  |
+5 |     rec(n - 1)
+  |     ^^^^^^^^^^ write the argument, or let nothing else settle the type

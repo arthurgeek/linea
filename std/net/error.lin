@@ -1,0 +1,63 @@
+import std.io
+import std.mem
+import std.testing
+
+use io.WriteFailure
+
+// A NetError says why a network operation failed. AddressInUse is lifted out
+// of Io because a server usually answers it differently from any other failure
+// to listen.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum NetError {
+    AddressInUse,
+    InvalidAddress,
+    Io(io.IoError),
+}
+
+impl Display for NetError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            AddressInUse => &w.write_str("the address is already in use"),
+            InvalidAddress => &w.write_str("the address is not an IPv4 address and port"),
+            Io(error) => error.fmt(&w),
+        }
+    }
+}
+
+test fn a_net_error_displays_its_reason() {
+    let refused = io.IoError { operation = .Connect, category = .ConnectionRefused, code = .None, progress = 0 }
+    // The 256-byte recorder holds all three reasons, one per line.
+    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var wrote = true
+    for error in [NetError.AddressInUse, NetError.InvalidAddress, NetError.Io(refused)] {
+        wrote = wrote && error.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok()
+    }
+    let expected =
+        \\the address is already in use
+        \\the address is not an IPv4 address and port
+        \\Connect failed (ConnectionRefused) after 0 bytes
+        \\
+    let equal = writer.holds(expected)
+    writer.release()
+    testing.assert(wrote, "display rendering failed")?
+    testing.assert(equal, "a net error displayed the wrong reason")?
+    .Ok(())
+}
+
+// Close `fd`, reporting a refusal as an IoError.
+fn close_descriptor(fd: Int32) -> Result[(), io.IoError] where carries() {
+    let answer = mem._close_fd(fd)
+    if answer < 0 {
+        return .Err(io.IoError.from_os(.Close, Int32(-answer)))
+    }
+    .Ok(())
+}
+
+// Classify a negative runtime answer, which is a negated errno, as a NetError.
+fn failure(operation: io.IoOperation, answer: Int64) -> NetError {
+    let error = io.IoError.from_os(operation, Int32(-answer))
+    match read error.category {
+        AddressInUse => .AddressInUse,
+        _ => .Io(error),
+    }
+}

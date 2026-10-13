@@ -1,0 +1,23 @@
+// One trait declares the operation, so the postfix form already says which
+// one is meant. What is offered is the operation under its own name and the
+// dot stays: rewriting a call nothing is wrong with would be an opinion about
+// spelling, and the tree keeps both spellings so that nothing below it can
+// tell them apart.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.weight()
+}

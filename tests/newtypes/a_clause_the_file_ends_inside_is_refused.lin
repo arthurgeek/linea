@@ -1,0 +1,4 @@
+// A clause is read on the line its `where` opens, and the end of the file
+// ends that line as a break does: the declaration is refused there, with
+// nothing of the clause recorded.
+pub type Percent = UInt8 where

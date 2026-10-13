@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/text/a_returned_interpolation_cannot_borrow_a_local.lin:22:9
+   |
+22 |         "hi {name}"
+   |         ^^^^^^^^^^^ escape observations only from the signature's declared sources

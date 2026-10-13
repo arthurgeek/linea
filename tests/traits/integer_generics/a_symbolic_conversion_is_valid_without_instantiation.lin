@@ -1,0 +1,7 @@
+fn _converted[T: Integer]() -> T {
+    T(256)
+}
+
+fn main() -> UInt8 {
+    0
+}

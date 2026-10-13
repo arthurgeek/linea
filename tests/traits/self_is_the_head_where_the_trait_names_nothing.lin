@@ -1,0 +1,18 @@
+// `Self` is the head the implementation names, and the trait it answers is a
+// separate name: one of them reaching no declaration is reported where it is
+// written and says nothing about the other. A member writing `Self` where the
+// head applies arguments has written the whole of the type.
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Nope for Holder[T] {
+    fn get(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 3 }
+    h.v
+}

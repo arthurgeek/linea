@@ -1,0 +1,18 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn allocate(arena: Arena[mem.SystemAllocator]) -> mem.Buffer[mem.Handle[mem.SystemAllocator]] where borrows(arena) {
+    arena.handle().acquire(8).unwrap()
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 64)
+    let bytes = allocate(arena)
+    let length = bytes.length()
+    bytes.release()
+    arena.release()
+    UInt8(length)
+}

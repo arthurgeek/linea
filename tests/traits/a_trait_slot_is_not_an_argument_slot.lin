@@ -1,0 +1,39 @@
+// A symbol is what makes two functions two functions. Here an inherent `_1`
+// of `Cell`, instantiated at the type `_2`, stands beside what `Cell` supplies
+// for the trait `_1`, whose member is `_2`: joined by dots alone both would be
+// `Cell._1._2`. A type argument sits in brackets and an implementation's
+// member is spelled after the trait's module route and its own separator, so
+// the two are `;Cell._1[_2]` and `Cell;;_1._2`.
+//
+// The sibling cases pair a trait with a trait and a member with a member. This
+// one pairs a trait name with a type argument, which is the position nothing
+// else reaches.
+struct Cell {
+    v: UInt8,
+}
+
+struct _2 {
+    w: UInt8,
+}
+
+trait _1 {
+    fn _2(x: Self) -> UInt8
+}
+
+impl Cell {
+    pub fn _1[T](c: Cell, _t: T) -> UInt8 {
+        c.v
+    }
+}
+
+impl _1 for Cell {
+    fn _2(x: Self) -> UInt8 {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Cell = .{ v = 1 }
+    let g: _2 = .{ w = 2 }
+    Cell._1(c, g) + _1._2(c) - 2
+}

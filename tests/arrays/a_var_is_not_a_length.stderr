@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/a_var_is_not_a_length.lin:7:22
+  |
+7 |     let _xs: [UInt8; n] = [1, 2, 3]
+  |                      ^ this is not a constant

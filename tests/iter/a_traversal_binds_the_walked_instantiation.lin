@@ -1,0 +1,32 @@
+// A traversal declared by a generic implementation is lowered under the
+// instantiation the walk reached, which is what the implementation was matched
+// against -- so an implementation of any arity binds its parameters from the
+// walked type. Reading them off the positions iterator instead binds whatever
+// that iterator applies: one argument for a `Range`, none for an iterator of
+// its own, and an implementation whose head applies a different number of them
+// meets an assertion rather than a diagnostic.
+struct Pair2[A, B] {
+    a: A,
+    b: B,
+}
+
+impl[A, B] Index[Int64] for Pair2[A, B] {
+    type Elem = A
+
+    proj at(inout self: Pair2[A, B], _i: Int64) -> A {
+        self.a
+    }
+}
+
+impl[A, B] Pair2[A, B] {
+    trav positions = 0..2
+}
+
+fn main() -> UInt8 {
+    let p: Pair2[UInt8, UInt8] = .{ a = 3, b = 4 }
+    var total: UInt8 = 0
+    for read x in p {
+        total += x
+    }
+    total
+}

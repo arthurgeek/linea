@@ -1,0 +1,9 @@
+struct Token { value: UInt8 }
+
+struct Box[T: Copyable] { value: T }
+
+fn main() -> UInt8 {
+    let token = Token { value = 7 }
+    let _box = Box[Token] { value = token }
+    0
+}

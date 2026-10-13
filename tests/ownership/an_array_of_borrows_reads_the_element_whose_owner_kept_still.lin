@@ -1,0 +1,15 @@
+// An array of borrows of two places: changing one place ends the borrow in
+// one element, and the other element is still read.
+struct Box { value: UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    var y = Box { value = 2 }
+    let arr = [borrow x.value, borrow y.value]
+    bump(&x)
+    UInt8(*arr[1])
+}

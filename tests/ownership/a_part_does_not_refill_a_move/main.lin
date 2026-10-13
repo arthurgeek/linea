@@ -1,0 +1,24 @@
+// Assigning a whole binding refills the hole a move left. Assigning a part
+// does not: the rest of the value is still gone, so a second consume takes
+// what was already taken. The graph counts the depth of the place that was
+// written for exactly this reason -- reading it as "the root is live again"
+// is what let the same `Key` be released twice.
+@linear
+struct Holder {
+    k: Key,
+    n: UInt8,
+}
+
+fn consume(sink h: Holder) -> UInt8 {
+    let Holder { k: inner, n: count } = h
+    release(inner)
+    count
+}
+
+fn main() -> UInt8 {
+    var h: Holder = .{ k = mint(7), n = 1 }
+    let a = consume(h)
+    h.n = 2
+    let b = consume(h)
+    a + b
+}

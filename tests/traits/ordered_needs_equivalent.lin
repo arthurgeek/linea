@@ -1,0 +1,23 @@
+// A total order's equality is reflexive, so `Ordered` requires `Equivalent`
+// as well as `Comparable`. A type that orders is owed the second promise too.
+struct Key {
+    value: Int64,
+}
+
+impl Equatable for Key {
+    fn equals(self: Key, other: Key) -> Bool {
+        self.value == other.value
+    }
+}
+
+impl Comparable for Key {
+    fn less(self: Key, other: Key) -> Bool {
+        self.value < other.value
+    }
+}
+
+impl Ordered for Key {}
+
+fn main() -> UInt8 {
+    0
+}

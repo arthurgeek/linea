@@ -1,0 +1,10 @@
+// The success alternative is the exit status, so it is a `UInt8` for the same
+// reason the plain spelling is. Lowering reads that byte out of the payload,
+// and a payload of another type was a compiler defect rather than a diagnosis.
+import std.io
+
+use io.IoError
+
+fn main() -> Result[Str, IoError] {
+    .Ok("not a status")
+}

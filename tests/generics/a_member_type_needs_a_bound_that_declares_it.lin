@@ -1,0 +1,27 @@
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+
+    fn get(self: Box) -> UInt8 {
+        self.n
+    }
+}
+
+// C carries no bound, so nothing declares what C.Item could name.
+fn first[C](_c: C) -> C.Item {
+    0
+}
+
+fn main() -> UInt8 {
+    let b: Box = .{ n = 9 }
+    first(b)
+}

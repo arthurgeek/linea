@@ -1,0 +1,18 @@
+// `first` borrows a weight, not the filter, so reading `inspected` while
+// `first` is in use leaves the filter's lend alone.
+fn main() -> UInt8 {
+    let weights = [UInt64(1200), 3500, 6400]
+    var inspected: UInt64 = 0
+    var accepted = weights.as_slice().filter(
+        inout [inout inspected] |parcel| {
+            inspected += 1
+            *parcel <= 5000
+        },
+    )
+    let first = &accepted.next()
+    let seen = inspected
+    match first {
+        Some(weight) => UInt8(*weight / 1000) + UInt8(seen),
+        None => 0,
+    }
+}

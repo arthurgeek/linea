@@ -1,0 +1,5 @@
+error[S-Name]: expected a name
+ --> tests/structs/named_literals/a_marked_argument_is_a_place_not_a_literal.lin:8:11
+  |
+8 |     bump(&Point { x = 1 })
+  |           ^^^^^^^^^^^^^^^ `&` marks a binding the call writes to

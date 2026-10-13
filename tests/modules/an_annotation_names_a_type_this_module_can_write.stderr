@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Thing`
+  --> tests/modules/an_annotation_names_a_type_this_module_can_write/main.lin:16:12
+   |
+16 | fn peek(t: Thing) -> UInt8 {
+   |            ^^^^^ no type with this name is declared here

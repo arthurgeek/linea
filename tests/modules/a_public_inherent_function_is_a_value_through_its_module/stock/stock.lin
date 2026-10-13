@@ -1,0 +1,13 @@
+pub struct Inventory {
+    count: UInt8,
+}
+
+impl Inventory {
+    pub fn stocked(count: UInt8) -> Inventory {
+        .{ count = count }
+    }
+
+    pub fn restock(inout self: Inventory, by: UInt8) -> () {
+        self.count += by
+    }
+}

@@ -1,0 +1,5 @@
+error[T-Impl]: `Render` does not bound `draw`'s `W` by `Sink`
+  --> tests/traits/an_impl_asks_no_more_of_a_type_parameter_than_the_signature_does.lin:18:8
+   |
+18 |     fn draw[W: Sink](self: Tag, inout w: W) -> UInt8 {
+   |        ^^^^ drop it; the signature is what every call is checked against

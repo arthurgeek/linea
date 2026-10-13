@@ -1,0 +1,19 @@
+// `Account` is sealed: only this module reads or builds its fields.
+@opaque
+struct Account {
+    owner: Str,
+    balance: UInt64,
+}
+
+pub fn open(sink owner: Str) -> Account {
+    .{ owner, balance = 0 }
+}
+
+// Inside its module, a sealed type is updated like any other.
+pub fn deposit(sink account: Account, amount: UInt64) -> Account {
+    Account { balance = account.balance + amount, ..account }
+}
+
+pub fn balance(account: Account) -> UInt64 {
+    account.balance
+}

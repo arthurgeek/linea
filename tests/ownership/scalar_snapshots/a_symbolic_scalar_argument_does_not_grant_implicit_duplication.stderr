@@ -1,0 +1,5 @@
+error[O-Move]: `value` is lent, and this takes it
+ --> tests/ownership/scalar_snapshots/a_symbolic_scalar_argument_does_not_grant_implicit_duplication.lin:2:5
+  |
+2 |     value
+  |     ^^^^^ `copy` it, or declare the parameter `sink` to take it

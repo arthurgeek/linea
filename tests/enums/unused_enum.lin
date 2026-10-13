@@ -1,0 +1,5 @@
+enum Spare { A }
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+error[N-Immutable]: `seen` is captured by a closure that cannot change it
+ --> tests/closure_captures/a_capture_changes_only_in_an_inout_closure.lin:5:9
+  |
+4 |     let count = [sink seen = UInt8(0)] || {
+  |                       ---- captured here; a capture changes only in an `inout` closure that owns it
+5 |         seen += 1
+  |         ^^^^ this binding cannot be assigned

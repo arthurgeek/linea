@@ -1,0 +1,5 @@
+error[T-Bound]: Linear adds no capability requirement
+ --> tests/generics/a_linear_bound_is_redundant_before_copyable.lin:3:11
+  |
+3 | fn _twice[T: Linear + Copyable](x: T) -> UInt8 {
+  |           ^ drop the redundant Linear bound

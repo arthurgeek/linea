@@ -1,0 +1,7 @@
+struct Pair { value: UInt8 }
+
+fn main() -> UInt8 {
+    let pair: Pair = .{ value = 1 }
+    let _wrong: Bool = pair.value
+    0
+}

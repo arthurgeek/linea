@@ -1,0 +1,12 @@
+// A struct derives `http.Params` only when every field is read from one text
+// value: a type that parses from text, `Str`, or an `Option` of one.
+import std.http
+
+@derive(http.Params)
+struct Filter {
+    tags: [Str; 2],
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,14 @@
+stage 0
+release second
+release first
+stage 1
+stage 2
+release first
+stage 3
+release second
+release first
+stage 4
+release second
+release first
+allocation refusal
+release first

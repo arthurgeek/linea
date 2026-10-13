@@ -1,0 +1,16 @@
+// A `for` over a vector a call has just made is refused like one over a
+// named vector. A lending walk or a view of that vector would outlive it, so
+// the report suggests none: bind the vector first to walk it.
+import std.mem
+
+fn prices() -> Vec[UInt64, mem.SystemAllocator] {
+    Vec.new()
+}
+
+fn main() -> UInt8 {
+    var total = UInt64(0)
+    for cents in prices() {
+        total += cents
+    }
+    UInt8(total)
+}

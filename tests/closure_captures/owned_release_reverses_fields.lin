@@ -1,0 +1,39 @@
+import std.io
+
+@linear
+struct Token { number: UInt8 }
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let { number } = self
+        match io.print("{number}") { Ok(_) => {}, Err(_) => {} }
+    }
+}
+
+fn settle[F: Release](sink callback: F) -> () {
+    callback.release()
+}
+
+fn main() -> UInt8 {
+    let observed: Token = .{ number = 9 }
+    let first: Token = .{ number = 1 }
+    let second: Token = .{ number = 2 }
+    let callback = [observed, sink first, sink second] || {
+        observed.number + first.number + second.number
+    }
+    callback.release()
+    observed.release()
+
+    let third: Token = .{ number = 3 }
+    let fourth: Token = .{ number = 4 }
+    let generic = [sink third, sink fourth] || third.number + fourth.number
+    settle(generic)
+
+    let empty = || UInt8(0)
+    Release.release(empty)
+
+    let number: UInt8 = 3
+    let snapshot = [sink observation = borrow number] || *observation
+    Release.release(snapshot)
+    0
+}

@@ -1,0 +1,30 @@
+// A trait requiring `Lookup[UInt64]` is not implemented for a type that
+// implements `Lookup` only at some other argument.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+trait Fancy: Lookup[UInt64] {
+    fn tag(self: Self) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[Bool] for Board {
+    fn at(_self: Board, _i: Bool) -> UInt8 {
+        1
+    }
+}
+
+impl Fancy for Board {
+    fn tag(_self: Board) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    Fancy.tag(b)
+}

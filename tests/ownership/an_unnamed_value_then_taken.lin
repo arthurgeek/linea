@@ -1,0 +1,21 @@
+// The other direction. A value no place names, yielded into a position that
+// takes it, is consumed there and owes nothing afterwards -- which is what
+// stops the rule beside this one refusing every call that builds its
+// argument.
+@linear
+struct Inner {
+    n: UInt8,
+}
+
+fn mki() -> Inner {
+    .{ n = 6 }
+}
+
+fn takes(sink i: Inner) -> UInt8 {
+    let Inner { n } = i
+    n
+}
+
+fn main() -> UInt8 {
+    takes(mki())
+}

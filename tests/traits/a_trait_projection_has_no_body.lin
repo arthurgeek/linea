@@ -1,0 +1,14 @@
+// A trait declares which place a projection names, and each implementation
+// says where that place is. A body here is read and discarded rather than left
+// for the trait's loop to trip over, so the declarations after it are still
+// read -- which is what the frontend promises about every mistake.
+trait _Shelf {
+    type Item
+
+    proj at(inout self: Self, slot: UInt64) -> Self.Item { self }
+    fn count(self: Self) -> UInt64
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,15 @@
+struct Counter {
+    label: Str,
+    hits: UInt8,
+    limit: UInt8,
+}
+
+fn main() -> UInt8 {
+    var counter: Counter = .{ label = "visits", hits = 1, limit = 9 }
+    // `counter.hits` is read before `..counter` takes the value, and the
+    // assignment then gives `counter` the new one.
+    counter = Counter { hits = counter.hits + 1, ..counter }
+    counter = Counter { limit = counter.hits, hits = counter.limit, ..counter }
+    // 9 hits, limit 2
+    counter.hits * 10 + counter.limit
+}

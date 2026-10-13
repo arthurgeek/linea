@@ -1,0 +1,13 @@
+error[O-Leak]: `permit` (a linear `Permit`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/every_path_that_leaves_a_value_is_named.lin:21:13
+   |
+18 |         let permit = Permit { zone = visited }
+   |             ------ acquired here
+21 |             continue
+   |             ^^^^^^^^ still owned here
+24 |             break
+   |             ----- also still owned here
+27 |             return 7
+   |             ------ also still owned here
+   |
+   = help: take it apart with `let Permit { zone: _ } = permit`, or give it to something that takes it

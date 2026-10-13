@@ -1,0 +1,13 @@
+enum Mode { Preserve, Replace }
+
+fn select(mode: Mode = .Preserve) -> UInt8 {
+    match read mode { Preserve => 0, Replace => 1 }
+}
+
+fn invoke[F: fn(read mode: Mode = .Replace) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    invoke(select)
+}

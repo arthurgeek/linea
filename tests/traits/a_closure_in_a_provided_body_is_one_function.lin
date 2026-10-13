@@ -1,0 +1,34 @@
+// `scaled` and `step` each run as one function at each `Self` reaching
+// `total`, whether a call names the closure directly or `twice` calls it
+// through its type. `step` sits inside `scaled` and is reached both ways as
+// well. With one kilo, `step(1)` is 2, `scaled(1)` is 6 and `total` is 18.
+trait Weighed {
+    fn weight(self: Self) -> UInt8
+
+    fn total[U](self: Self, _tag: U, n: UInt8) -> UInt8 {
+        let scaled = [self] |m: UInt8| {
+            let step = [self] |k: UInt8| self.weight() + k
+            twice(step, m) + step(m)
+        }
+        twice(scaled, n) + scaled(n)
+    }
+}
+
+fn twice[F: fn(amount: UInt8) -> UInt8](f: F, n: UInt8) -> UInt8 {
+    f(n) + f(n)
+}
+
+@copyable
+struct Crate {
+    kilos: UInt8,
+}
+
+impl Weighed for Crate {
+    fn weight(self: Self) -> UInt8 {
+        self.kilos
+    }
+}
+
+fn main() -> UInt8 {
+    Crate { kilos = 1 }.total(true, 1)
+}

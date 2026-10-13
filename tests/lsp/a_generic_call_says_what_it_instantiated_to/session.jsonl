@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Monomorphisation is where a generic call stops being generic, so a cursor\n// on one says what it instantiated to. Two calls on one declaration reach two\n// instantiations, and the answer is each call's own.\nfn ident[T: Copyable](a: T) -> T {\n    copy(a)\n}\n\nfn main() -> UInt8 {\n    let n: UInt8 = 3\n    let same: UInt8 = ident(n)\n    let flag: Bool = ident(true)\n\n    if flag {\n        same\n    } else {\n        0\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":9,"character":24}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":23}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":6}}}
+{"jsonrpc":"2.0","id":5,"method":"shutdown"}

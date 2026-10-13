@@ -1,0 +1,14 @@
+// A `match` on the literal itself needs its type to compare the arms, so `k`
+// falls back to `Int64` there and cannot be passed as a `UInt8` afterwards.
+fn narrow(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let k = 5
+    let _small = match k {
+        0..10 => true,
+        _ => false,
+    }
+    narrow(k)
+}

@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let add = |lhs: UInt8, rhs: UInt8| {
+        lhs + rhs
+    }
+    let constant = || 3
+    add(constant(), 4)
+}

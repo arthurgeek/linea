@@ -1,0 +1,8 @@
+// It is an assignment, so its value is Unit, and a second one would be updating
+// a place by Unit. Refused where `a = b = c` is refused, and for the reason.
+fn main() -> UInt8 {
+    var a: UInt8 = 1
+    var b: UInt8 = 2
+    a += b += 3
+    a + b
+}

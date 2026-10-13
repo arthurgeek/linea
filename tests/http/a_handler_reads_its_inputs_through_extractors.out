@@ -1,0 +1,7 @@
+2026 day 40: 20 from the start
+2026 day 40: 5 from Ada L
+400 Bad Request: cannot read path value "day" from "forty": invalid decimal syntax at byte 0
+400 Bad Request: cannot read query value "size" from "500": decimal integer overflow at byte 2
+ada wrote notes
+401 Unauthorized: no author
+422 Unprocessable Content: missing field at $["title"]

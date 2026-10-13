@@ -1,0 +1,24 @@
+type Callback = fn() -> UInt8
+
+struct Handler {
+    run: Callback,
+}
+
+type Wrapped = Handler
+
+fn answer() -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    let wrapped: Option[Wrapped] = .Some(Wrapped(.{ run = Callback(answer) }))
+    match wrapped {
+        Some(value) => {
+            let Wrapped(handler) = value
+            let Handler { run: callback } = handler
+            let Callback(call) = callback
+            call()
+        },
+        None => 1,
+    }
+}

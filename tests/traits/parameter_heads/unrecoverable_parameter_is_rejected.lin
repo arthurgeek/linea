@@ -1,0 +1,7 @@
+trait Route {}
+
+impl[T, _U] Route for T {}
+
+fn main() -> UInt8 {
+    0
+}

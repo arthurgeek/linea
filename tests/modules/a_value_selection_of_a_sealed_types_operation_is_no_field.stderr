@@ -1,0 +1,10 @@
+error[T-UnknownField]: `Ticket` has no field `refund`
+  --> tests/modules/a_value_selection_of_a_sealed_types_operation_is_no_field/main.lin:11:19
+   |
+11 |     let _refund = ticket.refund
+   |                   ^^^^^^^^^^^^^ `refund` is an operation of `Ticket`, not a field; where a function is expected, write `Ticket.refund`, which takes the receiver as its first argument
+error[T-UnknownField]: `Str` has no field `trim_ascii`
+  --> tests/modules/a_value_selection_of_a_sealed_types_operation_is_no_field/main.lin:12:17
+   |
+12 |     let _trim = "  aisle ".trim_ascii
+   |                 ^^^^^^^^^^^^^^^^^^^^^ `trim_ascii` is an operation of `Str`, not a field; where a function is expected, write `Str.trim_ascii`, which takes the receiver as its first argument

@@ -1,0 +1,29 @@
+// `&` marks the first call after it. In `&hall().warm_up(5)` that is
+// `hall()`, and a function holds nothing a call writes to; the result is
+// bound with `var` before `warm_up` changes it. Assigning to a function is
+// refused for what it is.
+struct Thermostat {
+    target: Int64,
+    current: Int64,
+}
+
+impl Thermostat {
+    fn make() -> Thermostat {
+        Thermostat { target = 21, current = 17 }
+    }
+
+    fn warm_up(inout self: Thermostat, degrees: Int64) -> () {
+        self.current += degrees
+    }
+}
+
+fn hall() -> Thermostat {
+    Thermostat { target = 21, current = 17 }
+}
+
+fn main() -> UInt8 {
+    &hall().warm_up(5)
+    &Thermostat.make().warm_up(5)
+    hall = hall
+    0
+}

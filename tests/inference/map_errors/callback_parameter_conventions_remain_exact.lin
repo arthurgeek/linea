@@ -1,0 +1,9 @@
+fn widen(error: UInt8) -> UInt16 where carries(error) {
+    UInt16(error)
+}
+
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt8] = .Err(9)
+    let _mapped = failure.map_err(widen)
+    0
+}

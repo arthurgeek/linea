@@ -1,0 +1,18 @@
+// `swap` declares only `U`; `T` belongs to the implementation's head, and the
+// receiver `box` settles it. Naming `T` at the call is refused.
+struct Box[T] {
+    item: T,
+    moves: UInt8,
+}
+
+impl[T] Box[T] {
+    fn swap[U](self: Box[T], sink with: U) -> Box[U] where carries(with) {
+        Box[U] { item = with, moves = self.moves + 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    let box = Box[Bool] { item = true, moves = 0 }
+    let swapped = box.swap[Bool, UInt8](4)
+    swapped.item
+}

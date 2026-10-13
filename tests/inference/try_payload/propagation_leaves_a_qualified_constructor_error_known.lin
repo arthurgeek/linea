@@ -1,0 +1,16 @@
+enum Failure { Code(UInt8) }
+
+enum Other { Code(UInt8) }
+
+fn attempt[A: Discardable, F: fn(sink code: UInt8) -> A](make: F) -> Result[UInt8, A] where carries(make) {
+    .Err(make(3))
+}
+
+fn run() -> Result[UInt8, Failure] {
+    let value = attempt(Other.Code)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match run() { Ok(value) => value, Err(_) => 1 }
+}

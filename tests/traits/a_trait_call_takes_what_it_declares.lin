@@ -1,0 +1,21 @@
+// A call passing the wrong number of arguments is wrong about the arity, and
+// that is what it is told -- not that nothing settled `Self`. Nothing settled
+// it because the argument that would have is the one missing, so reporting
+// that instead would answer a question the call never got to ask.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    Measure.of()
+}

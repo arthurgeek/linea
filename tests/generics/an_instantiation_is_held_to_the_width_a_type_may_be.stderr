@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `P[W8]` is wider
+ --> tests/generics/an_instantiation_is_held_to_the_width_a_type_may_be.lin:6:8
+  |
+6 | struct P[T] { a: T, b: T, c: T, d: T, e: T, f: T, g: T, h: T }
+  |        ^ hold fewer parts, or nest them less deeply

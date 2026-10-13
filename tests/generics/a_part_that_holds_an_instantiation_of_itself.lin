@@ -1,0 +1,26 @@
+// `Wrap` holds whatever it is given, so a `Rec[T]` holding a `Wrap[Rec[T]]`
+// holds a `Rec[T]`: the graph of inline parts closes, and a value of the type
+// would have to contain one. Nothing grows -- `Rec` is reached again at the
+// argument it was given -- so the measure on arguments has nothing to say and
+// the set of instantiations does close. It is layout that does not.
+//
+// The part is refused where it is written rather than broken among the types
+// it mints. A declaration with parameters stands for one type per argument,
+// and each argument builds the chain again, so a break in one instantiation is
+// undone by the next.
+struct Wrap[T] {
+    inner: T,
+}
+
+struct Rec[T] {
+    a: T,
+    b: Wrap[Rec[T]],
+}
+
+fn _keep[T](_s: Rec[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

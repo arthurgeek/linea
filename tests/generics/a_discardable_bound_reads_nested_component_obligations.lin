@@ -1,0 +1,26 @@
+// A Discardable bound rejects a linear payload through nested ordinary
+// wrappers, even when the outer wrapper is declared before its component.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Mid[T] {
+    b: Box[T],
+}
+
+struct Box[T] {
+    v: T,
+}
+
+struct Held[T: Discardable] {
+    h: T,
+}
+
+fn take(_h: Held[Mid[Key]]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    take(.{ h = .{ b = .{ v = Key.Forged(1) } } })
+}

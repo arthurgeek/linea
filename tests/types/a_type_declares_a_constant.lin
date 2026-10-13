@@ -1,0 +1,14 @@
+// A constant may be a member of a type, reached through it exactly as an
+// inherent function is. This is what lets a bound be written where the type it
+// bounds is declared.
+struct Coins {
+    count: UInt8,
+}
+
+impl Coins {
+    pub let most: UInt8 = 9
+}
+
+fn main() -> UInt8 {
+    Coins.most
+}

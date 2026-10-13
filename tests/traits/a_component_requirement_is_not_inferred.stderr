@@ -1,0 +1,9 @@
+error[T-Derive]: `Pair` cannot derive `Measure` because component type `T` does not implement `Measure`
+  --> tests/traits/a_component_requirement_is_not_inferred.lin:30:11
+   |
+5  | template impl Measure where reflect.components: Measure {
+   |                                                 ------- the template requires every component to implement `Measure`
+20 |     left: T,
+   |     ---- this component has type `T`
+30 | derive[T] Measure for Pair[T]
+   |           ^^^^^^^ this written constraint environment does not prove the requirement

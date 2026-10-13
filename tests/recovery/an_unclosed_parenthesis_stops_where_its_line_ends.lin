@@ -1,0 +1,16 @@
+// `oops (` cannot follow `score + 1`, and its `(` is never closed, so the
+// skip stops where the line ends. What follows is still read: the mismatch in
+// `main` and the one in `_other` are reported.
+fn main() -> UInt8 {
+    let scores = [3, 4]
+    for score in scores {
+        score + 1 oops (
+    }
+    let last: UInt8 = "two"
+    last
+}
+
+fn _other() -> UInt8 {
+    let count: UInt8 = "three"
+    count
+}

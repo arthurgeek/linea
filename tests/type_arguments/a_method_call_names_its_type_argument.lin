@@ -1,0 +1,31 @@
+// `text.parse[UInt16]()` names the type `parse` returns in brackets before the
+// call. `parse` is a method of `Str`, so the brackets hold type arguments.
+import std.text
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+// A point is written as two digits, such as "34".
+impl text.Parse for Point {
+    fn parse(text: Str) -> Result[Point, text.ParseError] where carries() {
+        if Str.length(text) != 2 {
+            return .Err(.Syntax(0))
+        }
+        let x = Str.byte(text, 0).unwrap() - 48
+        let y = Str.byte(text, 1).unwrap() - 48
+        return .Ok(.{ x = x, y = y })
+    }
+}
+
+fn main() -> UInt8 {
+    let port = "8080".parse[UInt16]().unwrap()
+    let corner = "34".parse[Point]().unwrap()
+    let fallback = "70000".parse[UInt16]().unwrap_or(1)
+    if port == 8080 && corner.x == 3 && corner.y == 4 && fallback == 1 {
+        0
+    } else {
+        1
+    }
+}

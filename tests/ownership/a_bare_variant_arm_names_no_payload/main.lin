@@ -1,0 +1,23 @@
+// The third spelling of one claim. `Has(_)` binds the payload and is refused;
+// a bare `_` matches every variant and is refused; `Has` selects the variant
+// and takes none of what it carries, which is the same thing said a third way.
+//
+// It cannot be settled by asking the scrutinee's type. `Box` is linear
+// whichever variant an arm selects, so the type refuses the `Empty` arm below
+// as readily as the `Has` one -- and `Empty` carries nothing, so there is
+// nothing there to name. Only the count of what *this* variant carries tells
+// them apart, and the checker is what has it.
+@linear
+enum Box {
+    Has(Key),
+    Empty,
+}
+
+fn main() -> UInt8 {
+    let k: Key = mint(3)
+    let b: Box = Box.Has(k)
+    match b {
+        Has => 7,
+        Empty => 0,
+    }
+}

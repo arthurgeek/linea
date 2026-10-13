@@ -1,0 +1,10 @@
+error[S-Name]: expected a name after `enum`
+ --> tests/recovery/an_attached_derive_before_a_bare_enum_keyword.lin:4:6
+  |
+4 | enum
+  |      ^ an enum needs a name
+error[S-Enum]: expected `{`
+ --> tests/recovery/an_attached_derive_before_a_bare_enum_keyword.lin:4:6
+  |
+4 | enum
+  |      ^ an enum lists its variants

@@ -1,0 +1,55 @@
+// `()` is the one value of the unit type `()`, and it stands wherever a value
+// may: an argument, an initializer, a returned value, a tail, an arm's value,
+// an array element and a constant. `wrap[()](())` names the type and then
+// passes the value.
+let nothing: () = ()
+
+fn keep[T](_value: T) -> () {}
+
+fn finished(early: Bool) -> Result[(), Int64] {
+    if early {
+        return .Ok(())
+    }
+    let done: Result[(), Int64] = .Ok(())
+    done
+}
+
+fn refused(code: Int64) -> Result[(), Int64] {
+    match code {
+        0 => .Ok(()),
+        _ => .Err(code),
+    }
+}
+
+fn wrap[T](sink value: T) -> Option[T] {
+    .Some(value)
+}
+
+fn settle(_value: () = nothing) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    keep(())
+    let empty = ()
+    keep(empty)
+
+    let first: UInt8 = match finished(true) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+    let second: UInt8 = match finished(false) {
+        Ok(_) => 0,
+        Err(_) => 2,
+    }
+    let third: UInt8 = match refused(4) {
+        Ok(_) => 4,
+        Err(code) => UInt8(code) - 4,
+    }
+    let pair: [(); 2] = [(), ()]
+    let fourth: UInt8 = match wrap[()](()) {
+        Some(_) => UInt8(pair.length()) - 2,
+        None => 8,
+    }
+    first + second + third + fourth + settle()
+}

@@ -1,0 +1,17 @@
+struct Holder { view: borrow UInt8 }
+
+fn selected(value: UInt8) -> borrow UInt8 where borrows(value) {
+    let holder = Holder { view = borrow value }
+    let read Holder { view } = holder
+    copy(view)
+}
+
+fn main() -> UInt8 {
+    let value: UInt8 = 43
+    let view = selected(value)
+    if *view == 43 {
+        0
+    } else {
+        1
+    }
+}

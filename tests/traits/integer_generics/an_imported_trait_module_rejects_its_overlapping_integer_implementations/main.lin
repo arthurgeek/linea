@@ -1,0 +1,7 @@
+import tags
+
+use tags.Tag
+
+fn main() -> UInt8 {
+    Tag.tag(UInt8(0))
+}

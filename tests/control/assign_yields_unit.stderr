@@ -1,0 +1,11 @@
+error[N-Unused]: `x` is never used
+ --> tests/control/assign_yields_unit.lin:2:9
+  |
+2 |     var x: UInt8 = 1
+  |         ^ bind it as `_` if the value is not wanted
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/control/assign_yields_unit.lin:3:21
+  |
+3 |     let y: UInt8 = (x = 2)
+  |            ----- expected because of this annotation
+  |                     ^^^^^ expected `UInt8`, found `()`

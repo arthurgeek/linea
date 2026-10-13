@@ -1,0 +1,10 @@
+error[T-Refine]: `?` declines a newtype's construction, and this call constructs none
+  --> tests/newtypes/only_a_name_heads_a_construction.lin:17:14
+   |
+17 |     let _a = h.n?(50)
+   |              ^^^^^^^^ drop the `?`
+error[T-Refine]: `?` declines a newtype's construction, and this call constructs none
+  --> tests/newtypes/only_a_name_heads_a_construction.lin:18:5
+   |
+18 |     percent()?(50)
+   |     ^^^^^^^^^^^^^^ drop the `?`

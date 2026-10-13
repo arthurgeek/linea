@@ -1,0 +1,10 @@
+// `defer let` stays one statement when formatted: it is not rewritten into the
+// binding and the `defer` it means, and a comment above it stays above it.
+fn main() -> UInt8 {
+    // the first reading
+    defer   let first: UInt8   =   3
+    defer var second: UInt8 =  4;
+
+    defer let third: UInt8 = if first == 3 { 5 } else { 6 }
+    first + second + third
+}

@@ -1,0 +1,8 @@
+// A Writer is a byte sink a value can be rendered into. Each writer names its
+// own failure, so rendering can pass that failure through without interpreting
+// it.
+pub trait Writer {
+    type Error
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), Self.Error] where carries(.Err: self)
+}

@@ -1,0 +1,4 @@
+@opaque
+pub struct Point { value: UInt8 }
+
+fn main() -> UInt8 { Point { value = 0 }.value }

@@ -1,0 +1,9 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/defer/without_the_defer_the_value_leaks.lin:18:9
+   |
+18 |     let k: Key = .{ n = 7 }
+   |         ^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Key { n: _ } = k`, or give it to something that takes it

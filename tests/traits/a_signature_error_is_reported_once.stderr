@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/traits/a_signature_error_is_reported_once.lin:4:42
+  |
+4 |     fn handle(self: Self, count: [Int64; "3"]) -> Str
+  |                                          ^^^ this is not a number

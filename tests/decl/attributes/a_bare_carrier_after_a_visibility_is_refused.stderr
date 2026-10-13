@@ -1,0 +1,5 @@
+error[S-Entry]: carrier is a declaration attribute
+ --> tests/decl/attributes/a_bare_carrier_after_a_visibility_is_refused.lin:2:5
+  |
+2 | pub carrier struct Session {
+  |     ^^^^^^^ write `@` before this word, ahead of the visibility

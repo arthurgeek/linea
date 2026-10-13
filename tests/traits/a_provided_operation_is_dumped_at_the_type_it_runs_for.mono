@@ -1,0 +1,38 @@
+struct Tile {
+    side: UInt64,
+}
+
+struct Board {
+    width: UInt64,
+    height: UInt64,
+}
+
+fn ;main() -> UInt8 {
+    let tile = Tile { side = 2 }
+    let board = Board { width = 1, height = 3 }
+    UInt8(Tile;;Shape.doubled(tile) + ;twice[Board](board) + Tile;;Shape.doubled(tile))
+}
+
+fn Tile;;Shape.doubled(self: Tile) -> UInt64 {
+    Tile;;Shape.area(self) * 2
+}
+
+fn ;twice[Board](shape: Board) -> UInt64 {
+    Board;;Shape.quadrupled(shape)
+}
+
+fn Tile;;Shape.area(self: Tile) -> UInt64 {
+    self.side * self.side
+}
+
+fn Board;;Shape.quadrupled(self: Board) -> UInt64 {
+    Board;;Shape.doubled(self) * 2
+}
+
+fn Board;;Shape.doubled(self: Board) -> UInt64 {
+    Board;;Shape.area(self) * 2
+}
+
+fn Board;;Shape.area(self: Board) -> UInt64 {
+    self.width * self.height
+}

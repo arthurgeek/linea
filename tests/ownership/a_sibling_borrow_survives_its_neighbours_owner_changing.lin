@@ -1,0 +1,17 @@
+// A struct may hold borrows of two places. Changing one place ends only the
+// borrow of that place; the borrow of the other is still good to read.
+struct Box { value: UInt64 }
+
+struct Pair { left: borrow UInt64, right: borrow UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    var y = Box { value = 2 }
+    let p = Pair { left = borrow x.value, right = borrow y.value }
+    bump(&x)
+    UInt8(*p.right)
+}

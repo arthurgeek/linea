@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Measure` and `Weigh` both declare `Item`, and a type carrying both bounds reads it through neither
+  --> tests/traits/a_settled_reference_two_bounds_declare_reaches_neither.lin:37:40
+   |
+37 | fn _either[W: Measure + Weigh](sink v: W.Item) -> W.Item {
+   |                                        ^^^^^^ bound it by one of them
+error[N-Ambiguous]: `Measure` and `Weigh` both declare `Item`, and a type carrying both bounds reads it through neither
+  --> tests/traits/a_settled_reference_two_bounds_declare_reaches_neither.lin:37:51
+   |
+37 | fn _either[W: Measure + Weigh](sink v: W.Item) -> W.Item {
+   |                                                   ^^^^^^ bound it by one of them

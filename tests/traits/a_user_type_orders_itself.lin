@@ -1,0 +1,46 @@
+// A type says how it equals, orders and steps by implementing the traits the
+// prelude names. The two markers declare nothing: what they add is a promise
+// about the operations their own bounds require.
+struct Mark {
+    n: UInt8,
+}
+
+impl Equatable for Mark {
+    fn equals(self: Mark, other: Mark) -> Bool {
+        self.n == other.n
+    }
+}
+
+impl Equivalent for Mark {}
+
+impl Comparable for Mark {
+    fn less(self: Mark, other: Mark) -> Bool {
+        self.n < other.n
+    }
+}
+
+impl Ordered for Mark {}
+
+impl Steppable for Mark {
+    fn forward(self: Mark) -> Mark {
+        let next: Mark = .{ n = self.n + 1 }
+        next
+    }
+
+    fn backward(self: Mark) -> Mark {
+        let previous: Mark = .{ n = self.n - 1 }
+        previous
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 1 }
+    let b: Mark = .{ n = 2 }
+    let next = Steppable.forward(a)
+    let back = Steppable.backward(b)
+    if Comparable.less(a, b) && Equatable.equals(next, b) && Equatable.equals(back, a) {
+        9
+    } else {
+        0
+    }
+}

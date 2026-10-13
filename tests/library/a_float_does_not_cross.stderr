@@ -1,0 +1,10 @@
+error[T-Export]: `Float64` may not cross the foreign boundary: only an integer's representation is the language's to fix
+ --> tests/library/a_float_does_not_cross/main.lin:1:17
+  |
+1 | export fn scale(num: Float64) -> Float64 {
+  |                 ^^^ pass what it is made of, as integers
+error[T-Export]: `Float64` may not cross the foreign boundary: only an integer's representation is the language's to fix
+ --> tests/library/a_float_does_not_cross/main.lin:1:11
+  |
+1 | export fn scale(num: Float64) -> Float64 {
+  |           ^^^^^ pass what it is made of, as integers

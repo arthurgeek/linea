@@ -1,0 +1,10 @@
+struct Pair {
+    first: UInt8,
+    second: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair: fn(read first: UInt8, read second: UInt8) -> Pair = |first, second| .{ first = first, second = second }
+    let made = pair(4, 5)
+    made.first + made.second
+}

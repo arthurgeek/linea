@@ -1,0 +1,22 @@
+// An `Args` owns nothing.
+//
+// Written down because it looks like the opposite. A handle onto something the
+// process holds is the shape of a resource, and an implementation that made it
+// own the arguments would type-check, would answer every question about `at`
+// correctly, and would be wrong -- so what tells the two apart is copying one
+// and dropping both, which a linear value refuses and this does not.
+import std.env
+
+use env.Args
+use env.args
+
+fn main() -> UInt8 {
+    let a: Args = args()
+    let b = copy(a)
+
+    // Both are the same count, so the difference is zero however many arguments
+    // there were -- the case says something about ownership and nothing about
+    // how it was run.
+    let same: UInt64 = a.count() - b.count()
+    return UInt8(same)
+}

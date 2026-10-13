@@ -1,0 +1,11 @@
+error[O-Leak]: `Slot.Held.0` (a linear `Token`) is still owned when this path leaves
+  --> tests/traits/a_generated_binding_is_named_by_its_component.lin:40:8
+   |
+14 |         match self {
+   |         ------------ generated from this template code for `Slot.Held.0`
+37 |     Held(Token),
+   |          ----- the code was generated for this component
+40 | derive Count for Slot
+   |        ^^^^^ never settled on the path that reaches the end of this block
+   |
+   = help: give it to something that takes it

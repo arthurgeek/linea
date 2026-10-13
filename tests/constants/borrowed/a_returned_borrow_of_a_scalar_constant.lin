@@ -1,0 +1,23 @@
+// A borrow of a module constant carries no owner, so a function may return
+// one while declaring that its result carries nothing.
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+let ceiling = 42
+
+fn at_limit() -> Reading where carries() {
+    reading(ceiling)
+}
+
+fn limit() -> borrow Int64 where carries() {
+    borrow ceiling
+}
+
+fn main() -> UInt8 {
+    UInt8(*at_limit().value - *limit())
+}

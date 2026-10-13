@@ -1,0 +1,7 @@
+let number = 1
+
+let _text = "value {number}"
+
+fn main() -> UInt8 {
+    0
+}

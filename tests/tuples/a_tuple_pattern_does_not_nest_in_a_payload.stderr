@@ -1,0 +1,15 @@
+error[S-Match]: a binder is a name
+  --> tests/tuples/a_tuple_pattern_does_not_nest_in_a_payload.lin:10:14
+   |
+10 |         Some((a, b)) => 0,
+   |              ^ a pattern does not nest; bind a name here, then take it apart with `let`
+error[S-Tuple]: a tuple pattern binds a name or `_` to each component
+  --> tests/tuples/a_tuple_pattern_does_not_nest_in_a_payload.lin:17:13
+   |
+17 |         (a, (b, c)) => a,
+   |             ^ take this component apart with a second `let`
+error[S-Match]: a field's binder is a name
+  --> tests/tuples/a_tuple_pattern_does_not_nest_in_a_payload.lin:22:25
+   |
+22 |     let Wrapper { pair: (a, b) } = wrapper
+   |                         ^ a pattern does not nest; bind a name here, then take it apart with `let`

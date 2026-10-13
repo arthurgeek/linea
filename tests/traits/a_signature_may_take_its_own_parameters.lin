@@ -1,0 +1,24 @@
+// A trait's operation may be generic on its own account. Its parameters are
+// the signature's and the implementation's are the member's, so the two are
+// different types that stand in the same place -- and an implementation
+// supplies the signature when its k-th parameter answers for the signature's
+// k-th, not when the two are one type.
+struct Coins {
+    count: UInt8,
+}
+
+trait Measure {
+    fn of[U](x: Self, u: U) -> UInt8
+}
+
+impl Measure for Coins {
+    fn of[U](x: Self, _u: U) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let flag: Bool = true
+    Measure.of(c, flag)
+}

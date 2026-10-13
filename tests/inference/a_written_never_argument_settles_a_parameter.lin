@@ -1,0 +1,21 @@
+// `Never` written as a type argument is a type like any other, so it settles
+// the parameter it stands for. A result that cannot fail is `Result[T, Never]`,
+// and a call over it knows its error type. Only an expression of type `Never`,
+// which produces no value, leaves a parameter open.
+fn succeeded[T, E](result: Result[T, E]) -> Bool {
+    match read result {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+fn main() -> UInt8 {
+    let certain: Result[UInt8, Never] = .Ok(7)
+    let nothing: Option[Never] = .None
+    let checks = [certain.is_ok(), succeeded(certain), nothing.is_none()]
+    if checks == [true, true, true] {
+        0
+    } else {
+        1
+    }
+}

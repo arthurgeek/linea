@@ -1,0 +1,7 @@
+error[T-Bound]: `Option[Key]` does not implement `Comparable`
+  --> tests/traits/an_option_of_an_unordered_type_is_not_compared.lin:10:10
+   |
+10 |     if a < b {
+   |          ^ the operator is a call on that trait, so implement it for this type
+   |
+   = help: `Option[T]` implements `Comparable` when `T` implements `Comparable`, and `Key` does not

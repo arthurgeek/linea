@@ -1,0 +1,49 @@
+import std.testing
+
+// Method names the request methods a handler commonly matches on. Any other
+// token is `Other`, and `Request.method_text` still reports it as sent.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum Method {
+    Get,
+    Head,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Options,
+    Other,
+}
+
+// Method tokens are case-sensitive, so `get` is `Other`.
+fn method_of(token: Str) -> Method {
+    if token == "GET" {
+        .Get
+    } else if token == "HEAD" {
+        .Head
+    } else if token == "POST" {
+        .Post
+    } else if token == "PUT" {
+        .Put
+    } else if token == "PATCH" {
+        .Patch
+    } else if token == "DELETE" {
+        .Delete
+    } else if token == "OPTIONS" {
+        .Options
+    } else {
+        .Other
+    }
+}
+
+test fn a_method_token_names_its_method_exactly() {
+    testing.assert_eq(method_of("GET"), Method.Get, "GET")?
+    testing.assert_eq(method_of("HEAD"), Method.Head, "HEAD")?
+    testing.assert_eq(method_of("POST"), Method.Post, "POST")?
+    testing.assert_eq(method_of("PUT"), Method.Put, "PUT")?
+    testing.assert_eq(method_of("PATCH"), Method.Patch, "PATCH")?
+    testing.assert_eq(method_of("DELETE"), Method.Delete, "DELETE")?
+    testing.assert_eq(method_of("OPTIONS"), Method.Options, "OPTIONS")?
+    testing.assert_eq(method_of("get"), Method.Other, "a lowercase method matched")?
+    testing.assert_eq(method_of("BREW"), Method.Other, "an unknown method matched")?
+    .Ok(())
+}

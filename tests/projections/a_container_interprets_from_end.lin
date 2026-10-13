@@ -1,0 +1,29 @@
+// A container interprets a count back from its end by handing it to whatever
+// holds the elements: a projection's body is a path, so what the count is held
+// against is the array the path reaches, and the interpretation is the one the
+// array already has. One type answers two index types, and which bracket is
+// which is decided by what its index settled to.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Index[FromEnd] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: FromEnd) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    g[1] + g[^1]
+}

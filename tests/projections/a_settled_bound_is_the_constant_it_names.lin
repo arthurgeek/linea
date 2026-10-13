@@ -1,0 +1,11 @@
+// A bound settles where the place is formed, and a name bound to a constant
+// settles there as much as a digit does: the place's type is read off the
+// values, and the offset the place sits at is folded from the same two.
+let first: UInt64 = 1
+
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let middle: [UInt8; 2] = copy(a[first..3])
+    a[first..=2] = [9, 9]
+    middle[0] + middle[1] + a[1] + a[2]
+}

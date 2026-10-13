@@ -1,0 +1,18 @@
+// A `return` leaves the scope, so what the scope scheduled runs on the way
+// out. `go` answers with the value from before the bump and `main` sees the
+// bumped one, so the sum says the schedule fired on a path that never reaches
+// the block's end.
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+fn go(inout n: UInt8) -> UInt8 {
+    defer bump(&n)
+    return n
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 1
+    let before = go(&n)
+    before + n
+}

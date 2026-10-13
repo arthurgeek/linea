@@ -1,0 +1,31 @@
+program decls=6
+  decl function "show" tokens 6..15
+    in Show
+    param read "self" : Self
+    returns UInt8
+  decl trait_ "Show" tokens 3..16
+  decl struct_ "Holder" tokens 16..27
+    type param "T"
+    field "v" : T
+  decl function "show" tokens 38..53
+    in Holder
+    of trait Show
+    param read "self" : Holder[T]
+    returns UInt8
+    expr %1 block tokens 50..53
+      expr %0 int_literal tokens 51..52 "7"
+  decl impl_ "Holder" tokens 27..54
+    of trait Show
+    head[T]
+    type param "T"
+  decl function "main" tokens 54..82
+    returns UInt8
+    expr %9 block tokens 60..82
+      stmt %0 let_decl tokens 61..75 "h" : Holder[UInt8]
+        expr %4 struct_literal tokens 69..75
+          expr %2 name_ref tokens 71..72 "v"
+          expr %3 int_literal tokens 73..74 "1"
+      expr %8 call tokens 75..81
+        expr %6 field tokens 75..78 "show"
+          expr %5 name_ref tokens 75..76 "Show"
+        expr %7 name_ref tokens 79..80 "h"

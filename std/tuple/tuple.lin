@@ -1,0 +1,806 @@
+import std.hash
+import std.mem
+import std.testing
+
+// Tuple2 through Tuple8 hold two to eight positional components, named _0 to
+// _7 in order. A tuple is copyable when every component is.
+//
+// Equatable, Equivalent, Comparable, Ordered, Hash, Default and Release are
+// derived, so a tuple has each wherever every component does; derived Release
+// settles the components last first. Display and Debug are written by hand,
+// because a derived rendering names the type and its fields, as
+// `Tuple2 { _0: 1, _1: "a" }`, while a tuple prints its components in
+// parentheses, as `(1, "a")`.
+//
+// Every trait is implemented here, beside the declarations, because a type
+// admits one implementation of a trait in the whole program. Supplying Display
+// here keeps the first library that wants it from taking the only slot with a
+// rendering of its own.
+
+// Tuple2 holds two positional components, _0 and _1.
+@copyable
+pub struct Tuple2[A, B] { _0: A, _1: B }
+
+derive[A: Equatable, B: Equatable] Equatable for Tuple2[A, B]
+
+derive[A: Equivalent, B: Equivalent] Equivalent for Tuple2[A, B]
+
+derive[A: Comparable, B: Comparable] Comparable for Tuple2[A, B]
+
+derive[A: Ordered, B: Ordered] Ordered for Tuple2[A, B]
+
+derive[A: hash.Hash, B: hash.Hash] hash.Hash for Tuple2[A, B]
+
+derive[A: Default, B: Default] Default for Tuple2[A, B]
+
+derive[A: Release, B: Release] Release for Tuple2[A, B]
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn tuple_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+// Accept any Ordered value, so a call proves its argument's type is one.
+fn tuple_test_accepts_ordered[T: Ordered](_value: T) -> Bool {
+    true
+}
+
+test fn a_pair_derives_its_traits_from_its_components() {
+    let a = Tuple2[UInt8, Int8] { _0 = 1, _1 = 5 }
+    let b = Tuple2[UInt8, Int8] { _0 = 1, _1 = 5 }
+    let c = Tuple2[UInt8, Int8] { _0 = 2, _1 = -1 }
+    testing.assert(a == b, "equal pairs compared unequal")?
+    testing.assert(a < c, "pairs did not order by their first component")?
+    testing.assert(tuple_test_accepts_equivalent(a), "Tuple2 did not derive Equivalent")?
+    testing.assert(tuple_test_accepts_ordered(a), "Tuple2 did not derive Ordered")?
+    testing.assert_eq(hash.Hash.hash(a), hash.Hash.hash(b), "equal pairs hashed differently")?
+    testing.assert(hash.Hash.hash(a) != hash.Hash.hash(c), "different pairs hashed alike")?
+    let zero: Tuple2[UInt8, Int8] = Default.default()
+    testing.assert_eq(zero, Tuple2[UInt8, Int8] { _0 = 0, _1 = 0 }, "default is the components' defaults")?
+    .Ok(())
+}
+
+test fn a_pair_releases_its_components_last_first() {
+    let log = mem.ReleaseLog.open(2)
+    let pair = Tuple2[mem.ReleaseTag, mem.ReleaseTag] { _0 = log.tag(40), _1 = log.tag(50) }
+    pair.release()
+    let released = log.holds([UInt64(50), 40].as_slice())
+    log.release()
+    testing.assert(released, "derived release skipped, repeated or reordered a component")?
+    .Ok(())
+}
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display] Display for Tuple2[A, B] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug] Debug for Tuple2[A, B] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_pair_prints_its_components_in_parentheses() {
+    let pair = Tuple2[UInt8, Str] { _0 = 1, _1 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 32).unwrap()
+    let wrote = pair.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && pair.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, a) (1, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn pair_compares_and_hashes_by_every_component() {
+    let base = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 2 }
+    let same = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 2 }
+    testing.assert(base == same, "a pair compared unequal to its copy")?
+    let at_0 = Tuple2[UInt8, UInt8] { _0 = 2, _1 = 2 }
+    let at_1 = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 3 }
+    testing.assert(base != at_0, "a pair ignored its first component in equality")?
+    testing.assert(base < at_0, "a pair ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a pair ignored its first component in hashing")?
+    testing.assert(base != at_1, "a pair ignored its second component in equality")?
+    testing.assert(base < at_1, "a pair ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a pair ignored its second component in hashing")?
+    let low_0 = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 200 }
+    let high_0 = Tuple2[UInt8, UInt8] { _0 = 2, _1 = 0 }
+    testing.assert(low_0 < high_0, "a pair did not order by its first component before the ones after it")?
+    let low_1 = Tuple2[UInt8, UInt8] { _0 = 0, _1 = 1 }
+    let high_1 = Tuple2[UInt8, UInt8] { _0 = 0, _1 = 2 }
+    testing.assert(low_1 < high_1, "a pair did not order by its second component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple3 holds three positional components, _0 to _2.
+@copyable
+pub struct Tuple3[A, B, C] { _0: A, _1: B, _2: C }
+
+derive[A: Equatable, B: Equatable, C: Equatable] Equatable for Tuple3[A, B, C]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent] Equivalent for Tuple3[A, B, C]
+
+derive[A: Comparable, B: Comparable, C: Comparable] Comparable for Tuple3[A, B, C]
+
+derive[A: Ordered, B: Ordered, C: Ordered] Ordered for Tuple3[A, B, C]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash] hash.Hash for Tuple3[A, B, C]
+
+derive[A: Default, B: Default, C: Default] Default for Tuple3[A, B, C]
+
+derive[A: Release, B: Release, C: Release] Release for Tuple3[A, B, C]
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display] Display for Tuple3[A, B, C] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug] Debug for Tuple3[A, B, C] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_three_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple3[UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, a) (1, 2, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn three_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3 }
+    let same = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3 }
+    testing.assert(base == same, "a three-tuple compared unequal to its copy")?
+    let at_0 = Tuple3[UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3 }
+    let at_1 = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3 }
+    let at_2 = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4 }
+    testing.assert(base != at_0, "a three-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "a three-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a three-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "a three-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "a three-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a three-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "a three-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "a three-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "a three-tuple ignored its third component in hashing")?
+    let low_0 = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200 }
+    let high_0 = Tuple3[UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0 }
+    testing.assert(low_0 < high_0, "a three-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple3[UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200 }
+    let high_1 = Tuple3[UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0 }
+    testing.assert(low_1 < high_1, "a three-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple3[UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1 }
+    let high_2 = Tuple3[UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2 }
+    testing.assert(low_2 < high_2, "a three-tuple did not order by its third component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple4 holds four positional components, _0 to _3.
+@copyable
+pub struct Tuple4[A, B, C, D] { _0: A, _1: B, _2: C, _3: D }
+
+derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable] Equatable for Tuple4[A, B, C, D]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent] Equivalent for Tuple4[A, B, C, D]
+
+derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable] Comparable for Tuple4[A, B, C, D]
+
+derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered] Ordered for Tuple4[A, B, C, D]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash] hash.Hash for Tuple4[A, B, C, D]
+
+derive[A: Default, B: Default, C: Default, D: Default] Default for Tuple4[A, B, C, D]
+
+derive[A: Release, B: Release, C: Release, D: Release] Release for Tuple4[A, B, C, D]
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display, D: Display] Display for Tuple4[A, B, C, D] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(", ")?
+        self._3.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug, D: Debug] Debug for Tuple4[A, B, C, D] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(", ")?
+        self._3.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_four_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple4[UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, 3, a) (1, 2, 3, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn four_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4 }
+    let same = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4 }
+    testing.assert(base == same, "a four-tuple compared unequal to its copy")?
+    let at_0 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3, _3 = 4 }
+    let at_1 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3, _3 = 4 }
+    let at_2 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4, _3 = 4 }
+    let at_3 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 5 }
+    testing.assert(base != at_0, "a four-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "a four-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a four-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "a four-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "a four-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a four-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "a four-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "a four-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "a four-tuple ignored its third component in hashing")?
+    testing.assert(base != at_3, "a four-tuple ignored its fourth component in equality")?
+    testing.assert(base < at_3, "a four-tuple ignored its fourth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_3), "a four-tuple ignored its fourth component in hashing")?
+    let low_0 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200, _3 = 200 }
+    let high_0 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0, _3 = 0 }
+    testing.assert(low_0 < high_0, "a four-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200, _3 = 200 }
+    let high_1 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0, _3 = 0 }
+    testing.assert(low_1 < high_1, "a four-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1, _3 = 200 }
+    let high_2 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2, _3 = 0 }
+    testing.assert(low_2 < high_2, "a four-tuple did not order by its third component before the ones after it")?
+    let low_3 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 1 }
+    let high_3 = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 2 }
+    testing.assert(low_3 < high_3, "a four-tuple did not order by its fourth component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple5 holds five positional components, _0 to _4.
+@copyable
+pub struct Tuple5[A, B, C, D, E] { _0: A, _1: B, _2: C, _3: D, _4: E }
+
+derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable] Equatable for Tuple5[A, B, C, D, E]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent] Equivalent for Tuple5[A, B, C, D, E]
+
+derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable] Comparable for Tuple5[A, B, C, D, E]
+
+derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered] Ordered for Tuple5[A, B, C, D, E]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash] hash.Hash for Tuple5[A, B, C, D, E]
+
+derive[A: Default, B: Default, C: Default, D: Default, E: Default] Default for Tuple5[A, B, C, D, E]
+
+derive[A: Release, B: Release, C: Release, D: Release, E: Release] Release for Tuple5[A, B, C, D, E]
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display, D: Display, E: Display] Display for Tuple5[A, B, C, D, E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(", ")?
+        self._3.fmt(&w)?
+        &w.write_str(", ")?
+        self._4.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug] Debug for Tuple5[A, B, C, D, E] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(", ")?
+        self._3.debug(&w)?
+        &w.write_str(", ")?
+        self._4.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_five_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple5[UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, 3, 4, a) (1, 2, 3, 4, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn five_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5 }
+    let same = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5 }
+    testing.assert(base == same, "a five-tuple compared unequal to its copy")?
+    let at_0 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3, _3 = 4, _4 = 5 }
+    let at_1 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3, _3 = 4, _4 = 5 }
+    let at_2 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4, _3 = 4, _4 = 5 }
+    let at_3 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 5, _4 = 5 }
+    let at_4 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 6 }
+    testing.assert(base != at_0, "a five-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "a five-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a five-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "a five-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "a five-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a five-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "a five-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "a five-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "a five-tuple ignored its third component in hashing")?
+    testing.assert(base != at_3, "a five-tuple ignored its fourth component in equality")?
+    testing.assert(base < at_3, "a five-tuple ignored its fourth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_3), "a five-tuple ignored its fourth component in hashing")?
+    testing.assert(base != at_4, "a five-tuple ignored its fifth component in equality")?
+    testing.assert(base < at_4, "a five-tuple ignored its fifth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_4), "a five-tuple ignored its fifth component in hashing")?
+    let low_0 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200, _3 = 200, _4 = 200 }
+    let high_0 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0, _3 = 0, _4 = 0 }
+    testing.assert(low_0 < high_0, "a five-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200, _3 = 200, _4 = 200 }
+    let high_1 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0, _3 = 0, _4 = 0 }
+    testing.assert(low_1 < high_1, "a five-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1, _3 = 200, _4 = 200 }
+    let high_2 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2, _3 = 0, _4 = 0 }
+    testing.assert(low_2 < high_2, "a five-tuple did not order by its third component before the ones after it")?
+    let low_3 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 1, _4 = 200 }
+    let high_3 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 2, _4 = 0 }
+    testing.assert(low_3 < high_3, "a five-tuple did not order by its fourth component before the ones after it")?
+    let low_4 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 1 }
+    let high_4 = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 2 }
+    testing.assert(low_4 < high_4, "a five-tuple did not order by its fifth component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple6 holds six positional components, _0 to _5.
+@copyable
+pub struct Tuple6[A, B, C, D, E, F] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F }
+
+derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable] Equatable for Tuple6[A, B, C, D, E, F]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent] Equivalent for Tuple6[A, B, C, D, E, F]
+
+derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable] Comparable for Tuple6[A, B, C, D, E, F]
+
+derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered] Ordered for Tuple6[A, B, C, D, E, F]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash] hash.Hash for Tuple6[A, B, C, D, E, F]
+
+derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default] Default for Tuple6[A, B, C, D, E, F]
+
+derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release] Release for Tuple6[A, B, C, D, E, F]
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display, D: Display, E: Display, F: Display] Display for Tuple6[A, B, C, D, E, F] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(", ")?
+        self._3.fmt(&w)?
+        &w.write_str(", ")?
+        self._4.fmt(&w)?
+        &w.write_str(", ")?
+        self._5.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug] Debug for Tuple6[A, B, C, D, E, F] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(", ")?
+        self._3.debug(&w)?
+        &w.write_str(", ")?
+        self._4.debug(&w)?
+        &w.write_str(", ")?
+        self._5.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_six_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, 3, 4, 5, a) (1, 2, 3, 4, 5, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn six_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
+    let same = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
+    testing.assert(base == same, "a six-tuple compared unequal to its copy")?
+    let at_0 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
+    let at_1 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
+    let at_2 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4, _3 = 4, _4 = 5, _5 = 6 }
+    let at_3 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 5, _4 = 5, _5 = 6 }
+    let at_4 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 6, _5 = 6 }
+    let at_5 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 7 }
+    testing.assert(base != at_0, "a six-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "a six-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a six-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "a six-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "a six-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a six-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "a six-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "a six-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "a six-tuple ignored its third component in hashing")?
+    testing.assert(base != at_3, "a six-tuple ignored its fourth component in equality")?
+    testing.assert(base < at_3, "a six-tuple ignored its fourth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_3), "a six-tuple ignored its fourth component in hashing")?
+    testing.assert(base != at_4, "a six-tuple ignored its fifth component in equality")?
+    testing.assert(base < at_4, "a six-tuple ignored its fifth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_4), "a six-tuple ignored its fifth component in hashing")?
+    testing.assert(base != at_5, "a six-tuple ignored its sixth component in equality")?
+    testing.assert(base < at_5, "a six-tuple ignored its sixth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_5), "a six-tuple ignored its sixth component in hashing")?
+    let low_0 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200, _3 = 200, _4 = 200, _5 = 200 }
+    let high_0 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0 }
+    testing.assert(low_0 < high_0, "a six-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200, _3 = 200, _4 = 200, _5 = 200 }
+    let high_1 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0, _3 = 0, _4 = 0, _5 = 0 }
+    testing.assert(low_1 < high_1, "a six-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1, _3 = 200, _4 = 200, _5 = 200 }
+    let high_2 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2, _3 = 0, _4 = 0, _5 = 0 }
+    testing.assert(low_2 < high_2, "a six-tuple did not order by its third component before the ones after it")?
+    let low_3 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 1, _4 = 200, _5 = 200 }
+    let high_3 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 2, _4 = 0, _5 = 0 }
+    testing.assert(low_3 < high_3, "a six-tuple did not order by its fourth component before the ones after it")?
+    let low_4 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 1, _5 = 200 }
+    let high_4 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 2, _5 = 0 }
+    testing.assert(low_4 < high_4, "a six-tuple did not order by its fifth component before the ones after it")?
+    let low_5 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 1 }
+    let high_5 = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 2 }
+    testing.assert(low_5 < high_5, "a six-tuple did not order by its sixth component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple7 holds seven positional components, _0 to _6.
+@copyable
+pub struct Tuple7[A, B, C, D, E, F, G] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F, _6: G }
+
+derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable, G: Equatable] Equatable for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent, G: Equivalent] Equivalent for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable, G: Comparable] Comparable for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered, G: Ordered] Ordered for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash, G: hash.Hash] hash.Hash for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default, G: Default] Default for Tuple7[A, B, C, D, E, F, G]
+
+derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release, G: Release] Release for Tuple7[A, B, C, D, E, F, G]
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display, D: Display, E: Display, F: Display, G: Display] Display for Tuple7[A, B, C, D, E, F, G] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(", ")?
+        self._3.fmt(&w)?
+        &w.write_str(", ")?
+        self._4.fmt(&w)?
+        &w.write_str(", ")?
+        self._5.fmt(&w)?
+        &w.write_str(", ")?
+        self._6.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug] Debug for Tuple7[A, B, C, D, E, F, G] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(", ")?
+        self._3.debug(&w)?
+        &w.write_str(", ")?
+        self._4.debug(&w)?
+        &w.write_str(", ")?
+        self._5.debug(&w)?
+        &w.write_str(", ")?
+        self._6.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn a_seven_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, 3, 4, 5, 6, a) (1, 2, 3, 4, 5, 6, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn seven_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
+    let same = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
+    testing.assert(base == same, "a seven-tuple compared unequal to its copy")?
+    let at_0 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
+    let at_1 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
+    let at_2 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
+    let at_3 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 5, _4 = 5, _5 = 6, _6 = 7 }
+    let at_4 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 6, _5 = 6, _6 = 7 }
+    let at_5 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 7, _6 = 7 }
+    let at_6 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 8 }
+    testing.assert(base != at_0, "a seven-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "a seven-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "a seven-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "a seven-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "a seven-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "a seven-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "a seven-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "a seven-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "a seven-tuple ignored its third component in hashing")?
+    testing.assert(base != at_3, "a seven-tuple ignored its fourth component in equality")?
+    testing.assert(base < at_3, "a seven-tuple ignored its fourth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_3), "a seven-tuple ignored its fourth component in hashing")?
+    testing.assert(base != at_4, "a seven-tuple ignored its fifth component in equality")?
+    testing.assert(base < at_4, "a seven-tuple ignored its fifth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_4), "a seven-tuple ignored its fifth component in hashing")?
+    testing.assert(base != at_5, "a seven-tuple ignored its sixth component in equality")?
+    testing.assert(base < at_5, "a seven-tuple ignored its sixth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_5), "a seven-tuple ignored its sixth component in hashing")?
+    testing.assert(base != at_6, "a seven-tuple ignored its seventh component in equality")?
+    testing.assert(base < at_6, "a seven-tuple ignored its seventh component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_6), "a seven-tuple ignored its seventh component in hashing")?
+    let low_0 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200, _3 = 200, _4 = 200, _5 = 200, _6 = 200 }
+    let high_0 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0 }
+    testing.assert(low_0 < high_0, "a seven-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200, _3 = 200, _4 = 200, _5 = 200, _6 = 200 }
+    let high_1 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0 }
+    testing.assert(low_1 < high_1, "a seven-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1, _3 = 200, _4 = 200, _5 = 200, _6 = 200 }
+    let high_2 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2, _3 = 0, _4 = 0, _5 = 0, _6 = 0 }
+    testing.assert(low_2 < high_2, "a seven-tuple did not order by its third component before the ones after it")?
+    let low_3 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 1, _4 = 200, _5 = 200, _6 = 200 }
+    let high_3 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 2, _4 = 0, _5 = 0, _6 = 0 }
+    testing.assert(low_3 < high_3, "a seven-tuple did not order by its fourth component before the ones after it")?
+    let low_4 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 1, _5 = 200, _6 = 200 }
+    let high_4 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 2, _5 = 0, _6 = 0 }
+    testing.assert(low_4 < high_4, "a seven-tuple did not order by its fifth component before the ones after it")?
+    let low_5 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 1, _6 = 200 }
+    let high_5 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 2, _6 = 0 }
+    testing.assert(low_5 < high_5, "a seven-tuple did not order by its sixth component before the ones after it")?
+    let low_6 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 1 }
+    let high_6 = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 2 }
+    testing.assert(low_6 < high_6, "a seven-tuple did not order by its seventh component before the ones after it")?
+    .Ok(())
+}
+
+// Tuple8 holds eight positional components, _0 to _7.
+@copyable
+pub struct Tuple8[A, B, C, D, E, F, G, H] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F, _6: G, _7: H }
+
+derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable, G: Equatable, H: Equatable] Equatable for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent, G: Equivalent, H: Equivalent] Equivalent for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable, G: Comparable, H: Comparable] Comparable for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered, G: Ordered, H: Ordered] Ordered for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash, G: hash.Hash, H: hash.Hash] hash.Hash for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default, G: Default, H: Default] Default for Tuple8[A, B, C, D, E, F, G, H]
+
+derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release, G: Release, H: Release] Release for Tuple8[A, B, C, D, E, F, G, H]
+
+test fn an_eight_tuple_compares_by_position() {
+    let first = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] {
+        _0 = 0,
+        _1 = 0,
+        _2 = 0,
+        _3 = 0,
+        _4 = 0,
+        _5 = 0,
+        _6 = 0,
+        _7 = 1,
+    }
+    let last = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] {
+        _0 = 0,
+        _1 = 0,
+        _2 = 0,
+        _3 = 0,
+        _4 = 0,
+        _5 = 0,
+        _6 = 0,
+        _7 = 2,
+    }
+    testing.assert(first < last, "an eight-tuple did not order by its last component")?
+    .Ok(())
+}
+
+// Display writes the components between parentheses, separated by commas.
+impl[A: Display, B: Display, C: Display, D: Display, E: Display, F: Display, G: Display, H: Display] Display for Tuple8[A, B, C, D, E, F, G, H] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.fmt(&w)?
+        &w.write_str(", ")?
+        self._1.fmt(&w)?
+        &w.write_str(", ")?
+        self._2.fmt(&w)?
+        &w.write_str(", ")?
+        self._3.fmt(&w)?
+        &w.write_str(", ")?
+        self._4.fmt(&w)?
+        &w.write_str(", ")?
+        self._5.fmt(&w)?
+        &w.write_str(", ")?
+        self._6.fmt(&w)?
+        &w.write_str(", ")?
+        self._7.fmt(&w)?
+        &w.write_str(")")
+    }
+}
+
+// Debug writes the components as Display does, formatting each with Debug.
+impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug, H: Debug] Debug for Tuple8[A, B, C, D, E, F, G, H] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("(")?
+        self._0.debug(&w)?
+        &w.write_str(", ")?
+        self._1.debug(&w)?
+        &w.write_str(", ")?
+        self._2.debug(&w)?
+        &w.write_str(", ")?
+        self._3.debug(&w)?
+        &w.write_str(", ")?
+        self._4.debug(&w)?
+        &w.write_str(", ")?
+        self._5.debug(&w)?
+        &w.write_str(", ")?
+        self._6.debug(&w)?
+        &w.write_str(", ")?
+        self._7.debug(&w)?
+        &w.write_str(")")
+    }
+}
+
+test fn an_eight_tuple_prints_its_components_in_parentheses() {
+    let tuple = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = "a" }
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
+    let rendered = writer.holds("(1, 2, 3, 4, 5, 6, 7, a) (1, 2, 3, 4, 5, 6, 7, \"a\")")
+    writer.release()
+    testing.assert(wrote && rendered, "Display writes the components bare; Debug quotes a text component")?
+    .Ok(())
+}
+
+test fn eight_tuple_compares_and_hashes_by_every_component() {
+    let base = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    let same = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    testing.assert(base == same, "an eight-tuple compared unequal to its copy")?
+    let at_0 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    let at_1 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 3, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    let at_2 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 4, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    let at_3 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 5, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
+    let at_4 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 6, _5 = 6, _6 = 7, _7 = 8 }
+    let at_5 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 7, _6 = 7, _7 = 8 }
+    let at_6 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 8, _7 = 8 }
+    let at_7 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 9 }
+    testing.assert(base != at_0, "an eight-tuple ignored its first component in equality")?
+    testing.assert(base < at_0, "an eight-tuple ignored its first component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_0), "an eight-tuple ignored its first component in hashing")?
+    testing.assert(base != at_1, "an eight-tuple ignored its second component in equality")?
+    testing.assert(base < at_1, "an eight-tuple ignored its second component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_1), "an eight-tuple ignored its second component in hashing")?
+    testing.assert(base != at_2, "an eight-tuple ignored its third component in equality")?
+    testing.assert(base < at_2, "an eight-tuple ignored its third component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_2), "an eight-tuple ignored its third component in hashing")?
+    testing.assert(base != at_3, "an eight-tuple ignored its fourth component in equality")?
+    testing.assert(base < at_3, "an eight-tuple ignored its fourth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_3), "an eight-tuple ignored its fourth component in hashing")?
+    testing.assert(base != at_4, "an eight-tuple ignored its fifth component in equality")?
+    testing.assert(base < at_4, "an eight-tuple ignored its fifth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_4), "an eight-tuple ignored its fifth component in hashing")?
+    testing.assert(base != at_5, "an eight-tuple ignored its sixth component in equality")?
+    testing.assert(base < at_5, "an eight-tuple ignored its sixth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_5), "an eight-tuple ignored its sixth component in hashing")?
+    testing.assert(base != at_6, "an eight-tuple ignored its seventh component in equality")?
+    testing.assert(base < at_6, "an eight-tuple ignored its seventh component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_6), "an eight-tuple ignored its seventh component in hashing")?
+    testing.assert(base != at_7, "an eight-tuple ignored its eighth component in equality")?
+    testing.assert(base < at_7, "an eight-tuple ignored its eighth component in ordering")?
+    testing.assert(hash.Hash.hash(base) != hash.Hash.hash(at_7), "an eight-tuple ignored its eighth component in hashing")?
+    let low_0 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 200, _2 = 200, _3 = 200, _4 = 200, _5 = 200, _6 = 200, _7 = 200 }
+    let high_0 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 2, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0, _7 = 0 }
+    testing.assert(low_0 < high_0, "an eight-tuple did not order by its first component before the ones after it")?
+    let low_1 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 1, _2 = 200, _3 = 200, _4 = 200, _5 = 200, _6 = 200, _7 = 200 }
+    let high_1 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 2, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0, _7 = 0 }
+    testing.assert(low_1 < high_1, "an eight-tuple did not order by its second component before the ones after it")?
+    let low_2 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 1, _3 = 200, _4 = 200, _5 = 200, _6 = 200, _7 = 200 }
+    let high_2 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 2, _3 = 0, _4 = 0, _5 = 0, _6 = 0, _7 = 0 }
+    testing.assert(low_2 < high_2, "an eight-tuple did not order by its third component before the ones after it")?
+    let low_3 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 1, _4 = 200, _5 = 200, _6 = 200, _7 = 200 }
+    let high_3 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 2, _4 = 0, _5 = 0, _6 = 0, _7 = 0 }
+    testing.assert(low_3 < high_3, "an eight-tuple did not order by its fourth component before the ones after it")?
+    let low_4 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 1, _5 = 200, _6 = 200, _7 = 200 }
+    let high_4 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 2, _5 = 0, _6 = 0, _7 = 0 }
+    testing.assert(low_4 < high_4, "an eight-tuple did not order by its fifth component before the ones after it")?
+    let low_5 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 1, _6 = 200, _7 = 200 }
+    let high_5 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 2, _6 = 0, _7 = 0 }
+    testing.assert(low_5 < high_5, "an eight-tuple did not order by its sixth component before the ones after it")?
+    let low_6 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 1, _7 = 200 }
+    let high_6 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 2, _7 = 0 }
+    testing.assert(low_6 < high_6, "an eight-tuple did not order by its seventh component before the ones after it")?
+    let low_7 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0, _7 = 1 }
+    let high_7 = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 0, _1 = 0, _2 = 0, _3 = 0, _4 = 0, _5 = 0, _6 = 0, _7 = 2 }
+    testing.assert(low_7 < high_7, "an eight-tuple did not order by its eighth component before the ones after it")?
+    .Ok(())
+}

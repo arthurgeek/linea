@@ -1,0 +1,5 @@
+error[T-Impl]: `UInt8` has no available associated type `Wider`
+  --> tests/traits/a_settled_reference_is_read_through_what_declares_it.lin:22:22
+   |
+22 |         let _deeper: Self.Item.Wider = 0
+   |                      ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

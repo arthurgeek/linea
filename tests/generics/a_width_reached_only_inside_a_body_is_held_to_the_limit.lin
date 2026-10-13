@@ -1,0 +1,71 @@
+// A body is checked once, in terms of its parameters, and lowered once per
+// instantiation. So `P[T]` here is one type to the checker and ten to the
+// program, and every one of the ten is minted after the check has finished --
+// the pool a module's handles index is not the one the checker was asked
+// about. Asking only where the checker stopped left these unasked, and a width
+// that stopped at the limit reached the backend as a slot smaller than the
+// value it holds.
+//
+// Nothing below names a wide type: each level wraps what it was given and
+// hands it on, so the widths exist only in what monomorphisation produced.
+// `.Nothing` is what makes that writable -- a value of `P[T]` that carries no
+// `T`, so a level needs no way to build one.
+enum P[T] {
+    Deep(T, T, T, T, T, T, T, T),
+    Nothing,
+}
+
+fn l1[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l2(w)
+}
+
+fn l2[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l3(w)
+}
+
+fn l3[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l4(w)
+}
+
+fn l4[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l5(w)
+}
+
+fn l5[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l6(w)
+}
+
+fn l6[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l7(w)
+}
+
+fn l7[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l8(w)
+}
+
+fn l8[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l9(w)
+}
+
+fn l9[T: Discardable](sink _v: T) -> UInt8 {
+    let w: P[T] = .Nothing
+    l10(w)
+}
+
+fn l10[T: Discardable](sink _v: T) -> UInt8 {
+    let _w: P[T] = .Nothing
+    0
+}
+
+fn main() -> UInt8 {
+    let n: UInt64 = 1
+    l1(n)
+}

@@ -1,0 +1,7 @@
+fn sum[T: Integer](_witness: T) -> T {
+    T(127) + T(1)
+}
+
+fn main() -> UInt8 {
+    UInt8(sum(Int8(0)))
+}

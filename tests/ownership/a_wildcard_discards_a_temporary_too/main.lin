@@ -1,0 +1,18 @@
+// Whether a value may be discarded cannot depend on whether it was given a
+// name. A scrutinee is often a temporary, and a rule that only sees named
+// values says `_` may drop a linear value provided you did not bind it --
+// which is a rule about syntax, and ownership is decided by position.
+@linear
+enum Box {
+    Has(Key),
+}
+
+fn make() -> Box {
+    Box.Has(mint(7))
+}
+
+fn main() -> UInt8 {
+    match make() {
+        _ => 3,
+    }
+}

@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Extract` and `Into` both declare `into` for `Source`
+  --> tests/convert/into/a_shared_method_name_requires_qualification.lin:23:22
+   |
+23 |     let code: Code = source.into()
+   |                      ^^^^^^^^^^^ write `Extract.into(…)` or `Into.into(…)`, which says which trait it goes through

@@ -1,0 +1,3 @@
+pub trait W {
+    fn size(x: Self) -> UInt8
+}

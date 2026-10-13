@@ -1,0 +1,19 @@
+// `k = k` is not a leak. The right-hand side is a consuming position and takes
+// the value before the write reaches the place, so by the time the place is
+// written it holds nothing and there is nothing to lose.
+//
+// This is the same reason a write over a place a move emptied is allowed: the
+// rule asks what the place holds, and a place that was taken from holds
+// nothing. It is the position of the read that decides it, not the shape of
+// the statement.
+//
+// The tag comes back as 7, so the value the write put back is the one that was
+// there -- an accepted program that also proves nothing was destroyed on the
+// way through.
+fn main() -> UInt8 {
+    var k = mint(7)
+    k = k
+    let t = tag(k)
+    release(k)
+    t
+}

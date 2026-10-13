@@ -1,0 +1,14 @@
+// A comment stays with the declaration it precedes. A re-export a newline
+// ended is recorded as running to the next declaration's first token, so the
+// comments written above that one lie inside its range -- and flushing to
+// that end wrote them above the re-export instead, where they read as
+// describing it.
+import inner
+
+use inner.Thing
+
+// what main answers
+// and why it is worth two lines
+fn main() -> UInt8 {
+    0
+}

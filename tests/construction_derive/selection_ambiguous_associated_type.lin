@@ -1,0 +1,22 @@
+trait First {
+    type Item
+}
+
+trait Second {
+    type Item
+}
+
+struct Box {}
+
+impl First for Box {
+    type Item = UInt8
+}
+
+impl Second for Box {
+    type Item = UInt8
+}
+
+fn main() -> UInt8 {
+    let value: Box.Item = 7
+    value - 7
+}

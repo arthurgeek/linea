@@ -1,0 +1,12 @@
+// A `Str` is an address, and a program cannot write one down.
+//
+// The safety of the whole type rests on this: `Str.byte` reads through an
+// address with no bound but the length beside it, and that is sound only
+// because every address in existence came from a literal the compiler emitted.
+// `opaque` is what makes it so -- outside the module that declares it, the type
+// has no fields, so there is nothing to build a value out of and nothing to
+// read one apart with.
+fn main() -> UInt8 {
+    let forged: Str = .{ at = 0, len = 4096 }
+    UInt8(Str.length(forged))
+}

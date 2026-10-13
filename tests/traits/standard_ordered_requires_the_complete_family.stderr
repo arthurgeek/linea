@@ -1,0 +1,15 @@
+error[T-Bound]: `Ordered` requires `Comparable`, and `Token` does not implement it
+ --> tests/traits/standard_ordered_requires_the_complete_family.lin:5:8
+  |
+5 | derive Ordered for Token
+  |        ^^^^^^^ implement it for that type, or drop the bound
+error[T-Derive]: `Token` cannot derive `Ordered` because its `Comparable` prerequisite is absent or has stronger constraints
+ --> tests/traits/standard_ordered_requires_the_complete_family.lin:5:8
+  |
+5 | derive Ordered for Token
+  |        ^^^^^^^ derive the prerequisite under constraints this environment proves
+ ::: std/cmp/cmp.lin
+L | pub trait Ordered: Comparable + Equivalent {}
+  |                    ---------- this is a direct supertrait
+L |     reflect.supertraits: derived,
+  |             ----------- the template requires derived evidence for every direct supertrait

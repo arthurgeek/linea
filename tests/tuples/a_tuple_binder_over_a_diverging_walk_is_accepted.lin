@@ -1,0 +1,7 @@
+// A walk over a value that never completes runs no body, so a tuple binder
+// and a name binder are both accepted without a type to take apart.
+fn main() -> UInt8 {
+    for (a, b) in return 7 {
+        let _z = a + b
+    }
+}

@@ -1,0 +1,9 @@
+import protocol
+
+@derive(protocol.Score)
+struct Mark[T: protocol.Score] { value: T }
+
+fn main() -> UInt8 {
+    let mark = Mark[UInt8] { value = 7 }
+    protocol.Score.score(mark) - 7
+}

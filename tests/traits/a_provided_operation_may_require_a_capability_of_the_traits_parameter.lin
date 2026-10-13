@@ -1,0 +1,29 @@
+// `doubled` needs a second `unit` to price twice, so it is offered only where
+// `K` is Copyable. `Crate` prices by `UInt8`, which is, so `doubled` copies
+// the unit of 3 and prices it twice at weight 2. `quote` reaches `doubled`
+// through a bound, where `K: Copyable` is what proves the clause.
+trait Priced[K] {
+    fn price(self: Self, sink unit: K) -> UInt8
+
+    fn doubled(self: Self, sink unit: K) -> UInt8 where K: Copyable {
+        self.price(copy(unit)) + self.price(unit)
+    }
+}
+
+struct Crate {
+    weight: UInt8,
+}
+
+impl Priced[UInt8] for Crate {
+    fn price(self: Self, sink unit: UInt8) -> UInt8 {
+        self.weight * unit
+    }
+}
+
+fn quote[K: Copyable, T: Priced[K]](priced: T, sink unit: K) -> UInt8 {
+    priced.doubled(unit)
+}
+
+fn main() -> UInt8 {
+    Crate { weight = 2 }.doubled(3) + quote(Crate { weight = 1 }, UInt8(4))
+}

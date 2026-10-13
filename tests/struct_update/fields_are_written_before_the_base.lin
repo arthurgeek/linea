@@ -1,0 +1,30 @@
+import std.io
+
+use io.IoError
+use io.println
+
+struct Order {
+    item: UInt8,
+    count: UInt8,
+    rush: Bool,
+}
+
+fn say(text: Str, value: UInt8) -> UInt8 {
+    println(text).unwrap()
+    value
+}
+
+fn standard() -> Order {
+    println("base").unwrap()
+    .{ item = 0, count = 1, rush = false }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    // Initializers run in the order they are written, and the base is written
+    // last, so it runs after them.
+    let order = Order { count = say("count", 3), item = say("item", 7), ..standard() }
+    if order.rush {
+        return .Ok(1)
+    }
+    .Ok(order.item + order.count)
+}

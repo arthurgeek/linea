@@ -1,0 +1,22 @@
+// A binding whose annotation and whose initialiser are not of one type. The
+// annotation wins -- the checker recorded `Big` -- and a `return` answers with
+// Unit, so a slot sized from the initialiser is a unit-wide slot that a name
+// of type `Big` reaches through. Naming it emits the address of that slot as
+// the indirect result, which the verifier accepts because nothing there knows
+// the two were ever meant to agree.
+struct Big {
+    a: UInt8,
+    b: UInt64,
+    c: UInt64,
+}
+
+fn f(sink b: Big) -> Big {
+    let _x: Big = return b
+    b
+}
+
+fn main() -> UInt8 {
+    let v: Big = .{ a = 7, b = 1, c = 2 }
+    let w: Big = f(v)
+    w.a
+}

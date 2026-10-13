@@ -1,0 +1,25 @@
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_schedule_may_not_leave_as_well.lin:21:11
+   |
+21 |     defer return 1
+   |           ^^^^^^^^ `return` inside a `defer`
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_schedule_may_not_leave_as_well.lin:26:11
+   |
+26 |     defer maybe(c)?
+   |           ^^^^^^^^^ `?` inside a `defer`
+error[T-Discard]: this expression produces a `UInt8` that is discarded
+  --> tests/defer/a_schedule_may_not_leave_as_well.lin:26:11
+   |
+26 |     defer maybe(c)?
+   |           ^^^^^^^^^ bind it with `let _ =` to discard it deliberately
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_schedule_may_not_leave_as_well.lin:33:15
+   |
+33 |         defer break
+   |               ^^^^^ `break` inside a `defer`
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_schedule_may_not_leave_as_well.lin:42:15
+   |
+42 |         defer continue
+   |               ^^^^^^^^ `continue` inside a `defer`

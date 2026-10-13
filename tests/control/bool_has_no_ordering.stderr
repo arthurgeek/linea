@@ -1,0 +1,5 @@
+error[T-Bound]: `Bool` does not implement `Comparable`
+ --> tests/control/bool_has_no_ordering.lin:2:20
+  |
+2 |     let bad = true < false
+  |                    ^ the operator is a call on that trait, so implement it for this type

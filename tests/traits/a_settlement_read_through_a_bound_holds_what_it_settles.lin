@@ -1,0 +1,33 @@
+// The same closing, written the other way round: the part is read through
+// the bound on a parameter rather than through the implementation enclosing
+// it, and the implementation settles the name to the very type whose part
+// reads it. A `Holder[K]` would hold a `Holder[K]`.
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+struct Holder[W: Measure] {
+    v: W.Item,
+}
+
+struct K {
+    n: UInt8,
+}
+
+impl Measure for K {
+    type Item = Holder[K]
+
+    fn of(_x: Self) -> Self.Item {
+        .{ v = .{ v = .{ n = 1 } } }
+    }
+}
+
+fn _keep(_h: Holder[K]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

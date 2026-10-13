@@ -1,0 +1,27 @@
+// `label` returns a view into its parameter without a clause that permits
+// it. The report points at the returned value rather than at the body around
+// it.
+import std.io
+import std.mem
+
+@derive(Release)
+struct Station {
+    name: String[mem.SystemAllocator],
+    samples: UInt64,
+}
+
+fn label(station: Station) -> Str {
+    // No clause names `station`, so its name cannot be returned.
+    station.name.view()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let name = "Harbour".to_owned(mem.system()) else |_| {
+        return .Ok(1)
+    }
+    let station = Station { name = name, samples = 2 }
+    defer station.release()
+    let title = label(station)
+    io.println("{title} has {title.length()} letters")?
+    return .Ok(0)
+}

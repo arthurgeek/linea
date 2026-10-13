@@ -1,0 +1,11 @@
+type Count = UInt8
+
+struct Holder { count: Count }
+
+fn main() -> UInt8 {
+    let holder = Holder { count = Count(7) }
+    let read Holder { count } = holder
+    let duplicate = copy(count)
+    let Count(raw) = duplicate
+    raw
+}

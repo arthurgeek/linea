@@ -1,0 +1,9 @@
+program decls=1
+  decl function "main" tokens 0..20
+    returns UInt8
+    expr %3 block tokens 6..20
+      stmt %0 let_decl tokens 7..11 <missing name>
+        expr %0 int_literal tokens 9..10 "1"
+      stmt %1 let_decl tokens 11..18 "y" : UInt8
+        expr %1 int_literal tokens 16..17 "2"
+      expr %2 name_ref tokens 18..19 "y"

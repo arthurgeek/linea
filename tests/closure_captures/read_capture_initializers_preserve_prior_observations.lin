@@ -1,0 +1,11 @@
+fn change(inout number: UInt8) -> UInt64 {
+    number = 4
+    0
+}
+
+fn main() -> UInt8 {
+    var number: UInt8 = 3
+    let values: [UInt8; 1] = [7]
+    let saved = read [read number, read item = values[change(&number)]] || number + item
+    saved()
+}

@@ -1,0 +1,22 @@
+// `@opaque` exports Account but keeps its fields private to ledger.
+// `@linear` requires each account to be consumed, here by closing it and
+// returning its remaining funds. Balances are stored as whole cents.
+@(opaque, linear)
+struct Account {
+    balance: UInt64,
+}
+
+impl Account {
+    // Parameters are read-only by default, so `open` cannot change the
+    // caller's `opening_balance`.
+    pub fn open(opening_balance: UInt64) -> Account {
+        .{ balance = opening_balance }
+    }
+
+    // `sink` takes ownership. Destructuring consumes the account and returns
+    // its funds; the caller can no longer use the closed account.
+    pub fn close(sink self: Self) -> UInt64 {
+        let Account { balance: funds } = self
+        funds
+    }
+}

@@ -1,0 +1,21 @@
+// The body is a place, which is one path. A sequence of statements is code to
+// run, and a projection has nowhere to run it: what the site takes is the path
+// itself.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        let k = i
+        self.cells[k]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

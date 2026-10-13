@@ -1,0 +1,15 @@
+error[T-UnknownField]: `Door` has no field `make`
+  --> tests/decl/a_value_selection_of_an_operation_is_no_field.lin:28:17
+   |
+28 |     let _made = door.make
+   |                 ^^^^^^^^^ `make` is an operation of `Door`, not a field; where a function is expected, write `Door.make`
+error[T-UnknownField]: `Door` has no field `close`
+  --> tests/decl/a_value_selection_of_an_operation_is_no_field.lin:29:19
+   |
+29 |     let _closed = door.close
+   |                   ^^^^^^^^^^ `close` is an operation of `Door`, not a field; where a function is expected, write `Door.close`
+error[T-UnknownField]: `Door` has no field `open`
+  --> tests/decl/a_value_selection_of_an_operation_is_no_field.lin:30:19
+   |
+30 |     let _opened = door.open
+   |                   ^^^^^^^^^ `open` is an operation of `Door`, not a field; where a function is expected, write `Door.open`, which takes the receiver as its first argument

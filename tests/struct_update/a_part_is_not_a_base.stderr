@@ -1,0 +1,5 @@
+error[O-Move]: only part of `job` is named here
+  --> tests/struct_update/a_part_is_not_a_base.lin:13:43
+   |
+13 |     let tuned = Settings { retries = 5, ..job.settings }
+   |                                           ^^^^^^^^^^^^ move the whole binding, or `copy` this part out of it

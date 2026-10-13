@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let grouped: Int8 = -(128)
+    let nested: Int8 = -((128))
+    let outer: Int8 = (-128)
+    if grouped == outer && nested == outer {
+        0
+    } else {
+        1
+    }
+}

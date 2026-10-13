@@ -1,0 +1,31 @@
+// A default implementation's members adopt their trait's contract like any
+// other implementation's. Every type has a label here, and the label depends
+// only on the fallback text it was given.
+import std.io
+import std.mem
+
+trait Labelled {
+    fn label(self: Self, fallback: Str) -> Str where carries(fallback)
+}
+
+default impl[T] Labelled for T {
+    fn label(_self: Self, fallback: Str) -> Str {
+        copy(fallback)
+    }
+}
+
+struct Ticket {
+    holder: Str,
+}
+
+fn describe[T: Labelled](value: T, fallback: Str) -> Str where carries(fallback) {
+    Labelled.label(value, fallback)
+}
+
+fn main() -> UInt8 {
+    let holder = "ada".to_owned(mem.system()).unwrap()
+    let label = describe(Ticket { holder = holder.view() }, "ticket")
+    holder.release()
+    let _printed = io.println(label)
+    0
+}

@@ -1,0 +1,8 @@
+// A `]` can end an expression, so the newline after `xs[1]` ends the binding.
+// `-2` is a statement of its own, not a subtraction from the element.
+fn main() -> UInt8 {
+    let xs = [UInt8(4), 7]
+    let a = xs[1]
+    -2
+    a
+}

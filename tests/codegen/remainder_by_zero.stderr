@@ -1,0 +1,5 @@
+error[T-DivideByZero]: division by zero
+ --> tests/codegen/remainder_by_zero.lin:3:8
+  |
+3 |     10 % d
+  |        ^ the right operand is zero

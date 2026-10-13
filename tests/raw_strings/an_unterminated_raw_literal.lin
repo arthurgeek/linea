@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let quoted = r#"a quote " is not the end, and neither is this one"
+    let plain = r"no closing quote
+    0
+}

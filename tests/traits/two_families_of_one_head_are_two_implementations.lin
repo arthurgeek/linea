@@ -1,0 +1,35 @@
+// Two families over one constructor, both writing their argument from the
+// head. `Give[T]` and `Give[Wrap[T]]`, both for `Pair[T, U]`, look alike --
+// but no substitution can make `T` and `Wrap[T]` agree, since no finite type
+// contains itself, so the two never meet and both stand.
+trait Give[V] {
+    fn give(self: Self, v: V) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Wrap[T] {
+    v: T,
+}
+
+impl[T, U] Give[T] for Pair[T, U] {
+    fn give(_self: Self, _v: T) -> UInt8 {
+        5
+    }
+}
+
+impl[T, U] Give[Wrap[T]] for Pair[T, U] {
+    fn give(_self: Self, _v: Wrap[T]) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8, Bool] = .{ a = 1, b = true }
+    let n: UInt8 = 1
+    let w: Wrap[UInt8] = .{ v = 1 }
+    Give.give(p, n) + Give.give(p, w)
+}

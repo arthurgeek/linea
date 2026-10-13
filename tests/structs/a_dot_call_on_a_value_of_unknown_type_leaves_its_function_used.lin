@@ -1,0 +1,23 @@
+// `v` has no type, because `1 + true` is refused, so whether `v.total()`
+// runs the operation `Counter` declares or names the free function `total`
+// cannot be decided. Only the refused addition is reported; `total` is not
+// called unused on the strength of a call nobody could resolve.
+struct Counter {
+    value: UInt8,
+}
+
+impl Counter {
+    pub fn total(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn total(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let counter = Counter { value = 3 }
+    let v = 1 + true
+    counter.total() + v.total()
+}

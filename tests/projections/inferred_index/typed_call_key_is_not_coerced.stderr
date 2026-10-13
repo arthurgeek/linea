@@ -1,0 +1,5 @@
+error[T-Bound]: `Board` does not implement `Index[UInt64]`
+ --> tests/projections/inferred_index/typed_call_key_is_not_coerced.lin:7:5
+  |
+7 |     board[UInt64(0)]
+  |     ^^^^^ implement it for those arguments, or settle them to ones that are

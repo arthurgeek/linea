@@ -1,0 +1,5 @@
+error[T-Discard]: this expression produces a `UInt8` that is discarded
+ --> tests/control/expression_statement_discards.lin:3:5
+  |
+3 |     a + 1
+  |     ^^^^^ bind it with `let _ =` to discard it deliberately

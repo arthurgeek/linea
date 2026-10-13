@@ -1,0 +1,33 @@
+// A value computed inside the braces has no other owner, so the literal
+// holds it. A module constant and a string written in the braces hold the
+// same text for the whole program. The literal may therefore be kept in a
+// binding and rendered by a later statement.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Score {
+    points: Int64,
+}
+
+impl Display for Score {
+    fn fmt[W: Writer](self: Score, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Display.fmt(self.points, &w)?
+        &w.write_str(" points")
+    }
+}
+
+let player = "Ada"
+
+fn score(hits: Int64) -> Score {
+    .{ points = hits * 10 }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let line = "{player} scored {score(4)}"
+    let framed = "[{"inner {score(2)}"} {"done"}]"
+    println(line)?
+    println(framed)?
+    return .Ok(0)
+}

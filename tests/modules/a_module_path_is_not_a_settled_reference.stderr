@@ -1,0 +1,5 @@
+error[N-Undefined]: `Absent` is not declared in `hidden`
+ --> tests/modules/a_module_path_is_not_a_settled_reference/main.lin:9:19
+  |
+9 |     let n: hidden.Absent = .{ at = 1 }
+  |                   ^^^^^^ no declaration of that name is in that module

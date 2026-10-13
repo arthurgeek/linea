@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Ordered`, and `Key` does not implement it
+  --> tests/generics/ordered_admits_an_integer.lin:27:15
+   |
+27 |     let _no = smaller(a, b)
+   |               ^^^^^^^ implement it for that type, or drop the bound

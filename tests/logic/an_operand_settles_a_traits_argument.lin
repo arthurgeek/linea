@@ -1,0 +1,30 @@
+// The operands of `&&` and `||` are conditions, so each asks for a `Bool` the
+// way an `if` does and settles a trait's parameter written only as the
+// signature's return type.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Bool {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let t: Envelope[Bool] = .{ v = true }
+    let f: Envelope[Bool] = .{ v = false }
+    if Innermost.of(f) || Innermost.of(t) {
+        if Innermost.of(t) && Innermost.of(t) {
+            13
+        } else {
+            3
+        }
+    } else {
+        3
+    }
+}

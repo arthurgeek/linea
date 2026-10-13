@@ -1,0 +1,22 @@
+// A `Ticket` is sealed: outside `box_office` it can be sold and refunded,
+// and its seat cannot be read.
+@opaque
+struct Ticket {
+    seat: UInt8,
+}
+
+pub trait Refund {
+    fn refund(self: Self) -> UInt8
+}
+
+impl Refund for Ticket {
+    fn refund(self: Self) -> UInt8 {
+        self.seat
+    }
+}
+
+impl Ticket {
+    pub fn sell(seat: UInt8) -> Ticket {
+        .{ seat = seat }
+    }
+}

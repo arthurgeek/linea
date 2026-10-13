@@ -1,0 +1,22 @@
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn choose[A, B: Copyable](_ignored: A, value: B) -> B where carries(value) {
+    copy(value)
+}
+
+fn defaulted[T: Copyable](value: T, _by: UInt8 = 1) -> T {
+    copy(value)
+}
+
+fn through[T: Copyable](value: T) -> T {
+    let selected: fn(read value: T) -> T = identity
+    selected(value)
+}
+
+fn main() -> UInt8 {
+    let picked: fn(read _ignored: UInt8, read value: UInt16) -> UInt16 = choose
+    let with_default: fn(read value: UInt8, read _by: UInt8 = 1) -> UInt8 = defaulted
+    through(UInt8(6)) + UInt8(picked(1, 2)) + with_default(3)
+}

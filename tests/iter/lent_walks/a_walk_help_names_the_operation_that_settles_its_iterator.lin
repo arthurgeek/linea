@@ -1,0 +1,36 @@
+// The walk's help names the operation that settles a `Ticker`: `close` takes
+// it, while `finish` only reads it.
+@linear
+struct Ticker { left: UInt64 }
+
+impl Iterator for Ticker {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some(self.left)
+    }
+}
+
+impl Ticker {
+    fn finish(inout self: Self) -> UInt64 {
+        self.left
+    }
+
+    fn close(sink self: Self) -> UInt64 {
+        let Ticker { left } = self
+        left
+    }
+}
+
+fn main() -> UInt8 {
+    var t = Ticker { left = 3 }
+    var total: UInt64 = 0
+    for x in t {
+        total += x
+    }
+    UInt8(total)
+}

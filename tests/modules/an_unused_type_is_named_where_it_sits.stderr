@@ -1,0 +1,5 @@
+error[N-Unused]: `Ghost` is never used
+ --> tests/modules/an_unused_type_is_named_where_it_sits/main.lin:8:8
+  |
+8 | struct Ghost {
+  |        ^^^^^ name it in an annotation, or remove it

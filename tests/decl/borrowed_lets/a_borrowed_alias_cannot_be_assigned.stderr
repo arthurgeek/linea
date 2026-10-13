@@ -1,0 +1,7 @@
+error[N-Immutable]: `x` is declared with `let`
+ --> tests/decl/borrowed_lets/a_borrowed_alias_cannot_be_assigned.lin:6:5
+  |
+5 |     let read Point { x } = point
+  |                      - declared with `let` here
+6 |     x = 5
+  |     ^ this binding cannot be assigned

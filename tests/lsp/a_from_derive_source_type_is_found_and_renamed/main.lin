@@ -1,0 +1,32 @@
+// The source type a `From` derive names is a written type like any other: its
+// declaration and references are found from it, and a rename edits it with
+// every other place the type is written.
+struct Missing {
+    key: UInt8,
+}
+
+@derive(From[Missing])
+enum Failure {
+    Absent(Missing),
+    Unknown,
+}
+
+fn find(key: UInt8) -> Result[UInt8, Missing] {
+    if key == 0 {
+        .Err(Missing { key = key })
+    } else {
+        .Ok(key)
+    }
+}
+
+fn run(key: UInt8) -> Result[UInt8, Failure] {
+    let found = find(key)?
+    .Ok(found)
+}
+
+fn main() -> UInt8 {
+    match run(0) {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+}

@@ -1,0 +1,27 @@
+// A bound is discharged by an implementation existing, and the call runs one.
+// Two implementations of a trait for a type would let those two answers differ,
+// and the one taken would be whichever a scan reached first.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+struct Account {
+    balance: UInt8,
+}
+
+impl Measure for Account {
+    fn of(x: Account) -> UInt8 {
+        x.balance
+    }
+}
+
+impl Measure for Account {
+    fn of(x: Account) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

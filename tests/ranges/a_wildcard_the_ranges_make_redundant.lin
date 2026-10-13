@@ -1,0 +1,12 @@
+// `0..=255` already covers every `UInt8`, so the `_` after it reaches no
+// value: a wildcard closes a set that is already closed.
+fn classify(b: UInt8) -> UInt8 {
+    match read b {
+        0..=255 => 1,
+        _ => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(7)
+}

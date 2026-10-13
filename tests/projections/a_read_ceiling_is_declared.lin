@@ -1,0 +1,21 @@
+// The mode a trait writes on `self` is a ceiling, and an implementation may
+// declare less than the ceiling admits. `Index` reserves `inout` so that the
+// interface states the most a bracket may ever demand; a container that only
+// ever hands its elements out to be read says so, and says it here.
+struct Fixed {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Fixed {
+    type Elem = UInt8
+
+    proj at(self: Fixed, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let f: Fixed = .{ cells = [5, 6] }
+    let _ = f
+    0
+}

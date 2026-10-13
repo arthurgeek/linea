@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let letter =
+        \\Dear reader,
+        thanks
+        \\see you soon.
+    UInt8(letter.length())
+}

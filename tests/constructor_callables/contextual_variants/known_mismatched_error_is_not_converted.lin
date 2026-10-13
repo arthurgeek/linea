@@ -1,0 +1,14 @@
+enum ReadError { Allocation(UInt8) }
+
+enum WriteError { Allocation(UInt8) }
+
+fn render() -> Result[UInt8, WriteError] {
+    let source: Result[UInt8, UInt8] = .Err(7)
+    let mapped: Result[UInt8, ReadError] = source.map_err(.Allocation)
+    let value = mapped?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match render() { Ok(_) => 0, Err(_) => 1 }
+}

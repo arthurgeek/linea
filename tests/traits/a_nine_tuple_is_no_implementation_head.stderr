@@ -1,0 +1,5 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/traits/a_nine_tuple_is_no_implementation_head.lin:8:15
+  |
+8 | impl Show for (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) {
+  |               ^ give a struct names past eight parts

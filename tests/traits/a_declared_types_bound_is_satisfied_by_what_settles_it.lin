@@ -1,0 +1,53 @@
+// A declared type carries a bound the way a type parameter does, and settling
+// is where it is discharged: `type Iter: Stepper` says every implementation
+// answers with a type that implements `Stepper`, and the implementation here
+// answers with itself.
+//
+// Self-vending is the shape the bound exists for. `type Iter = Self` makes the
+// question "does `Counter` implement `Stepper`", which is the same question a
+// bound asks anywhere else, so the form needs no rule of its own.
+//
+// The trait's other declared type carries no bound and is settled to a
+// primitive that implements nothing, which is what says a bound rides the one
+// declaration that wrote it.
+struct Counter {
+    at: UInt8,
+}
+
+trait Stepper {
+    type Item
+
+    fn next(inout self: Self) -> Option[Self.Item]
+}
+
+trait Walk {
+    type Iter: Stepper
+
+    fn iterate(sink self: Self) -> Self.Iter
+}
+
+impl Stepper for Counter {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[Self.Item] {
+        self.at = self.at + 1
+        return .Some(self.at)
+    }
+}
+
+impl Walk for Counter {
+    type Iter = Self
+
+    fn iterate(sink self: Self) -> Self.Iter {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 6 }
+    var it: Counter = Walk.iterate(c)
+    match Stepper.next(&it) {
+        None => 0,
+        Some(n) => n,
+    }
+}

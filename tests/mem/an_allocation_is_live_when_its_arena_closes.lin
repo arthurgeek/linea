@@ -1,0 +1,24 @@
+// A buffer retains its allocator handle, so releasing the arena is refused
+// until that buffer has been released.
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 4096)
+    let a = arena.handle()
+
+    match a.acquire(64) {
+        Err(_) => {
+            arena.release()
+            1
+        },
+        Ok(b) => {
+            arena.release()
+            b.release()
+            0
+        },
+    }
+}

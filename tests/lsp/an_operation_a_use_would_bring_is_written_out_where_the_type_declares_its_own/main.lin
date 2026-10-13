@@ -1,0 +1,9 @@
+// `Door` declares `close` itself, and `door.Shut`, which is not in scope,
+// declares one too. The trait's item writes the call out beside the `use` it
+// adds, because with that `use` a postfix `close` still reaches the type's own.
+import door
+
+fn main() -> UInt8 {
+    let d = door.Door.make(4)
+    d.close()
+}

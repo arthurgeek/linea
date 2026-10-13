@@ -1,0 +1,32 @@
+// `Swap[UInt8, Bool]` stands for `Pair[Bool, UInt8]`, so the two `impl`s give
+// `Give` to `Holder` at one argument.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+alias Swap[A, B] = Pair[B, A]
+
+trait Give[T] {
+    fn give(_self: Self, x: T) -> UInt8
+}
+
+struct Holder {
+    value: UInt8,
+}
+
+impl Give[Swap[UInt8, Bool]] for Holder {
+    fn give(_self: Self, x: Swap[UInt8, Bool]) -> UInt8 {
+        x.second
+    }
+}
+
+impl Give[Pair[Bool, UInt8]] for Holder {
+    fn give(_self: Self, x: Pair[Bool, UInt8]) -> UInt8 {
+        x.second + 1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

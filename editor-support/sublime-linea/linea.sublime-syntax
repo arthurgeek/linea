@@ -1,0 +1,353 @@
+%YAML 1.2
+---
+# Linea syntax for Sublime/syntect, which is what `bat` reads. Hand-maintained:
+# syntect matches regexes in a context stack and tree-sitter builds a tree, so a
+# translation between them would fit badly and debug worse. The gates are what
+# keep this and the tree-sitter grammar in step -- they are written
+# independently and checked against the same table.
+#
+# Scopes mirror the tree-sitter captures, in Sublime's naming.
+name: Linea
+file_extensions: [lin]
+scope: source.linea
+
+variables:
+  ident: '[a-z_][a-zA-Z0-9_]*'
+  type_ident: '\b[A-Z][a-zA-Z0-9_]*\b'
+
+contexts:
+  main:
+    - include: comments
+    - include: strings
+    - include: attributes
+    - include: keywords
+    - include: literals
+    - include: types
+    - include: parentheses
+    - include: braces
+    - include: operators
+
+  attributes:
+    - match: '@'
+      scope: punctuation.definition.annotation.linea
+      push: attribute-item
+
+  attribute-item:
+    - include: comments
+    - match: '\('
+      scope: punctuation.section.group.begin.linea
+      set: attribute-group
+    - match: '\b(opaque|linear|copyable|carrier)\b'
+      scope: storage.modifier.linea
+      pop: true
+    - match: '\bderive\b'
+      scope: keyword.declaration.type.linea
+      set: attribute-derive-open
+    - match: '(?=\S)'
+      pop: true
+
+  attribute-group:
+    - include: comments
+    - match: '\)'
+      scope: punctuation.section.group.end.linea
+      pop: true
+    - match: ','
+      scope: punctuation.separator.linea
+    - match: '\b(opaque|linear|copyable|carrier)\b'
+      scope: storage.modifier.linea
+    - match: '\bderive\b'
+      scope: keyword.declaration.type.linea
+      push: attribute-derive-open
+    - match: '(?=\S)'
+      pop: true
+
+  attribute-derive-open:
+    - include: comments
+    - match: '\('
+      scope: punctuation.section.group.begin.linea
+      set: attribute-derive-traits
+    - match: '(?=\S)'
+      pop: true
+
+  attribute-derive-traits:
+    - include: comments
+    - match: '\)'
+      scope: punctuation.section.group.end.linea
+      pop: true
+    - match: ','
+      scope: punctuation.separator.linea
+    - match: '\b({{ident}})(\.)'
+      captures:
+        1: entity.name.namespace.linea
+        2: punctuation.accessor.linea
+    - include: types
+    - match: '(?=\S)'
+      pop: true
+
+  comments:
+    - match: '//.*$'
+      scope: comment.line.double-slash.linea
+
+  import-path:
+    # A keyword, dot, or alias marker can continue onto the next line.
+    - include: comments
+    - match: '\b[A-Za-z_][A-Za-z0-9_]*\b'
+      scope: variable.other.linea
+      set: import-tail
+    - match: '(?=\S)'
+      pop: true
+
+  import-tail:
+    - include: comments
+    - match: '\b(as)\b'
+      scope: keyword.control.import.linea
+      set: import-path
+    - match: '\.'
+      scope: punctuation.accessor.linea
+      set: import-path
+    - match: '$|(?=\S)'
+      pop: true
+
+  # Delegation is recognized only while reading a declaration header. A
+  # binding or expression named via stays an ordinary identifier.
+  impl-header:
+    - include: comments
+    - match: '\b(via)\b(?=\s+({{ident}}|{{type_ident}}))'
+      scope: storage.modifier.linea
+      set: delegation-field
+    - match: '(?=[{};])'
+      pop: true
+    - include: keywords
+    - include: types
+    - include: operators
+
+  traversal-tail:
+    - include: comments
+    - match: '\b(via)\b'
+      scope: storage.modifier.linea
+      set: delegation-field
+    - match: '(?=\S)'
+      pop: true
+
+  delegation-field:
+    - include: comments
+    - match: '\b({{ident}}|{{type_ident}})\b'
+      scope: variable.other.member.linea
+      pop: true
+    - match: '(?=\S)'
+      pop: true
+
+  strings:
+    # A multi-line literal's line is `\\` followed by the rest of the line,
+    # which has no escapes and no interpolation.
+    - match: '(\\\\).*$'
+      scope: string.unquoted.multiline.linea
+      captures:
+        1: punctuation.definition.string.begin.linea
+    # A string does not span lines: the lexer ends one at a newline and reports
+    # it unterminated, so the context pops there rather than colouring the rest
+    # of the file.
+    #
+    # A raw literal, `r"…"` or `r#"…"#`, has no escapes and no interpolation,
+    # and closes at a quote followed by as many hashes as opened it. At most
+    # eight hashes open one, as the lexer's bound says.
+    - match: '\br(#{0,8})"'
+      scope: punctuation.definition.string.begin.linea
+      push:
+        - meta_scope: string.quoted.raw.linea
+        - match: '"\1'
+          scope: punctuation.definition.string.end.linea
+          pop: true
+        - match: '$'
+          pop: true
+    - match: '"'
+      scope: punctuation.definition.string.begin.linea
+      push:
+        - meta_scope: string.quoted.double.linea
+        # A doubled brace is text. It must be matched before a single one, or
+        # the first byte opens an interpolation and colours the second as code.
+        - match: '\{\{'
+          scope: constant.character.escape.linea
+        - match: '\{'
+          scope: punctuation.section.interpolation.begin.linea
+          push: interpolation
+        # A backslash takes the next byte with it, as it does in the lexer.
+        # Without this the quote in `"\""` ends the literal and the rest of the
+        # line reads as code -- and a bracket the literal was holding is then
+        # counted by the contexts below.
+        - match: '\\.'
+          scope: constant.character.escape.linea
+        - match: '"'
+          scope: punctuation.definition.string.end.linea
+          pop: true
+        - match: '$'
+          pop: true
+
+  interpolation:
+    # The expression is code rather than string content. A brace it opens
+    # enters the ordinary brace context, so only the matching outer one reaches
+    # this rule and closes the interpolation.
+    - clear_scopes: 1
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.linea
+      pop: true
+    # A colon at this level, outside every bracket of the value, begins its
+    # format spec, which runs to the closing brace: `{price:>8.2}`.
+    - match: '(:)(\s*)([^}"\n]+)'
+      captures:
+        1: punctuation.separator.linea
+        3: keyword.operator.linea
+    - include: main
+
+  keywords:
+    - match: '\b(fn)\b'
+      scope: keyword.declaration.function.linea
+    # The `for` of a walk, told from the `for` of an `impl T for U` by what
+    # follows it: a binder and `in`. Above the declaration rule because the
+    # first match wins, and that rule would otherwise take every `for`.
+    - match: '\bfor\b(?=\s+(?:read\s+|inout\s+)?[A-Za-z_][A-Za-z0-9_]*\s+in\b)'
+      scope: keyword.control.loop.linea
+    - match: '\b(impl)\b'
+      scope: keyword.declaration.type.linea
+      push: impl-header
+    - match: '\b(enum|struct|template|derive|trait|for|extern)\b'
+      scope: keyword.declaration.type.linea
+    # `default impl[T] Trait for T`, a fallback implementation. Contextual
+    # for the reason `type` is: the `impl` after it is what makes it the
+    # modifier, and `fn default()` or a binding named `default` stays a name.
+    - match: '\b(default)\b(?=\s+impl\b)'
+      scope: keyword.declaration.type.linea
+    # `type Item` in a trait, and `type Item = UInt8` in an implementation of
+    # it. The word is not reserved, so a name following it is what tells the
+    # member from the ordinary noun -- and colouring every `type` would take
+    # the word off every programmer who wanted it for a binding.
+    #
+    # Any name, because the compiler holds one to no shape: `type item` is a
+    # member the parser reads and this must colour it the same way, or the
+    # highlighting says a line means something the compiler disagrees with.
+    - match: '\b(type)\b(?=\s+({{ident}}|{{type_ident}}))'
+      scope: keyword.declaration.type.linea
+    # `alias Pricing = fn(...)`, another name for a type. Contextual for the
+    # reason `type` is, and read the same way: the name after it is what makes
+    # it a declaration rather than a binding someone named `alias`.
+    - match: '\b(alias)\b(?=\s+({{ident}}|{{type_ident}}))'
+      scope: keyword.declaration.type.linea
+    # `proj at(...)`, a member that yields a place. Contextual for the reason
+    # `type` is, and read the same way: the name after it is what makes it a
+    # member rather than the noun someone wanted for a binding.
+    - match: '\b(proj)\b(?=\s+({{ident}}|{{type_ident}}))'
+      scope: keyword.declaration.type.linea
+    # `trav positions = ...`, the positions a lending walk runs through. Read
+    # the way `proj` is, and for the same reason: the name after it is what
+    # makes it a member rather than the noun someone wanted for a binding.
+    - match: '\b(trav)\b(\s+)({{ident}}|{{type_ident}})'
+      captures:
+        1: keyword.declaration.type.linea
+        3: entity.name.function.linea
+      push: traversal-tail
+    # `where` opens a refinement or declaration constraint clause. It and `in`
+    # are reserved, unlike `type` above -- a clause may sit on its own line,
+    # and a word a statement could begin would leave the continuation ambiguous.
+    - match: '(\breflect\b)(\s*)(\.)(\s*)(supertraits\b)(\s*:\s*)(derived\b)'
+      captures:
+        1: keyword.control.linea
+        3: punctuation.accessor.linea
+        5: variable.other.member.linea
+        7: keyword.control.linea
+    - match: '(\breflect\b)(\s*)(\.)(\s*)(case|same_case|other_case|components|ordinal_of|target)\b'
+      captures:
+        1: keyword.control.linea
+        3: punctuation.accessor.linea
+        5: variable.other.member.linea
+    - match: '\b(where|in|reflect)\b'
+      scope: keyword.control.linea
+    # `it` is the clause's own spelling of the value it is about, and the only
+    # one the compiler accepts -- but it is an ordinary name everywhere else,
+    # so it is coloured between the two words that place it and nowhere else.
+    - match: '(?<=\bwhere)\s+(it)\b(?=\s+in\b)'
+      captures:
+        1: keyword.control.linea
+    - match: '\b(import|use)\b'
+      scope: keyword.control.import.linea
+      push: import-path
+    - match: '\b(as)\b'
+      scope: keyword.control.import.linea
+    - match: '\b(let|var)\b'
+      scope: storage.type.linea
+    - match: '\b(pub|internal|export|test|trap|phantom)\b'
+      scope: storage.modifier.linea
+    # A convention decides what a call may do to its argument, so it reads as a
+    # modifier rather than as control flow.
+    - match: '\b(read|inout|sink)\b'
+      scope: storage.modifier.linea
+    - match: '\b(if|else|match)\b'
+      scope: keyword.control.conditional.linea
+    - match: '\b(while|loop)\b'
+      scope: keyword.control.loop.linea
+    - match: '\b(break|continue|defer|panic|return)\b'
+      scope: keyword.control.flow.linea
+    - match: '\b(copy|borrow|borrows|carries|retains)\b'
+      scope: keyword.operator.word.linea
+
+  literals:
+    - match: '\b(true|false)\b'
+      scope: constant.language.boolean.linea
+    - match: '\b[0-9]+\b'
+      scope: constant.numeric.integer.linea
+
+  types:
+    - match: '(;)\s*(_)(?=\s*\])'
+      captures:
+        1: punctuation.separator.linea
+        2: constant.language.inferred.linea
+    # A qualified type or trait keeps the module qualifier distinct from the
+    # declaration named after the dot in every written-type position.
+    - match: '\b({{ident}})(\.)({{type_ident}})'
+      captures:
+        1: entity.name.namespace.linea
+        2: punctuation.accessor.linea
+        3: entity.name.type.linea
+    - match: '\b(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float64|Never)\b'
+      scope: storage.type.builtin.linea
+    # The type an implementation names. Built in rather than declared, so it
+    # is styled as what it is and not as a type someone wrote down.
+    - match: '\bSelf\b'
+      scope: storage.type.builtin.linea
+    - match: '{{type_ident}}'
+      scope: entity.name.type.linea
+
+  # A parameter list and an argument list are the same brackets read from the
+  # two ends of a call, and a name before a colon means one thing in both -- the
+  # parameter, declared in one and restated in the other -- so both take the
+  # parameter scope. A default needs no rule of its own: its `=` is the operator
+  # rule's and its constant is a literal wherever else one appears.
+  parentheses:
+    - match: '\('
+      push:
+        - match: '\)'
+          pop: true
+        - match: '\b({{ident}})\s*(:)'
+          captures:
+            1: variable.parameter.linea
+            2: punctuation.separator.linea
+        - include: main
+
+  # Braces are entered so the rule above does not reach inside them: a `name:`
+  # in a record pattern or a type's body names a member, and the nearest
+  # enclosing bracket is what tells the two apart.
+  braces:
+    - match: '\{'
+      push:
+        - match: '\}'
+          pop: true
+        - include: main
+
+  operators:
+    - match: '->|=>'
+      scope: punctuation.separator.linea
+    # `..=` before `..`: the inclusive spelling is the longer match, and the
+    # context tries alternatives in order rather than taking the longest.
+    - match: '\.\.=|\.\.'
+      scope: keyword.operator.linea
+    - match: '&&|\|\||==|!=|<=|>=|[+\-*/%]=|[+\-*/%<>=&!^|]'
+      scope: keyword.operator.linea

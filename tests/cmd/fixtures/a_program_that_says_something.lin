@@ -1,0 +1,15 @@
+// Write two fragments and a UTF-8 greeting to standard error.
+// Named fragments are also exercised by the command runner's source rewrites.
+import std.io
+
+use io.eprint
+use io.eprintln
+
+fn main() -> UInt8 {
+    let first = "one"
+    let second = " two"
+    eprint(first)
+    eprintln(second)
+    eprintln("Olá")
+    0
+}

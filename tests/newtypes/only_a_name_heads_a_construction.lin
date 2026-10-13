@@ -1,0 +1,19 @@
+// The unproven form is `Name?(e)`, and what stands before the `?` is a name
+// reaching a newtype -- a word in scope, or a word after the module declaring
+// it. A `?` written on anything else marks the construction of nothing: a
+// value's part names no type, and a call's result is not a name at all. Both
+// are refused rather than read as some other call whose head happens to end
+// in a question mark.
+struct Holder {
+    n: UInt8,
+}
+
+fn percent() -> UInt8 {
+    50
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 1 }
+    let _a = h.n?(50)
+    percent()?(50)
+}

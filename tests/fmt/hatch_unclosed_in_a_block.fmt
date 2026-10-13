@@ -1,0 +1,9 @@
+// A region with no `on` runs to the end of the file. The block it began in
+// must not write its own closing brace afterwards: the brace is already inside
+// the copied text, and emitting a second one produces a file that does not
+// parse -- over the top of the one the author had.
+fn main() -> UInt8 {
+    let x: UInt8 = 7
+    // linea fmt: off
+    x
+}

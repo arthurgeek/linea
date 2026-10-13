@@ -1,0 +1,7 @@
+fn reduce2[T, F: fn(read lhs: T, read rhs: T) -> T where carries(lhs, rhs)](lhs: T, rhs: T, combine: F) -> T where carries(lhs, rhs, combine) {
+    combine(lhs, rhs)
+}
+
+fn main() -> UInt8 {
+    reduce2(2, 3, |lhs, rhs| lhs + rhs)
+}

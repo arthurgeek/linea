@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking a `Ticker` abandons it where the walk ends, and it is linear
+  --> tests/iter/lent_walks/a_walk_help_names_the_operation_that_settles_its_iterator.lin:32:14
+   |
+32 |     for x in t {
+   |              ^ `Ticker` is linear, and nothing settles it here
+   |
+   = help: walk it lent with `for x in &t`, then settle `t` with `close()`

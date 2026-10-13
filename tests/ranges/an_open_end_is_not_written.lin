@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let r = ..9
+    let s = 3..
+    let _ = r
+    let _ = s
+    0
+}

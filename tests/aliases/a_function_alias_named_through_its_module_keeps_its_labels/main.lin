@@ -1,0 +1,11 @@
+// `handlers.Handler` names the parameter `amount`, so a value of that type is
+// called with the label even though the alias is written after its module.
+import handlers
+
+fn apply(handler: handlers.Handler) -> UInt8 {
+    handler(amount: 3)
+}
+
+fn main() -> UInt8 {
+    apply(handlers.double)
+}

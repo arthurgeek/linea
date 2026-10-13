@@ -1,0 +1,29 @@
+trait Count {
+    fn count(self: Self) -> UInt8
+}
+
+template impl Count {
+    fn count(_self: Self) -> UInt8 {
+        match read _self {
+            reflect.case => {
+                var total: UInt8 = 0
+                for (_first, _second) in reflect.components {
+                    total += 1
+                }
+                total
+            },
+        }
+    }
+}
+
+struct Digits {
+    tens: UInt8,
+    ones: UInt8,
+}
+
+derive Count for Digits
+
+fn main() -> UInt8 {
+    let _digits: Digits = .{ tens = 2, ones = 5 }
+    0
+}

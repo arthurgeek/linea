@@ -1,0 +1,14 @@
+fn main() -> UInt8 {
+    let a = 1.5
+    let b = 0.5
+    let sum = a + b
+    let difference = a - b
+    let product = a * b
+    let quotient = a / b
+    let negated = -a
+    if sum == 2.0 && difference == 1.0 && product == 0.75 && quotient == 3.0 && negated == -1.5 {
+        0
+    } else {
+        1
+    }
+}

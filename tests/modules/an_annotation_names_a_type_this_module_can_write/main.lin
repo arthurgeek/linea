@@ -1,0 +1,22 @@
+// A name written on its own reaches what this module holds, so a name that
+// reaches nothing here names nothing at all. Naming another module's type
+// takes the module: `a.Thing`, or `use a.Thing` and then the word.
+//
+// Reaching for any binding of that name anywhere in the program made this
+// compile. The checker answers such a token with poison and reports nothing,
+// because it believes the resolver already did -- so the annotation resolved
+// to no type, `peek` lowered to a constant, and the program ran returning 0
+// where 7 is the answer. Adding `use a.Thing` is what makes the name reach
+// something, and is what this file leaves out.
+//
+// A pattern's head is the other rule: it cannot be qualified, so there the
+// wide search is right. That is a separate case.
+import a
+
+fn peek(t: Thing) -> UInt8 {
+    t.n
+}
+
+fn main() -> UInt8 {
+    peek(a.make())
+}

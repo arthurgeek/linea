@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Hover on a pair answers with the tuple type, spelled the way the source\n// writes it.\nfn main() -> UInt8 {\n    let pair: (UInt64, Str) = (1, \"a\")\n    let (_n, _s) = pair\n    0\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

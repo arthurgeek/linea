@@ -1,0 +1,18 @@
+// A module's own `Option` and the standard library's are different types.
+// A report writes the one this module does not name bare through its
+// module, so the two never read the same.
+enum Option[T] {
+    Missing,
+    Here(T),
+}
+
+fn first_byte(text: Str) -> Option[UInt8] {
+    text.byte(0)
+}
+
+fn main() -> UInt8 {
+    match first_byte("") {
+        Missing => 0,
+        Here(byte) => byte,
+    }
+}

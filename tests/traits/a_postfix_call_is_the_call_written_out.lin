@@ -1,0 +1,33 @@
+// `a.of(n)` is `Measure.of(a, n)`. Not "behaves like": the two spellings are
+// one call, and both appear here so the case fails if they ever stop agreeing.
+//
+// The signature is generic on purpose. Without a type parameter the checker
+// never reaches inference, which is where the receiver was dropped: the
+// written argument list is short by one and shifted by one for a postfix call,
+// so inference read the wrong argument for each parameter. The two spellings
+// then instantiated the callee differently, or the postfix one was refused for
+// saying nothing about a parameter its receiver settles.
+//
+// The tree keeps what was written, so a formatter reading it back writes the
+// spelling the programmer chose. What makes the two one call is that every pass
+// reads a call's arguments through one routine, and the receiver is an argument
+// by the time any of them looks.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of[U](x: Self, _u: U) -> UInt8
+}
+
+impl Measure for Account {
+    fn of[U](x: Self, _u: U) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 3 }
+    let flag: Bool = true
+    a.of(flag) + Measure.of(a, flag)
+}

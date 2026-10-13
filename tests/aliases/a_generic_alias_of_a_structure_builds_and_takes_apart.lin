@@ -1,0 +1,16 @@
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+alias Labelled[B] = Pair[Str, B]
+
+fn main() -> UInt8 {
+    let pair = Labelled[UInt8] { a = "age", b = 7 }
+    let Labelled { a: label, b: age } = pair
+    if label == "age" {
+        age
+    } else {
+        0
+    }
+}

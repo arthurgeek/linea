@@ -1,0 +1,29 @@
+trait ReverseDigits {
+    fn reverse(self: Self) -> UInt8
+}
+
+template impl ReverseDigits {
+    fn reverse(_self: Self) -> UInt8 {
+        match read _self {
+            reflect.case => {
+                var total: UInt8 = 0
+                for component in reflect.components.reversed {
+                    total = total * 10 + component.of(_self)
+                }
+                total
+            },
+        }
+    }
+}
+
+struct Digits {
+    tens: UInt8,
+    ones: UInt8,
+}
+
+derive ReverseDigits for Digits
+
+fn main() -> UInt8 {
+    let digits: Digits = .{ tens = 2, ones = 5 }
+    digits.reverse()
+}

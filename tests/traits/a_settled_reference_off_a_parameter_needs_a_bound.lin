@@ -1,0 +1,30 @@
+// A bound is what names the trait a settled reference is read through. A
+// parameter carrying none names no trait, so there is nothing that declares
+// the name and no implementation that could settle it -- whatever the module
+// happens to declare elsewhere.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _unbounded[W](sink v: W.Item) -> W.Item {
+    v
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

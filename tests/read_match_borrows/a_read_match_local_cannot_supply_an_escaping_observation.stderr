@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/read_match_borrows/a_read_match_local_cannot_supply_an_escaping_observation.lin:7:39
+  |
+7 |     match read bucket { Full(pair) => borrow pair.number }
+  |                                       ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

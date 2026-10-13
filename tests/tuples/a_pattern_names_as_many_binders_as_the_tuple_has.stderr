@@ -1,0 +1,5 @@
+error[T-Arity]: expected 2 name(s), found 3
+ --> tests/tuples/a_pattern_names_as_many_binders_as_the_tuple_has.lin:4:9
+  |
+4 |     let (a, b, c) = pair
+  |         ^^^^^^^^^ a tuple pattern binds every component by position

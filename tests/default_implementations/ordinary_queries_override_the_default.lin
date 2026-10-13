@@ -1,0 +1,41 @@
+trait Lookup {
+    type Query
+
+    fn matches(self: Self, query: Self.Query) -> Bool
+}
+
+default impl[T: Copyable] Lookup for T {
+    type Query = T
+
+    fn matches(_self: T, _query: T) -> Bool {
+        true
+    }
+}
+
+@copyable
+struct Pair[T] { value: T }
+
+impl Lookup for Bool {
+    type Query = UInt8
+
+    fn matches(self: Bool, query: UInt8) -> Bool {
+        self && query == 7
+    }
+}
+
+fn ask[T: Lookup](value: T, query: T.Query) -> Bool {
+    Lookup.matches(value, query)
+}
+
+fn pair[T: Copyable](value: Pair[T]) -> Bool {
+    Lookup.matches(value, value)
+}
+
+fn main() -> UInt8 {
+    let value: Pair[UInt16] = .{ value = 9 }
+    if Lookup.matches(UInt16(4), 4) && ask(true, 7) && !ask(true, 8) && pair(value) {
+        0
+    } else {
+        1
+    }
+}

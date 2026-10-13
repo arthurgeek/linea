@@ -1,0 +1,17 @@
+struct Board {
+    scores: [UInt8; 2],
+}
+
+impl Index[UInt64] for Board via scores
+
+fn first(inout calls: UInt8) -> UInt64 {
+    calls += 1
+    return 0
+}
+
+fn main() -> UInt8 {
+    var board: Board = .{ scores = [1, 2] }
+    var calls: UInt8 = 0
+    board[first(&calls)] += 3
+    return board[0] + calls - 5
+}

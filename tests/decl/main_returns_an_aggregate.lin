@@ -1,0 +1,17 @@
+// The exit status is a byte, and the emitted entry point says so whatever
+// `main` was declared to return: it is written `export function w` and the
+// `ret` narrows what it is handed to a word. Returning a structure therefore
+// narrowed the *address* of a frame that was ending, and the operating system
+// observed its low byte.
+//
+// The program checked clean, linked, ran, and answered with a number nothing
+// in it computed.
+struct Big {
+    a: Int64,
+    b: Int64,
+    c: Int64,
+}
+
+fn main() -> Big {
+    .{ a = 1, b = 2, c = 3 }
+}

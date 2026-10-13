@@ -1,0 +1,5 @@
+error[T-Mismatch]: this takes a `Point` apart, and the value is an `a.Point`
+  --> tests/modules/a_pattern_head_names_a_declaration/main.lin:22:9
+   |
+22 |         Point { x: c, y: d } => c + d,
+   |         ^^^^^^^^^^^^^^^^^^^^ the pattern names a different type

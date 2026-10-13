@@ -1,0 +1,10 @@
+error[T-Impl]: `Measure` declares `Item` as a type, and this implementation supplies an operation
+  --> tests/traits/an_impl_supplies_the_kind_of_member_declared.lin:17:8
+   |
+17 |     fn Item(x: Self) -> UInt8 {
+   |        ^^^^ supply the member the trait declares
+error[T-Impl]: `Measure` declares `of` as an operation, and this implementation supplies a type
+  --> tests/traits/an_impl_supplies_the_kind_of_member_declared.lin:21:10
+   |
+21 |     type of = UInt8
+   |          ^^ supply the member the trait declares

@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/traits/integer_generics/a_symbolic_conversion_traps_when_evaluated_out_of_range.lin:2:5

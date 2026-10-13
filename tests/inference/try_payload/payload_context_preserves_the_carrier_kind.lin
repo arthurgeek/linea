@@ -1,0 +1,8 @@
+fn some[T](sink value: T) -> Option[T] where carries(.Some: value) {
+    .Some(value)
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value: UInt64 = some(7)?
+    return .Ok(UInt8(value))
+}

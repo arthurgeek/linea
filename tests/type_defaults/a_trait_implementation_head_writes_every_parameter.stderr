@@ -1,0 +1,5 @@
+error[T-Bound]: `Shelf` takes 2 type argument(s), and was given 1
+  --> tests/type_defaults/a_trait_implementation_head_writes_every_parameter.lin:14:21
+   |
+14 | impl[T] Counted for Shelf[T] {
+   |                     ^^^^^ a trait implementation's head names every parameter, so a default is not filled here

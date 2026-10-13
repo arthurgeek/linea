@@ -1,0 +1,19 @@
+fn preserve[T, R](sink error: T) -> Result[R, T] where carries(.Err: error) {
+    return .Err(error)
+}
+
+fn produce[U, F: fn(sink error: UInt8) -> Result[UInt64, U]](transform: F) -> Result[UInt64, U] where carries(transform) {
+    transform(7)
+}
+
+fn main() -> UInt8 {
+    let value = produce(preserve)
+    match value {
+        Ok(_) => 1,
+        Err(error) => if error == UInt8(7) {
+            0
+        } else {
+            1
+        },
+    }
+}

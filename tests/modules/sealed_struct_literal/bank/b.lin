@@ -1,0 +1,10 @@
+@opaque
+struct Account { id: UInt8, balance: UInt8 }
+
+pub fn open(id: UInt8) -> Account {
+    .{ id = id, balance = 0 }
+}
+
+pub fn total(a: Account) -> UInt8 {
+    a.balance
+}

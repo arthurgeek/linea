@@ -1,0 +1,5 @@
+error[T-Reflection]: wrap a parameter of this member
+ --> tests/derive_from/reflect_wrap_takes_a_parameter.lin:7:22
+  |
+7 |         reflect.wrap(UInt8(1))
+  |                      ^^^^^^^^ the variant is selected by the written type of a parameter

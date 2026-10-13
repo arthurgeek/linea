@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Integer`, and `Pair` is not a built-in integer type
+  --> tests/generics/a_structure_cannot_satisfy_integer_arithmetic.lin:15:19
+   |
+15 |     let r: Pair = add(p, q)
+   |                   ^^^ supply a built-in integer type or an Integer-constrained parameter

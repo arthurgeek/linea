@@ -1,0 +1,33 @@
+// A walk in a `break` or a `return` operand takes its sequence once for each
+// time that operand is evaluated, so the exemption a leaving expression
+// carries reaches the walk's head. The body is what repeats; the head is not,
+// any more than a call's argument is -- and the same walk written behind a
+// call has always been accepted, so reading the loop depth here would make
+// inlining a callee change the answer.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+impl Token {
+    fn eat(sink self: Token) -> UInt8 {
+        let Token { n: v } = self
+        v
+    }
+}
+
+fn main() -> UInt8 {
+    let ts: [Token; 2] = [.{ n = 3 }, .{ n = 4 }]
+
+    // The walk runs once, inside the operand of a `break` that leaves the
+    // loop around it. Taking `ts` here is taking it once.
+    loop {
+        break {
+            var total: UInt8 = 0
+            for t in ts {
+                total += Token.eat(t)
+            }
+            total
+        }
+    }
+}

@@ -1,0 +1,5 @@
+error[T-ExternAgreement]: `close` is declared with another signature in module `a`, and one runtime symbol has one signature
+ --> tests/library/one_foreign_symbol_has_one_signature/b/b.lin:1:11
+  |
+1 | extern fn close(fd: Int64) -> Int64
+  |           ^^^^^ declare it with the parameter types, conventions and result of the other declaration

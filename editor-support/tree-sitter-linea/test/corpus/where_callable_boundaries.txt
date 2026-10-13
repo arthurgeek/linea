@@ -1,0 +1,114 @@
+==================
+Callable contracts leave enclosing separators
+==================
+fn choose[I: Source]() -> fn(sink item: I.Item) -> () where I.Item: Discardable {
+    |sink item| {}
+}
+fn invoke(callback: fn(value: UInt8) -> borrow UInt8 where borrows(value), value: UInt8) -> borrow UInt8 where borrows(value) {
+    callback(value)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (parameter_list)
+    (callable_type
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (settled_ref_type
+            (type_identifier)
+            (type_identifier))))
+      (unit_type))
+    (where_clause
+      (where_predicate
+        (settled_ref_type
+          (type_identifier)
+          (type_identifier))
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (block
+      (expression_statement
+        (lambda_expression
+          (parameter
+            (identifier))
+          (block)))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (callable_type
+          (parameter_list
+            (parameter
+              (identifier)
+              (type_identifier)))
+          (borrow_type
+            (type_identifier))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier))))))
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (borrow_type
+      (type_identifier))
+    (where_clause
+      (source_contract
+        (source_path
+          (identifier))))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)))))))
+
+==================
+Contracts attach to the nearest ungrouped callable
+==================
+fn choose() -> fn(value: UInt8) -> borrow UInt8 where borrows(value) {
+    |value| -> where borrows(value) { borrow value }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (callable_type
+      (parameter_list
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (borrow_type
+        (type_identifier))
+      (contract_clause
+        (source_contract
+          (source_path
+            (identifier)))))
+    (block
+      (expression_statement
+        (lambda_expression
+          (parameter
+            (identifier))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier))))
+          (block
+            (expression_statement
+              (borrow_expression
+                (identifier)))))))))

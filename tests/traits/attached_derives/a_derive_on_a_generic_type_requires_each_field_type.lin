@@ -1,0 +1,60 @@
+import std.hash
+import std.io
+
+use hash.Hash
+use io.IoError
+use io.println
+
+// `@derive` on a generic type implements each trait where every field's type
+// implements it: `Labelled[T]` equals when `T` does.
+@(copyable, derive(Equatable, Debug))
+struct Labelled[T] {
+    label: Str,
+    value: T,
+}
+
+@(copyable, derive(Equatable, Debug))
+enum Reading[T] {
+    Missing,
+    Taken(T),
+}
+
+// The written bound `K: Hash` still applies beside the derived requirements.
+@derive(Equatable, Equivalent)
+struct Entry[K: Hash, V] {
+    key: K,
+    value: V,
+}
+
+@linear
+struct Ticket {}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket {} = self
+    }
+}
+
+// `Holder[Ticket]` releases its ticket through the derived implementation.
+@derive(Release)
+struct Holder[T] {
+    held: T,
+    count: UInt64,
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let count: Labelled[Int64] = .{ label = "count", value = 3 }
+    let same: Labelled[Int64] = .{ label = "count", value = 3 }
+    let named: Labelled[Str] = .{ label = "name", value = "Ada" }
+    let taken: Reading[Bool] = .Taken(true)
+    let missing: Reading[Bool] = .Missing
+    let entry: Entry[UInt64, Bool] = .{ key = 1, value = true }
+    println("{count:?} {named:?}")?
+    println("{taken:?} {missing:?}")?
+    let holder: Holder[Ticket] = .{ held = .{}, count = 1 }
+    holder.release()
+    if count != same || taken == missing || entry != entry {
+        return .Ok(1)
+    }
+    return .Ok(0)
+}

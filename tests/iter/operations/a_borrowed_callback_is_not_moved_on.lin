@@ -1,0 +1,12 @@
+import std.io
+
+// `any_of` only borrows `heavy`, and `any` consumes its predicate, so the
+// callback cannot be handed on.
+fn any_of[F: fn(sink weight: UInt64) -> Bool](stop: UInt64, heavy: F) -> Bool where F: Discardable {
+    (UInt64(1)..stop).any(heavy)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{any_of(10, |sink weight| weight > 4)}")?
+    .Ok(0)
+}

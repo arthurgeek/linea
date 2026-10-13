@@ -1,0 +1,12 @@
+// The prelude puts a name in every module's scope so that writing it works and
+// declaring it again is an ordinary duplicate. A module that can *write* a
+// name does not thereby declare it, so nothing reaches one *through* a module.
+//
+// Read out of the same scope a module's own declarations sit in, every module
+// appeared to declare `Option` -- so adding a name to the prelude would have
+// changed the public surface of every module in every program.
+import inner
+
+fn main() -> UInt8 {
+    inner.ping(inner.Option.Some(3))
+}

@@ -1,0 +1,5 @@
+error[T-Lend]: `Range[I]` implements no `Iterator`
+ --> tests/delegation/traversal_delegation_requires_bounded_iterator_capabilities.lin:9:24
+  |
+9 |     trav positions via values
+  |                        ^^^^^^ a traversal is the positions a walk asks for one at a time

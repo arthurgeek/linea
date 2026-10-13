@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    &tick()
+    let seen = count
+    &tick()
+    seen
+}

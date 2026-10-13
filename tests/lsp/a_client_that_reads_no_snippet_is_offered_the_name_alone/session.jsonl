@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A client that did not advertise snippet support reads `${1:a}` as literal\n// text, so it is offered the bare name and nothing else. The capability is read\n// where every other one is read, at initialize, and what a client without it\n// gets is the behaviour that stood before a stop was ever written.\nfn add(a: UInt8, b: UInt8) -> UInt8 {\n    a + b\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = add(1, 2)\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

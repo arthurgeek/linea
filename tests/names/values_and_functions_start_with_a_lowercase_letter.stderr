@@ -1,0 +1,85 @@
+error[N-Case]: modules start with a lowercase letter
+ --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:1:20
+  |
+1 | import std.text as Strings
+  |                    ^^^^^^^ rename it `strings`
+error[N-Case]: constants start with a lowercase letter
+ --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:5:5
+  |
+5 | let LIMIT: UInt8 = 9
+  |     ^^^^^ rename it `limit`
+error[N-Case]: fields start with a lowercase letter
+ --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:8:5
+  |
+8 |     Count: UInt8,
+  |     ^^^^^ rename it `count`
+error[N-Case]: constants start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:12:9
+   |
+12 |     let Start: UInt8 = 1
+   |         ^^^^^ rename it `start`
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:14:8
+   |
+14 |     fn Bump(self: Self) -> UInt8 {
+   |        ^^^^ rename it `bump`
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:19:4
+   |
+19 | fn Clamp(Value: UInt8) -> UInt8 {
+   |    ^^^^^ rename it `clamp`
+error[N-Case]: parameters start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:19:10
+   |
+19 | fn Clamp(Value: UInt8) -> UInt8 {
+   |          ^^^^^ rename it `value`
+error[N-Case]: functions start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:27:4
+   |
+27 | fn For() -> UInt8 {
+   |    ^^^ rename it: `for` is not a name a program declares
+error[N-Case]: parameters start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:31:19
+   |
+31 | fn apply(step: fn(Amount: UInt8) -> UInt8, amount: UInt8) -> UInt8 {
+   |                   ^^^^^^ rename it `amount`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:44:9
+   |
+44 |     let Total = Clamp(Counter { Count = 2 }.Bump())
+   |         ^^^^^ rename it `total`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:46:9
+   |
+46 |     for Step in 0..2 {
+   |         ^^^^ rename it `step`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:49:9
+   |
+49 |     let Add = |Amount: UInt8| Amount + 1
+   |         ^^^ rename it `add`
+error[N-Case]: parameters start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:49:16
+   |
+49 |     let Add = |Amount: UInt8| Amount + 1
+   |                ^^^^^^ rename it `amount`
+error[N-Case]: captures start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:51:18
+   |
+51 |     let shift = [Moved = offset] || Moved
+   |                  ^^^^^ rename it `moved`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:52:32
+   |
+52 |     let halved = half(4) else |Reason| {
+   |                                ^^^^^^ rename it `reason`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:56:14
+   |
+56 |         Some(Inner) => Inner,
+   |              ^^^^^ rename it `inner`
+error[N-Case]: bindings start with a lowercase letter
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:59:26
+   |
+59 |     let Counter { Count: Held } = Counter { Count = 1 }
+   |                          ^^^^ rename it `held`

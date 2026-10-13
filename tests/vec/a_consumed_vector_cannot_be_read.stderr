@@ -1,0 +1,7 @@
+error[O-Move]: `values` has already been moved
+  --> tests/vec/a_consumed_vector_cannot_be_read.lin:17:19
+   |
+16 |     values.release()
+   |     ------ it was taken here
+17 |     let _length = values.length()
+   |                   ^^^^^^ it was already taken, and a value is taken once

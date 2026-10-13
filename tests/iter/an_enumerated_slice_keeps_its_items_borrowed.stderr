@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/iter/an_enumerated_slice_keeps_its_items_borrowed.lin:7:9
+  |
+6 |     for (i, x) in values.as_slice().enumerate() {
+  |                   ----------------------------- the loop's next pass still walks the observation here
+7 |         values[0] = 1
+  |         ^^^^^^^^^ keep this place available until the last use of its observation

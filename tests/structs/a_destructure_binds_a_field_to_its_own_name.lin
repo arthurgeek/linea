@@ -1,0 +1,17 @@
+// `S { f }` binds the field to its own name, which is what a reader writing it
+// out would have written. The field and the binder are one token, and that is
+// the whole of the shorthand.
+//
+// Written down because renaming a binding must write the long form back:
+// rewriting the shared token in place renames the field with it, and names a
+// field the type does not have.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p: Point = .{ x = 4, y = 3 }
+    let Point { x, y } = p
+    x + y
+}

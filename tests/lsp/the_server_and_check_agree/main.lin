@@ -1,0 +1,8 @@
+fn helper() -> UInt8 {
+    1 + true
+}
+
+fn main() -> UInt8 {
+    let x: UInt8 = true
+    nope
+}

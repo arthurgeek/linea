@@ -1,0 +1,7 @@
+// `count` has no operation `parse` and no field of that name, so the call is
+// refused as a call of an operation `UInt8` does not have.
+fn main() -> UInt8 {
+    let count: UInt8 = 3
+    let _parsed = count.parse[UInt8]()
+    count
+}

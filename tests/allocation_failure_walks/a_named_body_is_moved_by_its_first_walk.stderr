@@ -1,0 +1,7 @@
+error[O-Move]: `body` has already been moved
+  --> tests/allocation_failure_walks/a_named_body_is_moved_by_its_first_walk.lin:14:64
+   |
+13 |     let first = testing.each_allocation_failure(mem.system(), body, copy(refused))
+   |                                                               ---- it was taken here
+14 |     let second = testing.each_allocation_failure(mem.system(), body, refused)
+   |                                                                ^^^^ it was already taken, and a value is taken once

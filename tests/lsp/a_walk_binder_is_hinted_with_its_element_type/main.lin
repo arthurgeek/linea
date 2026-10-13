@@ -1,0 +1,38 @@
+// A `for` binder is the one binding in a body whose type is never written: the
+// grammar has no `for x: T in xs`, so a dump that writes types into source has
+// nothing it could write there and says nothing. A hint is not source, so it
+// says what the binder holds -- for all three walks, which bind different
+// things: a value the walk hands over, and a place it lends.
+struct Row {
+    cells: [UInt8; 2],
+}
+
+impl Index[Int64] for Row {
+    type Elem = UInt8
+
+    proj at(inout self: Row, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Row {
+    trav cells = 0..2
+}
+
+fn main() -> UInt8 {
+    let span: Range[UInt8] = 0..3
+    var total: UInt8 = 0
+    for n in span {
+        total += n
+    }
+
+    var r: Row = .{ cells = [1, 2] }
+    for read c in r {
+        total += c
+    }
+    for inout c in r {
+        c += 1
+    }
+
+    total
+}

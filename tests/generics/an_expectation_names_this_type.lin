@@ -1,0 +1,19 @@
+// A generic type's name alone is a template, and which instantiation is meant
+// is the expectation's to say -- but only where the expectation is one of this
+// declaration's instantiations. Handed back unchecked, a variant took the type
+// of whatever was expected: `Option.None` type-checked as a `UInt8`, and as
+// another enum's instantiation it produced a value whose layout the code that
+// read it did not have.
+enum Other[T] {
+    Nope,
+    Yep(T),
+}
+
+fn main() -> UInt8 {
+    let scalar: UInt8 = Option.None
+    let wrong: Option[UInt8] = Other.Nope
+    match wrong {
+        None => scalar,
+        Some(n) => n,
+    }
+}

@@ -1,0 +1,11 @@
+fn receive(_text: Str) -> () {}
+
+fn message() -> Str {
+    "hello {1}"
+}
+
+fn main() -> UInt8 {
+    receive("hello {2}")
+    receive(message())
+    0
+}

@@ -1,0 +1,21 @@
+struct Board[T] { values: [T; 2] }
+
+impl[T] Index[UInt64] for Board[T] via values
+
+impl[T] Index[FromEnd] for Board[T] via values
+
+impl[T] Board[T] {
+    trav positions via values
+}
+
+fn main() -> UInt8 {
+    var board: Board[UInt8] = .{ values = [2, 3] }
+    for inout value in board {
+        value += 1
+    }
+    var total: UInt8 = 0
+    for read value in board {
+        total += value
+    }
+    return total + board[^1] - 11
+}

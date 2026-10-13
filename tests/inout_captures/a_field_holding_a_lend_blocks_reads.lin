@@ -1,0 +1,20 @@
+struct Tally[F] {
+    step: F,
+}
+
+fn tally[F](sink step: F) -> Tally[F] where carries(step) {
+    .{ step = step }
+}
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var counter = tally(
+        inout [inout count] || {
+            count += 3
+        },
+    )
+    &(counter.step)()
+    let seen = count
+    &(counter.step)()
+    seen
+}

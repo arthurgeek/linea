@@ -1,0 +1,9 @@
+error[O-Leak]: `lease` (a linear `Lease`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/four_ways_to_settle_are_listed_as_three.lin:41:9
+   |
+41 |     let lease = Lease.sign(12)
+   |         ^^^^^ never settled on the path that reaches the end of this block
+43 | }
+   | - the block ends here
+   |
+   = help: settle it first with `lease.sublet(…)`, `lease.end()`, `lease.transfer()` or …, or take it apart with `let Lease { months: _ } = lease`

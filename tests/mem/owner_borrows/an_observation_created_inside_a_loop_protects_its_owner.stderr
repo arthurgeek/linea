@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/mem/owner_borrows/an_observation_created_inside_a_loop_protects_its_owner.lin:7:9
+  |
+7 |         owner += 1
+  |         ^^^^^ keep this place available until the last use of its observation
+8 |         total += *view
+  |                  ----- the observation is still used here

@@ -1,0 +1,18 @@
+// A constant and a function are both reached through the type, so they are one
+// namespace and not two. There is no separate space for an "associated
+// constant" to sit in and no rule of its own -- a name is declared once.
+struct Coins {
+    count: UInt8,
+}
+
+impl Coins {
+    pub let most: UInt8 = 9
+
+    pub fn most(x: Coins) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    Coins.most
+}

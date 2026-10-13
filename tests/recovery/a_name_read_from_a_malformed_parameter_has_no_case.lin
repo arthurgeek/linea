@@ -1,0 +1,16 @@
+// A parameter is a name and a type, so `fn(Count)` and `fn pair(UInt8,
+// UInt8)` are refused for their missing `:`. The parser reads what stood
+// where a name was expected in order to go on, and that name was never
+// declared, so it is held neither to a parameter's case nor to being
+// declared once.
+fn pair(UInt8, UInt8) -> UInt8 {
+    0
+}
+
+fn apply(step: fn(Count) -> UInt8) -> UInt8 {
+    step(1)
+}
+
+fn main() -> UInt8 {
+    apply(|n: UInt8| n) - 1 + pair(1, 2)
+}

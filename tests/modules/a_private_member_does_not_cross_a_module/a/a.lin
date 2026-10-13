@@ -1,0 +1,13 @@
+pub struct Thing {
+    v: UInt8,
+}
+
+impl Thing {
+    fn secret() -> UInt8 {
+        7
+    }
+
+    pub fn open() -> UInt8 {
+        Thing.secret()
+    }
+}

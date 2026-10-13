@@ -1,0 +1,40 @@
+// An arena opened on another arena's handle, and both closed innermost first.
+//
+// Nothing here is a special case. The inner arena is an arena over an
+// allocator, and the allocator is the outer arena's handle: a value that owns
+// nothing, which is why an arena can be backed by one at all. Storing the
+// backing by value would ask the inner arena to hold the outer one, and only
+// one thing may hold what a linear value owes.
+//
+// The inner slab is a piece of the outer slab, so closing the inner arena hands
+// that piece back to an arena that reclaims nothing until it is closed itself.
+// The `defer`s run in the reverse of the order they were written, which is the
+// order the closes have to happen in.
+import std.mem
+
+use mem.Arena
+use mem.Oom
+use mem.Owner
+use mem.system
+
+fn work() -> Result[UInt64, Oom] {
+    let outer = Arena.open(system(), 4096)
+    defer outer.release()
+
+    let inner = Arena.open(outer.handle(), 1024)
+    defer inner.release()
+
+    let a = inner.handle()
+    var held = a.acquire(128)?
+    defer held.release()
+
+    mem.Buffer.store(&held, 64, 7)
+    return .Ok(held.load(64))
+}
+
+fn main() -> UInt8 {
+    match work() {
+        Err(_) => 1,
+        Ok(n) => UInt8(n),
+    }
+}

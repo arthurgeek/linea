@@ -1,0 +1,10 @@
+struct Token {
+    value: UInt8,
+}
+
+derive Ordered for Token
+
+fn main() -> UInt8 {
+    let _token: Token = .{ value = 0 }
+    0
+}

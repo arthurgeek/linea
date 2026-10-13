@@ -1,0 +1,12 @@
+error[T-Mismatch]: expected `fn(read UInt8) -> UInt8`, found `Int64`
+ --> tests/typecheck/a_test_callable_result_is_diagnosed.lin:2:5
+  |
+1 | test fn gives_number() -> fn(read x: UInt8) -> UInt8 {
+  |                           -------------------------- expected because of this return type
+2 |     0
+  |     ^ expected `fn(read UInt8) -> UInt8`, found `Int64`
+error[S-Test]: a test answers `Result[(), E]`, which is whether it failed
+ --> tests/typecheck/a_test_callable_result_is_diagnosed.lin:1:27
+  |
+1 | test fn gives_number() -> fn(read x: UInt8) -> UInt8 {
+  |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^ this one answers `fn(read UInt8) -> UInt8`

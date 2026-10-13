@@ -1,0 +1,97 @@
+struct Checking {
+    expected: Str,
+    offset: UInt64,
+    calls: UInt64,
+    refuse: UInt64,
+}
+
+impl Writer for Checking {
+    type Error = UInt8
+
+    fn write_str(inout self: Checking, s: Str) -> Result[(), UInt8] {
+        self.calls += 1
+        if self.calls == self.refuse {
+            return .Err(7)
+        }
+        var i: UInt64 = 0
+        while i < Str.length(s) {
+            if Str.byte(s, i) != Str.byte(self.expected, self.offset) {
+                return .Err(8)
+            }
+            i += 1
+            self.offset += 1
+        }
+        return .Ok({})
+    }
+}
+
+fn renders_unsigned(value: UInt64, expected: Str) -> Bool {
+    var writer: Checking = .{ expected = copy(expected), offset = 0, calls = 0, refuse = 0 }
+    match Display.fmt(value, &writer) {
+        Ok(_) => writer.offset == Str.length(expected),
+        Err(_) => false,
+    }
+}
+
+fn renders_signed(value: Int64, expected: Str) -> Bool {
+    var writer: Checking = .{ expected = copy(expected), offset = 0, calls = 0, refuse = 0 }
+    match Display.fmt(value, &writer) {
+        Ok(_) => writer.offset == Str.length(expected),
+        Err(_) => false,
+    }
+}
+
+fn refuses(value: UInt64, expected: Str, at: UInt64) -> Bool {
+    var writer: Checking = .{ expected = copy(expected), offset = 0, calls = 0, refuse = at }
+    match Display.fmt(value, &writer) {
+        Ok(_) => false,
+        Err(code) => code == 7 && writer.calls == at,
+    }
+}
+
+fn main() -> UInt8 {
+    let maximum: UInt64 = 18446744073709551615
+    if !renders_unsigned(UInt64(0), "0") {
+        return 1
+    }
+    if !renders_unsigned(UInt64(9), "9") {
+        return 2
+    }
+    if !renders_unsigned(UInt64(10), "10") {
+        return 3
+    }
+    if !renders_unsigned(UInt64(99), "99") {
+        return 4
+    }
+    if !renders_unsigned(UInt64(100), "100") {
+        return 5
+    }
+    if !renders_unsigned(UInt64(1234), "1234") {
+        return 6
+    }
+    if !renders_unsigned(UInt64(12345), "12345") {
+        return 7
+    }
+    if !renders_unsigned(maximum, "18446744073709551615") {
+        return 8
+    }
+    if !renders_signed(Int64(-9223372036854775808), "-9223372036854775808") {
+        return 9
+    }
+    if !renders_signed(Int64(9223372036854775807), "9223372036854775807") {
+        return 10
+    }
+    if !renders_signed(Int64(-100), "-100") {
+        return 11
+    }
+    if !refuses(UInt64(1234), "1234", 1) {
+        return 12
+    }
+    if !refuses(UInt64(1234), "1234", 2) {
+        return 13
+    }
+    if !refuses(UInt64(12345), "12345", 2) {
+        return 14
+    }
+    return 0
+}

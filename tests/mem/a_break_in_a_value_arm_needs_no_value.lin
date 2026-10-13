@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    loop {
+        break if true {
+            break 1
+        } else {
+            2
+        }
+    }
+}

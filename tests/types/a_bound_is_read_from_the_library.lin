@@ -1,0 +1,14 @@
+// A primitive's bounds are Linea source in the standard library, not numbers
+// the compiler keeps to itself. Reading one is reading a constant declared in
+// a file that can be opened.
+//
+// `Int16(UInt8.max)` is a conversion of a constant expression, so it is worked
+// out where it is written and costs nothing when the program runs.
+fn main() -> UInt8 {
+    let wide: Int16 = 300
+    if wide > Int16(UInt8.max) {
+        7
+    } else {
+        0
+    }
+}

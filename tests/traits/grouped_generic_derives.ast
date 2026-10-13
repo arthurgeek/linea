@@ -1,0 +1,16 @@
+program decls=5
+  decl trait_ "Inspect" tokens 0..4
+  decl template_impl "Inspect" tokens 4..15
+    of trait Inspect
+    where reflect.components : Inspect
+  decl struct_ "Box" tokens 15..26
+    type param "T"
+    field "value" : T
+  decl derive_impl grouped "Box" tokens 26..41
+    trait Inspect
+    head[T]
+    type param "T" : Inspect
+  decl function "main" tokens 41..50
+    returns UInt8
+    expr %1 block tokens 47..50
+      expr %0 int_literal tokens 48..49 "0"

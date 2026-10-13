@@ -1,0 +1,14 @@
+error[O-Move]: only part of `ks` is named here
+  --> tests/ownership/a_part_of_an_array_is_not_a_place.lin:24:10
+   |
+24 |     take(ks[0])
+   |          ^^^^^ move the whole binding, or `copy` this part out of it
+error[O-Leak]: `ks` (a linear `[Key; 2]`) is still owned when this path leaves
+  --> tests/ownership/a_part_of_an_array_is_not_a_place.lin:23:9
+   |
+23 |     let ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+   |         ^^ never settled on the path that reaches the end of this block
+25 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

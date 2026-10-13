@@ -1,0 +1,5 @@
+error[T-MissingField]: `y` is not named
+ --> tests/decl/borrowed_lets/a_borrowed_struct_pattern_still_covers_every_field.lin:5:14
+  |
+5 |     let read Point { x } = point
+  |              ^^^^^^^^^^^ every field is named exactly once

@@ -1,0 +1,11 @@
+// An index the compiler cannot settle is checked when the program runs, and
+// trapping is what it does where no element sits. The index is computed, so
+// there is nothing here to fold.
+fn at(xs: [UInt8; 3], i: UInt8) -> UInt8 {
+    xs[i]
+}
+
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 3]
+    at(xs, 7)
+}

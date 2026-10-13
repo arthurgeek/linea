@@ -1,0 +1,7 @@
+error[T-Arity]: expected 1 argument(s), found 2
+ --> tests/decl/arity_too_many.lin:6:5
+  |
+1 | fn f(a: UInt8) -> UInt8 {
+  |    - declared here
+6 |     f(1, 2)
+  |     ^^^^^^^ the wrong number of arguments

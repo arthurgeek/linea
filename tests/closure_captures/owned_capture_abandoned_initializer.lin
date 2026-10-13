@@ -1,0 +1,21 @@
+@linear
+struct Key { id: UInt8 }
+
+enum Failure { Stop }
+
+fn fail() -> Result[UInt8, Failure] {
+    .Err(.Stop)
+}
+
+fn perform() -> Result[UInt8, Failure] {
+    let key: Key = .{ id = 7 }
+    let finish = sink [sink key, sink number = fail()?] || {
+        let { id } = key
+        id + number
+    }
+    .Ok(finish())
+}
+
+fn main() -> UInt8 {
+    match perform() { Ok(value) => value, Err(_) => 0 }
+}

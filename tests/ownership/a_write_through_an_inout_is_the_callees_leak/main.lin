@@ -1,0 +1,20 @@
+// A write through an `inout` parameter destroys the caller's value, and the
+// caller cannot see that: the signature says the value survives the call. So
+// it is the callee that is checked.
+//
+// [O-Reinit] asks only that the parameter be initialised at every exit, and it
+// is satisfied by the very write that destroys what was there. The two rules
+// ask different questions of one write -- whether the place ends up full, and
+// what became of what was in it -- so satisfying either does not excuse the
+// other.
+fn steal(inout k: Key) -> UInt8 {
+    k = mint(2)
+    0
+}
+
+fn main() -> UInt8 {
+    var b = mint(3)
+    let y = steal(&b)
+    release(b)
+    y
+}

@@ -1,0 +1,50 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// A field of the type's own type needs the implementation being derived, which
+// is assumed while the fields are checked: `Tree[Str]` releases because `Str`
+// and `Vec[Tree[Str], SystemAllocator]` do.
+@derive(Release)
+struct Tree[T] {
+    value: T,
+    children: Vec[Tree[T], SystemAllocator],
+}
+
+// The same holds through another derived type.
+@derive(Release)
+struct Folder[T] {
+    name: T,
+    files: Vec[Entry[T], SystemAllocator],
+}
+
+@derive(Release)
+enum Entry[T] {
+    File(T),
+    Nested(Folder[T]),
+}
+
+fn leaf(sink value: Str) -> Tree[Str] {
+    .{ value = value, children = Vec.new() }
+}
+
+fn main() -> UInt8 {
+    var root = leaf("root")
+    Vec.push(&root.children, leaf("left")).unwrap()
+    Vec.push(&root.children, leaf("right")).unwrap()
+    let trees = root.children.length()
+    root.release()
+
+    var inner: Folder[Str] = .{ name = "inner", files = Vec.new() }
+    Vec.push(&inner.files, .File("notes")).unwrap()
+    var outer: Folder[Str] = .{ name = "outer", files = Vec.new() }
+    Vec.push(&outer.files, .Nested(inner)).unwrap()
+    let entries = outer.files.length()
+    outer.release()
+
+    if trees == 2 && entries == 1 {
+        0
+    } else {
+        1
+    }
+}

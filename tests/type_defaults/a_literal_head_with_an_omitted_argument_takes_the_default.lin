@@ -1,0 +1,13 @@
+struct Tag[K = UInt8] {
+    kind: K,
+}
+
+fn kind_of(sink tag: Tag) -> UInt8 {
+    let Tag { kind } = tag
+    kind
+}
+
+fn main() -> UInt8 {
+    let made = Tag { kind = 6 }
+    kind_of(made)
+}

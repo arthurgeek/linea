@@ -1,0 +1,11 @@
+// The other direction of the same rule. A walk over a copy takes the copy, so
+// the value the copy was made from is still there afterwards -- which is what
+// makes the refusal beside this one a fact about position and not about `for`.
+fn main() -> UInt8 {
+    let xs: [UInt8; 5] = [0, 1, 2, 3, 4]
+    var total: UInt8 = 0
+    for x in copy(xs) {
+        total += x
+    }
+    total + xs[4] + 1
+}

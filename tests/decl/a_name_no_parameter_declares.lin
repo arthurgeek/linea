@@ -1,0 +1,17 @@
+// A name says which parameter an argument fills, so a name the signature does
+// not declare says nothing. A conversion and a variant construction declare no
+// parameters at all, so every name written in one is such a name.
+enum Colour {
+    Red,
+    Mix(UInt8),
+}
+
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let _mixed = Colour.Mix(r: 1)
+    let _narrowed = UInt8(x: 3)
+    add(a: 40, c: 2)
+}

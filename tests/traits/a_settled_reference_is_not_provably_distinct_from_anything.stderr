@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Give[T.A]` for `Holder[U]`
+  --> tests/traits/a_settled_reference_is_not_provably_distinct_from_anything.lin:26:15
+   |
+20 | impl[T: Pair] Give[T.A] for Holder[T] {
+   |               ---- the other implementation
+26 | impl[U: Pair] Give[Bool] for Holder[U] {
+   |               ^^^^ no instantiation may answer to two implementations of one trait

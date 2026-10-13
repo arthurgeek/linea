@@ -1,0 +1,31 @@
+// One call settles a signature written in terms of a settled reference twice --
+// once in what it takes and once in what it answers. Both are the same type,
+// because both are read through the one implementation the argument names, so
+// the literal standing where the operation takes one is checked against what
+// that implementation settled and the value coming back is that type too.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn plus(v: Self.Item, x: Self) -> Self.Item where carries(v, x)
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn plus(v: Self.Item, x: Self) -> Self.Item {
+        v + x.at
+    }
+}
+
+fn measured[T: Measure](base: T.Item, v: T) -> T.Item where carries(base, v) {
+    Measure.plus(base, v)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    measured(1, c)
+}

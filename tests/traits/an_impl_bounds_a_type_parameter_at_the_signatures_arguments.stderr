@@ -1,0 +1,5 @@
+error[T-Impl]: `Render` does not bound `draw`'s `W` by `Lookup[Bool]`
+  --> tests/traits/an_impl_bounds_a_type_parameter_at_the_signatures_arguments.lin:18:8
+   |
+18 |     fn draw[W: Lookup[Bool]](self: Tag, w: W) -> UInt8 {
+   |        ^^^^ drop it; the signature is what every call is checked against

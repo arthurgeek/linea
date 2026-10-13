@@ -1,0 +1,5 @@
+error[S-Destructure]: use `let` to take a value apart
+ --> tests/tuples/var_does_not_take_a_tuple_apart.lin:3:5
+  |
+3 |     var (a, b) = (1, 2)
+  |     ^^^ a destructuring binding is introduced by `let`

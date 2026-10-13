@@ -1,0 +1,6 @@
+import a
+import b
+
+export fn both(fd: Int32) -> Int64 {
+    a.close_one(fd) + b.close_other(Int64(fd))
+}

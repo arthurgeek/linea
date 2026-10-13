@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _grid: [[UInt8; _]; _] = []
+    0
+}

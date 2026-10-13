@@ -1,0 +1,27 @@
+// A call through a bound reaches the implementation the bound names, so the
+// trait's arguments are the bound's. `W: Holds[UInt8]` makes `Holds.of(w, a)`
+// a call at `Holds[UInt8]`, and an argument of another type is refused in the
+// generic body itself, before any instantiation: whether `Coins` also answers
+// `Holds[Bool]` is nothing `W` promised.
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[A] {
+    fn of(x: Self, a: A) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    fn of(x: Self, a: UInt8) -> UInt8 {
+        x.count + a
+    }
+}
+
+fn wrapped[W: Holds[UInt8]](w: W) -> UInt8 {
+    Holds.of(w, true)
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    wrapped(c)
+}

@@ -1,0 +1,10 @@
+error[T-BorrowContract]: a contract path must name a declared source
+  --> tests/tuples/a_contract_cannot_name_a_pattern_parameter.lin:10:41
+   |
+10 |         |(a, b)| -> UInt8 where carries(a) {
+   |                                         ^ this source is not declared
+error[T-BorrowContract]: a contract path must name a declared source
+  --> tests/tuples/a_contract_cannot_name_a_pattern_parameter.lin:19:41
+   |
+19 |         |(a, b)| -> UInt8 where carries(pair) {
+   |                                         ^^^^ this source is not declared

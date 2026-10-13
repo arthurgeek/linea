@@ -1,0 +1,27 @@
+// A locker holds a deposit until it is closed.
+@linear
+pub struct Locker {
+    deposit: UInt8,
+}
+
+pub fn open(deposit: UInt8) -> Locker {
+    Locker { deposit }
+}
+
+impl Locker {
+    pub fn deposit(self: Locker) -> UInt8 {
+        self.deposit
+    }
+}
+
+// Closing a locker hands back its deposit.
+pub trait Close {
+    fn close(sink self: Self) -> UInt8
+}
+
+impl Close for Locker {
+    fn close(sink self: Locker) -> UInt8 {
+        let Locker { deposit } = self
+        deposit
+    }
+}

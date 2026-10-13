@@ -1,0 +1,7 @@
+enum Failure { Refused(UInt64) }
+
+fn main() -> UInt8 {
+    let input: Result[UInt8, UInt8] = .Err(7)
+    let _mapped = input.map_err(Failure.Refused)
+    0
+}

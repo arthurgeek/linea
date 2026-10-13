@@ -1,0 +1,14 @@
+error[O-Copy]: `Key` does not permit copying
+  --> tests/ownership/a_copy_of_a_linear_element.lin:12:18
+   |
+12 |     let _other = copy(ks[0])
+   |                  ^^^^^^^^^^^ move the value, or declare a copyable representation
+error[O-Leak]: `ks` (a linear `[Key; 2]`) is still owned when this path leaves
+  --> tests/ownership/a_copy_of_a_linear_element.lin:11:9
+   |
+11 |     let ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+   |         ^^ never settled on the path that reaches the end of this block
+14 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

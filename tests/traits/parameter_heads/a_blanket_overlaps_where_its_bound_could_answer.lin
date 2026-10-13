@@ -1,0 +1,20 @@
+// `Allowed` is implemented for some `Packet[T]`, so the blanket head bounded
+// by it could answer for a packet as the constructor head does, and the two
+// overlap.
+trait Allowed {}
+
+trait Checked {}
+
+trait Route[phantom T] {}
+
+impl[T: Allowed, U] Route[U] for T {}
+
+pub struct Packet[T] { value: T }
+
+impl[T: Checked] Allowed for Packet[T] {}
+
+impl[T] Route[Bool] for Packet[T] {}
+
+fn main() -> UInt8 {
+    0
+}

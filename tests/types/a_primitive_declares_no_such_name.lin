@@ -1,0 +1,7 @@
+// A primitive is a namespace like any other type: nobody declares one, so what
+// it holds is what the standard library wrote for it. A name the library did
+// not write is undefined there, which is the answer a namespace gives rather
+// than a rule of its own.
+fn main() -> UInt8 {
+    UInt8.middle
+}

@@ -1,0 +1,46 @@
+// `Meal` implements three traits that each declare `blank`, so neither the
+// call `Meal.blank()` nor the function value `Meal.blank` says which is
+// meant. The report writes the spelling through each trait, as a call where
+// the name is called and as a value where it is not.
+struct Meal {
+    courses: UInt8,
+}
+
+trait Starter {
+    fn blank() -> Self
+}
+
+trait Empty {
+    fn blank() -> Self
+}
+
+trait Plain {
+    fn blank() -> Self
+}
+
+impl Starter for Meal {
+    fn blank() -> Meal {
+        .{ courses = 1 }
+    }
+}
+
+impl Empty for Meal {
+    fn blank() -> Meal {
+        .{ courses = 0 }
+    }
+}
+
+impl Plain for Meal {
+    fn blank() -> Meal {
+        .{ courses = 2 }
+    }
+}
+
+fn serve(make: fn() -> Meal) -> UInt8 {
+    make().courses
+}
+
+fn main() -> UInt8 {
+    let meal = Meal.blank()
+    meal.courses + serve(Meal.blank)
+}

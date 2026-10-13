@@ -1,0 +1,53 @@
+trait Build[T] {
+    fn build(sink source: T) -> Self where carries(source)
+}
+
+trait Deliver[T] {
+    fn deliver(sink self: Self) -> T where carries(self)
+}
+
+impl[T, U: Build[T]] Deliver[U] for T {
+    fn deliver(sink self: T) -> U where carries(self) {
+        Build.build(self)
+    }
+}
+
+struct Input { value: UInt8 }
+
+struct Output { value: UInt8 }
+
+struct Wrapped[T] { value: T }
+
+impl[T] Build[T] for Wrapped[T] {
+    fn build(sink source: T) -> Wrapped[T] where carries(source) {
+        .{ value = source }
+    }
+}
+
+impl Build[Input] for Output {
+    fn build(sink source: Input) -> Output where carries(source) {
+        .{ value = source.value }
+    }
+}
+
+impl Build[UInt8] for Output {
+    fn build(sink source: UInt8) -> Output where carries(source) {
+        .{ value = source }
+    }
+}
+
+fn forward[T, U: Build[T]](sink source: T) -> U where carries(source) {
+    source.deliver()
+}
+
+fn main() -> UInt8 {
+    let input: Input = .{ value = 7 }
+    let output: Output = input.deliver()
+    let second: Output = forward(UInt8(9))
+    let wrapped: Wrapped[UInt8] = UInt8(11).deliver()
+    if output.value == 7 && second.value == 9 && wrapped.value == 11 {
+        0
+    } else {
+        1
+    }
+}

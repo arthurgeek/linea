@@ -1,0 +1,38 @@
+// Every emitted block must end, and a block the runtime aborted in has
+// nothing to return. Ending it with a return would ask the function's return
+// type a question it has no answer to: where that type is an aggregate, a
+// return's operand is the address of the value to copy out, so a fabricated
+// zero would be a load from address zero -- a null dereference on every trap
+// path out of every aggregate-returning function, unreachable only because the
+// runtime got there first. So the block ends by stating that control never
+// leaves it, and the return type is asked nothing.
+//
+// The trap here is never taken, so the case is the `.mlir`: the trap block
+// ends unreachable, with no return in it.
+struct Triple {
+    a: UInt64,
+    b: UInt64,
+    c: UInt64,
+}
+
+fn grow(n: UInt64) -> Triple {
+    .{ a = n + 1, b = 2, c = 3 }
+}
+
+fn main() -> UInt8 {
+    let t = grow(0)
+
+    if t.a != 1 {
+        1
+    } else {
+        if t.b != 2 {
+            2
+        } else {
+            if t.c != 3 {
+                3
+            } else {
+                0
+            }
+        }
+    }
+}

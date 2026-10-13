@@ -1,0 +1,5 @@
+error[T-Default]: a constant of `Permit` would be built where nothing settles it
+ --> tests/constants/enum_variants/a_linear_sink_default_is_not_a_constant.lin:4:33
+  |
+4 | fn settle(sink permit: Permit = .Preserve) -> UInt64 {
+  |                                 ^^^^^^^^^ a value of this type must be settled, so it cannot be a constant

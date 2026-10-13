@@ -1,0 +1,5 @@
+error[S-Entry]: opaque does not combine with another visibility
+ --> tests/decl/attributes/opaque_does_not_combine_with_internal.lin:1:1
+  |
+1 | @opaque
+  | ^ remove `pub` or `internal`

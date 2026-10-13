@@ -1,0 +1,81 @@
+// Compare available releases with the installed version to plan an upgrade.
+import std.testing
+import std.io
+
+use io.IoError
+use io.println
+
+// Derived ordering compares fields in declaration order: major, then minor.
+// `@derive` implies no traits, so the list names every prerequisite: Ordered
+// needs Comparable and Equivalent, and both of those need Equatable.
+@derive(Equatable, Equivalent, Comparable, Ordered)
+struct Version {
+    major: UInt8,
+    minor: UInt8,
+}
+
+@derive(Equatable, Debug)
+enum Upgrade {
+    KeepInstalled,
+    MinorUpdate,
+    MajorUpgrade,
+}
+
+fn upgrade(installed: Version, available: Version) -> Upgrade {
+    // `<=` uses the ordering derived for Version.
+    if available <= installed {
+        .KeepInstalled
+    } else if available.major == installed.major {
+        .MinorUpdate
+    } else {
+        .MajorUpgrade
+    }
+}
+
+test fn newer_releases_distinguish_minor_updates_from_major_upgrades() {
+    let installed = Version { major = 1, minor = 9 }
+    testing.assert_eq(
+        upgrade(installed, .{ major = 1, minor = 10 }),
+        Upgrade.MinorUpdate,
+        "a newer minor release should be offered as an update",
+    )?
+    testing.assert_eq(
+        upgrade(installed, .{ major = 2, minor = 0 }),
+        Upgrade.MajorUpgrade,
+        "a new major release should require an upgrade review",
+    )?
+}
+
+test fn equal_and_older_releases_keep_the_installed_version() {
+    let installed = Version { major = 2, minor = 3 }
+    testing.assert_eq(upgrade(installed, installed), Upgrade.KeepInstalled, "the installed release needs no upgrade")?
+    testing.assert_eq(
+        upgrade(installed, .{ major = 2, minor = 2 }),
+        Upgrade.KeepInstalled,
+        "an older minor release should not replace the installed version",
+    )?
+    testing.assert_eq(
+        upgrade(installed, .{ major = 1, minor = 99 }),
+        Upgrade.KeepInstalled,
+        "a larger minor number should not make an older major release newer",
+    )?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let installed = Version { major = 1, minor = 9 }
+    let releases: [Version; _] = [
+        .{ major = 1, minor = 10 },
+        .{ major = 2, minor = 0 },
+        .{ major = 1, minor = 8 },
+    ]
+
+    println("Installed: {installed.major}.{installed.minor}")?
+    for read available in releases {
+        match upgrade(installed, available) {
+            KeepInstalled => println("{available.major}.{available.minor}: keep the installed version")?,
+            MinorUpdate => println("{available.major}.{available.minor}: minor update available")?,
+            MajorUpgrade => println("{available.major}.{available.minor}: major upgrade; review compatibility")?,
+        }
+    }
+    .Ok(0)
+}

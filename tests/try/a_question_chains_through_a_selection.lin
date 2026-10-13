@@ -1,0 +1,22 @@
+// `f()?.n`. `?` sits in the same suffix loop as a selection and a call, so it
+// composes with them in whatever order they are written -- what `?` yielded is
+// selected from without a rule saying that a selection may follow one.
+struct Box {
+    n: UInt8,
+}
+
+fn boxed() -> Option[Box] {
+    Option.Some(.{ n = 6 })
+}
+
+fn go() -> Option[UInt8] {
+    let n = boxed()?.n
+    Option.Some(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

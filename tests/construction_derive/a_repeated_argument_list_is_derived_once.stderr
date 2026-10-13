@@ -1,0 +1,6 @@
+error[N-Duplicate]: `Echo` is already implemented for `Product` with the same arguments
+  --> tests/construction_derive/a_repeated_argument_list_is_derived_once.lin:14:22
+   |
+14 | derive (Echo[UInt8], Echo[UInt8]) for Product
+   |         ---- already implemented here
+   |                      ^^^^ a trait is implemented once per arguments and type

@@ -1,0 +1,20 @@
+// An ordinary wrapper declared before its components inherits their linear
+// obligations and cannot be copied.
+struct Early {
+    o: Outer[UInt8],
+}
+
+struct Outer[T] {
+    c: Cell[T],
+}
+
+@linear
+struct Cell[T] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let e: Early = .{ o = .{ c = .{ v = 7 } } }
+    let twin = copy(e)
+    e.o.c.v + twin.o.c.v
+}

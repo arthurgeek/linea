@@ -1,0 +1,66 @@
+import std.mem
+
+trait Priced {
+    fn cents(self: Self) -> UInt64
+}
+
+struct Pizza {
+    slices: UInt64,
+}
+
+impl Priced for Pizza {
+    fn cents(self: Pizza) -> UInt64 {
+        self.slices * 150
+    }
+}
+
+trait Convert[T] {
+    fn convert(self: Self) -> T
+}
+
+impl Convert[UInt64] for Pizza {
+    fn convert(self: Pizza) -> UInt64 {
+        self.slices
+    }
+}
+
+fn double(value: UInt64) -> UInt64 {
+    value * 2
+}
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+// `step` holds a function without a written type, and a lambda of the same
+// signature can stand in its place, in either arm. Either is kept as a
+// closure, and so is a trait's operation, whose `Self` the closure's call
+// settles.
+fn main() -> Result[UInt8, mem.Oom] {
+    let step = double
+    let doubled_once = step(1)
+    let chosen = if doubled_once > 1 {
+        step
+    } else {
+        |value| value + 1
+    }
+    let other = if doubled_once > 1 {
+        |value: UInt64| value + 1
+    } else {
+        double
+    }
+    let kept = mem.Closure.open(mem.system(), chosen)?
+    let doubled = kept(10) + other(0)
+    kept.release()
+    let unchanged = identity
+    let also_kept = mem.Closure.open(mem.system(), unchanged)?
+    let same = also_kept(UInt64(1))
+    also_kept.release()
+    let price = mem.Closure.open(mem.system(), Priced.cents)?
+    let cents = price(Pizza { slices = 2 })
+    price.release()
+    let convert = mem.Closure.open(mem.system(), Convert.convert)?
+    let slices: UInt64 = convert(Pizza { slices = 3 })
+    convert.release()
+    return .Ok(UInt8(doubled + same + cents / 100 + slices))
+}

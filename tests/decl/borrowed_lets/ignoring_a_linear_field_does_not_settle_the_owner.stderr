@@ -1,0 +1,9 @@
+error[O-Leak]: `envelope` (a linear `Envelope`) is still owned when this path leaves
+  --> tests/decl/borrowed_lets/ignoring_a_linear_field_does_not_settle_the_owner.lin:7:9
+   |
+7  |     let envelope = Envelope { token = Token { number = 3 }, stamp = 5 }
+   |         ^^^^^^^^ never settled on the path that reaches the end of this block
+10 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

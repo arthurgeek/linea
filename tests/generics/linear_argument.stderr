@@ -1,0 +1,14 @@
+error[N-Unused]: `held` is never used
+  --> tests/generics/linear_argument.lin:17:9
+   |
+17 |     let held: Box[Key] = .{ v = Key.Forged(2) }
+   |         ^^^^ bind it as `_` if the value is not wanted
+error[O-Leak]: `held` (a linear `Box[Key]`) is still owned when this path leaves
+  --> tests/generics/linear_argument.lin:17:9
+   |
+17 |     let held: Box[Key] = .{ v = Key.Forged(2) }
+   |         ^^^^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

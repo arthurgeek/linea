@@ -1,0 +1,12 @@
+// A newline ends `let x = foo`, so `(bar)` on the next line is a statement of
+// its own whose value is discarded, which is refused.
+fn foo(n: UInt8) -> UInt8 {
+    n
+}
+
+fn main() -> UInt8 {
+    let bar = 2
+    let x = foo
+    (bar)
+    x(3)
+}

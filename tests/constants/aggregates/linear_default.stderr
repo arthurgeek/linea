@@ -1,0 +1,5 @@
+error[T-Default]: a constant of `Ticket` would be built where nothing settles it
+ --> tests/constants/aggregates/linear_default.lin:6:28
+  |
+6 | fn number(ticket: Ticket = .{ serial = 7 }) -> UInt8 {
+  |                            ^^^^^^^^^^^^^^^ a value of this type must be settled, so it cannot be a constant

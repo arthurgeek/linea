@@ -1,0 +1,29 @@
+// A trait requiring another is a demand on every implementation of it, and
+// nothing else in the module discharges it.
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+trait Ranked: Same {
+    fn under(self: Self, other: Self) -> Bool
+}
+
+struct Mark {
+    n: UInt8,
+}
+
+impl Ranked for Mark {
+    fn under(self: Mark, other: Mark) -> Bool {
+        self.n < other.n
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Mark = .{ n = 1 }
+    let b: Mark = .{ n = 2 }
+    if Ranked.under(a, b) {
+        4
+    } else {
+        0
+    }
+}

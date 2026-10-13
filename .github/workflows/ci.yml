@@ -1,0 +1,720 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # A change to Markdown alone runs nothing, except the Markdown a gate reads:
+    # the guide compiles its programs, and the semantics, the decision index
+    # and the corpus are checked against the compiler.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'docs/learn/**'
+      - 'docs/linea-semantics.md'
+      - 'docs/adr/**'
+      - 'tests/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # The same paths as a push to main.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'docs/learn/**'
+      - 'docs/linea-semantics.md'
+      - 'docs/adr/**'
+      - 'tests/**'
+  workflow_dispatch:
+  # Every lane, the sweep included, once a week on the default branch.
+  schedule:
+    - cron: '17 4 * * 1'
+
+env:
+  ZIG_LOCAL_CACHE_DIR: /var/tmp/linea-zig-cache
+  LINEA_SCRATCH: /var/tmp/linea-conformance
+
+# A pull request labelled with anything but `full-ci` starts a run that does
+# nothing, so it gets a group of its own: it must not cancel the run already
+# in progress for that pull request, nor be cancelled by it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}${{ (github.event.action == 'labeled' && github.event.label.name != 'full-ci') && format('-label-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # A draft pull request runs nothing. A ready pull request and a push to main
+    # run `check`; the other lanes -- sweep, sanitize, optimised and fuzz --
+    # run only on a pull request labelled `full-ci`, on a manual run and on the
+    # weekly schedule, so a pull request runs them once, when it is about to
+    # merge. Adding any other label runs no lane, cancels nothing, and leaves
+    # `merge-ready` answering what the pull request's last run answered.
+    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    runs-on: ubuntu-24.04
+    # A healthy warm run of this job takes a few minutes; a cold one does not.
+    # A cold run on a two-vCPU hosted runner took 115 minutes.
+    # The outcome cache is keyed on the emitted IR and a stamp of every tool,
+    # so a change to the toolchain invocation re-records every case -- the
+    # whole corpus builds and runs from nothing, which fits under this bound
+    # and not under a bound sized to the warm run alone. It still fires on a
+    # stall, because a job that hangs and a job that is merely slow look
+    # identical until someone cancels one.
+    #
+    # The suite is about a hundred CPU-minutes of work on a fast laptop: the
+    # corpus, the generated programs under every rewrite, the recompilation
+    # properties, and the Debug unit tests. Four vCPUs run
+    # it in well over half an hour, and the build runs one step at a time
+    # (see below), so the bound sits well above that.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      # An outcome is keyed on the emitted IR and on a stamp of every tool a
+      # build runs -- and under Nix that stamp is portable: a store path is a
+      # content hash and every timestamp is normalised to epoch 1, so the same
+      # `flake.lock` gives byte-identical stamps on any machine. The recorded
+      # answers therefore mean the same thing here as they did there, and a
+      # changed program simply misses and rebuilds.
+      #
+      # A cold hosted suite takes most of an hour. Persisting its recorded
+      # outcomes keeps later revisions from rebuilding every case from zero.
+      # Save each run separately so a retry can extend a partial snapshot.
+      # Prefer snapshots of this revision before trying other revisions.
+      - name: Restore program outcomes
+        id: outcomes_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
+          key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+
+      # A runner that stops answering the server takes its job log with it, so
+      # the memory, disk and largest processes are sampled every 20 seconds
+      # into a file this job uploads, and each sample is echoed by the long
+      # step below.
+      - name: Record runner resources
+        run: .github/scripts/resource-log.sh start
+
+      # The conformance suite's recorded outcomes live outside Zig's build
+      # cache: their own key covers the emitted IR, runtime, commands and Nix
+      # tool stamps, and the cache above persists them explicitly.
+      - name: Formatting
+        run: nix develop --command zig fmt --check build.zig build src runtime
+
+      - name: Build
+        run: nix develop --command zig build
+
+      # A few seconds, and part of `test` below too; run first so a grammar
+      # that stopped parsing a file fails before the hour the suite takes.
+      - name: Editor grammar
+        run: nix develop --command zig build editor
+
+      # The runner has about seven gigabytes, and each heavy step of the suite
+      # holds three to four and a half: a compile of the compiler, of the
+      # conformance runner or of the unit tests, the unit tests running, and
+      # the corpus walk with the compilers it starts. `-Dsequential` makes
+      # each wait for the one before it. `-j1` alone did not: a compile runs
+      # in a child process, and the unit tests ran beside one until the runner
+      # stopped answering. The build runs at a lower priority so the runner's
+      # own agent keeps getting scheduled while every core is busy.
+      # The conformance runner is built ReleaseSafe (`-Dsafe-runner`): it
+      # compiles and rewrites the generated programs in process, which takes
+      # about 4.7 minutes in a Debug runner and 42 seconds in a ReleaseSafe
+      # one. The compiler under test and the unit tests stay Debug.
+      #
+      # On a pull request the guide, the library's own tests and the
+      # examples' own tests are left to the `optimised` lane, which runs
+      # before the pull request merges; a push to main runs them here.
+      - name: Unit tests and conformance suite
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build test -j1 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # The library's own tests, asserted by their exit status rather than by a
+      # transcript. The suite already runs this command as a case, and that case
+      # compares what it printed against a golden -- which `-Dupdate` rewrites.
+      # So a run that stopped passing can be accepted, and the case then holds
+      # the failure as its expectation and goes green forever.
+      #
+      # Nothing here can be accepted. The command either exits zero or the build
+      # is red, which is the one claim about the library a golden cannot make on
+      # its own behalf.
+      - name: The library's own tests pass
+        if: ${{ github.event_name == 'push' }}
+        run: nix develop --command zig build run -- test std
+
+      # The examples', for the same reason and against the same hole: the suite
+      # runs one of these as a case and compares its transcript, so a run that
+      # stopped passing can be accepted into the golden.
+      #
+      # Every example that declares a test rather than a list of them, because a
+      # list is a second place to remember: an example gaining a test and not
+      # gaining a line here is one nothing runs, and nothing would say so.
+      - name: The examples' own tests pass
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          nix develop --command bash -c '
+            set -e
+            ran=0
+            for root in examples/*.lin examples/*/; do
+              root=${root%/}
+              grep -rqs "^test fn " "$root" || continue
+              echo ">>> $root"
+              ./zig-out/bin/linea test "$root"
+              ran=$((ran + 1))
+            done
+            # An empty sweep passes vacuously, and an example that stopped being
+            # walked reads exactly like one that has no tests.
+            [ "$ran" -gt 0 ] || { echo "no example declared a test"; exit 1; }
+            echo ">>> $ran example root(s) tested"
+          '
+
+      # A failed assertion or golden comparison still leaves completed program
+      # outcomes. The runner checks their content and toolchain keys on reuse.
+      - name: Save program outcomes
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
+          key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
+
+      - name: Keep the resource log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The runtime library a test run links, watched while it executes. The
+  # address sanitizer instruments what `cc` compiles from C, which is
+  # `runtime/linea_rt.c`; generated programs reach `cc` as printed LLVM IR
+  # without the attribute it instruments, so their own loads and stores are
+  # not watched. What this lane watches is the runtime, every allocation and
+  # free through the intercepted allocator, and a leak check at every clean
+  # exit -- the only check at run time that ownership abandoned no value.
+  #
+  # So it runs what runs: the cases that record an exit status, the examples
+  # and the transcripts that build or run a program, and no generated
+  # programs. Everything else the corpus checks is the compiler's answer,
+  # which the unsanitized lanes already compare.
+  #
+  # This runs here and not in the local loop because sanitized programs do
+  # not work on Darwin, which is where the compiler is developed: the runtime
+  # hangs before reaching `main`, on a C program that does nothing but return
+  # a constant.
+  sanitize:
+    # A pull request labelled `full-ci` runs this lane, and so do manual runs
+    # and the weekly schedule.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        # `address` is the one sanitizer offered; the `Sanitize` doc in
+        # `build.zig` records why `memory` was retired and why `thread` was
+        # never offered. A gate in `build.zig` fails the build if this list
+        # and the enum disagree, so no entry can be dropped by forgetting.
+        sanitizer: [address]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      # An outcome is keyed on the emitted IR and on a stamp of every tool a
+      # build runs -- and under Nix that stamp is portable: a store path is a
+      # content hash and every timestamp is normalised to epoch 1, so the same
+      # `flake.lock` gives byte-identical stamps on any machine. The recorded
+      # answers therefore mean the same thing here as they did there, and a
+      # changed program simply misses and rebuilds.
+      #
+      # A cold hosted suite approaches an hour. Each sanitizer has its own
+      # stamp and therefore its own cache: sharing this key made both lanes miss
+      # together and race to save one incomplete answer.
+      - name: Restore program outcomes
+        id: outcomes_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
+          key: outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
+            outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+
+      # The conformance suite's recorded outcomes live outside Zig's build
+      # cache: their own key covers the emitted IR, runtime, commands and Nix
+      # tool stamps, and the lane-specific cache above persists them explicitly.
+      - name: Conformance suite under ${{ matrix.sanitizer }}
+        # The compiler itself runs optimised with safety checks: the Debug
+        # compiler's coverage belongs to `check`, and this lane's subject is the
+        # runtime and the generated code under the sanitizer.
+        run: nix develop --command zig build conformance --release=safe -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
+
+      - name: Save program outcomes
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
+          key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
+
+  # The corpus and unit tests against a ReleaseFast compiler. `check` covers
+  # the corpus and the compiler's unit tests in Debug; this lane is the
+  # optimised build of both.
+  # Linea results must remain defined and independent of compiler optimization.
+  optimised:
+    # A pull request labelled `full-ci` runs this lane, and so do manual runs
+    # and the weekly schedule.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    runs-on: ubuntu-24.04
+    # Every case builds once, and the unit tests build a ReleaseFast compiler
+    # that holds several gigabytes while it links. One step at a time, so the
+    # bound covers the three steps run end to end.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      # Its own key, because the IR an optimised compiler emits is the IR a
+      # debug one emits and the outcomes are therefore shared -- but the tool
+      # stamp differs, so a miss here must not evict what `check` recorded.
+      - name: Restore program outcomes
+        id: outcomes_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes
+          key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
+            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+
+      # A runner that stops answering the server takes its job log with it, so
+      # the memory, disk and largest processes are sampled every 20 seconds
+      # into a file this job uploads, and each sample is echoed by the long
+      # step below.
+      - name: Record runner resources
+        run: .github/scripts/resource-log.sh start
+
+      # One suite per step, and each with `-Dsequential`, for the reasons
+      # given on the `check` job's test step: a suite's heavy steps wait for
+      # one another, and two suites in one build would run side by side. The
+      # soundness and self-test steps below are one heavy step each.
+      - name: Unit tests, optimised
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build test-unit --release=fast -j1 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      - name: Conformance suite, optimised
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build conformance --release=fast -j1 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # The language's memory promise held to generated programs: every
+      # operation that can move, grow or free storage meets every live
+      # observation of it, and an accepted unsound program fails. It is a build
+      # step of its own, so no other step runs it; a change to the ownership
+      # checker, the MIR verifier or the storage model can otherwise merge
+      # without it having run. It builds the same ReleaseFast compiler as the
+      # step above, so it shares this job rather than building it again.
+      - name: Soundness matrix and generated storage programs
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # Sixteen more generated storage programs. On the weekly schedule and a
+      # manual run the seeds move with the run number, so each searches a
+      # window no earlier run has, and a finding fails that run, not a pull
+      # request it has nothing to do with. A pull request checks a fixed
+      # second window, so a re-run answers the same and its outcomes stay
+      # cached. The matrix does not depend on the seed and is left out. This
+      # is what stands in for fuzzing the storage property, which a search on
+      # every pull request did at a hundred inputs for ten minutes.
+      - name: Generated storage programs over further seeds
+        env:
+          ROTATE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          if [ "$ROTATE" = true ]; then seed=$(( GITHUB_RUN_NUMBER * 16 )); else seed=16; fi
+          echo "storage program seeds $seed..$(( seed + 15 ))"
+          nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dsoundness-matrix=false -Dseed=$seed -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # What `check` leaves to this lane on a pull request: the guide's
+      # programs, the library's own tests and the examples' own tests. They
+      # run with the Debug compiler, as they do in `check` on main, because a
+      # trap in an optimised compiler is a silent miscompile instead.
+      - name: The guide's programs print what it shows
+        run: nix develop --command zig build guide -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # The library's own tests, asserted by their exit status rather than by a
+      # transcript. The suite already runs this command as a case, and that case
+      # compares what it printed against a golden -- which `-Dupdate` rewrites.
+      # So a run that stopped passing can be accepted, and the case then holds
+      # the failure as its expectation and goes green forever.
+      #
+      # Nothing here can be accepted. The command either exits zero or the build
+      # is red, which is the one claim about the library a golden cannot make on
+      # its own behalf.
+      - name: The library's own tests pass
+        run: nix develop --command zig build run -- test std
+
+      # The examples', for the same reason and against the same hole: the suite
+      # runs one of these as a case and compares its transcript, so a run that
+      # stopped passing can be accepted into the golden.
+      #
+      # Every example that declares a test rather than a list of them, because a
+      # list is a second place to remember: an example gaining a test and not
+      # gaining a line here is one nothing runs, and nothing would say so.
+      - name: The examples' own tests pass
+        run: |
+          nix develop --command bash -c '
+            set -e
+            ran=0
+            roots=()
+            for root in examples/*.lin examples/*/; do
+              root=${root%/}
+              grep -rqs "^test fn " "$root" || continue
+              roots+=("$root")
+              ran=$((ran + 1))
+            done
+            # An empty sweep passes vacuously, and an example that stopped being
+            # walked reads exactly like one that has no tests.
+            [ "$ran" -gt 0 ] || { echo "no example declared a test"; exit 1; }
+            printf ">>> %s\n" "${roots[@]}"
+            # Two at a time, one per core; xargs fails if any root fails.
+            printf "%s\0" "${roots[@]}" | xargs -0 -n 1 -P 2 ./zig-out/bin/linea test
+            echo ">>> $ran example root(s) tested"
+          '
+
+      - name: Save program outcomes
+        if: ${{ !cancelled() && steps.outcomes_restore.outcome == 'success' && steps.outcomes_restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
+            ${{ env.LINEA_SCRATCH }}-${{ github.job }}/soundness/outcomes
+          key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
+
+      - name: Keep the resource log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # What each input dimension costs, and how that cost grows.
+  #
+  # A job of its own because it is the one gate that reads a clock. The suite
+  # asserts what a compilation asked for, which is counted and reads the same
+  # on every machine; a walk inside a walk allocates nothing and runs straight
+  # past it. That shape is a real defect class, so something has
+  # to time it -- and a timing gate inside the suite would fail on a busy
+  # machine and teach everyone to re-run the suite.
+  #
+  # It asserts a ratio across a doubling rather than a duration: about two is
+  # linear, about four is quadratic, and a slow runner divides out of both
+  # sides. Nothing else runs in this job, and a failure names a dimension.
+  sweep:
+    # No other lane waits for it and the merge gate does not read it: it times
+    # passes against a clock, and a slow shared runner can fail it without a
+    # regression. A failure stays visible on the run.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      # Release, because the sizes the sweep uses were chosen against one: a
+      # debug build takes long enough per shape to make the job slow without
+      # making the ratio any truer.
+      #
+      # No outcome cache here on purpose. A pass that gets slower emits the
+      # same bytes, so a cached answer is exactly what a regression produces.
+      - name: Build the release sweep runner
+        shell: bash
+        run: nix develop --command zig build conformance-runner -Drelease 2>&1 | tee "$RUNNER_TEMP/sweep-build.log"
+
+      - name: What each input dimension costs
+        shell: bash
+        run: |
+          read_optional() {
+            for path in "$@"; do
+              echo ">>> $path"
+              cat "$path" 2>/dev/null || echo "unavailable: $path"
+            done
+          }
+          snapshot() {
+            echo ">>> $1: $(date -u +%FT%TZ)"
+            if ! grep -E '^(Cpus_allowed|Mems_allowed)' /proc/self/status; then
+              echo 'unavailable: process CPU/memory affinity'
+            fi
+            read_optional /proc/stat /proc/loadavg /proc/self/cgroup /proc/meminfo /proc/pressure/memory
+            cgroup_paths=(/sys/fs/cgroup)
+            cgroup_path=$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup 2>/dev/null) || cgroup_path=
+            if [[ -n "$cgroup_path" && "$cgroup_path" != / ]]; then
+              cgroup_paths+=("/sys/fs/cgroup$cgroup_path")
+            fi
+            for path in "${cgroup_paths[@]}"; do
+              read_optional "$path"/{cpu.max,cpu.stat,memory.current,memory.peak,memory.events,memory.swap.current}
+            done
+          }
+          {
+            lscpu || echo 'unavailable: lscpu CPU model and topology'
+            lscpu --caches || echo 'unavailable: lscpu cache topology'
+            snapshot before
+            set +e
+            nix develop --command /usr/bin/time -v ./zig-out/bin/conformance "$GITHUB_WORKSPACE/tests" --sweep
+            sweep_status=$?
+            set -e
+            snapshot after
+            echo ">>> sweep exit status: $sweep_status"
+            exit "$sweep_status"
+          } 2>&1 | tee "$RUNNER_TEMP/sweep.log"
+
+      - name: Keep sweep output and runner diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-diagnostics-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sweep*.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  # The frontend's promises are total: any bytes lex to a stream that reproduces
+  # them, any bytes parse to a tree, any span renders. A generator tests those
+  # far better than written cases, which cover only programs someone thought of.
+  fuzz:
+    # Weekly and on a manual run, not per pull request: six of the eight
+    # targets have never recorded a finding, and the one that guards what a
+    # change to the middle of the compiler can break runs before merge in
+    # `fuzz-mir` below. The inputs a search reaches are kept between runs, so
+    # each week's search starts where the last one stopped.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    # A release build of the fuzz root and twenty thousand runs of each
+    # target. A quiet run takes about half an hour.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Restore the inputs earlier searches reached
+        id: fuzz_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f
+          key: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-inputs-${{ runner.os }}-
+
+      # A crash an earlier search saved was reported, and kept as an artifact,
+      # by the run that found it. Zig never removes the file, so a restored
+      # one would fail every later run whether or not the defect was fixed.
+      - name: Forget a crash an earlier search recorded
+        run: rm -f "$ZIG_LOCAL_CACHE_DIR/f/crash"
+
+      - name: Record runner resources
+        run: .github/scripts/resource-log.sh start
+
+      # Release, because Zig's non-LLVM backend cannot build a fuzz test on
+      # 0.16 and a release build uses LLVM instead. This step selects the
+      # fuzz entry points named `fuzz:` without running ordinary unit tests or
+      # native corpus examples. It produces no conformance outcomes to cache.
+      #
+      # A run bound rather than a time bound makes the search end on its own.
+      - name: Fuzz the frontend
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nix develop --command zig build fuzz --release=safe --fuzz=20K -Dfuzz-filter=fuzz:
+
+      # Zig's bounded fuzz runner can save a crash while returning success.
+      # An empty input can reproduce a failure, so check presence, not size.
+      - name: No fuzz crash was recorded
+        run: test ! -e "$ZIG_LOCAL_CACHE_DIR/f/crash"
+
+      # Only after a clean search, so a crash is never saved for the next one.
+      - name: Keep the inputs this search reached
+        if: ${{ success() && steps.fuzz_restore.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f
+          key: fuzz-inputs-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # A crash is only useful with the input that caused it. Without this the
+      # runner is destroyed and the reproduction goes with it, leaving a red
+      # job and nothing to act on.
+      - name: Keep the inputs that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Keep the resource log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The one fuzz target that runs before a pull request merges: a module
+  # lowered from a program the compiler accepted must verify. A change to
+  # lowering, ownership, checking and the type tables (`src/sema`), to the
+  # loader that runs them in order, or to the program generator can break it,
+  # so it runs when a pull request touches one of those and otherwise passes
+  # without building anything.
+  fuzz-mir:
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Whether the change touches what the target guards
+        id: touched
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --name-only "$BASE"...HEAD | grep -qE '^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing the target guards changed"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        if: ${{ steps.touched.outputs.run == 'true' }}
+
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        if: ${{ steps.touched.outputs.run == 'true' }}
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fuzz the verifier over lowered programs
+        if: ${{ steps.touched.outputs.run == 'true' }}
+        run: |
+          nix develop --command zig build fuzz --release=safe --fuzz=20K "-Dfuzz-filter=fuzz: a module lowered"
+
+      - name: No fuzz crash was recorded
+        if: ${{ steps.touched.outputs.run == 'true' }}
+        run: test ! -e "$ZIG_LOCAL_CACHE_DIR/f/crash"
+
+      - name: Keep the inputs that failed
+        if: ${{ failure() && steps.touched.outputs.run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-mir-failures
+          path: ${{ env.ZIG_LOCAL_CACHE_DIR }}/f/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # One status for the whole pipeline. On a pull request it is green only when
+  # `check`, `sanitize`, `optimised` and `fuzz-mir` all ran and passed, so a
+  # pull request is ready to merge only after its `full-ci` run; on main,
+  # manual and scheduled runs, every lane that ran passed. `fuzz` runs weekly
+  # and on a manual run, so a pull request does not wait for it, and `sweep`
+  # runs beside the others and reports on its own.
+  merge-ready:
+    needs: [check, sanitize, optimised, fuzz, fuzz-mir]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      checks: read
+    steps:
+      # A label other than `full-ci` runs no lane, so this run has nothing to
+      # judge. It answers what the pull request's last run answered for this
+      # commit, rather than a skip that would read as a pass, and fails while
+      # that run is still deciding.
+      - name: The last run's answer, for a label that runs nothing
+        id: carried
+        if: ${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # The latest other run's check, by when it started; one still
+          # running has no answer yet, and is not taken for its predecessor's.
+          answer=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?check_name=merge-ready&filter=all&per_page=100" \
+            --jq "[.check_runs[] | select(.details_url | contains(\"/runs/$GITHUB_RUN_ID/\") | not)] | sort_by(.started_at) | last | if . == null then \"none\" elif .status != \"completed\" then \"pending\" else .conclusion end")
+          echo "the last run for $SHA answered: $answer"
+          [ "$answer" = success ]
+
+      - name: Every lane that ran passed
+        if: ${{ steps.carried.outcome == 'skipped' }}
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          REQUIRED: ${{ needs.check.result }} ${{ needs.sanitize.result }} ${{ needs.optimised.result }} ${{ needs.fuzz-mir.result }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          echo "lane results: $RESULTS"
+          case " $RESULTS " in
+            *" failure "*|*" cancelled "*) exit 1 ;;
+          esac
+          if [ "$EVENT" = pull_request ]; then
+            case " $REQUIRED " in
+              *" skipped "*)
+                echo "a lane was skipped: label the pull request full-ci to run every lane before merging"
+                exit 1 ;;
+            esac
+          fi

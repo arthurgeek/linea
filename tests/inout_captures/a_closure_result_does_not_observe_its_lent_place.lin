@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var outer = inout [inout count] || {
+        count += 1
+        [count] || count
+    }
+    let show = &outer()
+    show()
+}

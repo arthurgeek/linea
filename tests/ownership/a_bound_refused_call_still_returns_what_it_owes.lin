@@ -1,0 +1,25 @@
+// `open` needs a Copyable argument, and a `Pair` is not one, so the call is
+// refused for its bound. It still returns the linear `Lock` its signature
+// declares, so taking that lock twice and leaving it unsettled are reported
+// beside the bound.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+@linear
+struct Lock {
+    held: UInt8,
+}
+
+fn open[T: Copyable](_value: T) -> Lock {
+    .{ held = 1 }
+}
+
+fn main() -> UInt8 {
+    let pair: Pair = .{ left = 1, right = 2 }
+    let lock = open(pair)
+    let _kept = lock
+    let _again = lock
+    0
+}

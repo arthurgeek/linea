@@ -1,0 +1,5 @@
+error[T-Bound]: `DebugOnly` is written into text, so it implements `Display`
+  --> tests/text/a_display_interpolation_requires_display.lin:18:15
+   |
+18 |     println("{value}")?
+   |               ^^^^^ it does not

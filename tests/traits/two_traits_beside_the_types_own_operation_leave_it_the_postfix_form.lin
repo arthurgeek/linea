@@ -1,0 +1,37 @@
+// `Door` declares `close` itself and through two traits. The postfix form
+// reaches the type's own; each trait's is reached written out. Only two traits
+// and no operation of the type's own would leave `door.close()` ambiguous.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+trait Latch {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+impl Latch for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 2
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    door.close() * 10 + Shut.close(door) + Latch.close(door)
+}

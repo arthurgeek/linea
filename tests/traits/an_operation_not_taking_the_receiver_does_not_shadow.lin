@@ -1,0 +1,27 @@
+// `Door` declares a `close` whose first parameter is a code rather than a
+// door, so the postfix form cannot reach it. `door.close()` reaches `Shut`'s,
+// and the type's own is reached as `Door.close(3)`.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(code: UInt8) -> UInt8 {
+        code
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    door.close() + Door.close(3)
+}

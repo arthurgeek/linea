@@ -1,0 +1,21 @@
+// `Inner` is private to this module, and `Outer` seals its fields.
+struct Inner[T] {
+    value: T,
+}
+
+impl[T: Equatable] Equatable for Inner[T] {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.value == other.value
+    }
+}
+
+@(opaque, derive(Equatable))
+struct Outer[T] {
+    inner: Inner[T],
+}
+
+impl[T] Outer[T] {
+    pub fn wrap(sink value: T) -> Outer[T] {
+        .{ inner = .{ value = value } }
+    }
+}

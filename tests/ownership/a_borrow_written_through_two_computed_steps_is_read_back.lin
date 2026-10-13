@@ -1,0 +1,20 @@
+// A borrow stored in `c[j][j].left` is read back from the same field while
+// a `right` borrow elsewhere in the array has a stale owner.
+struct Box { value: UInt64 }
+
+struct Pair { left: borrow UInt64, right: borrow UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    let y = Box { value = 2 }
+    var c = [[Pair { left = borrow y.value, right = borrow y.value }, Pair { left = borrow y.value, right = borrow x.value }], [Pair { left = borrow y.value, right = borrow y.value }, Pair { left = borrow y.value, right = borrow y.value }]]
+    var j: UInt64 = 1
+    j = j - 1
+    c[j][j].left = borrow y.value
+    bump(&x)
+    UInt8(*c[j][j].left)
+}

@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `Door`
+  --> tests/decl/an_operation_not_taking_the_receiver_is_refused_at_its_parameter.lin:16:5
+   |
+9  |     fn close(code: UInt8) -> UInt8 {
+   |              ---- expected because of this parameter
+16 |     door.close()
+   |     ^^^^ expected `UInt8`, found `Door`

@@ -1,0 +1,7 @@
+error[O-Move]: `grow` has already been moved
+ --> tests/option/a_named_transform_is_moved_by_its_first_map.lin:9:27
+  |
+8 |     let grown = first.map(grow)
+  |                           ---- it was taken here
+9 |     let also = second.map(grow)
+  |                           ^^^^ it was already taken, and a value is taken once

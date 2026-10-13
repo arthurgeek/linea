@@ -1,0 +1,7 @@
+error[S-Mutation]: this argument is not mutated, so it takes no `&`
+ --> tests/decl/read_takes_no_marking.lin:7:15
+  |
+1 | fn twice(n: UInt8) -> UInt8 {
+  |          - declared `read`
+7 |     x = twice(&x)
+  |               ^^ unexpected `&`

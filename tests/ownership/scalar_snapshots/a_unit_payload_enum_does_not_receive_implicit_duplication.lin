@@ -1,0 +1,11 @@
+@copyable
+enum Flag {
+    Present(()),
+}
+
+fn main() -> UInt8 {
+    let flag: Flag = .Present({})
+    let moved = flag
+    match moved { Present(_) => {} }
+    match flag { Present(_) => 0 }
+}

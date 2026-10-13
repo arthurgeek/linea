@@ -1,0 +1,21 @@
+struct Holder[UInt8] {
+    v: UInt8,
+}
+
+struct Holder[Bool] {
+    v: Bool,
+}
+
+fn ;main() -> UInt8 {
+    let a: Holder[UInt8] = .{ v = 3 }
+    let b: Holder[Bool] = .{ v = true }
+    ;Holder[UInt8].one(a) + ;Holder[Bool].two(b)
+}
+
+pub fn ;Holder[UInt8].one(_self: Holder[UInt8]) -> UInt8 {
+    1
+}
+
+pub fn ;Holder[Bool].two(_self: Holder[Bool]) -> UInt8 {
+    2
+}

@@ -1,0 +1,19 @@
+// A module's own declaration shadows a prelude name, and a second declaration
+// of that name in the same module is still a duplicate.
+struct Option {
+    chosen: Bool,
+}
+
+enum Option {
+    Yes,
+    No,
+}
+
+fn main() -> UInt8 {
+    let pick = Option { chosen = true }
+    if pick.chosen {
+        0
+    } else {
+        1
+    }
+}

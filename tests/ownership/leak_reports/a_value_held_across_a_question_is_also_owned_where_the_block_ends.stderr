@@ -1,0 +1,11 @@
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_value_held_across_a_question_is_also_owned_where_the_block_ends.lin:19:29
+   |
+18 |     let ticket = Ticket { seat = 14 }
+   |         ------ acquired here
+19 |     let seat = seat_for(row)?
+   |                             ^ still owned here
+21 | }
+   | - also still owned where the block ends
+   |
+   = help: take it apart with `let Ticket { seat: _ } = ticket`, or give it to something that takes it

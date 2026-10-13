@@ -1,0 +1,37 @@
+// A source is matched to a payload by the type each names, so a payload
+// written through an alias and a source written by the declaration's own name
+// select the same variant.
+struct Rejected {
+    code: UInt8,
+}
+
+alias Refusal = Rejected
+
+@derive(From[Rejected])
+enum Outcome {
+    Refused(Refusal),
+    Accepted,
+}
+
+fn attempt(code: UInt8) -> Result[UInt8, Rejected] {
+    if code > 3 {
+        .Err(Rejected { code = code })
+    } else {
+        .Ok(code)
+    }
+}
+
+fn settle(code: UInt8) -> Result[UInt8, Outcome] {
+    let accepted = attempt(code)?
+    .Ok(accepted)
+}
+
+fn main() -> UInt8 {
+    match settle(9) {
+        Err(outcome) => match outcome {
+            Refused(refusal) => refusal.code - 9,
+            Accepted => 1,
+        },
+        Ok(_) => 2,
+    }
+}

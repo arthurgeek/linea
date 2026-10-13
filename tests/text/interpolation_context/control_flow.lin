@@ -1,0 +1,15 @@
+fn main() -> UInt8 {
+    let _conditional: Str = if true {
+        "hello {1}"
+    } else {
+        "other {2}"
+    }
+    let _matched: Str = match UInt8(0) {
+        0 => "hello {3}",
+        _ => "other {4}",
+    }
+    let _looped: Str = loop {
+        break "hello {5}"
+    }
+    0
+}

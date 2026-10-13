@@ -1,0 +1,33 @@
+// Two traits declare the operation, so the postfix form says nothing about
+// which was meant and the call is [N-Ambiguous]. The fix the diagnostic names
+// is the written-out form, so that is what accepting the offer writes: one
+// item per trait, each replacing the whole postfix call rather than inserting
+// at the cursor.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+trait Weigh {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Weigh for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.weight()
+}

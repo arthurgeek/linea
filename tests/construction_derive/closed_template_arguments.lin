@@ -1,0 +1,24 @@
+trait Echo[A: Copyable] {
+    fn echo(_self: Self, sink input: A) -> A where carries(input)
+}
+
+template impl[Parameter: Copyable] Echo[Parameter] {
+    fn echo(_self: Self, sink input: Parameter) -> Parameter where carries(input) {
+        input
+    }
+}
+
+struct Product {}
+
+derive (Echo[UInt8], Echo[Bool]) for Product
+
+fn main() -> UInt8 {
+    let product: Product = .{}
+    let first = Echo.echo(product, UInt8(7))
+    let second = Echo.echo(product, true)
+    if first == 7 && second {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,10 @@
+error[M-Impl]: `Board` is declared in `model`
+ --> tests/delegation/index_delegation_stays_in_the_defining_module/main.lin:5:24
+  |
+5 | impl Index[UInt64] for Board via values
+  |                        ^^^^^ write it where the trait is declared, or where the type is
+error[T-Projection]: declare field delegation in the type's defining module
+ --> tests/delegation/index_delegation_stays_in_the_defining_module/main.lin:5:34
+  |
+5 | impl Index[UInt64] for Board via values
+  |                                  ^^^^^^ delegate to a stored field with a valid indexing projection

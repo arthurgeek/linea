@@ -1,0 +1,21 @@
+// `Item` carries no bound, so nothing declares what could be selected from it
+// and the projection stops there.
+trait Inner {
+    type Item
+
+    fn peek(sink self: Self) -> Self.Item
+}
+
+trait Outer {
+    type Mid: Inner
+
+    fn mid(self: Self) -> Self.Mid
+}
+
+fn _deeper[O: Outer](_o: O) -> O.Mid.Item.Rest {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

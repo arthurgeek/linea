@@ -1,0 +1,39 @@
+struct Nested[T] {
+    value: T,
+}
+
+trait Supplies[S] {
+    fn supply(self: Self) -> S
+}
+
+struct Source {}
+
+impl Supplies[Nested[UInt8]] for Source {
+    fn supply(_self: Self) -> Nested[UInt8] {
+        .{ value = 7 }
+    }
+}
+
+struct Holder[T, U] {
+    marker: T,
+    value: U,
+}
+
+trait Tag {
+    fn tag(self: Self) -> UInt8
+}
+
+impl[T, U: Supplies[Nested[T]]] Tag for Holder[T, U] {
+    fn tag(_self: Self) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Holder[UInt8, Source] = .{ marker = 0, value = .{} }
+    if Tag.tag(held) == 9 {
+        0
+    } else {
+        1
+    }
+}

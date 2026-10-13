@@ -1,0 +1,20 @@
+// `Ledger.measure` takes any allocator through its own type parameter, so the
+// string it opens is a `String[A]` for that parameter. The report names
+// `release` as what settles it.
+import std.mem
+
+struct Ledger {
+    entries: UInt8,
+}
+
+impl Ledger {
+    fn measure[A: Allocator](self: Self, allocator: A) -> UInt8 {
+        let line = String.new_in(allocator)
+        self.entries + UInt8(line.length())
+    }
+}
+
+fn main() -> UInt8 {
+    let ledger = Ledger { entries = 2 }
+    ledger.measure(mem.system())
+}

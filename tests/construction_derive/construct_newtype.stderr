@@ -1,0 +1,10 @@
+error[T-Reflection]: construct structs or an active enum case
+  --> tests/construction_derive/construct_newtype.lin:32:8
+   |
+32 | derive Rebuild for Shape
+   |        ^^^^^^^ this target does not provide the selected product
+error[T-Bound]: `Rebuild` requires `Self` to implement it, and `Shape` does not
+  --> tests/construction_derive/construct_newtype.lin:36:36
+   |
+36 |     let _rebuilt = Rebuild.rebuild(original)
+   |                                    ^^^^^^^^ implement it for that type, or reach the operation on one that does

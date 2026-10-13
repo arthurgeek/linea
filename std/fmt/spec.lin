@@ -1,0 +1,530 @@
+import std.testing
+
+// An alignment places a value inside its width.
+@(copyable, derive(Debug, Equatable))
+pub enum Align {
+    Left,
+    Right,
+    Center,
+}
+
+// A Spec describes how a value is laid out: the padding around it, a
+// number's sign and zero padding, and the digits after a Float64's decimal
+// point. An interpolation builds one from the text after its colon, so
+// `{price:>8.2}` right-aligns a price with two decimals in eight columns. A
+// program that picks a layout at run time builds a Spec itself and passes it
+// to `write_display`, `write_debug`, `write_integer` or `write_float`.
+//
+// `fill` pads each column with one of its scalars, repeating it as a pattern
+// when it holds several; an empty fill pads with spaces. Width counts Unicode
+// scalars, so "café" occupies four columns. `align` of None puts text on the
+// left and numbers on the right. `plus` writes `+` before a number that is not
+// negative, and `zero` pads a number with zeros between its sign and its
+// digits in place of the fill and alignment. `precision` is the number of
+// digits after a Float64's point.
+//
+// `Spec.default()` is the layout an interpolation without a colon uses: no
+// padding, no sign for a positive number, and the shortest digits for a
+// Float64. Struct update changes one part of it, as in
+// `Spec { width = 8, ..Spec.default() }`.
+@(copyable, derive(Debug, Equatable, Default))
+pub struct Spec {
+    fill: Str,
+    align: Option[Align],
+    plus: Bool,
+    zero: Bool,
+    width: UInt64,
+    precision: Option[UInt64],
+}
+
+impl Spec {
+    // Return the default layout padded with spaces to `width` columns.
+    pub fn padded(width: UInt64) -> Spec {
+        Spec { width, ..Spec.default() }
+    }
+}
+
+test fn a_default_spec_adds_no_padding() {
+    let plain = Spec.default()
+    testing.assert_eq(plain.width, UInt64(0), "a default spec has a width")?
+    testing.assert_eq(plain.align, .None, "a default spec chose an alignment")?
+    expect_display("ab", plain, "ab", "a default spec changed its value")?
+    .Ok(())
+}
+
+test fn a_padded_spec_sets_only_the_width() {
+    let spec = Spec.padded(6)
+    let expected = Spec { width = 6, ..Spec.default() }
+    testing.assert_eq(spec, expected, "a padded spec changed more than its width")?
+    .Ok(())
+}
+
+// ScalarCount counts the Unicode scalars written to it and keeps none of them,
+// so a value can be measured before the padding in front of it is written.
+@copyable
+struct ScalarCount {
+    scalars: UInt64,
+}
+
+impl Writer for ScalarCount {
+    type Error = Never
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), Never] where carries() {
+        self.scalars += scalars_in(s)
+        .Ok(())
+    }
+}
+
+// A scalar is one leading byte and its continuation bytes; a continuation
+// byte has the bit pattern 10xxxxxx, 128 through 191.
+fn scalars_in(s: Str) -> UInt64 {
+    var count: UInt64 = 0
+    let span: Range[UInt64] = 0..s.length()
+    for i in span {
+        match s.byte(i) {
+            Some(b) => if b < 128 || b > 191 {
+                count += 1
+            },
+            None => {},
+        }
+    }
+    count
+}
+
+test fn scalars_count_characters_rather_than_bytes() {
+    testing.assert_eq(scalars_in(""), UInt64(0), "empty text has scalars")?
+    testing.assert_eq(scalars_in("abc"), UInt64(3), "ASCII counted wrongly")?
+    testing.assert_eq(scalars_in("café"), UInt64(4), "a two-byte scalar counted twice")?
+    testing.assert_eq(scalars_in("🚀→"), UInt64(2), "four- and three-byte scalars counted wrongly")?
+    .Ok(())
+}
+
+// Padding counts the columns written before and after a value.
+@copyable
+struct Padding {
+    before: UInt64,
+    after: UInt64,
+}
+
+// Split what the width leaves over `used` columns: all of it on one side, or
+// half on each side with the odd column after the value.
+fn padding_for(spec: Spec, usual: Align, used: UInt64) -> Padding {
+    if used >= spec.width {
+        return .{ before = 0, after = 0 }
+    }
+    let spare = spec.width - used
+    let align = match read spec.align {
+        Some(chosen) => chosen,
+        None => usual,
+    }
+    match read align {
+        Left => .{ before = 0, after = spare },
+        Right => .{ before = spare, after = 0 },
+        Center => .{ before = spare / 2, after = spare - spare / 2 },
+    }
+}
+
+test fn padding_splits_the_spare_columns_by_alignment() {
+    var spec = Spec.padded(7)
+    let left = padding_for(spec, .Left, 2)
+    testing.assert(left.before == 0 && left.after == 5, "left alignment padded before the value")?
+    spec.align = .Some(.Right)
+    let right = padding_for(spec, .Left, 2)
+    testing.assert(right.before == 5 && right.after == 0, "an explicit alignment lost to the usual one")?
+    spec.align = .Some(.Center)
+    let center = padding_for(spec, .Left, 2)
+    testing.assert(center.before == 2 && center.after == 3, "the odd column of centering went first")?
+    let full = padding_for(spec, .Left, 9)
+    testing.assert(full.before == 0 && full.after == 0, "a value wider than its width was padded")?
+    .Ok(())
+}
+
+// Write `text` `count` times; a count of zero writes nothing.
+fn write_repeated[W: Writer](text: Str, count: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    var left = count
+    while left > 0 {
+        &w.write_str(text)?
+        left -= 1
+    }
+    .Ok(())
+}
+
+// Fill `columns` columns of padding with `fill`. A fill of several scalars
+// repeats as a pattern, and the last copy is cut to the columns left, so the
+// padding never grows past the width. An empty fill pads with spaces.
+fn write_fill[W: Writer](fill: Str, columns: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let width = scalars_in(fill)
+    if width == 0 {
+        return write_repeated(" ", columns, &w)
+    }
+    var left = columns
+    while left >= width {
+        &w.write_str(fill)?
+        left -= width
+    }
+    if left == 0 {
+        return .Ok(())
+    }
+    &w.write_str(leading_scalars(fill, left))
+}
+
+// Return the first `count` scalars of `text`, or all of it when it holds
+// fewer.
+fn leading_scalars(text: Str, count: UInt64) -> Str where carries(text) {
+    var seen: UInt64 = 0
+    let span: Range[UInt64] = 0..text.length()
+    for i in span {
+        match text.byte(i) {
+            Some(b) => if b < 128 || b > 191 {
+                if seen == count {
+                    return text.slice(0, i).unwrap()
+                }
+                seen += 1
+            },
+            None => {},
+        }
+    }
+    copy(text)
+}
+
+test fn a_fill_of_several_scalars_stays_within_the_width() {
+    var spec = Spec { align = .Some(.Right), fill = "-=", ..Spec.padded(7) }
+    expect_display("ab", spec, "-=-=-ab", "a two-scalar fill overran the width")?
+    spec.fill = "·→"
+    expect_display("ab", spec, "·→·→·ab", "a multi-byte fill was cut inside a scalar")?
+    spec.fill = ""
+    expect_display("ab", spec, "     ab", "an empty fill did not pad with spaces")?
+    .Ok(())
+}
+
+// Write a value's Display text padded to the spec's width. The value is
+// rendered twice, once to measure it and once to write it, when the width
+// could leave room for padding. `plus`, `zero` and `precision` apply only to
+// numbers, through `write_integer` and `write_float`, and are ignored here.
+pub fn write_display[T: Display, W: Writer](value: T, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    if spec.width == 0 {
+        return value.fmt(&w)
+    }
+    var count = ScalarCount { scalars = 0 }
+    match value.fmt(&count) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    let padding = padding_for(spec, .Left, count.scalars)
+    write_fill(spec.fill, padding.before, &w)?
+    value.fmt(&w)?
+    write_fill(spec.fill, padding.after, &w)
+}
+
+test fn write_display_pads_text_by_its_alignment() {
+    var spec = Spec.padded(6)
+    expect_display("ab", spec, "ab    ", "text is not left-aligned by default")?
+    spec.align = .Some(.Right)
+    expect_display("ab", spec, "    ab", "right alignment changed")?
+    spec.align = .Some(.Center)
+    spec.fill = "*"
+    expect_display("ab", spec, "**ab**", "centering or fill changed")?
+    expect_display("abcdefgh", spec, "abcdefgh", "a value wider than its width was cut")?
+    expect_display("café", Spec.padded(6), "café  ", "width counted bytes")?
+    .Ok(())
+}
+
+test fn write_display_ignores_number_parts_on_other_values() {
+    let spec = Spec { plus = true, zero = true, precision = .Some(1), ..Spec.padded(5) }
+    expect_display(true, spec, "true ", "a number part changed a Bool")?
+    .Ok(())
+}
+
+test fn write_display_appends_to_what_the_writer_holds() {
+    defer var out = String.new()
+    &out.write_str(">").unwrap()
+    write_display("ab", Spec { align = .Some(.Right), ..Spec.padded(4) }, &out).unwrap()
+    &out.write_str("<").unwrap()
+    testing.assert_eq(out.view(), ">  ab<", "the padded text was not written between its neighbours")?
+    .Ok(())
+}
+
+// Write a value's Debug text padded to the spec's width, as `write_display`
+// pads its Display text.
+pub fn write_debug[T: Debug, W: Writer](value: T, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    if spec.width == 0 {
+        return value.debug(&w)
+    }
+    var count = ScalarCount { scalars = 0 }
+    match value.debug(&count) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    let padding = padding_for(spec, .Left, count.scalars)
+    write_fill(spec.fill, padding.before, &w)?
+    value.debug(&w)?
+    write_fill(spec.fill, padding.after, &w)
+}
+
+test fn write_debug_pads_quoted_text() {
+    let spec = Spec { align = .Some(.Right), ..Spec.padded(6) }
+    expect_debug("ab", spec, r#"  "ab""#, "Debug text was not padded with its quotes")?
+    let one: Option[UInt8] = .Some(1)
+    expect_debug(one, Spec.padded(9), "Some(1)  ", "Debug structure was not padded")?
+    .Ok(())
+}
+
+test fn write_debug_appends_to_what_the_writer_holds() {
+    defer var out = String.new()
+    &out.write_str(">").unwrap()
+    write_debug("ab", Spec.padded(6), &out).unwrap()
+    &out.write_str("<").unwrap()
+    testing.assert_eq(out.view(), ">\"ab\"  <", "the padded text was not written between its neighbours")?
+    .Ok(())
+}
+
+// Write a number's sign and digits in the spec's layout. `sign` is empty,
+// "-" or "+", and `digits` is how many columns `body` writes.
+fn write_number_parts[W: Writer](spec: Spec, sign: Str, digits: UInt64, body: NumberBody, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let used = scalars_in(sign) + digits
+    // Zeros go between the sign and the digits, so -5 in five columns is
+    // -0005. Infinity and NaN have no digits to pad, so they take spaces.
+    if spec.zero && body.finite() {
+        &w.write_str(sign)?
+        if used < spec.width {
+            write_repeated("0", spec.width - used, &w)?
+        }
+        return body.write(&w)
+    }
+    let padding = padding_for(spec, .Right, used)
+    write_fill(spec.fill, padding.before, &w)?
+    &w.write_str(sign)?
+    body.write(&w)?
+    write_fill(spec.fill, padding.after, &w)
+}
+
+// A NumberBody is the unsigned part of a number: an integer's magnitude, or a
+// Float64's magnitude with the digits its precision asks for.
+@copyable
+enum NumberBody {
+    Whole(UInt64),
+    Fraction(Float64, Option[UInt64]),
+}
+
+impl NumberBody {
+    // Infinity and NaN are not finite, so they have no digits to pad with zeros.
+    fn finite(self: Self) -> Bool {
+        match read self {
+            Whole(_) => true,
+            Fraction(magnitude, _) => magnitude == magnitude && magnitude != 1.0 / 0.0,
+        }
+    }
+
+    // Write the digits without a sign.
+    fn write[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        match read self {
+            Whole(magnitude) => format_unsigned(magnitude, &w),
+            Fraction(magnitude, precision) => write_float_magnitude(magnitude, precision, &w),
+        }
+    }
+}
+
+// Write an integer with the spec's sign, zero padding and alignment. Numbers
+// are right-aligned unless the spec says otherwise; `precision` is ignored.
+pub fn write_integer[T: Integer, W: Writer](value: T, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let negative = value < T(0)
+    // The magnitude of the most negative value does not fit its own type, so
+    // it is taken one step inside the range and restored in UInt64.
+    let magnitude = if negative {
+        UInt64(0 - (Int64(value) + 1)) + 1
+    } else {
+        UInt64(value)
+    }
+    let sign = if negative {
+        "-"
+    } else if spec.plus {
+        "+"
+    } else {
+        ""
+    }
+    write_number_parts(spec, sign, decimal_digits(magnitude), .Whole(magnitude), &w)
+}
+
+test fn write_integer_right_aligns_and_pads_after_the_sign() {
+    expect_integer(42, Spec.padded(5), "   42", "numbers are not right-aligned by default")?
+    let zeros = Spec { zero = true, ..Spec.padded(4) }
+    expect_integer(7, zeros, "0007", "zero padding changed")?
+    expect_integer(-7, zeros, "-007", "zero padding went before the sign")?
+    expect_integer(123456, zeros, "123456", "a wide number was cut")?
+    let signed = Spec { plus = true, ..Spec.default() }
+    expect_integer(7, signed, "+7", "plus lost its sign")?
+    expect_integer(0, signed, "+0", "zero is not negative")?
+    expect_integer(-7, signed, "-7", "plus replaced a minus")?
+    let left = Spec { align = .Some(.Left), ..Spec.padded(4) }
+    expect_integer(-7, left, "-7  ", "explicit left alignment lost")?
+    .Ok(())
+}
+
+test fn write_integer_reaches_both_ends_of_every_width() {
+    let least: Int8 = -128
+    let most: UInt64 = 18446744073709551615
+    let lowest: Int64 = -9223372036854775808
+    expect_integer(least, Spec.padded(5), " -128", "Int8.min lost its magnitude")?
+    expect_integer(most, Spec.default(), "18446744073709551615", "UInt64.max changed")?
+    expect_integer(lowest, Spec.default(), "-9223372036854775808", "Int64.min changed")?
+    .Ok(())
+}
+
+test fn write_integer_appends_to_what_the_writer_holds() {
+    defer var out = String.new()
+    &out.write_str(">").unwrap()
+    write_integer(-7, Spec { zero = true, ..Spec.padded(4) }, &out).unwrap()
+    write_integer(7, Spec { plus = true, zero = true, ..Spec.padded(4) }, &out).unwrap()
+    &out.write_str("<").unwrap()
+    testing.assert_eq(out.view(), ">-007+007<", "the padded text was not written between its neighbours")?
+    .Ok(())
+}
+
+// Write a Float64 with the spec's sign, zero padding, alignment and precision.
+// Without a precision the digits are Display's, the shortest that read back
+// as the value. With one, those digits are rounded half away from zero to
+// that many places after the point: 2.675 with two places is 2.68, and 0.5
+// with none is 1. A negative value, including -0.0, keeps its minus sign.
+// Infinity and NaN ignore the precision, and NaN takes no sign.
+pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let negative = is_negative(value)
+    let magnitude = if negative {
+        -value
+    } else {
+        value
+    }
+    let sign = if negative {
+        "-"
+    } else if spec.plus && value == value {
+        "+"
+    } else {
+        ""
+    }
+    let body: NumberBody = .Fraction(magnitude, copy(spec.precision))
+    if spec.width == 0 {
+        &w.write_str(sign)?
+        return body.write(&w)
+    }
+    var count = ScalarCount { scalars = 0 }
+    match body.write(&count) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    write_number_parts(spec, sign, count.scalars, body, &w)
+}
+
+test fn write_float_rounds_to_its_precision() {
+    let cents = Spec { precision = .Some(2), ..Spec.default() }
+    expect_float(3.5, cents, "3.50", "precision did not add zeros")?
+    expect_float(2.675, cents, "2.68", "precision did not round the shown digits half away from zero")?
+    expect_float(-2.675, cents, "-2.68", "a negative value rounded toward zero")?
+    expect_float(0.001, cents, "0.00", "a small value did not round to zero")?
+    expect_float(-0.001, cents, "-0.00", "a negative value lost its sign")?
+    expect_float(9.999, cents, "10.00", "rounding did not carry into the whole part")?
+    expect_float(1e22, cents, "10000000000000000000000.00", "a large value lost its zeros")?
+    expect_float(5e-324, cents, "0.00", "the smallest subnormal did not round to zero")?
+    let whole = Spec { precision = .Some(0), ..Spec.default() }
+    expect_float(0.5, whole, "1", "half did not round away from zero")?
+    expect_float(2.5, whole, "3", "precision zero kept a point")?
+    let long = Spec { precision = .Some(20), ..Spec.default() }
+    expect_float(0.1, long, "0.10000000000000000000", "more places than digits changed the value")?
+    expect_float(1.25e-7, long, "0.00000012500000000000", "leading fractional zeros were lost")?
+    .Ok(())
+}
+
+test fn write_float_pads_signs_and_names_non_finite_values() {
+    var spec = Spec { precision = .Some(1), ..Spec.padded(8) }
+    expect_float(21.5, spec, "    21.5", "floats are not right-aligned by default")?
+    spec.zero = true
+    expect_float(-21.5, spec, "-00021.5", "zero padding went before the sign")?
+    let infinity = 1.0 / 0.0
+    expect_float(-infinity, spec, "    -inf", "infinity was padded with zeros")?
+    spec.plus = true
+    expect_float(0.0 / 0.0, spec, "     NaN", "NaN took a sign or zeros")?
+    expect_float(infinity, spec, "    +inf", "infinity lost its plus")?
+    let shortest = Spec { plus = true, ..Spec.default() }
+    expect_float(0.1 + 0.2, shortest, "+0.30000000000000004", "the shortest digits changed")?
+    expect_float(-0.0, shortest, "-0.0", "negative zero lost its sign")?
+    .Ok(())
+}
+
+test fn write_float_appends_to_what_the_writer_holds() {
+    defer var out = String.new()
+    &out.write_str(">").unwrap()
+    write_float(2.5, Spec { precision = .Some(2), ..Spec.padded(7) }, &out).unwrap()
+    write_float(-0.5, Spec.default(), &out).unwrap()
+    &out.write_str("<").unwrap()
+    testing.assert_eq(out.view(), ">   2.50-0.5<", "the padded text was not written between its neighbours")?
+    .Ok(())
+}
+
+// An interpolation whose format spec lays its value out calls one of the four
+// functions below with the parts the spec wrote, and they pass a Spec to the
+// matching `write_` function. The compiler picks one by the value's type:
+// integers, Float64, and the Display or Debug text of anything else. `align`
+// is 0 for none, then 1, 2 and 3 for left, right and center, and `places`
+// counts only when `fraction` is set.
+fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64) -> Spec {
+    let side: Option[Align] = match read align {
+        1 => .Some(.Left),
+        2 => .Some(.Right),
+        3 => .Some(.Center),
+        _ => .None,
+    }
+    let precision: Option[UInt64] = if fraction {
+        .Some(places)
+    } else {
+        .None
+    }
+    Spec { fill = copy(fill), align = side, plus, zero, width, precision }
+}
+
+fn interpolate_display[T: Display, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_display(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+}
+
+fn interpolate_debug[T: Debug, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_debug(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+}
+
+fn interpolate_integer[T: Integer, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_integer(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+}
+
+fn interpolate_float[W: Writer](value: Float64, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_float(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+}
+
+test fn a_spec_of_the_written_parts_names_each_one() {
+    let spec = spec_of("*", 3, true, false, 9, true, 2)
+    let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2) }
+    testing.assert_eq(spec, expected, "a written part was lost")?
+    testing.assert_eq(spec_of(" ", 0, false, true, 4, false, 7), Spec { fill = " ", align = .None, plus = false, zero = true, width = 4, precision = .None }, "an absent part was set")?
+    .Ok(())
+}
+
+// Render with each routine into owned text and compare the whole result, so a
+// failure reports the text that was written.
+fn expect_display[T: Display](value: T, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    defer var out = String.new()
+    write_display(value, spec, &out).unwrap()
+    testing.assert_eq(out.view(), expected, said)
+}
+
+fn expect_debug[T: Debug](value: T, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    defer var out = String.new()
+    write_debug(value, spec, &out).unwrap()
+    testing.assert_eq(out.view(), expected, said)
+}
+
+fn expect_integer[T: Integer](value: T, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    defer var out = String.new()
+    write_integer(value, spec, &out).unwrap()
+    testing.assert_eq(out.view(), expected, said)
+}
+
+fn expect_float(value: Float64, spec: Spec, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    defer var out = String.new()
+    write_float(value, spec, &out).unwrap()
+    testing.assert_eq(out.view(), expected, said)
+}

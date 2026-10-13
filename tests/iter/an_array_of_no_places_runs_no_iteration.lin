@@ -1,0 +1,14 @@
+// An array's length is part of its type, so an array of no elements has no
+// place for a walk to reach: the body never runs and the walk runs out at
+// once. The `break` is what tells the two apart -- a body that ran would have
+// stopped at a place this array does not have.
+fn main() -> UInt8 {
+    let xs: [UInt8; 0] = []
+    let found = for x in xs {
+        break x
+    }
+    match found {
+        Some(v) => v,
+        None => 9,
+    }
+}

@@ -1,0 +1,21 @@
+import units
+
+use units.Step
+
+// The alias bounds a parameter whether `use` brought it in or the bound
+// names it through its module.
+fn run[F: Step](f: F) -> UInt8 {
+    f(10)
+}
+
+fn qualified[F: units.Step](f: F) -> UInt8 {
+    f(1)
+}
+
+fn down(value: UInt8) -> UInt8 {
+    value - 1
+}
+
+fn main() -> UInt8 {
+    run(down) + qualified(down) - 9
+}

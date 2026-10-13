@@ -1,0 +1,22 @@
+enum Mode { Preserve, Replace }
+
+impl Mode {
+    let fallback: Self = .Replace
+
+    fn apply(self: Self, pick: fn(read mode: Self = .Replace) -> UInt8) -> UInt8 {
+        match read self { Preserve => pick(), Replace => pick(.Preserve) }
+    }
+}
+
+fn select(mode: Mode = Mode.fallback) -> UInt8 {
+    match read mode { Preserve => 0, Replace => 1 }
+}
+
+fn invoke[F: fn(read mode: Mode = Mode.fallback) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    let mode = Mode.Preserve
+    invoke(select) + mode.apply(select) - 2
+}

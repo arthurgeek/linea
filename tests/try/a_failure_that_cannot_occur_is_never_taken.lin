@@ -1,0 +1,37 @@
+// A failure of type `Never` has no value, so `?` on a result that cannot fail
+// only ever continues with its success. `greet` reaches one through a writer
+// whose writes always succeed, and `twice` names that result directly.
+struct Tally {
+    bytes: UInt64,
+}
+
+impl Writer for Tally {
+    type Error = Never
+
+    fn write_str(inout self: Tally, s: Str) -> Result[(), Never] where carries() {
+        self.bytes += s.length()
+        return .Ok({})
+    }
+}
+
+fn greet[W: Writer](inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    Writer.write_str(&w, "hello, ")?
+    Writer.write_str(&w, "world")
+}
+
+fn twice(inout tally: Tally) -> Result[(), Never] {
+    Writer.write_str(&tally, "ab")?
+    Writer.write_str(&tally, "c")
+}
+
+fn main() -> UInt8 {
+    var tally = Tally { bytes = 0 }
+    match greet(&tally) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    match twice(&tally) {
+        Ok(_) => UInt8(tally.bytes),
+        Err(never) => never,
+    }
+}

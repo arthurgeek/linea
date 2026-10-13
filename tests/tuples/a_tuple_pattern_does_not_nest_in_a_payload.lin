@@ -1,0 +1,28 @@
+// A tuple pattern names plain binders. It does not nest inside a variant's
+// payload, another tuple pattern or a struct pattern's field; take the inner
+// value out with a binder, then take it apart with `let`.
+struct Wrapper {
+    pair: (UInt8, UInt8),
+}
+
+fn in_a_payload(sink found: Option[(UInt8, UInt8)]) -> UInt8 {
+    match found {
+        Some((a, b)) => 0,
+        None => 0,
+    }
+}
+
+fn in_a_tuple(sink nested: (UInt8, (UInt8, UInt8))) -> UInt8 {
+    match nested {
+        (a, (b, c)) => a,
+    }
+}
+
+fn in_a_field(sink wrapper: Wrapper) -> UInt8 {
+    let Wrapper { pair: (a, b) } = wrapper
+    0
+}
+
+fn main() -> UInt8 {
+    in_a_payload(.Some((1, 2))) + in_a_tuple((1, (2, 3))) + in_a_field(.{ pair = (1, 2) })
+}

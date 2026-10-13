@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `thanks`
+ --> tests/multiline_strings/a_code_line_ends_a_multiline_literal.lin:4:9
+  |
+4 |         thanks
+  |         ^^^^^^ no binding with this name is in scope
+error[T-Discard]: this expression produces a `Str` that is discarded
+ --> tests/multiline_strings/a_code_line_ends_a_multiline_literal.lin:5:9
+  |
+5 |         \\see you soon.
+  |         ^^^^^^^^^^^^^^^ bind it with `let _ =` to discard it deliberately

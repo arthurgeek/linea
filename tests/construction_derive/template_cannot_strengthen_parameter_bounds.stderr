@@ -1,0 +1,5 @@
+error[T-Template]: use the same bounds as the corresponding trait parameter
+ --> tests/construction_derive/template_cannot_strengthen_parameter_bounds.lin:5:15
+  |
+5 | template impl[A: Copyable] Measure[A] {
+  |               ^ template parameters must admit the same arguments as the trait

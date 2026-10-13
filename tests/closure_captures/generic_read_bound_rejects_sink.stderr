@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `fn() -> UInt8`, and `<closure>` is not that callable type
+ --> tests/closure_captures/generic_read_bound_rejects_sink.lin:7:5
+  |
+7 |     apply(callback)
+  |     ^^^^^ give it the exact callable type the bound names

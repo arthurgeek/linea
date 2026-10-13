@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Give[T.A]` for `Holder[T]`
+  --> tests/traits/two_settled_references_through_one_head_may_meet.lin:48:15
+   |
+42 | impl[T: Pair] Give[T.A] for Holder[T] {
+   |               ---- the other implementation
+48 | impl[T: Pair] Give[T.B] for Holder[T] {
+   |               ^^^^ no instantiation may answer to two implementations of one trait

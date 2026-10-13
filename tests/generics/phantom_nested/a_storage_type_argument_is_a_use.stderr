@@ -1,0 +1,5 @@
+error[T-Phantom]: `T` appears in this declaration, and `phantom` says it appears nowhere
+ --> tests/generics/phantom_nested/a_storage_type_argument_is_a_use.lin:9:20
+  |
+9 | struct Vec[phantom T, A] {
+  |                    ^ remove `phantom`: the parameter carries bytes

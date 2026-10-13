@@ -1,0 +1,10 @@
+// A parameter takes one argument. Naming it twice gives it twice, and so does
+// naming one the positional prefix has already filled.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let _twice = add(a: 1, a: 2, b: 3)
+    add(1, 2, a: 3)
+}

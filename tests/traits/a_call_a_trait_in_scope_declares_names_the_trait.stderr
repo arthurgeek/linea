@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Ticket` has no operation `release`
+ --> tests/traits/a_call_a_trait_in_scope_declares_names_the_trait.lin:9:5
+  |
+9 |     ticket.release()
+  |     ^^^^^^^^^^^^^^ `Release` declares it, and `Ticket` does not implement `Release`

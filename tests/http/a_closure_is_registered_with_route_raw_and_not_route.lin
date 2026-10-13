@@ -1,0 +1,14 @@
+// A closure's type is its own, so `route` does not take one: `route_raw`
+// registers a closure of the state and the request.
+import std.http
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", |inout _state: (), request: http.Request| http.text(request, "x"))
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

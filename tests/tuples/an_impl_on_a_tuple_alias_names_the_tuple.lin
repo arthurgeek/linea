@@ -1,0 +1,19 @@
+// An implementation is written against a type's own declaration, so a tuple
+// alias is refused as its head, and the help quotes the whole tuple the alias
+// names.
+alias Pair = (UInt8, Str)
+
+trait First {
+    fn first(self: Self) -> UInt8
+}
+
+impl First for Pair {
+    fn first(self: Self) -> UInt8 {
+        let (n, _) = self
+        n
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

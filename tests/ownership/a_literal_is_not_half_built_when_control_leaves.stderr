@@ -1,0 +1,6 @@
+error[O-Uncommitted]: `Pair` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_literal_is_not_half_built_when_control_leaves.lin:16:33
+   |
+16 |     let p: Pair = .{ a = d, b = return 7 }
+   |                          - it was given up here
+   |                                 ^^^^^^^^ give the value up after this, not before it

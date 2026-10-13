@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `nope`
+ --> tests/control/a_poisoned_break_value_is_reported_once.lin:6:13
+  |
+6 |             nope
+  |             ^^^^ no binding with this name is in scope

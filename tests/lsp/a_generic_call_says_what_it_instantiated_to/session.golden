@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"resolveProvider":false},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"documentSymbolProvider":true,"codeActionProvider":{"codeActionKinds":["quickfix"]},"documentFormattingProvider":true,"renameProvider":true,"foldingRangeProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","variable","number","string","comment","operator"],"tokenModifiers":["declaration","readonly","defaultLibrary","linear"]},"full":true},"inlayHintProvider":{"resolveProvider":false}}}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"plaintext","value":"ident[UInt8] -> UInt8"},"range":{"start":{"line":9,"character":22},"end":{"line":9,"character":30}}}}
+{"jsonrpc":"2.0","id":3,"result":{"contents":{"kind":"plaintext","value":"ident[Bool] -> Bool"},"range":{"start":{"line":10,"character":21},"end":{"line":10,"character":32}}}}
+{"jsonrpc":"2.0","id":4,"result":{"contents":{"kind":"plaintext","value":"T"},"range":{"start":{"line":4,"character":4},"end":{"line":4,"character":11}}}}
+{"jsonrpc":"2.0","id":5,"result":null}

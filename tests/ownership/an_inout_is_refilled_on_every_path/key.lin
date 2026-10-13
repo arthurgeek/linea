@@ -1,0 +1,14 @@
+@linear
+pub enum Key { Forged(UInt8) }
+
+pub fn mint(id: UInt8) -> Key {
+    Key.Forged(id)
+}
+
+pub fn tag(k: Key) -> UInt8 {
+    match read k { Forged(n) => n }
+}
+
+pub fn release(sink k: Key) -> () {
+    match k { Forged(_) => {} }
+}

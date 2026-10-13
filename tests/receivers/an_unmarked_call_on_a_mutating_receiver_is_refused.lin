@@ -1,0 +1,15 @@
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn add(inout self: Self, amount: UInt8) -> () {
+        self.count += amount
+    }
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    counter.add(2)
+    counter.count
+}

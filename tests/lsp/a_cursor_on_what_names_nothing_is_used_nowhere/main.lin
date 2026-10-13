@@ -1,0 +1,5 @@
+// A cursor on something that is not a name reaches no binding, so there is
+// nowhere it is used and nothing to highlight.
+fn main() -> UInt8 {
+    1 + 2
+}

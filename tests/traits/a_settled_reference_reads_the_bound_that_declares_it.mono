@@ -1,0 +1,20 @@
+struct Counter {
+    at: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let c: Counter = .{ at = 3 }
+    ;measured[Counter](c) + Counter;;Show.spell(c)
+}
+
+fn ;measured[Counter](v: Counter) -> UInt8 {
+    Counter;;Measure.of(v)
+}
+
+fn Counter;;Show.spell(x: Counter) -> UInt8 {
+    x.at + 1
+}
+
+fn Counter;;Measure.of(x: Counter) -> UInt8 {
+    x.at
+}

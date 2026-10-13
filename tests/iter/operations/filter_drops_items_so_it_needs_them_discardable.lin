@@ -1,0 +1,44 @@
+// `filter` drops the items its predicate rejects, so its own where clause asks
+// that they be Discardable. A `Ticket` is linear: `filter` refuses a walk of
+// tickets, while `filter_map`, which hands every ticket to its callback to
+// settle, accepts the same walk.
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+// Tickets yields tickets for seats 1 up to `last`.
+struct Tickets {
+    issued: UInt8,
+    last: UInt8,
+}
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.issued == self.last {
+            return .None
+        }
+        self.issued += 1
+        .Some(.{ seat = self.issued })
+    }
+}
+
+// Settle a ticket, keeping its seat when the seat is even.
+fn even_seat(sink ticket: Ticket) -> Option[UInt8] {
+    let Ticket { seat } = ticket
+    if seat % 2 == 0 {
+        .Some(seat)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    let settled = Tickets { issued = 0, last = 4 }
+    let even_seats = settled.filter_map(even_seat).fold(0, |sink total, sink seat| total + seat)
+    let dropped = Tickets { issued = 0, last = 4 }
+    let _refused = dropped.filter(|ticket| ticket.seat % 2 == 0)
+    even_seats
+}

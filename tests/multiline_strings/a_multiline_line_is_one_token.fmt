@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let text =
+        \\first {line}
+        \\"second" \n
+    UInt8(text.length() - 24)
+}

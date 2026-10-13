@@ -1,0 +1,16 @@
+// The case of a name is its first letter's, so digits after a leading `_` do
+// not exempt it: `_1light` is a lowercase name and `_2Big` a capitalised one.
+enum Shade {
+    _1light,
+    Dark,
+}
+
+struct Box {
+    _2Big: UInt8,
+}
+
+fn main() -> UInt8 {
+    let _shade = Shade.Dark
+    let held = Box { _2Big = 1 }
+    held._2Big - 1
+}

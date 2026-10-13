@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `First` and `Second` both declare `count` for `borrow State`
+  --> tests/borrows/transparent/forwarded_readonly_methods_preserve_ambiguity.lin:38:5
+   |
+38 |     view.count()
+   |     ^^^^^^^^^^ write `First.count(…)` or `Second.count(…)`, which says which trait it goes through

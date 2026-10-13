@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Allocator
+use mem.Owner
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 1024)
+    let shelf: Shelf[UInt8, mem.Handle[SystemAllocator]] = .{ items = Vec.new_in(arena.handle()) }
+    let total = shelf.items.length()
+    shelf.release()
+    arena.release()
+    UInt8(total) + 2
+}

@@ -1,0 +1,5 @@
+error[T-Impl]: field delegation is supported only for `Index`
+ --> tests/delegation/index_delegation_rejects_other_traits.lin:5:6
+  |
+5 | impl Other for _Board via values
+  |      ^^^^^ write ordinary members for this trait

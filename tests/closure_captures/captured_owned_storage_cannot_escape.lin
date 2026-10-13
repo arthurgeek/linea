@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let observe = [sink number = UInt8(7)] || -> where borrows(number) borrow number
+    let observation = observe()
+    *observation
+}

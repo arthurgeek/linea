@@ -1,0 +1,8 @@
+// The name reaches nothing, which is said where it is written. Whether the
+// initialiser is a constant expression is a question about a name that does
+// not exist, and answering it as well would report one mistake twice.
+pub let x: UInt8 = nosuchname
+
+fn main() -> UInt8 {
+    x
+}

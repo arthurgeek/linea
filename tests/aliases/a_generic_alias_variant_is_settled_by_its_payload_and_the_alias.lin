@@ -1,0 +1,15 @@
+alias Failing[T] = Result[T, Int64]
+alias Maybe[T] = Option[T]
+
+fn main() -> UInt8 {
+    let answer = Failing.Ok(3)
+    let nothing: Maybe[UInt8] = Maybe.None
+    let held = match nothing {
+        Some(v) => v,
+        None => 4,
+    }
+    match answer {
+        Ok(v) => UInt8(v) + held,
+        Err(_) => 0,
+    }
+}

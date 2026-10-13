@@ -1,0 +1,6 @@
+// The first closure takes a number of cents and the second takes a name, so
+// they are called differently and no one type can hold both.
+fn main() -> UInt8 {
+    let rules = [|cents: UInt64| cents + 1, |name: Str| name.length()]
+    UInt8(rules.length())
+}

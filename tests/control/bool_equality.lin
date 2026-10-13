@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let yes = true
+    let both = yes == true
+    let _ = both
+    1
+}

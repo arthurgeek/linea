@@ -1,0 +1,30 @@
+error[O-Move]: `Triple.first` has already been moved
+  --> tests/construction_derive/construct_moved_components_keep_their_own_provenance.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code for `Triple.first`
+43 | struct Triple { first: Token, second: Token, third: Token }
+   |                 ----- the code was generated for this field
+47 | derive Build for Triple
+   |        ^^^^^ it was already taken, and a value is taken once
+   |        ----- it was taken here
+error[O-Move]: `Triple.second` has already been moved
+  --> tests/construction_derive/construct_moved_components_keep_their_own_provenance.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code for `Triple.second`
+43 | struct Triple { first: Token, second: Token, third: Token }
+   |                               ------ the code was generated for this field
+47 | derive Build for Triple
+   |        ^^^^^ it was already taken, and a value is taken once
+   |        ----- it was taken here
+error[O-Move]: `Triple.third` has already been moved
+  --> tests/construction_derive/construct_moved_components_keep_their_own_provenance.lin:47:8
+   |
+25 |         let result: Self = reflect.construct(
+   |                            ------------------ generated from this template code for `Triple.third`
+43 | struct Triple { first: Token, second: Token, third: Token }
+   |                                              ----- the code was generated for this field
+47 | derive Build for Triple
+   |        ^^^^^ it was already taken, and a value is taken once
+   |        ----- it was taken here

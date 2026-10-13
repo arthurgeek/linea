@@ -1,0 +1,5 @@
+error[O-Lent]: this uses the iterator the walk around it is advancing
+  --> tests/iter/lent_walks/a_lent_walk_keeps_its_iterator_to_itself.lin:13:24
+   |
+13 |         let _skipped = &pending.next()
+   |                        ^^^^^^^^^^^^^^^ the walk holds it until the loop ends; use it after the loop

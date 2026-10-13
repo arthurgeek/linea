@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Copyable`, and `Key` does not have that capability
+  --> tests/generics/a_bound_admits_an_inferred_argument.lin:17:13
+   |
+17 |     let m = Maybe.Just(Key.Forged(1))
+   |             ^^^^^ use a type meeting the capability requirement, or relax the bound

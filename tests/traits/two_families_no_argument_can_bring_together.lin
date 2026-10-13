@@ -1,0 +1,36 @@
+// Two families no argument can bring together. `Give[Pair[T, T]]` demands one
+// type for both fields, and `Give[Pair[Bool, Str]]` names two that differ, so
+// no substitution makes the two argument lists equal and the heads never get
+// asked.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[Pair[T, T]] for Holder[T] {
+    fn give(_self: Self, _u: Pair[T, T]) -> UInt8 {
+        6
+    }
+}
+
+impl[U] Give[Pair[Bool, Str]] for Holder[U] {
+    fn give(_self: Self, _u: Pair[Bool, Str]) -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Bool] = .{ v = true }
+    let n: Holder[UInt8] = .{ v = 9 }
+    let p: Pair[Bool, Bool] = .{ a = true, b = true }
+    let q: Pair[Bool, Str] = .{ a = true, b = "x" }
+    Give.give(h, p) + Give.give(n, q)
+}

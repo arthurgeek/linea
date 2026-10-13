@@ -1,0 +1,68 @@
+==================
+Applied and grouped type selections
+==================
+
+fn first[T](_value: module.Wrapper[T].Item) -> (Wrapper[T]).Item.Next {}
+fn second(_value: [UInt8; 2].Item) -> () {}
+fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (parameter_list
+      (parameter
+        (identifier)
+        (settled_ref_type
+          (settled_ref_type
+            (type_identifier)
+            (type_identifier)
+            (type_arguments
+              (type_identifier)))
+          (type_identifier))))
+    (settled_ref_type
+      (settled_ref_type
+        (grouped_type
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_identifier))))
+        (type_identifier))
+      (type_identifier))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (settled_ref_type
+          (array_type
+            (type_identifier)
+            (integer_literal))
+          (type_identifier))))
+    (unit_type)
+    (block))
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (parameter_list
+      (parameter
+        (identifier)
+        (settled_ref_type
+          (grouped_type
+            (callable_type
+              (parameter_list
+                (parameter
+                  (convention)
+                  (identifier)
+                  (type_identifier)))
+              (type_identifier)))
+          (type_identifier))))
+    (unit_type)
+    (block)))

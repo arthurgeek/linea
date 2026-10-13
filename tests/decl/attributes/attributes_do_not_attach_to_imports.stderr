@@ -1,0 +1,5 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/decl/attributes/attributes_do_not_attach_to_imports/main.lin:1:1
+  |
+1 | @copyable
+  | ^ place them before a struct, enum, or newtype

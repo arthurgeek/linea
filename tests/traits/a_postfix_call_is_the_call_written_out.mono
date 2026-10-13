@@ -1,0 +1,13 @@
+struct Account {
+    balance: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let a: Account = .{ balance = 3 }
+    let flag: Bool = true
+    Account;;Measure.of[Bool](a, flag) + Account;;Measure.of[Bool](a, flag)
+}
+
+fn Account;;Measure.of[Bool](x: Account, _u: Bool) -> UInt8 {
+    x.balance
+}

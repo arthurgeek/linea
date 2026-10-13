@@ -1,0 +1,5 @@
+error[T-Const]: `wide` is not a constant expression
+  --> tests/struct_update/a_constant_base_must_be_constant.lin:12:18
+   |
+12 | let wide: Size = .{ width = 8, ..measure() }
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^ give it something the language can work out without running anything

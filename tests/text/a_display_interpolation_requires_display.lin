@@ -1,0 +1,20 @@
+// An ordinary interpolation still requires Display when Debug exists.
+import std.io
+
+use io.IoError
+use io.println
+
+@copyable
+struct DebugOnly {}
+
+impl Debug for DebugOnly {
+    fn debug[W: Writer](_self: DebugOnly, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "debug")
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let value: DebugOnly = .{}
+    println("{value}")?
+    return .Ok(0)
+}

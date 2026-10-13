@@ -1,0 +1,8 @@
+struct Entry { value: UInt8 }
+
+fn main() -> UInt8 {
+    let entry: Entry = .{ value = 7 }
+    let view = borrow entry
+    (*view).value = 9
+    entry.value
+}

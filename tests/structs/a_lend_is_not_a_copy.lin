@@ -1,0 +1,39 @@
+// A `read` aggregate parameter is reached through the caller's storage rather
+// than copied into the callee's own. What a lend may do is what makes that
+// safe: it cannot be written, and moving out of one is [O-Move], so the body
+// can only read -- and no other argument may mutate the same place for the
+// duration of the call.
+//
+// Nothing here can tell which of the two happened, which is the point. This
+// case is what says so: two lends of one place, and a copy taken from one of
+// them and written through. If the copy shared the caller's storage, every
+// read below would see the 9.
+@copyable
+struct P {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn both(a: P, b: P) -> UInt8 {
+    var c: P = copy(a)
+    c.x = 9
+    c.x + b.x + a.x
+}
+
+fn read_it(a: P) -> UInt8 {
+    a.x
+}
+
+fn main() -> UInt8 {
+    let p: P = .{ x = 1, y = 2 }
+
+    // And a lend spanning a write the caller makes afterwards: the second
+    // call sees the new value because it reads the caller's storage, and the
+    // first saw the old one because it had already returned.
+    var q: P = .{ x = 1, y = 2 }
+    let before: UInt8 = read_it(q)
+    q.x = 5
+    let after: UInt8 = read_it(q)
+
+    both(p, p) + before + after + q.y
+}

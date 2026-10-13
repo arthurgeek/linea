@@ -1,0 +1,131 @@
+import std.mem
+import std.testing
+
+// Render `x` to standard output and report a failed write.
+pub fn print[T: Display](x: T) -> Result[(), IoError] {
+    var w = stdout()
+    x.fmt(&w)
+}
+
+test fn print_renders_a_value_to_standard_output() {
+    // The test runner discards what a test writes to standard output.
+    testing.assert(print("ready").is_ok(), "writing text to standard output failed")?
+    testing.assert(print(1250).is_ok(), "writing a number to standard output failed")?
+    .Ok(())
+}
+
+// Render a value and append a line ending to the supplied writer.
+pub fn line[T: Display, W: Writer](x: T, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    x.fmt(&w)?
+    &w.write_str("\n")
+}
+
+test fn a_line_is_the_value_and_the_ending_after_it() {
+    let a = mem.system()
+    var w = testing.Recorder.of(a, 64) else |_| {
+        return testing.assert(false, "a recorder was refused")
+    }
+    let wrote = line("hello", &w).is_ok()
+    let said = w.holds("hello\n")
+    w.release()
+
+    testing.assert(wrote, "writing a line into a recorder failed")?
+    testing.assert(said, "a line is not the value and the ending after it")?
+
+    var w = testing.Recorder.of(a, 64) else |_| {
+        return testing.assert(false, "a recorder was refused")
+    }
+    let wrote = line(1250, &w).is_ok()
+    let said = w.holds("1250\n")
+    w.release()
+
+    testing.assert(wrote, "writing a number into a recorder failed")?
+    testing.assert(said, "a rendered number is not followed by the ending")?
+
+    .Ok(())
+}
+
+// Render `x` and a line ending to standard output, and report a failed write.
+pub fn println[T: Display](x: T) -> Result[(), IoError] {
+    var w = stdout()
+    line(x, &w)
+}
+
+test fn println_ends_the_value_with_a_line_on_standard_output() {
+    testing.assert(println("ready").is_ok(), "writing a line to standard output failed")?
+    .Ok(())
+}
+
+// Render `x` to `w` and ignore a failed write. `eprint` writes to standard
+// error this way.
+fn eprint_to[T: Display, W: Writer](x: T, inout w: W) -> () where W.Error: Discardable {
+    match x.fmt(&w) {
+        _ => {},
+    }
+}
+
+// Render `x` to standard error and ignore a failed write: standard-error
+// output is best-effort debugging output.
+pub fn eprint[T: Display](x: T) -> () {
+    var w = stderr()
+    eprint_to(x, &w)
+}
+
+test fn eprint_renders_a_value_and_ignores_a_refused_write() {
+    // The test runner shows what a test wrote to standard error only when it
+    // fails.
+    eprint("checked")
+    var recorder = testing.Recorder.of(mem.system(), 16).unwrap()
+    eprint_to(1250, &recorder)
+    let rendered = recorder.holds("1250")
+    recorder.release()
+    testing.assert(rendered, "eprint did not render its value")?
+    // No process has descriptor -1, so every write to it is refused.
+    var refusing = descriptor(-1)
+    eprint_to("lost", &refusing)
+    .Ok(())
+}
+
+// Render `x` and a line ending to `w`, and ignore a failed write. `eprintln`
+// writes to standard error this way.
+fn eprintln_to[T: Display, W: Writer](x: T, inout w: W) -> () where W.Error: Discardable {
+    match line(x, &w) {
+        _ => {},
+    }
+}
+
+// Render `x` and a line ending to standard error, and ignore a failed write.
+pub fn eprintln[T: Display](x: T) -> () {
+    var w = stderr()
+    eprintln_to(x, &w)
+}
+
+test fn eprintln_renders_a_line_and_ignores_a_refused_write() {
+    eprintln("checked")
+    var recorder = testing.Recorder.of(mem.system(), 16).unwrap()
+    eprintln_to("ready", &recorder)
+    let rendered = recorder.holds("ready\n")
+    recorder.release()
+    testing.assert(rendered, "eprintln did not end its value with a line")?
+    // No process has descriptor -1, so every write to it is refused.
+    var refusing = descriptor(-1)
+    eprintln_to("lost", &refusing)
+    .Ok(())
+}
+
+// Generated entry-point code calls `report` with the error `main` returned: it
+// writes the error to standard error and gives the process exit status 1.
+fn report[E: Display](e: E) -> UInt8 {
+    eprint("error: ")
+    eprintln(e)
+    1
+}
+
+// Generated test-entry code calls `ran` to turn a test's result into its exit
+// status: 0 when it passed, and 1 after reporting its error.
+fn ran[E: Display](r: Result[(), E]) -> UInt8 {
+    match read r {
+        Ok(_) => 0,
+        Err(e) => report(e),
+    }
+}

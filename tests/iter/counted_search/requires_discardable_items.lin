@@ -1,0 +1,32 @@
+@linear
+enum Token {
+    One,
+}
+
+struct Tokens {
+    done: Bool,
+}
+
+impl Iterator for Tokens {
+    type Item = Token
+
+    fn next(inout self: Tokens) -> Option[Token] {
+        if self.done {
+            return .None
+        } else {
+            self.done = true
+            return .Some(.One)
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var tokens: Tokens = .{ done = false }
+    let report = &tokens.find_counted(|item| match read item { One => true })
+    let { found, inspected: _inspected } = report
+    match found {
+        Some(item) => match item { One => {} },
+        None => {},
+    }
+    0
+}

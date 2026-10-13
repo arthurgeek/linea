@@ -1,0 +1,14 @@
+// A generic signature resolves its parameters in the declaration that wrote
+// it, then substitutes the arguments supplied by the call.
+struct Cell[T] { v: T }
+
+fn bump[T: Copyable](inout c: Cell[T], x: T) -> () where retains(c.v: x) {
+    c.v = copy(x)
+}
+
+fn main() -> UInt8 {
+    var c: Cell[UInt8] = .{ v = 1 }
+    let n: UInt8 = 7
+    bump(&c, n)
+    c.v
+}

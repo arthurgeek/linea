@@ -1,0 +1,14 @@
+// `handler.run(3)` looks for an operation named `run`, and `Handler` declares
+// none. The field `run` holds a function, which `(handler.run)(3)` calls.
+struct Handler {
+    run: fn(n: UInt8) -> UInt8,
+}
+
+fn double(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    let handler: Handler = .{ run = double }
+    handler.run(3)
+}

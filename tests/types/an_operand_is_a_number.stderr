@@ -1,0 +1,5 @@
+error[T-Operands]: `P` is not a number
+  --> tests/types/an_operand_is_a_number.lin:18:18
+   |
+18 |     let r: P = p * q
+   |                  ^ arithmetic is defined over integers

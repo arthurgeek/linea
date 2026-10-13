@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/arrays/an_index_is_within_the_bound.lin:6:8
+  |
+6 |     xs[9]
+  |        ^ the length is 3, so the last index is 2

@@ -1,0 +1,19 @@
+Dear {name},
+your order has shipped.
+== {title} ==
+Regards,
+Kind regards,
+The shop
+brief
+at
+length
+{"ok": true, "path": "C:\temp", "escaped": "\n"}
+[first
+
+third
+]
+left
+    four spaces in
+a single line
+8 5
+https://example.com // not a comment

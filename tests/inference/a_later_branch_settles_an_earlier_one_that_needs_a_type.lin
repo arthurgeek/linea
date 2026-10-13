@@ -1,0 +1,20 @@
+// With nothing expected of the `if`, the arm that names its type settles the
+// arm that needs one, whichever is written first: `Option.None` names
+// `Option` but not what it holds, and `Option.Some(code)` says `UInt8`.
+fn kept(code: UInt8, keep: Bool) -> UInt8 {
+    let held = if keep {
+        Option.Some(code)
+    } else {
+        Option.None
+    }
+    let dropped = if keep {
+        Option.None
+    } else {
+        Option.Some(code)
+    }
+    held.unwrap_or(0) + dropped.unwrap_or(0)
+}
+
+fn main() -> UInt8 {
+    kept(7, true) + kept(5, false)
+}

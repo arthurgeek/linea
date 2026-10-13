@@ -1,0 +1,18 @@
+// `?` on a `None` returns `None` from the enclosing function, and what follows
+// does not run. The two paths answer with different numbers, so a `?` that
+// wrongly fell through is a different exit status and not the same one.
+fn none() -> Option[UInt8] {
+    Option.None
+}
+
+fn go() -> Option[UInt8] {
+    let _n = none()?
+    Option.Some(9)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 3,
+    }
+}

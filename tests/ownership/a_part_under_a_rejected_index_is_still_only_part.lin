@@ -1,0 +1,45 @@
+// `holder[9]` reaches past the end of the array the implementation projects,
+// and `holder.slots[5]` past the end of the array itself, so each index is
+// refused. Each selection still names only part of `holder`, and no position
+// takes part of a binding, so each partial move is reported too.
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+struct Slot {
+    ticket: Ticket,
+}
+
+struct Holder {
+    slots: [Slot; 2],
+}
+
+impl Index[UInt64] for Holder {
+    type Elem = Slot
+
+    proj at(inout self: Holder, i: UInt64) -> Slot {
+        self.slots[i]
+    }
+}
+
+fn release(sink _holder: Holder) -> UInt8 {
+    0
+}
+
+fn direct() -> UInt8 {
+    let holder = Holder { slots = [Slot { ticket = Ticket.Seat(1) }, Slot { ticket = Ticket.Seat(2) }] }
+    let ticket = holder.slots[5].ticket
+    redeem(ticket) + release(holder)
+}
+
+fn main() -> UInt8 {
+    let holder = Holder { slots = [Slot { ticket = Ticket.Seat(1) }, Slot { ticket = Ticket.Seat(2) }] }
+    let ticket = holder[9].ticket
+    redeem(ticket) + release(holder) + direct()
+}

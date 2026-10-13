@@ -1,0 +1,12 @@
+// A dotted name in a type position reaches what the module declares under it,
+// and what it reaches has to be a type: a module holds functions and constants
+// under the same dot, and neither is something a value can have.
+import pct
+
+fn width(_t: pct.thing) -> UInt8 {
+    3
+}
+
+fn main() -> UInt8 {
+    width(pct.thing())
+}

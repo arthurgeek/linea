@@ -1,0 +1,14 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/an_assignment_aliases_an_argument.lin:31:9
+   |
+31 |         p,
+   |         ^ already assigned here
+33 |             p.x = 9
+   |             ------- assigned by this argument
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/decl/an_assignment_aliases_an_argument.lin:37:9
+   |
+37 |         n,
+   |         ^ already assigned here
+39 |             n = 9
+   |             ----- assigned by this argument

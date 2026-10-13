@@ -1,0 +1,22 @@
+// An unused use binding is rejected. Oom is named explicitly, while the
+// inferred buffer value does not use the imported Buffer name.
+import std.mem
+
+use mem.Buffer
+use mem.Oom
+use mem.system
+
+fn take(n: UInt64) -> Result[UInt64, Oom] {
+    let a = system()
+    let b = a.acquire(n)?
+    let len = b.length()
+    Allocator.dispose(b)
+    return .Ok(len)
+}
+
+fn main() -> UInt8 {
+    match take(8) {
+        Ok(n) => UInt8(n),
+        Err(_) => 1,
+    }
+}

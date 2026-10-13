@@ -1,0 +1,29 @@
+// A generic function is lowered once per instantiation, from a queue that
+// starts at the entry point. Two calls at one argument reach one function;
+// two arguments make two; a generic declaration nothing calls is never
+// lowered at all -- reachability falls out rather than being computed, so
+// there is no dead-instantiation pass because there is nothing dead.
+//
+// The `.mono` golden is what records this: the program with its generics gone
+// holds one copy of `ident` per argument type, and a second emission of one
+// instantiation, or a merged pair, would show there.
+fn ident[T: Copyable](a: T) -> T {
+    copy(a)
+}
+
+fn _never_called[T: Copyable](a: T) -> T {
+    copy(a)
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    let once: UInt8 = ident(n)
+    let twice: UInt8 = ident(once)
+    let other: Bool = ident(true)
+
+    if other {
+        twice
+    } else {
+        0
+    }
+}

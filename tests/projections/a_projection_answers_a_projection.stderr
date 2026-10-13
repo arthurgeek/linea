@@ -1,0 +1,5 @@
+error[T-Projection]: `Reach` declares `one` as an operation, and this implementation supplies a projection
+  --> tests/projections/a_projection_answers_a_projection.lin:14:10
+   |
+14 |     proj one(self: Grid) -> UInt8 {
+   |          ^^^ supply the member the trait declares

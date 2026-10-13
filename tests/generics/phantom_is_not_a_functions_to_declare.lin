@@ -1,0 +1,10 @@
+// A phantom parameter is read for identity, and a function's body reads no
+// parameter for identity alone -- branding belongs to the type that carries
+// the distinction, and a function borrows it by naming that type.
+fn tagged[phantom Tag](x: UInt8) -> UInt8 {
+    x
+}
+
+fn main() -> UInt8 {
+    tagged(1)
+}

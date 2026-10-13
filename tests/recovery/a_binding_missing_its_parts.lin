@@ -1,0 +1,9 @@
+// A `let` is a name, an optional annotation, and an initialiser. Each piece
+// missing is its own report, because the piece is what the writer has to
+// supply -- and a destructuring `let` names what it takes apart, so it wants
+// the `=` for a reason a plain binding does not.
+fn main() -> UInt8 {
+    let a: UInt8
+    let .{ x = b }
+    a
+}

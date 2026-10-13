@@ -1,0 +1,10 @@
+error[N-Undefined]: unknown trait `Nonesuch`
+ --> tests/traits/a_declared_types_bound_names_a_trait.lin:8:16
+  |
+8 |     type Iter: Nonesuch
+  |                ^^^^^^^^ no trait with this name is declared
+error[N-Undefined]: unknown trait `Counter`
+ --> tests/traits/a_declared_types_bound_names_a_trait.lin:9:16
+  |
+9 |     type Held: Counter
+  |                ^^^^^^^ no trait with this name is declared

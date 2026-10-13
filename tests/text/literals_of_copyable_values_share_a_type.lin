@@ -1,0 +1,38 @@
+// A value that can be copied is held by the literal whether it is a variable
+// or computed in the braces, so literals that differ only in where their
+// value comes from have one type: a variable may be reassigned from either,
+// and the arms of an `if` or a `match` may choose between them.
+import std.io
+
+use io.IoError
+use io.println
+
+fn guest() -> Str {
+    "Ada"
+}
+
+fn fallback() -> Str {
+    "nobody"
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let host = "Bob"
+    var line = "hi {host}"
+    println(line)?
+    line = "hi {guest()}"
+    println(line)?
+    let first = true
+    let chosen = if first {
+        "x {host}"
+    } else {
+        "x {guest()}"
+    }
+    println(chosen)?
+    let found: Option[Str] = .None
+    let greeting = match read found {
+        Some(who) => "hello {who}",
+        None => "hello {fallback()}",
+    }
+    println(greeting)?
+    return .Ok(0)
+}

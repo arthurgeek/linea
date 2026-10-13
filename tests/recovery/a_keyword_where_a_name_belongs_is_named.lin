@@ -1,0 +1,29 @@
+// A keyword cannot name anything. Each place that declares a name reports
+// the keyword written there once, and parsing goes on after it.
+struct Box {
+    match: UInt8,
+    size: UInt8,
+}
+
+enum Kind {
+    template,
+    Plain(UInt8),
+}
+
+fn match(count: UInt8) -> UInt8 {
+    count
+}
+
+fn take[for](count: UInt8, match: UInt8) -> UInt8 {
+    count
+}
+
+fn main() -> UInt8 {
+    let template = 3
+    let _pick = |match: UInt8| 1
+    for match in [1, 2] {}
+    let box = Box { size = 1 }
+    match Kind.Plain(2) {
+        Plain(match) => box.size + take(1, 2),
+    }
+}

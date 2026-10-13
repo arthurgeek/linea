@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(read Str = "two") -> UInt64`, found `fn(read Str = "one") -> UInt64`
+  --> tests/constants/callable_string_defaults_differ.lin:10:18
+   |
+5  | fn invoke[F: fn(read value: Str = "two") -> UInt64](callback: F) -> UInt64 {
+   |                                                     -------- expected because of this parameter
+10 |     UInt8(invoke(size))
+   |                  ^^^^ expected `fn(read Str = "two") -> UInt64`, found `fn(read Str = "one") -> UInt64`

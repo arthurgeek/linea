@@ -1,0 +1,5 @@
+error[M-Vis]: `pick` is private to `alpha`
+  --> tests/modules/a_reexport_reaches_through_its_own_import/main.lin:11:15
+   |
+11 | pub use alpha.pick
+   |               ^^^^ declare it `pub` in its own module, or do not name it here

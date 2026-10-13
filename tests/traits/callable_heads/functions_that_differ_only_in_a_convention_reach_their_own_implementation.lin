@@ -1,0 +1,49 @@
+// Callable heads that differ only in a parameter's convention are different
+// shapes, so each function reaches the implementation written for its own.
+trait Describe {
+    fn describe(self: Self) -> UInt8
+}
+
+impl Describe for fn(value: UInt8) -> UInt8 {
+    fn describe(self: Self) -> UInt8 {
+        self(0) + 1
+    }
+}
+
+impl Describe for fn(inout value: UInt8) -> UInt8 {
+    fn describe(self: Self) -> UInt8 {
+        var value: UInt8 = 0
+        self(&value) + 2
+    }
+}
+
+impl Describe for fn(sink value: UInt8) -> UInt8 {
+    fn describe(self: Self) -> UInt8 {
+        self(0) + 4
+    }
+}
+
+fn borrowed(value: UInt8) -> UInt8 {
+    value
+}
+
+fn changed(inout value: UInt8) -> UInt8 {
+    value += 0
+    value
+}
+
+fn consumed(sink value: UInt8) -> UInt8 {
+    value
+}
+
+fn describe[H: Describe](handler: H) -> UInt8 {
+    handler.describe()
+}
+
+fn main() -> UInt8 {
+    if describe(borrowed) == 1 && describe(changed) == 2 && describe(consumed) == 4 {
+        0
+    } else {
+        1
+    }
+}

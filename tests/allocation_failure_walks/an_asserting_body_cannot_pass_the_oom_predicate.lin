@@ -1,0 +1,21 @@
+import std.mem
+import std.testing
+
+// `testing.oom_is_a_refusal` answers for `mem.Oom` alone. A body returning
+// `testing.Failure` may fail an assertion on a refused run, so it must say
+// which failures are refusals with `testing.Failure.is_refusal`, and passing
+// the `Oom` predicate is refused.
+fn main() -> UInt8 {
+    let walked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), testing.Failure] {
+            let held = allocator.acquire(8) else |_| {
+                return testing.assert(false, "the buffer was refused")
+            }
+            held.release()
+            .Ok(())
+        },
+        testing.oom_is_a_refusal,
+    )
+    UInt8(walked.unwrap_or(0))
+}

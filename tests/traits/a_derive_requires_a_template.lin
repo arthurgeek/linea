@@ -1,0 +1,12 @@
+trait Structural {}
+
+struct Mark {
+    value: UInt8,
+}
+
+derive Structural for Mark
+
+fn main() -> UInt8 {
+    let _mark: Mark = .{ value = 1 }
+    0
+}

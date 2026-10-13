@@ -1,0 +1,35 @@
+// Outside `box_office` a `Ticket` can only come from `sell`, and can only end
+// through `redeem` or `refund`: it cannot be taken apart there.
+@(opaque, linear)
+struct Ticket {
+    seat: UInt8,
+    cents: UInt64,
+}
+
+impl Ticket {
+    pub fn sell(seat: UInt8) -> Ticket {
+        .{ seat = seat, cents = 4500 }
+    }
+
+    pub fn redeem(sink self: Ticket) -> UInt8 {
+        let Ticket { seat, cents: _ } = self
+        seat
+    }
+
+    pub fn refund(sink self: Ticket) -> UInt64 {
+        let Ticket { seat: _, cents } = self
+        cents
+    }
+
+    fn void(sink self: Ticket) -> () {
+        let Ticket { seat: _, cents: _ } = self
+    }
+}
+
+pub fn cancel_all(sink ticket: Ticket) -> () {
+    ticket.void()
+}
+
+pub fn seat_of(ticket: Ticket) -> UInt8 {
+    ticket.seat
+}

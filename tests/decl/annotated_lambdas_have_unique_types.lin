@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let first = |value: UInt8| value
+    let second = |value: UInt8| value
+    first(2) + second(3)
+}

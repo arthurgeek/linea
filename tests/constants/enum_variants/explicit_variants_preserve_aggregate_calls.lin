@@ -1,0 +1,17 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+fn select(mode: Mode) -> UInt64 {
+    match read mode { Preserve => 7, Exact(bits) => bits }
+}
+
+fn invoke[F: fn(mode: Mode) -> UInt64](callback: F, mode: Mode) -> UInt64 {
+    callback(mode)
+}
+
+fn main() -> UInt8 {
+    if select(Mode.Preserve) == 7 && select((.Preserve)) == 7 && invoke(select, .Preserve) == 7 && invoke(select, .Exact(384)) == 384 {
+        0
+    } else {
+        1
+    }
+}

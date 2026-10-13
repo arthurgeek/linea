@@ -1,0 +1,5 @@
+error[S-Match]: a field's binder is a name
+  --> tests/structs/a_field_pattern_read_binds_a_name.lin:11:19
+   |
+11 |         Pair { a: 1, b: _ } => 1,
+   |                   ^ a struct pattern binds each field to a name, and compares none

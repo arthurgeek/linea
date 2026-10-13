@@ -1,0 +1,29 @@
+// A callable type's contract is part of its identity. An implementation for
+// functions whose result carries from `text` is a function value of exactly
+// that contract, and the trait's operation lends its result on to the caller.
+trait Pick {
+    fn pick(self: Self, text: Str) -> Str where carries(text)
+}
+
+impl Pick for fn(text: Str) -> Str where carries(text) {
+    fn pick(self: Self, text: Str) -> Str where carries(text) {
+        self(text)
+    }
+}
+
+fn same(text: Str) -> Str where carries(text) {
+    copy(text)
+}
+
+fn run[H: Pick](handler: H, text: Str) -> Str where carries(text) {
+    handler.pick(text)
+}
+
+fn main() -> UInt8 {
+    let kept = run(same, "kept")
+    if kept == "kept" {
+        0
+    } else {
+        1
+    }
+}

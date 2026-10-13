@@ -1,0 +1,27 @@
+// A settled reference stands wherever a type stands, and an array's element is
+// one of those places. The annotation here names no type of its own -- an array
+// is written rather than named -- so what is written inside it is reached by
+// walking the type and not by reading a head.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        let held: [Self.Item; 2] = [x.at, 1]
+        held[0] + held[1]
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

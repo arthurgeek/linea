@@ -1,0 +1,101 @@
+// A generic implementation binds its whole head before checking what each
+// parameter requires. The callable bound on `F` therefore reads `I.Item`
+// through the concrete `I` in the same receiver.
+trait Source {
+    type Item
+
+    fn take(sink self: Self) -> Self.Item
+}
+
+struct Counter {
+    value: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn take(sink self: Counter) -> UInt8 {
+        let Counter { value } = self
+        value
+    }
+}
+
+struct Wrapped[T] {
+    value: Option[T],
+}
+
+impl[T] Source for Wrapped[T] {
+    type Item = Option[T]
+
+    fn take(sink self: Wrapped[T]) -> Option[T] {
+        let Wrapped { value } = self
+        value
+    }
+}
+
+struct Adapter[I, F] {
+    source: I,
+    transform: F,
+}
+
+fn adapt[
+    I: Source,
+    F: fn(sink item: I.Item) -> I.Item + Discardable,
+](sink source: I, sink transform: F) -> Adapter[I, F] where carries(source, transform) {
+    .{ source = source, transform = transform }
+}
+
+trait Apply {
+    type Output
+
+    fn apply(sink self: Self) -> Self.Output
+}
+
+impl[
+    I: Source,
+    F: fn(sink item: I.Item) -> I.Item + Discardable,
+] Apply for Adapter[I, F] {
+    type Output = I.Item
+
+    fn apply(sink self: Adapter[I, F]) -> I.Item {
+        let Adapter { source, transform } = self
+        transform(Source.take(source))
+    }
+}
+
+trait Forward {
+    type Output
+
+    fn forward(sink self: Self) -> Self.Output
+}
+
+impl[
+    I: Source,
+    F: fn(sink item: I.Item) -> I.Item + Discardable,
+] Forward for Adapter[I, F] {
+    type Output = I.Item
+
+    fn forward(sink self: Adapter[I, F]) -> I.Item {
+        Apply.apply(self)
+    }
+}
+
+fn main() -> UInt8 {
+    let counter: Counter = .{ value = 4 }
+    let adapter = adapt(counter, |sink item| item * 2)
+    if Forward.forward(adapter) != 8 {
+        return 1
+    }
+
+    let value: Option[UInt8] = .Some(5)
+    let wrapped: Wrapped[UInt8] = .{ value = value }
+    let constructed = adapt(wrapped, |sink item| item)
+    match Forward.forward(constructed) {
+        Some(item) => if item == 5 {
+            0
+        } else {
+            1
+        },
+        None => 1,
+    }
+}

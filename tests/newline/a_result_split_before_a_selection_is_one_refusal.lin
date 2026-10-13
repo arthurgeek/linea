@@ -1,0 +1,30 @@
+// A result type ends at a line break, so a selection on the next line is not
+// part of it. Nothing in a declaration's position can open with `.`, so the
+// line is read with the type and refused once, and nothing else is refused
+// for the type the declaration was left without.
+trait Source {
+    type Item
+    fn next(self: Self) -> Self
+        .Item
+}
+
+struct Counter {
+    n: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn next(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn first[S: Source](s: S) -> S
+    .Item {
+    s.next()
+}
+
+fn main() -> UInt8 {
+    first(Counter { n = 1 }) - 1
+}

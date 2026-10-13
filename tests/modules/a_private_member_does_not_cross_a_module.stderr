@@ -1,0 +1,5 @@
+error[M-Vis]: `secret` is private to `a`
+ --> tests/modules/a_private_member_does_not_cross_a_module/main.lin:8:13
+  |
+8 |     a.Thing.secret()
+  |             ^^^^^^ declare it `pub` in its own module, or do not name it here

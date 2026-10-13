@@ -1,0 +1,12 @@
+// Every `UInt8` is an `Int64`, so this answers `.Some` with no check. The
+// wrapper is what an optimiser removes rather than what a program pays for,
+// which is why a total conversion needs no separate trait to say it cannot
+// fail.
+fn main() -> UInt8 {
+    let small: UInt8 = 7
+    let wide: Option[Int64] = TryFrom.try_from(small)
+    match wide {
+        None => 0,
+        Some(n) => UInt8(n),
+    }
+}

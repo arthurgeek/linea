@@ -1,0 +1,27 @@
+// The other half of the rule. A declared type stands alone inside the braces
+// that declare it and nowhere else, and an implementation's braces are not
+// those: what an implementation writes is the type it settled or the reference
+// that names it, so a bare `Item` here is read where every other written name
+// is read and reaches whatever the module declares under it -- which is
+// nothing.
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+
+    fn get(self: Box) -> Item {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

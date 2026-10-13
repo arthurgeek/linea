@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/projections/a_folded_index_past_a_generic_arrays_length_traps.lin:4:16

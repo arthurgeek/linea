@@ -1,0 +1,5 @@
+error[T-Const]: a constant of `Ticket` would be built where nothing settles it
+ --> tests/constants/aggregates/linear_record.lin:4:22
+  |
+4 | let ticket: Ticket = .{ serial = 7 }
+  |                      ^^^^^^^^^^^^^^^ a value of this type must be settled, so it cannot be a constant

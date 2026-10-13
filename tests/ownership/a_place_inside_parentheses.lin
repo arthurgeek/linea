@@ -1,0 +1,40 @@
+// Parentheses are a node in the tree, because a formatter that dropped them
+// would rewrite the programmer's source. Every walk that asks what an
+// expression *names* therefore has to step through them, and three did not.
+//
+// The reads below were silently unchecked: `(o).z` named nothing, so a move
+// out of a part was never seen. The writes did not parse at all, so one
+// spelling of a place could be read and not written -- a rule a reader cannot
+// predict from the syntax.
+struct Inner {
+    y: UInt8,
+}
+
+struct Outer {
+    inner: Inner,
+    z: UInt8,
+}
+
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+// Two disjoint places under one root. A comparison that stopped at the
+// parenthesis found the bare `o` inside and reported everything under it.
+fn split(inout n: UInt8, i: Inner) -> UInt8 {
+    n = 1
+    i.y
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+
+    // Written through, at depth, inside parentheses.
+    (o).inner.y = 7
+    bump(&(o).inner.y)
+
+    // Read out of, where the position takes the value.
+    let taken: UInt8 = (o).inner.y
+
+    split(&(o).z, (o).inner) + taken + o.z
+}

@@ -1,0 +1,5 @@
+error[S-Range]: a range does not end a range
+ --> tests/ranges/a_chain_in_a_pattern_is_one_mistake.lin:7:13
+  |
+7 |         0..3..9 => 1,
+  |             ^^ neither association means anything

@@ -1,0 +1,10 @@
+error[T-UnknownOperation]: `refund` is declared by `Refund`, which is not in scope here
+  --> tests/modules/a_call_on_a_sealed_type_finds_operations_not_parts/main.lin:10:5
+   |
+10 |     ticket.refund()
+   |     ^^^^^^^^^^^^^ write `use box_office.Refund`: an operation is reached through the trait that declares it
+error[T-UnknownOperation]: `Ticket` has no operation `cancel`
+  --> tests/modules/a_call_on_a_sealed_type_finds_operations_not_parts/main.lin:14:5
+   |
+14 |     ticket.cancel()
+   |     ^^^^^^^^^^^^^ no operation of this name is declared for this type

@@ -1,0 +1,26 @@
+// `?` asks `map_err` for a success of `Option[UInt64]`, and `map_err` keeps
+// the success of the call it is made on, so that call's `T` is `UInt64`.
+@copyable
+enum Failure {
+    Code(UInt8),
+}
+
+fn nothing_yet[T]() -> Result[Option[T], UInt8] {
+    .Ok(.None)
+}
+
+fn pending() -> Result[Bool, Failure] {
+    let waiting: Option[UInt64] = nothing_yet().map_err(Failure.Code)?
+    return .Ok(waiting.is_none())
+}
+
+fn main() -> UInt8 {
+    match pending() {
+        Ok(waiting) => if waiting {
+            0
+        } else {
+            1
+        },
+        Err(_) => 1,
+    }
+}

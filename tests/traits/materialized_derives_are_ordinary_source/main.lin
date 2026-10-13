@@ -1,0 +1,50 @@
+// Every admitted derive may be replaced by the immutable ordinary source file
+// generated for it without changing typing, ownership, code or output.
+import std.io
+import protocol
+
+use io.IoError
+use io.println
+
+@copyable
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+derive (Equatable, Equivalent, Comparable, Ordered) for Pair
+
+derive Debug for Pair
+
+@linear
+enum Leaf { Value }
+
+impl Release for Leaf {
+    fn release(sink self: Leaf) -> () {
+        match self { Value => {} }
+    }
+}
+
+@linear
+struct Owned {
+    leaf: Leaf,
+}
+
+derive Release for Owned
+
+fn main() -> Result[UInt8, IoError] {
+    let pair: Pair = .{ a = 1, b = 2 }
+    let later: Pair = .{ a = 1, b = 3 }
+    let remote = protocol.make()
+    println("{pair:?}")?
+    println("{remote:?}")?
+    let owned: Owned = .{ leaf = .Value }
+    Release.release(owned)
+    return .Ok(
+        if pair < later {
+            0
+        } else {
+            1
+        },
+    )
+}

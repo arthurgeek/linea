@@ -1,0 +1,7 @@
+fn five() -> UInt8 {
+    return 5
+}
+
+fn main() -> UInt8 {
+    five()
+}

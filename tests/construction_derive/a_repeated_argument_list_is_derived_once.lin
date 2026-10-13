@@ -1,0 +1,19 @@
+trait Echo[A: Copyable] {
+    fn echo(_self: Self, sink input: A) -> A where carries(input)
+}
+
+template impl[Parameter: Copyable] Echo[Parameter] {
+    fn echo(_self: Self, sink input: Parameter) -> Parameter where carries(input) {
+        input
+    }
+}
+
+struct Product {}
+
+// The same argument list asks for the same implementation twice.
+derive (Echo[UInt8], Echo[UInt8]) for Product
+
+fn main() -> UInt8 {
+    let product: Product = .{}
+    Echo.echo(product, UInt8(0))
+}

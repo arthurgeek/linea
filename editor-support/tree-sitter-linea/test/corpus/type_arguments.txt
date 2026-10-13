@@ -1,0 +1,99 @@
+==================
+Type arguments named at a call
+==================
+
+fn main() -> UInt8 {
+    let port = "8080".parse[UInt16]()
+    let pair = both[UInt8, Bool](1, true)
+    let grid = none[[UInt8; 2]]()
+    &door.stretch[UInt8](1)
+    rack.steps[0](5)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (call_expression
+          (index_expression
+            (field_expression
+              (string_literal)
+              (identifier))
+            (identifier))
+          (argument_list)))
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (type_identifier))
+          (argument_list
+            (integer_literal)
+            (boolean_literal))))
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (type_arguments
+            (array_type
+              (type_identifier)
+              (integer_literal)))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (index_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (identifier))
+          (argument_list
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (index_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (integer_literal))
+          (argument_list
+            (integer_literal)))))))
+
+==================
+Type arguments name a function's instance as a value
+==================
+
+fn main() -> UInt8 {
+    let join = pair[UInt8, Bool]
+    let make = create[UInt8]
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (instantiation_expression
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (type_identifier))))
+      (let_statement
+        (identifier)
+        (index_expression
+          (identifier)
+          (identifier)))
+      (expression_statement
+        (integer_literal)))))

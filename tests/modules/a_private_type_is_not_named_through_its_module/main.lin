@@ -1,0 +1,9 @@
+// A dotted type name crosses a module boundary, so it meets the visibility
+// rule there like every other name that does. What the module keeps to itself
+// is not named from outside it, and a type position is no exception.
+import hidden
+
+fn main() -> UInt8 {
+    let t: hidden.Thing = hidden.make()
+    t.n
+}

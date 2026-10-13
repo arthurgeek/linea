@@ -1,0 +1,20 @@
+// The head another module declared is read through the same lookup a local
+// one is, so a part holding its own declaration through `pct.Box` is the part
+// holding it through a generic declared beside it. Which module wrote the
+// declaration that holds its parameter is no part of the question.
+import pct
+
+use pct.Box
+
+struct S[T] {
+    a: T,
+    b: Box[S[T]],
+}
+
+fn _keep[T](_s: S[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

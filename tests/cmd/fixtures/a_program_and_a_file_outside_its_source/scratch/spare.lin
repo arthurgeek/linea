@@ -1,0 +1,3 @@
+fn main() -> UInt8 {
+    nope
+}

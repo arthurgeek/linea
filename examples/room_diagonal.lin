@@ -1,0 +1,35 @@
+// Calculate room diagonals to the nearest millimetre.
+import std.testing
+import std.io
+
+use io.IoError
+use io.println
+
+fn diagonal(width_mm: UInt16, length_mm: UInt16) -> UInt64 {
+    // `Float64(width_mm)` converts before squaring, so the sum of squares
+    // cannot overflow; UInt16 dimensions keep it below 2^33 in any case.
+    let width = Float64(width_mm)
+    let length = Float64(length_mm)
+    let distance = (width * width + length * length).sqrt()
+    UInt64(distance.round())
+}
+
+test fn a_three_by_four_metre_room_has_a_five_metre_diagonal() {
+    testing.assert_eq(diagonal(3000, 4000), 5000, "the room diagonal should be five metres")?
+}
+
+test fn diagonals_round_to_the_nearest_millimetre() {
+    testing.assert_eq(diagonal(1000, 1000), 1414, "the square room diagonal rounded incorrectly")?
+    testing.assert_eq(diagonal(2500, 3500), 4301, "the rectangular room diagonal rounded incorrectly")?
+    testing.assert_eq(diagonal(0, 4000), 4000, "a zero-width room should retain its length")?
+    testing.assert_eq(diagonal(0, 0), 0, "zero dimensions should give a zero diagonal")?
+    testing.assert_eq(diagonal(65535, 65535), 92680, "the largest room diagonal rounded incorrectly")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let study = diagonal(3000, 4000)
+    let bedroom = diagonal(2500, 3500)
+    println("Study: 3000 mm by 4000 mm, diagonal {study} mm")?
+    println("Bedroom: 2500 mm by 3500 mm, diagonal {bedroom} mm")?
+    .Ok(0)
+}

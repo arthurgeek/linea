@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/a_removed_element_keeps_its_arena_dependency.lin:27:21
+   |
+27 |     Release.release(arena)
+   |                     ^^^^^ keep this place available until the last use of its observation
+28 |     let retained = mem.Buffer.load(taken, 0)
+   |                                    ----- the observation is still used here

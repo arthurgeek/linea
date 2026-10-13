@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A type named through the module that declares it is a name like any other:\n// the cursor on `Thing` reaches where that module declares it, and renaming it\n// there rewrites the qualified head here and every spelling in that module.\nimport pct\n\nfn width(t: pct.Thing) -> UInt8 {\n    t.x\n}\n\nfn main() -> UInt8 {\n    width(pct.thing())\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"pct/pct.lin","languageId":"linea","version":1,"text":"pub struct Thing {\n    x: UInt8,\n}\n\npub fn thing() -> Thing {\n    .{ x = 3 }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":17}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":17},"newName":"Widget"}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

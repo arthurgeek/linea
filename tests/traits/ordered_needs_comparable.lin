@@ -1,0 +1,20 @@
+// `Ordered` promises trichotomy over an order and an equality, so a type that
+// says how it equals and never says how it orders cannot claim it.
+struct Point {
+    x: Int64,
+    y: Int64,
+}
+
+impl Equatable for Point {
+    fn equals(self: Point, other: Point) -> Bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl Equivalent for Point {}
+
+impl Ordered for Point {}
+
+fn main() -> UInt8 {
+    0
+}

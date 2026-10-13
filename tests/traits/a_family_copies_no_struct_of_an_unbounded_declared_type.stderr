@@ -1,0 +1,5 @@
+error[O-Copy]: `Box[W]` does not permit copying
+  --> tests/traits/a_family_copies_no_struct_of_an_unbounded_declared_type.lin:37:9
+   |
+37 |         copy(self)
+   |         ^^^^^^^^^^ move the value, or declare a copyable representation

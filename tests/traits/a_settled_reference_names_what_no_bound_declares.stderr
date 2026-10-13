@@ -1,0 +1,5 @@
+error[T-Impl]: a settled reference is read through a trait's bound, and none of `W`'s 2 bounds declares `Item`
+  --> tests/traits/a_settled_reference_names_what_no_bound_declares.lin:29:40
+   |
+29 | fn _either[W: Measure + Weigh](sink v: W.Item) -> UInt8 {
+   |                                        ^^^^^^ name a type one of them declares

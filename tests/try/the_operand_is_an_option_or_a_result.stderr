@@ -1,0 +1,5 @@
+error[T-Try]: `?` needs an `Option` or a `Result`, and this is `UInt8`
+  --> tests/try/the_operand_is_an_option_or_a_result.lin:12:13
+   |
+12 |     let n = plain()?
+   |             ^^^^^^^^ `?` works over exactly those two types

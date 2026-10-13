@@ -1,0 +1,17 @@
+// `peek` takes a `borrow Box[T]` and answers an observation of the item, so
+// a postfix call on a borrowed box reaches it with `T` settled from the box.
+struct Box[T] {
+    item: T,
+}
+
+impl[T] Box[T] {
+    fn peek(self: borrow Box[T]) -> borrow T where carries(self) {
+        borrow self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Box[UInt8] = .{ item = 5 }
+    let r = borrow b
+    *r.peek()
+}

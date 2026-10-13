@@ -1,0 +1,17 @@
+// `==` is a call on `Equatable`, and a structure that says nothing about how
+// it equals has no such call to make. Nothing is derived from what it holds:
+// two `UInt8` fields are equatable and the structure around them is not, so
+// what identity means here is still the author's to say.
+struct P {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    let a: P = .{ x = 1 }
+    let b: P = .{ x = 1 }
+    if a == b {
+        1
+    } else {
+        0
+    }
+}

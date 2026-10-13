@@ -1,0 +1,13 @@
+// A remainder answers to [T-Overflow] through its division: where the
+// quotient is not representable there is nothing for the remainder to be left
+// over from, even though the zero it would answer fits. The pair that asks is
+// the minimum by minus one, at every signed width -- a narrow remainder
+// computed at full width answers zero, in range, so the pair is guarded where
+// the division is emitted rather than range-checked after it.
+fn v(sink a: Int8) -> Int8 {
+    a
+}
+
+fn main() -> UInt8 {
+    UInt8(Int64(v(-128) % v(-1)) + 100)
+}

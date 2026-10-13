@@ -1,0 +1,13 @@
+enum Wrapped { Value(borrow UInt64) }
+
+fn main() -> UInt8 {
+    let make: fn(sink payload: borrow UInt64) -> Wrapped where carries(.Value: payload) = Wrapped.Value
+    let owner: UInt64 = 37
+    match make(borrow owner) {
+        Value(value) => if *value == 37 {
+            0
+        } else {
+            1
+        },
+    }
+}

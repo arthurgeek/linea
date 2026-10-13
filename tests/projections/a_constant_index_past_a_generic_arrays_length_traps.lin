@@ -1,0 +1,14 @@
+// A bounded generic body cannot know how long the array it is given is, so a
+// constant index inside it is held against the length of each array the body
+// runs on. An index no element sits at traps where the same index into a
+// concrete array is refused.
+fn poke[C: Index[UInt64]](c: C) -> UInt8 {
+    match read c[5] {
+        _ => 7,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 2] = [2, 3]
+    poke(a)
+}

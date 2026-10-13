@@ -1,0 +1,39 @@
+// A type, a trait, an associated type, a variant and a type parameter each
+// name a type or a way to build one, so each starts with a capital letter.
+struct point {
+    x: UInt8,
+}
+
+enum Shade {
+    light,
+    Dark,
+}
+
+type meters = UInt8
+
+trait sized {
+    type unit
+
+    fn size(self: Self) -> UInt8
+}
+
+impl sized for Shade {
+    type unit = UInt8
+
+    fn size(self: Self) -> UInt8 {
+        match read self {
+            light => 1,
+            Dark => 2,
+        }
+    }
+}
+
+fn first[t](sink value: t) -> t {
+    value
+}
+
+fn main() -> UInt8 {
+    let spot = point { x = 3 }
+    let meters(length) = meters(4)
+    first(spot.x) + length + Shade.Dark.size()
+}

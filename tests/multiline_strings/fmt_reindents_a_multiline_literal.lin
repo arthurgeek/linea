@@ -1,0 +1,19 @@
+fn width(text: Str) -> UInt64 {
+    text.length()
+}
+
+fn main() -> UInt8 {
+    let header =
+  \\name   | total
+            \\-------+------
+    let inline =    \\kept on the line of its `=`
+        \\and continued below it
+    let measured = width(
+\\one
+    \\two
+    )
+    let noted =
+        // A comment before the literal keeps the literal's depth.
+  \\id
+    UInt8(header.length() + inline.length() + measured + noted.length() - 88)
+}

@@ -1,0 +1,14 @@
+// An array carries its own places, so a `for` over one walks them: the length
+// is part of the type and every position is one the compiler already addresses,
+// which is a traversal the language has without a `Sequence` saying how.
+//
+// The binder is bound to the element type, once per position, in the order the
+// positions run.
+fn main() -> UInt8 {
+    let xs: [UInt64; 3] = [3, 5, 9]
+    var total: UInt64 = 0
+    for x in xs {
+        total += x
+    }
+    UInt8(total)
+}

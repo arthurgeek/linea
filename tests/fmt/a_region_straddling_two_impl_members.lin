@@ -1,0 +1,24 @@
+// A region opened in one `impl` member and closed inside the next. The member
+// it ends in begins inside the region and continues past it, so the walk steps
+// over the whole member and its body goes with it. Extending the region to
+// cover a node it would otherwise cut is what keeps the file whole -- and it
+// has to reach every node, not only a top-level declaration.
+struct P {
+    x: UInt8,
+}
+
+impl P {
+    pub fn one() -> UInt8 {
+        // linea fmt: off
+        1
+    }
+
+    pub fn two() -> UInt8 {
+        // linea fmt: on
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    P.one() + P.two()
+}

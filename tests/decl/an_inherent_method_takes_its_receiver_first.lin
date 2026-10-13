@@ -1,0 +1,16 @@
+struct Counter {
+    count: UInt64,
+}
+
+impl Counter {
+    fn bump(inout self: Counter, by: UInt64) -> () {
+        self.count += by
+    }
+}
+
+fn main() -> UInt8 {
+    let bump: fn(inout counter: Counter, by: UInt64) -> () = Counter.bump
+    var counter: Counter = .{ count = 1 }
+    bump(&counter, 4)
+    UInt8(counter.count - 5)
+}

@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let tenth = 0.1
+    let sum = tenth + tenth + tenth
+    if sum != 0.30000000000000004 {
+        return 1
+    }
+    if sum == 0.3 {
+        return 2
+    }
+    0
+}

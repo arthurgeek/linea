@@ -1,0 +1,5 @@
+error[T-Projection]: a projection names a place, and this body computes a value
+  --> tests/projections/a_projection_names_a_place.lin:12:9
+   |
+12 |         self.cells[i] + 1
+   |         ^^^^^^^^^^^^^^^^^ reach the place from `self` by field selection and indexing, and nothing else

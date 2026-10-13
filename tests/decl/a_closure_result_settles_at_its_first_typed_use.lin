@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let constant = || 7
+    let _first = constant()
+    let second: UInt8 = constant()
+    second
+}

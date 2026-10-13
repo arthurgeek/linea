@@ -1,0 +1,5 @@
+error[T-Phantom]: `phantom` is not a function's to declare
+ --> tests/generics/phantom_is_not_a_signatures_to_declare.lin:6:18
+  |
+6 |     fn f[phantom X](s: Self) -> UInt8
+  |                  ^ a body can read no parameter for identity alone

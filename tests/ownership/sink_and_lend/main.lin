@@ -1,0 +1,22 @@
+// Reading a linear value preserves its ownership. A consuming operation
+// then settles it by destructuring its payload.
+@linear
+enum Key { Forged(UInt8) }
+
+// Reading grants observation without allowing a move from the parameter.
+fn tag(k: Key) -> UInt8 {
+    match read k { Forged(n) => n }
+}
+
+// `sink` takes ownership. This is how a linear value is finally disposed of:
+// taken apart, with the obligation ending where the parts do.
+fn release(sink k: Key) -> () {
+    match k { Forged(_) => {} }
+}
+
+fn main() -> UInt8 {
+    let k = Key.Forged(9)
+    let t = tag(k)
+    release(k)
+    t
+}

@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A primitive is introduced at no token: nothing declares `UInt8`, so there is\n// no declaration to change and every use of it belongs to someone else.\nfn main() -> UInt8 {\n    UInt8.max\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":5},"newName":"Byte"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

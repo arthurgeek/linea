@@ -1,0 +1,11 @@
+// One arm's malformed bound is one arm's mistake. Recovery rests where the
+// arm ends, so the arms after it are still read, still checked, and still
+// there -- a single spelling error must not delete the rest of the match.
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    match x {
+        5.. => 0,
+        6 => 1,
+        _ => 2,
+    }
+}

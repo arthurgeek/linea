@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/integers/settled_by_use/a_literal_out_of_range_is_reported_where_it_is_written.lin:2:15
+  |
+2 |     let big = 300
+  |               ^^^ literal is out of range for its type
+3 |     let small: UInt8 = big
+  |                        --- settled to `UInt8` here

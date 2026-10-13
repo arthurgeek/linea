@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/mem/owner_borrows/a_conditional_replacement_retains_the_possible_original_owner.lin:8:5
+  |
+8 |     first = 11
+  |     ^^^^^ keep this place available until the last use of its observation
+9 |     UInt8(*view + first)
+  |           ----- the observation is still used here

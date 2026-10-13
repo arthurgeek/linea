@@ -1,0 +1,24 @@
+// `true` is worked out without running anything, so it is a constant
+// expression: it is what a module constant may hold and what a parameter may
+// default to, whether the default is written out or reached through a name.
+// Omitting the parameter, naming it, and writing the value out are one
+// program, and each call is weighted differently -- a spliced value that is
+// not the declared one answers with a different number.
+pub let doubled_by_default: Bool = true
+
+fn tally(base: UInt8, doubled: Bool = doubled_by_default, extra: Bool = false) -> UInt8 {
+    let step = if doubled {
+        base * 2
+    } else {
+        base
+    }
+    if extra {
+        step + 1
+    } else {
+        step
+    }
+}
+
+fn main() -> UInt8 {
+    tally(5) + tally(5, doubled: true) + tally(6, false) + tally(1, extra: true)
+}

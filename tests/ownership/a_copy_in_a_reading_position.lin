@@ -1,0 +1,12 @@
+// A reading parameter observes an aggregate without duplicating it.
+@copyable
+struct Token { value: UInt8 }
+
+fn read_value(token: Token) -> UInt8 {
+    token.value
+}
+
+fn main() -> UInt8 {
+    let token: Token = .{ value = 1 }
+    read_value(copy(token))
+}

@@ -1,0 +1,22 @@
+// Where one trait declares the operation the dot stays, and the call is written
+// over the postfix form the reader started rather than in at the cursor: the
+// brackets are already there, and an insertion would leave a second pair beside
+// them. What remains to be filled in is a stop, and the receiver is not one.
+trait Measure {
+    fn of(self: Self, fee: UInt8) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn of(self: Self, fee: UInt8) -> UInt8 {
+        self.n + fee
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    coppers.of()
+}

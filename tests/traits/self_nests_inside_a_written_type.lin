@@ -1,0 +1,26 @@
+// `Self` is a type name, so it sits wherever one does -- including inside
+// another type's arguments. Substitution reaches it there or it reaches
+// nothing: a rule that replaced only a written type's whole spelling would
+// leave this one standing, and `Option[Self]` is a type the implementing
+// module cannot name any other way.
+struct Coins {
+    count: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> Option[Self]
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> Option[Self] {
+        .Some(.{ count = x.count })
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    match Measure.of(c) {
+        None => 0,
+        Some(k) => k.count,
+    }
+}

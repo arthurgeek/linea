@@ -1,0 +1,5 @@
+// A case that is a directory and whose subject is its own byte layout. Its
+// goldens sit at the stem the directory names, so anything reading the
+// formatting golden from beside `main.lin` finds nothing and reformats the
+// input half of the case.
+fn main()->UInt8{ 2 }

@@ -1,0 +1,5 @@
+error[T-Infer]: the callable signature depends on a type no other argument or result settles
+ --> tests/inference/map_errors/callback_bodies_do_not_guess_unknown_input_types.lin:6:12
+  |
+6 |     invoke(|sink error| UInt16(error))
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ settle every input type before this callable value

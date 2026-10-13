@@ -1,0 +1,7 @@
+error[T-Derive]: this derive trait is repeated
+ --> tests/traits/attached_derives/a_trait_is_not_repeated_across_attributes.lin:2:10
+  |
+1 | @derive(Equatable)
+  |         --------- this trait was already requested here
+2 | @(derive(Equatable))
+  |          ^^^^^^^^^ a type derives each trait once

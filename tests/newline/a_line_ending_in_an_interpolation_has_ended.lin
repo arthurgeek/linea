@@ -1,0 +1,8 @@
+// An interpolated string can end an expression, so the newline after its
+// closing quote ends the binding. `(n)` on the next line is a statement of its
+// own, the function's result, rather than a call of the text.
+fn main() -> UInt8 {
+    let n = 3
+    let _s = "{n}"
+    (n)
+}

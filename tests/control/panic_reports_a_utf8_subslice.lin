@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let message = "prefix: á stopped"
+    panic(message.slice(8, message.length()).unwrap())
+}

@@ -1,0 +1,18 @@
+program decls=3
+  decl function "_needs" tokens 0..23
+    type param "T"
+    param read "_callback" : fn(read value: T) -> T
+    returns (
+    expr %0 block tokens 21..23
+  decl function "_forwards" tokens 23..50
+    type param "U"
+    param read "callback" : fn(read value: U) -> U
+    returns (
+    expr %4 block tokens 44..50
+      expr %3 call tokens 45..49
+        expr %1 name_ref tokens 45..46 "_needs"
+        expr %2 name_ref tokens 47..48 "callback"
+  decl function "main" tokens 50..59
+    returns UInt8
+    expr %6 block tokens 56..59
+      expr %5 int_literal tokens 57..58 "0"

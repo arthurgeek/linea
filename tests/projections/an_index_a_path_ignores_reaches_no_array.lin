@@ -1,0 +1,32 @@
+// A number a bracket writes is held to an array's length where the path
+// carries it to one, and a path that never reads its parameter carries it
+// nowhere: there is no array for the number to be an index of, so there is
+// nothing to hold it to. The range spelling says the same. A range in a bracket
+// over a container is the value the implementation was keyed for, and its
+// bounds name a place only where they form one.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, _i: UInt64) -> UInt8 {
+        self.cells[0]
+    }
+}
+
+impl Index[Range[UInt64]] for Grid {
+    type Elem = [UInt8; 4]
+
+    proj at(inout self: Grid, _i: Range[UInt64]) -> [UInt8; 4] {
+        self.cells
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4] }
+    let one: UInt8 = g[900]
+    let whole: [UInt8; 4] = copy(g[900..902])
+    one + whole[3]
+}

@@ -1,0 +1,296 @@
+import std.mem
+import std.testing
+
+// `Fields` are the key–value pairs a line carries after its message. `field`
+// makes one and `and` adds another, so
+// `log.field("method", method).and("status", status)` carries two, written
+// `method=GET status=200`. `()` carries none. A field borrows its value. A
+// literal or a computed value is kept until the end of the statement that logs
+// it, so `logger.info("done", log.field("count", 3))` needs no `let`. A type of
+// your own can implement `Fields` to be logged as the fields it chooses.
+pub trait Fields {
+    // Hand each field to `visitor`, in the order they are written.
+    fn visit[V: Visitor](self: Self, inout visitor: V) -> Result[(), V.Error] where carries(.Err: visitor)
+}
+
+// A `Visitor` receives the fields of a line one at a time, and writes them in
+// its format. The text format writes `key=value`.
+pub trait Visitor {
+    type Error
+
+    fn field[T: Display](inout self: Self, key: Str, value: T) -> Result[(), Self.Error] where carries(.Err: self)
+}
+
+// `()` carries no fields.
+impl Fields for () {
+    fn visit[V: Visitor](_self: (), inout _visitor: V) -> Result[(), V.Error] where carries(.Err: _visitor) {
+        .Ok(())
+    }
+}
+
+// A `Field` carries one key and borrows a value that Display writes.
+struct Field[T: Display] {
+    key: Str,
+    value: borrow T,
+}
+
+// `field` makes a field that writes `value` under `key`. The field borrows
+// the value rather than taking it, so the caller keeps what it logs, and
+// making it formats nothing: the value is written only if its line is.
+pub fn field[T: Display](sink key: Str, value: T) -> Field[T] where carries(.key: key), borrows(.value: value) {
+    .{ key, value = borrow value }
+}
+
+test fn a_field_is_written_as_its_key_and_value() {
+    defer let text = fields_text(field("port", 8080))
+    testing.assert_eq(text.view(), " port=8080", "the field changed")?
+    .Ok(())
+}
+
+// A field borrows its value, so the caller keeps a value it logs, even one
+// that owns memory, and may log it twice.
+test fn a_field_observes_a_value_its_caller_keeps() {
+    let path = "/items/7".to_owned(mem.system()).unwrap()
+    defer let text = fields_text(field("path", path).and("again", path))
+    let kept = path.view() == "/items/7"
+    path.release()
+    testing.assert(kept, "the logged value changed")?
+    testing.assert_eq(text.view(), " path=/items/7 again=/items/7", "the fields changed")?
+    .Ok(())
+}
+
+impl[T: Display] Fields for Field[T] {
+    fn visit[V: Visitor](self: Self, inout visitor: V) -> Result[(), V.Error] where carries(.Err: visitor) {
+        &visitor.field(self.key, *self.value)
+    }
+}
+
+// `And` carries the fields of `first`, then one more, whose value it borrows.
+struct And[F: Fields, T: Display] {
+    first: F,
+    key: Str,
+    value: borrow T,
+}
+
+impl[F: Fields, T: Display] Fields for And[F, T] {
+    fn visit[V: Visitor](self: Self, inout visitor: V) -> Result[(), V.Error] where carries(.Err: visitor) {
+        self.first.visit(&visitor)?
+        &visitor.field(self.key, *self.value)
+    }
+}
+
+impl[T: Display] Field[T] {
+    // `and` adds a field that writes `value` under `key` after this one.
+    pub fn and[U: Display](sink self: Self, sink key: Str, value: U) -> And[Field[T], U] where carries(.first: self), carries(.key: key), borrows(.value: value) {
+        .{ first = self, key, value = borrow value }
+    }
+}
+
+test fn and_adds_a_second_field_after_the_first() {
+    defer let two = fields_text(field("method", "GET").and("status", 200))
+    testing.assert_eq(two.view(), " method=GET status=200", "two fields changed")?
+    .Ok(())
+}
+
+impl[F: Fields, T: Display] And[F, T] {
+    // `and` adds a field that writes `value` under `key` after these.
+    pub fn and[U: Display](sink self: Self, sink key: Str, value: U) -> And[And[F, T], U] where carries(.first: self), carries(.key: key), borrows(.value: value) {
+        .{ first = self, key, value = borrow value }
+    }
+}
+
+test fn added_fields_are_written_in_order() {
+    defer let three = fields_text(field("method", "GET").and("status", 200).and("path", "/health"))
+    testing.assert_eq(three.view(), " method=GET status=200 path=/health", "three fields changed")?
+    .Ok(())
+}
+
+// A value is quoted when it is empty or holds a space, `=`, `"` or an ASCII
+// control character, so each field reads back as one key and one value. In
+// quotes, `"` and `\` are escaped with a backslash, a line feed, carriage
+// return and tab as `\n`, `\r` and `\t`, and any other control character as
+// `\u` and four hexadecimal digits.
+test fn a_value_is_quoted_when_it_could_not_be_read_back_otherwise() {
+    defer let text = fields_text(field("empty", "").and("spaced", "not found").and("equals", "a=b").and("plain", "/items/7"))
+    testing.assert_eq(text.view(), r#" empty="" spaced="not found" equals="a=b" plain=/items/7"#, "quoting changed")?
+    defer let escaped = fields_text(field("text", "say \"hi\"\n\ttab\\ \u{1}"))
+    testing.assert_eq(escaped.view(), r#" text="say \"hi\"\n\ttab\\ \u0001""#, "escaping changed")?
+    .Ok(())
+}
+
+// A value without a space or a quote is written as it is, whatever its type.
+test fn a_value_is_written_through_display() {
+    defer let text = fields_text(field("ratio", 0.5).and("ok", true).and("café", "crème"))
+    testing.assert_eq(text.view(), " ratio=0.5 ok=true café=crème", "a value changed")?
+    .Ok(())
+}
+
+// `fields_text` writes `fields` as a line writes them, after its message.
+fn fields_text[F: Fields](fields: F) -> String {
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), escaping = false }
+    fields.visit(&line).unwrap()
+    let Line { text, escaping: _ } = line
+    text
+}
+
+// A `Line` is a log line being built in `text`. While `escaping` is set, text
+// written to it is escaped, which is how a quoted value is written.
+@derive(Release)
+struct Line[A: Allocator] {
+    text: String[A],
+    escaping: Bool,
+}
+
+impl[A: Allocator] Writer for Line[A] {
+    type Error = mem.Oom
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), mem.Oom] where carries() {
+        if !self.escaping {
+            return &self.text.append(s)
+        }
+        append_escaped(&self.text, s)
+    }
+}
+
+// The text format writes each field as a space, the key, `=` and the value.
+impl[A: Allocator] Visitor for Line[A] {
+    type Error = mem.Oom
+
+    fn field[T: Display](inout self: Self, key: Str, value: T) -> Result[(), mem.Oom] where carries() {
+        &self.text.append(" ")?
+        write_value(&self, key)?
+        &self.text.append("=")?
+        write_value(&self, value)
+    }
+}
+
+// Write a message: as it is, or quoted when it is empty or holds `=`, `"` or
+// a control character. Spaces leave a message as it is, since everything
+// between the level and the first field is the message.
+fn write_message[A: Allocator](inout line: Line[A], message: Str) -> Result[(), mem.Oom] where carries() {
+    let scanned = scan(message)
+    write_quoted_if(&line, message, scanned.special || scanned.empty)
+}
+
+test fn a_message_is_quoted_only_when_it_could_be_read_as_a_field() {
+    defer let plain = message_text("accepting a connection failed")
+    defer let equals = message_text("a=b")
+    defer let empty = message_text("")
+    testing.assert_eq(plain.view(), "accepting a connection failed", "a message with spaces was quoted")?
+    testing.assert_eq(equals.view(), r#""a=b""#, "a message with = was not quoted")?
+    testing.assert_eq(empty.view(), r#""""#, "an empty message was not quoted")?
+    .Ok(())
+}
+
+// `message_text` writes `message` as a line writes it.
+fn message_text(message: Str) -> String {
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), escaping = false }
+    write_message(&line, message).unwrap()
+    let Line { text, escaping: _ } = line
+    text
+}
+
+// Write a key or a value, quoted when it is empty or holds a space, `=`, `"`
+// or a control character. The value is written once to learn which, without
+// storing it, and once more into the line.
+fn write_value[T: Display, A: Allocator](inout line: Line[A], value: T) -> Result[(), mem.Oom] where carries() {
+    var scanned = Scan { empty = true, space = false, special = false }
+    match value.fmt(&scanned) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    write_quoted_if(&line, value, scanned.empty || scanned.space || scanned.special)
+}
+
+// Write `value` into `line`, between quotes and escaped when `quoted`.
+fn write_quoted_if[T: Display, A: Allocator](inout line: Line[A], value: T, quoted: Bool) -> Result[(), mem.Oom] where carries() {
+    if !quoted {
+        return value.fmt(&line)
+    }
+    &line.text.append("\"")?
+    line.escaping = true
+    let written = value.fmt(&line)
+    line.escaping = false
+    written?
+    &line.text.append("\"")
+}
+
+// A `Scan` records what text written to it holds, and keeps none of it.
+@copyable
+struct Scan {
+    empty: Bool,
+    space: Bool,
+    special: Bool,
+}
+
+// `scan` records what `text` holds.
+fn scan(text: Str) -> Scan {
+    var scanned = Scan { empty = true, space = false, special = false }
+    match &scanned.write_str(text) {
+        Ok(_) => {},
+        Err(never) => never,
+    }
+    scanned
+}
+
+// The text format names these ASCII bytes.
+let ascii_space: UInt8 = 32
+
+let ascii_quote: UInt8 = 34
+
+let ascii_equals: UInt8 = 61
+
+let ascii_backslash: UInt8 = 92
+
+let ascii_delete: UInt8 = 127
+
+impl Writer for Scan {
+    type Error = Never
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), Never] where carries() {
+        for byte in s.as_bytes() {
+            let b = *byte
+            self.empty = false
+            if b == ascii_space {
+                self.space = true
+            } else if b < ascii_space || b == ascii_delete || b == ascii_quote || b == ascii_equals {
+                self.special = true
+            }
+        }
+        .Ok(())
+    }
+}
+
+// `hex_digits` spells a byte of a `\u00XX` escape as two lowercase
+// hexadecimal digits.
+let hex_digits: Str = "0123456789abcdef"
+
+// Append `s` to `text` escaped for a quoted value. Runs of bytes that need no
+// escape are appended whole.
+fn append_escaped[A: Allocator](inout text: String[A], s: Str) -> Result[(), mem.Oom] where carries() {
+    var start: UInt64 = 0
+    var at: UInt64 = 0
+    let bytes = s.as_bytes()
+    while at < bytes.length() {
+        let b = bytes[at]
+        let needs_escape = b < ascii_space || b == ascii_delete || b == ascii_quote || b == ascii_backslash
+        if needs_escape {
+            &text.append(s.slice(start, at).unwrap())?
+            &text.append(match read b {
+                9 => r"\t",
+                10 => r"\n",
+                13 => r"\r",
+                34 => r#"\""#,
+                92 => r"\\",
+                _ => r"\u00",
+            })?
+            if b != 9 && b != 10 && b != 13 && b != ascii_quote && b != ascii_backslash {
+                &text.append(hex_digits.slice(UInt64(b / 16), UInt64(b / 16) + 1).unwrap())?
+                &text.append(hex_digits.slice(UInt64(b % 16), UInt64(b % 16) + 1).unwrap())?
+            }
+            start = at + 1
+        }
+        at += 1
+    }
+    &text.append(s.slice(start, at).unwrap())
+}

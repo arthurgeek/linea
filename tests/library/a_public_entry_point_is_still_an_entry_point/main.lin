@@ -1,0 +1,3 @@
+pub fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+error[T-Bound]: `Tag` requires `Self` to implement it, and `Holder[UInt16, Source]` does not
+  --> tests/traits/integer_generics/nested_implementation_bounds_reject_different_arguments.lin:34:13
+   |
+34 |     Tag.tag(held)
+   |             ^^^^ implement it for that type, or reach the operation on one that does
+   |
+   = help: `Holder[T, U]` implements `Tag` when `U` implements `Supplies[Nested[UInt16]]`, and `Source` does not

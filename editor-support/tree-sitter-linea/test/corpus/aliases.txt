@@ -1,0 +1,27 @@
+==================
+Aliases name a type
+==================
+
+alias Pricing = fn(cents: UInt64) -> UInt64
+pub alias Step[T] = [T; 2]
+
+---
+
+(source_file
+  (alias_declaration
+    name: (type_identifier)
+    type: (callable_type
+      (parameter_list
+        (parameter
+          name: (identifier)
+          type: (type_identifier)))
+      return_type: (type_identifier)))
+  (alias_declaration
+    (visibility)
+    name: (type_identifier)
+    type_parameters: (type_parameters
+      (type_parameter
+        name: (type_identifier)))
+    type: (array_type
+      element: (type_identifier)
+      length: (integer_literal))))

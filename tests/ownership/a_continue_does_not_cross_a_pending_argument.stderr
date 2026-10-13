@@ -1,0 +1,7 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_continue_does_not_cross_a_pending_argument.lin:25:17
+   |
+23 |             d,
+   |             - it was given up here
+25 |                 continue
+   |                 ^^^^^^^^ give the value up after this, not before it

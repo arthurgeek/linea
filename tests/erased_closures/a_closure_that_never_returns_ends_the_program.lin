@@ -1,0 +1,14 @@
+import std.mem
+
+// A closure called as `fn() -> Never` never returns, so the call ends the
+// program where the closure panics.
+fn main() -> Result[UInt8, mem.Oom] {
+    let reason = "the reactor overheated"
+    let halt: mem.Closure[fn() -> Never, mem.SystemAllocator] = mem.Closure.open(
+        mem.system(),
+        [sink reason] || -> Never {
+            panic(reason)
+        },
+    )?
+    halt()
+}

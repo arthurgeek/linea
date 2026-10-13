@@ -1,0 +1,24 @@
+import std.io
+
+use io.IoError
+use io.println
+
+// A phantom parameter is in no field, so the derived implementations ask
+// nothing of it: `Id[Account]` compares and prints although `Account` does
+// neither.
+@(copyable, derive(Equatable, Debug))
+struct Id[phantom Of] {
+    value: UInt64,
+}
+
+struct Account {}
+
+fn main() -> Result[UInt8, IoError] {
+    let first = Id[Account] { value = 1 }
+    let second = Id[Account] { value = 1 }
+    println("{first:?}")?
+    if first == second {
+        return .Ok(0)
+    }
+    return .Ok(1)
+}

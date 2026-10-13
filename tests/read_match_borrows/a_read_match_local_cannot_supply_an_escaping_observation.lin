@@ -1,0 +1,12 @@
+struct Pair { number: UInt64 }
+
+enum Bucket { Full(Pair) }
+
+fn invalid() -> borrow UInt64 where carries() {
+    let bucket: Bucket = .Full(.{ number = 19 })
+    match read bucket { Full(pair) => borrow pair.number }
+}
+
+fn main() -> UInt8 {
+    UInt8(*invalid())
+}

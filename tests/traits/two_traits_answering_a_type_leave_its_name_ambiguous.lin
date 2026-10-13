@@ -1,0 +1,32 @@
+// `Meal` implements two traits that both declare `blank`, and it declares no
+// `blank` itself, so `Meal.blank()` does not say which trait's is meant.
+// Writing the call through the trait says it.
+struct Meal {
+    courses: UInt8,
+}
+
+trait Starter {
+    fn blank() -> Self
+}
+
+trait Empty {
+    fn blank() -> Self
+}
+
+impl Starter for Meal {
+    fn blank() -> Meal {
+        .{ courses = 1 }
+    }
+}
+
+impl Empty for Meal {
+    fn blank() -> Meal {
+        .{ courses = 0 }
+    }
+}
+
+fn main() -> UInt8 {
+    let meal = Meal.blank()
+    let chosen: Meal = Empty.blank()
+    meal.courses + chosen.courses
+}

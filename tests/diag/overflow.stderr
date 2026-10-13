@@ -1,0 +1,5 @@
+error[T-Overflow]: this operation overflows `UInt8`
+ --> tests/diag/overflow.lin:2:9
+  |
+2 |     200 + 100
+  |         ^ the result is not representable

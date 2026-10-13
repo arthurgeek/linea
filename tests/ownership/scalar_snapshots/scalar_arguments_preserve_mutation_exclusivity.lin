@@ -1,0 +1,18 @@
+fn first(sink value: UInt8, _later: UInt8) -> UInt8 {
+    value
+}
+
+fn replace(inout value: UInt8) -> UInt8 {
+    value = 9
+    0
+}
+
+fn main() -> UInt8 {
+    var value: UInt8 = 7
+    let snapshot = first(value, replace(&value))
+    if snapshot == 7 && value == 9 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,3 @@
+internal fn value() -> UInt8 {
+    7
+}

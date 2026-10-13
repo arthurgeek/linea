@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/an_arena_is_taken_while_the_arena_it_backs_is_live.lin:12:5
+   |
+12 |     outer.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+13 |     inner.release()
+   |     ----- the observation is still used here

@@ -1,0 +1,15 @@
+// `json.MaxDepth` holds 0 to 128 nested containers, the most the parser's
+// recursion supports, so a deeper limit is refused where it is written.
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    let limits = json.ParseLimits { max_depth = json.MaxDepth(500), ..Default.default() }
+    match json.parse(mem.system(), "[[1]]", limits: limits) {
+        Ok(document) => {
+            document.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

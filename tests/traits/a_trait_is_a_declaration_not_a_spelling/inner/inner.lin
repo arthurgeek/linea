@@ -1,0 +1,18 @@
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Measure for Box {
+    fn of(x: Box) -> UInt8 {
+        x.n
+    }
+}
+
+pub fn weigh() -> UInt8 {
+    let b: Box = .{ n = 2 }
+    Measure.of(b)
+}

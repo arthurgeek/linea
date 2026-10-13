@@ -1,0 +1,5 @@
+error[T-Projection]: a projection whose expansion reaches itself is refused: Loop -> Loop
+ --> tests/projections/a_projection_does_not_reach_itself.lin:9:9
+  |
+9 |         self[i]
+  |         ^^^^^^^ this is where the chain returns to an implementation already on it

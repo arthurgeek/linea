@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let flag: Bool = 1
+    let _ = flag
+    0
+}

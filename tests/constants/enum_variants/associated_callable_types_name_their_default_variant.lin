@@ -1,0 +1,25 @@
+enum Mode { Preserve, Replace }
+
+trait Chooser {
+    type Choice
+
+    fn choose(_picker: Self, pick: Self.Choice) -> UInt8
+}
+
+struct Picker {}
+
+impl Chooser for Picker {
+    type Choice = fn(read mode: Mode = .Preserve) -> UInt8
+
+    fn choose(_picker: Self, pick: Self.Choice) -> UInt8 {
+        pick()
+    }
+}
+
+fn pick(mode: Mode = .Preserve) -> UInt8 {
+    match read mode { Preserve => 0, Replace => 1 }
+}
+
+fn main() -> UInt8 {
+    Chooser.choose(Picker {}, pick) + pick(.Replace) - 1
+}

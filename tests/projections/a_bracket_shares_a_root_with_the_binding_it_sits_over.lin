@@ -1,0 +1,26 @@
+// A bracket is a step in a path, so the binding it sits over is a prefix of
+// what it names. Passing one `&` beside the other is the aliasing every prefix
+// pair is refused for -- and a projection whose path is its own receiver makes
+// the two one place outright, so what the reading argument saw would be
+// whatever the mutating one had already written.
+struct Cell {
+    n: UInt8,
+}
+
+impl Index[UInt64] for Cell {
+    type Elem = Cell
+
+    proj at(inout self: Cell, _i: UInt64) -> Cell {
+        self
+    }
+}
+
+fn f(inout a: Cell, b: Cell) -> UInt8 {
+    a.n = 9
+    b.n
+}
+
+fn main() -> UInt8 {
+    var c: Cell = .{ n = 1 }
+    f(&c[0], c)
+}

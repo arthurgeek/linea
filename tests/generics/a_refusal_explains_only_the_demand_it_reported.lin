@@ -1,0 +1,86 @@
+// A bound refusal names one demand: a type lacking a trait at the arguments the
+// bound settled, or lacking a capability. A missing implementation that fails
+// on anything else is its own mistake and is reported beside the refusal.
+// `find` refuses `Board` for `Lookup[Bool]`; `Box[Board]` lacks `Shout` because
+// `Board` lacks `Lookup[UInt8]`, a different implementation for a different
+// reason. `keep` refuses `Pair` for `Copyable`; `Holder[Pair, F]` lacks `Shout`
+// because `Pair` is not Copyable and because its closure takes a `UInt8` where
+// the bound asks for a `Pair`, and the closure is wrong whatever `Pair` becomes.
+// `twice` refuses `Pair` for `Integer`, which also promises `Equatable`,
+// `Comparable` and copying, none of which the refusal named; `Num[Pair]`
+// lacking `Shout` is reported beside it.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+trait Shout {
+    fn shout(_self: Self) -> UInt8
+}
+
+@copyable
+struct Board {
+    cells: UInt8,
+}
+
+struct Box[T] {
+    item: T,
+}
+
+impl[T: Lookup[UInt8]] Shout for Box[T] {
+    fn shout(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn find[C: Lookup[Bool]](c: C) -> UInt8 {
+    Lookup.at(c, true)
+}
+
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+struct Holder[T, F] {
+    item: T,
+    check: F,
+}
+
+impl[T: Copyable, F: fn(value: T) -> Bool] Shout for Holder[T, F] {
+    fn shout(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn keep[T: Copyable](sink value: T) -> T {
+    value
+}
+
+fn hold[T, F](sink item: T, sink check: F) -> Holder[T, F] where carries(item, check) {
+    .{ item = item, check = check }
+}
+
+struct Num[N] {
+    value: N,
+}
+
+impl[N: Integer] Shout for Num[N] {
+    fn shout(_self: Self) -> UInt8 {
+        3
+    }
+}
+
+fn twice[N: Integer](sink value: N) -> Num[N] where carries(value) {
+    .{ value = value }
+}
+
+fn main() -> UInt8 {
+    let board = Board { cells = 1 }
+    let found = find(board)
+    let boxed: Box[Board] = .{ item = board }
+    let pair: Pair = .{ left = 1, right = 2 }
+    let Pair { left, right: _ } = keep(pair)
+    let held = hold(Pair { left = 3, right = 4 }, |value: UInt8| value > 2)
+    let doubled = twice(Pair { left = 5, right = 6 })
+    found + boxed.shout() + left + held.shout() + doubled.shout()
+}

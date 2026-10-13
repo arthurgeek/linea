@@ -1,0 +1,32 @@
+// `transaction` reaches the end of the block still owned, so the report points
+// at the binding and names the brace where the block ends. The help line lists
+// what settles a `Transaction`, in the order the operations are declared.
+@linear
+struct Transaction {
+    cents: UInt64,
+}
+
+impl Transaction {
+    fn open(cents: UInt64) -> Transaction {
+        .{ cents = cents }
+    }
+
+    fn amount(self: Transaction) -> UInt64 {
+        self.cents
+    }
+
+    pub fn commit(sink self: Transaction) -> UInt64 {
+        let Transaction { cents } = self
+        cents
+    }
+
+    pub fn rollback(sink self: Transaction) -> UInt64 {
+        let Transaction { cents: _ } = self
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let transaction = Transaction.open(250)
+    UInt8(transaction.amount() / 10)
+}

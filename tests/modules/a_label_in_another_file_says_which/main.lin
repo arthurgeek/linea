@@ -1,0 +1,17 @@
+// A diagnostic whose two labels sit in different files. The parameter is in
+// `other`, the argument is here, and both are shown.
+//
+// Which came first was decided by comparing the two spans, and a span is a
+// byte offset into the file that produced it -- so the order depended on how
+// long the other file happened to be, and a comment added there flipped it.
+// Ordering is the renderer's: it holds the file table, so it is the only place
+// that can compare two positions in different files at all.
+//
+// It is also the only place that can say which file a line came from, which is
+// what `:::` does below. Two files' line 2 stacked with nothing between them
+// are two places a reader cannot tell apart.
+import other
+
+fn main() -> UInt8 {
+    other.f(7)
+}

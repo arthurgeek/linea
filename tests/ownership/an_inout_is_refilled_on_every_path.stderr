@@ -1,0 +1,19 @@
+error[O-Reinit]: `k` is moved out and not put back
+ --> tests/ownership/an_inout_is_refilled_on_every_path/main.lin:9:16
+  |
+9 | fn drain(inout k: Key) -> UInt8 {
+  |                ^ assign it before returning on every path
+error[O-Reinit]: `k` is moved out and not put back
+  --> tests/ownership/an_inout_is_refilled_on_every_path/main.lin:14:16
+   |
+14 | fn early(inout k: Key, c: UInt8) -> UInt8 {
+   |                ^ assign it before returning on every path
+error[O-Leak]: `a` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/an_inout_is_refilled_on_every_path/main.lin:24:9
+   |
+24 |     var a = mint(1)
+   |         ^ never settled on the path that reaches the end of this block
+30 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

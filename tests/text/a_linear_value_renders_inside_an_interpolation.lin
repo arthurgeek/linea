@@ -1,0 +1,39 @@
+// An interpolation borrows each value it renders, so a linear value can be
+// written into text and still settled afterwards by its owner.
+import std.io
+
+use io.IoError
+use io.println
+
+@linear
+struct Ticket {
+    seat: Int64,
+}
+
+impl Display for Ticket {
+    fn fmt[W: Writer](self: Ticket, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str("seat ")?
+        Display.fmt(self.seat, &w)
+    }
+}
+
+// `show` reads the ticket, so its caller still owns it.
+fn show(ticket: Ticket) -> Result[(), IoError] {
+    let line = "holding {ticket}"
+    println(line)?
+    println("again {ticket}")
+}
+
+// `redeem` takes the ticket, which settles it.
+fn redeem(sink ticket: Ticket) -> Int64 {
+    let Ticket { seat } = ticket
+    seat
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let ticket = Ticket { seat = 12 }
+    let shown = show(ticket)
+    let seat = redeem(ticket)
+    shown?
+    return .Ok(UInt8(seat))
+}

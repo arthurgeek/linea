@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iter/lent_walks/a_lent_walk_invalidates_a_closure_reading_its_iterator.lin:28:14
+   |
+28 |     for p in &pending {
+   |              ^^^^^^^^ keep this place available until the last use of its observation
+29 |         total += commit(p) + look()
+   |                              ---- the observation is still used here

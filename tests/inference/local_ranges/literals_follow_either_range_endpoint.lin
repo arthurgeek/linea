@@ -1,0 +1,15 @@
+fn unsigned(value: Range[UInt64]) -> Bool {
+    value.lo == 0 && value.hi == 4
+}
+
+fn main() -> UInt8 {
+    let limit: UInt64 = 4
+    let forward = 0..limit
+    let backward = limit..0
+    let grouped = (0)..limit
+    if unsigned(forward) && backward.hi == 0 && grouped.hi == limit {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,25 @@
+import std.hash
+
+use hash.Hash
+
+// The derive adds requirements for its implementation; it does not replace
+// the bounds the type declares. `Entry[Label, Bool]` is refused because
+// `Label` does not implement `Hash`.
+@derive(Equatable)
+struct Entry[K: Hash, V] {
+    key: K,
+    value: V,
+}
+
+@derive(Equatable)
+struct Label {
+    text: Str,
+}
+
+fn main() -> UInt8 {
+    let first: Entry[Label, Bool] = .{ key = .{ text = "a" }, value = true }
+    if first == first {
+        return 0
+    }
+    1
+}

@@ -1,0 +1,5 @@
+error[T-Try]: `?` needs an `Option` or a `Result`, and this is `Int64`
+ --> tests/inference/try_payload/payload_context_requires_a_carrier.lin:6:25
+  |
+6 |     let value: UInt64 = identity(7)?
+  |                         ^^^^^^^^^^^^ `?` works over exactly those two types

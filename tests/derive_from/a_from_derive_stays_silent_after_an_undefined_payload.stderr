@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Missing`
+ --> tests/derive_from/a_from_derive_stays_silent_after_an_undefined_payload.lin:3:10
+  |
+3 |     Byte(Missing),
+  |          ^^^^^^^ no type with this name is declared here

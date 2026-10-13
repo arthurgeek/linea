@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let sum = 200 + 100
+    let small: UInt8 = sum
+    small
+}

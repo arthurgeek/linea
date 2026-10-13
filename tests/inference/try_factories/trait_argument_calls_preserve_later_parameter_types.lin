@@ -1,0 +1,24 @@
+trait Accepts[A: Discardable, B: Discardable] {
+    fn accept(self: Self, sink first: A, sink second: B) -> UInt8
+}
+
+struct Receiver {}
+
+impl Accepts[UInt8, UInt64] for Receiver {
+    fn accept(_self: Self, sink first: UInt8, sink second: UInt64) -> UInt8 {
+        if first == 1 && second == 7 {
+            0
+        } else {
+            1
+        }
+    }
+}
+
+fn identity[T](sink value: T) -> T where carries(value) {
+    value
+}
+
+fn main() -> UInt8 {
+    let receiver: Receiver = .{}
+    Accepts.accept(receiver, identity(UInt8(1)), UInt64(7))
+}

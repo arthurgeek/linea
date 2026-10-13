@@ -1,0 +1,28 @@
+// An implementation requiring a Copyable argument does not cover a
+// wrapper instantiated with a linear payload.
+trait Show {}
+
+enum Holder[T] {
+    Of(T),
+}
+
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+impl[T: Copyable] Show for Holder[T] {}
+
+fn shown[S: Show](_s: S) -> UInt8 {
+    5
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Key] = Holder.Of(Key.Forged(1))
+    let n = shown(h)
+    match h {
+        Of(k) => match k {
+            Forged(v) => n + v,
+        },
+    }
+}

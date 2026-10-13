@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"struct Point { x: UInt8, y: UInt8 }\n\nfn main() -> UInt8 {\n    let origin = Point { x = 3, y = 4 }\n    let moved = Point { x = 5, ..origin }\n    moved.x + moved.y\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":35},"newName":"start"}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":5,"character":10}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":35}}}
+{"jsonrpc":"2.0","id":5,"method":"shutdown"}

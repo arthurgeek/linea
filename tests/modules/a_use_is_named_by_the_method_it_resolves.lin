@@ -1,0 +1,14 @@
+// A postfix call makes the `use` binding of its trait live. The qualified
+// call reaches the trait through `hash` without using that binding.
+import std.hash
+
+use hash.Hash
+
+fn main() -> UInt8 {
+    let seat = UInt64(12)
+    if seat.hash() == hash.Hash.hash(seat) {
+        3
+    } else {
+        0
+    }
+}

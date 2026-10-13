@@ -1,0 +1,9 @@
+// `handler.run(3)` looks for an operation named `run`, and `Handler`
+// declares none. Its field `run` is sealed outside `dispatch`, so the report
+// does not mention it.
+import dispatch
+
+fn main() -> UInt8 {
+    let handler = dispatch.doubling()
+    handler.run(3)
+}

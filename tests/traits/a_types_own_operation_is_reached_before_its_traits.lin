@@ -1,0 +1,25 @@
+// `Tank` declares `default` itself and implements `Default`. Written through
+// the type, the call reaches the type's own operation, exactly as a postfix
+// call would; the trait's is reached through the trait.
+@copyable
+struct Tank {
+    litres: UInt8,
+}
+
+impl Tank {
+    fn default() -> Tank {
+        .{ litres = 50 }
+    }
+}
+
+impl Default for Tank {
+    fn default() -> Tank {
+        .{ litres = 0 }
+    }
+}
+
+fn main() -> UInt8 {
+    let own = Tank.default()
+    let trait_default: Tank = Default.default()
+    own.litres + trait_default.litres
+}

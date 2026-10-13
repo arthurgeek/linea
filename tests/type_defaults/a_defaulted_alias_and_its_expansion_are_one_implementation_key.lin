@@ -1,0 +1,28 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+alias Rack[T, A: Allocator = SystemAllocator] = Vec[T, A]
+
+trait Takes[phantom T] {
+    fn takes(_self: Self) -> UInt8
+}
+
+struct Counter {}
+
+impl Takes[Rack[UInt8]] for Counter {
+    fn takes(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Takes[Vec[UInt8, SystemAllocator]] for Counter {
+    fn takes(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

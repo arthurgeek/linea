@@ -1,0 +1,10 @@
+error[S-Entry]: a program's `main` is not generic
+ --> tests/decl/main_is_not_generic.lin:8:9
+  |
+8 | fn main[T: Copyable]() -> UInt8 {
+  |         ^ nothing calls the entry point, so nothing supplies this
+error[N-Unused]: `T` is never used
+ --> tests/decl/main_is_not_generic.lin:8:9
+  |
+8 | fn main[T: Copyable]() -> UInt8 {
+  |         ^ name it in this declaration, or remove it

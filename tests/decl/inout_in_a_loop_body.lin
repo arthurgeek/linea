@@ -1,0 +1,21 @@
+// A local read before an inout call observes the write on the next iteration.
+// Local and indirect accesses use the same storage width across the back edge.
+fn set(inout x: Int8) -> () {
+    x = 0 - 1
+}
+
+fn main() -> UInt8 {
+    var x: Int8 = 0
+    var seen: Int8 = 0
+    var i: UInt8 = 0
+    while i < 2 {
+        seen = x
+        set(&x)
+        i = i + 1
+    }
+    if seen == 0 - 1 {
+        9
+    } else {
+        1
+    }
+}

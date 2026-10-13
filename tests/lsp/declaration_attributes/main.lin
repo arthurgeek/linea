@@ -1,0 +1,44 @@
+import traits
+
+use traits.Score
+
+@(
+    copyable,
+    // Keep this request grouped with its policy.
+    derive(traits.Score),
+)
+struct Point {
+    value: UInt8,
+}
+
+@copyable
+// This comment stays between separate attributes.
+@derive(Score)
+struct Sample[T: Copyable] {
+    value: T,
+}
+
+@derive(traits.Score)
+enum Choice { Value(UInt8) }
+
+@derive(Score)
+type Count = UInt8
+
+struct Cell[T] { value: T }
+
+derive[T: Copyable] Score for Cell[T]
+
+fn main() -> UInt8 {
+    let point = Point { value = 3 }
+    let duplicate = copy(point)
+    let sample = Sample[UInt8] { value = 5 }
+    let choice = Choice.Value(7)
+    let count = Count(11)
+    let cell = Cell[UInt8] { value = 13 }
+    let total = Score.score(point) + Score.score(duplicate) + Score.score(sample) + Score.score(choice) + Score.score(count) + Score.score(cell)
+    if total == 42 {
+        0
+    } else {
+        1
+    }
+}

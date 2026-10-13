@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/closure_captures/owned_recovery_retains_read_dependency.lin:5:5
+  |
+5 |     number = 2
+  |     ^^^^^^ keep this place available until the last use of its observation
+6 |     *observation + number
+  |     ------------ the observation is still used here

@@ -1,0 +1,7 @@
+fn discard[T](sink _value: T) -> ()
+where T: Discardable {}
+
+fn main() -> UInt8 {
+    discard(7)
+    0
+}

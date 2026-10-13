@@ -1,0 +1,25 @@
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_declaration_over_an_allocator_writes_the_allocator_of_a_defaulted_type.lin:22:12
+   |
+22 |     inner: Shelf[UInt8],
+   |            ^^^^^ write the allocator: `A`, or `SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_declaration_over_an_allocator_writes_the_allocator_of_a_defaulted_type.lin:35:37
+   |
+35 | alias _Mine[A: Allocator] = Pair[A, Shelf[UInt8]]
+   |                                     ^^^^^ write the allocator: `A`, or `SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_declaration_over_an_allocator_writes_the_allocator_of_a_defaulted_type.lin:16:65
+   |
+16 | fn _from_function[A: Allocator](sink shelf: Shelf[UInt8, A]) -> Shelf[UInt8] where carries(shelf) {
+   |                                                                 ^^^^^ write the allocator: `A`, or `SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_declaration_over_an_allocator_writes_the_allocator_of_a_defaulted_type.lin:26:38
+   |
+26 |     fn _inner_of(sink self: Self) -> Shelf[UInt8] where carries(self) {
+   |                                      ^^^^^ write the allocator: `A`, or `SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_declaration_over_an_allocator_writes_the_allocator_of_a_defaulted_type.lin:32:43
+   |
+32 |     fn _keep(self: Self, allocator: A) -> Shelf[UInt8]
+   |                                           ^^^^^ write the allocator: `A`, or `SystemAllocator` where the system allocator is meant

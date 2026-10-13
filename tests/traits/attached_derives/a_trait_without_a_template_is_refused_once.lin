@@ -1,0 +1,16 @@
+trait Plain[T] {
+    fn accept(self: Self, value: T) -> ()
+}
+
+impl Plain[UInt8] for UInt8 {
+    fn accept(_self: Self, _value: UInt8) -> () {}
+}
+
+@derive(Plain[UInt8])
+struct Point {
+    value: UInt8,
+}
+
+fn main() -> UInt8 {
+    Point { value = 0 }.value
+}

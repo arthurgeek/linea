@@ -1,0 +1,10 @@
+error[T-Bound]: `Closure` takes a `fn` or `inout fn` type, and `UInt64` is not one
+ --> tests/erased_closures/a_closure_type_takes_a_read_or_inout_callable.lin:6:25
+  |
+6 | fn _count(_numbers: mem.Closure[UInt64, mem.SystemAllocator]) -> UInt8 {
+  |                         ^^^^^^^ write the `fn` or `inout fn` type the closure is called as
+error[T-Bound]: `Closure` takes a `fn` or `inout fn` type, and `sink fn() -> UInt8` is not one
+  --> tests/erased_closures/a_closure_type_takes_a_read_or_inout_callable.lin:10:23
+   |
+10 | fn _finish(_last: mem.Closure[sink fn() -> UInt8, mem.SystemAllocator]) -> UInt8 {
+   |                       ^^^^^^^ write the `fn` or `inout fn` type the closure is called as

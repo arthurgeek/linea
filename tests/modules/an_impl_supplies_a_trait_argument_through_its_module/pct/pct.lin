@@ -1,0 +1,7 @@
+pub struct Thing {
+    x: UInt8,
+}
+
+pub fn make() -> Thing {
+    .{ x = 3 }
+}

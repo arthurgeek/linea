@@ -1,0 +1,19 @@
+// Integer supplies arithmetic in a generic body at its declaration.
+// Equality instead resolves through the declared Equatable requirement.
+fn add[T: Integer](a: T, b: T) -> T where carries() {
+    a + b
+}
+
+fn same[T: Discardable + Equatable](a: T, b: T) -> Bool {
+    a == b
+}
+
+fn main() -> UInt8 {
+    let x: UInt8 = 3
+    let y: UInt8 = 4
+    if same(x, x) {
+        add(x, y)
+    } else {
+        0
+    }
+}

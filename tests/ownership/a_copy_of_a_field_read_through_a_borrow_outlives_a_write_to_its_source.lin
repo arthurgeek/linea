@@ -1,0 +1,20 @@
+// A `Str` field copied out of a borrowed value is read again after the owner is
+// written: the copy holds what the field held, and the borrow was only the way
+// to reach it.
+@copyable
+struct Room {
+    name: Str,
+    seats: UInt8,
+}
+
+fn main() -> UInt8 {
+    var hall = Room { name = "hall", seats = 120 }
+    let big = borrow hall
+    let name = copy(big.name)
+    hall.seats = 100
+    if name == "hall" {
+        hall.seats
+    } else {
+        0
+    }
+}

@@ -1,0 +1,27 @@
+// Each malformed `else` is one mistake, reported once, and the statements after
+// it are still read.
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn get(n: UInt8) -> Result[UInt8, UInt8] {
+    if n > 2 {
+        Result.Ok(n)
+    } else {
+        Result.Err(n)
+    }
+}
+
+fn main() -> UInt8 {
+    let a = find(1) else |
+    let b = get(2) else |first second| { return first }
+    let c = get(3) else ||
+    let d = find(4) else
+    let e = get(5) else |error|
+    let f = find(6) else { 1 } else { 2 }
+    a + b + c + d + e + f
+}

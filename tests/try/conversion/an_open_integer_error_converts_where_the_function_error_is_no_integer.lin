@@ -1,0 +1,29 @@
+// An integer literal's error type that meets no integer takes its default,
+// `Int64`, and converts through `From[Int64]` like any known error type.
+enum Failure {
+    Code(Int64),
+}
+
+impl From[Int64] for Failure {
+    fn from(sink source: Int64) -> Failure {
+        return .Code(source + 1)
+    }
+}
+
+fn fail[E](sink error: E) -> Result[UInt8, E] where carries(.Err: error) {
+    return .Err(error)
+}
+
+fn check() -> Result[UInt8, Failure] {
+    let value = fail(40)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match check() {
+        Ok(_) => 0,
+        Err(failure) => match failure {
+            Code(code) => UInt8(code),
+        },
+    }
+}

@@ -1,0 +1,5 @@
+error[T-Const]: `config` is not a constant expression
+ --> tests/constants/aggregates/function_is_not_construction.lin:8:14
+  |
+8 | let config = make()
+  |              ^^^^^^ give it something the language can work out without running anything

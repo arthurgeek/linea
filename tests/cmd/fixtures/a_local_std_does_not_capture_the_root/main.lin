@@ -1,0 +1,9 @@
+import std.io
+
+// Reaches the library's `println`, which writes. The one beside this file
+// answers its argument and writes nothing, so a run that reached it would print
+// nothing and exit differently.
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("the library")?
+    return .Ok(0)
+}

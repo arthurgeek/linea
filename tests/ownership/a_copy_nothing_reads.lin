@@ -1,0 +1,10 @@
+// An aggregate copy is unnecessary when its source is never read again.
+@copyable
+struct Token { value: UInt8 }
+
+fn main() -> UInt8 {
+    let a: Token = .{ value = 1 }
+    let b = copy(a)
+    let c = copy(b)
+    c.value
+}

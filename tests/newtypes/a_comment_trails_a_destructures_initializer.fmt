@@ -1,0 +1,15 @@
+// Two statements sharing a line, the second trailed by a comment, mean
+// exactly what they would spread over two lines: `q` is bound before the
+// destructure runs, and the destructure still reads `p` apart into `n`.
+@copyable
+type Percent = UInt8 where it in 0..=99
+
+fn viaLet(sink p: Percent) -> UInt8 {
+    let q: UInt8 = 1
+    let Percent(n) = p // read straight back
+    n + q
+}
+
+fn main() -> UInt8 {
+    viaLet(Percent(29))
+}

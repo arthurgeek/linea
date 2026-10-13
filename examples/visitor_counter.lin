@@ -1,0 +1,112 @@
+// A guest book over TCP. Each visitor connects, sends a name, and is told which
+// visitor it was. The server counts visitors across connections, so the third
+// to arrive is greeted as visitor 3 whichever connection that was.
+import std.io
+import std.mem
+import std.net
+
+// Read the visitor's name, then answer with their number and close.
+// `visitors` is the count of everyone greeted so far; a visitor whose name
+// never arrives is not counted.
+fn greet(sink connection: net.Connection, inout visitors: UInt64) -> () {
+    // A refused buffer hands the connection back; `settled()` closes it.
+    var reader = io.BufferedReader.open(mem.system(), capacity: 256, reader: connection).settled() else |reason| {
+        io.eprintln("cannot buffer a connection: {reason}")
+        return
+    }
+    let name = match &reader.read_line_borrowed(max_bytes: 64) {
+        Ok(line) => match line {
+            Some(text) => text,
+            None => "stranger",
+        },
+        Err(error) => {
+            io.eprintln("cannot read a name: {error}")
+            let _closed = reader.abandon().close()
+            return
+        },
+    }
+    visitors += 1
+    // The name lives in the reader's buffer, so the greeting is built before
+    // the connection is taken back from the reader.
+    defer var greeting = String.new()
+    let built = io.line("welcome, {name}: you are visitor {visitors}", &greeting).is_ok()
+    var conn = reader.abandon()
+    if !built || &conn.write_str(greeting.view()).is_err() {
+        io.eprintln("cannot greet a visitor")
+    }
+    let _closed = conn.close()
+}
+
+// Connect, send `name` as a line, and tell the server nothing more is coming.
+// The server need not be accepting yet: the kernel queues the connection and
+// its bytes until `net.serve` takes them.
+fn arrive(address: net.Address, name: Str) -> Option[net.Connection] {
+    var visitor = net.connect(address) else |error| {
+        io.eprintln("cannot connect: {error}")
+        return .None
+    }
+    let sent = io.line(name, &visitor).is_ok() && &visitor.shutdown_write().is_ok()
+    if !sent {
+        io.eprintln("cannot send {name}")
+        let _closed = visitor.close()
+        return .None
+    }
+    .Some(visitor)
+}
+
+// Print the greeting the server sent back, then close the connection.
+fn read_greeting(sink visitor: net.Connection) -> () {
+    var reader = io.BufferedReader.open(mem.system(), capacity: 256, reader: visitor).settled() else |reason| {
+        io.eprintln("cannot buffer a connection: {reason}")
+        return
+    }
+    match &reader.read_line_borrowed(max_bytes: 256) {
+        Ok(line) => match line {
+            Some(text) => {
+                let _printed = io.println(text)
+            },
+            None => io.eprintln("the server said nothing"),
+        },
+        Err(error) => io.eprintln("cannot read a greeting: {error}"),
+    }
+    let _closed = reader.abandon().close()
+}
+
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)) else |error| {
+        io.eprintln("cannot listen: {error}")
+        return 1
+    }
+    let address = listener.local_address() else |error| {
+        io.eprintln("cannot read the bound address: {error}")
+        let _closed = listener.close()
+        return 1
+    }
+    let ada = arrive(address, "Ada")
+    let grace = arrive(address, "Grace")
+    let edsger = arrive(address, "Edsger")
+    // `serve` hands each accepted connection to the handler and returns once
+    // three have been served. The handler counts visitors in a captured
+    // variable, which `into_captures` returns afterwards.
+    var handler = inout [sink visitors = UInt64(0)] |sink connection: net.Connection, _peer: net.Address| {
+        greet(connection, &visitors)
+    }
+    let ended = net.serve(listener, &handler, connections: .Some(3))
+    let { visitors } = handler.into_captures()
+    for visitor in [ada, grace, edsger] {
+        match visitor {
+            Some(connection) => read_greeting(connection),
+            None => {},
+        }
+    }
+    match ended {
+        Ok(_) => {
+            let _printed = io.println("{visitors} visitors")
+            0
+        },
+        Err(error) => {
+            io.eprintln("{error}")
+            1
+        },
+    }
+}

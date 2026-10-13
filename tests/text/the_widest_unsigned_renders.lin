@@ -1,0 +1,20 @@
+// The unsigned half is not the signed one with a check in front of it. Half of
+// what a `UInt64` holds is past what an `Int64` does, so converting up and
+// rendering that would trap on exactly the numbers only this can print -- which
+// is what it did before this existed.
+//
+// Twenty digits, which the corpus records as a golden.
+import std.io
+
+use io.Descriptor
+use io.eprintln
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+    let widest: UInt64 = 18446744073709551615
+    Display.fmt(widest, &w)?
+    eprintln("")
+    return .Ok(0)
+}

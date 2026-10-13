@@ -1,0 +1,18 @@
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/construction_derive/construct_dead_defer.lin:40:8
+   |
+24 |             |component| {
+   |                         - generated from this template code for `Pair.first`
+36 | struct Pair { first: Token, second: Token }
+   |               ----- the code was generated for this field
+40 | derive Build for Pair
+   |        ^^^^^ delete the `defer`, or move what takes the value after it
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/construction_derive/construct_dead_defer.lin:40:8
+   |
+24 |             |component| {
+   |                         - generated from this template code for `Pair.second`
+36 | struct Pair { first: Token, second: Token }
+   |                             ------ the code was generated for this field
+40 | derive Build for Pair
+   |        ^^^^^ delete the `defer`, or move what takes the value after it

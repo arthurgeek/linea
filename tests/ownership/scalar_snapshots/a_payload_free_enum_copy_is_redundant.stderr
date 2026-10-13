@@ -1,0 +1,5 @@
+error[O-ScalarCopy]: `State` already produces a scalar snapshot when read
+ --> tests/ownership/scalar_snapshots/a_payload_free_enum_copy_is_redundant.lin:6:21
+  |
+6 |     let duplicate = copy(state)
+  |                     ^^^^^^^^^^^ remove `copy` and read the value directly

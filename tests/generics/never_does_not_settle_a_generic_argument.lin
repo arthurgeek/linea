@@ -1,0 +1,10 @@
+// Bottom conversion satisfies a type only after another fact chooses it. A
+// non-completing argument alone cannot choose one arbitrary instantiation.
+fn choose[T](sink value: T) -> T {
+    value
+}
+
+fn main() -> UInt8 {
+    let _answer = choose(panic("stop"))
+    0
+}

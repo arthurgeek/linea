@@ -1,0 +1,10 @@
+error[S-BaseLast]: the base of a structure literal comes last
+ --> tests/struct_update/the_base_comes_last.lin:9:38
+  |
+9 |     let wide = Size { ..copy(small), width = 8 }
+  |                                      ^^^^^ write this before `..`
+error[S-BaseLast]: the base of a structure literal comes last
+  --> tests/struct_update/the_base_comes_last.lin:10:44
+   |
+10 |     let tall = Size { height = 8, ..small, ..copy(wide) }
+   |                                            ^^ write this before `..`

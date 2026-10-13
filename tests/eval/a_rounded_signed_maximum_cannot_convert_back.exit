@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/eval/a_rounded_signed_maximum_cannot_convert_back.lin:2:5

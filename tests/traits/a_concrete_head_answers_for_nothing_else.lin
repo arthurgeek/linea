@@ -1,0 +1,24 @@
+// An implementation whose head applies settled arguments answers for that one
+// instantiation and no other. `Pair[UInt8, Bool]` and `Pair[Bool, UInt8]` are
+// built from one constructor, and reading the second through an implementation
+// written for the first would read the body's `self.a` as a `UInt8` out of a
+// `Bool`.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl Show for Pair[UInt8, Bool] {
+    fn show(self: Pair[UInt8, Bool]) -> UInt8 {
+        self.a
+    }
+}
+
+fn main() -> UInt8 {
+    let p: Pair[Bool, UInt8] = .{ a = true, b = 5 }
+    Show.show(p)
+}

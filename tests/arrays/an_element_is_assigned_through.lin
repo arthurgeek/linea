@@ -1,0 +1,8 @@
+// An index names a place, so it is written to the way a field is. Permission
+// belongs to the binding: `xs` is a `var`, so this is allowed at any depth.
+fn main() -> UInt8 {
+    var xs: [UInt8; 3] = [1, 2, 3]
+    xs[0] = 9
+    xs[2] = xs[0] + 1
+    xs[0] + xs[2]
+}

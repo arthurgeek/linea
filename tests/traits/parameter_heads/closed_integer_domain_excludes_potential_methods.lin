@@ -1,0 +1,28 @@
+trait IntegerRoute[U] {
+    fn route(self: Self) -> U
+}
+
+impl[T: Integer, U: Integer] IntegerRoute[U] for T {
+    fn route(self: T) -> U {
+        U(self)
+    }
+}
+
+trait BoolRoute {
+    fn route(self: Self) -> Bool
+}
+
+impl BoolRoute for Bool {
+    fn route(self: Bool) -> Bool {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let value = false
+    if value.route() {
+        1
+    } else {
+        0
+    }
+}

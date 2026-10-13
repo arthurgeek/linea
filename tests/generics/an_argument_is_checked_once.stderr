@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt8` cannot hold 300
+  --> tests/generics/an_argument_is_checked_once.lin:18:24
+   |
+13 | fn two(a: UInt8, b: UInt8) -> UInt8 {
+   |        - expected because of this parameter
+18 |     id(id(id(id(id(two(300, 1))))))
+   |                        ^^^ literal is out of range for its type

@@ -1,0 +1,35 @@
+enum Shape { Circle(UInt8), Square }
+
+fn make(n: UInt8) -> Shape {
+    Shape.Circle(n)
+}
+
+fn size(s: Shape) -> UInt8 {
+    match read s {
+        Circle(n) => n,
+        Square => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    // A value too wide for a register crossing a join, where both arms write
+    // one slot and the join reads it.
+    let picked: Shape = if true {
+        make(3)
+    } else {
+        Shape.Square
+    }
+
+    // And one rebound each time round a loop. The storage it copies from is
+    // the same on every iteration, so a copy that did not happen would show up
+    // as the last value winning rather than the sum.
+    var running: Shape = Shape.Circle(0)
+    var i: UInt8 = 0
+    while i < 3 {
+        let step: Shape = make(i)
+        running = Shape.Circle(size(running) + size(step))
+        i = i + 1
+    }
+
+    size(picked) + size(running)
+}

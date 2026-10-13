@@ -1,0 +1,9 @@
+pub trait Tag {
+    fn tag(value: Self) -> UInt8
+}
+
+impl[T: Integer] Tag for T {
+    fn tag(value: T) -> UInt8 {
+        UInt8(value)
+    }
+}

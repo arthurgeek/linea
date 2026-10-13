@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/an_inout_call_protects_the_new_observed_owner.lin:11:5
+   |
+11 |     owner = 9
+   |     ^^^^^ keep this place available until the last use of its observation
+12 |     UInt8(*target + owner)
+   |           ------- the observation is still used here

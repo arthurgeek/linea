@@ -1,0 +1,24 @@
+// A derived implementation requires the trait of each field's type. `Tag[Of]`
+// compares for every `Of`, so `Shelf[Of]` asks nothing of `Of`.
+@derive(Equatable)
+struct Tag[phantom Of] {
+    id: UInt64,
+}
+
+@derive(Equatable)
+struct Shelf[Of] {
+    tag: Tag[Of],
+    count: UInt64,
+}
+
+struct Book {}
+
+fn main() -> UInt8 {
+    let first: Shelf[Book] = .{ tag = .{ id = 1 }, count = 3 }
+    let second: Shelf[Book] = .{ tag = .{ id = 1 }, count = 3 }
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

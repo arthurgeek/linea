@@ -1,0 +1,5 @@
+error[O-Copy]: `T` does not permit copying
+ --> tests/generics/a_parameter_is_not_copied.lin:9:5
+  |
+9 |     copy(x)
+  |     ^^^^^^^ move the value, or declare a copyable representation

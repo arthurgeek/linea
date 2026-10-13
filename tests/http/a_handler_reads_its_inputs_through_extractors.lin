@@ -1,0 +1,88 @@
+// A handler reads each input with `request.extract`: a path value, a query,
+// a JSON body, and a type of the program's own that implements `Extract`.
+import std.http
+import std.io
+import std.json
+import std.mem
+
+use http.Handler
+use mem.Owner
+
+@derive(http.Params)
+struct Day {
+    year: UInt32,
+    day: UInt16,
+}
+
+@derive(http.Params)
+struct Page {
+    size: Option[UInt8],
+    after: Option[Str],
+}
+
+@derive(Release, json.Decode[A])
+struct Entry[A: Allocator] {
+    title: String[A],
+}
+
+struct Author {
+    name: Str,
+}
+
+impl[P: Allocator] http.Extract[P] for Author {
+    fn extract(request: http.Request[P]) -> Result[Author, http.Error[P]] where carries(request) {
+        let name = request.header("X-Author") else {
+            return .Err(http.error(request, .Unauthorized, "no author"))
+        }
+        return .Ok(.{ name })
+    }
+}
+
+fn day[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let Day { year, day } = request.extract[http.Path[Day]]()?
+    let Page { size, after } = request.extract[http.Query[Page]]()?
+    let shown = size.unwrap_or(20)
+    let start = after.unwrap_or("the start")
+    http.text(request, "{year} day {day}: {shown} from {start}")
+}
+
+fn post[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let author = request.extract[Author]()?
+    let entry = request.extract[http.Json[Entry[mem.Handle[P]]]]()?
+    defer entry.release()
+    http.text(request, "{author.name} wrote {entry.title.view()}")
+}
+
+fn answer(inout router: http.Router[(), mem.SystemAllocator], method: Str, target: Str, author: Str, body: Str) -> () {
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), method, target, body).unwrap()
+    &sent.add_header("Content-Type", "application/json").unwrap()
+    if author.length() > 0 {
+        &sent.add_header("X-Author", author).unwrap()
+    }
+    var nothing = {}
+    match &router.serve_http(&nothing, sent.request()) {
+        Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+        Err(error) => io.println("{error}").unwrap(),
+    }
+    arena.release()
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let days = &router.route_raw(r"GET /days/{year}/{day}", day)
+    let posts = &router.route_raw("POST /entries", post)
+    answer(&router, "GET", "/days/2026/40", "", "")
+    answer(&router, "GET", "/days/2026/40?size=5&after=Ada+L", "", "")
+    answer(&router, "GET", "/days/2026/forty", "", "")
+    answer(&router, "GET", "/days/2026/40?size=500", "", "")
+    answer(&router, "POST", "/entries", "ada", r#"{"title":"notes"}"#)
+    answer(&router, "POST", "/entries", "", r#"{"title":"notes"}"#)
+    answer(&router, "POST", "/entries", "ada", r#"{"heading":"notes"}"#)
+    router.release()
+    if days.is_ok() && posts.is_ok() {
+        0
+    } else {
+        1
+    }
+}

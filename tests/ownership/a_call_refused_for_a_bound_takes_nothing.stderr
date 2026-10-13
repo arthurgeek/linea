@@ -1,0 +1,5 @@
+error[T-Bound]: `Release` requires `Self` to implement it, and `Note` does not
+  --> tests/ownership/a_call_refused_for_a_bound_takes_nothing.lin:13:21
+   |
+13 |     Release.release(note)
+   |                     ^^^^ implement it for that type, or reach the operation on one that does

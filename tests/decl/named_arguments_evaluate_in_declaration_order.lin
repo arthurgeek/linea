@@ -1,0 +1,20 @@
+// Arguments evaluate in the callee's parameter order, whatever order the call
+// spells them: the spelling below is reversed, the output is not.
+import std.io
+
+use io.IoError
+use io.println
+
+fn say(s: Str) -> Result[UInt8, IoError] {
+    println(s)?
+    return .Ok(1)
+}
+
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let sum = add(b: say("b")?, a: say("a")?)
+    return .Ok(sum)
+}

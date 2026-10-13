@@ -1,0 +1,7 @@
+error[N-Duplicate]: `_Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/one_implementation_per_settled_reference_path.lin:37:15
+   |
+31 | impl[T: Pair] _Give[T.A] for Holder[T] {
+   |               ----- already implemented here
+37 | impl[T: Pair] _Give[T.A] for Holder[T] {
+   |               ^^^^^ a trait is implemented once per arguments and type

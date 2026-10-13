@@ -1,0 +1,5 @@
+extern fn linea_close(fd: Int32) -> Int64
+
+export fn close_descriptor(fd: Int32) -> Int64 {
+    linea_close(fd)
+}

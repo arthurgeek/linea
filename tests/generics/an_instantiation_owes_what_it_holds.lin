@@ -1,0 +1,19 @@
+// Conditional copyability of a generic wrapper depends on its owned
+// parameter. An unbounded generic body cannot duplicate that parameter.
+@copyable
+struct Box[T] {
+    v: T,
+}
+
+struct Outer[T] {
+    held: Box[T],
+}
+
+fn dup[T](b: Box[T]) -> Box[T] {
+    copy(b)
+}
+
+fn main() -> UInt8 {
+    let plain: Outer[UInt8] = .{ held = .{ v = 1 } }
+    plain.held.v
+}

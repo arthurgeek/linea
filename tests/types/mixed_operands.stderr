@@ -1,0 +1,6 @@
+error[T-Operands]: expected `UInt8`, found `Int64`
+ --> tests/types/mixed_operands.lin:4:15
+  |
+4 |     UInt8(a + Int64(b))
+  |           - expected because of this operand
+  |               ^^^^^^^^ expected `UInt8`, found `Int64`

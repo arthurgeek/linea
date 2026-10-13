@@ -1,0 +1,7 @@
+error[O-Move]: `heavy` has already been moved
+ --> tests/iter/operations/a_named_callback_is_moved_by_its_first_walk.lin:9:37
+  |
+8 |     let first = (UInt64(1)..10).any(heavy)
+  |                                     ----- it was taken here
+9 |     let second = (UInt64(1)..3).any(heavy)
+  |                                     ^^^^^ it was already taken, and a value is taken once

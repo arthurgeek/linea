@@ -1,0 +1,12 @@
+trait Structural {}
+
+struct Stamp {
+    value: UInt8,
+}
+
+derive Structural for Stamp
+
+fn main() -> UInt8 {
+    let _stamp: Stamp = .{ value = 1 }
+    0
+}

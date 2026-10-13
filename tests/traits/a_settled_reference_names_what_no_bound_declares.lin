@@ -1,0 +1,36 @@
+// A name is read through a bound that declares it, and neither of these does:
+// the parameter carries two traits and `Item` is not a member of either. The
+// name reaches no declaration at all, which is a different mistake from two
+// bounds reaching two.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+trait Weigh {
+    fn heft(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+impl Weigh for Counter {
+    fn heft(x: Self) -> UInt8 {
+        x.at + 1
+    }
+}
+
+fn _either[W: Measure + Weigh](sink v: W.Item) -> UInt8 {
+    Measure.of(v)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c) + Weigh.heft(c)
+}

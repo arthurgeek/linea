@@ -1,0 +1,35 @@
+// A `continue` goes back to the loop head, which is a reachable state like any
+// other: `d` was given up on the way there and `use2` never began.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn key() -> Key {
+    .{ n = 2 }
+}
+
+fn go() -> UInt8 {
+    var n: UInt8 = 0
+    while n < 1 {
+        let d: Key = .{ n = 1 }
+        n = use2(
+            d,
+            {
+                continue
+                key()
+            },
+        )
+    }
+    n
+}
+
+fn main() -> UInt8 {
+    go()
+}

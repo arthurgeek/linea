@@ -1,0 +1,576 @@
+import std.fmt
+import std.json as json_format
+import std.mem
+import std.testing
+
+// An `Extract` type is one a handler reads out of a request, or refuses the
+// request with the error that says why. A handler asks for one input per
+// line, naming its type, and passes a refusal on with `?`:
+//
+//     let order = request.extract[http.Json[Order[mem.Handle[P]]]]()?
+//
+// `http.Path`, `http.Query` and `http.Json` are extractors. Any type becomes
+// one by implementing `Extract` for every `P`: `extract` reads the request
+// and returns the value, or the `http.Error` to answer with. The value may
+// view the request, which lives until the response has been written.
+pub trait Extract[P: Allocator] {
+    fn extract(request: Request[P]) -> Result[Self, Error[P]]
+}
+
+// `Extracted` is what a handler receives from an extractor: the extractor
+// itself, unless the extractor wraps what it read, as `http.Json[T]` wraps a
+// `T` and hands over the `T`.
+pub trait Extracted {
+    type Output
+
+    fn output(sink self: Self) -> Output where carries(self)
+}
+
+// An extractor that wraps nothing is handed over as it is.
+default impl[T] Extracted for T {
+    type Output = T
+
+    fn output(sink self: Self) -> T where carries(self) {
+        self
+    }
+}
+
+impl[P: Allocator] Request[P] {
+    // `extract` reads a `T` out of this request through `T`'s `Extract`
+    // implementation and returns what `T` hands over, or returns the error
+    // that refuses the request.
+    pub fn extract[T: Extract[P] + Extracted](self: Self) -> Result[T.Output, Error[P]] where carries(self) {
+        let found = T.extract(self)?
+        .Ok(found.output())
+    }
+}
+
+test fn a_request_extracts_any_type_that_implements_extract() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var named = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &named.add_header("X-Guest", "ada").unwrap()
+    let unnamed = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let visitor = named.request().extract[Guest]().unwrap()
+    let refused = match unnamed.request().extract[Guest]() {
+        Ok(_) => return testing.assert(false, "a request without a visitor was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(visitor.name, "ada", "the visitor changed")?
+    testing.assert_eq(refused.status(), Status.BadRequest, "the refusal changed its status")?
+    testing.assert_eq(refused.message(), Option.Some("who is visiting?"), "the refusal changed its message")?
+    .Ok(())
+}
+
+// `Guest` is extracted from the `X-Guest` header, and refused with 400
+// without one.
+struct Guest {
+    name: Str,
+}
+
+impl[P: Allocator] Extract[P] for Guest {
+    fn extract(request: Request[P]) -> Result[Guest, Error[P]] {
+        match request.header("X-Guest") {
+            Some(name) => .Ok(.{ name }),
+            None => .Err(error(request, .BadRequest, "who is visiting?")),
+        }
+    }
+}
+
+// `Path[T]` reads a `T` from the path values the router matched for the
+// request and hands it over. A struct deriving `http.Params` takes each
+// field from the path value of its name, and a single value, such as
+// `Path[UInt64]`, reads the only one the route has:
+//
+//     // GET /orders/{id}
+//     let id = request.extract[http.Path[UInt64]]()?
+//
+// A value its field cannot be read from answers 400, naming it. A field the
+// route has no value for, or a single value read from a route with several,
+// is a mistake in the program rather than the request, and answers 500.
+pub struct Path[T] {
+    value: T,
+}
+
+// Releasing a `Path` releases the value it holds.
+derive[T: Release] Release for Path[T]
+
+impl[T] Extracted for Path[T] {
+    type Output = T
+
+    fn output(sink self: Self) -> T where carries(self) {
+        let Path { value } = self
+        value
+    }
+}
+
+impl[P: Allocator, T: FromPath] Extract[P] for Path[T] {
+    fn extract(request: Request[P]) -> Result[Path[T], Error[P]] {
+        let values = request.path_params() else {
+            return .Err(error(request, .InternalServerError, "no route matched the request, so it has no path values"))
+        }
+        let found: Result[T, ParamError] = FromPath.from_path(values)
+        match found {
+            Ok(value) => .Ok(.{ value }),
+            Err(refusal) => .Err(refused_path(request, refusal)),
+        }
+    }
+}
+
+// Answer a path value that could not be read.
+fn refused_path[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
+    let ParamError { name, value, problem } = refusal
+    match problem {
+        Missing => error(request, .InternalServerError, "the route has no path value {name:?}"),
+        Repeated => error(request, .InternalServerError, "the route names the path value {name:?} twice"),
+        Refused(reason) => error(request, .BadRequest, "path value {name:?} is refused: {reason}"),
+        Count(count) => error(request, .InternalServerError, "the route has {count} path values, and one was read"),
+        Invalid(reason) => error(request, .BadRequest, "cannot read path value {name:?} from {value:?}: {reason}"),
+    }
+}
+
+// `Month` is read from a path such as `/days/2026/3`.
+@derive(Params)
+struct Month {
+    year: UInt32,
+    month: UInt8,
+}
+
+fn month_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let span = request.extract[Path[Month]]()?
+    text(request, "{span.year}-{span.month:02}")
+}
+
+fn order_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let id = request.extract[Path[UInt64]]()?
+    text(request, "order {id}")
+}
+
+test fn a_path_reads_its_fields_from_the_path_values() {
+    defer var router = Router.new()
+    &router.route_raw(r"GET /days/{year}/{month}", month_of).unwrap()
+    &router.route_raw(r"GET /orders/{id}", order_of).unwrap()
+    &router.route_raw(r"GET /months/{month}", month_of).unwrap()
+    &router.route_raw(r"GET /pairs/{id}/{other}", order_of).unwrap()
+    defer let found = served(&router, "GET", "/days/2026/3")
+    defer let ordered = served(&router, "GET", "/orders/42")
+    defer let wrong = served(&router, "GET", "/days/2026/13x")
+    defer let unrouted = served(&router, "GET", "/months/3")
+    defer let several = served(&router, "GET", "/pairs/1/2")
+    testing.assert_eq(found.view(), "200 2026-03", "the struct was not read")?
+    testing.assert_eq(ordered.view(), "200 order 42", "the single value was not read")?
+    testing.assert_eq(wrong.view(), r#"400 cannot read path value "month" from "13x": invalid decimal syntax at byte 2"#, "an invalid value was not refused")?
+    testing.assert_eq(unrouted.view(), r#"500 the route has no path value "year""#, "a field the route lacks was not refused")?
+    testing.assert_eq(several.view(), "500 the route has 2 path values, and one was read", "a single value read from several was not refused")?
+    .Ok(())
+}
+
+test fn a_path_is_refused_when_no_router_matched() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/orders/42", body: "").unwrap()
+    let refused = match sent.request().extract[Path[UInt64]]() {
+        Ok(_) => return testing.assert(false, "a request no router matched had a path value"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), Status.InternalServerError, "the refusal changed its status")?
+    .Ok(())
+}
+
+// `Query[T]` reads a `T` from the request's query, the pairs after `?` in
+// its target, decoded as an HTML form encodes them, and hands it over. A
+// struct deriving `http.Params` takes each field from the value of its name,
+// and an `Option` field is `None` when the query does not name it:
+//
+//     // GET /orders?page=2
+//     @derive(http.Params)
+//     struct Listing {
+//         page: UInt32,
+//         limit: Option[UInt32],
+//     }
+//     let listing = request.extract[http.Query[Listing]]()?
+//
+// A query that is not percent-encoded UTF-8, a value that is missing or
+// named more than once, and a value its field cannot be read from answer
+// 400, naming the value. Every value a query holds has a name, so a `Query`
+// reads a `Params`, not a single value.
+pub struct Query[T] {
+    value: T,
+}
+
+// Releasing a `Query` releases the value it holds.
+derive[T: Release] Release for Query[T]
+
+impl[T] Extracted for Query[T] {
+    type Output = T
+
+    fn output(sink self: Self) -> T where carries(self) {
+        let Query { value } = self
+        value
+    }
+}
+
+impl[P: Allocator, T: Params] Extract[P] for Query[T] {
+    fn extract(request: Request[P]) -> Result[Query[T], Error[P]] {
+        let values = request.query_params() else {
+            return .Err(error(request, .BadRequest, "the query is not percent-encoded UTF-8"))
+        }
+        let found: Result[T, ParamError] = Params.from_params(values)
+        match found {
+            Ok(value) => .Ok(.{ value }),
+            Err(refusal) => .Err(refused_query(request, refusal)),
+        }
+    }
+}
+
+// Answer a query value that could not be read.
+fn refused_query[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
+    let ParamError { name, value, problem } = refusal
+    match problem {
+        Missing => error(request, .BadRequest, "missing query value {name:?}"),
+        Repeated => error(request, .BadRequest, "the query names {name:?} more than once"),
+        Refused(reason) => error(request, .BadRequest, "query value {name:?} is refused: {reason}"),
+        Count(count) => error(request, .BadRequest, "the query has {count} values, and one was read"),
+        Invalid(reason) => error(request, .BadRequest, "cannot read query value {name:?} from {value:?}: {reason}"),
+    }
+}
+
+// `Listing` is a page of a list, asked for in a query such as `?page=2`.
+@derive(Params)
+struct Listing {
+    page: UInt32,
+    limit: Option[UInt32],
+    sort: Option[Str],
+}
+
+fn listing_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let Listing { page, limit, sort } = request.extract[Query[Listing]]()?
+    let shown = limit.unwrap_or(10)
+    let order = sort.unwrap_or("newest")
+    text(request, "page {page}, {shown} by {order}")
+}
+
+test fn a_query_reads_its_fields_by_name() {
+    defer var router = Router.new()
+    &router.route_raw("GET /orders", listing_of).unwrap()
+    defer let first = served(&router, "GET", "/orders?page=1")
+    defer let sorted = served(&router, "GET", "/orders?sort=oldest+first&limit=5&page=3")
+    defer let unpaged = served(&router, "GET", "/orders?limit=5")
+    defer let wrong = served(&router, "GET", "/orders?page=-1")
+    defer let broken = served(&router, "GET", "/orders?page=%zz")
+    defer let twice = served(&router, "GET", "/orders?page=1&page=2")
+    testing.assert_eq(first.view(), "200 page 1, 10 by newest", "the defaults were not used")?
+    testing.assert_eq(sorted.view(), "200 page 3, 5 by oldest first", "the named values were not read")?
+    testing.assert_eq(unpaged.view(), r#"400 missing query value "page""#, "a missing value was not refused")?
+    testing.assert_eq(wrong.view(), r#"400 cannot read query value "page" from "-1": invalid decimal syntax at byte 0"#, "an invalid value was not refused")?
+    testing.assert_eq(broken.view(), "400 the query is not percent-encoded UTF-8", "a broken escape was not refused")?
+    testing.assert_eq(twice.view(), r#"400 the query names "page" more than once"#, "a repeated value was not refused")?
+    .Ok(())
+}
+
+fn days_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let span = request.extract[Query[DayRange]]()?
+    text(request, "days {span.from} to {span.to}")
+}
+
+test fn a_query_answers_a_refusal_of_a_params_of_its_own() {
+    defer var router = Router.new()
+    &router.route_raw("GET /days", days_of).unwrap()
+    defer let ordered = served(&router, "GET", "/days?from=3&to=9")
+    defer let reversed = served(&router, "GET", "/days?from=9&to=3")
+    testing.assert_eq(ordered.view(), "200 days 3 to 9", "an ordered range was refused")?
+    testing.assert_eq(reversed.view(), r#"400 query value "to" is refused: ends before `from`"#, "a reversed range was not refused")?
+    .Ok(())
+}
+
+// `Form[T]` reads a `T` from the request's body, a form's fields sent with
+// `Content-Type: application/x-www-form-urlencoded`, decoded the same way
+// `Query` decodes a query, and hands it over:
+//
+//     // POST /signup, body `name=Ada&age=30`
+//     @derive(http.Params)
+//     struct Signup {
+//         name: Str,
+//         age: UInt32,
+//     }
+//     let signup = request.extract[http.Form[Signup]]()?
+//
+// A body sent as another type answers 415. A body that is not
+// percent-encoded UTF-8, a value that is missing or named more than once,
+// and a value its field cannot be read from answer 400, naming the value,
+// exactly as `Query` answers the same mistakes in a query.
+// `Limits.max_form_pairs` bounds how many pairs a body may hold, and one
+// past it answers 413 before the body is decoded, when the request is read.
+pub struct Form[T] {
+    value: T,
+}
+
+// Releasing a `Form` releases the value it holds.
+derive[T: Release] Release for Form[T]
+
+impl[T] Extracted for Form[T] {
+    type Output = T
+
+    fn output(sink self: Self) -> T where carries(self) {
+        let Form { value } = self
+        value
+    }
+}
+
+impl[P: Allocator, T: Params] Extract[P] for Form[T] {
+    fn extract(request: Request[P]) -> Result[Form[T], Error[P]] {
+        if !is_form_content_type(request.header("Content-Type")) {
+            return .Err(error(request, .UnsupportedMediaType, "expected a form body, sent with `Content-Type: application/x-www-form-urlencoded`"))
+        }
+        let values = request.form_params() else {
+            return .Err(error(request, .BadRequest, "the body is not percent-encoded UTF-8"))
+        }
+        let found: Result[T, ParamError] = Params.from_params(values)
+        match found {
+            Ok(value) => .Ok(.{ value }),
+            Err(refusal) => .Err(refused_form(request, refusal)),
+        }
+    }
+}
+
+// Answer a form value that could not be read.
+fn refused_form[P: Allocator](request: Request[P], sink refusal: ParamError) -> Error[P] {
+    let ParamError { name, value, problem } = refusal
+    match problem {
+        Missing => error(request, .BadRequest, "missing form value {name:?}"),
+        Repeated => error(request, .BadRequest, "the form names {name:?} more than once"),
+        Refused(reason) => error(request, .BadRequest, "form value {name:?} is refused: {reason}"),
+        Count(count) => error(request, .BadRequest, "the form has {count} values, and one was read"),
+        Invalid(reason) => error(request, .BadRequest, "cannot read form value {name:?} from {value:?}: {reason}"),
+    }
+}
+
+// `Signup` is the form POST /signup expects, such as `name=Ada&age=30`.
+@derive(Params)
+struct Signup {
+    name: Str,
+    age: UInt32,
+}
+
+fn signup_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    let Signup { name, age } = request.extract[Form[Signup]]()?
+    text(request, "signed up {name}, {age}")
+}
+
+// `form_posted` sends `body` to POST /signup as `content_type` and describes
+// the answer as `posted` does.
+fn form_posted(content_type: Str, body: Str) -> String {
+    var router = Router.new()
+    &router.route_raw("POST /signup", signup_of).unwrap()
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = new_request(arena.handle(), "POST", "/signup", body, content_type).unwrap()
+    var nothing = ()
+    let described = match &router.serve_http(&nothing, sent.request()) {
+        Ok(response) => {
+            let answer = Str.from_bytes(response.body().unwrap()).unwrap()
+            fmt.render_owned(mem.system(), "200 {answer}").unwrap()
+        },
+        Err(error) => {
+            let code = error.status().code()
+            let message = error.message().unwrap_or("")
+            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+        },
+    }
+    arena.release()
+    router.release()
+    described
+}
+
+test fn a_request_extracts_a_form_by_its_field_names() {
+    defer let noted = form_posted("application/x-www-form-urlencoded", "name=Ada+L%C3%B3pez&age=30")
+    defer let typed = form_posted("application/json", "name=Ada&age=30")
+    defer let malformed = form_posted("application/x-www-form-urlencoded", "name=%zz&age=30")
+    defer let missing = form_posted("application/x-www-form-urlencoded", "name=Ada")
+    defer let wrong = form_posted("application/x-www-form-urlencoded", "name=Ada&age=old")
+    defer let twice = form_posted("application/x-www-form-urlencoded", "name=Ada&age=30&age=31")
+    testing.assert_eq(noted.view(), "200 signed up Ada López, 30", "the form was not decoded")?
+    testing.assert_eq(typed.view(), "415 expected a form body, sent with `Content-Type: application/x-www-form-urlencoded`", "a body of another type was decoded")?
+    testing.assert_eq(malformed.view(), "400 the body is not percent-encoded UTF-8", "a broken escape was not refused")?
+    testing.assert_eq(missing.view(), r#"400 missing form value "age""#, "a missing value was not refused")?
+    testing.assert_eq(wrong.view(), r#"400 cannot read form value "age" from "old": invalid decimal syntax at byte 0"#, "an invalid value was not refused")?
+    testing.assert_eq(twice.view(), r#"400 the form names "age" more than once"#, "a repeated value was not refused")?
+    .Ok(())
+}
+
+// `Json[T]` reads a `T` from the request's body, a JSON document sent with
+// `Content-Type: application/json`, decoded with `json.decode` into the
+// request's arena, and hands it over:
+//
+//     let order = request.extract[http.Json[Order[mem.Handle[P]]]]()?
+//
+// A body sent as another type answers 415. A body that is not UTF-8, or not
+// JSON, answers 400, and a document that does not decode into `T` answers
+// 422, naming the problem and where it is, such as
+// `missing field at $["sender"]`. An arena too small for the value answers
+// 500.
+pub struct Json[T] {
+    value: T,
+}
+
+// Releasing a `Json` releases the value it holds.
+derive[T: Release] Release for Json[T]
+
+impl[T] Extracted for Json[T] {
+    type Output = T
+
+    fn output(sink self: Self) -> T where carries(self) {
+        let Json { value } = self
+        value
+    }
+}
+
+impl[P: Allocator, T: json_format.Decode[mem.Handle[P]]] Extract[P] for Json[T] {
+    fn extract(request: Request[P]) -> Result[Json[T], Error[P]] {
+        if !is_json(request.header("Content-Type")) {
+            return .Err(error(request, .UnsupportedMediaType, "expected a JSON body, sent with `Content-Type: application/json`"))
+        }
+        let body = request.text() else |_| {
+            return .Err(error(request, .BadRequest, "the body is not UTF-8"))
+        }
+        let decoded: Result[T, json_format.DecodeError[mem.Handle[P]]] = json_format.decode(request.allocator(), body)
+        match decoded {
+            Ok(value) => .Ok(.{ value }),
+            Err(failure) => {
+                let status = decode_status(failure)
+                let refused: Error[P] = if status == Status.InternalServerError {
+                    Error.new(status)
+                } else {
+                    error(request, status, failure)
+                }
+                failure.release()
+                return .Err(refused)
+            },
+        }
+    }
+}
+
+// `is_json` says whether `content_type` names JSON: `application/json`, or an
+// `application/` type ending in `+json`, compared under ASCII case folding,
+// with any parameters after `;` ignored.
+fn is_json(content_type: Option[Str]) -> Bool {
+    let media = media_type(content_type) else {
+        return false
+    }
+    if media.equals_ascii_folded("application/json") {
+        return true
+    }
+    // `application/` is 12 bytes and `+json` 5, and a subtype has a name
+    // before its suffix.
+    let length = media.length()
+    if length <= 17 {
+        return false
+    }
+    let application = media.slice(0, 12).unwrap()
+    let suffix = media.slice(length - 5, length).unwrap()
+    application.equals_ascii_folded("application/") && suffix.equals_ascii_folded("+json")
+}
+
+test fn json_is_named_by_its_media_type() {
+    testing.assert(is_json(.Some("application/json")), "application/json was not JSON")?
+    testing.assert(is_json(.Some("Application/JSON; charset=utf-8")), "a folded type with a parameter was not JSON")?
+    testing.assert(is_json(.Some("application/problem+json")), "a +json type was not JSON")?
+    testing.assert(!is_json(.Some("text/plain")), "text was JSON")?
+    testing.assert(!is_json(.Some("application/x-www-form-urlencoded")), "a form was JSON")?
+    testing.assert(!is_json(.Some("+json")), "a bare suffix was JSON")?
+    testing.assert(!is_json(.Some("a")), "a type shorter than a suffix was JSON")?
+    testing.assert(!is_json(.Some("application/+json")), "a suffix without a subtype was JSON")?
+    testing.assert(!is_json(.None), "a body without a type was JSON")?
+    .Ok(())
+}
+
+// `Note` is the JSON object POST /notes expects, such as `{"text":"hi"}`.
+@derive(Release, json_format.Decode[A])
+struct Note[A: Allocator] {
+    text: String[A],
+}
+
+fn note_of[P: Allocator](inout _: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+    defer let note = request.extract[Json[Note[mem.Handle[P]]]]()?
+    text(request, "noted {note.text.view()}")
+}
+
+// `posted` sends `body` to POST /notes as `content_type`, from a request arena
+// of `arena_bytes`, and describes the answer as `served` does.
+fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
+    var router = Router.new()
+    &router.route_raw("POST /notes", note_of).unwrap()
+    let arena = mem.Arena.open(mem.system(), size: arena_bytes)
+    var sent = new_request(arena.handle(), "POST", "/notes", body).unwrap()
+    &sent.add_header("Content-Type", content_type).unwrap()
+    var nothing = ()
+    let described = match &router.serve_http(&nothing, sent.request()) {
+        Ok(response) => {
+            let answer = Str.from_bytes(response.body().unwrap()).unwrap()
+            fmt.render_owned(mem.system(), "200 {answer}").unwrap()
+        },
+        Err(error) => {
+            let code = error.status().code()
+            let message = error.message().unwrap_or("")
+            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+        },
+    }
+    arena.release()
+    router.release()
+    described
+}
+
+test fn json_decodes_the_body_or_names_what_is_wrong() {
+    defer let noted = posted("application/json", r#"{"text":"hi"}"#)
+    defer let typed = posted("text/plain", r#"{"text":"hi"}"#)
+    defer let malformed = posted("application/json", r"{")
+    defer let missing = posted("application/json", r"{}")
+    defer let wrong = posted("application/json", r#"{"text":1}"#)
+    testing.assert_eq(noted.view(), "200 noted hi", "the note was not decoded")?
+    testing.assert_eq(typed.view(), "415 expected a JSON body, sent with `Content-Type: application/json`", "a body of another type was decoded")?
+    testing.assert_eq(malformed.view(), "400 invalid syntax at byte 1", "a body that is not JSON was not refused with 400")?
+    testing.assert_eq(missing.view(), r#"422 missing field at $["text"]"#, "a missing field was not refused with 422")?
+    testing.assert_eq(wrong.view(), r#"422 wrong kind of value at $["text"]"#, "a field of the wrong kind was not refused with 422")?
+    .Ok(())
+}
+
+test fn json_refuses_a_body_that_is_not_utf8() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "POST / HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\nhé"
+    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+    let refused = match sent.request().extract[Json[Note[mem.Handle]]]() {
+        Ok(note) => {
+            note.release()
+            return testing.assert(false, "a body cut inside a scalar was decoded")
+        },
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), Status.BadRequest, "the refusal changed its status")?
+    testing.assert_eq(refused.message(), Option.Some("the body is not UTF-8"), "the refusal changed its message")?
+    .Ok(())
+}
+
+// `repeated` returns `prefix`, `piece` `times` times, then `suffix`.
+fn repeated(prefix: Str, piece: Str, times: UInt64, suffix: Str) -> String {
+    var text = String.new()
+    &text.append(prefix).unwrap()
+    for _ in 0..times {
+        &text.append(piece).unwrap()
+    }
+    &text.append(suffix).unwrap()
+    text
+}
+
+// A JSON body at the default body limit decodes in the default request arena,
+// whether it is one long string or the most values `json.decode` admits, and
+// is answered for what it says rather than 500.
+test fn a_json_body_within_the_default_limits_decodes_in_the_default_arena() {
+    let limits = Limits.default()
+    defer let text = repeated(r#"{"text":""#, "x", limits.max_body_bytes - 11, r#""}"#)
+    defer let values = repeated(r#"{"text":"a","pad":["#, "0,", 99990, "0]}")
+    defer let objects = repeated(r#"{"text":"a","pad":["#, r"{},", 99990, r"{}]}")
+    defer let echoed = posted("application/json", text.view(), arena_bytes: limits.request_arena_bytes)
+    defer let padded = posted("application/json", values.view(), arena_bytes: limits.request_arena_bytes)
+    defer let nested = posted("application/json", objects.view(), arena_bytes: limits.request_arena_bytes)
+    testing.assert(echoed.starts_with("200 noted xxx"), "a body of the most text was not decoded")?
+    testing.assert_eq(padded.view(), r#"422 unknown field at $["pad"]"#, "a body of the most values was not refused for its field")?
+    testing.assert_eq(nested.view(), r#"422 unknown field at $["pad"]"#, "a body of the most objects was not refused for its field")?
+    .Ok(())
+}

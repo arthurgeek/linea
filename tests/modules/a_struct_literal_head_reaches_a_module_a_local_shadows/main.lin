@@ -1,0 +1,10 @@
+// A struct literal's head is a type path, so `shapes.Thing { size = 2 }`
+// names the module's type even where the local `shapes` is in scope.
+import shapes
+
+fn main() -> UInt8 {
+    let shapes: UInt8 = 4
+    let t = shapes.Thing { size = 2 }
+    let u: shapes.Thing = .{ size = 1 }
+    t.size + u.size + shapes
+}

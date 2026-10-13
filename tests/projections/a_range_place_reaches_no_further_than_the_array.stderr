@@ -1,0 +1,15 @@
+error[T-Index]: no element sits here, and the length is part of the type
+ --> tests/projections/a_range_place_reaches_no_further_than_the_array.lin:9:35
+  |
+9 |     let past: [UInt8; 2] = copy(a[4..6])
+  |                                   ^ the length is 4, so the last index is 3
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/projections/a_range_place_reaches_no_further_than_the_array.lin:10:38
+   |
+10 |     let over: [UInt8; 5] = copy(a[0..5])
+   |                                      ^ the length is 4, so the greatest end is 4
+error[T-RangePlace]: a range place is the elements between its bounds, and these name none
+  --> tests/projections/a_range_place_reaches_no_further_than_the_array.lin:11:36
+   |
+11 |     let empty: [UInt8; 1] = copy(a[2..2])
+   |                                    ^^^^ there is no array type of no elements for this to be

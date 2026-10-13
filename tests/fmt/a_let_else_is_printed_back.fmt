@@ -1,0 +1,43 @@
+// The formatter keeps `else` on the line the initializer ends, since a newline
+// there would end the binding.
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+enum Fault {
+    Unknown,
+}
+
+fn measure(code: UInt8) -> Result[Size, Fault] {
+    if code == 3 {
+        Result.Ok(Size { width = 4, height = 5 })
+    } else {
+        Result.Err(Fault.Unknown)
+    }
+}
+
+fn listening(width: UInt8) -> Option[UInt16] {
+    if width > 9 {
+        Option.Some(1)
+    } else {
+        Option.None
+    }
+}
+
+fn main() -> UInt8 {
+    let Size { width, height } = measure(3) else |_| {
+        return 1
+    }
+    let area = measure(3) else |error| {
+        return match error { Unknown => 2 }
+    }
+    let port: UInt16 = listening(width) else {
+        8080
+    }
+    if port == 8080 {
+        width * height + area.width
+    } else {
+        0
+    }
+}

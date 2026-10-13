@@ -1,0 +1,5 @@
+error[T-ArraySize]: an inferred array length needs an array literal to count
+ --> tests/arrays/inferred_length/nonliteral_inner_shape.lin:3:25
+  |
+3 |     let _grid: [[UInt8; _]; _] = [row]
+  |                         ^ supply an array literal or write an explicit length

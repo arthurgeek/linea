@@ -1,0 +1,11 @@
+// A default belongs to a `read` or `sink` parameter, and defaulted parameters
+// form a suffix: `a` is `inout`, and `c` follows a defaulted parameter with
+// none of its own.
+fn f(inout a: UInt8 = 1, b: UInt8 = 2, c: UInt8) -> UInt8 {
+    a + b + c
+}
+
+fn main() -> UInt8 {
+    var a = 1
+    f(&a, 2, 3)
+}

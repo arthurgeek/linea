@@ -1,0 +1,10 @@
+error[M-Import]: `std` says where a path starts, and holds nothing of its own
+ --> tests/modules/std_alone_names_no_module.lin:4:8
+  |
+4 | import std
+  |        ^^^ this names no module
+error[M-Unused]: `std` is never used
+ --> tests/modules/std_alone_names_no_module.lin:4:8
+  |
+4 | import std
+  |        ^^^ remove the import

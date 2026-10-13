@@ -1,0 +1,14 @@
+struct Point { x: UInt8 }
+
+struct Outer { point: Point }
+
+fn main() -> UInt8 {
+    let outer = Outer { point = Point { x = 37 } }
+    let read Outer { point } = outer
+    let read Point { x } = point
+    if x == 37 && outer.point.x == 37 {
+        0
+    } else {
+        1
+    }
+}

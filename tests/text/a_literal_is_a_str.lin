@@ -1,0 +1,9 @@
+// A string literal is the library's `Str`: an address and a length, and both
+// come from the compiler. What the type *is* is declared in `std/text/`, and
+// all the compiler knows is which declaration to name and where the bytes go.
+//
+// Length is in bytes, which is what the storage holds.
+fn main() -> UInt8 {
+    let greeting: Str = "hello"
+    UInt8(Str.length(greeting))
+}

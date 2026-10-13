@@ -1,0 +1,23 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn work(flag: Bool) -> UInt8 {
+    let owner = Arena.open(system(), 64)
+    let handle = owner.handle()
+    if flag {
+        owner.release()
+    } else {
+        let moved = owner
+        moved.release()
+    }
+    let bytes = handle.acquire(8).unwrap()
+    bytes.release()
+    0
+}
+
+fn main() -> UInt8 {
+    work(false)
+}

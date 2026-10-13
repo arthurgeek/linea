@@ -1,0 +1,13 @@
+// Short-circuit is as much about sequence as about skipping. Each operand adds
+// a distinct amount, so an answer of 7 means all three ran in the order
+// written; any other order or any skipped operand answers differently.
+fn add(inout n: UInt8, amount: UInt8) -> Bool {
+    n = n + amount
+    true
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 0
+    let _unused = add(&n, 1) && add(&n, 2) && add(&n, 4)
+    n
+}

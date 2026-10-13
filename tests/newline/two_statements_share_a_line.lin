@@ -1,0 +1,8 @@
+// What `;` is still for: there is no newline between these two, so nothing
+// else separates them. Formatted code has no use for it, though -- a body is
+// one statement per line, so `fmt` gives each its own and the separator it
+// then writes is the line break. The `.fmt` golden beside this file is that.
+fn main() -> UInt8 {
+    let a: UInt8 = 1; let b: UInt8 = 2
+    a + b
+}

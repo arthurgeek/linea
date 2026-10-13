@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"fn main() -> UInt8 {\n    let x: UInt8 = true\n    x\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"main.lin","version":2},"contentChanges":[{"text":"fn main() -> UInt8 {\n    nope\n}\n"}]}}
+{"jsonrpc":"2.0","id":2,"method":"shutdown"}

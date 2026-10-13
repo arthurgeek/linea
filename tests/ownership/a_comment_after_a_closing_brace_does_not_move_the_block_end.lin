@@ -1,0 +1,14 @@
+// A comment written after a block's closing brace is not part of the block,
+// so the leak points at the brace.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn main() -> UInt8 {
+    let row = {
+        let _ticket = Ticket.Seat(4)
+        7
+    } // the row is chosen
+    row
+}

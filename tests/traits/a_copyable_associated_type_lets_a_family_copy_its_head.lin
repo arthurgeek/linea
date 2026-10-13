@@ -1,0 +1,52 @@
+// A Copyable associated-type bound permits a conditional copyable wrapper
+// to duplicate its payload in a generic implementation.
+@copyable
+struct Tally {
+    at: UInt8,
+}
+
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item: Copyable
+
+    fn of(sink x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = Tally
+
+    fn of(sink x: Self) -> Self.Item {
+        .{ at = x.at }
+    }
+}
+
+@copyable
+enum Wrap[W: Measure] {
+    Holds(W.Item),
+}
+
+trait Twin {
+    fn twin(self: Self) -> Self
+}
+
+impl[W: Measure] Twin for Wrap[W] {
+    fn twin(self: Self) -> Self {
+        copy(self)
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 3 }
+    let w: Wrap[Counter] = .Holds(Measure.of(c))
+    let g: Wrap[Counter] = Twin.twin(w)
+    let a = match w {
+        Holds(t) => t.at,
+    }
+    let b = match g {
+        Holds(t) => t.at,
+    }
+    a + b
+}

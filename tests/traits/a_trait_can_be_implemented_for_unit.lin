@@ -1,0 +1,15 @@
+// Unit is a type, so a trait can give its single value behavior through the
+// same implementation relation as any named type.
+trait Value {
+    fn value(self: Self) -> UInt8
+}
+
+impl Value for () {
+    fn value(_self: ()) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    Value.value({})
+}

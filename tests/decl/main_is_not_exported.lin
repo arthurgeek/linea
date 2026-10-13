@@ -1,0 +1,6 @@
+// A module reaches only the modules beneath it, so nothing imports the program
+// and `pub` on its entry point widens the name's reach to nobody. The whole of
+// `main() -> UInt8` is the rule, and this is not that spelling.
+pub fn main() -> UInt8 {
+    1
+}

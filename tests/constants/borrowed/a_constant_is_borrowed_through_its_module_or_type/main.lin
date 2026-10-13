@@ -1,0 +1,37 @@
+// A constant reached through its module or through a type is the same static
+// storage as one named bare, so a borrow of it, or of a field of it, may be
+// returned from a function that takes nothing.
+import settings
+
+struct Reading {
+    value: borrow Int64,
+}
+
+fn reading(value: Int64) -> Reading where borrows(.value: value) {
+    .{ value = borrow value }
+}
+
+struct Limits {
+    low: Int64,
+}
+
+impl Limits {
+    let max = 9
+}
+
+fn module_limit() -> Reading where carries() {
+    reading(settings.limit)
+}
+
+fn module_field() -> Reading where carries() {
+    reading(settings.config.limit)
+}
+
+fn type_limit() -> borrow Int64 where carries() {
+    borrow Limits.max
+}
+
+fn main() -> UInt8 {
+    let limits = Limits { low = 2 }
+    UInt8(*module_limit().value + *module_field().value + *type_limit() + limits.low)
+}

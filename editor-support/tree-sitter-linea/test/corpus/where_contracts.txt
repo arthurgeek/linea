@@ -1,0 +1,89 @@
+==================
+Shared where contracts and constraints
+==================
+fn choose[T](value: T) -> T where carries(value), T: Copyable, borrows(value) { value }
+fn observe(callback: fn(value: borrow UInt8) -> borrow UInt8 where carries(value)) -> UInt8 { 0 }
+fn main() -> UInt8 {
+    let callback = [number] || -> where borrows(number), carries(number) borrow number
+    let typed = || -> UInt8 { 7 }
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (where_clause
+      (source_contract
+        (source_path
+          (identifier)))
+      (where_predicate
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier))))
+      (source_contract
+        (source_path
+          (identifier))))
+    (block
+      (expression_statement
+        (identifier))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (callable_type
+          (parameter_list
+            (parameter
+              (identifier)
+              (borrow_type
+                (type_identifier))))
+          (borrow_type
+            (type_identifier))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier)))))))
+    (type_identifier)
+    (block
+      (expression_statement
+        (integer_literal))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier)))
+            (source_contract
+              (source_path
+                (identifier))))
+          (borrow_expression
+            (identifier))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (type_identifier)
+          (block
+            (expression_statement
+              (integer_literal)))))
+      (expression_statement
+        (integer_literal)))))

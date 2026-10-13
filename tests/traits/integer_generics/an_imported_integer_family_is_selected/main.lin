@@ -1,0 +1,11 @@
+import tags
+
+use tags.Tag
+
+fn main() -> UInt8 {
+    if Tag.tag(Int16(7)) == 7 && Tag.tag(UInt32(9)) == 9 {
+        0
+    } else {
+        1
+    }
+}

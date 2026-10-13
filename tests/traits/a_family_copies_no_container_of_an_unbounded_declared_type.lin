@@ -1,0 +1,58 @@
+// A conditional copyable enum does not guarantee that an unbounded associated
+// type can be copied. The generic body must reject duplicating its payload.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(sink x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = Key
+
+    fn of(sink x: Self) -> Self.Item {
+        Key.Forged(x.at)
+    }
+}
+
+@copyable
+enum Wrap[W: Measure] {
+    Holds(W.Item),
+}
+
+trait Twin {
+    fn twin(self: Self) -> Self
+}
+
+impl[W: Measure] Twin for Wrap[W] {
+    fn twin(self: Self) -> Self {
+        copy(self)
+    }
+}
+
+fn eat(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 3 }
+    let w: Wrap[Counter] = .Holds(Measure.of(c))
+    let g: Wrap[Counter] = Twin.twin(w)
+    let a = match w {
+        Holds(k) => eat(k),
+    }
+    let b = match g {
+        Holds(k) => eat(k),
+    }
+    a + b
+}

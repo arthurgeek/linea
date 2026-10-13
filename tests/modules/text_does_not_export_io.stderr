@@ -1,0 +1,5 @@
+error[N-Undefined]: `stdout` is not declared in `text`
+ --> tests/modules/text_does_not_export_io.lin:4:21
+  |
+4 |     let _out = text.stdout()
+  |                     ^^^^^^ no declaration of that name is in that module

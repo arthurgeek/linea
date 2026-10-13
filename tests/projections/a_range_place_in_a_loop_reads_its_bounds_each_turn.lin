@@ -1,0 +1,15 @@
+// A bound a range place names is read, so a bracket inside a loop names the
+// same bound on every turn. A bound given up would be given up once and the
+// loop would be refused for spending it again on the second turn.
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let lo: UInt64 = 0
+    var n: UInt8 = 0
+    var i: UInt64 = 0
+    while i < 3 {
+        let two: [UInt8; 2] = copy(a[lo..2])
+        n += two[0] + two[1]
+        i += 1
+    }
+    n
+}

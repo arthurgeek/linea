@@ -1,0 +1,48 @@
+import std.mem
+
+use mem.PushFailure
+use mem.Owner
+
+@linear
+struct Token {
+    number: UInt64,
+}
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let Token { number: _ } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    let allocator = arena.handle()
+    var values: Vec[Token, mem.Handle[mem.SystemAllocator]] = Vec.new_in(allocator)
+    var inserted: UInt64 = 0
+    loop {
+        let token: Token = .{ number = inserted }
+        match Vec.push(&values, token) {
+            Ok(_) => inserted += 1,
+            Err(failure) => {
+                let PushFailure { reason: reason, value: returned } = failure
+                if reason != mem.Oom.Exhausted || returned.number != inserted {
+                    panic("failed push lost its element")
+                }
+                returned.release()
+                break
+            },
+        }
+    }
+    if inserted == 0 || values.length() != inserted {
+        panic("failed growth changed the vector length")
+    }
+    let positions: Range[UInt64] = 0..inserted
+    for i in positions {
+        if values[i].number != i {
+            panic("failed growth changed a stored element")
+        }
+    }
+    values.release()
+    arena.release()
+    0
+}

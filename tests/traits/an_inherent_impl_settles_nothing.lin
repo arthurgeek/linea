@@ -1,0 +1,18 @@
+// `Self` inside an inherent implementation names the type it is for, and a
+// settled reference off it still needs a trait: the names a settled reference
+// may reach are what a trait declares, and this `impl` names none — so there is
+// nothing to have settled `Item` and nothing for the annotation to mean.
+struct Counter {
+    at: UInt8,
+}
+
+impl Counter {
+    fn get(x: Counter) -> Self.Item {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Counter.get(c)
+}

@@ -1,0 +1,10 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let source = Vec.filled(mem.system(), count: 2, value: UInt8(7)).unwrap()
+    let { values, iterator } = source.as_slice().collect(mem.system()).unwrap()
+    defer values.release()
+    iterator.release()
+    source.release()
+    *values[0]
+}

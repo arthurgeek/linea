@@ -1,0 +1,50 @@
+==================
+Generic extern storage declarations
+==================
+
+extern fn slot_stride[T](read shape: SlotType[T]) -> UInt64
+extern fn slot_put[T, R](inout owner: R, at: UInt64, len: UInt64, i: UInt64, sink v: T) -> ()
+
+---
+
+(source_file
+  (extern_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))))
+    (type_identifier))
+  (extern_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier)))
+    (unit_type)))

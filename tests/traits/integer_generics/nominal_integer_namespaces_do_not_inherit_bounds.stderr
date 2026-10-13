@@ -1,0 +1,5 @@
+error[N-Variant]: this name refers to a type, and a type has no parts to select
+ --> tests/traits/integer_generics/nominal_integer_namespaces_do_not_inherit_bounds.lin:4:5
+  |
+4 |     Count.max
+  |     ^^^^^ only an enum has variants

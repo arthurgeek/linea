@@ -1,0 +1,50 @@
+import std.mem
+
+@copyable
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+derive Release for Point
+
+fn read_at[T: Copyable, A: Allocator](values: Vec[T, A], position: UInt64) -> T {
+    copy(values[position])
+}
+
+fn last_position(inout calls: UInt64) -> UInt64 {
+    calls += 1
+    9
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Point, mem.SystemAllocator] = Vec.new()
+    let positions: Range[UInt8] = 0..10
+    for position in positions {
+        let point: Point = .{ x = position, y = position + 1 }
+        match Vec.push(&values, point) {
+            Ok(_) => {},
+            Err(_) => panic("push failed"),
+        }
+    }
+    for inout point in values {
+        point.x += 1
+    }
+    var total: UInt64 = 0
+    for read point in values {
+        if point.x != point.y {
+            panic("lending mutation did not reach storage")
+        }
+        total += 1
+    }
+    if total != 10 || read_at(values, 9).x != 10 {
+        panic("index or traversal missed an element")
+    }
+    var calls: UInt64 = 0
+    let observed = values[last_position(&calls)].x
+    if calls != 1 || observed != 10 {
+        panic("index evaluation duplicated its operand or lost the field projection")
+    }
+    values.release()
+    0
+}

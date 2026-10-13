@@ -1,0 +1,15 @@
+// A closure's body is a function of its own, so a `break` written in it has no
+// loop to leave, even when the closure is written inside one.
+fn main() -> UInt8 {
+    var n: UInt64 = 0
+    for i in UInt64(0)..3 {
+        let f = |x: UInt64| -> UInt64 {
+            if x > 1 {
+                break
+            }
+            x
+        }
+        n += f(i)
+    }
+    UInt8(n)
+}

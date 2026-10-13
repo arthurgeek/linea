@@ -1,0 +1,9 @@
+import vault
+
+fn main() -> UInt8 {
+    let k = vault.mint(7)
+    // `_` names no variant, so it needs nothing from the sealed type. That is
+    // what makes it the obvious exemption, and the exemption would be the way
+    // to defeat the seal: what is sealed is the scrutinee's type.
+    match k { _ => 0 }
+}

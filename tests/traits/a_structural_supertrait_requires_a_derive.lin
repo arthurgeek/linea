@@ -1,0 +1,18 @@
+trait Base {}
+
+trait Law: Base {}
+
+template impl Base {}
+
+template impl Law where reflect.supertraits: derived {}
+
+struct Item {}
+
+impl Base for Item {}
+
+derive Law for Item
+
+fn main() -> UInt8 {
+    let _item: Item = .{}
+    0
+}

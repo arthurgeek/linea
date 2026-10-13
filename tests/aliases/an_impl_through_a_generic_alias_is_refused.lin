@@ -1,0 +1,15 @@
+alias Boxed[T] = Option[T]
+
+trait Describe {
+    fn describe(_self: Self) -> UInt8
+}
+
+impl[T] Describe for Boxed[T] {
+    fn describe(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,5 @@
+error[M-Unused]: `scores` is never used
+ --> tests/modules/an_import_an_operation_shadows_is_unused/main.lin:3:8
+  |
+3 | import scores
+  |        ^^^^^^ remove the import

@@ -1,0 +1,26 @@
+let count = 3
+
+let small = UInt8(7)
+
+let ready = true
+
+@copyable
+struct Settings {}
+
+impl Settings {
+    pub let amount = small
+    pub let label = "ok"
+}
+
+fn answer(value: UInt8 = Settings.amount) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let values: [UInt8; count] = [1, 2, 3]
+    if ready && answer() == 7 && values[2] == 3 && Settings.label.length() == 2 {
+        0
+    } else {
+        1
+    }
+}

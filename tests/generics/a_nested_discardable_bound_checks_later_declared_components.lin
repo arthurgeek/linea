@@ -1,0 +1,31 @@
+// A Discardable bound on a nested argument sees every concrete owned part,
+// including a linear field declared later in the source.
+@linear
+struct Wrap {
+    w: Held[Box[UInt8]],
+}
+
+struct Held[X: Discardable] {
+    h: X,
+}
+
+struct Box[T] {
+    v: T,
+    k: Key,
+}
+
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn take(sink w: Wrap) -> UInt8 {
+    let Wrap { w: h } = w
+    let Held { h: b } = h
+    let Box { v: n, k: k } = b
+    match k { Forged(m) => m + n }
+}
+
+fn main() -> UInt8 {
+    take(.{ w = .{ h = .{ v = 2, k = Key.Forged(1) } } })
+}

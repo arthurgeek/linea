@@ -1,0 +1,5 @@
+warning[N-Shadowed]: `Gate` declares `close` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
+  --> tests/aliases/a_generic_alias_forwarding_implementation_draws_no_warning.lin:41:8
+   |
+41 |     fn close(x: Self) -> UInt8 {
+   |        ^^^^^ reach it as `Shut.close(x)`

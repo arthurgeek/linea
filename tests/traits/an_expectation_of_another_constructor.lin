@@ -1,0 +1,29 @@
+// The expectation settles `Self` through one constructor by binding arguments
+// positionally, which needs the two heads to be the same constructor. Here
+// they are not, so nothing stands where `Self` is written and the call is
+// refused for that rather than for what the mismatch would look like further
+// down.
+//
+// Positional binding and not a search: `Result[Coins, UInt8]` has a `Coins` in it,
+// and reaching for it would be unification.
+struct Coins {
+    count: UInt8,
+}
+
+trait Make {
+    fn some() -> Option[Self]
+}
+
+impl Make for Coins {
+    fn some() -> Option[Self] {
+        .Some(.{ count = 5 })
+    }
+}
+
+fn main() -> UInt8 {
+    let made: Result[Coins, UInt8] = Make.some()
+    match made {
+        Err(_e) => 0,
+        Ok(c) => c.count,
+    }
+}

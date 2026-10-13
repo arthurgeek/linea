@@ -1,0 +1,27 @@
+// A head's argument is a written type, read where every written type is read:
+// a name no declaration answers is refused in a head exactly as it is in an
+// annotation. The rule holds wherever the head stands -- after `impl`, and
+// after `for`.
+trait Zero {
+    fn zero() -> UInt8
+}
+
+struct Coins[T] {
+    n: T,
+}
+
+impl Coins[Bogus] {
+    pub fn count() -> UInt8 {
+        0
+    }
+}
+
+impl Zero for Coins[Missing] {
+    fn zero() -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    Coins.count()
+}

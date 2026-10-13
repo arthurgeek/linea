@@ -1,0 +1,26 @@
+struct Point { x: UInt8 }
+
+type Wrapped = Point
+
+fn selected(wrapped: Wrapped) -> UInt8 {
+    let read Wrapped(point) = wrapped
+    let read Point { x } = point
+    x
+}
+
+fn matched(wrapped: Wrapped) -> UInt8 {
+    match read wrapped {
+        Wrapped(point) => match read point {
+            Point { x } => x,
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    let wrapped = Wrapped(Point { x = 53 })
+    if selected(wrapped) == matched(wrapped) {
+        0
+    } else {
+        1
+    }
+}

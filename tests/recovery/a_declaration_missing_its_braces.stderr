@@ -1,0 +1,75 @@
+error[S-Enum]: expected `{`
+  --> tests/recovery/a_declaration_missing_its_braces.lin:10:5
+   |
+10 |     Red,
+   |     ^^^ an enum lists its variants
+error[S-Entry]: a program is a list of declarations
+  --> tests/recovery/a_declaration_missing_its_braces.lin:10:5
+   |
+10 |     Red,
+   |     ^^^ expected `fn` here
+error[S-Struct]: expected `{`
+  --> tests/recovery/a_declaration_missing_its_braces.lin:14:5
+   |
+14 |     x: UInt8,
+   |     ^ a struct lists its fields
+error[S-Entry]: a program is a list of declarations
+  --> tests/recovery/a_declaration_missing_its_braces.lin:14:5
+   |
+14 |     x: UInt8,
+   |     ^ expected `fn` here
+error[S-Brace]: expected `{`
+  --> tests/recovery/a_declaration_missing_its_braces.lin:18:5
+   |
+18 |     fn get() -> UInt8 { 1 }
+   |     ^^ an impl lists what the type can do
+error[S-Entry]: a program is a list of declarations
+  --> tests/recovery/a_declaration_missing_its_braces.lin:19:1
+   |
+19 | }
+   | ^ expected `fn` here
+error[S-Field]: expected `:`
+  --> tests/recovery/a_declaration_missing_its_braces.lin:21:16
+   |
+21 | struct Pair { x, y: UInt8 }
+   |                ^ a field is always annotated
+error[S-Type]: expected a type
+  --> tests/recovery/a_declaration_missing_its_braces.lin:23:22
+   |
+23 | enum Shape { Circle( }
+   |                      ^ a variant carries values of some type
+error[S-Enum]: expected `)`
+  --> tests/recovery/a_declaration_missing_its_braces.lin:23:22
+   |
+23 | enum Shape { Circle( }
+   |                      ^ this payload is never closed
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/recovery/a_declaration_missing_its_braces.lin:9:6
+  |
+9 | enum Colour
+  |      ^^^^^^ found 0
+error[N-Unused]: `Colour` is never used
+ --> tests/recovery/a_declaration_missing_its_braces.lin:9:6
+  |
+9 | enum Colour
+  |      ^^^^^^ name it in an annotation, or remove it
+error[N-Unused]: `Point` is never used
+  --> tests/recovery/a_declaration_missing_its_braces.lin:13:8
+   |
+13 | struct Point
+   |        ^^^^^ name it in an annotation, or remove it
+error[N-Unused]: `get` is never used
+  --> tests/recovery/a_declaration_missing_its_braces.lin:18:8
+   |
+18 |     fn get() -> UInt8 { 1 }
+   |        ^^^ call it, or name it with a leading `_`
+error[N-Unused]: `Pair` is never used
+  --> tests/recovery/a_declaration_missing_its_braces.lin:21:8
+   |
+21 | struct Pair { x, y: UInt8 }
+   |        ^^^^ name it in an annotation, or remove it
+error[N-Unused]: `Shape` is never used
+  --> tests/recovery/a_declaration_missing_its_braces.lin:23:6
+   |
+23 | enum Shape { Circle( }
+   |      ^^^^^ name it in an annotation, or remove it

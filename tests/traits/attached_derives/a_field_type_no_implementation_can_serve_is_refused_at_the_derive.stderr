@@ -1,0 +1,7 @@
+error[T-Derive]: `Bag` cannot derive `Equatable` because component type `Vec[T, SystemAllocator]` implements `Equatable` for no arguments
+  --> tests/traits/attached_derives/a_field_type_no_implementation_can_serve_is_refused_at_the_derive.lin:8:9
+   |
+8  | @derive(Equatable)
+   |         ^^^^^^^^^ implement the trait for this field's type, or remove the derive
+10 |     items: Vec[T, SystemAllocator],
+   |     ----- no implementation of `Equatable` exists for any `Vec[T, SystemAllocator]`

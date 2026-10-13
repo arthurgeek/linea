@@ -1,0 +1,49 @@
+import std.iter
+import std.mem
+
+struct Arrivals {
+    next_weight: UInt64,
+}
+
+impl iter.Iterator for Arrivals {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        if self.next_weight > 5000 {
+            return .None
+        }
+        let weight = self.next_weight
+        self.next_weight += 1500
+        .Some(weight)
+    }
+}
+
+impl Release for Arrivals {
+    fn release(sink self: Self) -> () {
+        let Arrivals { next_weight: _ } = self
+    }
+}
+
+fn inspector(inout inspected: UInt64) -> Result[mem.Closure[inout fn() -> Option[UInt64], mem.SystemAllocator], mem.Oom] {
+    let arrivals = Arrivals { next_weight = 500 }
+    let accepted = arrivals.filter(
+        inout [inout inspected] |weight| {
+            inspected += 1
+            weight <= 3000
+        },
+    )
+    mem.Closure.open(mem.system(), inout [sink accepted] || &accepted.next())
+}
+
+fn main() -> UInt8 {
+    var inspected: UInt64 = 0
+    match inspector(&inspected) {
+        Ok(next) => {
+            var pull = next
+            let _first = &pull()
+            pull.release()
+        },
+        Err(_) => {},
+    }
+    UInt8(inspected)
+}

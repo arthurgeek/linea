@@ -1,0 +1,24 @@
+// An implementation may answer a trait at what its own head applies:
+// `Give[T] for Holder[T]` is `Give[UInt8]` for a `Holder[UInt8]`. What the
+// implementation supplied for the trait's parameters is written in its own
+// parameters, so the receiver binds them before the arguments are compared --
+// the trait's arguments are settled by the same receiver its head is.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[T] for Holder[T] {
+    fn give(_self: Self, _u: T) -> UInt8 {
+        5
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 9 }
+    let n: UInt8 = 1
+    Give.give(h, n)
+}

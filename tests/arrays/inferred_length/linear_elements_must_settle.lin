@@ -1,0 +1,7 @@
+@linear
+struct Ticket { value: UInt8 }
+
+fn main() -> UInt8 {
+    let _tickets: [Ticket; _] = [.{ value = 1 }, .{ value = 2 }]
+    0
+}

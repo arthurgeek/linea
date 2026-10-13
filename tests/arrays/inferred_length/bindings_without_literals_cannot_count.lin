@@ -1,0 +1,14 @@
+let source = [UInt8(1), UInt8(2)]
+
+// A name is not a literal, so there is nothing to count.
+let copied: [UInt8; _] = source
+
+// A parameter's type is what every caller supplies, and a default is one of
+// those values, so the default cannot decide the length.
+fn total(values: [UInt8; _] = [1, 2]) -> UInt8 {
+    values[0]
+}
+
+fn main() -> UInt8 {
+    copied[0] + total()
+}

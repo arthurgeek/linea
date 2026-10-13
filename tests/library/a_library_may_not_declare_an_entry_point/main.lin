@@ -1,0 +1,7 @@
+pub fn square(num: Int32) -> Int32 {
+    num * num
+}
+
+fn main() -> UInt8 {
+    0
+}

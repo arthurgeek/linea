@@ -1,0 +1,28 @@
+// A place is a name followed by any chain of fields, and `&` marks a place.
+// Where the marker took a bare name, the only way to write into part of a
+// structure across a call was to hand over the whole thing.
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+// The path may end anywhere along the chain: what the parameter's type says
+// is what the argument has to name.
+fn shift(inout i: Inner) -> () {
+    i.y = i.y + 10
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+
+    // Two steps in, then one. The address is computed the way an assignment
+    // through the same path computes it, so a backend that reached the wrong
+    // bytes here would reach them there too.
+    bump(&o.inner.y)
+    shift(&o.inner)
+
+    o.inner.y + o.z
+}

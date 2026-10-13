@@ -1,0 +1,20 @@
+// `deeper[T]` calls `deeper[Wrap[T]]`, which calls `deeper[Wrap[Wrap[T]]]`.
+// Every instantiation is a new one, so the set the program reaches never
+// closes and it stands for infinitely many functions.
+//
+// Refused for what the program says rather than for how far the compiler got:
+// there is no depth at which this becomes reasonable, so there is no depth for
+// a limit to sit at.
+@copyable
+enum Wrap[T] {
+    Only(T),
+}
+
+fn deeper[T: Copyable](a: T) -> UInt8 {
+    deeper(Wrap.Only(copy(a)))
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    deeper(n)
+}

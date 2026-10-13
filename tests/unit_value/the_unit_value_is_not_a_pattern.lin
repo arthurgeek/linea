@@ -1,0 +1,7 @@
+// The unit type has one value, so a pattern for it would test nothing. `_`
+// matches `()`.
+fn main() -> UInt8 {
+    match () {
+        () => 0,
+    }
+}

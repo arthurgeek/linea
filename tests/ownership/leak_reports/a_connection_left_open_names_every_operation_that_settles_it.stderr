@@ -1,0 +1,9 @@
+error[O-Leak]: `_visitor` (a linear `net.Connection`) is still owned when this path leaves
+ --> tests/ownership/leak_reports/a_connection_left_open_names_every_operation_that_settles_it.lin:6:9
+  |
+6 |     var _visitor = connection
+  |         ^^^^^^^^ never settled on the path that reaches the end of this block
+7 | }
+  | - the block ends here
+  |
+  = help: settle it first with `_visitor.release()`, `_visitor.close()` or `_visitor.reset()`

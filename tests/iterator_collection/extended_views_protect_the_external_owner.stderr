@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iterator_collection/extended_views_protect_the_external_owner.lin:9:5
+   |
+9  |     owner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+10 |     let result: UInt8 = if values[0] == "one" {
+   |                            --------- the observation is still used here

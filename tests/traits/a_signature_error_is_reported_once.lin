@@ -1,0 +1,23 @@
+// A trait signature that cannot be typed is reported once, however many calls
+// and implementations read it.
+trait Handler {
+    fn handle(self: Self, count: [Int64; "3"]) -> Str
+}
+
+struct Echo {}
+
+impl Handler for Echo {
+    fn handle(_self: Self, _count: [Int64; 3]) -> Str {
+        "echo"
+    }
+}
+
+fn run[H: Handler](h: H) -> () {
+    let _a = Handler.handle(h, [1, 2, 3])
+    let _b = Handler.handle(h, [1, 2, 3])
+}
+
+fn main() -> UInt8 {
+    run(Echo {})
+    0
+}

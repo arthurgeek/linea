@@ -1,0 +1,29 @@
+// [T-ArraySize]. A truth value is a constant expression and is worth 1, and a
+// length is a count: `true` says nothing about how many elements a type holds,
+// so the array it is written into is no type at all. Which leaves nothing for
+// coherence to key it as, and nothing for it to be a second implementation of
+// -- the one thing wrong with this program is the length.
+trait Give[phantom U] {
+    fn give(self: Self) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; true]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; 1]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    h.n
+}

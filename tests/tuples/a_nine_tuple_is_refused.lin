@@ -1,0 +1,6 @@
+// A tuple holds at most eight components, as a literal and as a type.
+fn main() -> UInt8 {
+    let _literal = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    let _typed: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = Default.default()
+    0
+}

@@ -1,0 +1,490 @@
+// Answer JSON documents over HTTP.
+// POST /echo decodes a JSON message and sends its text back to the caller its
+// `Authorization: Bearer <name>` header names, GET /greet/{name} greets the
+// name in the path, GET /stats reports how many messages have been echoed,
+// POST /signup reads a form's fields by name and confirms them as JSON, and
+// GET /health reports that the server is up. Anything else is answered
+// 404 or 405 by the router. Every response carries an `X-Request-Id` header.
+// The handlers log what they did, and every request is logged once more when
+// its answer has been sent, all to standard error.
+import std.env
+import std.http
+import std.io
+import std.json
+import std.log
+import std.mem
+import std.net
+import std.testing
+
+// `use` brings a trait's operations into scope, so a test can call
+// `&router.serve_http(&app, request)` on a router directly.
+use http.Handler
+use mem.Owner
+
+// `Options` holds what the command line asked for: the port to listen on,
+// and how many requests to answer before stopping, or `.None` to serve until
+// killed.
+struct Options {
+    port: UInt16,
+    requests: Option[UInt64],
+}
+
+// `Message` is the JSON object POST /echo expects, such as
+// `{"text":"hello"}`. `json.Decode[mem.Handle]` builds one from a document,
+// allocating its text in `mem.Handle`, and refuses an object with a field missing, a field of
+// the wrong kind, or a field `Message` does not have. `Release` frees that
+// text.
+@derive(Release, json.Decode[mem.Handle])
+struct Message {
+    text: String[mem.Handle],
+}
+
+// `Echo` is the answer, such as `{"to":"ada","echo":"hello"}`. Its fields
+// borrow the caller's name and the message's text, and `derive(json.Encode)`
+// writes them as an object in the order they are declared.
+@derive(json.Encode)
+struct Echo {
+    to: Str,
+    echo: Str,
+}
+
+// `App` is the state every handler shares. `http.with_state` owns it and
+// lends it down the stack to the handler of each request as `inout app`, one
+// request at a time, so a handler can change it: `echo` counts the messages
+// it answers in `echoed`.
+// `logger` is the program's logger; each handler logs what it did through
+// it, and `http.logged` adds the line for the whole request after it.
+@derive(Release)
+struct App {
+    logger: log.Logger[io.Descriptor],
+    echoed: UInt64,
+}
+
+// `Caller` names who sent a request, read from its
+// `Authorization: Bearer <name>` header. A real service would check a token
+// there; this example trusts the name it is given.
+@derive(Release)
+struct Caller {
+    name: Str,
+}
+
+// Any type becomes an extractor by implementing `http.Extract` for every
+// allocator `P`: `extract` reads the request and returns the value, or the
+// `http.Error` that answers the request instead. `Caller` borrows its name
+// from the request's header, and `http.Request` is a carrier, so a caller lives
+// as long as the request it came from.
+impl[P: Allocator] http.Extract[P] for Caller {
+    fn extract(request: http.Request[P]) -> Result[Caller, http.Error[P]] {
+        let name = bearer_name(request.header("Authorization")) else {
+            // A 401 answer names the scheme the client should authenticate
+            // with in a `WWW-Authenticate` header.
+            var refused = http.error(request, .Unauthorized, "name the caller with `Authorization: Bearer <name>`")
+            &refused.set_header(request, "WWW-Authenticate", "Bearer")?
+            return .Err(refused)
+        }
+        .Ok(.{ name })
+    }
+}
+
+// `Message` reads itself from the request's JSON body, so a handler that asks
+// for a `Message` receives the decoded value. `http.Json[Message]` decodes the
+// body into the request's arena: 415 answers a body not sent as JSON, 400 one
+// that is not JSON, and 422, naming the problem and where it is, such as
+// `missing field at $["text"]`, a document that is not a `Message`.
+impl http.Extract[mem.SystemAllocator] for Message {
+    fn extract(request: http.Request) -> Result[Message, http.Error] {
+        request.extract[http.Json[Message]]()
+    }
+}
+
+// `bearer_name` returns the name after `Bearer ` in an `Authorization`
+// header, or `None` when there is no header, another scheme, or no name.
+// HTTP compares a scheme's name without regard to case.
+fn bearer_name(sink header: Option[Str]) -> Option[Str] where carries(.Some: header) {
+    let value = header?
+    let scheme = value.slice(0, 7)?
+    if !scheme.equals_ascii_folded("Bearer ") {
+        return .None
+    }
+    let name = value.slice(7, value.length())?.trim_ascii()
+    if name.length() == 0 {
+        return .None
+    }
+    .Some(name)
+}
+
+// A handler names what it needs as parameters, and the router builds each one
+// from the request before calling it. The first, `inout app`, is the shared
+// state; the rest are extractors, read in the order they are written, and the
+// request comes last. When an extractor refuses, the router answers the
+// request with its error and does not call the handler: 401 without a caller,
+// then the refusals of the body. The router releases each extractor, last
+// first, when the handler returns. `http.Request` and `http.Response` name the
+// system allocator the server carves each request's arena from, unless a
+// handler is written for another. What a handler allocates through
+// `request.allocator()` lives in that arena until the response is written.
+//
+// `http.Request` is a carrier, so the answer may borrow from the request. The
+// caller's name and the message's text are views into it.
+fn echo(inout app: App, caller: Caller, message: Message, request: http.Request) -> Result[http.Response, http.Error] {
+    let said = message.text.view()
+    app.logger.info("echoing a message", log.field("caller", caller.name).and("bytes", said.length()))
+    app.echoed += 1
+    // `http.json` encodes the answer into the arena, escaping any quote.
+    http.json(request, Echo { to = copy(caller.name), echo = said })
+}
+
+// `greet` answers with a `Greeting`, which `derive(json.Encode)` encodes.
+@derive(json.Encode)
+struct Greeting {
+    hello: Str,
+}
+
+// `http.Path[Str]` reads the route's only path value, `{name}`, which the
+// router has percent-decoded, and `.value` is the text.
+fn greet(inout app: App, name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    app.logger.info("greeting", log.field("name", name.value))
+    // `http.json` encodes the greeting, escaping any quote in the name.
+    http.json(request, Greeting { hello = copy(name.value) })
+}
+
+// `Stats` is the answer to GET /stats, such as `{"echoed":2}`.
+@derive(json.Encode)
+struct Stats {
+    echoed: UInt64,
+}
+
+// `stats` reads the count `echo` keeps in the shared state.
+fn stats(inout app: App, request: http.Request) -> Result[http.Response, http.Error] {
+    http.json(request, Stats { echoed = app.echoed })
+}
+
+// `health` does not use the state, so it does not ask for it.
+fn health(request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "ok")
+}
+
+// `Signup` is the form POST /signup expects, a browser's `<form>` posts as
+// `application/x-www-form-urlencoded`, such as `name=Ada&age=30`.
+@derive(http.Params, Release)
+struct Signup {
+    name: Str,
+    age: UInt32,
+}
+
+// `Signed` is the answer, confirming who signed up and their age.
+@derive(json.Encode)
+struct Signed {
+    signed_up: Str,
+    age: UInt32,
+}
+
+// `signup` reads a form body by field name. `http.Form[T]` answers 415 for a
+// body sent as anything but a form, and 400 for one that is not
+// percent-encoded UTF-8 or a field it cannot read, naming the field, exactly
+// as `http.Query` answers those mistakes in a query.
+fn signup(inout app: App, form: http.Form[Signup], request: http.Request) -> Result[http.Response, http.Error] {
+    // The form is lent, so `copy` takes the name's view out of it for the answer.
+    let name = copy(form.value.name)
+    let age = form.value.age
+    app.logger.info("signed up", log.field("name", name).and("age", age))
+    http.json(request, Signed { signed_up = name, age })
+}
+
+// Register every route. A pattern names a method and a path, and `{name}`
+// matches one path segment; a raw literal, `r"…"`, keeps its braces as
+// written. `?` stops at the first refused pattern. A handler that
+// asks for the state, the caller or a body is registered by name like any other.
+fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
+    // Only `POST /echo` counts, so `/stats` reports echoes and nothing else.
+    &router.route("POST /echo", echo)?
+    &router.route(r"GET /greet/{name}", greet)?
+    &router.route("GET /stats", stats)?
+    &router.route("POST /signup", signup)?
+    &router.route("GET /health", health)
+}
+
+fn main() -> UInt8 {
+    let options = parse_options(env.args()) else {
+        io.eprintln("usage: http-json-echo --port PORT [--requests N]")
+        return 64
+    }
+    // The logger writes lines at `Info` and above to standard error, building
+    // each line in memory from `mem.system()` before writing it whole.
+    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    // The annotation names the state the routes take, `App`.
+    var router: http.Router[App] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `http.logged` wraps the router: it logs the address the server listens
+    // on, times each request, and logs one line for it once the response has
+    // been written. Port 0 asks the operating system for any free port, and the
+    // logged address is the one it chose. `http.with_request_ids` wraps that in
+    // turn, numbering each request, so the number is in the response, in the
+    // request each handler reads, and in the logged line.
+    // `copy(logger)` gives `http.logged` and `App` loggers of their own and
+    // keeps this one for the lines `main` writes. A logger to standard error
+    // owns nothing, so a copy costs nothing.
+    let app = App { logger = copy(logger), echoed = 0 }
+    let handler = http.with_request_ids(http.logged(copy(logger), router))
+    // `..http.Limits.default()` takes every limit not written here from the
+    // standard limits. `copy` takes the limit out of `options` and leaves
+    // `options` whole.
+    let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
+    // `listen_and_serve` opens the listener, owns the handler and `state: app`
+    // while serving, and closes the listener when it stops. It returns `app`,
+    // so `main` reads what the routes changed and releases it.
+    let finished = http.listen_and_serve(net.loopback(options.port), handler, state: app, limits: limits) else |error| {
+        logger.error("serving stopped", log.field("error", error))
+        return 1
+    }
+    logger.info("stopped", log.field("echoed", finished.echoed))
+    finished.release()
+    0
+}
+
+// Read `--port PORT` and an optional `--requests N`, in either order.
+fn parse_options(args: env.Args) -> Option[Options] {
+    var port: Option[UInt16] = .None
+    var requests: Option[UInt64] = .None
+    var index: UInt64 = 1
+    while index < args.count() {
+        let flag = args.at(index)?
+        let value = args.at(index + 1)?
+        if flag == "--port" {
+            let number = value.parse[UInt16]() else |_| {
+                return .None
+            }
+            port = .Some(number)
+        } else if flag == "--requests" {
+            let number = value.parse[UInt64]() else |_| {
+                return .None
+            }
+            requests = .Some(number)
+        } else {
+            return .None
+        }
+        index += 2
+    }
+    .Some(.{ port = port?, requests })
+}
+
+// Each test builds a request in an arena, as the server does, and hands it to
+// a handler. The arena is released after the response has been read.
+fn body_of(response: http.Response) -> Str where borrows(response) {
+    Str.from_bytes(response.body().unwrap()).unwrap()
+}
+
+// The tests hand the handlers a state whose logger writes only errors, so
+// the lines they log while answering stay out of the test report.
+fn quiet() -> App {
+    .{ logger = log.to_stderr(mem.system(), minimum: .Error), echoed = 0 }
+}
+
+// `sent_by` builds a POST /echo request in `memory` carrying `body` as JSON,
+// with `authorization` as its `Authorization` header.
+fn sent_by(memory: mem.Handle, authorization: Str, body: Str) -> http.Message where carries(memory) {
+    var sent = http.new_request(memory, "POST", "/echo", body).unwrap()
+    &sent.add_header("Content-Type", "application/json").unwrap()
+    &sent.add_header("Authorization", authorization).unwrap()
+    sent
+}
+
+test fn echo_answers_the_caller_with_their_text() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
+    var app = quiet()
+    let response = &router.serve_http(&app, sent.request()).unwrap()
+    testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
+    testing.assert_eq(body_of(response), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
+    testing.assert_eq(app.echoed, 1, "the echo was not counted")?
+}
+
+// The scheme is read without regard to case, and a request naming no caller
+// is refused with 401 and the scheme to use.
+test fn echo_reads_the_caller_from_a_bearer_header() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let folded = sent_by(arena.handle(), "bearer  alan ", r#"{"text":"hi"}"#)
+    let basic = sent_by(arena.handle(), "Basic YWRhOg==", r#"{"text":"hi"}"#)
+    let unnamed = sent_by(arena.handle(), "Bearer ", r#"{"text":"hi"}"#)
+    var app = quiet()
+    let answered = &router.serve_http(&app, folded.request()).unwrap()
+    testing.assert_eq(body_of(answered), r#"{"to":"alan","echo":"hi"}"#, "a folded scheme was not read")?
+    for sent in [basic, unnamed] {
+        let refused = match &router.serve_http(&app, sent.request()) {
+            Ok(_) => return testing.assert(false, "a request naming no caller was answered"),
+            Err(error) => error,
+        }
+        testing.assert_eq(refused.status(), http.Status.Unauthorized, "the status changed")?
+        testing.assert_eq(refused.header("WWW-Authenticate"), Option.Some("Bearer"), "the challenge changed")?
+    }
+}
+
+test fn echo_refuses_a_body_that_is_not_json() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = sent_by(arena.handle(), "Bearer ada", "hello")
+    var app = quiet()
+    let refused = match &router.serve_http(&app, sent.request()) {
+        Ok(_) => return testing.assert(false, "a body that is not JSON was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("invalid syntax at byte 0"), "the message changed")?
+    testing.assert_eq(app.echoed, 0, "a refused message was counted")?
+}
+
+// A document that is JSON but not a message is refused with 422 and the
+// field at fault: here the text is missing, and then it is a number.
+test fn echo_names_the_field_a_message_gets_wrong() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let untold = sent_by(arena.handle(), "Bearer ada", r"{}")
+    var app = quiet()
+    let missing = match &router.serve_http(&app, untold.request()) {
+        Ok(_) => return testing.assert(false, "a message without text was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(missing.status(), http.Status.UnprocessableContent, "the status changed")?
+    testing.assert_eq(missing.message(), Option.Some(r#"missing field at $["text"]"#), "the missing field changed")?
+    let counted = sent_by(arena.handle(), "Bearer ada", r#"{"text":3}"#)
+    let wrong = match &router.serve_http(&app, counted.request()) {
+        Ok(_) => return testing.assert(false, "a number was accepted as text"),
+        Err(error) => error,
+    }
+    testing.assert_eq(wrong.status(), http.Status.UnprocessableContent, "the status changed")?
+    testing.assert_eq(wrong.message(), Option.Some(r#"wrong kind of value at $["text"]"#), "the wrong field changed")?
+}
+
+// An arena that holds the request but not the message decoded from it is the
+// server's shortage, not the caller's mistake, so it is answered 500.
+test fn echo_answers_500_when_the_arena_cannot_hold_the_message() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer let letters = Vec.filled(mem.system(), 3000, UInt8(120)).unwrap()
+    defer var body = String.new()
+    &body.append(r#"{"text":""#).unwrap()
+    &body.append(Str.from_bytes(letters.as_slice()).unwrap()).unwrap()
+    &body.append(r#""}"#).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let sent = sent_by(arena.handle(), "Bearer ada", body.view())
+    var app = quiet()
+    let refused = match &router.serve_http(&app, sent.request()) {
+        Ok(_) => return testing.assert(false, "a message the arena could not hold was answered"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.InternalServerError, "the status changed")?
+}
+
+// A message as long as the default body limit allows is echoed, and so is a
+// document of the most values `json.decode` admits, which the arena holds
+// besides the request: the one is answered 200 and the other is refused for
+// its field, never 500.
+test fn echo_answers_the_largest_messages_the_default_limits_allow() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    let limits = http.Limits.default()
+    defer var text = String.new()
+    &text.append(r#"{"text":""#).unwrap()
+    for _ in 0..(limits.max_body_bytes - 11) {
+        &text.append("x").unwrap()
+    }
+    &text.append(r#""}"#).unwrap()
+    defer var values = String.new()
+    &values.append(r#"{"text":"a","pad":["#).unwrap()
+    for _ in 0..99990 {
+        &values.append("0,").unwrap()
+    }
+    &values.append("0]}").unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
+    let long = sent_by(arena.handle(), "Bearer ada", text.view())
+    let answered = match &router.serve_http(&app, long.request()) {
+        Ok(response) => response,
+        Err(error) => {
+            return testing.assert_eq(error.status(), http.Status.Ok, "the longest message was refused")
+        },
+    }
+    testing.assert_eq(body_of(answered).length(), limits.max_body_bytes + 11, "the echo of the longest message changed")?
+    // Each request is served from an arena of its own.
+    defer let second = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
+    let padded = sent_by(second.handle(), "Bearer ada", values.view())
+    let refused = match &router.serve_http(&app, padded.request()) {
+        Ok(_) => return testing.assert(false, "a document with an unknown field was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status changed")?
+}
+
+// `http.with_request_ids` wraps the whole router, so every response carries the
+// next number. A test lends the state itself, `&app`, as `http.with_state` does
+// when serving.
+test fn each_response_carries_its_request_number() {
+    var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer var numbered = http.with_request_ids(router)
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let first = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
+    let first_answer = &numbered.serve_http(&app, first.request()).unwrap()
+    testing.assert_eq(first_answer.header("X-Request-Id"), Option.Some("1"), "the first response was not numbered 1")?
+    let second = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
+    let second_answer = &numbered.serve_http(&app, second.request()).unwrap()
+    testing.assert_eq(second_answer.header("X-Request-Id"), Option.Some("2"), "the second response was not numbered 2")?
+}
+
+// The router records the path value `greet` reads, so this request goes
+// through it.
+test fn greet_escapes_the_name_as_a_json_string() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/greet/say%22hi%22", body: "").unwrap()
+    let response = &router.serve_http(&app, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), r#"{"hello":"say\"hi\""}"#, "the greeting changed")?
+}
+
+// POST /signup reads a form's fields by name, exactly as a browser sends
+// one, and answers 415 for a body sent as anything else.
+test fn signup_reads_a_form_by_field_name() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
+    let response = &router.serve_http(&app, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), r#"{"signed_up":"Ada López","age":30}"#, "the signup changed")?
+    let json_sent = http.new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
+    let refused = match &router.serve_http(&app, json_sent.request()) {
+        Ok(_) => return testing.assert(false, "a JSON body was read as a form"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.UnsupportedMediaType, "the status changed")?
+}
+
+// GET /stats answers with the count `echo` keeps in the state, which
+// `with_state` lends through `http.with_request_ids` to the router and reads back.
+test fn stats_counts_the_messages_echoed() {
+    var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer var server = http.with_state(quiet(), http.with_request_ids(router))
+    var nothing = ()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let message = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
+    let echoed = &server.serve_http(&nothing, message.request()).unwrap()
+    testing.assert_eq(body_of(echoed), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
+    let asked = http.new_request(arena.handle(), "GET", "/stats", body: "").unwrap()
+    let stats = &server.serve_http(&nothing, asked.request()).unwrap()
+    testing.assert_eq(body_of(stats), r#"{"echoed":1}"#, "the stats changed")?
+    testing.assert_eq(server.state().echoed, 1, "the state did not keep the count")?
+}

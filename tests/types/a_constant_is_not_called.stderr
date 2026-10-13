@@ -1,0 +1,5 @@
+error[N-NotCallable]: this name names a constant, which is a value and is read rather than called
+  --> tests/types/a_constant_is_not_called.lin:14:5
+   |
+14 |     Coins.most()
+   |     ^^^^^^^^^^ only a function can be called

@@ -1,0 +1,19 @@
+// A store at an offset that is not a multiple of its width traps, and the
+// trap is its own kind: the offset is well inside the buffer, so what is wrong
+// is where the value would sit, not whether it fits.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(16) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store(&b, 3, 41)
+            b.release()
+            0
+        },
+        Err(_) => 1,
+    }
+}

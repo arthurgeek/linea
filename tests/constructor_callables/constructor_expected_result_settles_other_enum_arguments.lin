@@ -1,0 +1,13 @@
+enum Wrapped[T, U] { Value(T), Other(U) }
+
+fn main() -> UInt8 {
+    let wrap: fn(sink value: UInt8) -> Wrapped[UInt8, UInt64] = Wrapped.Value
+    match wrap(23) {
+        Value(code) => if code == 23 {
+            0
+        } else {
+            1
+        },
+        Other(_) => 2,
+    }
+}

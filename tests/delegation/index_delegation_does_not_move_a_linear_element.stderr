@@ -1,0 +1,14 @@
+error[O-Move]: only part of `g` is named here
+  --> tests/delegation/index_delegation_does_not_move_a_linear_element.lin:20:10
+   |
+20 |     take(g[0])
+   |          ^^^^ move the whole binding, or `copy` this part out of it
+error[O-Leak]: `g` (a linear `Grid`) is still owned when this path leaves
+  --> tests/delegation/index_delegation_does_not_move_a_linear_element.lin:19:9
+   |
+19 |     let g: Grid = .{ cells = [.{ n = 1 }, .{ n = 2 }] }
+   |         ^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/array_views/a_live_view_prevents_array_mutation.lin:4:5
+  |
+4 |     values[0] = 9
+  |     ^^^^^^^^^ keep this place available until the last use of its observation
+5 |     slice[0]
+  |     -------- the observation is still used here

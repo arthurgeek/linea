@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let low: UInt8 = 1
+    let high: UInt64 = 4
+    let range = low..high
+    UInt8(range.hi)
+}

@@ -1,0 +1,28 @@
+@linear
+struct Ticket { value: UInt8 }
+
+fn next(inout counter: UInt8) -> Ticket {
+    counter += 1
+    .{ value = counter }
+}
+
+fn value(sink ticket: Ticket) -> UInt8 {
+    let Ticket { value } = ticket
+    value
+}
+
+fn main() -> UInt8 {
+    var counter: UInt8 = 0
+    let tickets: [Ticket; _] = [next(&counter), next(&counter), next(&counter)]
+    var decimal: UInt16 = 0
+    for ticket in tickets {
+        decimal = decimal * 10 + UInt16(value(ticket))
+    }
+    let number: UInt8 = 7
+    let views: [borrow UInt8; _] = [borrow number]
+    if counter == 3 && decimal == 123 && *views[0] == 7 {
+        0
+    } else {
+        1
+    }
+}

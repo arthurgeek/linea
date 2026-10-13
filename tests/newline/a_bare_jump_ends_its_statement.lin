@@ -1,0 +1,8 @@
+// `return`, `break` and `continue` can each end a statement, so the newline
+// after a bare one ends it rather than reaching down a line for a value to
+// carry. A jump carries what is written beside it and nothing else -- without
+// that, a bare `break` would swallow whatever statement came after it.
+fn main() -> UInt8 {
+    return
+    7
+}

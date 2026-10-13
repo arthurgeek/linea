@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(read [UInt8; 2] = [2, 1]) -> UInt8`, found `fn(read [UInt8; 2] = [1, 2]) -> UInt8`
+  --> tests/constants/aggregates/callable_array_order.lin:10:12
+   |
+5  | fn invoke[F: fn(read values: [UInt8; 2] = [2, 1]) -> UInt8](callback: F) -> UInt8 {
+   |                                                             -------- expected because of this parameter
+10 |     invoke(first)
+   |            ^^^^^ expected `fn(read [UInt8; 2] = [2, 1]) -> UInt8`, found `fn(read [UInt8; 2] = [1, 2]) -> UInt8`

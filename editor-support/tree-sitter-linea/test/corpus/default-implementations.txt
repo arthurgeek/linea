@@ -1,0 +1,73 @@
+==================
+Default trait implementation
+==================
+
+default impl[T: Hash] Key for T {
+    type Query = T
+    fn matches(self: T, query: T) -> Bool { self == query }
+}
+
+---
+
+(source_file
+  (impl_block
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (trait_reference
+      (type_identifier))
+    (type_identifier)
+    (associated_type
+      (type_identifier)
+      (type_identifier))
+    (function_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (type_identifier))
+        (parameter
+          (identifier)
+          (type_identifier)))
+      (type_identifier)
+      (block
+        (expression_statement
+          (binary_expression
+            (identifier)
+            (identifier)))))))
+
+==================
+Default implementation with qualified bounds and constraints
+==================
+
+default impl[T: cmp.Equivalent] lookup.Key for T where T: Hash {
+    type Query = T
+}
+
+---
+
+(source_file
+  (impl_block
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (identifier)
+            (type_identifier)))))
+    (trait_reference
+      (identifier)
+      (type_identifier))
+    (type_identifier)
+    (where_clause
+      (where_predicate
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (associated_type
+      (type_identifier)
+      (type_identifier))))

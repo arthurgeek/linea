@@ -1,0 +1,14 @@
+import std.mem
+
+fn main() -> UInt8 {
+    var values: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    match Vec.push(&values, 7) { Ok(_) => {}, Err(_) => panic("push failed") }
+    for read value in values {
+        let _removed = Vec.remove(&values, 0)
+        if value != 7 {
+            panic("changed value")
+        }
+    }
+    values.release()
+    0
+}

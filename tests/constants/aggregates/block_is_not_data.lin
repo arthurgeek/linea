@@ -1,0 +1,8 @@
+let amount: UInt8 = {
+    let value: UInt8 = 7
+    value
+}
+
+fn main() -> UInt8 {
+    amount
+}

@@ -1,0 +1,22 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    var counts: collections.Map[String[mem.SystemAllocator], UInt64, mem.SystemAllocator] = collections.Map.new()
+    defer counts.release()
+    collections.Map.insert(&counts, "tea".to_owned(mem.system()).unwrap(), 2).unwrap().release()
+    let present = counts.get("tea")
+    if present.is_none() {
+        return 1
+    }
+    let initial = *present.unwrap()
+    let updated = collections.Map.update(&counts, "tea", |sink count| count + 1)
+    let removed = collections.Map.remove(&counts, "tea").unwrap()
+    let value = removed.value
+    removed.release()
+    if initial == 2 && updated && value == 3 && counts.length() == 0 {
+        0
+    } else {
+        1
+    }
+}

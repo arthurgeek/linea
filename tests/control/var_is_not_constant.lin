@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    var x: Int64 = 300
+    UInt8(x)
+}

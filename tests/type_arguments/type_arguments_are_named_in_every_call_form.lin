@@ -1,0 +1,55 @@
+// Type arguments are named the same way through a trait's path, inside a
+// generic function's body, on a method of a generic type, and beside named
+// arguments.
+trait Measure {
+    fn measure[U: Scale](self: Self) -> U
+}
+
+trait Scale {
+    fn from_grams(grams: UInt32) -> Self
+}
+
+impl Scale for UInt32 {
+    fn from_grams(grams: UInt32) -> UInt32 {
+        grams
+    }
+}
+
+struct Parcel {
+    grams: UInt32,
+}
+
+impl Measure for Parcel {
+    fn measure[U: Scale](self: Parcel) -> U {
+        Scale.from_grams(self.grams)
+    }
+}
+
+struct Box[T] {
+    item: T,
+    moves: UInt8,
+}
+
+impl[T] Box[T] {
+    fn holding[U](self: Box[T], sink with: U) -> Box[U] where carries(with) {
+        Box[U] { item = with, moves = self.moves + 1 }
+    }
+}
+
+fn same[T](sink value: T) -> T {
+    value
+}
+
+fn weigh[W: Scale](parcel: Parcel) -> W {
+    parcel.measure[W]()
+}
+
+fn main() -> UInt8 {
+    let parcel = Parcel { grams = 5 }
+    let through_trait = Measure.measure[UInt32](parcel)
+    let generic = weigh[UInt32](parcel)
+    let boxed = Box[Bool] { item = true, moves = 0 }
+    let replaced = boxed.holding[UInt8](7)
+    let named = same[UInt8](value: 1)
+    UInt8(through_trait + generic) + replaced.item + replaced.moves + named - 19
+}

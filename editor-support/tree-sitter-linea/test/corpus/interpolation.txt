@@ -1,0 +1,111 @@
+===================
+Interpolation formats
+===================
+
+fn show(value: Pair) -> Str {
+    "display={value} debug={value:?} nested={choose(.{ x = 1 }):?} escaped={{"
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (expression_statement
+        (string_literal
+          (interpolation
+            value: (identifier))
+          (interpolation
+            value: (identifier)
+            format: (format_selector
+              (format_spec)))
+          (interpolation
+            value: (call_expression
+              callee: (identifier)
+              (argument_list
+                (struct_literal
+                  (field_initialiser
+                    name: (identifier)
+                    (integer_literal)))))
+            format: (format_selector
+              (format_spec)))
+          (escaped_open_brace))))))
+
+==================
+Two slashes inside a string are text, not a comment
+==================
+fn paths() -> () {
+    let root = "//"
+    let url = "http://example.com" // a comment after it
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (parameter_list)
+    return_type: (unit_type)
+    body: (block
+      (let_statement
+        name: (identifier)
+        value: (string_literal))
+      (let_statement
+        name: (identifier)
+        value: (string_literal))
+      (line_comment))))
+
+===================
+Interpolation format specs
+===================
+
+fn row(day: UInt8, price: Float64, name: Str) -> Str {
+    "{day:02}|{ price : >8.2 }|{name:*^10?}|{f(n: 1):<4}"
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (expression_statement
+        (string_literal
+          (interpolation
+            value: (identifier)
+            format: (format_selector
+              (format_spec)))
+          (interpolation
+            value: (identifier)
+            format: (format_selector
+              (format_spec)))
+          (interpolation
+            value: (identifier)
+            format: (format_selector
+              (format_spec)))
+          (interpolation
+            value: (call_expression
+              callee: (identifier)
+              (argument_list
+                (named_argument
+                  name: (identifier)
+                  value: (integer_literal))))
+            format: (format_selector
+              (format_spec))))))))

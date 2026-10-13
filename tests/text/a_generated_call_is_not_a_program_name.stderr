@@ -1,0 +1,25 @@
+error[N-Undefined]: undefined name `report`
+  --> tests/text/a_generated_call_is_not_a_program_name.lin:28:24
+   |
+28 |     let _unqualified = report(1)
+   |                        ^^^^^^ no binding with this name is in scope
+error[M-Vis]: `ran` is private to `core`
+  --> tests/text/a_generated_call_is_not_a_program_name.lin:29:21
+   |
+29 |     let _ran = core.ran(io.println("a"))
+   |                     ^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `selected` is private to `testing`
+  --> tests/text/a_generated_call_is_not_a_program_name.lin:30:29
+   |
+30 |     let _selected = testing.selected("a")
+   |                             ^^^^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `no_such_test` is private to `testing`
+  --> tests/text/a_generated_call_is_not_a_program_name.lin:31:28
+   |
+31 |     let _no_such = testing.no_such_test()
+   |                            ^^^^^^^^^^^^ declare it `pub` in its own module, or do not name it here
+error[M-Vis]: `report` is private to `core`
+  --> tests/text/a_generated_call_is_not_a_program_name.lin:32:10
+   |
+32 |     core.report(1)
+   |          ^^^^^^ declare it `pub` in its own module, or do not name it here

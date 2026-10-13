@@ -1,0 +1,7 @@
+fn identity(read value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    identity(0)
+}

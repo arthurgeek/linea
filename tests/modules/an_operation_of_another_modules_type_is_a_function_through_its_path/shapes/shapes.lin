@@ -1,0 +1,13 @@
+pub struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    pub fn open(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+pub fn door() -> Door {
+    .{ width = 4 }
+}

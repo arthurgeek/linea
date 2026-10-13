@@ -1,0 +1,12 @@
+fn increment(number: UInt8) -> UInt8 {
+    number + 1
+}
+
+fn main() -> UInt8 {
+    let selected: fn(read value: UInt8) -> UInt8 = increment
+    let _ = selected(number: 3)
+    let _ = increment(value: 3)
+    let local = |entry: UInt8| entry + 1
+    let _ = local(value: 3)
+    0
+}

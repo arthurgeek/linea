@@ -1,0 +1,12 @@
+struct Point { x: UInt8, y: UInt8 }
+
+fn main() -> UInt8 {
+    var point = Point { x = 47, y = 2 }
+    let read Point { x, y: _ } = point
+    point.y = 3
+    if x == 47 && point.y == 3 {
+        0
+    } else {
+        1
+    }
+}

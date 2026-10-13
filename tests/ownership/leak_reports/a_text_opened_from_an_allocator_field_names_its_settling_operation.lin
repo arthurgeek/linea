@@ -1,0 +1,20 @@
+// A `Journal[A]` keeps its allocator in a field, and `draft` opens a string
+// with it. The string's type names the block's parameter `A`, and the report
+// names `release` as what settles it.
+import std.mem
+
+struct Journal[A: Allocator] {
+    allocator: A,
+}
+
+impl[A: Allocator] Journal[A] {
+    fn draft(self: Self) -> UInt8 {
+        let line = String.new_in(self.allocator)
+        UInt8(line.length())
+    }
+}
+
+fn main() -> UInt8 {
+    let journal: Journal[mem.SystemAllocator] = .{ allocator = mem.system() }
+    journal.draft()
+}

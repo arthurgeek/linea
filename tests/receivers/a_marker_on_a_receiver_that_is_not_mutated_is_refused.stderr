@@ -1,0 +1,14 @@
+error[S-Mutation]: this receiver is not mutated, so the call takes no `&`
+  --> tests/receivers/a_marker_on_a_receiver_that_is_not_mutated_is_refused.lin:22:18
+   |
+6  |     fn total(self: Self) -> UInt8 {
+   |              ---- declared `read`
+22 |     let total = &counter.total()
+   |                  ^^^^^^^ remove the `&` before it
+error[S-Mutation]: this receiver is not mutated, so the call takes no `&`
+  --> tests/receivers/a_marker_on_a_receiver_that_is_not_mutated_is_refused.lin:23:14
+   |
+14 |     fn close(sink self: Self) -> UInt8 {
+   |                   ---- declared `sink`
+23 |     total + &counter.close()
+   |              ^^^^^^^ remove the `&` before it

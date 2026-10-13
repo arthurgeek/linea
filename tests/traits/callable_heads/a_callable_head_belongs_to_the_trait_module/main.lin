@@ -1,0 +1,15 @@
+// A callable type has no declaring module, so only the module that declares
+// the trait may implement it for one.
+import api
+
+use api.Route
+
+impl Route for fn(input: UInt8) -> UInt8 {
+    fn route(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

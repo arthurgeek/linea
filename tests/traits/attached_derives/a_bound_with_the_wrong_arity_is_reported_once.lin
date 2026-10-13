@@ -1,0 +1,9 @@
+@derive(Equatable)
+struct Cell[T: Equatable[UInt8]] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let cell = Cell[UInt8] { value = 1 }
+    cell.value
+}

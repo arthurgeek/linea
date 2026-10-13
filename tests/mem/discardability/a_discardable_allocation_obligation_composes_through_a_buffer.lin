@@ -1,0 +1,20 @@
+import std.mem
+
+use mem.Arena
+use mem.Buffer
+use mem.Owner
+use mem.system
+
+fn abandon[A: Allocator](sink bytes: Buffer[A]) -> UInt8 where A.Obligation: Discardable {
+    if bytes.length() == 0 {
+        0
+    } else {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    defer arena.release()
+    abandon(arena.handle().acquire(0).unwrap())
+}

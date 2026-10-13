@@ -1,0 +1,8 @@
+struct Inner { y: UInt8 }
+
+struct Outer { inner: Inner, z: UInt8 }
+
+fn main() -> UInt8 {
+    let o: Outer = .{ inner = .{ y = 1 }, z = 2 }
+    o.z
+}

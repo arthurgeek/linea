@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let flag = true
+    let duplicate = copy(flag)
+    if flag && duplicate {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+error[T-Const]: a constant of `Choice` would be built where nothing settles it
+ --> tests/constants/enum_variants/affine_enum_with_linear_payload_cannot_be_constant.lin:6:13
+  |
+6 | let empty = Choice.Empty
+  |             ^^^^^^^^^^^^ a value of this type must be settled, so it cannot be a constant

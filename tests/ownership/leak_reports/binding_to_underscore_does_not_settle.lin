@@ -1,0 +1,17 @@
+// `_` says a value is not wanted. It does not settle a linear value, so the
+// badge bound to it is still owned where `main` ends.
+@linear
+struct Badge {
+    number: UInt8,
+}
+
+fn retire(sink badge: Badge) -> UInt8 {
+    let Badge { number } = badge
+    number
+}
+
+fn main() -> UInt8 {
+    let badge = Badge { number = 3 }
+    let _ = badge
+    retire(Badge { number = 4 })
+}

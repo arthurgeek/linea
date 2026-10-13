@@ -1,0 +1,9 @@
+// A declaration parameter's name is the label a call writes, so it cannot be
+// a pattern. Name the pair and take it apart in the body with a `let`.
+fn f((a, b): (UInt8, UInt8)) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    f((1, 2))
+}

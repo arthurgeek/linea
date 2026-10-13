@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"resolveProvider":false},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"documentSymbolProvider":true,"codeActionProvider":{"codeActionKinds":["quickfix"]},"documentFormattingProvider":true,"renameProvider":true,"foldingRangeProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","variable","number","string","comment","operator"],"tokenModifiers":["declaration","readonly","defaultLibrary","linear"]},"full":true},"inlayHintProvider":{"resolveProvider":false}}}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"plaintext","value":"UInt16"},"range":{"start":{"line":9,"character":4},"end":{"line":9,"character":27}}}}
+{"jsonrpc":"2.0","id":3,"result":{"contents":{"kind":"plaintext","value":"UInt16"},"range":{"start":{"line":10,"character":4},"end":{"line":10,"character":28}}}}
+{"jsonrpc":"2.0","id":4,"result":{"contents":{"kind":"plaintext","value":"UInt16"},"range":{"start":{"line":10,"character":19},"end":{"line":10,"character":28}}}}
+{"jsonrpc":"2.0","id":5,"result":{"contents":{"kind":"plaintext","value":"UInt8"},"range":{"start":{"line":10,"character":23},"end":{"line":10,"character":24}}}}
+{"jsonrpc":"2.0","id":6,"result":{"contents":{"kind":"plaintext","value":"UInt16"},"range":{"start":{"line":11,"character":10},"end":{"line":11,"character":28}}}}
+{"jsonrpc":"2.0","id":7,"result":null}

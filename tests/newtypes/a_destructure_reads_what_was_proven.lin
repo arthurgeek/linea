@@ -1,0 +1,22 @@
+// `let Percent(n) = p` and `match p { Percent(n) => ... }` both read the base
+// straight back: the proof happened at construction, and a pattern never
+// asks again.
+@copyable
+type Percent = UInt8 where it in 0..=99
+
+fn viaLet(sink p: Percent) -> UInt8 {
+    let Percent(n) = p
+    n
+}
+
+fn viaMatch(sink p: Percent) -> UInt8 {
+    match p {
+        Percent(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let a = viaLet(Percent(30))
+    let b = viaMatch(Percent(12))
+    a + b
+}

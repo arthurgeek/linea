@@ -1,0 +1,29 @@
+import policies
+
+let options: policies.Options = .{ title = "report", mode = policies.Mode.Sized(9) }
+
+fn invoke[F: fn(read options: policies.Options = options) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    if policies.amount() != 9 {
+        return 1
+    }
+    if policies.amount(options: options) != 9 {
+        return 2
+    }
+    if invoke(policies.amount) != 9 {
+        return 3
+    }
+    if policies.exported.title != "report" {
+        return 4
+    }
+    if policies.token_value() != 23 {
+        return 5
+    }
+    if policies.token_value(policies.token) != 23 {
+        return 6
+    }
+    0
+}

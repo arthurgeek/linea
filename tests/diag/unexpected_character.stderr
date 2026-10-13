@@ -1,0 +1,10 @@
+error[S-Char]: unexpected character '#'
+ --> tests/diag/unexpected_character.lin:3:13
+  |
+3 |     let y = #;
+  |             ^ not a valid token
+error[N-Unused]: `x` is never used
+ --> tests/diag/unexpected_character.lin:2:9
+  |
+2 |     let x = 1;
+  |         ^ bind it as `_` if the value is not wanted

@@ -1,0 +1,9 @@
+// `_` binds no name, so a type-parameter list may hold it more than once, as a
+// value parameter list may. Neither is a duplicate declaration.
+fn pick[_, _](_: UInt8, _: UInt8) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    pick[UInt8, Bool](1, 2)
+}

@@ -1,0 +1,25 @@
+trait Queryable {
+    type Query
+
+    fn accepts(self: Self, query: Self.Query) -> Bool
+}
+
+default impl[T] Queryable for T {
+    type Query = T
+
+    fn accepts(_self: Self, _query: Self.Query) -> Bool {
+        true
+    }
+}
+
+fn ask[T: Queryable](value: T, query: T.Query) -> Bool {
+    Queryable.accepts(value, query)
+}
+
+fn main() -> UInt8 {
+    if ask(UInt8(5), 5) {
+        0
+    } else {
+        1
+    }
+}

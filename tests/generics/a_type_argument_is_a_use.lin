@@ -1,0 +1,17 @@
+// An annotation names the types it is written with, and a type argument is
+// one of them. A binding's annotation was marked used by its head alone, so a
+// type reachable only as an argument -- `Cell[Opt]` names `Opt` nowhere else --
+// was reported never used. There is no way to write the program differently:
+// naming it with a leading `_` renames the type, and every use of it with it.
+struct Opt {
+    w: UInt8,
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let c: Cell[Opt] = .{ v = .{ w = 7 } }
+    c.v.w
+}

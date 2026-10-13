@@ -1,0 +1,137 @@
+// Group observed request durations into latency ranges. The histogram struct
+// owns the vector that stores the counts.
+//
+// `@linear` requires each histogram to be consumed exactly once. Here, `close`
+// consumes it and releases the vector. Omitting that step, closing twice,
+// or using the histogram after closing it is a compile-time error.
+import std.mem
+import std.testing
+import std.io
+
+use mem.Oom
+use mem.SystemAllocator
+use mem.system
+use io.IoError
+use io.println
+
+// Each bucket stores a UInt64 count. A vector lets the caller choose the
+// number of buckets at runtime; an array's length must be known at compile time.
+// Closing a histogram releases its vector.
+@linear
+struct Histogram {
+    counts: Vec[UInt64],
+}
+
+impl Histogram {
+    // Allocate every bucket together and initialize each count to zero.
+    // `?` returns an allocation error to the caller.
+    pub fn open(a: SystemAllocator, buckets: UInt64) -> Result[Histogram, Oom] {
+        let counts = Vec.filled(a, count: buckets, value: UInt64(0))?
+        .Ok(.{ counts })
+    }
+
+    // `inout self` permits updating the owned counts while preserving the
+    // histogram for later calls. Callers mark the call with `&`, as in
+    // `&h.record(1)`, to show that it changes `h`.
+    pub fn record(inout self: Self, bucket: UInt64) -> () {
+        self.counts[bucket] += 1
+    }
+
+    pub fn count(self: Self, bucket: UInt64) -> UInt64 {
+        self.counts[bucket]
+    }
+
+    // `sink self` transfers ownership to `close`. The pattern extracts the
+    // vector as `counts`, then `release` consumes it and frees its storage.
+    pub fn close(sink self: Self) -> () {
+        let Histogram { counts } = self
+        counts.release()
+    }
+}
+
+test fn a_histogram_counts_what_is_recorded_into_it() {
+    var h = Histogram.open(system(), 4).unwrap()
+    // Leave bucket 0 empty; record once in bucket 1 and twice in bucket 3.
+    &h.record(1)
+    &h.record(3)
+    &h.record(3)
+
+    let none = h.count(0)
+    let once = h.count(1)
+    let twice = h.count(3)
+    h.close()
+
+    testing.assert_eq(none, 0, "a bucket nothing recorded holds something")?
+    testing.assert_eq(once, 1, "a bucket recorded once does not hold one")?
+    testing.assert_eq(twice, 2, "a bucket recorded twice does not hold two")?
+}
+
+test fn two_histograms_keep_independent_counts() {
+    var first = Histogram.open(system(), 2).unwrap()
+    var second = Histogram.open(system(), 2).unwrap()
+    &first.record(0)
+    &second.record(0)
+    &second.record(0)
+
+    let one = first.count(0)
+    let two = second.count(0)
+    first.close()
+    second.close()
+
+    testing.assert_eq(one, 1, "a first histogram did not count its own")?
+    testing.assert_eq(two, 2, "a second histogram did not count its own")?
+}
+
+// The four buckets start at 0, 100, 200 and 300 ms. Index 3 also holds
+// longer requests, so dividing by 100 must clamp to that final index.
+fn latency_bucket(duration: UInt64) -> UInt64 {
+    let bucket = duration / 100
+    if bucket < 3 {
+        bucket
+    } else {
+        3
+    }
+}
+
+test fn latency_ranges_include_their_lower_bound() {
+    testing.assert_eq(latency_bucket(0), 0, "zero latency is outside the first bucket")?
+    testing.assert_eq(latency_bucket(99), 0, "99 ms is outside the first bucket")?
+    testing.assert_eq(latency_bucket(100), 1, "100 ms is outside the second bucket")?
+    testing.assert_eq(latency_bucket(200), 2, "200 ms is outside the third bucket")?
+    testing.assert_eq(latency_bucket(300), 3, "300 ms is outside the final bucket")?
+    testing.assert_eq(latency_bucket(520), 3, "a long request escaped the final bucket")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    // `let … else` binds what `Ok` holds when `open` succeeds. Otherwise the
+    // `else` block runs and must leave `main`; `|_|` names the error and drops
+    // it, since the message below says all this program knows about it.
+    var h = Histogram.open(system(), 4) else |_| {
+        io.eprintln("could not allocate the request latency histogram")
+        return .Ok(1)
+    }
+    // `[UInt64; _]` lets the compiler count the ten durations.
+    let durations: [UInt64; _] = [42, 87, 125, 98, 205, 310, 174, 63, 280, 520]
+    for duration in durations {
+        &h.record(latency_bucket(duration))
+    }
+
+    let fast = h.count(0)
+    let moderate = h.count(1)
+    let slow = h.count(2)
+    let delayed = h.count(3)
+    h.close()
+
+    println("request latency: under 100 ms: {fast}, 100-199 ms: {moderate}, 200-299 ms: {slow}, 300 ms or more: {delayed}")?
+    .Ok(0)
+}
+
+test fn an_unrepresentable_bucket_count_is_refused() {
+    match Histogram.open(system(), UInt64.max) {
+        Err(_) => {},
+        Ok(histogram) => {
+            histogram.close()
+            testing.assert(false, "an unrepresentable bucket count was accepted")?
+        },
+    }
+}

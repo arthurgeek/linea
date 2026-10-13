@@ -1,0 +1,5 @@
+error[O-Move]: `token` is a lend, and this takes it
+ --> tests/decl/borrowed_lets/a_sink_capture_cannot_take_a_borrowed_noncopyable_field.lin:8:27
+  |
+8 |     let take = sink [sink token] || {
+  |                           ^^^^^ `copy` it, or use the plain form of the construct, which does take the value

@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let wide = Option.Some(300)
+    let narrow = Option.Some(UInt8(1))
+    if wide == narrow {
+        1
+    } else {
+        0
+    }
+}

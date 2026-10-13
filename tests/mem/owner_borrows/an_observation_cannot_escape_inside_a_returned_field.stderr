@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/mem/owner_borrows/an_observation_cannot_escape_inside_a_returned_field.lin:5:12
+  |
+5 |     return .{ view = borrow local }
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

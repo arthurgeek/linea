@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `Float64`
+ --> tests/convert/into/a_library_trait_for_a_library_type_suggests_a_method.lin:5:24
+  |
+5 | impl From[Celsius] for Float64 {
+  |                        ^^^^^^^ the library declares both the trait and the type; give a type this program declares a method instead

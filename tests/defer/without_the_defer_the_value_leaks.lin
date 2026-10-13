@@ -1,0 +1,25 @@
+// The other half of the pair. The same shape with no disposal at all, which
+// [O-Leak] refuses. The case beside this one says the schedule fires; this one
+// says the rule that would have caught its absence is still on.
+//
+// The value is read, so what is missing is the disposal and nothing else: a
+// binding nothing names at all is [N-Unused] as well, and a case naming two
+// rules is evidence about neither.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn peek(k: Key) -> UInt8 {
+    k.n
+}
+
+fn go() -> UInt8 {
+    let k: Key = .{ n = 7 }
+    let seen = peek(k)
+    seen
+}
+
+fn main() -> UInt8 {
+    go()
+}

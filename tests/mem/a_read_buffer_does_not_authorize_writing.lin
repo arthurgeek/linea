@@ -1,0 +1,13 @@
+import std.mem
+
+fn write_through_read(bytes: mem.Buffer[mem.SystemAllocator]) -> () {
+    mem.Buffer.store_byte(&bytes, 0, 7)
+}
+
+fn main() -> UInt8 {
+    let allocator = mem.system()
+    let bytes = allocator.acquire(1).unwrap()
+    write_through_read(bytes)
+    bytes.release()
+    0
+}

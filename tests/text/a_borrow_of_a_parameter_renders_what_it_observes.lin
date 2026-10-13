@@ -1,0 +1,37 @@
+// A `borrow T` renders through `T`'s `Display`, so a generic function taking
+// a borrow of a displayable `T` writes it into text.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+// `v` observes a value owned by the caller.
+fn greet[T: Display](v: borrow T) -> Result[(), IoError] {
+    println("hello {v}")
+}
+
+// The inner literal holds a copy of the borrow, and the outer one renders it.
+fn bracket[T: Display](v: borrow T) -> Result[(), IoError] {
+    println("[{"in {v}"}]")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let n = 5
+    let name = Name { text = "Ada" }
+    greet(borrow n)?
+    greet(borrow name)?
+    bracket(borrow n)?
+    bracket(borrow name)?
+    return .Ok(0)
+}

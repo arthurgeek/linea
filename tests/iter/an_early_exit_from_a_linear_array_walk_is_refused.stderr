@@ -1,0 +1,5 @@
+error[O-LinearTail]: this walk can end early, abandoning the `Token` at every place it did not reach
+  --> tests/iter/an_early_exit_from_a_linear_array_walk_is_refused.lin:14:14
+   |
+14 |     for t in ts {
+   |              ^^ a walk over an array runs to its end where the element is linear, because nothing takes the places it never reached

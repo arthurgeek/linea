@@ -1,0 +1,28 @@
+// `Door` declares an `open` taking a door by value, which a borrowed door
+// cannot be passed as, so `r.open()` reaches `Shut`'s through the
+// observation. The type's own is reached from the door itself.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn open(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn open(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn open(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let d: Door = .{ width = 4 }
+    let r = borrow d
+    r.open() + d.open()
+}

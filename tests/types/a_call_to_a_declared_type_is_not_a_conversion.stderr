@@ -1,0 +1,5 @@
+error[N-NotCallable]: this name names a type, and only a primitive converts
+  --> tests/types/a_call_to_a_declared_type_is_not_a_conversion.lin:11:5
+   |
+11 |     Coins(wide)
+   |     ^^^^^ only a function can be called

@@ -1,0 +1,5 @@
+error[M-Opaque]: `Account` is opaque outside `bank`
+ --> tests/modules/sealed_field/main.lin:5:5
+  |
+5 |     a.balance
+  |     ^^^^^^^^^ only its own module can read its parts

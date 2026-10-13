@@ -1,0 +1,26 @@
+// `Self` at a call is settled by the argument, and what settles it must
+// implement the trait: the signature has no body, so an argument of a type
+// with no implementation names an operation that does not exist.
+struct Account {
+    balance: UInt8,
+}
+
+struct Ledger {
+    total: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    let l: Ledger = .{ total = 3 }
+    Measure.of(a) + Measure.of(l)
+}

@@ -1,0 +1,14 @@
+fn change(inout number: UInt8) -> UInt8 {
+    number = 4
+    0
+}
+
+fn apply[F: fn(read _input: UInt8) -> UInt8](callback: F, input: UInt8) -> UInt8 {
+    callback(input)
+}
+
+fn main() -> UInt8 {
+    var number: UInt8 = 3
+    let get = read [read number] |_input: UInt8| number
+    apply(get, change(&number))
+}

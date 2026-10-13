@@ -1,0 +1,7 @@
+fn _consume[T](sink value: T.Item) -> T where carries(value) {
+    value
+}
+
+fn main() -> UInt8 {
+    0
+}

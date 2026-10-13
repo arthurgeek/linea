@@ -1,0 +1,7 @@
+fn multiply(lhs: UInt64, rhs: UInt64) -> UInt64 {
+    lhs * rhs
+}
+
+fn main() -> UInt8 {
+    UInt8(multiply(2, 18446744073709551615))
+}

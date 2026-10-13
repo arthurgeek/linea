@@ -1,0 +1,11 @@
+import std.net
+
+// The runtime gives `linea_close` the signature `(Int32) -> Int64` in every
+// root that declares it, `std.net` included, so this declaration is refused.
+extern fn linea_close(fd: Int64) -> Int64
+
+fn main() -> UInt8 {
+    let _address = net.loopback(0)
+    let _closed = linea_close(3)
+    0
+}

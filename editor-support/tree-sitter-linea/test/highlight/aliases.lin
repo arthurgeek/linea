@@ -1,0 +1,12 @@
+alias Pricing = fn(cents: UInt64) -> UInt64
+// <- keyword.storage.type
+//    ^ type
+pub alias Step[T] = fn(value: T) -> T
+//  ^ keyword.storage.type
+//        ^ type
+
+fn main() -> UInt8 {
+    let alias = 0
+//      ^ variable
+    alias
+}

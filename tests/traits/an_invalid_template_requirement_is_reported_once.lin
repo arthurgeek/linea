@@ -1,0 +1,35 @@
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+trait Inspect {
+    fn inspect(self: Self) -> UInt8
+}
+
+template impl Inspect where reflect.components: Lookup {
+    fn inspect(_self: Self) -> UInt8 {
+        var total: UInt8 = 0
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    total = total + component.of(_self).at(0)
+                }
+            },
+        }
+        total
+    }
+}
+
+struct Filled {
+    value: UInt8,
+}
+
+struct Empty {}
+
+derive Inspect for Filled
+
+derive Inspect for Empty
+
+fn main() -> UInt8 {
+    0
+}

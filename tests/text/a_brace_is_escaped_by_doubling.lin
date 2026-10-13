@@ -1,0 +1,27 @@
+// `{{` is a `{` in the text. Doubling is what keeps a literal brace from
+// opening an expression, and it is needed for `{` alone: a `}` outside an
+// interpolation closes nothing, so it is an ordinary byte and needs no escape.
+//
+// `\u{...}` carries braces of its own and they belong to the escape. The
+// scanner reads through them, or `"\u{e1}"` would open an interpolation at the
+// `{` and the literal would end somewhere nobody wrote.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    let opens: Str = "{{"
+    let closes: Str = "}"
+    let escaped: Str = "\u{e1}"
+
+    // One byte, one byte, and two for `á`.
+    let n: UInt64 = Str.length(opens) + Str.length(closes) + Str.length(escaped)
+
+    // And a doubled brace beside a real interpolation, so the two readings of
+    // `{` are told apart in one literal.
+    var w: Descriptor = stdout()
+    Display.fmt("{{{n}}}", &w)?
+    return .Ok(0)
+}

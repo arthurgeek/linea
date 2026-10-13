@@ -1,0 +1,14 @@
+// Representation does not imply behaviour. A newtype over an integer is not
+// an integer, so `+` over two of them is refused: the sum of two percentages
+// is not a percentage, and nothing about the base decides otherwise. The way
+// to the arithmetic is the pattern that takes the value apart.
+type Percent = UInt8 where it in 0..=99
+
+fn add(sink a: Percent, sink b: Percent) -> Percent {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let Percent(n) = add(Percent(60), Percent(60))
+    n
+}

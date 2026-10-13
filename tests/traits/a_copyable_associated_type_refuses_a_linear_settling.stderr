@@ -1,0 +1,10 @@
+error[T-Bound]: `Item` requires `Copyable`, and `Coin` does not have that capability
+  --> tests/traits/a_copyable_associated_type_refuses_a_linear_settling.lin:29:17
+   |
+29 |     type Item = Coin
+   |                 ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-Bound]: `Held` requires `Copyable`, and `Cell[Coin]` does not have that capability
+  --> tests/traits/a_copyable_associated_type_refuses_a_linear_settling.lin:30:17
+   |
+30 |     type Held = Cell[Coin]
+   |                 ^^^^ use a type meeting the capability requirement, or relax the bound

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Measure` is already implemented for `UInt8`
+  --> tests/traits/one_implementation_per_builtin_head.lin:14:6
+   |
+8  | impl Measure for UInt8 {
+   |      ------- already implemented here
+14 | impl Measure for UInt8 {
+   |      ^^^^^^^ a trait is implemented once for a type

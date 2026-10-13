@@ -1,0 +1,35 @@
+// `http.serve` takes its limits last, and a caller that names none serves with
+// the standard limits `Default.default()` gives. The program serves only when
+// it is given a port, so run without one it answers at once.
+import std.env
+import std.http
+import std.mem
+import std.net
+
+fn hello[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "hello\n")
+}
+
+fn main() -> UInt8 {
+    let args = env.args()
+    let written = match args.at(1) {
+        Some(written) => written,
+        None => return 0,
+    }
+    let port: UInt16 = written.parse() else |_| {
+        return 2
+    }
+    var router = http.Router.new()
+    defer router.release()
+    if &router.route_raw("GET /", hello).is_err() {
+        return 3
+    }
+    let listener = match net.listen(net.loopback(port)) {
+        Ok(listener) => listener,
+        Err(_) => return 4,
+    }
+    match http.serve(listener, &router, mem.system()) {
+        Ok(_) => 0,
+        Err(_) => 5,
+    }
+}

@@ -1,0 +1,37 @@
+// Which implementations a program holds is decided by the types they were
+// written with, and an array's length is part of one. A length nothing settles
+// is refused where it is written rather than guessed at: guessing two of them
+// alike would make one implementation of what may be two types, and guessing
+// them apart would make two implementations of what may be one.
+//
+// A ring of constants is what settles no length however much of the program is
+// read: every member waits on the next and the last waits on the first, so
+// there is nothing later to learn.
+let a: UInt8 = b
+
+let b: UInt8 = a
+
+trait Give[phantom U] {
+    fn give(self: Self) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; a]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; b]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    h.n
+}

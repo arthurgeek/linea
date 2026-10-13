@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let s = "unterminated
+    0
+}

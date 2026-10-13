@@ -1,0 +1,35 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+@derive(Release)
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+@derive(Release)
+struct Labelled[L: Release] {
+    label: L,
+    shelf: Shelf[UInt8],
+}
+
+impl[L: Release] Labelled[L] {
+    fn shelf_of(sink self: Self) -> UInt64 where carries(self) {
+        let Labelled { label, shelf } = self
+        label.release()
+        let total = shelf.items.length()
+        shelf.release()
+        total
+    }
+}
+
+fn open[L: Release](sink label: L) -> Labelled[L] where carries(label) {
+    .{ label = label, shelf = .{ items = Vec.new() } }
+}
+
+fn main() -> UInt8 {
+    let label: Vec[UInt8] = Vec.new()
+    let held = open(label)
+    UInt8(held.shelf_of()) + 5
+}

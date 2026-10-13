@@ -1,0 +1,7 @@
+// [T-ArraySize]. A length counts elements, so it is a number. A truth value is
+// a constant expression and says nothing about how many elements a type holds,
+// so being one the language can work out is not enough to be a length.
+fn main() -> UInt8 {
+    let _xs: [UInt8; true] = [1]
+    0
+}

@@ -1,0 +1,13 @@
+fn take(value: Int64) -> Int64 {
+    value
+}
+
+fn main() -> UInt8 {
+    let grouped = take(-(9223372036854775808))
+    let plain = take(-9223372036854775808)
+    if grouped == plain {
+        0
+    } else {
+        1
+    }
+}

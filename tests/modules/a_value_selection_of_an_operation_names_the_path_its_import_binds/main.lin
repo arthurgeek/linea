@@ -1,0 +1,10 @@
+// `open` is an operation `shapes.Door` declares, and a selection that is not
+// a call's callee reaches no operation. This module imports `shapes` as `s`,
+// so the path the report offers is `s.Door.open`, the one that resolves here.
+import shapes as s
+
+fn main() -> UInt8 {
+    let door = s.door()
+    let _opener = door.open
+    0
+}

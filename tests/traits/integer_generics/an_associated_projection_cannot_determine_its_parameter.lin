@@ -1,0 +1,17 @@
+trait ItemSource {
+    type Item
+}
+
+trait Transfer[S] {
+    fn transfer(value: S) -> Self
+}
+
+impl[S: ItemSource, T: Integer] Transfer[S.Item] for T {
+    fn transfer(_value: S.Item) -> T {
+        T(0)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

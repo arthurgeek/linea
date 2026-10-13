@@ -1,0 +1,11 @@
+// An open end followed by a construct's own body is the open-end mistake,
+// not a range whose end is a block: the brace opens what the `if` holds, and
+// reading it as the high end swallowed the body whole and desynchronised
+// past the function's closing brace.
+fn main() -> UInt8 {
+    if 0.. {
+        0
+    } else {
+        1
+    }
+}

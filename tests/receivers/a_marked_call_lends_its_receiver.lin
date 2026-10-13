@@ -1,0 +1,57 @@
+// `&counter.bump()` calls `bump` with `counter` as its `inout` receiver: the
+// `&` marks the receiver the operation writes to, as `&x` marks an argument.
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+
+    fn add(inout self: Self, amount: UInt8) -> () {
+        self.count += amount
+    }
+
+    // `self` is already lent to this operation, and lending it on is marked
+    // the same way.
+    fn bump_twice(inout self: Self) -> () {
+        &self.bump()
+        &self.bump()
+    }
+}
+
+trait Press {
+    fn press(inout self: Self) -> ()
+}
+
+impl Press for Counter {
+    fn press(inout self: Self) -> () {
+        &self.add(3)
+    }
+}
+
+// A trait's operation lends its receiver through a type parameter too.
+fn press_twice[T: Press](inout button: T) -> () {
+    &button.press()
+    &button.press()
+}
+
+struct Tally {
+    counter: Counter,
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    &counter.bump()
+    &(counter).add(2)
+    &counter.bump_twice()
+    press_twice(&counter)
+
+    // A field path and an element are places, and are lent the same way.
+    var tally = Tally { counter = counter }
+    &tally.counter.bump()
+    var counters = [Counter { count = 10 }, Counter { count = 20 }]
+    &counters[1].add(tally.counter.count)
+    counters[1].count
+}

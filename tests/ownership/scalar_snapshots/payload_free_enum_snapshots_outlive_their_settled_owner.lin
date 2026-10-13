@@ -1,0 +1,24 @@
+@copyable
+enum State { Open, Closed }
+
+@linear
+struct Owner { state: State }
+
+fn close(sink owner: Owner) -> () {
+    let Owner { state: _state } = owner
+}
+
+fn main() -> UInt8 {
+    var owner: Owner = .{ state = .Open }
+    let before = owner.state
+    owner.state = .Closed
+    let after = owner.state
+    close(owner)
+    let was_open = match before { Open => true, Closed => false }
+    let is_closed = match after { Open => false, Closed => true }
+    if was_open && is_closed {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+error[N-Immutable]: an observation grants read-only access to its place
+ --> tests/json/observations/elements_do_not_grant_child_mutation.lin:8:24
+  |
+8 |     json.Value.append(&elements[UInt64(0)], json.Value.null(mem.system())).unwrap()
+  |                        ^^^^^^^^^^^^^^^^^^^ this place cannot be lent

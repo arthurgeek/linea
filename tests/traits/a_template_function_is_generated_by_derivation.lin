@@ -1,0 +1,20 @@
+trait Structural {
+    fn value(self: Self) -> UInt8
+}
+
+template impl Structural {
+    fn value(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+struct Mark {
+    value: UInt8,
+}
+
+derive Structural for Mark
+
+fn main() -> UInt8 {
+    let mark: Mark = .{ value = 1 }
+    Structural.value(mark)
+}

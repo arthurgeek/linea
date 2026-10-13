@@ -1,0 +1,15 @@
+enum Colour { Red, Green }
+
+enum Shape { Circle(Colour), Square }
+
+fn main() -> UInt8 {
+    // A payload that is itself matched. The outer arm binds it, the inner
+    // match reads its tag, and nothing about either is special.
+    match Shape.Circle(Colour.Green) {
+        Circle(c) => match c {
+            Red => 1,
+            Green => 7,
+        },
+        Square => 0,
+    }
+}

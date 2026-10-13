@@ -1,0 +1,36 @@
+error[T-Bound]: `C` requires `Lookup[Bool]`, and `Board` does not implement it
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:79:17
+   |
+79 |     let found = find(board)
+   |                 ^^^^ implement it for that type, or drop the bound
+error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capability
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:82:35
+   |
+82 |     let Pair { left, right: _ } = keep(pair)
+   |                                   ^^^^ use a type meeting the capability requirement, or relax the bound
+error[T-Bound]: `N` requires `Integer`, and `Pair` is not a built-in integer type
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:84:19
+   |
+84 |     let doubled = twice(Pair { left = 5, right = 6 })
+   |                   ^^^^^ supply a built-in integer type or an Integer-constrained parameter
+error[T-Bound]: `shout` comes from `Shout`, and `Box[Board]` does not implement it
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:85:13
+   |
+85 |     found + boxed.shout() + left + held.shout() + doubled.shout()
+   |             ^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Box[T]` implements `Shout` when `T` implements `Lookup[UInt8]`, and `Board` does not
+error[T-Bound]: `shout` comes from `Shout`, and `Holder[Pair, <closure>]` does not implement it
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:85:36
+   |
+85 |     found + boxed.shout() + left + held.shout() + doubled.shout()
+   |                                    ^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Holder[T, F]` implements `Shout` when `T` is `Copyable`, and `Pair` is not
+error[T-Bound]: `shout` comes from `Shout`, and `Num[Pair]` does not implement it
+  --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:85:51
+   |
+85 |     found + boxed.shout() + left + held.shout() + doubled.shout()
+   |                                                   ^^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Num[N]` implements `Shout` when `N` implements `Equatable`, and `Pair` does not

@@ -1,0 +1,11 @@
+// Not named `.lin`, so the corpus does not walk it as a case. The region below
+// opens before a declaration and its `on` sits inside one, so the region has to
+// reach past the marker to cover the declaration whole -- and the marker the
+// author wrote does nothing. The formatting is correct; the point is that it
+// says so.
+// linea fmt: off
+fn f() -> u8 {
+// linea fmt: on
+    let a: u8 = 1
+    a
+}

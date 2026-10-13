@@ -1,0 +1,7 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/projections/a_write_needs_every_ceiling_the_path_runs_through.lin:32:5
+   |
+17 |     proj at(self: Inner, i: UInt64) -> UInt8 {
+   |             ---- declared `read` here
+32 |     o[1] = 200
+   |     ^^^^ this place cannot be assigned

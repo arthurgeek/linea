@@ -1,0 +1,10 @@
+// A struct has one shape, so `_` matches it without testing anything and the
+// arm's value is the match's value.
+struct Point { x: UInt8, y: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { x = 1, y = 2 }
+    match point {
+        _ => 3,
+    }
+}

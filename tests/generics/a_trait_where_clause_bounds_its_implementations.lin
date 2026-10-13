@@ -1,0 +1,13 @@
+@linear
+enum Token {
+    One,
+}
+
+trait Accept[T]
+where T: Discardable {}
+
+impl Accept[Token] for UInt8 {}
+
+fn main() -> UInt8 {
+    0
+}

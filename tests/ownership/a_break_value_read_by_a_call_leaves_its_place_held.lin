@@ -1,0 +1,25 @@
+// `seen` only reads its argument, so the `for` that sits there only reads what
+// `break` hands it, and `kept` is still whole after the loop.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn seen(found: Option[Pair]) -> UInt8 {
+    match read found {
+        Some(pair) => pair.right,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let kept: Pair = .{ left = 4, right = 5 }
+    let right = seen(
+        for step in [1, 2, 3] {
+            if step == 2 {
+                break kept
+            }
+        },
+    )
+    right + kept.left
+}

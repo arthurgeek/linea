@@ -1,0 +1,13 @@
+let next = answer
+
+let answer = UInt8(42)
+
+let ready = true
+
+fn main() -> UInt8 {
+    if ready {
+        next - 42
+    } else {
+        1
+    }
+}

@@ -1,0 +1,19 @@
+// A returned handle cannot observe an arena whose storage ends in this body.
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.Handle
+use mem.SystemAllocator
+use mem.system
+
+fn allocator_of_nothing() -> Handle[SystemAllocator] {
+    let arena = Arena.open(system(), 4096)
+    defer arena.release()
+    arena.handle()
+}
+
+fn main() -> UInt8 {
+    let _a = allocator_of_nothing()
+    0
+}

@@ -1,0 +1,7 @@
+error[O-Move]: `read_number` has already been moved
+ --> tests/closure_captures/owned_recovery_consumes_closure.lin:5:20
+  |
+4 |     let { number: observation } = read_number.into_captures()
+  |                                   ----------- it was taken here
+5 |     *observation + read_number()
+  |                    ^^^^^^^^^^^ it was already taken, and a value is taken once

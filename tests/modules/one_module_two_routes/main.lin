@@ -1,0 +1,8 @@
+// `a/b` is named directly here and again through `a`. One directory is one
+// module whichever route reaches it, so `b.g` is one function.
+import a.b
+import a
+
+fn main() -> UInt8 {
+    b.g() + a.f()
+}

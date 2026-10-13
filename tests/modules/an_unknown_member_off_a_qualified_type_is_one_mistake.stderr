@@ -1,0 +1,5 @@
+error[N-Variant]: this name refers to a type, and a type has no parts to select
+  --> tests/modules/an_unknown_member_off_a_qualified_type_is_one_mistake/main.lin:10:14
+   |
+10 |     let _v = pct.Thing.x
+   |              ^^^^^^^^^ only an enum has variants

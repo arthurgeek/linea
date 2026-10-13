@@ -1,0 +1,30 @@
+// A count back from the end is held to the array the composition reaches, on
+// the same clause and named the way the reader wrote it.
+struct Inner {
+    cells: [UInt8; 3],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[FromEnd] for Inner {
+    type Elem = UInt8
+
+    proj at(inout self: Inner, i: FromEnd) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Index[FromEnd] for Outer {
+    type Elem = UInt8
+
+    proj at(inout self: Outer, i: FromEnd) -> UInt8 {
+        self.inner[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let o: Outer = .{ inner = .{ cells = [1, 2, 3] } }
+    o[^0]
+}

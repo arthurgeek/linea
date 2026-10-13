@@ -1,0 +1,38 @@
+struct Offsets {
+    values: [UInt64; 2],
+}
+
+struct Board {
+    values: [UInt8; 2],
+    offsets: Offsets,
+}
+
+struct Wrapper {
+    board: Board,
+}
+
+impl Index[UInt64] for Offsets {
+    type Elem = UInt64
+
+    proj at(self: Offsets, i: UInt64) -> UInt64 {
+        self.values[i]
+    }
+}
+
+impl Index[UInt64] for Board {
+    type Elem = UInt8
+
+    proj at(inout self: Board, i: UInt64) -> UInt8 {
+        self.values[self.offsets[i]]
+    }
+}
+
+impl Index[UInt64] for Wrapper via board
+
+fn main() -> UInt8 {
+    var board: Board = .{ values = [2, 3], offsets = .{ values = [1, 0] } }
+    board[0] = 5
+    var wrapper: Wrapper = .{ board = .{ values = [7, 11], offsets = .{ values = [1, 0] } } }
+    wrapper[1] = 13
+    return board.values[1] + wrapper.board.values[0] - 18
+}

@@ -1,0 +1,26 @@
+// While an interpolation borrows a value, the value cannot be replaced: the
+// text it renders later is the text it was written with.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var name = Name { text = "Ada" }
+    let greeting = "hello {name}"
+    name = Name { text = "Grace" }
+    println(greeting)?
+    println(name)?
+    return .Ok(0)
+}

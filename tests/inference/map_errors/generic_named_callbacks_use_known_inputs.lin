@@ -1,0 +1,16 @@
+fn identity[T](sink error: T) -> T where carries(error) {
+    error
+}
+
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt16] = .Err(9)
+    let mapped = failure.map_err(identity)
+    match mapped {
+        Ok(_) => 1,
+        Err(error) => if error == UInt16(9) {
+            0
+        } else {
+            1
+        },
+    }
+}

@@ -1,0 +1,14 @@
+// A `;` before a line opening with a variant answers no note, because a
+// variant cannot continue the line above, so `fmt` removes it as it removes
+// any separator that ends a line.
+fn half(n: UInt8) -> Result[UInt8, UInt8] {
+    let doubled = n * 2
+    .Ok(doubled / 4)
+}
+
+fn main() -> UInt8 {
+    match half(4) {
+        Ok(value) => value - 2,
+        Err(_) => 9,
+    }
+}

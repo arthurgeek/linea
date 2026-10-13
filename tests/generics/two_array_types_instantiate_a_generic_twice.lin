@@ -1,0 +1,13 @@
+// `[UInt8; 2]` and `[Bool; 2]` are two types, so a generic taking one is
+// instantiated twice and the two instantiations are two functions. What names
+// an instantiation has to say what it was made with, and an array's element
+// and length are the whole of what it is.
+fn eat[T](_x: T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 2] = [1, 2]
+    let b: [Bool; 2] = [true, false]
+    eat(a) + eat(b)
+}

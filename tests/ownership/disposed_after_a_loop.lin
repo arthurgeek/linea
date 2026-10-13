@@ -1,0 +1,39 @@
+// The mutation that deletes a statement giving a linear value away reached one
+// program in the whole corpus, so the rule it asserts -- that a linear value
+// nothing disposes of is refused -- was checked against a single shape. It
+// runs on a case of one file, which is why these are written as one.
+//
+// Here the disposal follows a loop, which is where it has to be: a loop body
+// may run no times, so a value given away inside one is not given away on
+// every path.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn mint(id: UInt8) -> Key {
+    Key.Forged(id)
+}
+
+fn tag(k: Key) -> UInt8 {
+    match read k {
+        Forged(n) => n,
+    }
+}
+
+fn release(sink k: Key) -> () {
+    match k {
+        Forged(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    let k = mint(7)
+    let t = tag(k)
+    var n: UInt8 = 0
+    while n == 0 {
+        n = 1
+    }
+    release(k)
+    t
+}

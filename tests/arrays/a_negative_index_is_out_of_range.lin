@@ -1,0 +1,16 @@
+// No element sits before the first one either. An index is compared against
+// the length, and a signed index compared only that way passes when it is
+// negative -- so the address is computed backwards from the array and the
+// program reads bytes that are no part of it.
+//
+// [ADR 0013] is what makes this a trap rather than a value the program is
+// allowed to see: every operation produces a defined result or is a diagnosed
+// error, and which one may not depend on the optimisation level.
+fn at(xs: [UInt8; 3], i: Int64) -> UInt8 {
+    xs[i]
+}
+
+fn main() -> UInt8 {
+    let n: Int64 = 0 - 1
+    at([1, 2, 3], n)
+}

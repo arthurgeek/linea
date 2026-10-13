@@ -1,0 +1,32 @@
+trait Ordinal {
+    fn ordinal(value: Self, inout count: UInt8) -> UInt64
+}
+
+template impl Ordinal {
+    fn ordinal(value: Self, inout count: UInt8) -> UInt64 {
+        reflect.ordinal_of(
+            {
+                count += 1
+                value
+            },
+        )
+    }
+}
+
+enum Choice {
+    First,
+    Second,
+}
+
+derive Ordinal for Choice
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    let choice: Choice = Choice.Second
+    let ordinal = Ordinal.ordinal(choice, &count)
+    if count == 1 && ordinal == 1 {
+        0
+    } else {
+        1
+    }
+}

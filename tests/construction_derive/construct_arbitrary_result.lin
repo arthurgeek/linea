@@ -1,0 +1,38 @@
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> UInt64 {
+        0
+    }
+}
+
+template impl Zero where reflect.target: struct, reflect.components: Zero {
+    fn zero() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Zero.zero()
+                Zero.zero()
+            },
+            {},
+        )
+    }
+}
+
+struct Pair {
+    left: UInt64,
+    right: UInt64,
+}
+
+derive Zero for Pair
+
+fn main() -> UInt8 {
+    let pair: Pair = Zero.zero()
+    if pair.left == 0 && pair.right == 0 {
+        0
+    } else {
+        1
+    }
+}

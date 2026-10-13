@@ -1,0 +1,14 @@
+// The compiler writes the only call to a test, and has nothing to pass it.
+import std.io
+
+use io.IoError
+use io.println
+
+test fn a_thing_holds(n: UInt8) -> Result[(), IoError] {
+    println(n)?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    0
+}

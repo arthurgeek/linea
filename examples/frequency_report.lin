@@ -1,0 +1,135 @@
+// Count how often each line appears in a file, or in a built-in sample.
+import std.collections
+import std.env
+import std.fs
+import std.io
+import std.mem
+import std.testing
+
+use mem.Owner
+
+// `LineCounts[A]` maps each distinct line to how often it appears, with the
+// lines and the table both allocated with `A`.
+alias LineCounts[A: Allocator] = collections.Map[String[A], UInt64, A]
+
+// Each key is a copy of its line made with `allocator`, so the counts outlive
+// `input`; `carries(.Ok: allocator)` says they still need the allocator.
+fn count_lines[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A], mem.Oom] where carries(.Ok: allocator) {
+    defer var counts = LineCounts.new_in(allocator)
+    for record in input.split("\n").unwrap() {
+        // Trim Unicode whitespace; preserve case and whitespace within each line.
+        let line = record.trim_unicode()
+        if line.length() == 0 {
+            continue
+        }
+        // `make_entry` runs only for a line not seen before: it copies the
+        // line into a key and starts its count at 1.
+        let make_entry = |query: Str, allocator: A| -> Result[collections.Entry[String[A], UInt64], mem.Oom] where carries(.Ok: allocator) {
+            .Ok(.{ key = query.to_owned(allocator)?, value = 1 })
+        }
+        // `upsert` adds one to the count of a line it has seen, and inserts a
+        // new entry otherwise. `settled()` releases an entry built under the
+        // wrong key and keeps only why the upsert failed.
+        let _ = &counts.upsert(line, make_entry, |sink count| count + 1).settled() else |reason| {
+            match reason {
+                Allocation(reason) => return .Err(reason),
+                Factory(reason) => return .Err(reason),
+                KeyMismatch => panic("a copied line did not match its query"),
+            }
+        }
+    }
+    .Ok(counts)
+}
+
+test fn frequencies_count_trimmed_lines_and_repeated_text() {
+    defer let counts = count_lines(mem.system(), " tea \ncoffee\ntea\n\tcoffee\r\ntea\n").unwrap()
+    testing.assert_eq(counts.length(), 2, "whitespace created another key")?
+    testing.assert_eq(*counts.get("tea").unwrap(), 3, "repeated tea lines were lost")?
+    testing.assert_eq(*counts.get("coffee").unwrap(), 2, "repeated coffee lines were lost")?
+}
+
+test fn empty_and_whitespace_only_inputs_have_no_frequencies() {
+    defer let empty = count_lines(mem.system(), "").unwrap()
+    defer let blanks = count_lines(mem.system(), " \n\t\r\n　\n").unwrap()
+    testing.assert_eq(empty.length(), 0, "empty input created a key")?
+    testing.assert_eq(blanks.length(), 0, "blank lines created a key")?
+}
+
+test fn frequency_keys_own_unicode_text_after_input_is_released() {
+    let input = "　café　\n東京\ncafé\n".to_owned(mem.system()).unwrap()
+    defer let counts = count_lines(mem.system(), input.view()).unwrap()
+    input.release()
+    testing.assert_eq(*counts.get("café").unwrap(), 2, "owned Unicode key lost its count")?
+    testing.assert_eq(*counts.get("東京").unwrap(), 1, "owned multibyte key changed")?
+}
+
+// Accept at most 1 MiB of input (1024 * 1024 UTF-8 bytes).
+let max_input_bytes: UInt64 = 1048576
+
+// Count this sample when no path is given. Each `\\` line is one line of
+// the text, and the bare `\\` line at the end adds the final line break.
+let sample =
+    \\tea
+    \\café
+    \\tea
+    \\東京
+    \\café
+    \\tea
+    \\
+
+// Print this when more than one path is given.
+let usage_text =
+    \\usage: frequency_report [path]
+    \\counts trimmed nonempty UTF-8 lines; no path uses a built-in sample
+
+fn main() -> Result[UInt8, io.IoError] {
+    let args = env.args()
+    if args.count() > 2 {
+        io.eprintln(usage_text)
+        return .Ok(1)
+    }
+    let counted = if args.count() <= 1 {
+        count_lines(mem.system(), sample)
+    } else {
+        // Paths use the original argument bytes; file contents must be UTF-8.
+        let argument = args.bytes_at(1) else {
+            io.eprintln("could not read the input path argument")
+            return .Ok(1)
+        }
+        let path = fs.Path.from_bytes(argument) else |reason| {
+            io.eprintln("invalid input path: {reason:?}")
+            return .Ok(1)
+        }
+        // `read_text` reads the file and decodes it as UTF-8. Its error says
+        // whether reading, closing the file, or decoding failed.
+        let input = fs.read_text(path, max_bytes: max_input_bytes) else |error| {
+            io.eprintln("{error}")
+            return .Ok(1)
+        }
+        let counted = count_lines(mem.system(), input.view())
+        input.release()
+        counted
+    }
+    defer let counts = counted else |reason| {
+        io.eprintln("could not allocate frequencies: {reason:?}")
+        return .Ok(1)
+    }
+    io.println("Frequencies ({counts.length()} distinct lines; order unspecified):")?
+    // `entries()` walks the map's pairs and leaves them in the map.
+    for entry in counts.entries() {
+        // `:>7` right-aligns each count in seven columns, as `uniq -c` does.
+        io.println("{entry.value:>7} {entry.key.view()}")?
+    }
+    .Ok(0)
+}
+
+test fn arena_frequencies_outlive_the_separate_input_owner() {
+    // `arena.handle()` lends the arena as the map's allocator, so each key is
+    // carved from the arena's 4096-byte block rather than from the input.
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let input = "café\n茶\ncafé\n".to_owned(mem.system()).unwrap()
+    defer let counts = count_lines(arena.handle(), input.view()).unwrap()
+    input.release()
+    testing.assert_eq(*counts.get("café").unwrap(), 2, "arena count retained its input owner")?
+    testing.assert_eq(*counts.get("茶").unwrap(), 1, "arena count lost its owned key")?
+}

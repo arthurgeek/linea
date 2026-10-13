@@ -1,0 +1,16 @@
+// The `-` opening the line after a statement could have continued it, which is
+// a note and not an error, so the program still builds, tests and runs.
+fn change_due(paid: Int64, price: Int64) -> Int64 {
+    let short = price - paid
+    -short
+}
+
+test fn change_is_what_was_paid_over_the_price() {
+    if change_due(10, 7) != 3 {
+        panic("10 paid for 7 did not give 3 back")
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8.try_from(change_due(10, 7)).unwrap_or(0)
+}

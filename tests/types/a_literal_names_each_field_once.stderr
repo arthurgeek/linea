@@ -1,0 +1,15 @@
+error[T-DuplicateField]: `x` is given twice
+ --> tests/types/a_literal_names_each_field_once.lin:7:30
+  |
+7 |     let p: Point = .{ x = 1, x = 2 }
+  |                              ^ already given above
+error[T-MissingField]: `y` is not given a value
+ --> tests/types/a_literal_names_each_field_once.lin:7:20
+  |
+7 |     let p: Point = .{ x = 1, x = 2 }
+  |                    ^^^^^^^^^^^^^^^^^ every field is given one
+error[T-MissingField]: `z` is not given a value
+ --> tests/types/a_literal_names_each_field_once.lin:7:20
+  |
+7 |     let p: Point = .{ x = 1, x = 2 }
+  |                    ^^^^^^^^^^^^^^^^^ every field is given one

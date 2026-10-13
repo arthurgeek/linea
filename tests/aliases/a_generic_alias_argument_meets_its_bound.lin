@@ -1,0 +1,8 @@
+import std.mem
+
+alias Bytes[A: mem.Allocator] = Vec[UInt8, A]
+
+fn main() -> UInt8 {
+    let _held: Bytes[UInt8] = Vec.new()
+    0
+}

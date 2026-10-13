@@ -1,0 +1,5 @@
+error[T-Impl]: `Apply` does not bound `run`'s `F` by `fn(read value: UInt8) -> UInt8`
+  --> tests/traits/an_impl_does_not_add_a_callable_bound.lin:10:8
+   |
+10 |     fn run[F: fn(read value: UInt8) -> UInt8](_self: Tag, _f: F) -> () {}
+   |        ^^^ drop it; the signature is what every call is checked against

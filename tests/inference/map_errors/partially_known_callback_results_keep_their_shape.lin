@@ -1,0 +1,15 @@
+fn produce[U, F: fn(sink error: UInt8) -> Option[U]](transform: F) -> Option[U] where carries(transform) {
+    transform(7)
+}
+
+fn main() -> UInt8 {
+    let value = produce(|sink error| .Some(UInt16(error) + 2))
+    match value {
+        Some(number) => if number == UInt16(9) {
+            0
+        } else {
+            1
+        },
+        None => 1,
+    }
+}

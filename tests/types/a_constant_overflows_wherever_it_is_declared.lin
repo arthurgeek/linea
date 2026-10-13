@@ -1,0 +1,12 @@
+// [T-Overflow] is decided at compile time where its operands are constant
+// expressions, and a constant declared below the one naming it is a constant
+// expression exactly as one declared above it is. Reported here rather than
+// left to the run: an answer that turned on the order the declarations were
+// written in would be two meanings for one program.
+pub let scaled: UInt8 = base + 200
+
+pub let base: UInt8 = 200
+
+fn main() -> UInt8 {
+    scaled
+}

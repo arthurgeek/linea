@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `hidden`
+ --> tests/decl/body_cannot_see_other_locals.lin:7:5
+  |
+7 |     hidden
+  |     ^^^^^^ no binding with this name is in scope

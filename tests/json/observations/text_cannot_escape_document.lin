@@ -1,0 +1,16 @@
+import std.json
+import std.mem
+
+fn text() -> Str {
+    let document = json.Value.string(mem.system(), "tea").unwrap()
+    defer document.release()
+    document.as_str().unwrap()
+}
+
+fn main() -> UInt8 {
+    if text() == "tea" {
+        0
+    } else {
+        1
+    }
+}

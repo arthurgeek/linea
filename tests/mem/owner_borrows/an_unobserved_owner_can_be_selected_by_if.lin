@@ -1,0 +1,26 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn work(flag: Bool) -> UInt8 {
+    let first = Arena.open(system(), 64)
+    let second = Arena.open(system(), 64)
+    let owner = if flag {
+        second.release()
+        first
+    } else {
+        first.release()
+        second
+    }
+    let bytes = owner.handle().acquire(8).unwrap()
+    let length = bytes.length()
+    bytes.release()
+    owner.release()
+    UInt8(length)
+}
+
+fn main() -> UInt8 {
+    work(false)
+}

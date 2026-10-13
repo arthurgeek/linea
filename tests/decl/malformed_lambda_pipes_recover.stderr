@@ -1,0 +1,10 @@
+error[S-Params]: expected a parameter name
+ --> tests/decl/malformed_lambda_pipes_recover.lin:2:17
+  |
+2 |     let _bad = |: UInt8| 1
+  |                 ^ a parameter is a name and a type
+error[N-Unused]: `broken` is never used
+ --> tests/decl/malformed_lambda_pipes_recover.lin:1:4
+  |
+1 | fn broken() -> UInt8 {
+  |    ^^^^^^ call it, or name it with a leading `_`

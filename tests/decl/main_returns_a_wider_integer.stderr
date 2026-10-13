@@ -1,0 +1,5 @@
+error[S-Entry]: a program's `main` answers `UInt8`, or `Result[UInt8, E]` to let a failure leave
+ --> tests/decl/main_returns_a_wider_integer.lin:6:14
+  |
+6 | fn main() -> Int64 {
+  |              ^^^^^ returns `Int64`

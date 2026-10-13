@@ -1,0 +1,13 @@
+// An alias declares no representation, so nothing may seal it, settle it or
+// export it; `pub` is the one modifier it takes.
+export alias Meters = UInt64
+@linear alias Tokens = UInt8
+@opaque
+alias Grams = UInt8
+
+fn main() -> UInt8 {
+    let _distance: Meters = 0
+    let _tokens: Tokens = 0
+    let _weight: Grams = 0
+    0
+}

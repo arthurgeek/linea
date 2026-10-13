@@ -1,0 +1,5 @@
+error[T-Bound]: `pair` takes 2 type argument(s), and was given 1
+  --> tests/type_arguments/a_call_names_every_type_parameter_or_none.lin:10:20
+   |
+10 |     let _one = pair[Bool](true, 3)
+   |                    ^^^^^^ name all 2 of `A`, `B`, or none to let the call settle them

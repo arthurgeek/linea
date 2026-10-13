@@ -1,0 +1,11 @@
+// A failure that leaves is rendered on the way out, so it implements `Display`.
+// Nothing else could render it: a compiler spelling the message would be a
+// second place deciding what a program says, and there would be nothing to say
+// about a type that never described itself.
+struct Silent {
+    n: Int64,
+}
+
+fn main() -> Result[UInt8, Silent] {
+    .Err(.{ n = 1 })
+}

@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `nope`
+ --> tests/inference/a_refused_argument_says_nothing_of_another_parameter.lin:8:25
+  |
+8 |     let _made = convert(nope)
+  |                         ^^^^ no binding with this name is in scope
+error[T-Infer]: nothing here says what `B` is
+ --> tests/inference/a_refused_argument_says_nothing_of_another_parameter.lin:8:17
+  |
+8 |     let _made = convert(nope)
+  |                 ^^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it

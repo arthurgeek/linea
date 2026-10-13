@@ -1,0 +1,29 @@
+// Inference is local. An expected type determines every argument, which
+// `[S-Literal]` already gave: a leading `.` means the type is the one expected
+// here, and a generic type needs no new rule for it.
+//
+// Where nothing expects one, the selected variant's payload settles the
+// parameters it mentions -- from the payload's *checked* type rather than the
+// shape of the expression that produced it, so an unannotated literal settles
+// it at `Int64` because that is what an unannotated literal is.
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+fn main() -> UInt8 {
+    let wide: Int64 = match Maybe.Some(3) {
+        None => 0,
+        Some(v) => v,
+    }
+
+    // The other direction: context supplies what no payload could, and `.None`
+    // carries nothing to infer from.
+    let from_context: Maybe[UInt8] = .None
+    let held: UInt8 = match from_context {
+        None => 7,
+        Some(v) => v,
+    }
+
+    UInt8(wide) + held
+}

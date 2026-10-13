@@ -1,0 +1,18 @@
+// A refusal arrives as a value, never a trap: out of memory is the one
+// failure a program must be able to write a path for. The size asked for
+// here is one no address space answers, so the refusal is reachable without
+// exhausting anything first.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(9223372036854775808) {
+        Ok(b) => {
+            b.release()
+            1
+        },
+        Err(_) => 7,
+    }
+}

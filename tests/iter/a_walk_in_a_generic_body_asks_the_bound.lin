@@ -1,0 +1,13 @@
+// Sequence supplies an iterator but does not promise that it is Discardable.
+// A consuming walk must be able to abandon the iterator on an early exit.
+fn walk[S: Sequence](sink s: S) -> UInt8 {
+    for _x in s {
+        let _q: UInt8 = 0
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..5
+    walk(xs)
+}

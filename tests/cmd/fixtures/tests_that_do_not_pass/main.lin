@@ -1,0 +1,87 @@
+// The half of a test runner that reports rather than counts.
+//
+// Every other case beneath this directory holds tests that pass, and a runner
+// that spawned nothing and answered "passed" would reproduce all of them. This
+// one cannot be reproduced that way: it records a failure a test returned, a
+// failure the runtime trapped on, and the status the command answers when any
+// test did not pass.
+import std.env
+import std.io
+
+use env.Args
+use env.args
+use io.IoError
+use io.println
+
+fn main() -> UInt8 {
+    0
+}
+
+// A failure the test itself reports, rendered by `Display` on the way out.
+test fn a_returned_failure_is_reported() -> Result[(), IoError] {
+    return .Err(IoError.from_os(.Write, 7))
+}
+
+// A failure nothing reports: the process ends where the trap is, and what a
+// reader is told comes from the runtime rather than from the test. The count
+// is a value the process supplied, so nothing folds the conversion away.
+test fn a_trap_is_contained_and_explained() -> Result[(), IoError] {
+    let a: Args = args()
+    let n = UInt8(a.count() * 200)
+    println(n)?
+    return .Ok({})
+}
+
+// Zero whose value is settled only when a test child runs. Keeping the trap
+// operands dynamic prevents static diagnostics from replacing the runtime
+// behavior these cases exercise.
+fn runtime_zero() -> UInt64 {
+    let a: Args = args()
+    a.count() - a.count()
+}
+
+test trap fn a_conversion_out_of_range_is_expected() -> Result[(), IoError] {
+    io.eprintln("before the expected trap")
+    let _n = UInt8(runtime_zero() + 300)
+    return .Ok({})
+}
+
+test trap fn an_integer_overflow_is_expected() -> Result[(), IoError] {
+    let zero = UInt8(runtime_zero())
+    let _underflow = zero - 1
+    return .Ok({})
+}
+
+test trap fn division_by_runtime_zero_is_expected() -> Result[(), IoError] {
+    let _quotient = UInt64(10) / runtime_zero()
+    return .Ok({})
+}
+
+test trap fn an_index_out_of_bounds_is_expected() -> Result[(), IoError] {
+    let values: [UInt8; 3] = [1, 2, 3]
+    let index = UInt8(runtime_zero() + 3)
+    let _value = values[index]
+    return .Ok({})
+}
+
+test trap fn a_nan_conversion_is_expected() -> Result[(), IoError] {
+    let zero = Float64(runtime_zero())
+    let nan = zero / zero
+    let _number = Int64(nan)
+    return .Ok({})
+}
+
+test trap fn an_explicit_panic_is_expected() -> Result[(), IoError] {
+    panic("the test expected this panic")
+}
+
+// Expecting a trap does not turn an ordinary success into one.
+test trap fn an_expected_trap_that_returns_is_reported() -> Result[(), IoError] {
+    return .Ok({})
+}
+
+// Beside them, so the transcript shows that one test failing does not stop
+// another from running or from being reported.
+test fn a_passing_test_still_runs() -> Result[(), IoError] {
+    return .Ok({})
+}

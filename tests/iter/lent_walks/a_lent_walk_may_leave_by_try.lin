@@ -1,0 +1,21 @@
+import std.io
+import std.mem
+
+// A failing `?` inside the walk still leaves the drain with its owner, and the
+// `defer` releases it.
+fn report(sink readings: Vec[UInt64, mem.SystemAllocator]) -> Result[(), io.IoError] {
+    var pending = readings.drain()
+    defer pending.release()
+    for reading in &pending {
+        io.println("reading {reading}")?
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(7).unwrap()
+    &readings.push(9).unwrap()
+    report(readings)?
+    .Ok(0)
+}

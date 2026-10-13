@@ -1,0 +1,5 @@
+error[M-Vis]: `close` is private to `door`
+ --> tests/modules/a_private_operation_out_of_a_dots_reach_is_reported_private/main.lin:8:7
+  |
+8 |     d.close()
+  |       ^^^^^ declare it `pub` in its own module, or do not name it here

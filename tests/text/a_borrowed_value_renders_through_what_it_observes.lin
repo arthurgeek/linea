@@ -1,0 +1,27 @@
+// A `borrow` value renders what it observes. An interpolation holds a copy
+// of the borrow itself, which is the address, so the observed value is read
+// when the line is written.
+import std.io
+
+use io.IoError
+use io.println
+
+// `show` takes a borrow of the number rather than the number.
+fn show(count: borrow Int64) -> Result[(), IoError] {
+    println("count {count}")
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let n = 5
+    let observed = borrow n
+    println("observed {observed}")?
+    let name = "Ada"
+    let named = borrow name
+    println("named {named} {*named}")?
+    let totals = [1, 2, 3]
+    for total in totals.as_slice() {
+        println("total {total}")?
+    }
+    show(borrow n)?
+    return .Ok(0)
+}

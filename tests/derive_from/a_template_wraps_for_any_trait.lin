@@ -1,0 +1,36 @@
+// `reflect.wrap(value)` belongs to the template mechanism, not to `From`: any
+// trait whose template wraps a parameter derives for the enum variant that
+// holds the parameter's type.
+trait Lift[T] {
+    fn lift(sink value: T) -> Self
+}
+
+template impl[S] Lift[S] where reflect.target: enum {
+    fn lift(sink value: S) -> Self {
+        reflect.wrap(value)
+    }
+}
+
+@derive(Lift[UInt8], Lift[Bool])
+enum Reading {
+    Count(UInt8),
+    Flag(Bool),
+}
+
+fn main() -> UInt8 {
+    let count: Reading = Lift.lift(UInt8(7))
+    let flag: Reading = Lift.lift(true)
+    let counted = match count {
+        Count(value) => value,
+        Flag(_) => 0,
+    }
+    let flagged = match flag {
+        Count(_) => false,
+        Flag(value) => value,
+    }
+    if flagged {
+        counted - 7
+    } else {
+        1
+    }
+}

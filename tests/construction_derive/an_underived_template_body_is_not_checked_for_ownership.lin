@@ -1,0 +1,34 @@
+// `spend` is a template member that no `derive` instantiates. A template's
+// body is checked where it is derived, so its closure taking `t` without
+// capturing it is not reported here, and the program runs.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink t: Ticket) -> UInt8 {
+    match t {
+        Seat(row) => row,
+    }
+}
+
+trait Spend {
+    fn spend(self: Self) -> UInt8
+}
+
+template impl Spend where reflect.target: struct {
+    fn spend(_self: Self) -> UInt8 {
+        let t = Ticket.Seat(1)
+        let go = || redeem(t)
+        go()
+    }
+}
+
+struct Pair {
+    left: UInt64,
+}
+
+fn main() -> UInt8 {
+    let pair = Pair { left = 1 }
+    UInt8(pair.left - 1)
+}

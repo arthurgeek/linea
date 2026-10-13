@@ -1,0 +1,13 @@
+fn main() -> UInt8 {
+    let threshold = UInt8(3)
+    let above = [threshold] |sink item: UInt8| item > threshold
+    let alias = [limit = threshold] || limit
+    let explicit = read [threshold, read limit = threshold] || threshold + limit
+    let empty = [] || UInt8(0)
+    let values = [UInt8(1), UInt8(2)]
+    if above(4) && alias() == 3 && explicit() == 6 && empty() == 0 && values[0] == 1 {
+        0
+    } else {
+        1
+    }
+}

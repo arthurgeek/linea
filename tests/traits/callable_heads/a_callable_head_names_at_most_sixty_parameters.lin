@@ -1,0 +1,15 @@
+// A callable head is keyed by its parameters' conventions, so it names at most
+// sixty parameters.
+trait Handle {
+    fn handle(_self: Self) -> UInt8
+}
+
+impl Handle for fn(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9: UInt8, p10: UInt8, p11: UInt8, p12: UInt8, p13: UInt8, p14: UInt8, p15: UInt8, p16: UInt8, p17: UInt8, p18: UInt8, p19: UInt8, p20: UInt8, p21: UInt8, p22: UInt8, p23: UInt8, p24: UInt8, p25: UInt8, p26: UInt8, p27: UInt8, p28: UInt8, p29: UInt8, p30: UInt8, p31: UInt8, p32: UInt8, p33: UInt8, p34: UInt8, p35: UInt8, p36: UInt8, p37: UInt8, p38: UInt8, p39: UInt8, p40: UInt8, p41: UInt8, p42: UInt8, p43: UInt8, p44: UInt8, p45: UInt8, p46: UInt8, p47: UInt8, p48: UInt8, p49: UInt8, p50: UInt8, p51: UInt8, p52: UInt8, p53: UInt8, p54: UInt8, p55: UInt8, p56: UInt8, p57: UInt8, p58: UInt8, p59: UInt8, p60: UInt8) -> UInt8 {
+    fn handle(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

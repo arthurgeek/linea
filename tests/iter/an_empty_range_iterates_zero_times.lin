@@ -1,0 +1,11 @@
+// A walk may yield nothing at all, and then the body never runs. The test is
+// at the head rather than at the foot: a loop that ran its body once before
+// asking would count one element a range with none never had.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 5..5
+    var n: UInt8 = 0
+    for _x in xs {
+        n += 1
+    }
+    n
+}

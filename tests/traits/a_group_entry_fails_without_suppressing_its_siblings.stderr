@@ -1,0 +1,14 @@
+error[T-Derive]: declare `template impl` in the trait's module, or write the implementation by hand
+  --> tests/traits/a_group_entry_fails_without_suppressing_its_siblings.lin:14:5
+   |
+14 |     MissingTemplate,
+   |     ^^^^^^^^^^^^^^^ this trait has no structural template
+error[T-Derive]: `Box` cannot derive `Ready` because component type `UInt8` does not implement `Required`
+  --> tests/traits/a_group_entry_fails_without_suppressing_its_siblings.lin:15:5
+   |
+7  | template impl Ready where reflect.components: Required {}
+   |                                               -------- the template requires every component to implement `Required`
+10 |     value: UInt8,
+   |     ----- this component has type `UInt8`
+15 |     Ready,
+   |     ^^^^^ implement `Required` for `UInt8`, or write this implementation by hand

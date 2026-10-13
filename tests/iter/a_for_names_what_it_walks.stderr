@@ -1,0 +1,5 @@
+error[S-For]: expected `in`
+ --> tests/iter/a_for_names_what_it_walks.lin:5:11
+  |
+5 |     for x xs {
+  |           ^^ a `for` names what it walks after `in`

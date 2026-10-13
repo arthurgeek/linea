@@ -1,0 +1,9 @@
+fn apply[T](sink value: T) -> T {
+    let identity = |sink item: T| item
+    identity(value)
+}
+
+fn main() -> UInt8 {
+    let _truth = apply(true)
+    apply(UInt8(7))
+}

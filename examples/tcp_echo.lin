@@ -1,0 +1,214 @@
+// Echo text over TCP. `tcp_echo serve PORT` waits for a client, sends back
+// everything the client sends, closes that connection, and waits for the next
+// client. Add a number, as in `tcp_echo serve PORT 3`, to stop after that many
+// clients. `tcp_echo send PORT MESSAGE...` connects, sends each message as a
+// line, and prints what comes back.
+import std.env
+import std.io
+import std.mem
+import std.net
+import std.testing
+
+use mem.Owner
+use net.Accepted
+use net.Acceptor
+
+fn main() -> UInt8 {
+    let args = env.args()
+    let mode = args.at(1) else {
+        return usage()
+    }
+    let port = port_argument(args) else {
+        return usage()
+    }
+    if mode == "serve" {
+        let clients = clients_argument(args) else {
+            return usage()
+        }
+        return serve(port, clients)
+    }
+    if mode == "send" && args.count() > 3 {
+        return send(port, args)
+    }
+    usage()
+}
+
+// Print this when the arguments are not a mode and a port.
+let usage_text =
+    \\usage: tcp_echo serve PORT [CLIENTS]
+    \\       tcp_echo send PORT MESSAGE...
+
+fn usage() -> UInt8 {
+    io.eprintln(usage_text)
+    64
+}
+
+// Read the port from the third argument. `?` returns `.None` early when the
+// argument is missing, and `else |_|` does the same when it is not a number.
+fn port_argument(args: env.Args) -> Option[UInt16] {
+    let text = args.at(2)?
+    let port = text.parse[UInt16]() else |_| {
+        return .None
+    }
+    .Some(port)
+}
+
+// Read how many clients to serve from the fourth argument. Without one, the
+// server never stops.
+fn clients_argument(args: env.Args) -> Option[UInt64] {
+    if args.count() == 3 {
+        return .Some(UInt64.max)
+    }
+    let text = args.at(3)?
+    let clients = text.parse[UInt64]() else |_| {
+        return .None
+    }
+    .Some(clients)
+}
+
+fn serve(port: UInt16, clients: UInt64) -> UInt8 {
+    // Each fallible step has one `let ... else`: report the failure and leave.
+    // The listener is linear, so every way out of `serve` closes it.
+    var listener = net.listen(net.loopback(port)) else |error| {
+        io.eprintln("cannot listen on port {port}: {error}")
+        return 1
+    }
+    let address = listener.local_address() else |error| {
+        io.eprintln("cannot read the listening address: {error}")
+        let _closed = listener.close()
+        return 1
+    }
+    io.eprintln("listening on {address}")
+    let accepted = accept_clients(&listener, clients)
+    // The listener is closed here, once, whether or not accepting worked.
+    let closed = listener.close()
+    if closed.is_err() {
+        io.eprintln("cannot close the listener")
+        return 1
+    }
+    if accepted {
+        0
+    } else {
+        1
+    }
+}
+
+// Echo clients one at a time until `clients` have been served, and answer
+// whether accepting never failed.
+fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
+    var served: UInt64 = 0
+    while served < clients {
+        let accepted = &listener.accept() else |error| {
+            io.eprintln("cannot accept a client: {error}")
+            return false
+        }
+        // `Accepted` holds the connection and the address of the client.
+        let Accepted { connection, address } = accepted
+        var open = connection
+        echo(&open, address)
+        // The connection is closed here, once, whether or not the echo worked.
+        let _closed = open.close()
+        served += 1
+    }
+    true
+}
+
+// Send everything the client sent back to it. A client shuts down its side
+// when it has sent everything, which is what ends `read_all`.
+fn echo(inout connection: net.Connection, client: net.Address) -> () {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+        io.eprintln("cannot read from {client}: {failure}")
+        // The failure owns any bytes read before it, so it is released.
+        failure.release()
+        return
+    }
+    let _written = io.write_all(&connection, received.as_slice()) else |error| {
+        io.eprintln("cannot echo to {client}: {error}")
+        return
+    }
+    io.eprintln("echoed {received.length()} bytes to {client}")
+}
+
+fn send(port: UInt16, args: env.Args) -> UInt8 {
+    var connection = net.connect(net.loopback(port)) else |error| {
+        io.eprintln("cannot connect to port {port}: {error}")
+        return 1
+    }
+    let echoed = exchange(&connection, args)
+    // The connection is closed here, once, whether or not the exchange worked.
+    let closed = connection.close()
+    if closed.is_err() {
+        io.eprintln("cannot close the connection")
+        return 1
+    }
+    if echoed {
+        0
+    } else {
+        1
+    }
+}
+
+// Send the messages from the fourth argument on, one per line, and print what
+// the server sends back. Report the first step that fails and answer whether
+// every step worked.
+fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
+    defer var text = String.new()
+    for index in 3..args.count() {
+        let message = args.at(index) else {
+            io.eprintln("a message must be valid UTF-8")
+            return false
+        }
+        let _line = io.line(message, &text) else |_| {
+            io.eprintln("a message is too long to send")
+            return false
+        }
+    }
+    let _written = io.write_all(&connection, text.view().as_bytes()) else |error| {
+        io.eprintln("cannot send: {error}")
+        return false
+    }
+    // Shutting down writes tells the server nothing more is coming.
+    let _shut = &connection.shutdown_write() else |error| {
+        io.eprintln("cannot finish sending: {error}")
+        return false
+    }
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+        io.eprintln("cannot read the echo: {failure}")
+        failure.release()
+        return false
+    }
+    let echoed = Str.from_bytes(received.as_slice()) else |_| {
+        io.eprintln("the echo was not text")
+        return false
+    }
+    io.print(echoed).is_ok()
+}
+
+// `echo_text` connects a client to a fresh listener, sends `text`, echoes it
+// with `echo`, and returns what the client reads back.
+fn echo_text(text: Str) -> String {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let _sent = io.write_all(&client, text.as_bytes()).unwrap()
+    &client.shutdown_write().unwrap()
+    let Accepted { connection, address } = &listener.accept().unwrap()
+    var server = connection
+    echo(&server, address)
+    server.close().unwrap()
+    let text = io.read_text(&client, max_bytes: 4096).unwrap()
+    client.close().unwrap()
+    listener.close().unwrap()
+    text
+}
+
+test fn a_client_gets_its_lines_back() {
+    defer let echoed = echo_text("one\ntwo\n")
+    testing.assert_eq(echoed.view(), "one\ntwo\n", "the lines were not echoed")?
+}
+
+test fn a_client_that_sends_nothing_gets_nothing_back() {
+    defer let echoed = echo_text("")
+    testing.assert_eq(echoed.view(), "", "an empty message was answered")?
+}

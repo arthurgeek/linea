@@ -1,0 +1,5 @@
+error[M-Opaque]: `Account` is opaque outside `bank`
+ --> tests/modules/sealed_struct_literal/main.lin:4:16
+  |
+4 |     bank.total(.{ id = 1, balance = 0 })
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

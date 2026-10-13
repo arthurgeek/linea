@@ -1,0 +1,22 @@
+// A sequence known only through its `Sequence` bound offers the same
+// operations, since `Sequence` provides them to every type implementing it,
+// and what the bounds say about `S.Iter` holds for the walk they take.
+import std.io
+
+// Count the items of any sequence whose items may be dropped.
+fn count[S: Sequence](sink values: S) -> UInt64 where S.Iter: Discardable, S.Iter.Item: Discardable {
+    values.fold(0, |sink total, sink _item| total + 1)
+}
+
+// Count the items of any sequence, one mapped weight at a time.
+fn weigh[S: Sequence](sink values: S) -> UInt64 where S.Iter: Discardable, S.Iter.Item: Discardable {
+    values.map(|sink _item| UInt64(2)).fold(0, |sink sum, sink weight| sum + weight)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let values = [UInt64(1), 2, 3, 4]
+    let counted = count(values.as_slice())
+    let weight = weigh(values.as_slice())
+    io.println("{counted} {weight}")?
+    .Ok(0)
+}

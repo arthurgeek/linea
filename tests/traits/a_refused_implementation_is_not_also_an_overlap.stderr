@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `UInt8`
+ --> tests/traits/a_refused_implementation_is_not_also_an_overlap/main.lin:9:18
+  |
+9 | impl Measure for UInt8 {
+  |                  ^^^^^ write it where the trait is declared

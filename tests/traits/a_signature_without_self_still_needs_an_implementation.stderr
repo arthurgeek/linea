@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Number`'s `Self`
+ --> tests/traits/a_signature_without_self_still_needs_an_implementation.lin:6:5
+  |
+6 |     Number.value()
+  |     ^^^^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns

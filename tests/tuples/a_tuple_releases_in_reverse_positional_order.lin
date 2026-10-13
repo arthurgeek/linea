@@ -1,0 +1,38 @@
+// Releasing a tuple releases its components from the last position to the
+// first, as a struct's derived release walks its fields.
+import std.io
+
+use io.print
+
+@linear
+enum One { Value }
+
+@linear
+enum Two { Value }
+
+@linear
+enum Three { Value }
+
+impl Release for One {
+    fn release(sink self: One) -> () {
+        match self { Value => match print("1") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+impl Release for Two {
+    fn release(sink self: Two) -> () {
+        match self { Value => match print("2") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+impl Release for Three {
+    fn release(sink self: Three) -> () {
+        match self { Value => match print("3") { Ok(_) => {}, Err(_) => {} } }
+    }
+}
+
+fn main() -> UInt8 {
+    let value: (One, Two, Three) = (.Value, .Value, .Value)
+    Release.release(value)
+    0
+}

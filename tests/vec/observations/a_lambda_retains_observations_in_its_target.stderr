@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/vec/observations/a_lambda_retains_observations_in_its_target.lin:10:5
+   |
+10 |     owner = 9
+   |     ^^^^^ keep this place available until the last use of its observation
+11 |     UInt8(*target + owner)
+   |           ------- the observation is still used here

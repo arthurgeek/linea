@@ -1,0 +1,14 @@
+// Two brackets over one array whose numbers settle to different elements name
+// different places, so neither argument can see what the other did. The exit
+// status is what the reading argument was handed and what the mutating one left
+// behind, added: the read saw the second element as it was written.
+fn two(inout a: UInt8, b: UInt8) -> UInt8 {
+    a = 9
+    b
+}
+
+fn main() -> UInt8 {
+    var xs: [UInt8; 4] = [1, 2, 3, 4]
+    let seen: UInt8 = two(&xs[0], xs[1])
+    seen + xs[0]
+}

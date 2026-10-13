@@ -1,0 +1,5 @@
+error[T-Bound]: `Ranked` requires `Marked`, and `Mark` does not implement it
+  --> tests/traits/a_traits_bound_is_a_list.lin:24:6
+   |
+24 | impl Ranked for Mark {
+   |      ^^^^^^ implement it for that type, or drop the bound

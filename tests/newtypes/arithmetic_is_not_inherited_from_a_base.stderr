@@ -1,0 +1,5 @@
+error[T-Operands]: `Percent` is not a number
+ --> tests/newtypes/arithmetic_is_not_inherited_from_a_base.lin:8:7
+  |
+8 |     a + b
+  |       ^ a name over a base does not inherit its operators: take the value apart to reach them

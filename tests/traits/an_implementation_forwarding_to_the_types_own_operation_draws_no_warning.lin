@@ -1,0 +1,69 @@
+// `Door`, `Hatch` and `Gate` each declare `close` themselves and implement
+// `Shut`. `Door`'s implementation only calls `Door.close` with the same
+// arguments, and `Hatch`'s calls `x.close()`, which reaches `Hatch`'s own, so
+// a postfix call runs the same code whichever `close` it reaches, and nothing
+// is reported. `Gate`'s implementation computes something else, so a postfix
+// call on a gate skips it, and that is reported.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+struct Hatch {
+    width: UInt8,
+}
+
+impl Hatch {
+    fn close(self: Self) -> UInt8 {
+        self.width
+    }
+}
+
+struct Gate {
+    width: UInt8,
+}
+
+impl Gate {
+    fn close(self: Gate) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        Door.close(x)
+    }
+}
+
+impl Shut for Hatch {
+    fn close(x: Self) -> UInt8 {
+        x.close()
+    }
+}
+
+impl Shut for Gate {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+// Generic code bounded on `Shut` reaches each through the trait.
+fn shut[S: Shut](item: S) -> UInt8 {
+    Shut.close(item)
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    let hatch: Hatch = .{ width = 3 }
+    let gate: Gate = .{ width = 2 }
+    door.close() + shut(door) + hatch.close() + shut(hatch) + gate.close() + shut(gate)
+}

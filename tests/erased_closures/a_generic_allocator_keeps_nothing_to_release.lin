@@ -1,0 +1,20 @@
+import std.mem
+
+// `A` may be an arena's handle, whose closures may be dropped, so a closure
+// kept through any allocator `A` cannot own what must be released.
+fn keep[A: Allocator, F: fn() -> UInt64 + Release](allocator: A, sink count: F) -> Result[mem.Closure[fn() -> UInt64, A], mem.Oom] where carries(.Ok: allocator, count) {
+    mem.Closure.open(allocator, count)
+}
+
+fn main() -> Result[UInt8, mem.Oom] {
+    let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let count = keep(
+        mem.system(),
+        [sink scores] || -> UInt64 {
+            scores.length()
+        },
+    )?
+    let counted = count()
+    count.release()
+    return .Ok(UInt8(counted))
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/decl/borrowed_lets/a_deferred_read_keeps_the_selected_field_unchanged_until_exit.lin:12:5
+   |
+11 |     defer add(&total, x)
+   |                       - the observation is still used here
+12 |     point.x = 5
+   |     ^^^^^^^ keep this place available until the last use of its observation

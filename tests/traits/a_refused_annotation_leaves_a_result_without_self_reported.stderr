@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `Missing`
+  --> tests/traits/a_refused_annotation_leaves_a_result_without_self_reported.lin:15:19
+   |
+15 |     let _counted: Missing = Count.count()
+   |                   ^^^^^^^ no type with this name is declared here
+error[T-Bound]: nothing here settles `Count`'s `Self`
+  --> tests/traits/a_refused_annotation_leaves_a_result_without_self_reported.lin:15:29
+   |
+15 |     let _counted: Missing = Count.count()
+   |                             ^^^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns

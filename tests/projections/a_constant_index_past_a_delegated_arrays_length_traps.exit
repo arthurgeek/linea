@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/projections/a_constant_index_past_a_delegated_arrays_length_traps.lin:16:16

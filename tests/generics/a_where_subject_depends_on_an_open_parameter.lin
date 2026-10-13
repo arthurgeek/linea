@@ -1,0 +1,7 @@
+// A trailing predicate is a promise about a generic family, not a compile-time
+// assertion about an already concrete type.
+fn _assertion() -> () where UInt8: Copyable {}
+
+fn main() -> UInt8 {
+    0
+}

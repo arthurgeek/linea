@@ -1,0 +1,29 @@
+// A signature returning `Option[Self]` is settled by what the call is expected
+// to produce, one level in: the expectation's head is the written head, so the
+// arguments bind positionally and `Self` is what stands in its place.
+//
+// One level, and no further. Reading deeper into a written type is
+// unification, which inference refuses everywhere else -- and a trait whose
+// operations only ever return a constructed type is unreachable without this,
+// which is what a conversion trait is.
+struct Coins {
+    count: UInt8,
+}
+
+trait Make {
+    fn some() -> Option[Self]
+}
+
+impl Make for Coins {
+    fn some() -> Option[Self] {
+        .Some(.{ count = 5 })
+    }
+}
+
+fn main() -> UInt8 {
+    let made: Option[Coins] = Make.some()
+    match made {
+        None => 0,
+        Some(c) => c.count,
+    }
+}

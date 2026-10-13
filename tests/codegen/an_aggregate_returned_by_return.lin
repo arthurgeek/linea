@@ -1,0 +1,36 @@
+// A function returning a value too wide for a register is handed the address
+// of storage the *caller* owns, and the backend is told which convention by the
+// function's return type. Taking that type from the body block instead names
+// the wrong one whenever the value leaves through `return`: the block yields
+// nothing, so the signature says a machine word, and what comes back is the
+// address of a frame that has ended.
+//
+// The `.mlir` beside this case is what it asserts -- a leading caller-owned
+// pointer and no result, rather than a function answering a machine word. The
+// exit status alone would go green again the moment the stack allocator put
+// the next call's frame somewhere else, and this failed silently rather than
+// crashing: `noise()` is what overwrote the dead frame, and `take` read 99
+// where 1 is the answer.
+struct Big {
+    a: Int64,
+    b: Int64,
+    c: Int64,
+}
+
+fn make() -> Big {
+    return .{ a = 1, b = 2, c = 3 }
+}
+
+fn noise() -> UInt8 {
+    let p: Big = .{ a = 99, b = 98, c = 97 }
+    UInt8(p.a)
+}
+
+fn take(b: Big, sink n: UInt8) -> UInt8 {
+    let _ = n
+    UInt8(b.a)
+}
+
+fn main() -> UInt8 {
+    take(make(), noise())
+}

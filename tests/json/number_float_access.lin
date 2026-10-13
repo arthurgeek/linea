@@ -1,0 +1,16 @@
+import std.json
+import std.mem
+
+fn main() -> UInt8 {
+    let number = json.Number.parse(mem.system(), "1.25e2").unwrap()
+    let parsed = number.as_float64().unwrap()
+    number.release()
+    let value = json.Value.number(mem.system(), "5e-324").unwrap()
+    let smallest = value.as_float64().unwrap()
+    value.release()
+    if parsed == 125.0 && smallest == 5e-324 {
+        0
+    } else {
+        1
+    }
+}

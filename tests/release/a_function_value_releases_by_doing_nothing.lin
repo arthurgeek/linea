@@ -1,0 +1,35 @@
+// A function value owns nothing, so it implements Release and releasing it
+// does nothing. A vector of them releases the way a vector of numbers does.
+import std.mem
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn halve(value: UInt8) -> UInt8 {
+    value / 2
+}
+
+fn add_step[A: Allocator](inout steps: Vec[fn(value: UInt8) -> UInt8, A], step: fn(value: UInt8) -> UInt8) -> () {
+    Vec.push(&steps, copy(step)).unwrap()
+}
+
+fn settle[T: Release](sink value: T) -> () {
+    value.release()
+}
+
+fn main() -> UInt8 {
+    var steps: Vec[fn(value: UInt8) -> UInt8, mem.SystemAllocator] = Vec.new()
+    add_step(&steps, double)
+    add_step(&steps, halve)
+    var value: UInt8 = 5
+    for index in 0..steps.length() {
+        let step = copy(steps[index])
+        value = step(value)
+    }
+    steps.release()
+    let kept: fn(value: UInt8) -> UInt8 = double
+    settle(copy(kept))
+    kept.release()
+    value
+}

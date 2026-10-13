@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Point`
+ --> tests/enums/match_misses_a_variant.lin:4:5
+  |
+4 |     match Shape.Circle {
+  |     ^^^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`

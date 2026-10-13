@@ -1,0 +1,8 @@
+struct Wrapper[C] { inner: C }
+
+impl[C: Index[UInt64]] Index[UInt64] for Wrapper[C] via inner
+
+fn main() -> UInt8 {
+    let wrapped: Wrapper[Wrapper[[UInt8; 2]]] = .{ inner = .{ inner = [2, 3] } }
+    return wrapped[9]
+}

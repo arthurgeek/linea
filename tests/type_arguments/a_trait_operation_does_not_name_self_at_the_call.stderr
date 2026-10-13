@@ -1,0 +1,5 @@
+error[T-Bound]: `make` takes 0 type argument(s), and was given 1
+  --> tests/type_arguments/a_trait_operation_does_not_name_self_at_the_call.lin:14:27
+   |
+14 |     let _named = Make.make[UInt16](3)
+   |                           ^^^^^^^^ `Self` is settled by the arguments or by the type the call is expected to have, such as an annotation

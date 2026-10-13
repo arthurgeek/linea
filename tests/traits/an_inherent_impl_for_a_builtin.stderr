@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `UInt8`
+ --> tests/traits/an_inherent_impl_for_a_builtin.lin:9:6
+  |
+9 | impl UInt8 {
+  |      ^^^^^ an inherent `impl` goes in the module that declares the type

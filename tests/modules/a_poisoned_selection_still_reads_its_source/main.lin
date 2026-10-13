@@ -1,0 +1,8 @@
+import bank
+
+fn main() -> UInt8 {
+    let account = bank.Account.open(7)
+    let moved = account
+    let _balance: UInt8 = account.balance
+    bank.Account.balance(moved)
+}

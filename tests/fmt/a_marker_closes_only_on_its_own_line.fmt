@@ -1,0 +1,7 @@
+// A marker is a marker only on a line of its own. An `on` written after code
+// is an ordinary comment and does not close the region, exactly as an `off`
+// written there does not open one -- otherwise the two ends of the hatch read
+// by different rules.
+// linea fmt: off
+fn kept()   -> UInt8 { 0 } // linea fmt: on
+fn also()   -> UInt8 { 1 }

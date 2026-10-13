@@ -1,0 +1,44 @@
+// Report the coldest and warmest overnight temperatures of a weather
+// station's week in a single pass over its readings.
+import std.io
+import std.testing
+
+use io.IoError
+use io.println
+
+// A tuple suits a result whose two parts are obvious from context: the
+// signature promises (lowest, highest), and the walk keeps both in one pass.
+fn bounds(readings: [Int64; 7]) -> (Int64, Int64) {
+    var lowest = readings[0]
+    var highest = readings[0]
+    for read reading in readings {
+        if reading < lowest {
+            lowest = reading
+        }
+        if reading > highest {
+            highest = reading
+        }
+    }
+    (lowest, highest)
+}
+
+test fn the_extremes_span_the_whole_week() {
+    let (lowest, highest) = bounds([4, -3, 7, 0, -8, 12, 5])
+    testing.assert_eq(lowest, -8, "the lowest reading is -8")?
+    testing.assert_eq(highest, 12, "the highest reading is 12")?
+}
+
+test fn a_constant_week_has_equal_extremes() {
+    testing.assert_eq(bounds([6, 6, 6, 6, 6, 6, 6]), (6, 6), "every reading is 6")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let readings: [Int64; 7] = [4, -3, 7, 0, -8, 12, 5]
+
+    // The pattern `(lowest, highest)` takes the returned pair apart.
+    let (lowest, highest) = bounds(readings)
+    println("coldest night: {lowest} degrees")?
+    println("warmest night: {highest} degrees")?
+    println("spread: {highest - lowest} degrees")?
+    .Ok(0)
+}

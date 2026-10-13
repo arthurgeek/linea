@@ -1,0 +1,37 @@
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: Notes = .{ count = 9 }
+    ;measured[Coins](c) + ;measured[Notes](n)
+}
+
+fn ;measured[Coins](v: Coins) -> UInt8 {
+    Coins;;Measure.of(v)
+}
+
+fn ;measured[Notes](v: Notes) -> UInt8 {
+    Notes;;Measure.of(v)
+}
+
+fn Coins;;Measure.of(x: Coins) -> UInt8 {
+    if x.count < 4 {
+        1
+    } else {
+        2
+    }
+}
+
+fn Notes;;Measure.of(x: Notes) -> UInt8 {
+    if x.count < 4 {
+        10
+    } else {
+        20
+    }
+}

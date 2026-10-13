@@ -1,0 +1,23 @@
+trait Echo[A: Copyable] {
+    type Item
+
+    fn echo(_self: Self, input: A) -> Item where carries(input)
+}
+
+impl[A: Copyable] Echo[A] for UInt64 {
+    type Item = A
+
+    fn echo(_self: UInt64, input: A) -> A where carries(input) {
+        copy(input)
+    }
+}
+
+fn main() -> UInt8 {
+    let first = Echo.echo(UInt64(1), UInt8(7))
+    let second = Echo.echo(UInt64(2), true)
+    if first == 7 && second {
+        0
+    } else {
+        1
+    }
+}

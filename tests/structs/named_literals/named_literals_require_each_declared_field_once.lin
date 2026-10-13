@@ -1,0 +1,6 @@
+struct Pair { first: UInt8, second: UInt8 }
+
+fn main() -> UInt8 {
+    let _pair = Pair { first = 1, first = 2, other = 3 }
+    0
+}

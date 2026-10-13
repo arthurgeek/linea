@@ -1,0 +1,5 @@
+error[T-Convert]: `UInt8` converts one value
+ --> tests/types/a_conversion_takes_one_value.lin:5:5
+  |
+5 |     UInt8(1, 2)
+  |     ^^^^^^^^^^^ a conversion takes exactly one argument

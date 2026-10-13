@@ -1,0 +1,10 @@
+error[N-TypeAlias]: `Step` is an alias of `fn(value: UInt8) -> UInt8`, which holds nothing to select
+  --> tests/aliases/an_alias_bound_names_a_function_type.lin:12:20
+   |
+12 |     let _stepped = Step.apply(1)
+   |                    ^^^^^^^^^^ only a type a declaration names holds members
+error[N-TypeAlias]: `Meters` is an alias of `UInt64`, and a bound names a trait or a function type
+ --> tests/aliases/an_alias_bound_names_a_function_type.lin:7:15
+  |
+7 | fn measure[T: Meters](sink value: T) -> T {
+  |               ^^^^^^ bound it by a trait, or by an alias of a function type

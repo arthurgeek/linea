@@ -1,0 +1,34 @@
+// `walk[S]` calls `walk[S.Next]`, which calls `walk[S.Next.Next]`. A
+// projection puts the declaration's own type parameter beneath a type-level
+// operation, and that is one structural step for the measure -- so the set of
+// instantiations the program reaches never closes.
+//
+// The measure does not look through the projection to what settles it. `Cycle`
+// settles `Next` to itself, so the chain would in fact end after one step, and
+// the call is refused anyway: [T-PolyRec] is a structural approximation of
+// termination, and reading what a projection settles to would make it an
+// evaluator of declared types instead.
+trait Step {
+    type Next: Step
+
+    fn onward(sink self: Self) -> Self.Next
+}
+
+struct Cycle { _n: UInt8 }
+
+impl Step for Cycle {
+    type Next = Cycle
+
+    fn onward(sink self: Cycle) -> Self.Next {
+        self
+    }
+}
+
+fn walk[S: Step](sink s: S) -> UInt8 {
+    walk(Step.onward(s))
+}
+
+fn main() -> UInt8 {
+    let c: Cycle = .{ _n = 0 }
+    walk(c)
+}

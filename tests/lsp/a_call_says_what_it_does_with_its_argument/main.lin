@@ -1,0 +1,20 @@
+// A call site says nothing about what it does with its arguments: `coins` is
+// gone once this call returns and `one` is not, and the two lines look the
+// same. Every convention is written on the declaration, including the one
+// written by saying nothing, so the declaration is where a hint reads it.
+struct Coins {
+    amount: UInt8,
+}
+
+fn spend(kept: UInt8, taken: UInt8, sink purse: Coins, inout tally: UInt8) -> UInt8 {
+    tally = kept + taken
+    purse.amount
+}
+
+fn main() -> UInt8 {
+    let one: UInt8 = 1
+    let two: UInt8 = 2
+    let coins: Coins = .{ amount = 3 }
+    var total: UInt8 = 0
+    spend(one, two, coins, &total)
+}

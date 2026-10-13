@@ -1,0 +1,15 @@
+struct _Board {
+    values: [UInt8; 2],
+}
+
+impl Index[UInt64] for _Board via values
+
+impl Index[Int64] for _Board via values
+
+impl _Board {
+    trav positions via values
+}
+
+fn main() -> UInt8 {
+    0
+}

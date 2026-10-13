@@ -1,0 +1,12 @@
+fn replace[T: Copyable](inout target: T, value: T) -> () where retains(target: value) {
+    target = copy(value)
+}
+
+fn main() -> UInt8 {
+    let owner: UInt64 = 7
+    let other: UInt64 = 1
+    var target = borrow other
+    let incoming = borrow owner
+    replace(&target, incoming)
+    UInt8(*target)
+}

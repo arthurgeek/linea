@@ -1,0 +1,30 @@
+error[T-Mismatch]: expected `fn(sink UInt8, read UInt8 = 2) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+ --> tests/decl/a_named_function_signature_is_exact.lin:6:75
+  |
+6 |     let _convention: fn(sink value: UInt8, read by: UInt8 = 2) -> UInt8 = exact
+  |                      -------------------------------------------------- expected because of this annotation
+  |                                                                           ^^^^^ expected `fn(sink UInt8, read UInt8 = 2) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+error[T-Mismatch]: expected `fn(read UInt16, read UInt8 = 2) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+ --> tests/decl/a_named_function_signature_is_exact.lin:7:70
+  |
+7 |     let _type: fn(read value: UInt16, read by: UInt8 = 2) -> UInt8 = exact
+  |                --------------------------------------------------- expected because of this annotation
+  |                                                                      ^^^^^ expected `fn(read UInt16, read UInt8 = 2) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+error[T-Mismatch]: expected `fn(read UInt8, read UInt8) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+ --> tests/decl/a_named_function_signature_is_exact.lin:8:77
+  |
+8 |     let _default_presence: fn(read value: UInt8, read by: UInt8) -> UInt8 = exact
+  |                            ---------------------------------------------- expected because of this annotation
+  |                                                                             ^^^^^ expected `fn(read UInt8, read UInt8) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+error[T-Mismatch]: expected `fn(read UInt8, read UInt8 = 3) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+ --> tests/decl/a_named_function_signature_is_exact.lin:9:78
+  |
+9 |     let _default_value: fn(read value: UInt8, read by: UInt8 = 3) -> UInt8 = exact
+  |                         -------------------------------------------------- expected because of this annotation
+  |                                                                              ^^^^^ expected `fn(read UInt8, read UInt8 = 3) -> UInt8`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+error[T-Mismatch]: expected `fn(read UInt8, read UInt8 = 2) -> Bool`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`
+  --> tests/decl/a_named_function_signature_is_exact.lin:10:70
+   |
+10 |     let _result: fn(read value: UInt8, read by: UInt8 = 2) -> Bool = exact
+   |                  ------------------------------------------------- expected because of this annotation
+   |                                                                      ^^^^^ expected `fn(read UInt8, read UInt8 = 2) -> Bool`, found `fn(read UInt8, read UInt8 = 2) -> UInt8`

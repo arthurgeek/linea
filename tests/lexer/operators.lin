@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    a + b - c * d / e
+    let _one = |value: UInt8| value
+    let _empty = || 0
+    let _reader = read [] |value: UInt8| value
+}

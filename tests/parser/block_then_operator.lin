@@ -1,0 +1,22 @@
+fn main() -> UInt8 {
+    var c: UInt8 = 3
+
+    // A construct that ends in a block ends the statement with it. Reading the
+    // `-` below as subtraction would make the loop and the expression after it
+    // one operation, which parses, takes the loop's `()` as an operand, and
+    // reports a type error several lines from what caused it.
+    while c != 0 {
+        c = c - 1
+    }
+
+    let n: Int8 = -(6)
+
+    // The same for a conditional, and for a `match`.
+    if c == 0 {
+        c = 1
+    }
+
+    // `-(-6)` is 6, and the conversion is written because it is never
+    // inferred.
+    UInt8(-(n))
+}

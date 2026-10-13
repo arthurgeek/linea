@@ -1,0 +1,14 @@
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/decl/capturing_callable_forms_are_refused.lin:14:20
+   |
+14 |     let _free = || value
+   |                    ^^^^^ this name belongs to an enclosing body
+   |
+   = help: write `[value]` before the parameters to read it where it is, or `[sink value]` to move it into the closure
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/decl/capturing_callable_forms_are_refused.lin:16:30
+   |
+16 |     let _linear = || consume(token)
+   |                              ^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `token` away, so it must own it: write `sink [sink token]` before the parameters, which makes a closure called once

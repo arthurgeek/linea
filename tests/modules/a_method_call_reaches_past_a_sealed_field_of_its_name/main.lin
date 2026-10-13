@@ -1,0 +1,9 @@
+// The field `seat` is sealed outside `box_office`, and `ticket.seat()` calls
+// the public operation `seat`, which a call reaches whatever fields the type
+// holds.
+import box_office
+
+fn main() -> UInt8 {
+    let ticket = box_office.sell(4)
+    ticket.seat() - 4
+}

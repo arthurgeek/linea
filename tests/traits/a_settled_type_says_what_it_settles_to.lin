@@ -1,0 +1,25 @@
+// An implementation settles a declared type by saying what it is. The trait's
+// side asks and says nothing about what the type is; written again with
+// nothing after it, an implementation asks the same question a second time and
+// answers neither.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

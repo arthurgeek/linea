@@ -1,0 +1,5 @@
+error[T-Literal]: float literal is too large
+ --> tests/diag/a_float_literal_is_too_large.lin:2:13
+  |
+2 |     let x = 1.0e400
+  |             ^^^^^^^ no float type can hold this

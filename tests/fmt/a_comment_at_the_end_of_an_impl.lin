@@ -1,0 +1,17 @@
+// A comment after the last member belongs to the `impl` that encloses it.
+// Written after the brace it describes whatever declaration follows, and it
+// settles there rather than moving, so nothing later says it is wrong.
+struct S {
+    a: UInt8,
+}
+
+impl S {
+    pub fn one() -> UInt8 {
+        9
+    }
+    // this is about the impl
+}
+
+fn main() -> UInt8 {
+    S.one()
+}

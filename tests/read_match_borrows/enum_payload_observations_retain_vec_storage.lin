@@ -1,0 +1,52 @@
+import std.mem
+import std.io
+
+struct Pair { key: UInt64, value: UInt64 }
+
+enum Bucket { Empty, Full(UInt64, Pair), Number(UInt64) }
+
+derive Release for Pair
+
+derive Release for Bucket
+
+fn observed(slots: Vec[Bucket, mem.SystemAllocator]) -> borrow UInt64 where borrows(slots) {
+    match read slots[0] {
+        Full(_, entry) => borrow entry.value,
+        Empty => panic("missing payload"),
+        Number(_) => panic("expected pair"),
+    }
+}
+
+fn observed_pair(slots: Vec[Bucket, mem.SystemAllocator]) -> borrow Pair where borrows(slots) {
+    match read slots[0] {
+        Full(_, entry) => borrow entry,
+        Empty => panic("missing payload"),
+        Number(_) => panic("expected pair"),
+    }
+}
+
+fn observed_number(slots: Vec[Bucket, mem.SystemAllocator]) -> borrow UInt64 where borrows(slots) {
+    match read slots[1] {
+        Number(number) => borrow number,
+        _ => panic("expected scalar"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var slots: Vec[Bucket, mem.SystemAllocator] = Vec.new()
+    defer slots.release()
+    let bucket: Bucket = .Full(99, .{ key = 7, value = 20 })
+    Vec.push(&slots, bucket).unwrap()
+    Vec.push(&slots, Bucket.Number(31)).unwrap()
+    let number = observed_number(slots)
+    let scalar = observed(slots)
+    let pair = observed_pair(slots)
+    io.println("scalar={*scalar}; pair={pair.key},{pair.value}; number={*number}")?
+    return .Ok(
+        if *scalar == 20 && pair.key == 7 && pair.value == 20 && *number == 31 {
+            0
+        } else {
+            1
+        },
+    )
+}

@@ -1,0 +1,24 @@
+// `retains(target: value)` keeps the borrow in the field passed as `target`
+// and nowhere else in the holder, so a sibling field is still read after the
+// retained place changes.
+struct Box { value: UInt64 }
+
+struct Holder { kept: borrow UInt64, other: borrow UInt64 }
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn put(inout target: borrow UInt64, value: borrow UInt64) -> () where retains(target: value) {
+    target = copy(value)
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    let y = Box { value = 2 }
+    let z: UInt64 = 5
+    var h = Holder { kept = borrow z, other = borrow y.value }
+    put(&h.kept, borrow x.value)
+    bump(&x)
+    UInt8(*h.other)
+}

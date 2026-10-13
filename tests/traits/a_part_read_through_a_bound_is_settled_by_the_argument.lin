@@ -1,0 +1,50 @@
+// A declared type holds a part read through a bound on one of its own
+// parameters, and the argument settles it: `Holder[Counter]`'s `v` is whatever
+// `Counter`'s implementation of `Measure` settled `Item` to. Nothing about the
+// declaration says which type that is, and nothing has to -- the part is
+// substituted where every other part of an instantiation is.
+struct Counter {
+    at: UInt8,
+}
+
+struct Flag {
+    on: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+impl Measure for Flag {
+    type Item = Bool
+
+    fn of(x: Self) -> Self.Item {
+        x.on == 1
+    }
+}
+
+struct Holder[W: Measure] {
+    v: W.Item,
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 6 }
+    let f: Flag = .{ on = 1 }
+    let counted: Holder[Counter] = .{ v = Measure.of(c) }
+    let flagged: Holder[Flag] = .{ v = Measure.of(f) }
+    if flagged.v {
+        counted.v + 1
+    } else {
+        0
+    }
+}

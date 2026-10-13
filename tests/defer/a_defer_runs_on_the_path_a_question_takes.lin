@@ -1,0 +1,25 @@
+// `?`'s failing edge is an exit from the scope, and the least visible one:
+// nothing is written at the point control leaves. The schedule reaches it
+// anyway, which is the whole reason `defer` is worth having in a language with
+// `?`.
+fn bump(inout n: UInt8) -> () {
+    n = n + 1
+}
+
+fn none() -> Option[UInt8] {
+    Option.None
+}
+
+fn go(inout n: UInt8) -> Option[UInt8] {
+    defer bump(&n)
+    let v = none()?
+    Option.Some(v)
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 1
+    match go(&n) {
+        Some(v) => v,
+        None => n,
+    }
+}

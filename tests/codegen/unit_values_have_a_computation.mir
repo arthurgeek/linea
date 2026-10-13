@@ -1,0 +1,24 @@
+function ;main
+@0:
+  %0 = constant () value computation=i64 0
+  %1 = call () value computation=i64 @f1(%0)
+  %2 = call () value computation=i64 @f2()
+  %3 = call () value computation=i64 @f3()
+  %4 = constant UInt8 value computation=i64 0
+  ret %4
+function ;consume[$28$29]
+local $0 () value storage=i64
+@0:
+  %0 = constant () value computation=i64 0
+  ret %0
+function ;empty
+@0:
+  %0 = constant () value computation=i64 0
+  ret %0
+function ;bare
+@0:
+  %0 = constant () value computation=i64 0
+  ret %0
+@1:
+  %2 = constant () value computation=i64 0
+  ret %2

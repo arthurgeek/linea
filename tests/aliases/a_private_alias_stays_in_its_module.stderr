@@ -1,0 +1,5 @@
+error[M-Vis]: `Meters` is private to `units`
+ --> tests/aliases/a_private_alias_stays_in_its_module/main.lin:4:25
+  |
+4 |     let distance: units.Meters = units.stride()
+  |                         ^^^^^^ declare it `pub` in its own module, or do not name it here

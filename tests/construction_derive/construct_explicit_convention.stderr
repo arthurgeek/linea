@@ -1,0 +1,10 @@
+error[T-Reflection]: write only the descriptor name between pipes
+  --> tests/construction_derive/construct_explicit_convention.lin:15:13
+   |
+15 |             |read component| {
+   |             ^^^^^^^^^^^^^^^^^^ a construction descriptor has no passing convention
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_explicit_convention.lin:32:22
+   |
+32 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

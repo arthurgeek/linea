@@ -1,0 +1,41 @@
+// An implementation's own parameters are in scope in the signatures of its
+// members, and a settled reference written off one is read through the bounds
+// that parameter carries -- the same reading its header got, so `T.A` in the
+// header and `T.A` in the member name one type.
+trait Pair {
+    type A
+
+    fn a(self: Self) -> Self.A
+}
+
+trait Give[U] {
+    fn give(self: Self, u: U) -> U where carries(self)
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+struct One {
+    x: UInt8,
+}
+
+impl Pair for One {
+    type A = UInt8
+
+    fn a(self: Self) -> Self.A {
+        self.x
+    }
+}
+
+impl[T: Pair] Give[T.A] for Holder[T] {
+    fn give(self: Self, _u: T.A) -> T.A where carries(self) {
+        Pair.a(self.v)
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[One] = .{ v = .{ x = 4 } }
+    let n: UInt8 = 3
+    Give.give(h, n)
+}

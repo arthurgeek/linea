@@ -1,0 +1,33 @@
+// Owner supplies a reusable allocator handle. The generic body borrows its
+// owner only while allocating and using the buffer; its numeric answer has
+// no remaining owner dependency.
+import std.mem
+
+use mem.Arena
+use mem.Oom
+use mem.Owner
+use mem.system
+
+fn scratch[O: Owner](o: O) -> Result[UInt64, Oom] {
+    let h = o.handle()
+
+    var b = h.acquire(64)?
+    mem.Buffer.store(&b, 0, 7)
+    let n = b.load(0)
+    b.release()
+
+    return .Ok(n)
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 4096)
+    defer arena.release()
+
+    match scratch(system()) {
+        Err(_) => 1,
+        Ok(direct) => match scratch(arena) {
+            Err(_) => 2,
+            Ok(pooled) => UInt8(direct + pooled),
+        },
+    }
+}

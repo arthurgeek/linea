@@ -1,0 +1,6 @@
+// Use after free. `release` took `k`, and `tag` reads what is no longer there.
+fn main() -> UInt8 {
+    let k = mint(7)
+    release(k)
+    tag(k)
+}

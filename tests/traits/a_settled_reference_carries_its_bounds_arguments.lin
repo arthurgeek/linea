@@ -1,0 +1,50 @@
+// A settled reference carries what its declared type's bound promises, at the
+// argument that bound names, so it discharges a bound written at the same one.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+trait Holds {
+    type Elem: Lookup[UInt64]
+
+    fn one(self: Self) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+struct Bag {
+    n: UInt8,
+}
+
+impl Holds for Bag {
+    type Elem = Board
+
+    fn one(self: Bag) -> UInt8 {
+        self.n
+    }
+}
+
+fn index[C: Lookup[UInt64]](c: C) -> UInt8 {
+    let i: UInt64 = 2
+    Lookup.at(c, i)
+}
+
+fn reach[H: Holds](h: H, e: H.Elem) -> UInt8 {
+    let k: UInt8 = Holds.one(h)
+    let j: UInt8 = index(e)
+    k + j
+}
+
+fn main() -> UInt8 {
+    let g: Bag = .{ n = 5 }
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    reach(g, b)
+}

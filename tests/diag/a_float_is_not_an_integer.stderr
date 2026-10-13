@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Float64`, found `Int64`
+ --> tests/diag/a_float_is_not_an_integer.lin:2:23
+  |
+2 |     let _x: Float64 = 2
+  |             ------- expected because of this annotation
+  |                       ^ expected `Float64`, found `Int64`

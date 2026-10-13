@@ -1,0 +1,17 @@
+// The trait's own module already implements `Measure` for `UInt8`. This module
+// owns neither side, so its `impl` is refused for that and is not an
+// implementation of `Measure` that could overlap the first: one mistake, one
+// report.
+import measure
+
+use measure.Measure
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

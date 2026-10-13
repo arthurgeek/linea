@@ -1,0 +1,5 @@
+error[S-Entry]: linear and copyable are exclusive
+ --> tests/decl/attributes/linear_and_copyable_are_exclusive.lin:1:1
+  |
+1 | @(linear, copyable)
+  | ^ choose one ownership policy

@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Second`, found `First`
+  --> tests/constants/enum_variants/callable_use_does_not_retype_a_contextual_constant.lin:11:37
+   |
+11 | fn invoke[F: fn(read mode: Second = chosen) -> UInt8](callback: F) -> UInt8 {
+   |                      ---- expected because of this parameter
+   |                                     ^^^^^^ expected `Second`, found `First`

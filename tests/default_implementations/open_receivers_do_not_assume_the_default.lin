@@ -1,0 +1,25 @@
+trait Queryable {
+    type Query
+
+    fn accepts(self: Self, query: Self.Query) -> Bool
+}
+
+default impl[T: Copyable] Queryable for T {
+    type Query = T
+
+    fn accepts(_self: T, _query: T) -> Bool {
+        true
+    }
+}
+
+fn accepts_itself[T: Queryable](value: T) -> Bool {
+    Queryable.accepts(value, value)
+}
+
+fn main() -> UInt8 {
+    if accepts_itself(false) {
+        0
+    } else {
+        1
+    }
+}

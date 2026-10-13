@@ -1,0 +1,28 @@
+// A trait argument is settled by the head, and a type built from a head
+// parameter is: `Give[Option[T]] for Holder[T]` answers `Give[Option[UInt8]]`
+// at `Holder[UInt8]` and a different argument at every other member of the
+// family. The parameter stands under a constructor rather than alone, which is
+// what the head settles it through.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[Option[T]] for Holder[T] {
+    fn give(_self: Self, u: Option[T]) -> UInt8 {
+        match read u {
+            None => 4,
+            Some(_v) => 6,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 1 }
+    let n: UInt8 = 2
+    let held: Option[UInt8] = .Some(n)
+    Give.give(h, held)
+}

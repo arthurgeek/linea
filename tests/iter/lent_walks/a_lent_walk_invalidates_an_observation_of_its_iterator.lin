@@ -1,0 +1,43 @@
+// The walk advances the grower on every step, and `next` may grow its
+// vector, so an observation of that vector taken before the walk cannot be
+// read inside it.
+import std.io
+import std.mem
+
+// `next` grows the vector it owns, which moves its buffer.
+struct Grower {
+    values: Vec[UInt64, mem.SystemAllocator],
+    left: UInt64,
+}
+
+impl Iterator for Grower {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        var i: UInt64 = 0
+        while i < 64 {
+            &self.values.push(i).unwrap()
+            i += 1
+        }
+        .Some(self.left)
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var values: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &values.push(41).unwrap()
+    var grower = Grower { values = values, left = 4 }
+    let view = grower.values.as_slice()
+    var total: UInt64 = 0
+    for x in &grower {
+        total += x + view[0]
+    }
+    let Grower { values: rest, left: _ } = grower
+    rest.release()
+    io.println("{total}")?
+    .Ok(0)
+}

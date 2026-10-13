@@ -1,0 +1,5 @@
+error[S-Entry]: `read` is redundant on a parameter
+ --> tests/closure_captures/redundant_read_lambda_parameter.lin:2:21
+  |
+2 |     let identity = |read value: UInt8| value
+  |                     ^^^^ omit `read`; parameters are read by default

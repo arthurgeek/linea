@@ -1,0 +1,13 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"import readings\n\nfn main() -> UInt8 {\n    let value: UInt8 = 3\n    let first = readings.Reading[UInt8] { value }\n    let second: readings.Reading[UInt8] = .{ value = 4 }\n    first.value + second.value + value\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"readings/readings.lin","languageId":"linea","version":1,"text":"pub struct Reading[T] {\n    value: T,\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":27}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":27},"newName":"Sample"}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":47}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{"textDocument":{"uri":"readings/readings.lin"},"position":{"line":1,"character":6},"newName":"amount"}}
+{"jsonrpc":"2.0","id":6,"method":"textDocument/definition","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":44}}}
+{"jsonrpc":"2.0","id":7,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":3,"character":10},"newName":"sample"}}
+{"jsonrpc":"2.0","id":8,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":27},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":9,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"position":{"line":6,"character":12},"context":{"includeDeclaration":true}}}
+{"jsonrpc":"2.0","id":10,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":27}}}
+{"jsonrpc":"2.0","id":11,"method":"shutdown"}

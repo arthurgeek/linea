@@ -1,0 +1,12 @@
+error[N-Duplicate]: `a` is already declared by this pattern
+  --> tests/tuples/a_capture_and_a_pattern_binder_are_declared_once.lin:13:42
+   |
+13 |     let by_capture = apply((3, 4), [a] |(a, b)| a + b)
+   |                                     - already declared here
+   |                                          ^ a pattern declares each name once
+error[N-Duplicate]: `c` is already declared by this declaration
+  --> tests/tuples/a_capture_and_a_pattern_binder_are_declared_once.lin:14:55
+   |
+14 |     let by_parameter = apply_with((3, 4), 5, |(c, d), c: UInt8| c + d)
+   |                                                - already declared here
+   |                                                       ^ a closure's captures and parameters are declared once

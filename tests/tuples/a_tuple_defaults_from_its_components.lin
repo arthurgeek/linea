@@ -1,0 +1,5 @@
+// A tuple's default holds each component's default.
+fn main() -> UInt8 {
+    let zero: (UInt8, Bool) = Default.default()
+    zero._0
+}

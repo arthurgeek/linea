@@ -1,0 +1,5 @@
+error[T-Bound]: `T` is bounded `Copyable` twice
+ --> tests/generics/a_copyable_bound_cannot_be_repeated.lin:4:11
+  |
+4 | fn _twice[T: Copyable + Copyable](x: T) -> UInt8 {
+  |           ^ drop one of the two bounds

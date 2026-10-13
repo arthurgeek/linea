@@ -1,0 +1,7 @@
+// `_` says the programmer will not use the value. That is not the same claim
+// as that it may be discarded, and treating the two alike is how a leak
+// escapes — which is the last hole in the sealed-type argument.
+fn main() -> UInt8 {
+    let _k = mint(7)
+    0
+}

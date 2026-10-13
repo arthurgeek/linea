@@ -1,0 +1,41 @@
+error[S-Brace]: expected `}`
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:14
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |              ^^^^^ this struct pattern is never closed
+error[S-Equals]: expected `=`
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:35
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |                                   ^ a destructuring `let` names what it takes apart
+error[S-Entry]: a program is a list of declarations
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:43
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |                                           ^ expected `fn` here
+error[N-Undefined]: undefined name `x`
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:37
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |                                     ^ no binding with this name is in scope
+error[N-Case]: bindings start with a lowercase letter
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:29
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |                             ^^^^^ rename it `point`
+error[N-Unused]: `outer` is never used
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:5:9
+  |
+5 |     let outer = Outer { point = Point { x = 3 } }
+  |         ^^^^^ bind it as `_` if the value is not wanted
+error[N-Unused]: `Point` is never used
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:6:29
+  |
+6 |     let read Outer { point: Point { x } } = outer
+  |                             ^^^^^ bind it as `_` if the value is not wanted
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/decl/borrowed_lets/nested_patterns_are_not_introduced_by_read.lin:4:20
+  |
+4 | fn main() -> UInt8 {
+  |              ----- expected because of this return type
+  |                    ^ this body produces nothing

@@ -1,0 +1,17 @@
+import std.mem
+
+// A walk that takes the drain would abandon the system storage it holds where
+// the loop ends.
+fn total(sink readings: Vec[UInt64, mem.SystemAllocator]) -> UInt64 {
+    var sum: UInt64 = 0
+    for reading in readings.drain() {
+        sum += reading
+    }
+    sum
+}
+
+fn main() -> UInt8 {
+    var readings: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    &readings.push(3).unwrap()
+    UInt8(total(readings))
+}

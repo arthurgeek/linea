@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    var number: UInt8 = 1
+    let read_number = [number] || number
+    let { number: observation } = read_number.into_captures()
+    number = 2
+    *observation + number
+}

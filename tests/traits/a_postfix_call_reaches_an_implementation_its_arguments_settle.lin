@@ -1,0 +1,39 @@
+// A postfix call reaches an operation of a trait the receiver implements at
+// trait arguments the receiver alone does not fix. `impl[P] Watch[P] for
+// Tally` holds for every `P`, so `&tally.observe(true)` is a call at
+// `Watch[Bool]`, settled by its argument exactly as `Watch.observe(&tally,
+// true)` is.
+trait Watch[P] {
+    fn observe(inout self: Self, event: P) -> ()
+}
+
+struct Tally {
+    count: UInt64,
+}
+
+impl[P] Watch[P] for Tally {
+    fn observe(inout self: Self, _event: P) -> () {
+        self.count += 1
+    }
+}
+
+// A wrapper whose implementation is generic over what it wraps and over the
+// trait's argument, as a middleware is over the handler it holds.
+struct Layer[W] {
+    inner: W,
+}
+
+impl[P, W: Watch[P]] Watch[P] for Layer[W] {
+    fn observe(inout self: Self, event: P) -> () {
+        &self.inner.observe(event)
+    }
+}
+
+fn main() -> UInt8 {
+    var tally = Tally { count = 0 }
+    &tally.observe(true)
+    &tally.observe(UInt8(3))
+    var layered: Layer[Tally] = .{ inner = tally }
+    &layered.observe("event")
+    UInt8(layered.inner.count)
+}

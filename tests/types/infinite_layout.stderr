@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: List contains itself
+ --> tests/types/infinite_layout.lin:5:6
+  |
+5 | enum List {
+  |      ^^^^ a value of this type would have to hold one, so it has no size

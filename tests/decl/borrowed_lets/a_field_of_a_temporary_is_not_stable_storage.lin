@@ -1,0 +1,12 @@
+struct Point { x: UInt8 }
+
+struct Outer { point: Point }
+
+fn make() -> Outer {
+    Outer { point = Point { x = 3 } }
+}
+
+fn main() -> UInt8 {
+    let read Point { x } = make().point
+    x
+}

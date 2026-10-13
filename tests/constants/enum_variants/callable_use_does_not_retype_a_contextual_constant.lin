@@ -1,0 +1,17 @@
+enum First { Preserve }
+
+enum Second { Preserve }
+
+let chosen: First = .Preserve
+
+fn select(mode: Second = .Preserve) -> UInt8 {
+    match read mode { Preserve => 0 }
+}
+
+fn invoke[F: fn(read mode: Second = chosen) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    invoke(select)
+}

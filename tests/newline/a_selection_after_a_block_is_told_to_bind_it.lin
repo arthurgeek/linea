@@ -1,0 +1,22 @@
+// An `if` ends in a block, and a construct ending in a block takes no
+// selection, so the line opening with `.doubled()` begins a statement of its
+// own. The note says to bind the value first.
+struct Meters {
+    value: UInt8,
+}
+
+impl Meters {
+    fn doubled(self: Self) -> UInt8 {
+        self.value * 2
+    }
+}
+
+fn main() -> UInt8 {
+    let length = if true {
+        Meters { value = 3 }
+    } else {
+        Meters { value = 1 }
+    }
+    .doubled()
+    length.doubled()
+}

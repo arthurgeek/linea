@@ -1,0 +1,19 @@
+import std.http
+import std.mem
+import std.net
+
+fn health[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "ok")
+}
+
+fn main() -> Result[UInt8, http.ServeError] {
+    let listener = net.listen(net.loopback(0)).map_err(|sink error| http.ServeError.Accept(error))?
+    var router = http.Router.new()
+    defer router.release()
+    match http.Router.route_raw(&router, "GET /health", health) {
+        Ok(_) => {},
+        Err(_) => return .Ok(1),
+    }
+    http.serve(listener, &router, mem.system())?
+    return .Ok(0)
+}

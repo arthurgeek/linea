@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source, and several parameters are carriers
+  --> tests/borrows/contracts/two_carriers_need_a_clause.lin:13:4
+   |
+13 | fn first(session: Session, visit: Visit) -> Str {
+   |    ^^^^^ `session` and `visit` are carriers, so none is the default source; add `where carries(session)` or `where carries(visit)`, or list several sources in one clause

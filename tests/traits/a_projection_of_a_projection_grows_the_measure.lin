@@ -1,0 +1,31 @@
+// `walk[S]` calls `walk[S.Next.Next]`. Each projection is a structural step of
+// its own, so an argument selected twice stands two steps above the parameter
+// the declaration was given, and the measure reaches `S` through both of them.
+//
+// Depth is not what the rule asks about: a chain of any length is refused for
+// putting the declaration's own type parameter beneath a type-level operation,
+// which one projection already does.
+trait Step {
+    type Next: Step
+
+    fn onward(sink self: Self) -> Self.Next
+}
+
+struct Cycle { _n: UInt8 }
+
+impl Step for Cycle {
+    type Next = Cycle
+
+    fn onward(sink self: Cycle) -> Self.Next {
+        self
+    }
+}
+
+fn walk[S: Step](sink s: S) -> UInt8 {
+    walk(Step.onward(Step.onward(s)))
+}
+
+fn main() -> UInt8 {
+    let c: Cycle = .{ _n = 0 }
+    walk(c)
+}

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/a_callable_default_is_a_value_not_a_spelling.lin:15:6
+   |
+9  | impl Give[fn(read value: UInt8 = 1 + 1) -> UInt8] for Holder {
+   |      ---- already implemented here
+15 | impl Give[fn(read value: UInt8 = 2) -> UInt8] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

@@ -1,0 +1,42 @@
+// `Board` implements `Lookup` twice, at two different arguments, and each
+// settles `Elem` to a different type: `UInt64` to `UInt8`, `Bool` to `Bool`
+// itself. A bound naming only `Lookup[UInt64]` settles `C.Elem` to `UInt8` --
+// were the other implementation read instead, `first` would declare `Bool`
+// as its return type and `main` would refuse it, so this compiling at all is
+// already proof of which one was picked. The value returned is what that one
+// implementation, and no other, computes.
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Lookup[Bool] for Board {
+    type Elem = Bool
+
+    fn at(_self: Board, i: Bool) -> Bool {
+        i
+    }
+}
+
+fn first[C: Lookup[UInt64]](c: C) -> C.Elem {
+    let i: UInt64 = 2
+    Lookup.at(c, i)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [5, 6, 7, 8] }
+    first(b)
+}

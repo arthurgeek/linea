@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let first: fn() -> UInt8 = || 1
+    let second: fn() -> UInt8 = || 2
+    let _same = first == second
+    0
+}

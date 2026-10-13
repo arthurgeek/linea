@@ -1,0 +1,8 @@
+// A range place is copied out of or assigned into whole, and nothing else: a
+// narrower use has no meaning yet, so binding one to a name is refused where
+// it is written rather than given a value form nothing defines.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    let head = a[0..2]
+    head[0] + head[1]
+}

@@ -1,0 +1,15 @@
+import std.mem
+
+fn inspect(values: borrow [UInt8; 2]) -> mem.Slice[UInt8] where carries(values) {
+    values.as_slice()
+}
+
+fn main() -> UInt8 {
+    let values = [UInt8(4), UInt8(7)]
+    let slice = inspect(borrow values)
+    if slice[0] == 4 && slice[1] == 7 {
+        0
+    } else {
+        1
+    }
+}

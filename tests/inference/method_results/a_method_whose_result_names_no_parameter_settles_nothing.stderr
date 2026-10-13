@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `T` is
+ --> tests/inference/method_results/a_method_whose_result_names_no_parameter_settles_nothing.lin:8:23
+  |
+8 |     let ready: Bool = nothing_yet().is_ok()
+  |                       ^^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it

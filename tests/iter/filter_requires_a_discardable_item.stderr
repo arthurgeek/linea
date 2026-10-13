@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Token` does not have that capability
+  --> tests/iter/filter_requires_a_discardable_item.lin:20:27
+   |
+20 |     let selected = tokens.filter(|item| match read item { One => true })
+   |                           ^^^^^^ `filter` may dispose of a `Token`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause

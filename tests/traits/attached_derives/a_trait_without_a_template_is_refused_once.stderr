@@ -1,0 +1,5 @@
+error[T-Derive]: declare `template impl` in the trait's module, or write the implementation by hand
+ --> tests/traits/attached_derives/a_trait_without_a_template_is_refused_once.lin:9:9
+  |
+9 | @derive(Plain[UInt8])
+  |         ^^^^^ this trait has no structural template

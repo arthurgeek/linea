@@ -1,0 +1,5 @@
+error[T-Refine]: `n + 1` is not known to be in 0..=99
+ --> tests/newtypes/an_unproven_operand_is_named_as_it_was_written.lin:7:22
+  |
+7 |     let Percent(v) = Percent(n + 1)
+  |                      ^^^^^^^^^^^^^^ make it fallible: `Percent?(n + 1)`

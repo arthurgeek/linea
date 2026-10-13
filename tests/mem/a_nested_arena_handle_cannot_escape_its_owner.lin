@@ -1,0 +1,23 @@
+// An inner arena remains the handle owner even when its slab comes from a
+// longer-lived outer arena. Closing the inner owner invalidates its handles.
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Owner
+use mem.SystemAllocator
+use mem.system
+
+fn scratch(outer: Arena[SystemAllocator]) -> Handle[Handle[SystemAllocator]] {
+    let inner = Arena.open(outer.handle(), 1024)
+    let a = inner.handle()
+    inner.release()
+    a
+}
+
+fn main() -> UInt8 {
+    let outer = Arena.open(system(), 4096)
+    let _a = scratch(outer)
+    outer.release()
+    0
+}

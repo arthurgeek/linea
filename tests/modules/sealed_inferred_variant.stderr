@@ -1,0 +1,5 @@
+error[M-Opaque]: `Key` is opaque outside `vault`
+ --> tests/modules/sealed_inferred_variant/main.lin:6:15
+  |
+6 |     vault.tag(.Forged(7))
+  |               ^^^^^^^^^^ only its own module can build one

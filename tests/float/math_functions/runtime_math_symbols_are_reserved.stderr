@@ -1,0 +1,5 @@
+error[M-Export]: `linea_math_pow` is a symbol the runtime defines, so nothing may export it
+ --> tests/float/math_functions/runtime_math_symbols_are_reserved/main.lin:1:11
+  |
+1 | export fn linea_math_pow(value: UInt64, exponent: UInt64) -> UInt64 {
+  |           ^^^^^^^^^^^^^^ publish it under a name of your own

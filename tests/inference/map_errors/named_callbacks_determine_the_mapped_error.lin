@@ -1,0 +1,16 @@
+fn widen(sink error: UInt8) -> UInt16 where carries(error) {
+    UInt16(error) + 1
+}
+
+fn main() -> UInt8 {
+    let failure: Result[UInt8, UInt8] = .Err(9)
+    let mapped = failure.map_err(widen)
+    match mapped {
+        Ok(_) => 1,
+        Err(error) => if error == UInt16(10) {
+            0
+        } else {
+            1
+        },
+    }
+}

@@ -1,0 +1,14 @@
+// Equality is behaviour like every other, so it is not inherited either: a
+// newtype's values compare only through what an `impl` on its own head says
+// they mean, or through the base a pattern reveals.
+type Percent = UInt8 where it in 0..=99
+
+fn main() -> UInt8 {
+    let a = Percent(1)
+    let b = Percent(2)
+    if a == b {
+        1
+    } else {
+        0
+    }
+}

@@ -1,0 +1,11 @@
+// `(b.f)()` calls the value the field `f` holds, which is a `UInt8` rather
+// than a function.
+struct Box[T] {
+    f: T,
+}
+
+fn main() -> UInt8 {
+    let b: Box[UInt8] = .{ f = 3 }
+    let size = (b.f)()
+    size
+}

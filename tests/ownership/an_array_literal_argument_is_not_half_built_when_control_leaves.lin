@@ -1,0 +1,24 @@
+// An array literal takes several values and completes as one, so it holds a
+// transfer open exactly as a call does. `d` is in the array and the array is
+// never built.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn total(sink keys: [Key; 2]) -> UInt8 {
+    var sum: UInt8 = 0
+    for key in keys {
+        let Key { n: x } = key
+        sum += x
+    }
+    sum
+}
+
+fn go(sink d: Key) -> UInt8 {
+    total([d, return 7])
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

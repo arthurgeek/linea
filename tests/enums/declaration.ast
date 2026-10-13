@@ -1,0 +1,12 @@
+program decls=2
+  decl enum_ "Colour" tokens 0..10
+    variant "Red"
+    variant "Green"
+    variant "Blue"
+  decl function "main" tokens 10..25
+    returns UInt8
+    expr %3 block tokens 16..25
+      stmt %0 let_decl tokens 17..23 "_"
+        expr %1 field tokens 20..23 "Red"
+          expr %0 name_ref tokens 20..21 "Colour"
+      expr %2 int_literal tokens 23..24 "0"

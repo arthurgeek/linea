@@ -1,0 +1,6 @@
+struct Point {
+    @copyable
+    value: UInt8,
+}
+
+fn main() -> UInt8 { Point { value = 0 }.value }

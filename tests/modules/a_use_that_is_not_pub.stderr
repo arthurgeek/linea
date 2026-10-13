@@ -1,0 +1,5 @@
+error[M-Vis]: `helper` is private to `mid`
+ --> tests/modules/a_use_that_is_not_pub/main.lin:4:9
+  |
+4 |     mid.helper(2) + mid.ping()
+  |         ^^^^^^ declare it `pub` in its own module, or do not name it here

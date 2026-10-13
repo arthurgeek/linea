@@ -1,0 +1,12 @@
+@derive(Equatable, Debug)
+struct Point { value: UInt8 }
+
+fn main() -> UInt8 {
+    let first = Point { value = 3 }
+    let second = Point { value = 3 }
+    if first == second {
+        0
+    } else {
+        1
+    }
+}

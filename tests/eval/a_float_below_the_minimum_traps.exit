@@ -1,0 +1,2 @@
+trap
+linea: value out of range for its type at tests/eval/a_float_below_the_minimum_traps.lin:3:14

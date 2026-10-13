@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/ownership/an_arm_binder_shares_its_scrutinees_root.lin:23:41
+   |
+23 |     match read e { Round(p) => grow(&e, p) }
+   |                                     -- mutated by this argument
+   |                                         ^ already passed `&` here

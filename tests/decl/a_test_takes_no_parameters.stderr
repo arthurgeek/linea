@@ -1,0 +1,5 @@
+error[S-Test]: a test takes no parameters
+ --> tests/decl/a_test_takes_no_parameters.lin:7:23
+  |
+7 | test fn a_thing_holds(n: UInt8) -> Result[(), IoError] {
+  |                       ^ the compiler writes the only call to a test, and has nothing to pass

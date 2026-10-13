@@ -1,0 +1,16 @@
+// A test is part of the program's checked source, even where it is absent from
+// what ships. So `check` reports a mistake inside one, of a program it will
+// emit no part of and run no part of.
+import std.io
+
+use io.IoError
+use io.println
+
+test fn a_thing_holds() -> Result[(), IoError] {
+    println(nope)?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    0
+}

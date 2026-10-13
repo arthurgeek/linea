@@ -1,0 +1,10 @@
+fn fill(inout target: Option[borrow UInt64]) -> () where retains(target: target) {
+    let local: UInt64 = 7
+    target = .Some(borrow local)
+}
+
+fn main() -> UInt8 {
+    var target: Option[borrow UInt64] = .None
+    fill(&target)
+    match target { Some(view) => UInt8(*view), None => 0 }
+}

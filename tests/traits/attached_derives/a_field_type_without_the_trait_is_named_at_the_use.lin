@@ -1,0 +1,30 @@
+// A derived implementation on a generic type requires its trait of each field
+// type naming a parameter. Comparing `Labelled[Token]` needs `Token: Equatable`,
+// and comparing `Shelf[Token]` needs `Labelled[Token]: Equatable`.
+@derive(Equatable)
+struct Labelled[T] {
+    label: Str,
+    value: T,
+}
+
+@derive(Equatable)
+struct Shelf[T] {
+    first: Labelled[T],
+}
+
+struct Token {}
+
+fn same[T: Equatable](first: T, second: T) -> Bool {
+    first == second
+}
+
+fn main() -> UInt8 {
+    let first: Labelled[Token] = .{ label = "a", value = .{} }
+    let second: Labelled[Token] = .{ label = "a", value = .{} }
+    let third: Shelf[Token] = .{ first = .{ label = "b", value = .{} } }
+    let fourth: Shelf[Token] = .{ first = .{ label = "b", value = .{} } }
+    if first == second || same(third, fourth) {
+        return 1
+    }
+    0
+}

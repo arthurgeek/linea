@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Route[Bool]` for `Packet[T]`
+  --> tests/traits/parameter_heads/a_blanket_overlaps_where_its_bound_could_answer.lin:16:9
+   |
+10 | impl[T: Allowed, U] Route[U] for T {}
+   |                     ----- the other implementation
+16 | impl[T] Route[Bool] for Packet[T] {}
+   |         ^^^^^ no instantiation may answer to two implementations of one trait

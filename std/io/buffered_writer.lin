@@ -1,0 +1,791 @@
+import std.mem
+import std.release
+import std.testing
+
+// BufferError says why no buffer was made: a zero capacity or refused storage.
+// Construction then returns the stream it was given.
+@(copyable, derive(Debug, Display))
+pub enum BufferError {
+    ZeroCapacity,
+    Allocation(mem.Oom),
+}
+
+// A BufferOpenFailure hands back the stream no buffer was made for, with the
+// reason.
+pub struct BufferOpenFailure[R] {
+    resource: R,
+    reason: BufferError,
+}
+
+// A BufferedWriter collects bytes in a buffer and hands them to `writer` when
+// the buffer fills or is flushed. Pending bytes have one owner and occupy
+// `start` through `start + length`. finish and abort explicitly settle the
+// buffer and return the underlying writer.
+@(opaque, linear)
+struct BufferedWriter[W: ByteWriter, A: Allocator = mem.SystemAllocator] {
+    writer: W,
+    bytes: mem.Buffer[A],
+    start: UInt64,
+    length: UInt64,
+}
+
+// A FinishFailure returns the writer whose pending bytes could not be flushed,
+// with the write failure.
+@linear
+pub struct FinishFailure[W: ByteWriter, A: Allocator, E] {
+    writer: BufferedWriter[W, A],
+    failure: WriteFailure[E],
+}
+
+// Display renders the refusal and leaves the returned stream with the failure.
+impl[R] Display for BufferOpenFailure[R] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.reason.fmt(&w)
+    }
+}
+
+// Display renders the flush failure and borrows the returned writer.
+impl[W: ByteWriter, A: Allocator, E: Display] Display for FinishFailure[W, A, E] {
+    fn fmt[S: Writer](self: Self, inout w: S) -> Result[(), S.Error] {
+        &w.write_str("could not finish buffered output: ")?
+        self.failure.fmt(&w)
+    }
+}
+
+derive[R: Release] Release for BufferOpenFailure[R]
+
+// BufferOpenReason says why a buffered stream could not be opened, once the
+// stream it was given is closed. Closing can fail too, so `close` keeps that
+// failure beside the refusal.
+@copyable
+pub struct BufferOpenReason[C] {
+    reason: BufferError,
+    close: Option[C],
+}
+
+derive[C: Debug] Debug for BufferOpenReason[C]
+
+// A refused buffer reads as its refusal, followed by a failed close.
+impl[C: Display] Display for BufferOpenReason[C] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.reason.fmt(&w)?
+        closing_failure(self.close, &w)
+    }
+}
+
+// Write a failed close after the main reason, and nothing when the close
+// succeeded.
+fn closing_failure[C: Display, W: Writer](close: Option[C], inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    match read close {
+        Some(error) => {
+            &w.write_str("; closing the stream failed: ")?
+            error.fmt(&w)
+        },
+        None => .Ok(()),
+    }
+}
+
+// Settling a refused buffer closes the stream it was given and keeps why no
+// buffer was made, together with a failed close.
+impl[R: Close] release.Settle for BufferOpenFailure[R] {
+    type Reason = BufferOpenReason[R.CloseError]
+
+    fn settle(sink self: Self) -> BufferOpenReason[R.CloseError] where carries(self) {
+        let BufferOpenFailure { resource, reason } = self
+        let close: Option[R.CloseError] = match resource.close() {
+            Ok(_) => .None,
+            Err(error) => .Some(error),
+        }
+        .{ reason, close }
+    }
+}
+
+test fn settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
+    let settled = BufferedWriter.open(mem.system(), capacity: 0, writer: output).settled()
+    let zero = match settled {
+        Ok(writer) => {
+            let _output = writer.abort()
+            false
+        },
+        Err(reason) => match read reason.reason { ZeroCapacity => reason.close.is_none(), Allocation(_) => false },
+    }
+    testing.assert(zero, "settling a refused buffer lost its reason")?
+    .Ok(())
+}
+
+test fn a_refused_buffer_displays_a_failed_close() {
+    let reason: BufferOpenReason[UInt8] = .{ reason = .ZeroCapacity, close = .Some(5) }
+    // The 64-byte recorder holds the refusal and the close failure.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = reason.fmt(&writer).is_ok()
+    let equal = writer.holds("ZeroCapacity; closing the stream failed: 5")
+    writer.release()
+    testing.assert(wrote && equal, "a refused buffer lost its close failure")?
+    .Ok(())
+}
+
+// FinishReason says why a buffered stream could not finish, once its pending
+// bytes are abandoned and the underlying stream is closed. `close` keeps a
+// failed close beside the write failure.
+@copyable
+pub struct FinishReason[E, C] {
+    write: WriteFailure[E],
+    close: Option[C],
+}
+
+derive[E: Debug, C: Debug] Debug for FinishReason[E, C]
+
+// A failed finish reads as its write failure, followed by a failed close.
+impl[E: Display, C: Display] Display for FinishReason[E, C] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("could not finish buffered output: ")?
+        self.write.fmt(&w)?
+        closing_failure(self.close, &w)
+    }
+}
+
+// Releasing a failed finish abandons the pending bytes, then releases the
+// underlying stream, which ignores a failed close, and the write failure.
+impl[W: ByteWriter + Release, A: Allocator, E: Release] Release for FinishFailure[W, A, E] {
+    fn release(sink self: Self) -> () {
+        let FinishFailure { writer, failure } = self
+        writer.abort().release()
+        failure.release()
+    }
+}
+
+test fn a_failed_finish_can_be_released_whole() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 0 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: output).settled().unwrap()
+    let accepted = &writer.write_some("ab".as_bytes()).is_ok()
+    let released = match writer.finish() {
+        Ok(_) => false,
+        Err(failure) => {
+            failure.release()
+            true
+        },
+    }
+    testing.assert(accepted && released, "a writer that accepts nothing finished")?
+    .Ok(())
+}
+
+// Settling a failed finish abandons the pending bytes and closes the
+// underlying stream, keeping the write failure and a failed close.
+impl[W: ByteWriter + Close, A: Allocator, E: Release] release.Settle for FinishFailure[W, A, E] {
+    type Reason = FinishReason[E, W.CloseError]
+
+    fn settle(sink self: Self) -> FinishReason[E, W.CloseError] where carries(self) {
+        let FinishFailure { writer, failure } = self
+        let close: Option[W.CloseError] = match writer.abort().close() {
+            Ok(_) => .None,
+            Err(error) => .Some(error),
+        }
+        .{ write = failure, close }
+    }
+}
+
+test fn settling_a_failed_finish_keeps_the_write_failure_and_a_failed_close() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: output).settled().unwrap()
+    let accepted = &writer.write_some("abcd".as_bytes()).is_ok()
+    let settled = writer.finish().settled()
+    let failed = match settled {
+        Ok(_) => false,
+        Err(reason) => {
+            let write = copy(reason.write)
+            write.kind == .Underlying && write.reason == .Some(9) && write.written == 2 && reason.close == .Some(5)
+        },
+    }
+    testing.assert(accepted && failed, "settling a failed finish lost its write failure or its close failure")?
+    .Ok(())
+}
+
+// BufferedOutputProbe accepts at most `step` bytes per write into eight bytes of
+// storage, and fails with the reason 9 once it holds `stop` bytes.
+struct BufferedOutputProbe {
+    bytes: [UInt8; 8],
+    length: UInt64,
+    step: UInt64,
+    stop: UInt64,
+}
+
+derive Release for BufferedOutputProbe
+
+// The probe's close fails with 5 once it has stopped accepting bytes, so a
+// test can see a close failure kept beside a write failure.
+impl Close for BufferedOutputProbe {
+    type CloseError = UInt8
+
+    fn close(sink self: Self) -> Result[(), UInt8] where carries() {
+        if self.length == self.stop {
+            return .Err(5)
+        }
+        .Ok(())
+    }
+}
+
+impl ByteWriter for BufferedOutputProbe {
+    type Error = UInt8
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[UInt8]] {
+        if self.length == self.stop {
+            return .Err(.{ kind = .Underlying, reason = .Some(9), written = 0 })
+        }
+        var count = self.step
+        if count > bytes.length() {
+            count = bytes.length()
+        }
+        if count > self.stop - self.length {
+            count = self.stop - self.length
+        }
+        for i in 0..count {
+            self.bytes[self.length + i] = bytes[i]
+        }
+        self.length += count
+        .Ok(count)
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, WriteFailure[UInt8]] {
+        .Ok(0)
+    }
+}
+
+impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Buffer `writer` with `capacity` bytes from `allocator`. A zero capacity or
+    // refused storage returns `writer` untouched.
+    pub fn open(allocator: A, capacity: UInt64, sink writer: W) -> Result[Self, BufferOpenFailure[W]] where carries(.Ok: allocator), carries(.Ok.writer: writer), carries(.Err.resource: writer) {
+        if capacity == 0 {
+            return .Err(.{ resource = writer, reason = .ZeroCapacity })
+        }
+        match allocator.acquire(capacity) {
+            Err(reason) => .Err(.{ resource = writer, reason = .Allocation(reason) }),
+            Ok(bytes) => .Ok(.{ writer = writer, bytes = bytes, start = 0, length = 0 }),
+        }
+    }
+}
+
+test fn a_buffer_refusal_returns_the_supplied_writer() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
+    let refused = match BufferedWriter.open(mem.system(), capacity: 0, writer: output) {
+        Ok(writer) => {
+            let _sink = writer.abort()
+            false
+        },
+        Err(failure) => {
+            // The 32-byte recorder holds the refusal reason.
+            var recorder = testing.Recorder.of(mem.system(), 32).unwrap()
+            let explained = failure.fmt(&recorder).is_ok() && recorder.holds("ZeroCapacity")
+            recorder.release()
+            let BufferOpenFailure { resource: returned, reason: reason } = failure
+            explained && returned.stop == 7 && match reason { ZeroCapacity => true, Allocation(_) => false }
+        },
+    }
+    testing.assert(refused, "zero-capacity buffering lost the supplied writer or its reason")?
+    .Ok(())
+}
+
+test fn allocation_refusal_returns_an_untouched_writer() {
+    let arena = mem.Arena.open(mem.system(), size: 0)
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
+    let refused = match BufferedWriter.open(arena.handle(), capacity: 4, writer: output) {
+        Ok(writer) => {
+            let _sink = writer.abort()
+            false
+        },
+        Err(failure) => {
+            let BufferOpenFailure { resource: returned, reason: reason } = failure
+            returned.length == 0 && returned.stop == 7 && match reason { Allocation(_) => true, ZeroCapacity => false }
+        },
+    }
+    arena.release()
+    testing.assert(refused, "allocation refusal changed or lost the writer")?
+    .Ok(())
+}
+
+test fn a_buffered_writer_holds_its_bytes_in_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+    var writer = BufferedWriter.open(arena.handle(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "an arena buffer was refused")
+    }
+    let wrote = line("tea", &writer).is_ok()
+    // ASCII t is byte 116 and a line ending is byte 10.
+    let delivered = match writer.finish() {
+        Ok(output) => output.length == 4 && output.bytes[0] == 116 && output.bytes[3] == 10,
+        Err(failure) => {
+            let FinishFailure { writer: returned, failure: _ } = failure
+            let _output = returned.abort()
+            false
+        },
+    }
+    testing.assert(wrote && delivered, "a writer buffered in an arena lost its bytes")?
+    .Ok(())
+}
+
+impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Return the bytes this buffer holds; underlying writers keep their own
+    // pending bytes.
+    pub fn pending(self: Self) -> mem.Slice[UInt8] where borrows(self) {
+        self.bytes.as_slice().subspan(start: self.start, count: self.length).unwrap()
+    }
+}
+
+test fn pending_holds_the_bytes_not_yet_handed_on() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let accepted = &writer.write_some("ab".as_bytes()).is_ok()
+    let held = writer.pending() == "ab".as_bytes()
+    let flushed = &writer.flush().is_ok()
+    let emptied = writer.pending().length() == 0
+    let _output = writer.abort()
+    testing.assert(accepted && held, "pending did not hold the accepted bytes")?
+    testing.assert(flushed && emptied, "pending kept bytes a flush handed on")?
+    .Ok(())
+}
+
+impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Drop the pending bytes and return the underlying writer.
+    pub fn abort(sink self: Self) -> W where carries(self.writer) {
+        let BufferedWriter { writer: writer, bytes: bytes, start: _, length: _ } = self
+        bytes.release()
+        writer
+    }
+}
+
+test fn abort_drops_pending_bytes_and_returns_the_writer() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let accepted = &writer.write_some("ab".as_bytes()).is_ok()
+    let returned = writer.abort()
+    testing.assert(accepted, "the buffer refused bytes it had room for")?
+    testing.assert_eq(returned.length, UInt64(0), "abort handed pending bytes on")?
+    testing.assert_eq(returned.stop, UInt64(8), "abort returned another writer")?
+    .Ok(())
+}
+
+impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Flush every pending byte and return the underlying writer. A failed flush
+    // returns the whole buffered writer with the failure, so no pending byte is
+    // lost.
+    pub fn finish(sink self: Self) -> Result[W, FinishFailure[W, A, W.Error]] where carries(.Ok: self.writer), carries(.Err: self) {
+        var pending = self
+        match &pending.flush() {
+            Err(failure) => .Err(.{ writer = pending, failure = failure }),
+            Ok(_) => .Ok(pending.abort()),
+        }
+    }
+}
+
+test fn a_buffered_writer_renders_a_utf8_line_across_short_writes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 1, stop = 8 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 1, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let wrote = line("é", &writer).is_ok()
+    let delivered = match writer.finish() {
+        Ok(output) => output.length == 3 && output.bytes[0] == 195 && output.bytes[1] == 169 && output.bytes[2] == 10,
+        Err(failure) => {
+            let FinishFailure { writer: returned, failure: _ } = failure
+            let _output = returned.abort()
+            false
+        },
+    }
+    testing.assert(wrote && delivered, "buffered text output lost UTF-8 bytes or the line ending")?
+    .Ok(())
+}
+
+// FlushOnceWriter fails its first flush and succeeds after it.
+struct FlushOnceWriter {
+    output: BufferedOutputProbe,
+    failed: Bool,
+}
+
+impl ByteWriter for FlushOnceWriter {
+    type Error = UInt8
+
+    fn pending_bytes(self: Self) -> UInt64 {
+        self.output.pending_bytes()
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[UInt8]] where carries() {
+        &self.output.write_some(bytes)
+    }
+
+    fn flush(inout self: Self) -> Result[UInt64, WriteFailure[UInt8]] where carries() {
+        if !self.failed {
+            self.failed = true
+            return .Err(.{ kind = .Underlying, reason = .Some(9), written = 0 })
+        }
+        .Ok(0)
+    }
+}
+
+test fn finishing_after_an_underlying_flush_failure_does_not_repeat_bytes() {
+    let output = FlushOnceWriter {
+        output = .{ bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 },
+        failed = false,
+    }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "writer allocation failed")
+    }
+    let accepted = match &writer.write_some("done".as_bytes()) {
+        Ok(count) => count == 4,
+        Err(_) => false,
+    }
+    var delivered = false
+    var explained = false
+    let returned = match writer.finish() {
+        Ok(_output) => return testing.assert(false, "the first underlying flush succeeded"),
+        Err(failure) => {
+            // Display borrows the failure, so its writer is still returned below.
+            // The 96-byte recorder holds the finishing context and the reason.
+            var recorder = testing.Recorder.of(mem.system(), 96).unwrap()
+            explained = failure.fmt(&recorder).is_ok() && recorder.holds("could not finish buffered output: write failed after 4 bytes: 9")
+            recorder.release()
+            let FinishFailure { writer: writer, failure: error } = failure
+            delivered = error.written == 4
+            writer
+        },
+    }
+    let empty = returned.pending().length() == 0 && returned.pending_bytes() == 0
+    let finished = match returned.finish() {
+        Ok(output) => output.failed && output.output.length == 4 && output.output.bytes[0] == 100 && output.output.bytes[3] == 101,
+        Err(failure) => {
+            let FinishFailure { writer: writer, failure: _ } = failure
+            let _output = writer.abort()
+            false
+        },
+    }
+    testing.assert(accepted && delivered && empty && finished, "retrying flush repeated already-delivered bytes")?
+    testing.assert(explained, "a finishing failure lost its context or reason")?
+    .Ok(())
+}
+
+impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
+    // Update the retained suffix after every accepted prefix, even on failure.
+    // This operation drains bytes without flushing the underlying writer.
+    fn drain(inout self: Self) -> Result[UInt64, WriteFailure[W.Error]] where carries(.Err: self) {
+        let bytes = self.bytes.as_slice().subspan(start: self.start, count: self.length).unwrap()
+        match write_all(&self.writer, bytes) {
+            Ok(written) => {
+                self.start = 0
+                self.length = 0
+                return .Ok(written)
+            },
+            Err(failure) => {
+                self.start += failure.written
+                self.length -= failure.written
+                return .Err(failure)
+            },
+        }
+    }
+}
+
+impl[W: ByteWriter, A: Allocator] ByteWriter for BufferedWriter[W, A] {
+    type Error = W.Error
+
+    fn pending_bytes(self: Self) -> UInt64 {
+        self.length + self.writer.pending_bytes()
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[W.Error]] {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        if self.start + self.length == self.bytes.length() {
+            match &self.drain() {
+                Ok(_) => {},
+                Err(failure) => {
+                    let WriteFailure { kind: kind, reason: reason, written: _ } = failure
+                    return .Err(.{ kind = kind, reason = reason, written = 0 })
+                },
+            }
+        }
+        let available = self.bytes.length() - self.start - self.length
+        let count = if bytes.length() < available {
+            bytes.length()
+        } else {
+            available
+        }
+        for index in 0..count {
+            &self.bytes.store_byte(self.start + self.length + index, bytes[index])
+        }
+        self.length += count
+        .Ok(count)
+    }
+
+    fn flush(inout self: Self) -> Result[UInt64, WriteFailure[W.Error]] {
+        // Moving bytes into another buffer is acceptance, not delivery. Count
+        // only bytes that leave the composed writer's retained output.
+        let pending = self.pending_bytes()
+        let result = match &self.drain() {
+            Ok(_) => &self.writer.flush(),
+            Err(failure) => .Err(failure),
+        }
+        let written = pending - self.pending_bytes()
+        match result {
+            Ok(_) => .Ok(written),
+            Err(failure) => {
+                let WriteFailure { kind: kind, reason: reason, written: _ } = failure
+                return .Err(.{ kind = kind, reason = reason, written = written })
+            },
+        }
+    }
+}
+
+impl[W: ByteWriter, A: Allocator] Writer for BufferedWriter[W, A] {
+    type Error = WriteFailure[W.Error]
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), Self.Error] {
+        match write_all(&self, s.as_bytes()) {
+            Ok(_) => .Ok(()),
+            Err(failure) => .Err(failure),
+        }
+    }
+}
+
+test fn a_buffered_text_failure_preserves_accepted_progress_and_pending_bytes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 1, stop = 3 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 2, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let failed = match &writer.write_str("abcdef") {
+        Ok(_) => false,
+        Err(failure) => failure.written == 4 && match read failure.kind {
+            Underlying => match read failure.reason { Some(reason) => reason == 9, None => false },
+            _ => false,
+        },
+    }
+    let pending = writer.pending()
+    let kept = pending.length() == 1 && pending[0] == 100
+    let output = writer.abort()
+    let delivered = output.length == 3 && output.bytes[0] == 97 && output.bytes[1] == 98 && output.bytes[2] == 99
+    testing.assert(failed && kept && delivered, "text output changed the byte writer's error or progress")?
+    .Ok(())
+}
+
+test fn buffered_output_retries_only_its_unsent_suffix() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 5, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let text = "hello"
+    let accepted = match &writer.write_some(text.as_bytes()) {
+        Ok(count) => count == 5,
+        Err(_) => false,
+    }
+    let failed = match &writer.flush() {
+        Ok(_) => false,
+        Err(failure) => failure.written == 3,
+    }
+    let pending = writer.pending()
+    let suffix = pending.length() == 2 && pending[0] == 108 && pending[1] == 111
+    writer.writer.stop = 8
+    let delivered = match writer.finish() {
+        Ok(output) => output.length == 5 && output.bytes[0] == 104 && output.bytes[1] == 101 && output.bytes[2] == 108 && output.bytes[3] == 108 && output.bytes[4] == 111,
+        Err(failure) => {
+            let FinishFailure { writer: returned, failure: _ } = failure
+            let _sink = returned.abort()
+            false
+        },
+    }
+    testing.assert(accepted && failed && suffix && delivered, "buffered retry lost progress or duplicated delivered bytes")?
+    .Ok(())
+}
+
+test fn draining_a_full_buffer_can_fail_without_accepting_new_bytes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 3, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let first = "abcdef"
+    let accepted = match &writer.write_some(first.as_bytes()) {
+        Ok(count) => count == 3,
+        Err(_) => false,
+    }
+    let next = "def"
+    let refused = match &writer.write_some(next.as_bytes()) {
+        Ok(_) => false,
+        Err(failure) => failure.written == 0,
+    }
+    let pending = writer.pending()
+    let suffix = pending.length() == 1 && pending[0] == 99
+    let recovered = match writer.finish() {
+        Ok(_) => false,
+        Err(failure) => {
+            let FinishFailure { writer: returned, failure: failure } = failure
+            let untouched = failure.written == 0
+            let output = returned.abort()
+            untouched && output.length == 2 && output.bytes[0] == 97 && output.bytes[1] == 98
+        },
+    }
+    testing.assert(accepted && refused && suffix && recovered, "old output progress was counted as newly accepted input")?
+    .Ok(())
+}
+
+test fn a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 3, writer: output) else |_| {
+        return testing.assert(false, "buffer allocation failed")
+    }
+    let first = "abc"
+    let second = "def"
+    let accepted_first = match &writer.write_some(first.as_bytes()) {
+        Ok(count) => count == 3,
+        Err(_) => false,
+    }
+    let accepted_second = match &writer.write_some(second.as_bytes()) {
+        Ok(count) => count == 3,
+        Err(_) => false,
+    }
+    let pending = writer.pending()
+    let suffix = pending == "def".as_bytes()
+    let delivered = match writer.finish() {
+        Ok(output) => output.length == 6 && output.bytes[0] == 97 && output.bytes[1] == 98 && output.bytes[2] == 99 && output.bytes[3] == 100 && output.bytes[4] == 101 && output.bytes[5] == 102,
+        Err(failure) => {
+            let FinishFailure { writer: returned, failure: _ } = failure
+            let _output = returned.abort()
+            false
+        },
+    }
+    testing.assert(accepted_first && accepted_second && suffix && delivered, "draining and refilling changed the output order")?
+    .Ok(())
+}
+
+test fn an_empty_buffered_write_does_not_drain_a_full_buffer() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 0 }
+    var writer = BufferedWriter.open(mem.system(), capacity: 2, writer: output) else |_| {
+        return testing.assert(false, "writer allocation failed")
+    }
+    let accepted = match &writer.write_some("ok".as_bytes()) {
+        Ok(count) => count == 2,
+        Err(_) => false,
+    }
+    let empty = match &writer.write_some("".as_bytes()) {
+        Ok(count) => count == 0,
+        Err(_) => false,
+    }
+    let pending = writer.pending()
+    let intact = pending.length() == 2 && pending[0] == 111 && pending[1] == 107
+    let returned = writer.abort()
+    testing.assert(accepted && empty && intact && returned.length == 0, "empty input drained or changed a full output buffer")?
+    .Ok(())
+}
+
+test fn nested_buffered_flush_preserves_delivery_progress_and_pending_bytes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
+    let inner = BufferedWriter.open(mem.system(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "inner buffer allocation failed")
+    }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: inner) else |failure| {
+        let BufferOpenFailure { resource: inner, reason: _ } = failure
+        let _output = inner.abort()
+        return testing.assert(false, "outer buffer allocation failed")
+    }
+    let accepted = match &writer.write_some("done".as_bytes()) {
+        Ok(count) => count == 4,
+        Err(_) => false,
+    }
+    let failed = match &writer.flush() {
+        Ok(_) => false,
+        Err(failure) => failure.written == 2 && match read failure.kind {
+            Underlying => match read failure.reason { Some(reason) => reason == 9, None => false },
+            _ => false,
+        },
+    }
+    let pending = writer.writer.pending()
+    let kept = writer.pending_bytes() == 2 && writer.pending().length() == 0 && pending.length() == 2 && pending[0] == 110 && pending[1] == 101
+    writer.writer.writer.stop = 8
+    let retried = match &writer.flush() {
+        Ok(count) => count == 2,
+        Err(_) => false,
+    }
+    let empty = writer.pending_bytes() == 0 && writer.pending().length() == 0 && writer.writer.pending().length() == 0
+    let inner = writer.abort()
+    let output = inner.abort()
+    let delivered = output.length == 4 && output.bytes[0] == 100 && output.bytes[1] == 111 && output.bytes[2] == 110 && output.bytes[3] == 101
+    testing.assert(accepted && failed && kept && retried && empty && delivered, "nested flushing changed delivery progress or repeated pending bytes")?
+    .Ok(())
+}
+
+test fn nested_buffered_drain_failure_counts_only_delivered_bytes() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
+    let inner = BufferedWriter.open(mem.system(), capacity: 2, writer: output) else |_| {
+        return testing.assert(false, "inner buffer allocation failed")
+    }
+    var writer = BufferedWriter.open(mem.system(), capacity: 5, writer: inner) else |failure| {
+        let BufferOpenFailure { resource: inner, reason: _ } = failure
+        let _output = inner.abort()
+        return testing.assert(false, "outer buffer allocation failed")
+    }
+    let accepted = match &writer.write_some("hello".as_bytes()) {
+        Ok(count) => count == 5,
+        Err(_) => false,
+    }
+    let failed = match &writer.flush() {
+        Ok(_) => false,
+        Err(failure) => failure.written == 3,
+    }
+    let outer_pending = writer.pending()
+    let inner_pending = writer.writer.pending()
+    let kept = writer.pending_bytes() == 2 && outer_pending.length() == 1 && outer_pending[0] == 111 && inner_pending.length() == 1 && inner_pending[0] == 108
+    writer.writer.writer.stop = 8
+    let retried = match &writer.flush() {
+        Ok(count) => count == 2,
+        Err(_) => false,
+    }
+    let empty = writer.pending_bytes() == 0 && writer.pending().length() == 0 && writer.writer.pending().length() == 0
+    let inner = writer.abort()
+    let output = inner.abort()
+    let delivered = output.length == 5 && output.bytes[0] == 104 && output.bytes[1] == 101 && output.bytes[2] == 108 && output.bytes[3] == 108 && output.bytes[4] == 111
+    testing.assert(accepted && failed && kept && retried && empty && delivered, "nested draining counted buffered bytes as delivered or changed its suffixes")?
+    .Ok(())
+}
+
+test fn three_buffered_layers_count_each_delivered_byte_once() {
+    let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
+    let inner = BufferedWriter.open(mem.system(), capacity: 4, writer: output) else |_| {
+        return testing.assert(false, "inner buffer allocation failed")
+    }
+    let middle = BufferedWriter.open(mem.system(), capacity: 4, writer: inner) else |failure| {
+        let BufferOpenFailure { resource: inner, reason: _ } = failure
+        let _output = inner.abort()
+        return testing.assert(false, "middle buffer allocation failed")
+    }
+    var writer = BufferedWriter.open(mem.system(), capacity: 4, writer: middle) else |failure| {
+        let BufferOpenFailure { resource: middle, reason: _ } = failure
+        let inner = middle.abort()
+        let _output = inner.abort()
+        return testing.assert(false, "outer buffer allocation failed")
+    }
+    let accepted = match &writer.write_some("done".as_bytes()) {
+        Ok(count) => count == 4,
+        Err(_) => false,
+    }
+    let failed = match &writer.flush() {
+        Ok(_) => false,
+        Err(failure) => failure.written == 2,
+    }
+    let pending = writer.writer.writer.pending()
+    let kept = writer.pending_bytes() == 2 && writer.pending().length() == 0 && writer.writer.pending().length() == 0 && pending.length() == 2 && pending[0] == 110 && pending[1] == 101
+    writer.writer.writer.writer.stop = 8
+    let retried = match &writer.flush() {
+        Ok(count) => count == 2,
+        Err(_) => false,
+    }
+    let middle = writer.abort()
+    let inner = middle.abort()
+    let output = inner.abort()
+    let delivered = output.length == 4 && output.bytes[0] == 100 && output.bytes[1] == 111 && output.bytes[2] == 110 && output.bytes[3] == 101
+    testing.assert(accepted && failed && kept && retried && delivered, "three buffered layers counted a byte twice or repeated a delivered prefix")?
+    .Ok(())
+}

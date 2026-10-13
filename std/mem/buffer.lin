@@ -1,0 +1,289 @@
+import std.testing
+
+// A Buffer holds allocated bytes and the allocator's settlement obligation.
+// Opaque fields prevent callers from creating buffers from arbitrary addresses
+// or dropping a system allocation's obligation independently of its storage.
+@opaque
+struct Buffer[A: Allocator] {
+    at: UInt64,
+    len: UInt64,
+    /// Reserved bytes to return at disposal; len records the requested bytes.
+    /// Keeping both accounts for allocators that round requests up.
+    allocated: UInt64,
+    allocator: A,
+    obligation: A.Obligation,
+}
+
+impl[A: Allocator] Release for Buffer[A] {
+    fn release(sink self: Self) -> () {
+        Allocator.dispose(self)
+    }
+}
+
+test fn a_buffer_disposes_through_its_stored_allocator() {
+    let bytes = system().acquire(8).unwrap()
+    let answer = bytes.length()
+    bytes.release()
+    testing.assert_eq(answer, UInt64(8), "buffer release lost its allocation")?
+    .Ok(())
+}
+
+// Observe initialized bytes while retaining the buffer as their owner.
+extern fn buffer_span[A: Allocator](owner: Buffer[A], start: UInt64, count: UInt64) -> Slice[UInt8] where borrows(owner)
+
+// Runtime allocation returns an address, or zero on failure.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+// Return `size` bytes at `at`, allocated with `align`, to the runtime.
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+
+// The compiler replaces these declarations with checked memory accesses.
+// They have no runtime definitions, so an unlowered call fails to link.
+extern fn linea_raw_store(at: UInt64, len: UInt64, i: UInt64, v: UInt64) -> ()
+
+extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64
+
+// Byte accesses check bounds; every byte offset satisfies their alignment.
+extern fn linea_raw_store8(at: UInt64, len: UInt64, i: UInt64, v: UInt8) -> ()
+
+extern fn linea_raw_load8(at: UInt64, len: UInt64, i: UInt64) -> UInt8
+
+// Oom is the recoverable value an allocation failure produces.
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum Oom {
+    Exhausted,
+}
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn oom_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+test fn derived_oom_equality_compares_its_case() {
+    let exhausted: Oom = .Exhausted
+    let same: Oom = .Exhausted
+    testing.assert(exhausted.equals(same), "out-of-memory values differed")?
+    testing.assert(oom_test_accepts_equivalent(same), "Oom did not derive Equivalent")?
+    .Ok(())
+}
+
+test fn derived_oom_rendering_names_its_case() {
+    let exhausted: Oom = .Exhausted
+    let a = system()
+    var writer = testing.Recorder.of(a, 64).unwrap()
+    let wrote = "{exhausted} {exhausted:?}".fmt(&writer).is_ok()
+    let rendered = writer.holds("Exhausted Exhausted")
+    writer.release()
+    testing.assert(wrote, "rendering Oom failed")?
+    testing.assert(rendered, "Oom.Display and Oom.Debug did not render their cases")?
+    .Ok(())
+}
+
+test fn derived_oom_release_consumes_its_case() {
+    let exhausted: Oom = .Exhausted
+    exhausted.release()
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // Eight-byte alignment supports all scalar loads and stores.
+    let alignment: UInt64 = 8
+
+    // Return the requested length in bytes, excluding any extra space the
+    // allocator reserved.
+    pub fn length(self: Self) -> UInt64 {
+        self.len
+    }
+}
+
+// Empty buffers have length zero but still reserve storage that must be freed.
+test fn an_empty_buffer_is_allocated_rather_than_refused() {
+    let a = system()
+    match a.acquire(0) {
+        Err(_) => testing.assert(false, "a buffer of no bytes is refused")?,
+        Ok(b) => {
+            let size = b.length()
+            let reserved = b.allocated
+            b.release()
+            testing.assert_eq(size, 0, "a buffer of no bytes has a length")?
+            testing.assert(reserved != 0, "a buffer of no bytes reserves nothing to give back")?
+        },
+    }
+
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // View the requested bytes while the buffer stays their owner. Bytes the
+    // allocator reserved past the requested length are not part of the view.
+    pub fn as_slice(self: Self) -> Slice[UInt8] where borrows(self) {
+        buffer_span(self, 0, self.len)
+    }
+}
+
+test fn a_buffer_byte_view_covers_the_requested_extent() {
+    let allocator = system()
+    defer var bytes = allocator.acquire(3).unwrap()
+    &bytes.store_byte(1, 201)
+    let view = bytes.as_slice()
+    testing.assert_eq(view.length(), UInt64(3), "buffer view exposed allocator padding")?
+    testing.assert_eq(view[0], UInt8(0), "buffer view lost a zeroed byte")?
+    testing.assert_eq(view[1], UInt8(201), "buffer view lost a stored byte")?
+    testing.assert_eq(view.subspan(start: 3, count: 0).unwrap().length(), UInt64(0), "empty end view was refused")?
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // Store eight bytes at a byte offset. The offset must be eight-byte aligned
+    // and the complete value must fit in the buffer; otherwise the access traps.
+    pub fn store(inout self: Self, i: UInt64, v: UInt64) -> () {
+        linea_raw_store(self.at, self.len, i, v)
+    }
+}
+
+test trap fn store_traps_past_the_end() -> Result[(), testing.Failure] {
+    let a = system()
+    var b = a.acquire(16) else |_| {
+        return testing.assert(false, "a buffer of sixteen bytes was refused")
+    }
+    &b.store(16, 1)
+    b.release()
+    .Ok(())
+}
+
+test trap fn store_traps_at_a_misaligned_offset() -> Result[(), testing.Failure] {
+    let a = system()
+    var b = a.acquire(16) else |_| {
+        return testing.assert(false, "a buffer of sixteen bytes was refused")
+    }
+    &b.store(1, 1)
+    b.release()
+    .Ok(())
+}
+
+// Dispose the buffer before assertions so failure cannot skip cleanup.
+test fn a_buffer_arrives_zeroed_and_holds_what_it_is_given() {
+    let a = system()
+    var b = a.acquire(32) else |_| {
+        return testing.assert(false, "a buffer of thirty-two bytes was refused")
+    }
+    let size = Buffer.length(self: b)
+
+    // Four UInt64 words occupy byte offsets 0, 8, 16 and 24.
+    // Nothing has been stored, so every word reads zero.
+    let front = b.load(0)
+    let back = b.load(24)
+
+    &b.store(8, 1234567890)
+    let stored = b.load(8)
+
+    // Adjacent values must remain unchanged after the store.
+    let before = b.load(0)
+    let after = b.load(16)
+
+    b.release()
+
+    testing.assert_eq(size, 32, "a buffer is not as long as it was asked for")?
+    testing.assert_eq(front, 0, "a buffer arrives holding something")?
+    testing.assert_eq(back, 0, "a buffer arrives holding something past its start")?
+    testing.assert_eq(stored, 1234567890, "a buffer does not hold what was stored in it")?
+    testing.assert_eq(before, 0, "a store reached behind the place it names")?
+    testing.assert_eq(after, 0, "a store reached past the place it names")?
+
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // Load eight bytes. Misalignment or an access past the end traps.
+    pub fn load(self: Self, i: UInt64) -> UInt64 {
+        linea_raw_load(self.at, self.len, i)
+    }
+}
+
+test trap fn load_traps_past_the_end() -> Result[(), testing.Failure] {
+    let a = system()
+    match a.acquire(16) {
+        Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
+        Ok(b) => {
+            let _loaded = b.load(16)
+            b.release()
+        },
+    }
+    .Ok(())
+}
+
+test trap fn load_traps_at_a_misaligned_offset() -> Result[(), testing.Failure] {
+    let a = system()
+    match a.acquire(16) {
+        Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
+        Ok(b) => {
+            let _loaded = b.load(1)
+            b.release()
+        },
+    }
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // Store one byte; an offset past the end traps.
+    pub fn store_byte(inout self: Self, i: UInt64, v: UInt8) -> () {
+        linea_raw_store8(self.at, self.len, i, v)
+    }
+}
+
+test trap fn store_byte_traps_past_the_end() -> Result[(), testing.Failure] {
+    let a = system()
+    var b = a.acquire(8) else |_| {
+        return testing.assert(false, "a buffer of eight bytes was refused")
+    }
+    &b.store_byte(8, 1)
+    b.release()
+    .Ok(())
+}
+
+test fn a_byte_store_reaches_one_byte() {
+    let a = system()
+    var b = a.acquire(8) else |_| {
+        return testing.assert(false, "a buffer of eight bytes was refused")
+    }
+    // Use a nonzero byte above the signed-byte range and inspect
+    // its immediate neighbors at offsets four and six.
+    &b.store_byte(5, 200)
+    let stored = b.load_byte(5)
+    let before = b.load_byte(4)
+    let after = b.load_byte(6)
+    b.release()
+
+    testing.assert_eq(stored, 200, "a buffer does not hold the byte stored in it")?
+    testing.assert_eq(before, 0, "a byte store reached behind the place it names")?
+    testing.assert_eq(after, 0, "a byte store reached past the place it names")?
+
+    .Ok(())
+}
+
+impl[A: Allocator] Buffer[A] {
+    // Load one byte; an offset past the end traps.
+    pub fn load_byte(self: Self, i: UInt64) -> UInt8 {
+        linea_raw_load8(self.at, self.len, i)
+    }
+}
+
+test trap fn load_byte_traps_past_the_end() -> Result[(), testing.Failure] {
+    let a = system()
+    match a.acquire(8) {
+        Err(_) => testing.assert(false, "a buffer of eight bytes was refused")?,
+        Ok(b) => {
+            let _loaded = b.load_byte(8)
+            b.release()
+        },
+    }
+    .Ok(())
+}
+
+impl Oom {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    internal fn is_refusal(self: Self) -> Bool {
+        match read self { Exhausted => true }
+    }
+}

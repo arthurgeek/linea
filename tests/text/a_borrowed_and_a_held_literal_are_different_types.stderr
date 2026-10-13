@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `{interpolation borrow Name}`, found `{interpolation Name}`
+  --> tests/text/a_borrowed_and_a_held_literal_are_different_types.lin:29:12
+   |
+29 |     line = "hi {guest()}"
+   |     ---- expected because of this binding
+   |            ^^^^^^^^^^^^^^ expected `{interpolation borrow Name}`, found `{interpolation Name}`
+   |
+   = help: one literal borrows a variable it cannot copy and the other holds a value computed in its braces; bind the computed value with `let` first, so both borrow a variable

@@ -1,0 +1,32 @@
+// A function's name is a value of the function's own signature, so a `let`
+// holding one needs no written type.
+struct Coffee {
+    shots: UInt8,
+}
+
+impl Coffee {
+    fn add_shot(inout self: Coffee) -> () {
+        self.shots += 1
+    }
+
+    fn brewed(shots: UInt8) -> Coffee {
+        Coffee { shots }
+    }
+}
+
+fn add_one(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn twice(step: fn(read value: UInt8) -> UInt8, value: UInt8) -> UInt8 {
+    step(step(value))
+}
+
+fn main() -> UInt8 {
+    let increment = add_one
+    let strengthen = Coffee.add_shot
+    let brew = Coffee.brewed
+    var mine = brew(2)
+    strengthen(&mine)
+    twice(increment, mine.shots) + increment(value: 0)
+}

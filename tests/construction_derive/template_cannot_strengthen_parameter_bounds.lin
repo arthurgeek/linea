@@ -1,0 +1,22 @@
+trait Measure[A] {
+    fn measure(_self: Self, _context: A) -> UInt64
+}
+
+template impl[A: Copyable] Measure[A] {
+    fn measure(_self: Self, _context: A) -> UInt64 {
+        0
+    }
+}
+
+struct Product {}
+
+derive Measure[UInt8] for Product
+
+fn main() -> UInt8 {
+    let product: Product = .{}
+    if Measure.measure(product, UInt8(0)) == 0 {
+        0
+    } else {
+        1
+    }
+}

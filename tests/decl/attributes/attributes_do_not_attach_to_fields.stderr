@@ -1,0 +1,5 @@
+error[S-Entry]: attributes precede the type declaration
+ --> tests/decl/attributes/attributes_do_not_attach_to_fields.lin:2:5
+  |
+2 |     @copyable
+  |     ^ move this attribute above the declaration

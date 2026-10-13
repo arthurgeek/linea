@@ -1,0 +1,5 @@
+error[S-Expr]: expected an expression
+ --> tests/struct_update/a_base_needs_an_expression.lin:7:35
+  |
+7 |     let moved = Point { x = 5, .. }
+  |                                   ^ this is not the start of an expression

@@ -1,0 +1,48 @@
+function ;main
+local $0 UInt8 value storage=i8
+local $1 UInt8 value storage=i8
+@0:
+  %0 = constant UInt8 value computation=i64 0
+  store UInt8 $0 %0
+  %2 = addr_of UInt8 managed-address $0
+  %3 = call UInt8 value computation=i64 @f1(%2)
+  store UInt8 $1 %3
+  %5 = load UInt8 value computation=i64 $0
+  ret %5
+function ;go
+local $0 UInt8 managed-address
+local $1 Key value storage=bytes
+local $2 Key value storage=bytes
+@0:
+  %0 = addr_of Key managed-address $1
+  %1 = constant UInt64 value computation=i64 0
+  %2 = field_addr UInt8 managed-address %0, %1
+  %3 = constant UInt8 value computation=i64 3
+  store_indirect UInt8 %2, %3
+  %5 = constant UInt8 value computation=i64 0
+  %6 = addr_of Key managed-address $2
+  %7 = addr_of Key managed-address $1
+  move_value Key %6, %7
+  %9 = addr_of Key managed-address $2
+  %10 = load UInt8 managed-address $0
+  %11 = call () value computation=i64 @f2(%9, %10)
+  ret %5
+function ;spend
+local $0 Key value storage=bytes
+local $1 UInt8 managed-address
+local $2 UInt8 value storage=i8
+@0:
+  %0 = addr_of Key managed-address $0
+  %1 = constant UInt64 value computation=i64 0
+  %2 = field_addr UInt8 managed-address %0, %1
+  %3 = load_indirect UInt8 value computation=i64 %2
+  store UInt8 $2 %3
+  %5 = load UInt8 managed-address $1
+  %6 = load_indirect UInt8 value computation=i64 %5
+  %7 = load UInt8 value computation=i64 $2
+  %8 = add UInt8 value computation=i64 %6, %7
+  %9 = check UInt8 value computation=i64 %8 (overflow)
+  %10 = load UInt8 managed-address $1
+  store_indirect UInt8 %10, %9
+  %12 = constant () value computation=i64 0
+  ret %12

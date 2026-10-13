@@ -1,0 +1,23 @@
+// The other direction: a `?` whose payload does meet the position it sits in.
+// The annotation names the payload's type rather than the carrier's, which is
+// what `?` is for -- an expectation that reached the operand instead would
+// refuse this for wanting an `Option` where an `Option` was written.
+fn some() -> Option[UInt8] {
+    Option.Some(7)
+}
+
+fn doubled(n: UInt8) -> UInt8 {
+    n + n
+}
+
+fn go() -> Option[UInt8] {
+    let n: UInt8 = some()?
+    Option.Some(doubled(n))
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Some(n) => n,
+        None => 0,
+    }
+}

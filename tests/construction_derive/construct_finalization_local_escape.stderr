@@ -1,0 +1,12 @@
+error[N-Undefined]: undefined name `value`
+  --> tests/construction_derive/construct_finalization_local_escape.lin:20:32
+   |
+20 |                 let _escaped = value
+   |                                ^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `value`
+  --> tests/construction_derive/construct_finalization_local_escape.lin:31:8
+   |
+13 |         reflect.construct(
+   |         ------------------ generated from this template code
+31 | derive Zero for Pair
+   |        ^^^^ no binding with this name is in scope

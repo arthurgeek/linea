@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Integer`, and `Bool` is not a built-in integer type
+ --> tests/traits/integer_generics/a_closed_integer_bound_excludes_bool.lin:6:5
+  |
+6 |     accept(true)
+  |     ^^^^^^ supply a built-in integer type or an Integer-constrained parameter

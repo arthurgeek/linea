@@ -1,0 +1,8 @@
+struct Ghost {
+    v: UInt8,
+}
+
+pub fn seven() -> UInt8 {
+    let _g: Ghost = .{ v = 7 }
+    7
+}

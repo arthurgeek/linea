@@ -1,0 +1,11 @@
+fn first(values: [UInt8; 2] = [1, 2]) -> UInt8 {
+    values[UInt64(0)]
+}
+
+fn invoke[F: fn(read values: [UInt8; 2] = [2, 1]) -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    invoke(first)
+}

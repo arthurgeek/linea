@@ -1,0 +1,6 @@
+@derive(From[UInt8])
+enum Vacant {}
+
+fn main() -> UInt8 {
+    0
+}

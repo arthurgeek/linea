@@ -1,0 +1,9 @@
+error[O-Leak]: `_tickets` (a linear `[Ticket; 2]`) is still owned when this path leaves
+ --> tests/arrays/inferred_length/linear_elements_must_settle.lin:5:9
+  |
+5 |     let _tickets: [Ticket; _] = [.{ value = 1 }, .{ value = 2 }]
+  |         ^^^^^^^^ never settled on the path that reaches the end of this block
+7 | }
+  | - the block ends here
+  |
+  = help: give it to something that takes it

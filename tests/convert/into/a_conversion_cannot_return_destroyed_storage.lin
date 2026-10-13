@@ -1,0 +1,20 @@
+import std.mem
+
+struct OwnedLabel { text: String[mem.SystemAllocator] }
+
+struct LabelView { text: Str }
+
+impl From[OwnedLabel] for LabelView {
+    fn from(sink source: OwnedLabel) -> LabelView where carries(source) {
+        let OwnedLabel { text: owned } = source
+        let view = owned.view()
+        owned.release()
+        return .{ text = view }
+    }
+}
+
+fn main() -> UInt8 {
+    let label: OwnedLabel = .{ text = "shipment".to_owned(mem.system()).unwrap() }
+    let view: LabelView = label.into()
+    UInt8(view.text.length())
+}

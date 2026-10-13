@@ -1,0 +1,6 @@
+// [T-Index], the first of its two clauses. An index counts, and a Bool is not
+// a count: there is no element a `true` names.
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 3]
+    xs[true]
+}

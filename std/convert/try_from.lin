@@ -1,0 +1,57 @@
+import std.testing
+
+// TryFrom[T] converts a T into the implementing type when the value fits.
+// It returns Some(converted) when the value fits, or None when it does not.
+// The conversion observes its source, so the caller still holds the value
+// after a refusal. Conversions whose entire source range fits the target
+// always return Some.
+pub trait TryFrom[T] {
+    fn try_from(x: T) -> Option[Self]
+}
+
+// TryInto[T] converts a value into T when it fits. Every TryFrom
+// implementation supplies the corresponding TryInto for its source, so a
+// type implements TryFrom and callers may write either direction.
+pub trait TryInto[T] {
+    fn try_into(self: Self) -> Option[T]
+}
+
+impl[T, U: TryFrom[T]] TryInto[U] for T {
+    fn try_into(self: Self) -> Option[U] {
+        U.try_from(self)
+    }
+}
+
+// A seat numbers a place on a small ferry, which carries passengers in seats
+// 1 to 40, so a conversion refuses every other number.
+@copyable
+struct Seat {
+    number: UInt8,
+}
+
+impl TryFrom[UInt64] for Seat {
+    fn try_from(x: UInt64) -> Option[Seat] {
+        if x < 1 || x > 40 {
+            return .None
+        }
+        .Some(.{ number = UInt8(x) })
+    }
+}
+
+test fn try_into_uses_the_destinations_try_from() {
+    let booked: Option[Seat] = UInt64(12).try_into()
+    testing.assert(match read booked { Some(seat) => seat.number == 12, None => false }, "a seat on the ferry was refused")?
+    let aft: Option[Seat] = UInt64(41).try_into()
+    testing.assert(aft.is_none(), "a seat past the last row was accepted")?
+    let written_out: Option[Seat] = UInt64(0).try_into()
+    testing.assert(written_out.is_none(), "seat zero was accepted")?
+}
+
+test fn try_into_narrows_integers_through_their_try_from() {
+    let fits: Option[UInt8] = UInt16(255).try_into()
+    testing.assert_eq(fits, Option.Some(UInt8(255)), "the largest byte was refused")?
+    let overflows: Option[UInt8] = UInt16(256).try_into()
+    testing.assert_eq(overflows, Option.None, "a value past the largest byte was accepted")?
+    let negative: Option[UInt64] = Int64(-1).try_into()
+    testing.assert_eq(negative, Option.None, "a negative value became unsigned")?
+}

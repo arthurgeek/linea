@@ -1,0 +1,22 @@
+import std.http
+import std.mem
+
+// A streamed body is kept in the request's arena and dropped with it, so it
+// cannot own a vector from the system allocator, which must be released.
+fn report[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    let lines: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    http.stream(
+        request,
+        [sink lines] |inout body| {
+            Display.fmt("{lines.length()} lines\n", &body)?
+            return .Ok({})
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let _registered = &router.route_raw("GET /report", report)
+    router.release()
+    0
+}

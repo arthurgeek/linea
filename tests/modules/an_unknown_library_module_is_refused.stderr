@@ -1,0 +1,10 @@
+error[M-Import]: the standard library holds no module named `nosuch`
+ --> tests/modules/an_unknown_library_module_is_refused.lin:9:8
+  |
+9 | import std.nosuch
+  |        ^^^^^^^^^^ cannot import it
+error[M-Unused]: `nosuch` is never used
+ --> tests/modules/an_unknown_library_module_is_refused.lin:9:12
+  |
+9 | import std.nosuch
+  |            ^^^^^^ remove the import

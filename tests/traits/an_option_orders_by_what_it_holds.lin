@@ -1,0 +1,11 @@
+// `None` precedes every `Some`, and two `Some`s order by what they hold.
+fn main() -> UInt8 {
+    let none: Option[UInt8] = .None
+    let one: Option[UInt8] = .Some(1)
+    let two: Option[UInt8] = .Some(2)
+    if none < one && one < two && one == .Some(1) && !(none < none) {
+        0
+    } else {
+        1
+    }
+}

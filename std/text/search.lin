@@ -1,0 +1,188 @@
+import std.testing
+import std.mem
+
+// A SplitError says why text cannot be split: an empty separator would match
+// between every pair of bytes.
+@(copyable, derive(Debug, Release))
+pub enum SplitError {
+    EmptySeparator,
+}
+
+test fn search_errors_can_be_released_explicitly() {
+    let error: SplitError = .EmptySeparator
+    error.release()
+    .Ok(())
+}
+
+// Split yields the fields of a text between occurrences of a separator.
+@opaque
+struct Split {
+    text: Str,
+    separator: Str,
+    at: UInt64,
+    finished: Bool,
+}
+
+impl Iterator for Split {
+    type Item = Str
+
+    fn next(inout self: Self) -> Option[Str] where carries(.Some: self.text) {
+        if self.finished {
+            return .None
+        }
+        let from = self.at
+        match self.text.find(self.separator, start: self.at) {
+            Some(at) => {
+                self.at = at + self.separator.length()
+                self.text.slice(from, at)
+            },
+            None => {
+                self.finished = true
+                self.text.slice(from, self.text.length())
+            },
+        }
+    }
+}
+
+// Return whether `needle` occurs in `s` at byte offset `at`. Callers establish
+// that the complete needle lies within the haystack.
+fn matches_at(s: Str, needle: Str, at: UInt64) -> Bool {
+    let span: Range[UInt64] = 0..needle.length()
+    for i in span {
+        if s.byte(at + i) != needle.byte(i) {
+            return false
+        }
+    }
+    true
+}
+
+impl Str {
+    // Return the byte offset of the first occurrence of `needle` at or after
+    // `start`, or None when there is none or `start` is past the end or inside
+    // a character.
+    // The search compares exact UTF-8 bytes, without normalization, in
+    // O((n - start) * m) time and constant additional storage.
+    pub fn find(self: Self, needle: Str, start: UInt64 = 0) -> Option[UInt64] where carries() {
+        if !starts_a_character(self, start) {
+            return .None
+        }
+        let size = needle.length()
+        let available = self.length() - start
+        if size > available {
+            return .None
+        }
+        var at = start
+        let last = self.length() - size
+        while at <= last {
+            if matches_at(self, needle, at) {
+                return .Some(at)
+            }
+            // Testing before increment permits the maximum representable end.
+            if at == last {
+                return .None
+            }
+            at += 1
+        }
+        .None
+    }
+}
+
+test fn find_respects_boundaries_and_empty_needles() {
+    testing.assert_eq("olá olá".find("á", start: 0), Option.Some(UInt64(2)), "search lost the byte offset")?
+    testing.assert_eq("olá olá".find("á", start: 4), Option.Some(UInt64(7)), "search ignored its start")?
+    testing.assert("olá".find("", start: 3).is_none(), "search accepted a continuation boundary")?
+    testing.assert_eq("olá".find("", start: 4), Option.Some(UInt64(4)), "empty needle did not match the end")?
+    testing.assert("a".find("", start: 2).is_none(), "search accepted a start past the end")?
+    testing.assert("aaa".find("aaaa").is_none(), "long needle matched")?
+    testing.assert("é".find("e\u{301}").is_none(), "search normalized its input")?
+    testing.assert_eq("a\u{0}b".find("\u{0}"), Option.Some(UInt64(1)), "search treated NUL as the end")?
+    .Ok(())
+}
+
+test fn a_search_position_outlives_the_text_that_was_searched() {
+    let source = "before:after".to_owned(mem.system()).unwrap()
+    let position = source.view().find(":")
+    source.release()
+    testing.assert_eq(position.unwrap(), UInt64(6), "search position depended on released text")?
+    .Ok(())
+}
+
+impl Str {
+    // Return whether the text begins with `prefix`.
+    pub fn starts_with(self: Self, prefix: Str) -> Bool {
+        prefix.length() <= self.length() && matches_at(self, prefix, 0)
+    }
+}
+
+test fn starts_with_compares_the_leading_bytes() {
+    testing.assert("ábc".starts_with("á"), "a prefix did not match")?
+    testing.assert("abc".starts_with(""), "the empty prefix did not match")?
+    testing.assert(!"a".starts_with("aa"), "a longer prefix matched")?
+    .Ok(())
+}
+
+impl Str {
+    // Return whether the text ends with `suffix`.
+    pub fn ends_with(self: Self, suffix: Str) -> Bool {
+        if suffix.length() > self.length() {
+            false
+        } else {
+            matches_at(self, suffix, self.length() - suffix.length())
+        }
+    }
+}
+
+test fn ends_with_compares_the_trailing_bytes() {
+    testing.assert("ábc".ends_with("bc"), "a suffix did not match")?
+    testing.assert("abc".ends_with(""), "the empty suffix did not match")?
+    testing.assert(!"a".ends_with("aa"), "a longer suffix matched")?
+    .Ok(())
+}
+
+impl Str {
+    // Return an iterator over the fields between occurrences of `separator`,
+    // keeping empty ones, or refuse an empty separator. The iterator keeps both
+    // descriptors so a separator can itself borrow dynamic text.
+    pub fn split(self: Self, separator: Str) -> Result[Split, SplitError] where carries(.Ok: self, separator) {
+        if separator.length() == 0 {
+            .Err(.EmptySeparator)
+        } else {
+            .Ok(.{ text = copy(self), separator = copy(separator), at = 0, finished = false })
+        }
+    }
+}
+
+test fn split_preserves_empty_fields_and_stays_finished() {
+    var cursor = ",á,,".split(",") else |_| {
+        return testing.assert(false, "nonempty separator was rejected")
+    }
+    testing.assert_eq(&cursor.next(), Option.Some(""), "leading empty field disappeared")?
+    testing.assert_eq(&cursor.next(), Option.Some("á"), "split lost text")?
+    testing.assert_eq(&cursor.next(), Option.Some(""), "interior empty field disappeared")?
+    testing.assert_eq(&cursor.next(), Option.Some(""), "trailing empty field disappeared")?
+    testing.assert(&cursor.next().is_none(), "split continued after its last field")?
+    testing.assert(&cursor.next().is_none(), "finished split restarted")?
+    testing.assert("text".split("").is_err(), "empty separator was accepted")?
+    .Ok(())
+}
+
+test fn split_handles_empty_input_and_multibyte_delimiters() {
+    var empty = "".split(",").unwrap()
+    testing.assert_eq(&empty.next(), Option.Some(""), "empty input did not yield an empty field")?
+    testing.assert(&empty.next().is_none(), "empty input yielded multiple fields")?
+    var count: UInt64 = 0
+    for field in "a€b€".split("€").unwrap() {
+        if count == 0 {
+            testing.assert_eq(field, "a", "first field changed")?
+        }
+        if count == 1 {
+            testing.assert_eq(field, "b", "second field changed")?
+        }
+        if count == 2 {
+            testing.assert_eq(field, "", "trailing field disappeared")?
+        }
+        count += 1
+    }
+    testing.assert_eq(count, UInt64(3), "multibyte delimiter split an incorrect number of fields")?
+    .Ok(())
+}

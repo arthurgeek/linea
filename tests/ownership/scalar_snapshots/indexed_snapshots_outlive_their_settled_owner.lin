@@ -1,0 +1,19 @@
+@linear
+struct Owner { bytes: [UInt8; 2] }
+
+fn close(sink owner: Owner) -> () {
+    let Owner { bytes: _bytes } = owner
+}
+
+fn main() -> UInt8 {
+    var owner: Owner = .{ bytes = [7, 8] }
+    let before = owner.bytes[1]
+    owner.bytes[1] = 9
+    let after = owner.bytes[1]
+    close(owner)
+    if before == 8 && after == 9 {
+        0
+    } else {
+        1
+    }
+}

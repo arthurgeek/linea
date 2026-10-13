@@ -1,0 +1,12 @@
+fn zero[T: Integer](_value: T) -> T {
+    T(0)
+}
+
+fn main() -> UInt8 {
+    let correct = zero(Int8(1)) == Int8(0) && zero(Int16(1)) == Int16(0) && zero(Int32(1)) == Int32(0) && zero(Int64(1)) == Int64(0) && zero(UInt8(1)) == UInt8(0) && zero(UInt16(1)) == UInt16(0) && zero(UInt32(1)) == UInt32(0) && zero(UInt64(1)) == UInt64(0)
+    if correct {
+        0
+    } else {
+        1
+    }
+}

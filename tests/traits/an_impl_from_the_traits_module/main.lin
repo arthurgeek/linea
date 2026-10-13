@@ -1,0 +1,25 @@
+// A module that owns one side of the relationship may write the
+// implementation, and here it owns the trait. Implementing your own trait for
+// another module's type is the case that makes traits worth having: a library
+// defines an abstraction and brings existing types into it.
+//
+// The type is named by bringing it into scope. There is no qualified type
+// path, and traits add none -- `use` already binds another module's
+// declaration under a local name, as an alias rather than a fresh identity.
+import account
+
+use account.Account
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

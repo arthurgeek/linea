@@ -1,0 +1,19 @@
+// `redeem` takes `ticket`, so naming it again in `lookup(ticket)` uses a
+// ticket already taken, whatever `lookup` would have done with it.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    let row = redeem(ticket)
+    let _found = lookup(ticket)
+    row
+}

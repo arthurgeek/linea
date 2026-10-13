@@ -1,0 +1,33 @@
+// The containers the excusal exists to protect. `Cell[T]` and `Box[T]` are
+// Linear only for what the argument turns out to be, and a rule that read a
+// parameter as Linear at the declaration would refuse every generic container
+// anyone writes.
+//
+// Both halves are here, because the rule is only right if both hold: the
+// declaration is accepted, and `Box[Key]` still owes what a `Key` owes once
+// the argument is in. The first is the fixed point of the check, the second is
+// what makes the check worth having.
+struct Cell[T] {
+    v: T,
+}
+
+struct Box[T] {
+    v: Cell[T],
+}
+
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k { Forged(n) => n }
+}
+
+fn main() -> UInt8 {
+    let free: Box[UInt8] = .{ v = .{ v = 3 } }
+    let owed: Box[Key] = .{ v = .{ v = Key.Forged(4) } }
+    let Box { v: cell } = owed
+    let Cell { v: key } = cell
+    free.v.v + burn(key)
+}

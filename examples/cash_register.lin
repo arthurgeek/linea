@@ -1,0 +1,95 @@
+// Count the coins and notes collected from three cash registers.
+import std.io
+import std.testing
+
+// A trait declares an operation shared by different types. `Self` is the
+// implementing type; parameters are read by default, so `self` is lent
+// without being consumed.
+trait Cash {
+    fn cents(self: Self) -> UInt64
+}
+
+struct Coins {
+    pennies: UInt64,
+    nickels: UInt64,
+    dimes: UInt64,
+    quarters: UInt64,
+}
+
+struct Notes {
+    ones: UInt64,
+    fives: UInt64,
+    tens: UInt64,
+    twenties: UInt64,
+}
+
+// `impl Cash for Coins` supplies the trait operation for coin counts.
+impl Cash for Coins {
+    fn cents(self: Self) -> UInt64 {
+        // Coin denominations are worth 1, 5, 10 and 25 cents each.
+        self.pennies + self.nickels * 5 + self.dimes * 10 + self.quarters * 25
+    }
+}
+
+impl Cash for Notes {
+    fn cents(self: Self) -> UInt64 {
+        // Notes are worth 1, 5, 10 or 20 dollars; each dollar is 100 cents.
+        (self.ones + self.fives * 5 + self.tens * 10 + self.twenties * 20) * 100
+    }
+}
+
+// `[T; 3]` holds exactly three values of the same type. `T: Cash` requires
+// that type to implement Cash, so this function can total either array.
+fn total[T: Cash](registers: [T; 3]) -> UInt64 {
+    var cents: UInt64 = 0
+    for read register in registers {
+        cents += register.cents()
+    }
+    cents
+}
+
+test fn coins_are_counted_by_denomination() {
+    let drawer = Coins { pennies = 10, nickels = 2, dimes = 1, quarters = 2 }
+    testing.assert_eq(drawer.cents(), 80, "coin value in cents")?
+}
+
+test fn notes_are_converted_to_cents() {
+    let drawer = Notes { ones = 5, fives = 1, tens = 0, twenties = 1 }
+    testing.assert_eq(drawer.cents(), 3000, "note value in cents")?
+}
+
+test fn register_totals_include_empty_drawers() {
+    let coins: [Coins; _] = [
+        .{ pennies = 0, nickels = 0, dimes = 0, quarters = 0 },
+        .{ pennies = 1, nickels = 1, dimes = 1, quarters = 1 },
+        .{ pennies = 0, nickels = 0, dimes = 0, quarters = 4 },
+    ]
+    let notes: [Notes; _] = [
+        .{ ones = 0, fives = 0, tens = 0, twenties = 0 },
+        .{ ones = 1, fives = 1, tens = 1, twenties = 1 },
+        .{ ones = 0, fives = 0, tens = 0, twenties = 1 },
+    ]
+    testing.assert_eq(total(coins), 141, "coins from all registers")?
+    testing.assert_eq(total(notes), 5600, "notes from all registers")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let coins: [Coins; _] = [
+        .{ pennies = 10, nickels = 2, dimes = 1, quarters = 2 },
+        .{ pennies = 5, nickels = 0, dimes = 0, quarters = 10 },
+        .{ pennies = 0, nickels = 0, dimes = 0, quarters = 4 },
+    ]
+    let notes: [Notes; _] = [
+        .{ ones = 5, fives = 1, tens = 0, twenties = 1 },
+        .{ ones = 0, fives = 0, tens = 2, twenties = 0 },
+        .{ ones = 0, fives = 1, tens = 0, twenties = 2 },
+    ]
+
+    // Each call infers T from its array: Coins first, then Notes.
+    let coin_total = total(coins)
+    let note_total = total(notes)
+    io.println("Coins: {coin_total} cents")?
+    io.println("Notes: {note_total} cents")?
+    io.println("Till total: {coin_total + note_total} cents")?
+    .Ok(0)
+}

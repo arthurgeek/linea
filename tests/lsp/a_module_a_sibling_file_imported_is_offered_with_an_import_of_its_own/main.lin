@@ -1,0 +1,8 @@
+// Two files of one module. The file beside this one wrote `import ledger`, and
+// an import binds inside the file that wrote it -- so this file has bound
+// nothing and an import written here collides with nothing. What may be
+// written here is what an import of its own would reach, and that is one
+// question: the answer before the dot and the answer after it agree.
+fn main() -> UInt8 {
+    ledger.size()
+}

@@ -1,0 +1,10 @@
+enum Wrapped[T, U] { Value(T), Other(U) }
+
+fn wrap[U: Discardable, F: fn(sink value: UInt8) -> Wrapped[UInt8, U]](value: UInt8, factory: F) -> Wrapped[UInt8, U] {
+    factory(value)
+}
+
+fn main() -> UInt8 {
+    let _wrapped = wrap(7, .Value)
+    0
+}

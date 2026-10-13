@@ -1,0 +1,8 @@
+@copyable
+trait Marker {}
+
+impl Marker for UInt8 {}
+
+fn require[T: Marker](sink value: T) -> T where carries(value) { value }
+
+fn main() -> UInt8 { require(UInt8(0)) }

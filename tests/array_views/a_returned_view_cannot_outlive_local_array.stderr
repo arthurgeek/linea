@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/array_views/a_returned_view_cannot_outlive_local_array.lin:5:5
+  |
+5 |     values.as_slice()
+  |     ^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

@@ -1,0 +1,15 @@
+error[T-DefaultedAllocator]: `Vec` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+ --> tests/type_defaults/a_where_clause_or_a_required_trait_makes_a_declaration_generic_over_an_allocator.lin:7:27
+  |
+7 | fn _from_where[A](_names: Vec[Str], _allocator: A) -> UInt8 where A: Allocator {
+  |                           ^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Vec` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_where_clause_or_a_required_trait_makes_a_declaration_generic_over_an_allocator.lin:11:38
+   |
+11 | fn _from_supertrait[A: Pool](_names: Vec[Str], _allocator: A) -> UInt8 {
+   |                                      ^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `Vec` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_where_clause_or_a_required_trait_makes_a_declaration_generic_over_an_allocator.lin:20:36
+   |
+20 |     fn _count(_self: Self, _names: Vec[Str]) -> UInt8 {
+   |                                    ^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant

@@ -1,0 +1,68 @@
+// A generic function named with its type arguments is a value of that
+// instance, whether it is bound or passed where a function is expected. The
+// brackets settle what nothing after the name could: `empty[Bool]` takes no
+// argument that mentions `T`. A type's own operation and a trait's, named
+// through the trait or through the type, take their brackets the same way.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+trait Scale {
+    fn scaled[U: Copyable](self: Self, by: U) -> U where carries(by)
+}
+
+struct Crate {
+    count: UInt8,
+}
+
+impl Scale for Crate {
+    fn scaled[U: Copyable](_self: Self, by: U) -> U where carries(by) {
+        copy(by)
+    }
+}
+
+impl Crate {
+    fn pack[T: Copyable](_self: Self, extra: T) -> T where carries(extra) {
+        copy(extra)
+    }
+}
+
+fn create[P](sink value: P) -> Option[P] where carries(value) {
+    .Some(value)
+}
+
+fn empty[T]() -> Option[T] {
+    .None
+}
+
+fn pair[A, B](sink first: A, sink second: B) -> Pair[A, B] where carries(first, second) {
+    Pair[A, B] { first, second }
+}
+
+fn apply(make: fn(sink value: UInt8) -> Option[UInt8], value: UInt8) -> UInt8 {
+    make(value).unwrap_or(0)
+}
+
+fn main() -> UInt8 {
+    let make = create[UInt8]
+    let nothing = empty[Bool]
+    let join = pair[UInt8, Bool]
+    let joined = join(2, true)
+    let missing = if nothing().is_none() {
+        1
+    } else {
+        0
+    }
+    let set = if joined.second {
+        1
+    } else {
+        0
+    }
+    let through_trait = Scale.scaled[UInt8]
+    let through_type = Crate.scaled[UInt8]
+    let own = Crate.pack[UInt8]
+    let crate = Crate { count = 1 }
+    let scaled = through_trait(crate, 1) + through_type(crate, 2) + own(crate, 3) + crate.count
+    make(3).unwrap_or(0) + apply(create[UInt8], 4) + joined.first + missing + set + scaled - 18
+}

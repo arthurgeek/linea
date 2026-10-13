@@ -1,0 +1,25 @@
+// The monomorphised program is what lowering produced, and a dump of it holds
+// what that program contains and nothing else. A `pub` declaration satisfies
+// [N-Unused] by being exported, so a type nothing reaches is an ordinary
+// program with no such type in it -- and the instantiation the checker
+// interned while checking a body nothing calls is not in it either.
+//
+// Declaring either would make the dump grow with what was available rather
+// than with what the program does, which is the same output the emitted code
+// is careful not to produce.
+pub struct Unreached {
+    v: UInt8,
+}
+
+pub struct Held[T] {
+    v: T,
+}
+
+pub fn unreached() -> UInt8 {
+    let h: Held[UInt8] = .{ v = 3 }
+    h.v
+}
+
+fn main() -> UInt8 {
+    7
+}

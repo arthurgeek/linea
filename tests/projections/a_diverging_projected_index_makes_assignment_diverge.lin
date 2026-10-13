@@ -1,0 +1,21 @@
+struct Grid {
+    cells: [UInt8; 1],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [0] }
+    let _assignment: Bool = if false {
+        g[panic("index")] = 1
+    } else {
+        true
+    }
+    g.cells[0]
+}

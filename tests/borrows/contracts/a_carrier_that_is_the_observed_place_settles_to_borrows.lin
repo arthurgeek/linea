@@ -1,0 +1,24 @@
+// A result that observes the carrier's own place is borrowed from the
+// carrier, so the carrier settles the choice and the body is accepted.
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn first(session: Session, tag: Str) -> borrow Session {
+    if tag.length() > 0 {
+        borrow session
+    } else {
+        borrow session
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let kept = first(session, "x")
+    if kept.user.length() > 0 {
+        0
+    } else {
+        1
+    }
+}

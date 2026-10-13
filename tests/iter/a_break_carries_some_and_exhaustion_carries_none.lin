@@ -1,0 +1,29 @@
+// A walk ends either by stopping at an element or by running out, so a `for` a
+// `break e` can leave has type `Option[E]`: the early exit is `Some(e)` and
+// exhaustion is `None`. Both are written here, because a type that could only
+// say one of them would be a type that says nothing.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..9
+    let found = for x in xs {
+        if x == 5 {
+            break x
+        }
+    }
+
+    let ys: Range[UInt8] = 0..3
+    let ran_out = for y in ys {
+        if y == 9 {
+            break y
+        }
+    }
+
+    let a: UInt8 = match found {
+        Some(v) => v,
+        None => 0,
+    }
+    let b: UInt8 = match ran_out {
+        Some(v) => v,
+        None => 7,
+    }
+    a + b
+}

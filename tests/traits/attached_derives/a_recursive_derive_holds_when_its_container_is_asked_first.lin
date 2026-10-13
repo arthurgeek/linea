@@ -1,0 +1,42 @@
+import std.mem
+
+use mem.SystemAllocator
+
+// A cycle through a derived implementation holds whichever of its types is
+// asked about first: here the vector of trees before the tree.
+@derive(Release)
+struct Tree[T] {
+    value: T,
+    children: Vec[Tree[T], SystemAllocator],
+}
+
+fn settle[T: Release](sink value: T) -> () {
+    value.release()
+}
+
+fn forest() -> () {
+    let trees: Vec[Tree[Str], SystemAllocator] = Vec.new()
+    settle(trees)
+}
+
+fn kids() -> () {
+    let kids: Vec[Tree[Str], SystemAllocator] = Vec.new()
+    kids.release()
+}
+
+fn leaf(sink value: Str) -> Tree[Str] {
+    .{ value = value, children = Vec.new() }
+}
+
+fn trees() -> () {
+    var root = leaf("root")
+    Vec.push(&root.children, leaf("child")).unwrap()
+    root.release()
+}
+
+fn main() -> UInt8 {
+    forest()
+    kids()
+    trees()
+    0
+}

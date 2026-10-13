@@ -1,0 +1,7 @@
+fn multiply(lhs: Int64, rhs: Int64) -> Int64 {
+    lhs * rhs
+}
+
+fn main() -> UInt8 {
+    UInt8(multiply(-4611686018427387905, 2))
+}

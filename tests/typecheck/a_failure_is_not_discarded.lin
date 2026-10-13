@@ -1,0 +1,11 @@
+// `let _` is how a program says it does not want a value, and for every value
+// but one that is a complete answer. A `Result` is a report that something may
+// not have happened, and receiving it and saying nothing is not a decision.
+import std.io
+
+use io.print
+
+fn main() -> UInt8 {
+    let _ = print("gone")
+    0
+}

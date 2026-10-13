@@ -1,0 +1,6 @@
+import units
+
+fn main() -> UInt8 {
+    let distance: units.Meters = units.stride()
+    UInt8(distance / 10)
+}

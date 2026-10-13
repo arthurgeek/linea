@@ -1,0 +1,15 @@
+// A rename to a name in the wrong case for its kind produces a program the
+// compiler refuses, so it is refused rather than applied, and the server says
+// what the kind is and which spelling would do.
+enum Signal {
+    Ready,
+    Idle,
+}
+
+fn main() -> UInt8 {
+    let signal = Signal.Ready
+    match read signal {
+        Ready => 0,
+        Idle => 1,
+    }
+}

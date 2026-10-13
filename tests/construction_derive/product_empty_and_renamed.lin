@@ -1,0 +1,40 @@
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> Self {
+        0
+    }
+}
+
+template impl Zero where reflect.target: struct, reflect.components: Zero {
+    fn zero() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let field: component.Type = Zero.zero()
+                field
+            },
+            {},
+        )
+    }
+}
+
+struct Empty {}
+
+struct Record[T] { value: T }
+
+derive Zero for Empty
+
+derive[U: Zero] Zero for Record[U]
+
+fn main() -> UInt8 {
+    let _empty: Empty = Zero.zero()
+    let record: Record[UInt64] = Zero.zero()
+    if record.value == 0 {
+        0
+    } else {
+        1
+    }
+}

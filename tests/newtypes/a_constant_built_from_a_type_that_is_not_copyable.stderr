@@ -1,0 +1,14 @@
+error[T-Const]: a constant is copied wherever it is read, so `Percent` must be copyable
+ --> tests/newtypes/a_constant_built_from_a_type_that_is_not_copyable.lin:9:31
+  |
+9 | let house_discount: Percent = Percent(10)
+  |                               ^^^^^^^^^^^ built from the parts of `Percent`, which is not copyable
+  |
+  = help: mark `Percent` `@copyable`
+error[T-Const]: a constant is copied wherever it is read, so `text.ScalarPosition` must be copyable
+  --> tests/newtypes/a_constant_built_from_a_type_that_is_not_copyable.lin:11:34
+   |
+11 | let start: text.ScalarPosition = .{ value = 65, offset = 0 }
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^ built from the parts of `text.ScalarPosition`, which is not copyable
+   |
+   = help: `text.ScalarPosition` is not copyable, so write the value where it is used instead

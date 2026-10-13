@@ -1,0 +1,21 @@
+.{
+    .name = .linea,
+    .version = "0.0.0",
+    .fingerprint = 0xbcb8fdde1f4eb647,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .lsp_kit = .{
+            .url = "git+https://github.com/zigtools/lsp-kit.git?ref=0.16.x#e61d6fdf0e498a7aa71c5946c3052e5be9f16343",
+            .hash = "lsp_kit-0.1.0-bi_PL84xDAB33s_-DZPmYwprEqgi-dEjp1qAs36F96TA",
+        },
+        .tracy_src = .{
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.13.1.tar.gz",
+            .hash = "N-V-__8AAOncKwEm1F9c5LrT7HMNmRMYX8-fAoqpc6YyTu9X",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

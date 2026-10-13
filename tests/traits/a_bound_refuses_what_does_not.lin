@@ -1,0 +1,29 @@
+// And refuses one where no implementation exists. Reported at the argument,
+// which is what the writer chose, rather than inside the generic declaration
+// -- a generic body is checked once and no call site can add an error to it.
+struct Account {
+    balance: UInt8,
+}
+
+struct Ledger {
+    entries: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn weighed[T: Measure](_x: T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let l: Ledger = .{ entries = 2 }
+    weighed(l)
+}

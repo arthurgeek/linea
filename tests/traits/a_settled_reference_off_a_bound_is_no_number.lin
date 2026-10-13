@@ -1,0 +1,30 @@
+// Arithmetic is defined over numbers, and the bound promises no number. The
+// body checked once holds a value of a type the instantiation names, so a
+// literal added to it is a literal of some other type -- and what the type
+// would have to be is what the annotation already said.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn _counts[W: Measure](v: W.Item) -> UInt8 {
+    v + 1
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

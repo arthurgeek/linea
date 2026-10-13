@@ -1,0 +1,5 @@
+error[N-Undefined]: `Debug` is not declared in `text`
+ --> tests/modules/text_does_not_export_formatting.lin:4:23
+  |
+4 |     let _debug = text.Debug
+  |                       ^^^^^ no declaration of that name is in that module

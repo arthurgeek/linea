@@ -1,0 +1,8 @@
+enum Shape { Circle, Square, Point }
+
+fn main() -> UInt8 {
+    match Shape.Point {
+        Circle => 9,
+        _ => 3,
+    }
+}

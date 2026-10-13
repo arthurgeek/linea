@@ -1,0 +1,15 @@
+// `refund` is an operation `Refund` gives a `Ticket`, not one of its parts, so
+// selecting it without calling it is refused as a field the type lacks. A
+// name that is neither an operation nor a field of a sealed type is refused
+// under [M-Opaque], which says nothing about its parts.
+import box_office
+
+use box_office.Ticket
+use box_office.Refund
+
+fn main() -> UInt8 {
+    let ticket = Ticket.sell(14)
+    let _refund = ticket.refund
+    let _seats = ticket.seats
+    ticket.refund()
+}

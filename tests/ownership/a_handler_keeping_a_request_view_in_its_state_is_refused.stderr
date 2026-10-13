@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/a_handler_keeping_a_request_view_in_its_state_is_refused.lin:14:9
+   |
+14 |         self.path = request.path()
+   |         ^^^^^^^^^ escape observations only from the signature's declared sources

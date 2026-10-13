@@ -1,0 +1,7 @@
+error[T-MissingArgument]: `x` receives no argument
+  --> tests/traits/a_trait_call_takes_what_it_declares.lin:20:5
+   |
+10 |     fn of(x: Self) -> UInt8
+   |           - declared here
+20 |     Measure.of()
+   |     ^^^^^^^^^^^^ every parameter receives one

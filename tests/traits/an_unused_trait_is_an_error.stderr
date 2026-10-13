@@ -1,0 +1,5 @@
+error[N-Unused]: `Measure` is never used
+ --> tests/traits/an_unused_trait_is_an_error.lin:5:7
+  |
+5 | trait Measure {
+  |       ^^^^^^^ bind it as `_` if the value is not wanted

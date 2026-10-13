@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `UInt8` has no operation `parse`
+ --> tests/type_arguments/a_name_that_is_no_method_and_no_field_is_refused.lin:5:19
+  |
+5 |     let _parsed = count.parse[UInt8]()
+  |                   ^^^^^^^^^^^ no operation of this name is declared for this type

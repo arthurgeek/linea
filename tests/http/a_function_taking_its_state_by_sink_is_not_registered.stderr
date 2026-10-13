@@ -1,0 +1,7 @@
+error[T-Bound]: `H` requires `Endpoint[Counter, SystemAllocator]`, and `fn(sink counter: Counter, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request)` does not implement it
+  --> tests/http/a_function_taking_its_state_by_sink_is_not_registered.lin:16:26
+   |
+16 |     let routed = &router.route("GET /", consume)
+   |                          ^^^^^ implement it for that type, or drop the bound
+   |
+   = help: this function's parameters are `(sink, read)`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)

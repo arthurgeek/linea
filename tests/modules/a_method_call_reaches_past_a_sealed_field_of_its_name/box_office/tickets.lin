@@ -1,0 +1,14 @@
+@opaque
+struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    pub fn seat(self: Ticket) -> UInt8 {
+        self.seat
+    }
+}
+
+pub fn sell(seat: UInt8) -> Ticket {
+    .{ seat = seat }
+}

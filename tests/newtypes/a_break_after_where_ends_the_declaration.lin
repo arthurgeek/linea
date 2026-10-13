@@ -1,0 +1,10 @@
+// The one line break a refinement clause admits is the one before `where`.
+// Past it every token sits on the line the clause opened, so a break there
+// -- here, right after the keyword that opens it -- ends the declaration,
+// and what follows is read as its own.
+pub type Percent = UInt8 where
+    it in 0..=99
+
+fn main() -> UInt8 {
+    42
+}

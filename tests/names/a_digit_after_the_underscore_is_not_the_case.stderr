@@ -1,0 +1,10 @@
+error[N-Case]: variants start with a capital letter
+ --> tests/names/a_digit_after_the_underscore_is_not_the_case.lin:4:5
+  |
+4 |     _1light,
+  |     ^^^^^^^ rename it `_1Light`
+error[N-Case]: fields start with a lowercase letter
+ --> tests/names/a_digit_after_the_underscore_is_not_the_case.lin:9:5
+  |
+9 |     _2Big: UInt8,
+  |     ^^^^^ rename it `_2big`

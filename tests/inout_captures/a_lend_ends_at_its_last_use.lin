@@ -1,0 +1,11 @@
+// `tick` holds `count` lent `inout` until its last call. After that call,
+// `count` is readable again and holds both updates.
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var tick = inout [inout count] || {
+        count += 1
+    }
+    &tick()
+    &tick()
+    count
+}

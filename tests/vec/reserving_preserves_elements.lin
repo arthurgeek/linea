@@ -1,0 +1,16 @@
+import std.mem
+
+fn main() -> UInt8 {
+    var values: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    defer values.release()
+    match Vec.push(&values, 7) { Ok(_) => {}, Err(_) => return 1 }
+    match Vec.reserve(&values, 100) { Ok(_) => {}, Err(_) => return 2 }
+    if values.length() != 1 || values[0] != 7 {
+        return 3
+    }
+    match Vec.reserve(&values, UInt64.max) { Ok(_) => return 4, Err(_) => {} }
+    if values.length() != 1 || values[0] != 7 {
+        return 5
+    }
+    return 0
+}

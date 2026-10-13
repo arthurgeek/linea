@@ -1,0 +1,5 @@
+error[S-Field]: expected a field name
+ --> tests/structs/a_literal_value_without_a_field_name_is_one_mistake.lin:9:23
+  |
+9 |     let size = Size { 5, width = 1, height = 2 }
+  |                       ^ a literal names every field it gives

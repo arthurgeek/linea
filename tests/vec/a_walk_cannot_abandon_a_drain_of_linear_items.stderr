@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking a `mem.Drain[Transaction, mem.Handle[mem.SystemAllocator]]` abandons it where the walk ends, and it is linear
+  --> tests/vec/a_walk_cannot_abandon_a_drain_of_linear_items.lin:23:24
+   |
+23 |     for transaction in pending.drain() {
+   |                        ^^^^^^^^^^^^^^^ it still holds the `Transaction` items it has not handed over, and `Transaction` is linear
+   |
+   = help: bind it, `var remaining = pending.drain()`, walk it lent with `for transaction in &remaining`, then settle `remaining` with `finish()`

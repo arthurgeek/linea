@@ -1,0 +1,8 @@
+// A `read` tuple pattern lends each component of the place it reads, so the
+// place cannot be written while a binder is live.
+fn main() -> UInt8 {
+    var place: (UInt8, UInt8) = (1, 2)
+    let read (a, b) = place
+    place._0 = 9
+    a + b
+}

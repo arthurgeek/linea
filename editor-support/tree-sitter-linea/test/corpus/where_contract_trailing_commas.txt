@@ -1,0 +1,101 @@
+==================
+Callable contracts preserve trailing commas
+==================
+fn main() -> UInt8 {
+    let braced = || -> where
+        carries(),
+    {
+        7
+    }
+    let expression = || -> UInt8 where
+        carries(),
+    8
+    let typed: (fn() -> UInt8 where
+        carries(),
+    ) = || 9
+    let factory = || -> fn() -> UInt8 where
+        carries(),
+    || 10
+    if braced() == 7 && expression() == 8 && typed() == 9 && factory()() == 10 {
+        0
+    } else {
+        1
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (contract_clause
+            (source_contract))
+          (block
+            (expression_statement
+              (integer_literal)))))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (type_identifier)
+          (contract_clause
+            (source_contract))
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (grouped_type
+          (callable_type
+            (parameter_list)
+            (type_identifier)
+            (contract_clause
+              (source_contract))))
+        (lambda_expression
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (callable_type
+            (parameter_list)
+            (type_identifier)
+            (contract_clause
+              (source_contract)))
+          (lambda_expression
+            (integer_literal))))
+      (block_statement
+        (if_expression
+          (binary_expression
+            (binary_expression
+              (binary_expression
+                (binary_expression
+                  (call_expression
+                    (identifier)
+                    (argument_list))
+                  (integer_literal))
+                (binary_expression
+                  (call_expression
+                    (identifier)
+                    (argument_list))
+                  (integer_literal)))
+              (binary_expression
+                (call_expression
+                  (identifier)
+                  (argument_list))
+                (integer_literal)))
+            (binary_expression
+              (call_expression
+                (call_expression
+                  (identifier)
+                  (argument_list))
+                (argument_list))
+              (integer_literal)))
+          (block
+            (expression_statement
+              (integer_literal)))
+          (block
+            (expression_statement
+              (integer_literal))))))))

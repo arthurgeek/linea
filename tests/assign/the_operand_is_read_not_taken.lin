@@ -1,0 +1,10 @@
+// The right side is an operand of the operator, so it sits in a reading
+// position and is read where `a = a + b` reads it. Taking it instead -- which
+// is what copying the plain assignment's walk does, since `=` takes its value
+// -- leaves `b` gone after one update and refuses every later use of it.
+fn main() -> UInt8 {
+    var a: UInt8 = 1
+    let b: UInt8 = 2
+    a += b
+    a + b
+}

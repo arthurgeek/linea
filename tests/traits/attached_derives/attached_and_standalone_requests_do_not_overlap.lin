@@ -1,0 +1,16 @@
+trait Tagged {}
+
+template impl Tagged {}
+
+@derive(Tagged)
+struct Point { value: UInt8 }
+
+derive Tagged for Point
+
+fn tagged[T: Tagged](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    tagged(Point { value = 7 })
+}

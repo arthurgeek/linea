@@ -1,0 +1,9 @@
+error[O-Leak]: `bytes` (a linear `Buffer[A]`) is still owned when this path leaves
+  --> tests/mem/discardability/a_copyable_allocator_does_not_make_its_buffer_discardable.lin:6:31
+   |
+6  | fn abandon[A: Allocator](sink bytes: Buffer[A]) -> UInt8 {
+   |                               ^^^^^ never settled on the path that reaches the end of this block
+12 | }
+   | - the block ends here
+   |
+   = help: settle it first with `bytes.release()`

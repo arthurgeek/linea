@@ -1,0 +1,5 @@
+error[T-Mismatch]: this takes a tuple apart, and the value is a `Point`
+  --> tests/tuples/a_tuple_pattern_over_a_struct_is_refused.lin:10:9
+   |
+10 |     let (x, y) = point
+   |         ^^^^^^ a tuple pattern takes a tuple apart

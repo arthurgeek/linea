@@ -1,0 +1,26 @@
+// Which element a bracket over a container reaches is the implementation's path
+// to decide rather than the number the site wrote: a path that never reads its
+// parameter names one place for every number, and one that computes over it can
+// name one place for two. So two brackets over one container are held to name
+// one place however their numbers settle.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn two(inout a: UInt8, b: UInt8) -> UInt8 {
+    a = 9
+    b
+}
+
+fn main() -> UInt8 {
+    var g: Grid = .{ cells = [1, 2, 3, 4] }
+    two(&g[0], g[1])
+}

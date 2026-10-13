@@ -1,0 +1,41 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/typecheck/a_parameter_type_is_resolved_once.lin:6:42
+  |
+6 |     fn tally(self: Self, counts: [Int64; "3"], marks: [Bool; -1], note: Option[Str, Str]) -> Int64
+  |                                          ^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is not negative
+ --> tests/typecheck/a_parameter_type_is_resolved_once.lin:6:62
+  |
+6 |     fn tally(self: Self, counts: [Int64; "3"], marks: [Bool; -1], note: Option[Str, Str]) -> Int64
+  |                                                              ^^ this is negative
+error[T-Bound]: `Option` takes 1 type argument(s), and was given 2
+ --> tests/typecheck/a_parameter_type_is_resolved_once.lin:6:73
+  |
+6 |     fn tally(self: Self, counts: [Int64; "3"], marks: [Bool; -1], note: Option[Str, Str]) -> Int64
+  |                                                                         ^^^^^^ give it the arguments it declares
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:12:44
+   |
+12 |     fn tally(_self: Self, _counts: [Int64; "3"], _marks: [Bool; -1], _note: Option[Str, Str]) -> Int64 {
+   |                                            ^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is not negative
+  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:12:65
+   |
+12 |     fn tally(_self: Self, _counts: [Int64; "3"], _marks: [Bool; -1], _note: Option[Str, Str]) -> Int64 {
+   |                                                                 ^^ this is negative
+error[T-Bound]: `Option` takes 1 type argument(s), and was given 2
+  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:12:77
+   |
+12 |     fn tally(_self: Self, _counts: [Int64; "3"], _marks: [Bool; -1], _note: Option[Str, Str]) -> Int64 {
+   |                                                                             ^^^^^^ give it the arguments it declares
+error[T-Operands]: expected `Int64`, found `Bool`
+  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:17:31
+   |
+17 | fn total(_counts: [Int64; 1 + true]) -> Int64 {
+   |                           - expected because of this operand
+   |                               ^^^^ expected `Int64`, found `Bool`
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:17:27
+   |
+17 | fn total(_counts: [Int64; 1 + true]) -> Int64 {
+   |                           ^^^^^^^^ this is not a constant

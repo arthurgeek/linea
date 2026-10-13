@@ -1,0 +1,19 @@
+// A line opening with `.` and a lowercase name selects from the value above,
+// so each of these lines continues the expression before it. The chain adds
+// the scores divisible by four, 4 + 8, and `.total` reads the tally's field.
+struct Tally {
+    total: UInt64,
+}
+
+fn main() -> UInt8 {
+    let scores = [UInt64(1), 4, 7, 8]
+    let sum = scores
+        .as_slice()
+        .map(|sink score| *score)
+        .filter(|score| score % 4 == 0)
+        .fold(0, |sink sum, sink score| sum + score)
+    let tally = Tally { total = sum }
+    let total = tally
+        .total
+    UInt8(total)
+}

@@ -1,0 +1,7 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+  --> tests/iter/an_inout_walk_needs_the_ceiling.lin:22:5
+   |
+11 |     proj at(self: Fixed, i: Int64) -> UInt8 {
+   |             ---- declared `read` here
+22 |     for inout c in f {
+   |     ^^^^^^^^^^^^^^^^^^ this walk lends the places it reaches

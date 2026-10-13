@@ -1,0 +1,35 @@
+// A position is what a bracket is written with, so a traversal yields the
+// numbers a projection is indexed by. An iterator handing over anything else
+// walks something, and not this type's places.
+struct Once {
+    left: Bool,
+}
+
+impl Iterator for Once {
+    type Item = Bool
+
+    fn next(inout self: Once) -> Option[Bool] {
+        if self.left {
+            self.left = false
+            return .Some(true)
+        }
+        return .None
+    }
+}
+
+fn once() -> Once {
+    .{ left = true }
+}
+
+struct Bag {
+    xs: [UInt8; 2],
+}
+
+impl Bag {
+    trav positions = once()
+}
+
+fn main() -> UInt8 {
+    let b: Bag = .{ xs = [1, 2] }
+    b.xs[0] + b.xs[1]
+}

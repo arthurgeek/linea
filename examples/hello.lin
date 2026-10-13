@@ -1,0 +1,18 @@
+// Print a greeting in two languages.
+import std.io
+
+// `main` is the program's entry point. Result allows it to report an I/O error.
+fn main() -> Result[UInt8, io.IoError] {
+    // `let` creates an immutable binding. String literals contain UTF-8 text.
+    // The `Str` annotation is optional: the literal determines the type.
+    let name: Str = "Ada"
+
+    // Braces insert a value into the text. `?` returns an error if printing
+    // fails; otherwise execution continues with the next line.
+    io.println("Hello, {name}!")?
+    io.println("Olá, {name}!")?
+
+    // `.Ok(0)` wraps the exit status in Result; zero tells the shell the
+    // program succeeded.
+    .Ok(0)
+}

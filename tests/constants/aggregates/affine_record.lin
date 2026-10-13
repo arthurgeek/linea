@@ -1,0 +1,7 @@
+struct Config { amount: UInt8 }
+
+let config: Config = .{ amount = 7 }
+
+fn main() -> UInt8 {
+    config.amount
+}

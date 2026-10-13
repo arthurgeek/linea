@@ -1,0 +1,5 @@
+error[N-Variant]: `Missing` is not a variant of `Mode`
+ --> tests/constants/enum_variants/unknown_variant_is_not_selected_by_spelling.lin:3:24
+  |
+3 | fn select(mode: Mode = .Missing) -> UInt8 {
+  |                        ^^^^^^^^ not a variant of the type expected here

@@ -1,0 +1,12 @@
+fn apply[T, F: fn(read value: T) -> T](f: F, value: T) -> T where carries(f, value) {
+    f(value)
+}
+
+fn invoke[T: Copyable](value: T) -> T {
+    let identity: fn(read value: T) -> T = |value| copy(value)
+    apply(identity, value)
+}
+
+fn main() -> UInt8 {
+    invoke(UInt8(5))
+}

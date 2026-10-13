@@ -1,0 +1,11 @@
+// An arm begins with a variant, `_`, or a literal, and the parser says so
+// wherever an arm can begin: at the head of the list, and again after a
+// comma that promised another one.
+enum Colour { Red, Green }
+
+fn main() -> UInt8 {
+    match Colour.Red {
+        => 0,
+        Green => 1,
+    }
+}

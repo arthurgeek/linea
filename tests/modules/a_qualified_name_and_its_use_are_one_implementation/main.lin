@@ -1,0 +1,28 @@
+// `Pair[UInt8]` written through `use geo.Pair` and `geo.Pair[UInt8]` written
+// through the module name one declaration, so implementing a trait for both
+// spellings implements it twice.
+import geo
+
+use geo.Pair
+
+struct P {}
+
+trait Takes[T] {
+    fn take(self: Self, value: T) -> UInt8
+}
+
+impl Takes[Pair[UInt8]] for P {
+    fn take(_self: Self, _value: Pair[UInt8]) -> UInt8 {
+        1
+    }
+}
+
+impl Takes[geo.Pair[UInt8]] for P {
+    fn take(_self: Self, _value: geo.Pair[UInt8]) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,9 @@
+// One end outside the base is enough. A clause is an interval within the
+// base's own, so a bound the base cannot hold describes values the type could
+// never carry however they were constructed.
+type Big = UInt8 where it in 0..=1000
+
+fn main() -> UInt8 {
+    let Big(n) = Big(200)
+    n
+}

@@ -1,0 +1,8 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A trait's operation and every member supplying it are one name, so asking\n// where it is used names the signature, every implementation, and every call.\nstruct Account {\n    balance: UInt8,\n}\n\ntrait Measure {\n    fn of(x: Self) -> UInt8\n}\n\nimpl Measure for Account {\n    fn of(x: Self) -> UInt8 {\n        x.balance\n    }\n}\n\nfn main() -> UInt8 {\n    let a: Account = .{ balance = 1 }\n    let w: Weight = .{ grams = 2 }\n    a.of() + w.of()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sizes.lin","languageId":"linea","version":1,"text":"struct Weight {\n    grams: UInt8,\n}\n\nimpl Measure for Weight {\n    fn of(x: Self) -> UInt8 {\n        x.grams\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":7,"character":7}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{"textDocument":{"uri":"sizes.lin"},"context":{"includeDeclaration":true},"position":{"line":5,"character":7}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":19,"character":6}}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/documentHighlight","params":{"textDocument":{"uri":"main.lin"},"position":{"line":7,"character":7}}}
+{"jsonrpc":"2.0","id":6,"method":"shutdown"}

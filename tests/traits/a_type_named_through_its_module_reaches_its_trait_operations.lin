@@ -1,0 +1,14 @@
+// A type named through its module reaches the operations of the traits it
+// implements as a bare name does: `json.ParseLimits.default()` builds the
+// standard limits, and a literal takes its other fields from them.
+import std.json
+
+fn main() -> UInt8 {
+    let standard = json.ParseLimits.default()
+    let tighter = json.ParseLimits { max_nodes = 10, ..json.ParseLimits.default() }
+    if tighter.max_nodes < standard.max_nodes {
+        0
+    } else {
+        1
+    }
+}

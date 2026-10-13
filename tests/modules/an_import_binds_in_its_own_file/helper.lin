@@ -1,0 +1,5 @@
+import util
+
+fn helper() -> UInt8 {
+    util.one()
+}

@@ -1,0 +1,16 @@
+import std.hash
+import std.mem
+
+fn main() -> UInt8 {
+    let owned = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer owned.release()
+    let equal = "café\u{0}".to_owned(mem.system()).unwrap()
+    defer equal.release()
+    let different = "cafè\u{0}".to_owned(mem.system()).unwrap()
+    defer different.release()
+    if Equatable.equals(owned, equal) && !Equatable.equals(owned, different) && hash.Hash.hash(owned) == hash.Hash.hash(equal) && hash.Hash.hash(owned) == hash.Hash.hash("café\u{0}") && hash.Hash.hash(owned) != hash.Hash.hash("café") && hash.Hash.hash("") != hash.Hash.hash("\u{0}") && Equatable.equals({}, {}) && hash.Hash.hash({}) == hash.Hash.hash({}) {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/traits/integer_generics/symbolic_arithmetic_traps_in_a_narrow_instantiation.lin:2:12

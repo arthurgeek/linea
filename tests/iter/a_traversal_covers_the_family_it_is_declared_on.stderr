@@ -1,0 +1,5 @@
+error[T-Lend]: `Pair[Int64]` declares no traversal
+  --> tests/iter/a_traversal_covers_the_family_it_is_declared_on.lin:26:19
+   |
+26 |     for read x in p {
+   |                   ^ the implementation that declares one does not answer for this type

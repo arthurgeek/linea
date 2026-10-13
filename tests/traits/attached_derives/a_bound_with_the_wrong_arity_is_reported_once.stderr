@@ -1,0 +1,10 @@
+error[T-Bound]: `Equatable` takes 0 type argument(s), and this bound supplies 1
+ --> tests/traits/attached_derives/a_bound_with_the_wrong_arity_is_reported_once.lin:2:16
+  |
+2 | struct Cell[T: Equatable[UInt8]] {
+  |                ^^^^^^^^^ this trait takes no arguments
+error[T-Bound]: `T` requires `Equatable[UInt8]`, and `UInt8` does not implement it
+ --> tests/traits/attached_derives/a_bound_with_the_wrong_arity_is_reported_once.lin:7:16
+  |
+7 |     let cell = Cell[UInt8] { value = 1 }
+  |                ^^^^ implement it for that type, or drop the bound

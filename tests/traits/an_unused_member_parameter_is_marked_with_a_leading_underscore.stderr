@@ -1,0 +1,5 @@
+error[N-Unused]: `by` is never used
+  --> tests/traits/an_unused_member_parameter_is_marked_with_a_leading_underscore.lin:13:26
+   |
+13 |     fn scale(self: Self, by: Int32) -> Int32 {
+   |                          ^^ name it with a leading `_` if the value is not wanted

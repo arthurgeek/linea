@@ -1,0 +1,7 @@
+fn size() -> UInt8 {
+    1
+}
+
+fn twice() -> UInt8 {
+    size() + size()
+}

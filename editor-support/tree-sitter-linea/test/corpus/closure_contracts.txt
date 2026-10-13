@@ -1,0 +1,59 @@
+==================
+Closure contracts before the body
+==================
+fn main() -> UInt8 {
+    let inspect = [owner] |value: borrow UInt8| -> where carries(value), borrows(owner) value
+    let store = inout [sink held] |input: borrow UInt8| -> where retains(held: input) { held = copy(input) }
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (parameter
+            (identifier)
+            (borrow_type
+              (type_identifier)))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier)))
+            (source_contract
+              (source_path
+                (identifier))))
+          (identifier)))
+      (let_statement
+        (identifier)
+        (lambda_expression
+          (capture_list
+            (capture
+              (identifier)))
+          (parameter
+            (identifier)
+            (borrow_type
+              (type_identifier)))
+          (contract_clause
+            (source_contract
+              (source_path
+                (identifier))
+              (source_path
+                (identifier))))
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (copy_expression
+                  (identifier)))))))
+      (expression_statement
+        (integer_literal)))))

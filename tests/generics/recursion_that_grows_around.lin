@@ -1,0 +1,21 @@
+// Growth around a cycle rather than at a single declaration. `ping` hands
+// `pong` more than it was given and `pong` hands it back, so the two together
+// grow without either doing so alone -- which is why the rule asks whether a
+// call can reach its own declaration again rather than whether it names it.
+@copyable
+enum Wrap[T] {
+    Only(T),
+}
+
+fn ping[T: Copyable](a: T) -> UInt8 {
+    pong(Wrap.Only(copy(a)))
+}
+
+fn pong[T: Copyable](a: T) -> UInt8 {
+    ping(a)
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 1
+    ping(n)
+}

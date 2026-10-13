@@ -1,0 +1,6 @@
+// A module this file has not imported. What binds its name is the import, so
+// the module is offered with that import beside it, and each name it exports
+// is offered qualified -- the only spelling that crosses a module boundary.
+fn main() -> UInt8 {
+    0
+}

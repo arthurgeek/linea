@@ -1,0 +1,11 @@
+enum RenderError { Allocation(UInt8) }
+
+fn render() -> Result[UInt8, RenderError] {
+    let source: Option[UInt8] = .Some(7)
+    let wrapped: RenderError = source.map(.Allocation)?
+    return .Err(wrapped)
+}
+
+fn main() -> UInt8 {
+    match render() { Ok(_) => 0, Err(_) => 1 }
+}

@@ -1,0 +1,5 @@
+error[S-Test]: a test answers `Result[(), E]`, which is whether it failed
+ --> tests/typecheck/a_test_answers_a_result_of_nothing.lin:3:28
+  |
+3 | test fn a_thing_holds() -> UInt8 {
+  |                            ^^^^^ this one answers `UInt8`

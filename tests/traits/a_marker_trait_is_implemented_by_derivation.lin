@@ -1,0 +1,18 @@
+trait Structural {}
+
+template impl Structural {}
+
+struct Mark {
+    value: UInt8,
+}
+
+derive Structural for Mark
+
+fn accept[T: Structural](_value: T) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    let mark: Mark = .{ value = 1 }
+    accept(mark)
+}

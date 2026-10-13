@@ -1,0 +1,11 @@
+// `first` settles `T` as a function type, and a settled type flows into every
+// argument, so the lambda's `value` needs no annotation.
+fn pick[T](sink first: T, _second: T) -> T where carries(first) {
+    first
+}
+
+fn main() -> UInt8 {
+    let add_one: fn(value: UInt64) -> UInt64 = |value| value + 1
+    let chosen = pick(add_one, |value| value + 2)
+    UInt8(chosen(41))
+}

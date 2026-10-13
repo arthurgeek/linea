@@ -1,0 +1,5 @@
+error[S-Match]: expected `,`
+  --> tests/multiline_strings/an_arm_after_a_multiline_literal_needs_its_comma.lin:10:9
+   |
+10 |         Long => \\at length
+   |         ^^^^ the arm above ends in a `\\` line, which runs to its end; write its body as a block: `=> {`, its lines, then `},`

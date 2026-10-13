@@ -1,0 +1,5 @@
+error[N-Undefined]: `Measure` declares no `remaining`
+  --> tests/traits/a_trait_declares_no_such_operation.lin:27:13
+   |
+27 |     Measure.remaining(a)
+   |             ^^^^^^^^^ only what the trait declares is reached through it

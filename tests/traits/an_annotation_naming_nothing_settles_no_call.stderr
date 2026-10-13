@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Missing`
+ --> tests/traits/an_annotation_naming_nothing_settles_no_call.lin:4:17
+  |
+4 |     let _value: Missing = Default.default()
+  |                 ^^^^^^^ no type with this name is declared here

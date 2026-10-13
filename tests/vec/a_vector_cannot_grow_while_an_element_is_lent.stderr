@@ -1,0 +1,5 @@
+error[O-Lent]: this writes a place the construct around it is lending
+ --> tests/vec/a_vector_cannot_grow_while_an_element_is_lent.lin:7:24
+  |
+7 |         match Vec.push(&values, 8) { Ok(_) => {}, Err(_) => panic("push failed") }
+  |                        ^^^^^^^ write it after the construct ends, or take what it names instead of lending it

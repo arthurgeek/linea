@@ -1,0 +1,10 @@
+error[N-Variant]: the enum has no such variant
+  --> tests/traits/a_settled_reference_off_a_bound_has_no_variants.lin:24:9
+   |
+24 |         Dark => 0,
+   |         ^^^^ not a variant of what is matched
+error[N-Variant]: the enum has no such variant
+  --> tests/traits/a_settled_reference_off_a_bound_has_no_variants.lin:25:9
+   |
+25 |         Light => 1,
+   |         ^^^^^ not a variant of what is matched

@@ -1,0 +1,14 @@
+// A call that finds no operation is refused, and what it would have done with
+// its receiver and arguments is unknown. So neither `ticket` nor `voucher` is
+// reported as unsettled: the refused call is the one mistake.
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket { seat = 3 }
+    let voucher = Ticket { seat = 4 }
+    ticket.exchange(voucher)
+    0
+}

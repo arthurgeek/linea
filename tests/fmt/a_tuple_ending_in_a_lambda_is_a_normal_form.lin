@@ -1,0 +1,14 @@
+// A tuple holding a lambda with a block body is written one component per
+// line, as a call holding one is, so formatting it twice changes nothing. A
+// broken chain inside a tuple keeps one call per line.
+fn main() -> UInt8 {
+    let (base, step) = (UInt8(2), |sink x: UInt8| {
+        let doubled = x * 2
+        doubled + 1
+    })
+    let readings = [UInt8(1), 2, 3]
+    let (total, count) = (readings.as_slice().map(|sink reading| *reading)
+        .fold(0, |sink sum, sink reading| sum + reading), UInt8(3))
+    // `step(base)` is 5 and the readings total 6.
+    step(base) + total - count - 8
+}

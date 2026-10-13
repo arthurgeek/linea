@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/closure_captures/captured_destination_requires_contract.lin:5:9
+  |
+5 |         saved = copy(value)
+  |         ^^^^^ escape observations only from the signature's declared sources

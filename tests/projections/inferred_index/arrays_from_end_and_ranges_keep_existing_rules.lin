@@ -1,0 +1,14 @@
+fn main() -> UInt8 {
+    var values: [UInt8; 4] = [1, 2, 3, 4]
+    values[Int8(0)] += 1
+    values[UInt16(1)] += 1
+    values[^1] += 1
+    let end = FromEnd { k = 1 }
+    let middle: [UInt8; 2] = copy(values[1..3])
+    values[1..3] = [8, 9]
+    if values[0] == 2 && middle[0] == 3 && middle[1] == 3 && values[1] == 8 && values[end] == 5 {
+        0
+    } else {
+        1
+    }
+}

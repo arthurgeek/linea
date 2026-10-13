@@ -1,0 +1,14 @@
+@copyable
+type Percent = UInt8 where it in 0..=100
+
+fn main() -> UInt8 {
+    let first = Percent(30)
+    let second = copy(first)
+    let Percent(left) = first
+    let Percent(right) = second
+    if left == right {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,13 @@
+// `Default`'s template builds a struct from its fields, so an enum cannot
+// derive it: the enum names the variant it starts from by implementing
+// `Default` itself. The mistake is reported once, at the derive.
+@derive(Default)
+enum Volume {
+    Quiet,
+    Loud,
+}
+
+fn main() -> UInt8 {
+    let _volume = Volume.Quiet
+    0
+}

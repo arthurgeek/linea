@@ -1,0 +1,36 @@
+// `Swap[UInt8, Bool]` stands for `Pair[Bool, UInt8]`, so the two bounds are one
+// and `Elem` is read through it.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+alias Swap[A, B] = Pair[B, A]
+
+trait Lookup[I] {
+    type Elem
+
+    fn at(self: Self, i: I) -> Elem where carries(self, i)
+}
+
+struct Board {
+    cells: UInt8,
+}
+
+impl Lookup[Pair[Bool, UInt8]] for Board {
+    type Elem = UInt8
+
+    fn at(self: Board, i: Pair[Bool, UInt8]) -> UInt8 {
+        self.cells + i.second
+    }
+}
+
+fn pass[C: Lookup[Swap[UInt8, Bool]] + Lookup[Pair[Bool, UInt8]]](sink v: C.Elem) -> C.Elem {
+    v
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = 1 }
+    let p: Pair[Bool, UInt8] = .{ first = true, second = 2 }
+    pass[Board](Lookup.at(b, p))
+}

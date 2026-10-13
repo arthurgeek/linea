@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Blank` and `Gauge` both declare `reading` for `G`
+  --> tests/traits/a_postfix_call_two_bounds_answer_names_each_trait/main.lin:12:5
+   |
+12 |     level.reading()
+   |     ^^^^^^^^^^^^^ write `Blank.reading(…)` or `gauge.Gauge.reading(…)`, which says which trait it goes through

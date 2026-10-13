@@ -1,0 +1,10 @@
+error[T-Default]: a default cannot have the parameter type `Self`
+  --> tests/traits/a_self_typed_parameter_admits_no_default.lin:13:35
+   |
+13 |     fn pad(s: Self, extra: Self = 1) -> UInt8
+   |                                   ^ the parameter type is settled by the call
+error[T-Default]: a default cannot have the parameter type `Self`
+  --> tests/traits/a_self_typed_parameter_admits_no_default.lin:27:34
+   |
+27 |     fn widen(s: Self, by: Self = 1) -> UInt8
+   |                                  ^ the parameter type is settled by the call

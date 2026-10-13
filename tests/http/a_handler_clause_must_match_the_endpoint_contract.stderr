@@ -1,0 +1,12 @@
+error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read author: Author, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(author)` does not implement it
+  --> tests/http/a_handler_clause_must_match_the_endpoint_contract.lin:25:26
+   |
+25 |     let routed = &router.route("GET /", hello)
+   |                          ^^^^^ implement it for that type, or drop the bound
+   |
+   = help: its parameter conventions are ones `Endpoint` is implemented for, so its parameter types or its contract differ from the implementation's
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/http/a_handler_clause_must_match_the_endpoint_contract.lin:20:5
+   |
+20 |     http.text(request, "hello {author.name}")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

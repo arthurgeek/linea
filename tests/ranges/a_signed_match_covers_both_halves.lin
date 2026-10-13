@@ -1,0 +1,13 @@
+// A signed scrutinee's negative half is written the way the positive half
+// is: a minus belongs to a bound, so `-128..=-1` is an arm and not a
+// spelling accident, and both halves cover the type with no `_`.
+fn classify(b: Int8) -> UInt8 {
+    match read b {
+        -128..=-1 => 1,
+        0..=127 => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    classify(-5) * 10 + classify(64)
+}

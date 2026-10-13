@@ -1,0 +1,11 @@
+pub struct X {
+    n: UInt8,
+}
+
+pub fn mk() -> X {
+    .{ n = 1 }
+}
+
+pub fn helper() -> UInt8 {
+    5
+}

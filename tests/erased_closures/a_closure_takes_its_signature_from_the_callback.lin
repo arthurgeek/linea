@@ -1,0 +1,16 @@
+import std.mem
+
+// Nothing here names the closure's type, so the lambda's own written
+// signature becomes it.
+fn main() -> Result[UInt8, mem.Oom] {
+    let offset: UInt8 = 2
+    let shifted = mem.Closure.open(
+        mem.system(),
+        [sink offset] |value: UInt8| -> UInt8 {
+            value + offset
+        },
+    )?
+    let answer = shifted(40)
+    shifted.release()
+    return .Ok(answer)
+}

@@ -1,0 +1,52 @@
+// A traversal is an iterator a walk builds and abandons where it ends, so the
+// same rule governs it as governs the one a `Sequence` vends: an iterator
+// obliging disposal would be a value the loop holds at an exit with nothing
+// written to take it.
+//
+// Asked at the declaration, because that is where the choice was made. A walk
+// finding this traversal would be refused once per loop for one mistake.
+@linear
+struct Steps {
+    left: Int64,
+}
+
+impl Iterator for Steps {
+    type Item = Int64
+
+    fn next(inout self: Steps) -> Option[Int64] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left = self.left - 1
+        return .Some(self.left)
+    }
+}
+
+fn counting() -> Steps {
+    .{ left = 4 }
+}
+
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[Int64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Grid {
+    trav positions = counting()
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    var total: UInt8 = 0
+    for read c in g {
+        total += c
+    }
+    total
+}

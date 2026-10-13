@@ -1,0 +1,8 @@
+fn broken() -> UInt8 {
+    let _bad = |: UInt8| 1
+    2
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,11 @@
+import std.mem
+
+// Nothing says what `value` is: no closure type is expected here, and the
+// lambda writes no parameter type.
+fn main() -> Result[UInt8, mem.Oom] {
+    let step: UInt8 = 1
+    let next = mem.Closure.open(mem.system(), [sink step] |value| value + step)?
+    let answer = next(1)
+    next.release()
+    return .Ok(answer)
+}

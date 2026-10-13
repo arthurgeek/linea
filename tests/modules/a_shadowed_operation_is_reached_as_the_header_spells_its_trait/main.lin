@@ -1,0 +1,27 @@
+// `Door` declares `close` itself, and `shut.Shut`, which the implementation's
+// header spells as a path, declares one too. The warning spells the trait as
+// the header did and puts the member's own receiver in the call, so the form
+// it suggests is one this module can write.
+import shut
+
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+impl shut.Shut for Door {
+    fn close(self: Self) -> UInt8 {
+        self.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let front: Door = .{ width = 4 }
+    let back: Door = .{ width = 4 }
+    front.close() + shut.Shut.close(back)
+}

@@ -1,0 +1,5 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_one_tuple_is_a_group_and_a_trailing_comma_is_refused.lin:5:16
+  |
+5 |     let _one = (7,)
+  |                ^ `(x)` groups `x`; drop the comma, or add a second component

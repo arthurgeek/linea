@@ -1,0 +1,32 @@
+// `()` is a type wherever a type is written, not only where a function says it
+// answers nothing.
+//
+// It was readable in a return position alone, on the reasoning that a parameter
+// or a binding of this type would carry no value. That was true and stopped
+// covering the case: a call that can fail and has nothing to report on success
+// answers `Result[(), E]`, and there is no other way to spell it. Before this
+// the instantiation existed and was reachable only from an argument that
+// produced nothing.
+fn nothing_or_a_number(fail: Bool) -> Result[(), Int64] {
+    if fail {
+        .Err(7)
+    } else {
+        .Ok(())
+    }
+}
+
+fn main() -> UInt8 {
+    // `()` is the unit value, which is what the `Ok` above carries and what a
+    // match on it binds.
+    let went: UInt8 = match nothing_or_a_number(false) {
+        Ok(_) => 1,
+        Err(_) => 0,
+    }
+
+    let failed: UInt8 = match nothing_or_a_number(true) {
+        Ok(_) => 0,
+        Err(n) => UInt8(n),
+    }
+
+    went + failed
+}

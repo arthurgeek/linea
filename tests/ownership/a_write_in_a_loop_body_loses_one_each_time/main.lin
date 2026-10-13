@@ -1,0 +1,17 @@
+// A write in a loop body loses one value per iteration, so what is lost scales
+// with the trip count.
+//
+// [O-Loop] does not reach it. That rule is about moving a binding declared
+// outside the loop, and a write moves nothing -- which is why the leak
+// question is asked of the write itself rather than left to the rule that
+// happens to be about loops.
+fn main() -> UInt8 {
+    var k = mint(7)
+    var i: UInt8 = 0
+    while i < 3 {
+        k = mint(1)
+        i = i + 1
+    }
+    release(k)
+    0
+}

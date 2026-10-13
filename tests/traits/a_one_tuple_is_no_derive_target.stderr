@@ -1,0 +1,5 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/traits/a_one_tuple_is_no_derive_target.lin:7:22
+  |
+7 | derive[A] Marker for (A,)
+  |                      ^ `(x)` groups `x`; drop the comma, or add a second component

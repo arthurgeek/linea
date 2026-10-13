@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    while false {
+        1
+    }
+    0
+}

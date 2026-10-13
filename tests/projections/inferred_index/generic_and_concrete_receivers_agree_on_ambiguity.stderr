@@ -1,0 +1,5 @@
+error[T-Infer]: `Board[T]` is indexed by more than one integer type, including `UInt8` and `Int16`
+  --> tests/projections/inferred_index/generic_and_concrete_receivers_agree_on_ambiguity.lin:17:11
+   |
+17 |     board[1]
+   |           ^ write the key with the type you mean

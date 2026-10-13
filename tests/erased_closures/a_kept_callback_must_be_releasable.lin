@@ -1,0 +1,20 @@
+import std.mem
+
+// A key has no `Release`, so a closure owning one could not be released once
+// its type is erased.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+fn main() -> UInt8 {
+    let key = Key { id = 3 }
+    let reveal = mem.Closure.open(
+        mem.system(),
+        [sink key] || -> UInt8 {
+            key.id
+        },
+    ).unwrap()
+    reveal.release()
+    0
+}

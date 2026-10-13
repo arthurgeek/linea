@@ -1,0 +1,14 @@
+error[O-Capture]: this name is not declared in the closure capture list
+ --> tests/closure_captures/a_closure_that_changes_an_uncaptured_name_needs_it_lent.lin:8:9
+  |
+8 |         count += 1
+  |         ^^^^^ this name belongs to an enclosing body
+  |
+  = help: the closure changes `count`, so lend it to the closure: `inout [inout count]` before the parameters lends `count` until the closure's last use
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_closure_that_changes_an_uncaptured_name_needs_it_lent.lin:11:27
+   |
+11 |     let add = [count] || &names.push(count)
+   |                           ^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure changes `names`, so lend it to the closure: add `inout names` to the capture list and write `inout` before the list, which lends `names` until the closure's last use

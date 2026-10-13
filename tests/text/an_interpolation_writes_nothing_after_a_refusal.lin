@@ -1,0 +1,49 @@
+// A literal stops at the piece the writer refuses, and the pieces after it are
+// never written -- so what a programmer sees is what got through, and not the
+// whole literal with a failure reported at the end.
+//
+// The writer counts what it takes and refuses once it has taken enough, so the
+// refusal falls in the middle of the literal rather than at its first byte.
+// That is what makes the two readings tell themselves apart: a run that stops
+// prints `1` and a run that renders every piece and reports the last failure
+// prints `123`. A writer that refuses everything answers the same status under
+// both, which is a status a program writing nothing at all also answers.
+import std.io
+
+use io.Descriptor
+use io.stdout
+
+struct Refused {
+    why: Int64,
+}
+
+struct Counting {
+    out: Descriptor,
+    left: Int64,
+}
+
+impl Writer for Counting {
+    type Error = Refused
+
+    fn write_str(inout self: Counting, s: Str) -> Result[(), Refused] {
+        if self.left <= 0 {
+            return .Err(.{ why = 1 })
+        }
+        self.left = self.left - 1
+        match Writer.write_str(&self.out, s) {
+            Ok(_) => .Ok({}),
+            Err(_) => .Err(.{ why = 2 }),
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var w: Counting = .{ out = stdout(), left = 3 }
+    let a: Int64 = 1
+    let b: Int64 = 2
+    let c: Int64 = 3
+    match Display.fmt("{a}{b}{c}", &w) {
+        Ok(_) => 0,
+        Err(_) => 3,
+    }
+}

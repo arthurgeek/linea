@@ -1,0 +1,5 @@
+error[T-UnknownField]: `shapes.Door` has no field `open`
+ --> tests/modules/a_value_selection_of_another_modules_operation_names_its_path/main.lin:9:19
+  |
+9 |     let _opener = door.open
+  |                   ^^^^^^^^^ `open` is an operation of `Door`, not a field; where a function is expected, write `shapes.Door.open`, which takes the receiver as its first argument

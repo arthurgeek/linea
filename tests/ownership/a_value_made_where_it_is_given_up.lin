@@ -1,0 +1,29 @@
+// `key()` makes a value and hands it to `use2`, which never begins. Nothing
+// named it, and having no name changes nothing about what it owes: the state
+// the `return` goes to has a `Key` that nobody owns.
+//
+// A rule that followed only named values accepts this. It is the same rule as
+// the one over `d` beside it -- the invariant is about values, and a place is
+// how a program says which value rather than which values count.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn key() -> Key {
+    .{ n = 2 }
+}
+
+fn go() -> UInt8 {
+    use2(key(), return 7)
+}
+
+fn main() -> UInt8 {
+    go()
+}

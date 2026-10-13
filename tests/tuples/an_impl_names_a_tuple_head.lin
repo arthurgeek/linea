@@ -1,0 +1,23 @@
+// `(UInt8, Bool)` names the prelude's `Tuple2`. A trait this module declares
+// may be implemented for it here, and `Self` is the tuple. An inherent `impl`
+// names only the type, so it belongs in the module declaring the tuple types.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8, Bool) {
+    fn show(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+impl (UInt8, Bool) {
+    fn _x(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: (UInt8, Bool) = (1, true)
+    pair.show()
+}

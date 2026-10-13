@@ -1,0 +1,23 @@
+// A trait declares operations and projections, and a member answers the one it
+// was declared as. A function where a projection was asked for returns a value
+// where a bracket needs a place, and a projection where an operation was asked
+// for has nothing for a call to run.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+trait Reach {
+    fn one(self: Self) -> UInt8
+}
+
+impl Reach for Grid {
+    proj one(self: Grid) -> UInt8 {
+        self.cells[0]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

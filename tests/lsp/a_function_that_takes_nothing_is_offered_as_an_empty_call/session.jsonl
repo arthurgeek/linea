@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"completion":{"completionItem":{"snippetSupport":true}}}}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A function that takes nothing is written as an empty call, with the cursor\n// after the bracket. There is no stop inside the brackets: a stop there is a\n// place to type an argument the function does not take, and the text carries no\n// snippet syntax at all because there is none left to write.\nfn seven() -> UInt8 {\n    7\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = seven()\n    total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":10,"character":9}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

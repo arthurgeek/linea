@@ -1,0 +1,8 @@
+// A one-scalar string literal in a range end denotes that scalar's number.
+// `"a"` is 97 and `"f"` is 102; `lo` read back proves the conversion ran.
+fn main() -> UInt8 {
+    let r: Range[UInt8] = "a".."f"
+    let lo = r.lo
+    let _hi = r.hi
+    lo
+}

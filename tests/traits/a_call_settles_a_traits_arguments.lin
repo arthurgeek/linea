@@ -1,0 +1,36 @@
+// Two implementations of one trait for one type, and a call for each. The
+// argument standing where the trait's parameter is written is the whole of
+// what tells them apart, so a lookup ignoring it would run whichever body was
+// declared first for both calls.
+//
+// 3 + 4 from the first and 3 from the second, which is 10 -- and 14 if both
+// calls reached the first, so the two answers are distinguishable.
+trait Holds[T] {
+    fn held(x: Self, t: T) -> UInt8
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Holds[UInt8] for Coins {
+    fn held(x: Self, t: UInt8) -> UInt8 {
+        x.count + t
+    }
+}
+
+impl Holds[Bool] for Coins {
+    fn held(x: Self, t: Bool) -> UInt8 {
+        if t {
+            x.count
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let four: UInt8 = 4
+    Holds.held(c, four) + Holds.held(c, true)
+}

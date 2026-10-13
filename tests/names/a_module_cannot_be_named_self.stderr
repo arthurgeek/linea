@@ -1,0 +1,5 @@
+error[N-Case]: modules start with a lowercase letter
+ --> tests/names/a_module_cannot_be_named_self/main.lin:5:8
+  |
+5 | import Self
+  |        ^^^^ rename it `self`

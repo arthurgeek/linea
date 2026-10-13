@@ -1,0 +1,27 @@
+// A run of names the parser could not read to the end is one mistake and one
+// report. The parser says the dot has no name after it; a reader downstream
+// counting the names it did read would say the run holds one where two belong,
+// which is the same mistake again in other words -- and the reader that says
+// it has no way to know the run was ever meant to be longer.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        let _held: Self. = 0
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

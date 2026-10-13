@@ -1,0 +1,5 @@
+// [T-ArraySize]. A length counts elements, and a count is not negative.
+fn main() -> UInt8 {
+    let _xs: [UInt8; 0 - 1] = [1]
+    0
+}

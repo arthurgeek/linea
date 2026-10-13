@@ -1,0 +1,9 @@
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+  --> tests/temporaries/a_function_value_result_cannot_keep_a_temporary.lin:9:21
+   |
+9  |     let kept = pick([1, 2])
+   |                     ^^^^^^ this temporary ends with its statement
+10 |     UInt8(*kept)
+   |           ----- and a value borrowing it is used here
+   |
+   = help: bind the value with `let` first, and borrow the binding

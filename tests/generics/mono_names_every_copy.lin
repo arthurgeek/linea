@@ -1,0 +1,42 @@
+// Every call names the copy it reaches, and every type names the one it is.
+// A callee reached through a type or a module kept the name it was written
+// with, so a body called `Cell.get` while what existed was `Cell.get.UInt8` and
+// `Cell.get.Bool` -- two functions, one name, and neither declared.
+//
+// A nested instantiation took its name from the tokens beside it and the notes
+// already on them, so the answer depended on which declaration came first:
+// `Cell[Opt[UInt8]]` printed as `Cell.Opt` where `Opt` was declared after `Cell`,
+// and correctly where it was declared before.
+enum Opt[T] {
+    None,
+    Some(T),
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+impl[T: Copyable] Cell[T] {
+    pub fn get(c: Cell[T]) -> T {
+        copy(c.v)
+    }
+}
+
+fn depth(c: Cell[Opt[UInt8]]) -> UInt8 {
+    match read c.v {
+        None => 0,
+        Some(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Cell[UInt8] = .{ v = 5 }
+    let b: Cell[Bool] = .{ v = true }
+    let nested: Cell[Opt[UInt8]] = .{ v = Opt.Some(2) }
+
+    if Cell.get(b) {
+        Cell.get(a) + depth(nested)
+    } else {
+        0
+    }
+}

@@ -1,0 +1,7 @@
+pub struct Width {
+    of: UInt8,
+}
+
+pub fn twice(n: UInt8) -> UInt8 {
+    n * 2
+}

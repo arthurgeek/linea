@@ -1,0 +1,62 @@
+// A closure inside a provided operation may capture `self`, which holds the
+// type the operation runs at. `Scaled` calls its closure directly in
+// `offset` and hands one to `fold` in `total`. `Priced[K]` does the same over
+// a trait that takes a parameter, and its closure also captures a `K`.
+trait Scaled {
+    fn factor(self: Self) -> UInt8
+
+    fn offset(self: Self, by: UInt8) -> UInt8 {
+        let shift = [self] |amount: UInt8| self.factor() + amount
+        shift(by)
+    }
+
+    fn total(self: Self, count: UInt8) -> UInt8 {
+        (UInt8(0)..count).fold(0, [self] |sink sum, sink step| sum + step * self.factor())
+    }
+}
+
+trait Priced[K] {
+    fn price(self: Self, unit: K) -> UInt8
+
+    fn quote(self: Self, unit: K, extra: UInt8) -> UInt8 {
+        let add = [self, unit] |more: UInt8| self.price(unit) + more
+        add(extra)
+    }
+
+    fn bill(self: Self, unit: K, count: UInt8) -> UInt8 {
+        (UInt8(0)..count).fold(0, [self, unit] |sink sum, sink _step| sum + self.price(unit))
+    }
+}
+
+@copyable
+struct Crate {
+    weight: UInt8,
+}
+
+impl Scaled for Crate {
+    fn factor(self: Self) -> UInt8 {
+        self.weight
+    }
+}
+
+impl Priced[UInt8] for Crate {
+    fn price(self: Self, unit: UInt8) -> UInt8 {
+        self.weight * unit
+    }
+}
+
+impl Priced[Bool] for Crate {
+    fn price(self: Self, unit: Bool) -> UInt8 {
+        if unit {
+            self.weight
+        } else {
+            1
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let crate = Crate { weight = 2 }
+    // 2 + 3, 2 * (0 + 1 + 2 + 3), 2 * 3 + 1, 2 * 3 and 1 + 1
+    crate.offset(3) + crate.total(4) + crate.quote(UInt8(3), 1) + crate.bill(UInt8(1), 3) + crate.quote(false, 1)
+}

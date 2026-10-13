@@ -1,0 +1,9 @@
+error[O-Leak]: `crate` (a linear `Crate`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_trait_operation_that_settles_is_named.lin:19:9
+   |
+19 |     let crate = Crate { kilograms = 40 }
+   |         ^^^^^ never settled on the path that reaches the end of this block
+21 | }
+   | - the block ends here
+   |
+   = help: settle it first with `crate.release()`, or take it apart with `let Crate { kilograms: _ } = crate`

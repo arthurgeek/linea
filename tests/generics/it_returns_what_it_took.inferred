@@ -1,0 +1,14 @@
+// A return type is a written type like any other, so `-> Cell[T]` is read at
+// the call site with the callee's parameters in scope and substituted through
+// the instantiation the arguments settled.
+struct Cell[T] { v: T }
+
+fn wrap[T: Copyable](x: T) -> Cell[T] {
+    Cell[T] { v = copy(x) }
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 5
+    let c: Cell[UInt8] = wrap[UInt8](n)
+    c.v
+}

@@ -1,0 +1,15 @@
+fn hidden(num: Int32) -> Int32 {
+    num + 1
+}
+
+pub fn visible(num: Int32) -> Int32 {
+    hidden(num) + 1
+}
+
+export fn published(num: Int32) -> Int32 {
+    visible(num) + 1
+}
+
+pub export fn both(num: Int32) -> Int32 {
+    num + 1
+}

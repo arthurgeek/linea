@@ -1,0 +1,29 @@
+import std.io
+
+// A `return` inside a closure leaves the closure, not the walk around it, so
+// the walk still reaches every linear payment in the array.
+@linear
+struct Payment {
+    cents: UInt64,
+}
+
+fn commit(sink payment: Payment) -> UInt64 {
+    let Payment { cents } = payment
+    cents
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let payments = [Payment { cents = 100 }, Payment { cents = 200 }]
+    var total: UInt64 = 0
+    for payment in payments {
+        let bonus = |x: UInt64| -> UInt64 {
+            if x > 1 {
+                return x
+            }
+            0
+        }
+        total += commit(payment) + bonus(2)
+    }
+    io.println("total {total}")?
+    .Ok(0)
+}

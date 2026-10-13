@@ -1,0 +1,27 @@
+// An interpolation borrows a value it cannot copy, so it is used only while
+// that value lives. The block's `name` ends with the block, and `greeting`
+// would still borrow it afterwards.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let greeting = {
+        let name = Name { text = "Ada" }
+        "hello {name}"
+    }
+    println(greeting)?
+    return .Ok(0)
+}

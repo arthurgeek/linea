@@ -1,0 +1,38 @@
+// `Pair`'s `left` is a `Bool`, which has no `Zero`, so deriving `Apply` fails
+// its requirement. The derived body is never checked, so only [T-Derive] is
+// reported, and nothing about the closure inside that body.
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> UInt64 {
+        0
+    }
+}
+
+trait Apply {
+    fn apply(self: Self, f: fn(x: UInt64) -> UInt64) -> UInt64
+}
+
+template impl Apply where reflect.target: struct, reflect.components: Zero {
+    fn apply(_self: Self, f: fn(x: UInt64) -> UInt64) -> UInt64 {
+        let twice = |x: UInt64| f(x: f(x: x))
+        twice(x: 1)
+    }
+}
+
+struct Pair {
+    left: Bool,
+}
+
+derive Apply for Pair
+
+fn main() -> UInt8 {
+    let pair = Pair { left = true }
+    if pair.left {
+        0
+    } else {
+        1
+    }
+}

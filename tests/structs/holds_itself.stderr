@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: A contains B contains A
+ --> tests/structs/holds_itself.lin:3:8
+  |
+3 | struct A {
+  |        ^ a value of this type would have to hold one, so it has no size

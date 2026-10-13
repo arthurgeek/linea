@@ -1,0 +1,32 @@
+// A module may declare its own `Option`. Its signatures then mean that type,
+// while `?` still propagates the standard library's `Option`, which the module
+// names through `std.option`.
+import std.option
+
+enum Option {
+    Missing,
+    Found(UInt8),
+}
+
+fn first_byte(text: Str) -> option.Option[UInt8] {
+    let byte = text.byte(0)?
+    return .Some(byte)
+}
+
+fn lookup(text: Str) -> Option {
+    match first_byte(text) {
+        Some(byte) => .Found(byte),
+        None => .Missing,
+    }
+}
+
+fn main() -> UInt8 {
+    let empty = match lookup("") {
+        Found(_) => 100,
+        Missing => 1,
+    }
+    match lookup("A") {
+        Found(byte) => byte - 60 + empty,
+        Missing => 0,
+    }
+}

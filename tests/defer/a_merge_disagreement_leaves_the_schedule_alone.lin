@@ -1,0 +1,29 @@
+// [O-Merge]. The arms disagree about whether the value is consumed, and that
+// is the one mistake: the schedule is not also reported as dead.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn open(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn lock(sink k: Key) -> () {
+    let Key { n: _n } = k
+}
+
+fn go(flag: Bool) -> UInt8 {
+    let k: Key = .{ n = 7 }
+    defer lock(k)
+    if flag {
+        open(k)
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    go(true)
+}

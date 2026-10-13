@@ -1,0 +1,567 @@
+import std.mem
+import std.collections
+import std.testing
+
+// MaxDepth bounds how many containers a parse accepts nested. Parsing, writing
+// and releasing a value recurse once per container, so no limit exceeds the 128
+// their stacks hold.
+@copyable
+pub type MaxDepth = UInt64 where it in 0..=128
+
+test fn a_max_depth_holds_at_most_the_hard_depth() {
+    testing.assert(MaxDepth?(hard_depth).is_some(), "the hard depth was refused")?
+    testing.assert(MaxDepth?(hard_depth + 1).is_none(), "a depth past the hard depth was accepted")?
+}
+
+// MaxNumberBytes bounds the bytes one number token may hold, at most the
+// 65,536 a number accepts.
+@copyable
+pub type MaxNumberBytes = UInt64 where it in 0..=65536
+
+test fn a_max_number_bytes_holds_at_most_the_hard_token_length() {
+    testing.assert(MaxNumberBytes?(hard_number_bytes).is_some(), "the hard token length was refused")?
+    testing.assert(MaxNumberBytes?(hard_number_bytes + 1).is_none(), "a token length past the hard bound was accepted")?
+}
+
+// MaxMembers bounds the members one object may hold, at most the 4,096 a
+// value accepts.
+@copyable
+pub type MaxMembers = UInt64 where it in 0..=4096
+
+test fn a_max_members_holds_at_most_the_hard_member_count() {
+    testing.assert(MaxMembers?(hard_object_members).is_some(), "the hard member count was refused")?
+    testing.assert(MaxMembers?(hard_object_members + 1).is_none(), "a member count past the hard bound was accepted")?
+}
+
+// ParseLimits bounds what one parse accepts: input bytes, nesting depth,
+// values, decoded string bytes, number-token bytes and members per object.
+@copyable
+pub struct ParseLimits {
+    max_input_bytes: UInt64,
+    max_depth: MaxDepth,
+    max_nodes: UInt64,
+    max_string_bytes: UInt64,
+    max_number_bytes: MaxNumberBytes,
+    max_object_members: MaxMembers,
+}
+
+// The standard limits allow 8 MiB of input, 128 nested containers, 100,000
+// values, 1 MiB strings, 1 KiB number tokens and 4,096 members per object.
+// Byte limits count encoded input, decoded string bytes and number-token bytes.
+// `parse`, `parse_bytes` and `decode` use these limits when their caller gives
+// none.
+let standard_limits: ParseLimits = .{
+    max_input_bytes = 8388608,
+    max_depth = MaxDepth(128),
+    max_nodes = 100000,
+    max_string_bytes = 1048576,
+    max_number_bytes = MaxNumberBytes(1024),
+    max_object_members = MaxMembers(4096),
+}
+
+// `ParseLimits.default()` gives the standard limits above. Write only the limits a
+// specific input policy changes and take the rest from the default:
+// `ParseLimits { max_nodes = 1000, ..ParseLimits.default() }`.
+impl Default for ParseLimits {
+    fn default() -> ParseLimits {
+        standard_limits
+    }
+}
+
+test fn the_default_limits_bound_input_depth_and_nodes() {
+    let limits = ParseLimits.default()
+    testing.assert_eq(limits.max_input_bytes, UInt64(8388608), "the input bound changed")?
+    testing.assert_eq(limits.max_nodes, UInt64(100000), "the node bound changed")?
+    testing.assert_eq(limits.max_string_bytes, UInt64(1048576), "the string bound changed")?
+}
+
+// A Cursor tracks the parse position and how many values the parse has made.
+struct Cursor {
+    offset: UInt64,
+    nodes: UInt64,
+}
+
+// Refuse input longer than the limit before reading any of it.
+fn preflight(length: UInt64, limits: ParseLimits) -> Result[(), ParseError] {
+    if length > limits.max_input_bytes {
+        return .Err(.{ kind = .InputLimit, offset = limits.max_input_bytes })
+    }
+    .Ok(())
+}
+
+// Skip whitespace at the cursor.
+fn whitespace(input: Str, inout cursor: Cursor) -> () {
+    while cursor.offset < input.length() {
+        // RFC 8259 whitespace is space, tab, line feed or carriage return.
+        let byte = input.byte(cursor.offset).unwrap()
+        if byte != 32 && byte != 9 && byte != 10 && byte != 13 {
+            return
+        }
+        cursor.offset += 1
+    }
+}
+
+// Parse one value and refuse anything but whitespace after it.
+fn parse_document[A: Allocator](allocator: A, input: Str, limits: ParseLimits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    var cursor: Cursor = .{ offset = 0, nodes = 0 }
+    defer let value = parse_value(allocator, input, &cursor, limits, 0)?
+    whitespace(input, &cursor)
+    if cursor.offset != input.length() {
+        return .Err(.{ kind = .TrailingData, offset = cursor.offset })
+    }
+    .Ok(value)
+}
+
+// Match `expected` byte for byte at the cursor.
+fn literal(input: Str, inout cursor: Cursor, expected: Str) -> Result[(), ParseError] {
+    for index in UInt64(0)..expected.length() {
+        if cursor.offset == input.length() || input.byte(cursor.offset).unwrap() != expected.byte(index).unwrap() {
+            return .Err(.{ kind = .Syntax, offset = cursor.offset })
+        }
+        cursor.offset += 1
+    }
+    .Ok(())
+}
+
+// Parse one value of any kind, counting it against the node limit and each
+// container against the depth limit.
+fn parse_value[A: Allocator](allocator: A, input: Str, inout cursor: Cursor, limits: ParseLimits, depth: UInt64) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    whitespace(input, &cursor)
+    let start = cursor.offset
+    if start == input.length() {
+        return .Err(.{ kind = .Syntax, offset = start })
+    }
+    if cursor.nodes >= limits.max_nodes {
+        return .Err(.{ kind = .NodeLimit, offset = start })
+    }
+    cursor.nodes += 1
+    // A value starts with n (110), t (116), f (102), a quote (34), `[` (91),
+    // `{` (123), or a minus (45) or digit (48 through 57).
+    let byte = input.byte(start).unwrap()
+    if byte == 110 {
+        literal(input, &cursor, "null")?
+        return .Ok(Value.null(allocator))
+    }
+    if byte == 116 {
+        literal(input, &cursor, "true")?
+        return .Ok(Value.boolean(allocator, true))
+    }
+    if byte == 102 {
+        literal(input, &cursor, "false")?
+        return .Ok(Value.boolean(allocator, false))
+    }
+    if byte == 34 {
+        let string = scan_string(allocator, input, &cursor.offset, limits.max_string_bytes)?
+        return .Ok(value_from_string(allocator, string))
+    }
+    if byte == 91 || byte == 123 {
+        let MaxDepth(max_depth) = copy(limits.max_depth)
+        if depth >= max_depth {
+            return .Err(.{ kind = .DepthLimit, offset = start })
+        }
+        cursor.offset += 1
+        if byte == 91 {
+            return parse_array(allocator, input, &cursor, limits, depth + 1)
+        }
+        return parse_object(allocator, input, &cursor, limits, depth + 1)
+    }
+    if byte == 45 || (byte >= 48 && byte <= 57) {
+        let MaxNumberBytes(max_number_bytes) = copy(limits.max_number_bytes)
+        let end = scan_number(input, start, max_number_bytes)?
+        let token = input.slice(start, end).unwrap()
+        let number = number_from_scanned(allocator, token) else |_| {
+            return .Err(.{ kind = .Allocation, offset = start })
+        }
+        cursor.offset = end
+        return .Ok(value_from_number(allocator, number))
+    }
+    .Err(.{ kind = .Syntax, offset = start })
+}
+
+// Parse array elements from after the opening bracket (91) through the
+// closing one (93), separated by commas (44).
+fn parse_array[A: Allocator](allocator: A, input: Str, inout cursor: Cursor, limits: ParseLimits, depth: UInt64) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    defer var values: Vec[Value[A], A] = Vec.new_in(allocator)
+    var height: UInt64 = 1
+    whitespace(input, &cursor)
+    if input.byte(cursor.offset) == .Some(93) {
+        cursor.offset += 1
+        return .Ok(.{ node = .Array(values), height, allocator = copy(allocator) })
+    }
+    loop {
+        let child_start = cursor.offset
+        let child = parse_value(allocator, input, &cursor, limits, depth)?
+        if child.height + 1 > height {
+            height = child.height + 1
+        }
+        // `settled()` releases a child the array could not hold.
+        if &values.push(child).settled().is_err() {
+            return .Err(.{ kind = .Allocation, offset = child_start })
+        }
+        whitespace(input, &cursor)
+        let separator = input.byte(cursor.offset)
+        if separator == .Some(93) {
+            cursor.offset += 1
+            return .Ok(.{ node = .Array(values), height, allocator = copy(allocator) })
+        }
+        if separator != .Some(44) {
+            return .Err(.{ kind = .Syntax, offset = cursor.offset })
+        }
+        cursor.offset += 1
+        whitespace(input, &cursor)
+    }
+}
+
+// Parse object members from after the opening brace (123) through the closing
+// one (125): a key, a colon (58) and a value, separated by commas. A key
+// repeated, even when spelled with other escapes, is refused.
+fn parse_object[A: Allocator](allocator: A, input: Str, inout cursor: Cursor, limits: ParseLimits, depth: UInt64) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    defer var members: collections.Map[String[A], Value[A], A] = collections.Map.new_in(allocator)
+    var height: UInt64 = 1
+    whitespace(input, &cursor)
+    if input.byte(cursor.offset) == .Some(125) {
+        cursor.offset += 1
+        return .Ok(.{ node = .Object(members), height, allocator = copy(allocator) })
+    }
+    loop {
+        let key_start = cursor.offset
+        let MaxMembers(max_members) = copy(limits.max_object_members)
+        if members.length() >= max_members {
+            return .Err(.{ kind = .MemberLimit, offset = key_start })
+        }
+        defer let key = scan_string(allocator, input, &cursor.offset, limits.max_string_bytes)?
+        if members.get(key.view()).is_some() {
+            return .Err(.{ kind = .DuplicateKey, offset = key_start })
+        }
+        whitespace(input, &cursor)
+        if input.byte(cursor.offset) != .Some(58) {
+            return .Err(.{ kind = .Syntax, offset = cursor.offset })
+        }
+        cursor.offset += 1
+        whitespace(input, &cursor)
+        let child_start = cursor.offset
+        let child = parse_value(allocator, input, &cursor, limits, depth)?
+        if child.height + 1 > height {
+            height = child.height + 1
+        }
+        let previous = &members.insert(key, child).settled() else |_| {
+            return .Err(.{ kind = .Allocation, offset = child_start })
+        }
+        previous.release()
+        whitespace(input, &cursor)
+        let separator = input.byte(cursor.offset)
+        if separator == .Some(125) {
+            cursor.offset += 1
+            return .Ok(.{ node = .Object(members), height, allocator = copy(allocator) })
+        }
+        if separator != .Some(44) {
+            return .Err(.{ kind = .Syntax, offset = cursor.offset })
+        }
+        cursor.offset += 1
+        whitespace(input, &cursor)
+    }
+}
+
+// Parse `input` as one JSON document, allocating its values from `allocator`,
+// within `limits`.
+pub fn parse[A: Allocator](allocator: A, input: Str, limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    preflight(input.length(), limits)?
+    parse_document(allocator, input, limits)
+}
+
+test fn parsed_documents_own_text_and_preserve_number_tokens() {
+    let allocator = mem.system()
+    let input = r#"{"tea": [true, null, "café", 1.00, 1e400]}"#.to_owned(allocator).unwrap()
+    let document = parse(allocator, input.view()).unwrap()
+    input.release()
+    defer document.release()
+    let items = document.get("tea").unwrap()
+    testing.assert_eq(items.elements().unwrap().length(), UInt64(5), "array length changed")?
+    testing.assert_eq(items.at(0).unwrap().as_bool().unwrap(), true, "boolean changed")?
+    testing.assert_eq(items.at(1).unwrap().kind(), Kind.Null, "null changed kind")?
+    testing.assert_eq(items.at(2).unwrap().as_str().unwrap(), "café", "text retained input or changed")?
+    testing.assert_eq(items.at(3).unwrap().number_text().unwrap(), "1.00", "fraction spelling changed")?
+    testing.assert_eq(items.at(4).unwrap().number_text().unwrap(), "1e400", "large exponent was converted")?
+}
+
+test fn duplicate_decoded_names_are_refused_before_their_values() {
+    let error = match parse(mem.system(), r#"{"a":1,"\u0061":not_json}"#) {
+        Err(error) => error,
+        Ok(document) => {
+            document.release()
+            return testing.assert(false, "duplicate decoded name was accepted")
+        },
+    }
+    let expected: ParseError = .{ kind = .DuplicateKey, offset = 7 }
+    testing.assert_eq(error, expected, "duplicate checking parsed its value or lost the opening quote")?
+}
+
+test fn malformed_documents_report_the_first_unusable_byte() {
+    let inputs = ["", " ", "null true", "[1,]", r#"{"a":}"#, "[1", r#"{"a" 1}"#, "\u{feff}null"]
+    let kinds: [ParseErrorKind; 8] = [.Syntax, .Syntax, .TrailingData, .Syntax, .Syntax, .Syntax, .Syntax, .Syntax]
+    let offsets: [UInt64; 8] = [0, 1, 5, 3, 5, 2, 5, 0]
+    for index in 0..inputs.length() {
+        let error = match parse(mem.system(), inputs[index]) {
+            Err(error) => error,
+            Ok(value) => {
+                value.release()
+                return testing.assert(false, "malformed document was accepted")
+            },
+        }
+        testing.assert_eq(error.kind, kinds[index], "malformed document reported the wrong kind")?
+        testing.assert_eq(error.offset, offsets[index], "malformed document reported the wrong byte")?
+    }
+}
+
+test fn zero_limits_are_restrictions_and_container_depth_excludes_scalars() {
+    var limits = ParseLimits { max_nodes = 0, ..ParseLimits.default() }
+    let no_nodes = match parse(mem.system(), "null", limits: limits) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "zero node limit accepted a value")
+        },
+    }
+    let expected_nodes: ParseError = .{ kind = .NodeLimit, offset = 0 }
+    testing.assert_eq(no_nodes, expected_nodes, "node limit did not point at the value")?
+    limits.max_nodes = 1
+    limits.max_depth = MaxDepth(0)
+    parse(mem.system(), "null", limits: limits).unwrap().release()
+    let no_containers = match parse(mem.system(), "[]", limits: limits) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "zero depth accepted a container")
+        },
+    }
+    let expected_depth: ParseError = .{ kind = .DepthLimit, offset = 0 }
+    testing.assert_eq(no_containers, expected_depth, "depth limit did not point at the opener")?
+    limits.max_depth = MaxDepth(1)
+    parse(mem.system(), "[]", limits: limits).unwrap().release()
+    limits.max_nodes = 2
+    parse(mem.system(), "[null]", limits: limits).unwrap().release()
+    let nested = match parse(mem.system(), "[[]]", limits: limits) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "nested container bypassed depth limit")
+        },
+    }
+    let expected_nested: ParseError = .{ kind = .DepthLimit, offset = 1 }
+    testing.assert_eq(nested, expected_nested, "nested depth offset was not its opener")?
+}
+
+test fn parsing_nested_documents_handles_bounded_allocation_refusal() {
+    let input = r#"{"products":[{"name":"tea"},{"name":"coffee"}]}"#
+    var refused: UInt64 = 0
+    var accepted: UInt64 = 0
+    for size in UInt64(0)..64 {
+        defer let arena = mem.Arena.open(mem.system(), size * 1024)
+        match parse(arena.handle(), input) {
+            Err(error) => {
+                testing.assert_eq(error.kind, ParseErrorKind.Allocation, "bounded arena changed JSON syntax")?
+                refused += 1
+            },
+            Ok(document) => {
+                let correct = document
+                    .get("products")
+                    .unwrap()
+                    .at(1)
+                    .unwrap()
+                    .get("name")
+                    .unwrap()
+                    .as_str()
+                    .unwrap() == "coffee"
+                document.release()
+                testing.assert(correct, "completed arena document lost a nested value")?
+                accepted += 1
+            },
+        }
+    }
+    testing.assert(refused > 0 && accepted > 0, "allocation sweep did not cross the document's storage requirement")?
+}
+
+test fn configured_limits_accept_the_boundary_and_reject_the_next_value() {
+    let inputs = ["null", "[0]", r#""é""#, "12", r#"{"a":0}"#]
+    let larger = ["null ", "[0,0]", r#""éa""#, "123", r#"{"a":0,"b":1}"#]
+    let kinds = [ParseErrorKind.InputLimit, ParseErrorKind.NodeLimit, ParseErrorKind.StringLimit, ParseErrorKind.NumberLimit, ParseErrorKind.MemberLimit]
+    let offsets = [UInt64(4), 3, 3, 2, 7]
+    for index in UInt64(0)..5 {
+        var limits = ParseLimits.default()
+        match read index {
+            0 => limits.max_input_bytes = 4,
+            1 => limits.max_nodes = 2,
+            2 => limits.max_string_bytes = 2,
+            3 => limits.max_number_bytes = MaxNumberBytes(2),
+            _ => limits.max_object_members = MaxMembers(1),
+        }
+        parse(mem.system(), inputs[index], limits: limits).unwrap().release()
+        let failure = match parse(mem.system(), larger[index], limits: limits) {
+            Err(error) => error,
+            Ok(value) => {
+                value.release()
+                return testing.assert(false, "configured limit accepted excess input")
+            },
+        }
+        testing.assert_eq(failure.kind, kinds[index], "configured limit reported a different restriction")?
+        testing.assert_eq(failure.offset, offsets[index], "configured limit lost the first excess byte")?
+    }
+}
+
+test fn parser_accepts_128_containers_and_refuses_the_next_opener() {
+    defer var input = String.new()
+    for _index in UInt64(0)..hard_depth {
+        &input.append("[").unwrap()
+    }
+    for _index in UInt64(0)..hard_depth {
+        &input.append("]").unwrap()
+    }
+    let document = parse(mem.system(), input.view()).unwrap()
+    let height = document.height
+    document.release()
+    testing.assert_eq(height, hard_depth, "parsed depth changed")?
+    defer var excessive = "[".to_owned(mem.system()).unwrap()
+    &excessive.append(input.view()).unwrap()
+    &excessive.append("]").unwrap()
+    let error = match parse(mem.system(), excessive.view()) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "parser exceeded the hard depth bound")
+        },
+    }
+    let expected: ParseError = .{ kind = .DepthLimit, offset = hard_depth }
+    testing.assert_eq(error, expected, "excess depth did not name its opening bracket")?
+}
+
+// This walk refuses each attempt by hand rather than through
+// `testing.each_allocation_failure`, which accepts a refused run that
+// completes: here every refusal must be reported as an allocation error, and
+// nothing may be allocated after it.
+test fn json_parser_disposes_every_allocation_on_success_and_each_refusal() {
+    let input = r#"{"first":["tea",123,{"nested":"green\nleaf"}],"second":[true,false,null,"a longer owned string"],"last":{"price":1.25}}"#
+    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let allocator = baseline.allocator()
+    let document = parse(allocator, input).unwrap()
+    document.release()
+    let attempts = baseline.attempts()
+    testing.assert(attempts > 0, "parser did not exercise allocated ownership")?
+    testing.assert_eq(baseline.acquired(), attempts, "successful parse refused an acquisition")?
+    testing.assert(baseline.all_disposed(), "successful document release lost or repeated an allocation")?
+    for refusal in UInt64(1)..(attempts + 1) {
+        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
+        let failing = log.allocator()
+        let allocation_error = match parse(failing, input) {
+            Err(error) => error.kind == ParseErrorKind.Allocation,
+            Ok(value) => {
+                value.release()
+                false
+            },
+        }
+        testing.assert(allocation_error, "parser did not propagate an injected allocation refusal")?
+        testing.assert_eq(log.attempts(), refusal, "parser allocated after its first refusal")?
+        testing.assert_eq(log.acquired(), refusal - 1, "parser acquisition count skipped a refusal")?
+        testing.assert(log.all_disposed(), "parser refusal lost or repeated a partial allocation")?
+    }
+}
+
+// This walk refuses each attempt by hand rather than through
+// `testing.each_allocation_failure`, which requires the unrefused run to
+// succeed: each input here is malformed, and every refusal before the syntax
+// error must be reported as an allocation error.
+test fn json_parser_disposes_completed_siblings_and_partial_tokens_on_invalid_input() {
+    let inputs = [
+        r#"{"done":["tea",12],"partial":"allocated text"#,
+        r#"{"done":["tea",12],"partial":"allocated\q"}"#,
+        r#"{"done":["tea",12],"partial":["kept",1e+]}"#,
+        r#"{"done":["tea",12],"done":null}"#,
+        r#"["tea",{"key":"value"},]"#,
+        r#"{"done":["tea",12]} trailing"#,
+    ]
+    for input in inputs {
+        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let allocator = baseline.allocator()
+        let invalid = match parse(allocator, input) {
+            Err(error) => error.kind != ParseErrorKind.Allocation,
+            Ok(value) => {
+                value.release()
+                false
+            },
+        }
+        testing.assert(invalid, "malformed cleanup input was accepted")?
+        let attempts = baseline.attempts()
+        testing.assert(attempts > 0, "malformed input built no partial ownership")?
+        testing.assert(baseline.all_disposed(), "syntax refusal lost or repeated partial ownership")?
+        for refusal in UInt64(1)..(attempts + 1) {
+            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
+            let failing = log.allocator()
+            let refused = match parse(failing, input) {
+                Err(error) => error.kind == ParseErrorKind.Allocation,
+                Ok(value) => {
+                    value.release()
+                    false
+                },
+            }
+            testing.assert(refused, "syntax path ignored an earlier allocation refusal")?
+            testing.assert_eq(log.acquired(), refusal - 1, "syntax path acquired after its refusal")?
+            testing.assert(log.all_disposed(), "syntax-path allocation refusal lost partial ownership")?
+        }
+    }
+}
+
+// Parse bytes as `parse` does, refusing input that is not UTF-8 before its
+// grammar is read.
+pub fn parse_bytes[A: Allocator](allocator: A, input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value[A], ParseError] where carries(.Ok: allocator) {
+    preflight(input.length(), limits)?
+    let valid = Str.from_bytes(input) else |error| {
+        return .Err(.{ kind = .InvalidUtf8, offset = error.offset })
+    }
+    parse_document(allocator, valid, limits)
+}
+
+test fn preflight_precedes_utf8_and_utf8_precedes_grammar() {
+    let bytes: [UInt8; _] = [255, 0]
+    var limits = ParseLimits { max_input_bytes = 0, ..ParseLimits.default() }
+    let extent = match parse_bytes(mem.system(), bytes.as_slice(), limits: limits) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "oversized input was accepted")
+        },
+    }
+    let expected_extent: ParseError = .{ kind = .InputLimit, offset = 0 }
+    testing.assert_eq(extent, expected_extent, "UTF-8 validation preceded the extent check")?
+    limits.max_input_bytes = 2
+    let encoding = match parse_bytes(mem.system(), bytes.as_slice(), limits: limits) {
+        Err(error) => error,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "invalid UTF-8 was accepted")
+        },
+    }
+    let expected_encoding: ParseError = .{ kind = .InvalidUtf8, offset = 0 }
+    testing.assert_eq(encoding, expected_encoding, "grammar preceded UTF-8 validation")?
+}
+
+test fn incomplete_documents_release_completed_siblings_and_report_eof() {
+    let inputs = [r#"[true,"café",{"a":[0]}]"#, r#"{"tea":[null,false],"coffee":{"units":2}}"#]
+    for input in inputs {
+        for end in UInt64(0)..input.length() {
+            // UTF-8 prefixes may end within a scalar; parse_bytes validates them.
+            let prefix = input.as_bytes().subspan(0, end).unwrap()
+            match parse_bytes(mem.system(), prefix) {
+                Err(error) => testing.assert(error.offset <= end, "truncated input produced an out-of-bounds offset")?,
+                Ok(value) => {
+                    value.release()
+                    return testing.assert(false, "unfinished container was accepted")
+                },
+            }
+        }
+    }
+}
+
+test fn parsed_bytes_are_allocated_from_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    defer let document = parse_bytes(arena.handle(), r#"{"tea":["green","black"]}"#.as_bytes()).unwrap()
+    testing.assert_eq(document.get("tea").unwrap().at(1).unwrap().as_str().unwrap(), "black", "parsed bytes lost a value in an arena")?
+}

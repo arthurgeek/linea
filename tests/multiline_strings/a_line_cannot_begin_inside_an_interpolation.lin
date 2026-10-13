@@ -1,0 +1,13 @@
+fn greeting_length() -> UInt8 {
+    let greeting = "hello {\\world}"
+    let _ = greeting
+    0
+}
+
+fn other() -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    greeting_length() + other()
+}

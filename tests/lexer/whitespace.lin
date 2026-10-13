@@ -1,0 +1,7 @@
+// linea fmt: off
+fn main() -> UInt8 {
+    let  x   =	42 ;
+
+
+    let y=1;
+}

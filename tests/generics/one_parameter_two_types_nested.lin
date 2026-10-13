@@ -1,0 +1,23 @@
+// Settling a parameter from inside a written type does not weaken the rule
+// that it is settled once: two arguments that agree on the constructor and
+// disagree under it disagree about `T`.
+enum Maybe[T] {
+    None,
+    Some(T),
+}
+
+fn both[T](a: Maybe[T], b: Maybe[T]) -> UInt8 {
+    match read a {
+        None => match read b {
+            None => 0,
+            Some(_) => 1,
+        },
+        Some(_) => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    let x: Maybe[UInt8] = Maybe.Some(1)
+    let y: Maybe[Bool] = Maybe.Some(true)
+    both(x, y)
+}

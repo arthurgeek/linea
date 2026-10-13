@@ -1,0 +1,5 @@
+error[S-Type]: expected `]`
+ --> tests/derive_from/a_derive_entry_missing_its_closing_bracket_is_reported_once.lin:1:19
+  |
+1 | @derive(From[UInt8)
+  |                   ^ an argument list is closed

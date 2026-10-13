@@ -1,0 +1,17 @@
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    fn redeem(sink self: Ticket) -> UInt8 {
+        let Ticket { seat } = self
+        seat
+    }
+}
+
+fn main() -> UInt8 {
+    let redeem: fn(sink ticket: Ticket) -> UInt8 = Ticket.redeem
+    let ticket: Ticket = .{ seat = 4 }
+    redeem(ticket) - 4
+}

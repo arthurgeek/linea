@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: Rec contains itself
+ --> tests/generics/a_generic_that_holds_itself.lin:7:8
+  |
+7 |     b: Rec[T],
+  |        ^^^ a value would have to hold one, so it has no size

@@ -1,0 +1,19 @@
+import std.hash
+import std.io
+
+// A tuple compares, orders and hashes by its components, first to last.
+// Debug writes each component as Debug does, so text is quoted; Display
+// writes each component bare.
+fn main() -> Result[UInt8, io.IoError] {
+    let equal = (1, "a") == (1, "a")
+    let ordered = (1, "a") < (2, "a")
+    let hashed = hash.Hash.hash((1, true)) == hash.Hash.hash((1, true))
+    let pair = (1, "a")
+    io.println("{pair:?}")?
+    io.println("{pair}")?
+    if equal && ordered && hashed {
+        .Ok(0)
+    } else {
+        .Ok(1)
+    }
+}

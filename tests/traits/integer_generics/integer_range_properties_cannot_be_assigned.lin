@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    UInt8.max = 0
+    0
+}

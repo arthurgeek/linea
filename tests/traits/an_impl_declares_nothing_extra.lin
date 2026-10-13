@@ -1,0 +1,24 @@
+// And for nothing else. A member the trait does not declare is reachable
+// through neither namespace: not the trait's, which has no such name, and not
+// the type's, because a trait implementation's members are the trait's.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+
+    fn doubled(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

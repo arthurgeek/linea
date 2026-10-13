@@ -1,0 +1,7 @@
+error[O-Move]: `parcel` has already been moved
+  --> tests/convert/into/a_conversion_consumes_its_linear_source.lin:16:8
+   |
+15 |     let code: ParcelCode = parcel.into()
+   |                            ------ it was taken here
+16 |     if parcel.code == code.value {
+   |        ^^^^^^^^^^^ it was already taken, and a value is taken once

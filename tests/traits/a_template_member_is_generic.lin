@@ -1,0 +1,68 @@
+trait Sink {
+    type Error
+
+    fn write(inout self: Self, value: UInt8) -> Result[(), Self.Error]
+}
+
+trait Render {
+    fn render[W: Sink](self: Self, inout writer: W) -> Result[(), W.Error] where carries(.Err: writer)
+}
+
+template impl Render {
+    fn render[Output: Sink](_self: Self, inout writer: Output) -> Result[(), Output.Error] where carries(.Err: writer) {
+        Sink.write(&writer, 7)
+    }
+}
+
+enum FirstError {
+    Failed,
+}
+
+enum FirstSink {
+    Ready,
+}
+
+impl Sink for FirstSink {
+    type Error = FirstError
+
+    fn write(inout _self: FirstSink, _value: UInt8) -> Result[(), FirstError] {
+        .Ok({})
+    }
+}
+
+enum SecondError {
+    Failed,
+}
+
+enum SecondSink {
+    Ready,
+}
+
+impl Sink for SecondSink {
+    type Error = SecondError
+
+    fn write(inout _self: SecondSink, _value: UInt8) -> Result[(), SecondError] {
+        .Ok({})
+    }
+}
+
+struct Box[T] {
+    value: T,
+}
+
+derive[T] Render for Box[T]
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 1 }
+    var first: FirstSink = .Ready
+    match Render.render(box, &first) {
+        Err(_) => return 1,
+        Ok(_) => {},
+    }
+
+    var second: SecondSink = .Ready
+    match Render.render(box, &second) {
+        Err(_) => 2,
+        Ok(_) => 0,
+    }
+}

@@ -1,0 +1,17 @@
+// `.Ok(())` names a variant holding the unit value. A line opening with `.`
+// and a capitalised name cannot continue the line above, so it is the
+// function's result.
+fn record(count: UInt8) -> Result[(), UInt8] {
+    if count > 9 {
+        return .Err(count)
+    }
+    let _seen = count
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    match record(3) {
+        Ok(_) => 0,
+        Err(code) => code,
+    }
+}

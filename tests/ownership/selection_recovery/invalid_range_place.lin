@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let values: [UInt8; 2] = [1, 2]
+    let _wrong = values[0..1]
+    0
+}

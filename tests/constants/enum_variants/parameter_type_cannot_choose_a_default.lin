@@ -1,0 +1,9 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+fn select[T](_value: T = .Preserve) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    select(Mode.Preserve)
+}

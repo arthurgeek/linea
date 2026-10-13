@@ -1,0 +1,16 @@
+import std.mem
+
+// A view inside an `Option` payload beside a view of another vector: growing
+// the first vector ends the payload's view and leaves the second usable.
+struct Holder { first: Option[mem.Slice[UInt64]], second: mem.Slice[UInt64] }
+
+fn main() -> UInt8 {
+    var a = Vec.filled(mem.system(), 2, UInt64(7)).unwrap()
+    var b = Vec.filled(mem.system(), 3, UInt64(7)).unwrap()
+    let h = Holder { first = .Some(a.as_slice()), second = b.as_slice() }
+    Vec.push(&a, 1).unwrap()
+    let n = h.second.length()
+    a.release()
+    b.release()
+    UInt8(n)
+}

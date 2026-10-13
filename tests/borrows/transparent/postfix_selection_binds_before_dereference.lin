@@ -1,0 +1,14 @@
+struct Holder { item: borrow UInt8 }
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let holder: Holder = .{ item = borrow number }
+    let view = borrow holder
+    let direct = *holder.item
+    let grouped = *(*view).item
+    if direct + grouped == 14 {
+        0
+    } else {
+        1
+    }
+}

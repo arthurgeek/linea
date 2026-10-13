@@ -1,0 +1,10 @@
+error[T-Reflection]: write `|component| { ...; local }`
+  --> tests/construction_derive/construct_explicit_capture.lin:15:13
+   |
+15 |             [] |component| {
+   |             ^^^^^^^^^^^^^^^^ a construction recipe has one descriptor, no captures, convention or return annotation
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_explicit_capture.lin:32:22
+   |
+32 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

@@ -1,0 +1,25 @@
+trait BaseValue {
+    fn value(self: Self) -> UInt8
+}
+
+template impl BaseValue {
+    fn value(_self: Self) -> UInt8 {
+        match read _self {
+            reflect.case => {
+                var total: UInt8 = 0
+                for component in reflect.components {
+                    total = total + component.of(_self)
+                }
+                total
+            },
+        }
+    }
+}
+
+type Meters = UInt8
+
+derive BaseValue for Meters
+
+fn main() -> UInt8 {
+    BaseValue.value(Meters(9))
+}

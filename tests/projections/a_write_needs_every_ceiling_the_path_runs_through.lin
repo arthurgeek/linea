@@ -1,0 +1,34 @@
+// The ceiling is the most a site's position may reach, and a composing
+// projection runs through more than one: what the site's own bracket grants
+// says nothing about what the implementation its path reaches grants. A
+// container that hands its elements out to be read is read through whatever
+// wraps it.
+struct Inner {
+    cells: [UInt8; 3],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[UInt64] for Inner {
+    type Elem = UInt8
+
+    proj at(self: Inner, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Index[UInt64] for Outer {
+    type Elem = UInt8
+
+    proj at(inout self: Outer, i: UInt64) -> UInt8 {
+        self.inner[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var o: Outer = .{ inner = .{ cells = [1, 2, 3] } }
+    o[1] = 200
+    o[1]
+}

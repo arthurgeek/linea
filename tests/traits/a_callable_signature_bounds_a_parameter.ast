@@ -1,0 +1,10 @@
+program decls=2
+  decl function "_accepts" tokens 2..35
+    type param "F" : fn(read lhs: UInt8, read rhs: UInt8 = 2) -> UInt8
+    param read "_combine" : F
+    returns (
+    expr %1 block tokens 33..35
+  decl function "main" tokens 35..44
+    returns UInt8
+    expr %3 block tokens 41..44
+      expr %2 int_literal tokens 42..43 "0"

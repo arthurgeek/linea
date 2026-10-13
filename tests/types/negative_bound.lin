@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let _a: Int8 = -128
+    1
+}

@@ -1,0 +1,30 @@
+error[S-Name]: expected a name after `|`
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:20:26
+   |
+20 |     let a = find(1) else |
+   |                          ^ `else` binds what a failure carries to one name
+error[S-LetElse]: expected `|`
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:21:32
+   |
+21 |     let b = get(2) else |first second| { return first }
+   |                                ^^^^^^ an `else` binds one name between its bars
+error[S-LetElse]: expected a name between the bars
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:22:25
+   |
+22 |     let c = get(3) else ||
+   |                         ^^ write `else |error|`, or `else` alone where the failure carries nothing
+error[S-Brace]: expected `{`
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:24:5
+   |
+24 |     let e = get(5) else |error|
+   |     ^^^ an `else` handles the failure in a block
+error[S-Brace]: expected `{`
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:25:5
+   |
+25 |     let f = find(6) else { 1 } else { 2 }
+   |     ^^^ an `else` handles the failure in a block
+error[S-LetElse]: a binding takes one `else`
+  --> tests/recovery/a_broken_else_binder_is_one_mistake.lin:25:32
+   |
+25 |     let f = find(6) else { 1 } else { 2 }
+   |                                ^^^^ the `else` before this one already handles the failure

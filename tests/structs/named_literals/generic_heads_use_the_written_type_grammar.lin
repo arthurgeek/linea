@@ -1,0 +1,24 @@
+struct Cell[T] { value: T }
+
+struct Pair[A, B] { first: A, second: B }
+
+struct ArrayBox[T] { value: T }
+
+impl[T] Cell[T] {
+    fn make(sink value: T) -> Self {
+        Self { value }
+    }
+}
+
+fn main() -> UInt8 {
+    let pair = Pair[UInt8, Option[UInt8]] { first = 7, second = .None }
+    let nested = ArrayBox[[UInt8; 3]] { value = [1, 2, 3] }
+    let made: Cell[UInt8] = Cell.make(value: 4)
+    let Pair { first, second } = pair
+    let ArrayBox { value: values } = nested
+    if first == 7 && match second { None => true, Some(_) => false } && values[2] == 3 {
+        made.value - 4
+    } else {
+        1
+    }
+}

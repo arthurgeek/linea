@@ -1,0 +1,15 @@
+struct Settings {
+    name: Str,
+    retries: UInt8,
+}
+
+struct Job {
+    settings: Settings,
+}
+
+fn main() -> UInt8 {
+    let job: Job = .{ settings = .{ name = "sync", retries = 3 } }
+    // A base is moved, and a part of a binding cannot be moved on its own.
+    let tuned = Settings { retries = 5, ..job.settings }
+    tuned.retries
+}

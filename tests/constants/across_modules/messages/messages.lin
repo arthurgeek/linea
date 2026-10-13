@@ -1,0 +1,9 @@
+pub let greeting = hidden
+
+let hidden = "hello"
+
+pub let count = UInt8(5)
+
+pub fn selected(value: Str = greeting) -> UInt8 {
+    UInt8(value.length())
+}

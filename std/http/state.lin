@@ -1,0 +1,98 @@
+import std.mem
+import std.testing
+
+// `Stated` holds the application's state and the handler that answers with
+// it. It is the top of a stack: `serve` lends it `()`, and it lends its own
+// state to the handler it holds, which passes it down to every middleware
+// and route. Releasing it releases the state, so the state may own what must
+// be released, such as a connection.
+@opaque
+struct Stated[S, H] {
+    state: S,
+    handler: H,
+}
+
+// Releasing a `Stated` releases the state and the handler it holds.
+derive[S: Release, H: Release] Release for Stated[S, H]
+
+// `with_state` makes a handler that owns `state` and lends it to `handler`,
+// which may be a router or a whole stack of middleware around one, on every
+// request.
+pub fn with_state[S, H](sink state: S, sink handler: H) -> Stated[S, H] where carries(state, handler) {
+    .{ state, handler }
+}
+
+test fn with_state_lends_its_state_to_every_request() {
+    var router: Router[Visits] = Router.new()
+    &router.route_raw("GET /visit", visit).unwrap()
+    defer var server = with_state(Visits { count = 0 }, router)
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    // `serve` lends a `Stated` nothing, `()`, as this test does.
+    var nothing = ()
+    let first = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
+    let _first = &server.serve_http(&nothing, first.request()).unwrap()
+    let second = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
+    let answered = &server.serve_http(&nothing, second.request()).unwrap()
+    testing.assert_eq(Str.from_bytes(answered.body().unwrap()).unwrap(), "visit 2", "the state was not kept between requests")?
+    .Ok(())
+}
+
+impl[S, H] Stated[S, H] {
+    // `state` reads the state, such as a count the routes kept, once serving
+    // has stopped or between requests in a test.
+    pub fn state(self: Self) -> borrow S where borrows(self) {
+        borrow self.state
+    }
+}
+
+test fn a_stated_handler_reads_its_state() {
+    var router: Router[Visits] = Router.new()
+    &router.route_raw("GET /visit", visit).unwrap()
+    defer var server = with_state(Visits { count = 0 }, router)
+    let before = server.state().count
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
+    let _answered = &server.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(before, UInt64(0), "a new state changed")?
+    testing.assert_eq(server.state().count, UInt64(1), "the state did not show the visit")?
+    .Ok(())
+}
+
+impl[S, H: Release] Stated[S, H] {
+    // `into_state` releases the handler and returns the state, so a program
+    // that served the `Stated` reads what its routes changed and releases it.
+    pub fn into_state(sink self: Self) -> S {
+        let Stated { state, handler } = self
+        handler.release()
+        state
+    }
+}
+
+test fn into_state_returns_the_state_and_releases_the_handler() {
+    let router: Router[Visits] = Router.new()
+    var server = with_state(Visits { count = 3 }, router)
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = ()
+    let sent = new_request(arena.handle(), "GET", "/nowhere", body: "").unwrap()
+    let _missing = &server.serve_http(&nothing, sent.request())
+    let visits = server.into_state()
+    testing.assert_eq(visits.count, UInt64(3), "the state changed")?
+    visits.release()
+    .Ok(())
+}
+
+// A `Stated` answers a request by lending its state to the handler it holds.
+// It takes `()` itself, which is what `serve` lends.
+impl[P: Allocator, S, H: Handler[S, P]] Handler[(), P] for Stated[S, H] {
+    fn serve_http(inout self: Self, inout _state: (), request: Request[P]) -> Result[Response[P], Error[P]] {
+        &self.handler.serve_http(&self.state, request)
+    }
+}
+
+// A `Stated` passes every event on to the handler it holds.
+impl[S, H: Observer] Observer for Stated[S, H] {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+        &self.handler.observe(event)
+    }
+}

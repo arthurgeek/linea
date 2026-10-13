@@ -1,0 +1,14 @@
+// A newtype is a distinct nominal type over its base, same representation,
+// different contract -- so a bare `UInt64` is not a `Meters` and the mismatch
+// is reported the way any other is, naming both. The type annotation alone
+// shows the distinction.
+type Meters = UInt64
+
+fn wants(_m: Meters) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let raw: UInt64 = 5
+    wants(raw)
+}

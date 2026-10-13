@@ -1,0 +1,7 @@
+pub trait Parent {
+    fn value(self: Self) -> UInt8
+}
+
+pub trait Marker {}
+
+template impl Marker {}

@@ -1,0 +1,5 @@
+error[T-Template]: re-export this name from the trait's module with at least the trait's visibility
+  --> tests/traits/a_template_cannot_capture_a_narrower_name/protocol/protocol.lin:11:9
+   |
+11 |         seven()
+   |         ^^^^^ a template free reference must be reproducible wherever the trait can be named

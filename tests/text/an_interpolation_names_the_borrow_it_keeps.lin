@@ -1,0 +1,28 @@
+// A report about a borrow that outlives its value marks the borrow the kept
+// literal holds, not an earlier one that ended with its own statement.
+import std.io
+
+use io.IoError
+use io.println
+
+// A `Name` owns its text and cannot be copied, so an interpolation borrows it.
+struct Name {
+    text: Str,
+}
+
+impl Display for Name {
+    fn fmt[W: Writer](self: Name, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        &w.write_str(self.text)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let greeting = {
+        let name = Name { text = "Ada" }
+        println("early {name}")?
+        let visits = 1
+        "hello {visits} {name}"
+    }
+    println(greeting)?
+    return .Ok(0)
+}

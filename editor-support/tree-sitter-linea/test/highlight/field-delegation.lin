@@ -1,0 +1,12 @@
+impl Index[UInt64] for Board via scores
+//                           ^ keyword.storage.modifier
+//                               ^ variable.other.member
+impl Board {
+    trav positions via scores
+//                 ^ keyword.storage.modifier
+//                     ^ variable.other.member
+}
+fn via(via: UInt8) -> UInt8 { via }
+// ^ function
+//     ^ variable.parameter
+//                            ^ variable

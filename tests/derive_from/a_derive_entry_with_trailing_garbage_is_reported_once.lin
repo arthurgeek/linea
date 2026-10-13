@@ -1,0 +1,10 @@
+@derive(From[UInt8] 7)
+enum Failure {
+    Byte(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _failure = Failure.Unknown
+    0
+}

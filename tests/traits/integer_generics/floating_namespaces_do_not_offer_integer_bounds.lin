@@ -1,0 +1,7 @@
+fn _maximum() -> Float64 {
+    Float64.max
+}
+
+fn main() -> UInt8 {
+    0
+}

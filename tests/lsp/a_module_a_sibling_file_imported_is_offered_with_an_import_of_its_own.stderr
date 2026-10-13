@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `ledger`
+ --> tests/lsp/a_module_a_sibling_file_imported_is_offered_with_an_import_of_its_own/main.lin:7:5
+  |
+7 |     ledger.size()
+  |     ^^^^^^ no binding with this name is in scope

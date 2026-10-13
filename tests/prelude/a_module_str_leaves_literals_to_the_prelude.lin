@@ -1,0 +1,15 @@
+// A module may declare its own `Str`. A string literal still has the standard
+// library's text type, so its operations are still available.
+struct Str {
+    length: UInt64,
+}
+
+fn measure(word: Str) -> UInt64 {
+    word.length
+}
+
+fn main() -> UInt8 {
+    let greeting = "hello"
+    let own = Str { length = greeting.length() }
+    UInt8(measure(own))
+}

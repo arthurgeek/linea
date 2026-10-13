@@ -1,0 +1,5 @@
+error[S-Type]: expected a where item
+ --> tests/parser/a_where_clause_requires_a_predicate.lin:1:26
+  |
+1 | fn main() -> UInt8 where {
+  |                          ^ a `where` clause contains a contract or type predicate

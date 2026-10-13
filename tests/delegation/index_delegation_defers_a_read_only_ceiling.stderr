@@ -1,0 +1,5 @@
+error[N-Immutable]: an indexed write reaches a read-only projection
+ --> tests/delegation/index_delegation_defers_a_read_only_ceiling.lin:8:5
+  |
+8 |     proj at(self: Inner, i: UInt64) -> UInt8 {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the concrete backing implementation must permit mutation

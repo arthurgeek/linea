@@ -1,0 +1,28 @@
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/an_uncaptured_name_is_named_for_the_capture_list.lin:15:33
+   |
+15 |     let scaled = |x: UInt8| x * rate
+   |                                 ^^^^ this name belongs to an enclosing body
+   |
+   = help: write `[rate]` before the parameters to read it where it is, or `[sink rate]` to move it into the closure
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/an_uncaptured_name_is_named_for_the_capture_list.lin:16:47
+   |
+16 |     let raised = [rate] |x: UInt8| x * rate + bonus
+   |                                               ^^^^^ this name belongs to an enclosing body
+   |
+   = help: add `bonus` to the capture list to read it where it is, or `sink bonus` to move it into the closure
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/an_uncaptured_name_is_named_for_the_capture_list.lin:18:31
+   |
+18 |     let use_first = || redeem(first)
+   |                               ^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `first` away, so it must own it: write `sink [sink first]` before the parameters, which makes a closure called once
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/an_uncaptured_name_is_named_for_the_capture_list.lin:20:44
+   |
+20 |     let use_second = sink [rate] || redeem(second) + rate
+   |                                            ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `second` away, so it must own it: add `sink second` to the capture list

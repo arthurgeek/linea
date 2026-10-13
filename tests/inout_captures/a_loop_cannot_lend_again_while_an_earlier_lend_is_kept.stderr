@@ -1,0 +1,9 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/inout_captures/a_loop_cannot_lend_again_while_an_earlier_lend_is_kept.lin:10:26
+   |
+10 |             inout [inout count] || {
+   |                          ^^^^^ this lends the place again while its earlier lend is still used
+25 |     kept.release()
+   |     ---- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

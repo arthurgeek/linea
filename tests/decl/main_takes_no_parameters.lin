@@ -1,0 +1,7 @@
+// Nothing in the program calls `main`; the runtime does, and it passes what a
+// C entry point is passed. A declared parameter was lowered as an ordinary
+// one and filled from the register `argc` arrives in, so the body read a
+// number the language never gave it.
+fn main(x: UInt8) -> UInt8 {
+    x
+}

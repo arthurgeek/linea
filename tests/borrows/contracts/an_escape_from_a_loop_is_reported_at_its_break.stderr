@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/an_escape_from_a_loop_is_reported_at_its_break.lin:10:19
+   |
+10 |             break copy(view)
+   |                   ^^^^^^^^^^ escape observations only from the signature's declared sources

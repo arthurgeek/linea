@@ -1,0 +1,5 @@
+error[T-Bound]: `[Token; 2]` does not implement `Equatable`
+ --> tests/arrays/an_array_compares_only_what_its_elements_compare.lin:7:14
+  |
+7 |     if first == second {
+  |              ^^ an array compares through its elements, so their type must implement the trait

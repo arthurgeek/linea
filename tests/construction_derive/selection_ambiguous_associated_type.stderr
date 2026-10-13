@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Box` has more than one applicable trait key declaring `Item`
+  --> tests/construction_derive/selection_ambiguous_associated_type.lin:20:16
+   |
+20 |     let value: Box.Item = 7
+   |                ^^^^^^^^ select the associated type through one explicit bound

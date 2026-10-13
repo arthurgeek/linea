@@ -1,0 +1,3 @@
+pub trait Route {
+    fn route(self: Self) -> UInt8
+}

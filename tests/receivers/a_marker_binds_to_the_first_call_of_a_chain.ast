@@ -1,0 +1,50 @@
+program decls=7
+  decl struct_ "Counter" tokens 2..10
+    field "count" : UInt8
+  decl struct_ "Step" tokens 10..18
+    field "reached" : UInt8
+  decl function "advance" tokens 21..46
+    in Counter
+    param inout "self" : Self
+    returns Step
+    expr %8 block tokens 31..46
+      stmt %0 expr_stmt tokens 32..37
+        expr %3 add_assign tokens 32..37
+          expr %1 field tokens 32..35 "count"
+            expr %0 name_ref tokens 32..33 "self"
+          expr %2 int_literal tokens 36..37 "1"
+      expr %7 struct_literal tokens 37..45 type=Step
+        expr %4 name_ref tokens 39..40 "reached"
+        expr %6 field tokens 41..44 "count"
+          expr %5 name_ref tokens 41..42 "self"
+  decl impl_ "Counter" tokens 18..47
+  decl function "doubled" tokens 50..66
+    in Step
+    param read "self" : Self
+    returns UInt8
+    expr %13 block tokens 59..66
+      expr %12 mul tokens 60..65
+        expr %10 field tokens 60..63 "reached"
+          expr %9 name_ref tokens 60..61 "self"
+        expr %11 int_literal tokens 64..65 "2"
+  decl impl_ "Step" tokens 47..67
+  decl function "main" tokens 67..109
+    returns UInt8
+    expr %29 block tokens 73..109
+      stmt %1 let_decl tokens 74..83 "counter"
+        expr %16 struct_literal tokens 77..83 type=Counter
+          expr %14 name_ref tokens 79..80 "count"
+          expr %15 int_literal tokens 81..82 "4"
+      stmt %2 let_decl tokens 83..96 "first"
+        expr %21 call tokens 86..96
+          expr %20 field tokens 86..94 "doubled"
+            expr %19 call tokens 86..92 marked
+              expr %18 field tokens 87..90 "advance"
+                expr %17 name_ref tokens 87..88 "counter"
+      expr %28 add tokens 96..108
+        expr %22 name_ref tokens 96..97 "first"
+        expr %27 call tokens 98..108
+          expr %26 field tokens 98..106 "doubled"
+            expr %25 call tokens 98..104 marked
+              expr %24 field tokens 99..102 "advance"
+                expr %23 name_ref tokens 99..100 "counter"

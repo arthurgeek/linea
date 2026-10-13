@@ -1,0 +1,31 @@
+// A bounded parameter passed to another declaration's bounded parameter
+// discharges that bound. What discharges a bound is one question -- an
+// implementation for the type, or a promise already made about the parameter
+// -- so a call in a generic body and a call in `main` are answered the same
+// way, and a generic that may call through its own bound may pass it on.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn weigh[T: Measure](v: T) -> UInt8 {
+    Measure.of(v)
+}
+
+fn twice[T: Measure](v: T) -> UInt8 {
+    weigh(v) + weigh(v)
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 11 }
+    twice(a)
+}

@@ -1,0 +1,15 @@
+// The other half of the head rule, and the reason it is not a comparison of
+// declarations alone. A pattern cannot qualify its head -- `a.Point { .. }`
+// is not grammar -- so a module holding no type of that name has only the
+// spelling to write, and is still entitled to take apart what `a.make()`
+// returns.
+//
+// Its sibling case declares a `Point` here, which is what makes the head
+// reach a declaration and the two tell apart. This one declares none.
+import a
+
+fn main() -> UInt8 {
+    match a.make() {
+        Point { x: c, y: d } => c + d,
+    }
+}

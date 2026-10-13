@@ -1,0 +1,25 @@
+import std.hash
+import std.io
+
+use hash.Hash
+use io.IoError
+use io.println
+
+// A field of array type compares, orders, hashes and prints as its elements
+// do, so the struct derives each trait.
+@(copyable, derive(Equatable, Equivalent, Comparable, Ordered, Hash, Debug))
+struct Host {
+    octets: [UInt8; 4],
+    port: UInt16,
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let home: Host = .{ octets = [127, 0, 0, 1], port = 80 }
+    let same: Host = .{ octets = [127, 0, 0, 1], port = 80 }
+    let other: Host = .{ octets = [10, 0, 0, 2], port = 80 }
+    println("{home:?}")?
+    if home == same && other < home && Hash.hash(home) == Hash.hash(same) {
+        return .Ok(0)
+    }
+    return .Ok(1)
+}

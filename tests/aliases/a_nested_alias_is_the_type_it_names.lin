@@ -1,0 +1,13 @@
+alias Opt[T] = Option[T]
+
+fn inner(sink nested: Opt[Opt[UInt8]]) -> UInt8 {
+    match nested {
+        Some(_) => 0,
+        None => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    let flat: Option[UInt8] = .Some(0)
+    inner(flat)
+}

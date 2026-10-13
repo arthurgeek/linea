@@ -1,0 +1,10 @@
+// Every parameter receives an argument. An unfilled one is named rather than
+// counted: which parameter went unfilled is the answer, and a count of how many
+// arguments were written cannot give it.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    add(b: 2)
+}

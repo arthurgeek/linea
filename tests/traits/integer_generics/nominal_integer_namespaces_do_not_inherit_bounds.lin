@@ -1,0 +1,9 @@
+type Count = UInt8
+
+fn _maximum() -> Count {
+    Count.max
+}
+
+fn main() -> UInt8 {
+    0
+}

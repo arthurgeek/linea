@@ -1,0 +1,16 @@
+// `Self` is the type an implementation names, so outside one it names nothing.
+// Reported rather than left as an unknown type: a name that resolves to
+// nothing poisons whatever it annotates, and a poisoned value with no
+// diagnosis is every rule about it silently skipped.
+struct Account {
+    balance: UInt8,
+}
+
+fn weigh(x: Self) -> UInt8 {
+    x.balance
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 1 }
+    weigh(a)
+}

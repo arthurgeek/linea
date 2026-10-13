@@ -1,0 +1,38 @@
+// Discardability propagates through nested ordinary wrappers while their
+// trait implementations remain available at each substituted argument.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Near {
+    fn near(self: Self) -> UInt8
+}
+
+struct Holder[T: Discardable + Near] {
+    v: T,
+}
+
+struct Ring[V: Discardable + Show] {
+    r: V,
+}
+
+impl[V: Discardable + Show] Near for Ring[V] {
+    fn near(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+struct Wrap[U] {
+    w: U,
+}
+
+impl[T] Show for Wrap[T] {
+    fn show(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[Ring[Wrap[UInt8]]] = .{ v = .{ r = .{ w = 1 } } }
+    Near.near(h.v)
+}

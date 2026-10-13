@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Takes` is already implemented for `Counter` with the same arguments
+  --> tests/type_defaults/two_spellings_of_a_defaulted_type_are_one_implementation_key.lin:22:6
+   |
+16 | impl Takes[Shelf[UInt8]] for Counter {
+   |      ----- already implemented here
+22 | impl Takes[Shelf[UInt8, SystemAllocator]] for Counter {
+   |      ^^^^^ a trait is implemented once per arguments and type

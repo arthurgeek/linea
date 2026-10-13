@@ -1,0 +1,15 @@
+error[N-Unused]: `T` is never used
+ --> tests/traits/a_generic_parameter_is_not_bound_by_unit.lin:6:6
+  |
+6 | impl[T] Value for () {
+  |      ^ name it in this declaration, or remove it
+error[T-Impl]: implementation parameter `T` cannot be recovered from its key
+ --> tests/traits/a_generic_parameter_is_not_bound_by_unit.lin:6:6
+  |
+6 | impl[T] Value for () {
+  |      ^ place the parameter in the receiver or trait arguments outside associated-type projections
+error[T-Bound]: `Value` requires `Self` to implement it, and `()` does not
+  --> tests/traits/a_generic_parameter_is_not_bound_by_unit.lin:13:17
+   |
+13 |     Value.value({})
+   |                 ^^ implement it for that type, or reach the operation on one that does

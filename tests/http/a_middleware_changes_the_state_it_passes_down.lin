@@ -1,0 +1,60 @@
+// Every handler takes the state `inout`, middleware included. `Counted`
+// counts each request in the state before passing it and the request on, and
+// the route reads the count it left there.
+import std.http
+import std.io
+import std.mem
+
+use http.Handler
+use mem.Owner
+
+@derive(Release)
+struct App {
+    requests: UInt64,
+}
+
+// `Counted` holds the handler it passes each request on to.
+@derive(Release)
+struct Counted[H] {
+    next: H,
+}
+
+impl[H] Counted[H] {
+    fn around(sink next: H) -> Self where carries(next) {
+        .{ next }
+    }
+}
+
+impl[P: Allocator, H: http.Handler[App, P]] http.Handler[App, P] for Counted[H] {
+    fn serve_http(inout self: Self, inout state: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+        state.requests += 1
+        &self.next.serve_http(&state, request)
+    }
+}
+
+fn number[P: Allocator](inout app: App, request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    http.text(request, "request {app.requests}")
+}
+
+fn main() -> UInt8 {
+    var router: http.Router[App, mem.SystemAllocator] = http.Router.new()
+    &router.route_raw("GET /number", number).unwrap()
+    var server = http.with_state(App { requests = 0 }, Counted.around(router))
+    let arena = mem.Arena.open(mem.system(), size: 65536)
+    var nothing = {}
+    for _ in UInt64(0)..2 {
+        let sent = http.new_request(arena.handle(), "GET", "/number", body: "").unwrap()
+        match &server.serve_http(&nothing, sent.request()) {
+            Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+            Err(_) => io.println("refused").unwrap(),
+        }
+    }
+    arena.release()
+    let requests = server.state().requests
+    server.release()
+    if requests == 2 {
+        0
+    } else {
+        1
+    }
+}

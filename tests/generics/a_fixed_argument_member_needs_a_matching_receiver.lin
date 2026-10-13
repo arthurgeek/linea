@@ -1,0 +1,17 @@
+// A member of `impl[A] Pair[A, ()]` belongs to pairs whose second half is
+// `()`, so a pair holding a `Bool` there does not have it.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[A] Pair[A, ()] {
+    fn first_of(self: Self) -> A where A: Copyable {
+        copy(self.first)
+    }
+}
+
+fn main() -> UInt8 {
+    let both: Pair[UInt8, Bool] = .{ first = 4, second = true }
+    both.first_of()
+}

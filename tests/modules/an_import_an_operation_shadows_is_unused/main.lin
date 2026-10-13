@@ -1,0 +1,18 @@
+// `c.total()` runs the operation `Counter` declares, not `scores.total`, so
+// nothing uses the import and it is reported unused.
+import scores
+
+struct Counter {
+    value: UInt8,
+}
+
+impl Counter {
+    pub fn total(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn main() -> UInt8 {
+    let c = Counter { value = 3 }
+    c.total()
+}

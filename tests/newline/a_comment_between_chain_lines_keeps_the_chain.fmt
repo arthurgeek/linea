@@ -1,0 +1,12 @@
+// A comment on its own line between two links of a chain stays there, and the
+// line after it opens with `.filter`, so the chain goes on past it. It counts
+// the odd scores, 1 and 7.
+fn main() -> UInt8 {
+    let scores = [UInt64(1), 4, 7, 8]
+    let count = scores
+        .as_slice()
+        // Only the odd scores are counted.
+        .filter(|score| *score % 2 == 1)
+        .fold(0, |sink count, sink _score| count + 1)
+    UInt8(count)
+}

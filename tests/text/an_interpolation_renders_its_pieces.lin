@@ -1,0 +1,24 @@
+// `"a{x}b"` is a value holding the text around its interpolations and the
+// values inside them, rendered in order.
+//
+// A value, not a rendering: it can be bound, passed and returned, and it
+// renders only when something asks. Nothing here materialises text, so nothing
+// here needs a heap -- the pieces stay where they were and a writer receives
+// them one after another.
+//
+// Each value renders through the implementation its own type answers with, so
+// one inside a literal looks exactly as it does outside one.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    let n: Int64 = 42
+    let flag: Bool = true
+
+    var w: Descriptor = stdout()
+    Display.fmt("n = {n}, flag = {flag}", &w)?
+    return .Ok(0)
+}

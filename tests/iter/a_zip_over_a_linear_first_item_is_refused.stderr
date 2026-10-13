@@ -1,0 +1,8 @@
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Job` does not have that capability
+  --> tests/iter/a_zip_over_a_linear_first_item_is_refused.lin:34:26
+   |
+34 |     for (job, n) in jobs.zip(UInt8(1)..3) {
+   |                          ^^^ `zip` may dispose of a `Job`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before. `zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause

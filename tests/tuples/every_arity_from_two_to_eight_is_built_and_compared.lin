@@ -1,0 +1,15 @@
+// A tuple holds from two to eight components, and each arity compares.
+fn main() -> UInt8 {
+    let two = (1, 2)
+    let three = (1, 2, 3)
+    let four = (1, 2, 3, 4)
+    let five = (1, 2, 3, 4, 5)
+    let six = (1, 2, 3, 4, 5, 6)
+    let seven = (1, 2, 3, 4, 5, 6, 7)
+    let eight = (1, 2, 3, 4, 5, 6, 7, 8)
+    if two == two && three == three && four == four && five == five && six == six && seven == seven && eight == eight {
+        0
+    } else {
+        1
+    }
+}

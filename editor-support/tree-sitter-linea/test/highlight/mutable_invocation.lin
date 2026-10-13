@@ -1,0 +1,15 @@
+fn apply[F: inout fn() -> UInt8](inout callback: F) -> UInt8 {
+//          ^ keyword.storage.modifier
+//                ^ keyword.function
+    let first = &callback() + 1
+//              ^ operator
+//               ^ function
+//                          ^ operator
+    assert_eq(&callback(), 1)
+//            ^ operator
+//             ^ function
+    &tally.counter.bump()
+//  ^ operator
+//               ^ variable.other.member
+    first
+}

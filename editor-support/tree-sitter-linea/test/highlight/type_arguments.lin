@@ -1,0 +1,30 @@
+fn nothing[T]() -> Option[T] {
+    .None
+}
+
+fn pair[A, B](first: A, second: B) -> A {
+    first
+}
+
+fn double(value: UInt8) -> UInt8 {
+    value * 2
+}
+
+fn main() -> UInt8 {
+    let port = "8080".parse[UInt16]().unwrap()
+//                          ^ type.builtin
+    let _empty = nothing[Point]()
+//               ^ function
+//                       ^ type
+    let _pair = nothing[[UInt8; 2]]()
+//                        ^ type.builtin
+    let _make = pair[UInt8, Bool]
+//              ^ function
+//                   ^ type.builtin
+    let steps = [double, double]
+    let at = 1
+    let doubled = steps[at](5)
+//                ^ variable
+//                      ^ variable
+    UInt8(port - 8080) + doubled - 10
+}

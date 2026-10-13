@@ -1,0 +1,27 @@
+@(opaque, copyable)
+struct Str {
+    bytes: std.mem.Slice[UInt8],
+}
+
+@(opaque, copyable, derive(Release))
+struct Slice[UInt8] {
+    at: UInt64,
+    len: UInt64,
+}
+
+fn ;main() -> UInt8 {
+    let title = |_n: UInt8|
+        \\Chapter
+    UInt8(std.text;Str.length(closure.0(1))) - 7
+}
+
+fn closure.0(read _n: UInt8) -> Str {
+    \\Chapter
+}
+pub fn std.text;Str.length(self: std.text.Str) -> UInt64 {
+    std.mem;Slice[UInt8].length(self.bytes)
+}
+
+pub fn std.mem;Slice[UInt8].length(self: std.mem.Slice[UInt8]) -> UInt64 {
+    self.len
+}

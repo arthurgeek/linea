@@ -1,0 +1,22 @@
+program decls=5
+  decl associated_type "Item" tokens 3..15
+    in HasCallable
+    requires fn(read value: UInt8) -> UInt8
+  decl trait_ "HasCallable" tokens 0..16
+  decl function "_needs_callable" tokens 16..41
+    type param "F" : fn(read value: UInt8) -> UInt8
+    param read "_value" : F
+    returns (
+    expr %0 block tokens 39..41
+  decl function "_forwards" tokens 41..64
+    type param "H" : HasCallable
+    param read "value" : H.Item
+    returns (
+    expr %4 block tokens 58..64
+      expr %3 call tokens 59..63
+        expr %1 name_ref tokens 59..60 "_needs_callable"
+        expr %2 name_ref tokens 61..62 "value"
+  decl function "main" tokens 64..73
+    returns UInt8
+    expr %6 block tokens 70..73
+      expr %5 int_literal tokens 71..72 "0"

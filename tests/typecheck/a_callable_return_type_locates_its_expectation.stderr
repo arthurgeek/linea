@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(read UInt8) -> UInt8`, found `Int64`
+ --> tests/typecheck/a_callable_return_type_locates_its_expectation.lin:2:5
+  |
+1 | fn _gives_number() -> fn(read x: UInt8) -> UInt8 {
+  |                       -------------------------- expected because of this return type
+2 |     0
+  |     ^ expected `fn(read UInt8) -> UInt8`, found `Int64`

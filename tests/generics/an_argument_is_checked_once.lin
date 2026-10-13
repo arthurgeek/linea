@@ -1,0 +1,19 @@
+// An argument that settles a type parameter was walked to find its type and
+// then walked again to check it against the parameter it had just settled.
+// Every level of nesting doubled the work -- a call twenty deep took seconds,
+// and forty was not worth waiting for.
+//
+// It also reported whatever was wrong inside an argument twice, and recorded
+// what an inner call instantiated twice, which two later passes read by taking
+// the first match and neither enforces.
+fn id[T: Copyable](x: T) -> T {
+    copy(x)
+}
+
+fn two(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    id(id(id(id(id(two(300, 1))))))
+}

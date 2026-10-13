@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may fail with `ReadError`, and no `From[ReadError] for WriteError` implementation converts it to the function's error type
+ --> tests/constructor_callables/contextual_variants/known_mismatched_error_is_not_converted.lin:8:17
+  |
+8 |     let value = mapped?
+  |                 ^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`

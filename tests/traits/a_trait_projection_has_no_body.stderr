@@ -1,0 +1,5 @@
+error[S-Entry]: a trait's projection has no body
+ --> tests/traits/a_trait_projection_has_no_body.lin:8:58
+  |
+8 |     proj at(inout self: Self, slot: UInt64) -> Self.Item { self }
+  |                                                          ^ each implementation says which place it names

@@ -1,0 +1,11 @@
+// A call through a function value ends its temporaries with the statement,
+// as a call to the function by name does.
+fn first(items: [UInt64; 2]) -> borrow UInt64 where borrows(items) {
+    borrow items[0]
+}
+
+fn main() -> UInt8 {
+    let pick = first
+    let kept = pick([1, 2])
+    UInt8(*kept)
+}

@@ -1,0 +1,8 @@
+// Double free, which is the same question as use after free: the root is
+// moved and something reaches for it. One rule, one code.
+fn main() -> UInt8 {
+    let k = mint(7)
+    release(k)
+    release(k)
+    0
+}

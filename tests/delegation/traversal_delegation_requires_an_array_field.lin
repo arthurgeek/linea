@@ -1,0 +1,9 @@
+struct _Board { value: UInt8 }
+
+impl _Board {
+    trav positions via value
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,24 @@
+// Pair[UInt8, ()] has a one-byte field followed by a zero-width field.
+// Reading the unit field must not access bytes beyond the structure.
+// An empty block supplies the unit argument through inference.
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+fn both[A: Copyable, B: Copyable](x: A, y: B) -> Pair[A, B] where carries(x, y) {
+    .{ a = copy(x), b = copy(y) }
+}
+
+fn main() -> UInt8 {
+    let guard: UInt64 = 18364758544493064720
+    let n: UInt8 = 7
+    let p = both(n, {})
+    let _nothing = copy(p.b)
+
+    if guard != 18364758544493064720 {
+        1
+    } else {
+        p.a
+    }
+}

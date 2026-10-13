@@ -1,0 +1,19 @@
+// `Display` renders a value into a writer rather than answering a fresh string,
+// so an implementation has nowhere to put anything and cannot allocate. It is
+// generic over the writer, so one implementation serves every writer written
+// later, and monomorphisation makes each pairing a direct call.
+//
+// The bytes land on standard output, which the corpus records as a golden.
+import std.io
+
+use io.Descriptor
+use io.IoError
+use io.stdout
+
+fn main() -> Result[UInt8, IoError] {
+    var w: Descriptor = stdout()
+    Display.fmt(-9223372036854775808, &w)?
+    Display.fmt("hi", &w)?
+    Display.fmt("\n", &w)?
+    return .Ok(0)
+}

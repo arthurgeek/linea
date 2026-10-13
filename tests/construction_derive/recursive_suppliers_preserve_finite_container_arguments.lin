@@ -1,0 +1,91 @@
+trait Count: Copyable {
+    fn count(self: Self) -> UInt8
+}
+
+impl Count for UInt8 {
+    fn count(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+@copyable
+struct Entry[K: Count, V: Count] {
+    key: K,
+    value: V,
+}
+
+@copyable
+enum Slot[K: Count, V: Count] { Full(Entry[K, V]) }
+
+impl[K: Count, V: Count] Count for Slot[K, V] {
+    fn count(self: Self) -> UInt8 {
+        match read self { Full(entry) => Count.count(entry) }
+    }
+}
+
+@copyable
+struct Text[A: Count] { allocator: A }
+
+impl[A: Count] Count for Text[A] {
+    fn count(self: Self) -> UInt8 {
+        Count.count(self.allocator)
+    }
+}
+
+@copyable
+struct Document[A: Count] { allocator: A }
+
+impl[A: Count] Count for Document[A] {
+    fn count(self: Self) -> UInt8 {
+        let bucket: Bucket[Text[A], Document[A], A] = .{
+            key = .{ allocator = copy(self.allocator) },
+            value = copy(self),
+            allocator = copy(self.allocator),
+        }
+        Count.count(bucket)
+    }
+}
+
+@copyable
+struct Rack[E: Count, A: Count] {
+    element: E,
+    allocator: A,
+}
+
+@copyable
+struct Bucket[K: Count, V: Count, A: Count] {
+    key: K,
+    value: V,
+    allocator: A,
+}
+
+impl[K: Count, V: Count] Count for Entry[K, V] {
+    fn count(self: Self) -> UInt8 {
+        Count.count(self.key) + Count.count(self.value)
+    }
+}
+
+impl[E: Count, A: Count] Count for Rack[E, A] {
+    fn count(self: Self) -> UInt8 {
+        Count.count(self.element) + Count.count(self.allocator)
+    }
+}
+
+impl[K: Count, V: Count, A: Count] Count for Bucket[K, V, A] {
+    fn count(self: Self) -> UInt8 {
+        let rack: Rack[Slot[K, V], A] = .{
+            element = .Full(.{ key = copy(self.key), value = copy(self.value) }),
+            allocator = copy(self.allocator),
+        }
+        return Count.count(rack)
+    }
+}
+
+fn main() -> UInt8 {
+    let bucket: Bucket[UInt8, UInt8, UInt8] = .{ key = 1, value = 2, allocator = 3 }
+    if Count.count(bucket) == 6 {
+        0
+    } else {
+        1
+    }
+}

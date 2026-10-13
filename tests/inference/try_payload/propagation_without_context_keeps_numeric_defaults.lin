@@ -1,0 +1,18 @@
+fn success[T](sink value: T) -> Result[T, UInt8] where carries(.Ok: value) {
+    .Ok(value)
+}
+
+fn signed(value: Int64) -> Bool {
+    value == 7
+}
+
+fn main() -> Result[UInt8, UInt8] {
+    let value = success(7)?
+    return .Ok(
+        if signed(value) {
+            0
+        } else {
+            1
+        },
+    )
+}

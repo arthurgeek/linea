@@ -1,0 +1,17 @@
+// An annotation names a type, and which type it names depends on where it is
+// written. The scan that marked one used walked every binding in the program
+// and took the first of that name, so a type declared in the root module
+// answered for every module. Two modules each declaring a `Ghost` is the case
+// a module exists to make possible: here `a` names its own in its own
+// annotation and was told it was never used, while the root's was exempted by
+// a use that was not of it.
+import a
+
+struct Ghost {
+    v: UInt8,
+}
+
+fn main() -> UInt8 {
+    let _g: Ghost = .{ v = 1 }
+    a.seven()
+}

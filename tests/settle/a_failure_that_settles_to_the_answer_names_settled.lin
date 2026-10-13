@@ -1,0 +1,45 @@
+// A refused `push` fails with a `PushFailure` that holds the refused alarm.
+// `settled()` releases the alarm and keeps its `mem.Oom`, which `Hour`
+// converts from. `Day` converts from neither the failure nor its reason.
+import std.mem
+
+@(linear, derive(Release))
+struct Alarm {
+    minute: UInt64,
+}
+
+enum Hour {
+    Refused,
+}
+
+impl From[mem.Oom] for Hour {
+    fn from(sink _source: mem.Oom) -> Hour {
+        .Refused
+    }
+}
+
+enum Day {
+    Refused,
+}
+
+fn schedule(inout alarms: Vec[Alarm, mem.SystemAllocator], minute: UInt64) -> Result[(), Hour] {
+    &alarms.push(Alarm { minute })?
+    return .Ok({})
+}
+
+fn schedule_day(inout alarms: Vec[Alarm, mem.SystemAllocator], minute: UInt64) -> Result[(), Day] {
+    &alarms.push(Alarm { minute })?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    var alarms: Vec[Alarm, mem.SystemAllocator] = Vec.new()
+    let first = schedule(&alarms, 450).is_ok()
+    let second = schedule_day(&alarms, 480).is_ok()
+    alarms.release()
+    if first && second {
+        0
+    } else {
+        1
+    }
+}

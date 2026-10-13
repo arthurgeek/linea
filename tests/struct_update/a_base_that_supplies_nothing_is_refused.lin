@@ -1,0 +1,12 @@
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let small: Size = .{ width = 1, height = 1 }
+    // The literal writes every field, so the base would be taken and none of
+    // it kept.
+    let large = Size { width = 8, height = 9, ..small }
+    large.width
+}

@@ -1,0 +1,9 @@
+enum Shape { Circle(UInt8), Square }
+
+fn main() -> UInt8 {
+    let _: UInt8 = match Shape.Square {
+        Circle(n) => n,
+        Square => 0,
+    }
+    n
+}

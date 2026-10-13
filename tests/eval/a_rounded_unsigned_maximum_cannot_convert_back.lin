@@ -1,0 +1,8 @@
+fn roundtrip(value: UInt64) -> UInt64 {
+    UInt64(Float64(value))
+}
+
+fn main() -> UInt8 {
+    let _answer = roundtrip(18446744073709551615)
+    0
+}

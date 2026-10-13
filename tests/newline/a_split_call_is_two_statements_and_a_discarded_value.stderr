@@ -1,0 +1,5 @@
+error[T-Discard]: this expression produces an `Int64` that is discarded
+  --> tests/newline/a_split_call_is_two_statements_and_a_discarded_value.lin:10:5
+   |
+10 |     (bar)
+   |     ^^^^^ bind it with `let _ =` to discard it deliberately

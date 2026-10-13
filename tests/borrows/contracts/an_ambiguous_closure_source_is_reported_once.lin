@@ -1,0 +1,13 @@
+// A closure with two eligible sources and no clause is one error, as a
+// function is.
+fn main() -> UInt8 {
+    let pick = |left: Str, right: Str| -> Str {
+        if right.length() > 0 {
+            copy(left)
+        } else {
+            copy(right)
+        }
+    }
+    let _picked = pick("a", "b")
+    0
+}

@@ -1,0 +1,13 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let owned = "café".to_owned(mem.system()).unwrap()
+    defer owned.release()
+    let first = "tea".as_bytes()[0]
+    let trimmed = " tea ".trim_unicode()
+    if owned.view() == "café" && first == 116 && trimmed == "tea" && "".length() == 0 {
+        0
+    } else {
+        1
+    }
+}

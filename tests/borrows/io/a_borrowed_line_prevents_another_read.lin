@@ -1,0 +1,14 @@
+import std.io
+import std.mem
+
+fn main() -> UInt8 {
+    var reader = match io.BufferedReader.open(mem.system(), capacity: 32, reader: io.stdin()) {
+        Ok(reader) => reader,
+        Err(_) => return 1,
+    }
+    let line = io.BufferedReader.read_line_borrowed(&reader, max_bytes: 64).unwrap().unwrap()
+    let _next = io.BufferedReader.read_line_borrowed(&reader, max_bytes: 64)
+    let length = line.length()
+    let _input = reader.abandon()
+    return UInt8(length)
+}

@@ -1,0 +1,9 @@
+pub trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for UInt8 {
+    fn of(x: Self) -> UInt8 {
+        x
+    }
+}

@@ -1,0 +1,7 @@
+error[O-Move]: `b` has already been moved
+  --> tests/mem/a_buffer_read_after_it_is_disposed.lin:14:19
+   |
+13 |             b.release()
+   |             - it was taken here
+14 |             UInt8(b.load(0))
+   |                   ^ it was already taken, and a value is taken once

@@ -1,0 +1,19 @@
+// The direction that keeps the rule from becoming "a literal holds no `&`":
+// a value that names a place no other value names is what most literals with
+// a call in them look like.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn bump(inout n: UInt8) -> UInt8 {
+    n = 9
+    1
+}
+
+fn main() -> UInt8 {
+    var p: UInt8 = 2
+    var q: UInt8 = 3
+    let s: Pair = .{ a = bump(&p), b = q }
+    s.a + s.b + p
+}

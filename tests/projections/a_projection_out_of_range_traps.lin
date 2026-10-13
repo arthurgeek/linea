@@ -1,0 +1,20 @@
+// The bounds check rides the path the projection expands into, so an index no
+// element sits at traps where the same index into the field it names traps.
+// The index is a `var`, so there is nothing here to fold.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    var i: UInt64 = 9
+    g[i]
+}

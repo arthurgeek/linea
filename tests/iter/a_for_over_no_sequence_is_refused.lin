@@ -1,0 +1,6 @@
+// A `for` walks what a `Sequence` says how to walk. A number is not one, and
+// there is no walk to start from it.
+fn main() -> UInt8 {
+    for _x in 3 {}
+    0
+}

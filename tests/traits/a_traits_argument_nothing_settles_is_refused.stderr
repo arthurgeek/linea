@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Innermost`'s `U`
+  --> tests/traits/a_traits_argument_nothing_settles_is_refused.lin:23:16
+   |
+23 |     let held = Innermost.of(b)
+   |                ^^^^^^^^^^^^^^^ pass what it stands for, or say what the call returns

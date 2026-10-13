@@ -1,0 +1,13 @@
+fn bump(inout v: Float64) -> () {
+    v = v + 1.0
+}
+
+fn main() -> UInt8 {
+    var x: Float64 = 1.5
+    bump(&x)
+    if x == 2.5 {
+        0
+    } else {
+        1
+    }
+}

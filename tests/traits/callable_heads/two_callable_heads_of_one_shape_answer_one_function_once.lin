@@ -1,0 +1,21 @@
+// Two implementations at one callable shape whose trait arguments can be equal
+// overlap: a function of that shape would reach both.
+trait Handle[T] {
+    fn handle(self: Self, input: T) -> UInt64
+}
+
+impl[T] Handle[T] for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, _input: T) -> UInt64 {
+        self(1)
+    }
+}
+
+impl Handle[Bool] for fn(input: UInt64) -> UInt64 {
+    fn handle(self: Self, _input: Bool) -> UInt64 {
+        self(2)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

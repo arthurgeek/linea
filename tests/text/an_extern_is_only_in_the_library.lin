@@ -1,0 +1,16 @@
+// An `extern` names a symbol the compiler did not compile, so it is a signature
+// the language believes rather than a body it checked. What keeps that
+// tolerable is that the believed surface is small and ships with the compiler,
+// and a program that could declare its own would end that: it could name the
+// allocator's `free` and call it twice, and every guarantee the ownership pass
+// makes would be decoration.
+extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+fn main() -> UInt8 {
+    let n: Int64 = linea_write_some(2, 0, 0)
+    if n < 0 {
+        1
+    } else {
+        0
+    }
+}

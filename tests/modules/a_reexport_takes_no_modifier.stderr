@@ -1,0 +1,10 @@
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/modules/a_reexport_takes_no_modifier/mid/mid.lin:4:1
+  |
+4 | @opaque
+  | ^ place them before a struct, enum, or newtype
+error[S-Entry]: attributes attach only to a type declaration
+ --> tests/modules/a_reexport_takes_no_modifier/mid/mid.lin:6:1
+  |
+6 | @linear
+  | ^ place them before a struct, enum, or newtype

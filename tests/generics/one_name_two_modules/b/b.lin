@@ -1,0 +1,9 @@
+@copyable
+pub struct Thing {
+    p: UInt8,
+    q: UInt8,
+}
+
+pub fn make() -> Thing {
+    .{ p = 2, q = 3 }
+}

@@ -1,0 +1,15 @@
+// A failed `Option` carries nothing, so there is nothing for `else` to bind.
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn main() -> UInt8 {
+    let found = find(1) else |_| {
+        return 1
+    }
+    found
+}

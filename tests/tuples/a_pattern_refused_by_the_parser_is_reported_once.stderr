@@ -1,0 +1,10 @@
+error[S-Tuple]: a tuple pattern binds a name or `_` to each component
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:4:21
+  |
+4 |     let literal = |(1, 2)| 1
+  |                     ^ a pattern binds names and compares nothing; bind a name here and compare it in the body
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin:5:18
+  |
+5 |     let empty = |()| 1
+  |                  ^ `()` has nothing to take apart

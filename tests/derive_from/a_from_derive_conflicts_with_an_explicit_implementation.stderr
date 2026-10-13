@@ -1,0 +1,7 @@
+error[N-Duplicate]: `From` is already implemented for `Failure` with the same arguments
+  --> tests/derive_from/a_from_derive_conflicts_with_an_explicit_implementation.lin:5:9
+   |
+5  | @derive(From[Missing])
+   |         ^^^^ a trait is implemented once per arguments and type
+10 | impl From[Missing] for Failure {
+   |      ---- already implemented here

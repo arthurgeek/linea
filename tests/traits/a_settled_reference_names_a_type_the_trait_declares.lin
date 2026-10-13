@@ -1,0 +1,27 @@
+// A settled reference reaches the trait's declared types and nothing else.
+// `Weight` is a name this trait never declares, so no implementation settles it
+// and there is no type for the annotation to mean -- said where it is written
+// rather than left as a type nobody named.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        let n: Self.Weight = x.at
+        n
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

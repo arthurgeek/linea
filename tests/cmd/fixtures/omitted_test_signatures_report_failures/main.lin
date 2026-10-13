@@ -1,0 +1,44 @@
+import std.testing
+import std.io
+
+fn main() -> UInt8 {
+    0
+}
+
+fn mark_cleanup() -> () {
+    io.eprintln("cleanup")
+}
+
+test fn assertion_failure_propagates() {
+    defer mark_cleanup()
+    testing.assert(false, "assertion failure")?
+}
+
+test fn explicit_failure_is_returned() {
+    defer mark_cleanup()
+    let failure = match testing.assert(false, "explicit failure") {
+        Err(error) => error,
+        Ok(_) => panic("an assertion returned success"),
+    }
+    return .Err(failure)
+}
+
+test fn trailing_match_propagates_failure() {
+    let value: Option[UInt8] = .Some(1)
+    match value {
+        Some(_) => testing.assert(false, "match failure")?,
+        None => {},
+    }
+}
+
+test fn trailing_match_returns_explicit_failure() {
+    let failure = match testing.assert(false, "returned match failure") {
+        Err(error) => error,
+        Ok(_) => panic("an assertion returned success"),
+    }
+    let value: Option[UInt8] = .Some(1)
+    match value {
+        Some(_) => return .Err(failure),
+        None => {},
+    }
+}

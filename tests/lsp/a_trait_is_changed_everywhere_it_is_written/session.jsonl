@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A bound and an `impl` header name a trait outside every expression, and the\n// call below names it as one.\n// All four are changed, or the name is left alone.\ntrait Measure {\n    fn of(x: Self) -> UInt8\n}\n\nstruct Coins {\n    count: UInt8,\n}\n\nimpl Measure for Coins {\n    fn of(x: Self) -> UInt8 {\n        x.count\n    }\n}\n\nfn total[T: Measure](a: T) -> UInt8 {\n    Measure.of(a)\n}\n\nfn main() -> UInt8 {\n    let c: Coins = .{ count = 4 }\n    total(c)\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":17,"character":13},"newName":"Sized"}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

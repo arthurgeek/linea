@@ -1,0 +1,10 @@
+error[T-Reflection]: yield a binding declared directly by this recipe
+  --> tests/construction_derive/construct_outer_result.lin:18:17
+   |
+18 |                 outer
+   |                 ^^^^^ the result cannot be the descriptor, an outer binding or a nested-scope local
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_outer_result.lin:33:22
+   |
+33 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

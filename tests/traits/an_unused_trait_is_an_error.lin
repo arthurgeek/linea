@@ -1,0 +1,11 @@
+// A trait is a declaration, so one nothing names is an error like any other.
+// Its signatures are not: a signature has no body, so nothing in the program
+// can name its parameters, and holding them to the unused rule would make
+// every trait unwritable.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,27 @@
+trait Holder {
+    type Row: Index[Int16]
+}
+
+struct Board { values: [UInt8; 2] }
+
+impl Index[Int16] for Board via values
+
+struct Witness {}
+
+impl Holder for Witness {
+    type Row = Board
+}
+
+fn first[H: Holder](row: H.Row, _holder: H) -> borrow H.Row.Elem where borrows(row) {
+    borrow row[0]
+}
+
+fn main() -> UInt8 {
+    let board = Board { values = [7, 9] }
+    let value = first(board, Witness {})
+    if *value == 7 && board[Int16(0)] == 7 {
+        0
+    } else {
+        1
+    }
+}

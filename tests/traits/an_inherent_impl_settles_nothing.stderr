@@ -1,0 +1,5 @@
+error[T-Impl]: a settled reference is read through a trait's implementation, and this `impl` names no trait
+  --> tests/traits/an_inherent_impl_settles_nothing.lin:10:27
+   |
+10 |     fn get(x: Counter) -> Self.Item {
+   |                           ^^^^^^^^^ name the type itself, or move this to an implementation of a trait

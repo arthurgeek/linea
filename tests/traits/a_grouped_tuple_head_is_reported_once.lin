@@ -1,0 +1,18 @@
+// `((A, B))` groups a tuple and names no type, so it is refused as a head
+// where it is written, for an implementation and a derive request alike. The
+// refusal is the only report: a head that names nothing is not also held to
+// applying its own parameters.
+trait Show {}
+
+trait Marker {}
+
+template impl Marker {}
+
+impl[A, B] Show for ((A, B)) {
+}
+
+derive[A, B] Marker for ((A, B))
+
+fn main() -> UInt8 {
+    0
+}

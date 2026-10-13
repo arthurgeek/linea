@@ -1,0 +1,10 @@
+note[S-Continuation]: the next line selects from the value above, and an expression ending in a block takes no selection
+  --> tests/newline/a_selection_after_a_block_is_told_to_bind_it.lin:20:5
+   |
+20 |     .doubled()
+   |     ^ bind the value with `let`, then select from the binding
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/newline/a_selection_after_a_block_is_told_to_bind_it.lin:20:5
+   |
+20 |     .doubled()
+   |     ^^^^^^^^ name its enum, or give the binding a type

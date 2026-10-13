@@ -1,0 +1,7 @@
+pub fn stop() -> Never {
+    loop {}
+}
+
+fn main() -> UInt8 {
+    0
+}

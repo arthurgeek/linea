@@ -1,0 +1,28 @@
+// `pair.count()` reads `pair`, which holds the place `&pair.left` lends to
+// the same call.
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn add(inout self: Self, amount: UInt8) -> () {
+        self.count += amount
+    }
+}
+
+struct Pair {
+    left: Counter,
+    right: Counter,
+}
+
+impl Pair {
+    fn count(self: Self) -> UInt8 {
+        self.left.count + self.right.count
+    }
+}
+
+fn main() -> UInt8 {
+    var pair = Pair { left = Counter { count = 1 }, right = Counter { count = 2 } }
+    Counter.add(&pair.left, pair.count())
+    pair.left.count
+}

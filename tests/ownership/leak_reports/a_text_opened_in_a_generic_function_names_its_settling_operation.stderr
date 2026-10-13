@@ -1,0 +1,9 @@
+error[O-Leak]: `line` (a linear `String[A]`) is still owned when this path leaves
+ --> tests/ownership/leak_reports/a_text_opened_in_a_generic_function_names_its_settling_operation.lin:7:9
+  |
+7 |     let line = String.new_in(allocator)
+  |         ^^^^ never settled on the path that reaches the end of this block
+9 | }
+  | - the block ends here
+  |
+  = help: settle it first with `line.release()`

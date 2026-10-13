@@ -1,0 +1,8 @@
+// `parse` is an operation of `Str`, so the brackets before its call hold its
+// type arguments, and `3` and `limit + 1` are values rather than types.
+fn main() -> UInt8 {
+    let limit = 3
+    let _first = "7".parse[3]()
+    let _second = "7".parse[limit + 1]()
+    0
+}

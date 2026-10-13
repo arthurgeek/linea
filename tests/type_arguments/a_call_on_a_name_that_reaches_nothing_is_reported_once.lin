@@ -1,0 +1,12 @@
+// Each call's head names nothing, which is the one mistake reported: the
+// brackets after it are not also reported as an index or as types.
+struct Seed {
+    value: UInt8,
+}
+
+fn main() -> UInt8 {
+    let _a = missing.parse[UInt8]()
+    let _b = nothing_here[UInt8](3)
+    let _c = Seed.make[UInt8](1)
+    0
+}

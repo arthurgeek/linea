@@ -1,0 +1,8 @@
+// A primitive is an ordinary name, so it can be written where a value belongs
+// -- and what it names is a type, which is not one. The rule reads what the
+// name reaches rather than how it is spelled, so the answer here is the answer
+// a declared type gets.
+fn main() -> UInt8 {
+    let _wide = UInt8
+    0
+}

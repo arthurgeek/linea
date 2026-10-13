@@ -1,0 +1,62 @@
+// A linear success binds like any owned value, an `else` block may yield a
+// linear value of its own, and each path settles what it holds.
+fn open(n: UInt8) -> Result[Key, Key] {
+    if n > 2 {
+        Result.Ok(mint(n))
+    } else {
+        Result.Err(mint(n + 20))
+    }
+}
+
+fn find(n: UInt8) -> Option[UInt8] {
+    if n > 2 {
+        Option.Some(n)
+    } else {
+        Option.None
+    }
+}
+
+fn first(n: UInt8) -> UInt8 {
+    let key = open(n) else |failed| {
+        release(failed)
+        mint(9)
+    }
+    let t = tag(key)
+    release(key)
+    t
+}
+
+fn nested(n: UInt8) -> UInt8 {
+    let held = mint(1)
+    let found = find(n) else {
+        let other = find(n + 5) else {
+            release(held)
+            return 7
+        }
+        other
+    }
+    release(held)
+    found
+}
+
+fn looped() -> UInt8 {
+    var i: UInt8 = 0
+    let total = loop {
+        i += 1
+        let v = find(i) else {
+            continue
+        }
+        if v > 4 {
+            break v
+        }
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    var r = find(1) else {
+        0
+    }
+    r += 1
+    first(1) + first(4) + nested(1) + nested(4) + looped() + r
+}

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Takes` is already implemented for `P` with the same arguments
+  --> tests/modules/a_qualified_name_and_its_use_are_one_implementation/main.lin:20:6
+   |
+14 | impl Takes[Pair[UInt8]] for P {
+   |      ----- already implemented here
+20 | impl Takes[geo.Pair[UInt8]] for P {
+   |      ^^^^^ a trait is implemented once per arguments and type

@@ -1,0 +1,32 @@
+// Every length in a written type counts, however deep it sits:
+// `[[UInt8; 2]; 3]` and `[[UInt8; 3]; 2]` hold six elements each and are two
+// types all the same, so each names its own implementation.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[[UInt8; 2]; 3]] for Holder {
+    fn give(self: Self, _u: [[UInt8; 2]; 3]) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[[UInt8; 3]; 2]] for Holder {
+    fn give(self: Self, _u: [[UInt8; 3]; 2]) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    let wide: [[UInt8; 2]; 3] = [[1, 2], [3, 4], [5, 6]]
+    let tall: [[UInt8; 3]; 2] = [[1, 2, 3], [4, 5, 6]]
+    let a = Give.give(h, wide)
+    let b = Give.give(h, tall)
+    let _h = h
+    a + b
+}

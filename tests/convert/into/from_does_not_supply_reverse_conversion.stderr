@@ -1,0 +1,5 @@
+error[T-Bound]: `Destination` does not implement `Into[Source]`
+  --> tests/convert/into/from_does_not_supply_reverse_conversion.lin:13:26
+   |
+13 |     let source: Source = destination.into()
+   |                          ^^^^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are

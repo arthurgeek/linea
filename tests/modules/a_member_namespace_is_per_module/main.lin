@@ -1,0 +1,13 @@
+// A member is declared inside a type, and a type belongs to a module. Members
+// were held in one table keyed by the type's name alone, so two modules each
+// declaring a `Thing` shared one namespace: the second `Thing.make` was
+// reported as already declared, though nothing in that module declares it.
+// Two modules may declare one name, which is most of what a module is for.
+import a
+import b
+
+fn main() -> UInt8 {
+    let x = a.Thing.make()
+    let y = b.Thing.make()
+    x.v + y.w
+}

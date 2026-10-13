@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/projections/a_projection_out_of_range_traps.lin:19:5

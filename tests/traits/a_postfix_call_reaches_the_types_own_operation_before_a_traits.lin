@@ -1,0 +1,27 @@
+// `Door` declares `close` itself and through `Shut`. The postfix form reaches
+// the type's own operation: it is visible wherever the type is, so importing a
+// trait or adding a bound can never change what `door.close()` calls.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    door.close()
+}

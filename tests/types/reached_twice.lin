@@ -1,0 +1,20 @@
+// Reached from two places and not a cycle. A check that remembered every type
+// it had seen, rather than the ones on the path it is currently walking, would
+// refuse this.
+enum Colour { Red, Green }
+
+enum Pair { Left(Colour), Right(Colour) }
+
+fn shade(c: Colour) -> UInt8 {
+    match read c {
+        Red => 3,
+        Green => 4,
+    }
+}
+
+fn main() -> UInt8 {
+    match Pair.Left(Colour.Green) {
+        Left(c) => shade(c),
+        Right(_c) => 0,
+    }
+}

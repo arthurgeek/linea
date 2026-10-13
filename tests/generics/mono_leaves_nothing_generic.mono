@@ -1,0 +1,21 @@
+struct Coins {
+    count: UInt8,
+}
+
+struct Cell[UInt8] {
+    v: UInt8,
+}
+
+fn ;main() -> UInt8 {
+    let coppers: Coins = .{ count = 3 }
+    let held: Cell[UInt8] = .{ v = 4 }
+    Coins;;Measure.of(coppers) + ;Cell[UInt8].get(held)
+}
+
+fn Coins;;Measure.of(x: Coins) -> UInt8 {
+    x.count
+}
+
+pub fn ;Cell[UInt8].get(c: Cell[UInt8]) -> UInt8 {
+    copy(c.v)
+}

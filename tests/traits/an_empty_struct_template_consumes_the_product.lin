@@ -1,0 +1,18 @@
+trait Consume {
+    fn consume(sink self: Self) -> UInt8
+}
+
+template impl Consume {
+    fn consume(sink _self: Self) -> UInt8 {
+        match _self { reflect.case => 7 }
+    }
+}
+
+struct Empty {}
+
+derive Consume for Empty
+
+fn main() -> UInt8 {
+    let empty: Empty = .{}
+    Consume.consume(empty)
+}

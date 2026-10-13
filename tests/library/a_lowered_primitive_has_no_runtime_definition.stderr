@@ -1,0 +1,5 @@
+error[T-ExternRuntime]: `linea_raw_load8` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against
+ --> tests/library/a_lowered_primitive_has_no_runtime_definition/main.lin:1:11
+  |
+1 | extern fn linea_raw_load8(at: UInt64, len: UInt64, i: UInt64) -> UInt8
+  |           ^^^^^^^^^^^^^^^ reach it through the standard library's checked storage operations

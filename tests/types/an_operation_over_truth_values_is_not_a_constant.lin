@@ -1,0 +1,19 @@
+// The definition admits a truth value and nothing built over one. `!ready` and
+// `ready && ready` need nothing run to work out and are still not constant
+// expressions: the list is what says so, and it is what a wider one would have
+// to be extended past -- a form is admitted here or it is not admitted at all.
+pub let ready: Bool = true
+
+pub let toggled: Bool = !ready
+
+pub let both: Bool = ready && ready
+
+fn main() -> UInt8 {
+    if toggled {
+        1
+    } else if both {
+        2
+    } else {
+        0
+    }
+}

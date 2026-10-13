@@ -1,0 +1,30 @@
+// Branch and loop results inherit the reading position of the call.
+// Observing an aggregate field keeps the enclosing value intact.
+@copyable
+struct Coordinate { value: UInt8 }
+
+struct Point { x: Coordinate, y: Coordinate }
+
+enum Pick { First, Second }
+
+fn record(n: Coordinate) -> UInt8 {
+    n.value
+}
+
+fn main() -> UInt8 {
+    let p: Point = .{ x = .{ value = 1 }, y = .{ value = 2 } }
+
+    // Read through a conditional, and the parts are still there afterwards.
+    let through_if: UInt8 = record(
+        if true {
+            p.x
+        } else {
+            p.y
+        },
+    )
+
+    // And through a match, which is the same question with more arms.
+    let through_match: UInt8 = record(match Pick.Second { First => p.x, Second => p.y })
+
+    through_if + through_match + p.x.value + p.y.value
+}

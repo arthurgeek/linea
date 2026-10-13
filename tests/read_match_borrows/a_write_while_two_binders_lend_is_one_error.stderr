@@ -1,0 +1,5 @@
+error[O-Lent]: this writes a place the construct around it is lending
+ --> tests/read_match_borrows/a_write_while_two_binders_lend_is_one_error.lin:9:13
+  |
+9 |             point = Point { x = 3, y = 4 }
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ write it after the construct ends, or take what it names instead of lending it

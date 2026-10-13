@@ -1,0 +1,7 @@
+// [N-Undefined]. A name written as a length is read where every other name is
+// read, so one that reaches no declaration is undefined: the mistake is the
+// name, and a length with no value is what follows from it.
+fn main() -> UInt8 {
+    let _xs: [UInt8; Q] = [1, 2, 3]
+    0
+}

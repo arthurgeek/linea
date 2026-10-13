@@ -1,0 +1,35 @@
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let handle = arena.handle()
+    var element = match handle.acquire(8) {
+        Ok(value) => value,
+        Err(_) => panic("element allocation failed"),
+    }
+    mem.Buffer.store(&element, 0, 17)
+    var values: Vec[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.SystemAllocator] = Vec.new()
+    match Vec.push(&values, element) {
+        Ok(_) => {},
+        Err(_failure) => panic("push failed"),
+    }
+    let observed = mem.Buffer.load(values[0], 0)
+    let taken = match Vec.remove(&values, 0) {
+        Some(value) => value,
+        None => panic("the element was absent"),
+    }
+    match Vec.finish(values) {
+        Ok(_) => {},
+        Err(_held) => panic("the vector was not empty"),
+    }
+    Release.release(arena)
+    let retained = mem.Buffer.load(taken, 0)
+    Release.release(taken)
+    if observed == retained {
+        0
+    } else {
+        1
+    }
+}

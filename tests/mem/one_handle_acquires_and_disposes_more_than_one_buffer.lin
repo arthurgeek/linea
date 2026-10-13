@@ -1,0 +1,42 @@
+// One handle, two buffers, both acquired and both disposed.
+//
+// The handle is lent rather than taken, which is what `read self` buys: a
+// caller holding one allocator may acquire from it again, and again after
+// disposing. A handle a callee consumed would stop the second line from
+// compiling and make threading an allocator through a program cost what the
+// design says it does not.
+//
+// What this does NOT check is which *instance* disposed of what. `dispose`
+// takes a `Buffer[Self]`, and `Self` is a type -- so two values of one
+// allocator type are interchangeable here, and routing both disposals through
+// a second handle that acquired nothing would compile and exit the same way.
+// The pairing a type parameter can carry is between kinds of allocator, and
+// that is what the refusal beside this case records.
+//
+// `Allocator` is imported although the name is written nowhere below: the
+// trait is what `acquire` and `dispose` are declared by, and a method resolves
+// only through a trait the file can see.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+
+    match a.acquire(16) {
+        Err(_) => 0,
+        Ok(first) => {
+            let n = UInt8(first.length())
+            first.release()
+
+            match a.acquire(8) {
+                Err(_) => 0,
+                Ok(second) => {
+                    let m = UInt8(second.length())
+                    second.release()
+                    n + m
+                },
+            }
+        },
+    }
+}

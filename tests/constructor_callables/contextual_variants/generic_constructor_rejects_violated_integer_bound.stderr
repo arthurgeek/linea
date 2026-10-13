@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Integer`, and `Bool` is not a built-in integer type
+ --> tests/constructor_callables/contextual_variants/generic_constructor_rejects_violated_integer_bound.lin:4:59
+  |
+4 |     let _accept: fn(sink value: Bool) -> Reading[Bool] = .Accepted
+  |                                                           ^^^^^^^^ supply a built-in integer type or an Integer-constrained parameter
+error[T-Bound]: `T` requires `Integer`, and `Bool` is not a built-in integer type
+ --> tests/constructor_callables/contextual_variants/generic_constructor_rejects_violated_integer_bound.lin:4:42
+  |
+4 |     let _accept: fn(sink value: Bool) -> Reading[Bool] = .Accepted
+  |                                          ^^^^^^^ supply a built-in integer type or an Integer-constrained parameter

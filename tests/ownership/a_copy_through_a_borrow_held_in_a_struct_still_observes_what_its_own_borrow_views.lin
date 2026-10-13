@@ -1,0 +1,28 @@
+// The borrow of a value that holds a borrow is itself held in a struct. The copy
+// made through it holds the inner borrow, so changing what that borrow views is
+// still refused once the copy is read.
+struct Box {
+    value: UInt64,
+}
+
+@copyable
+struct Ref {
+    cell: borrow UInt64,
+}
+
+struct Pick {
+    whole: borrow Ref,
+}
+
+fn bump(inout b: Box) -> () {
+    b.value = b.value + 1
+}
+
+fn main() -> UInt8 {
+    var x = Box { value = 1 }
+    let holder = Ref { cell = borrow x.value }
+    let pick = Pick { whole = borrow holder }
+    let c = copy(*pick.whole)
+    bump(&x)
+    UInt8(*c.cell)
+}

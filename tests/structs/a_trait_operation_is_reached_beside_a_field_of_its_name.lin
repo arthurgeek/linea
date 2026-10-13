@@ -1,0 +1,20 @@
+// `door.width()` reaches the trait operation `Wide.width`, and `door.width`
+// reads the field of the same name.
+trait Wide {
+    fn width(self: Self) -> UInt8
+}
+
+struct Door {
+    width: UInt8,
+}
+
+impl Wide for Door {
+    fn width(self: Self) -> UInt8 {
+        self.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 3 }
+    door.width() - door.width - 1
+}

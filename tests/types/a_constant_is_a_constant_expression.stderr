@@ -1,0 +1,5 @@
+error[T-Const]: `most` is not a constant expression
+ --> tests/types/a_constant_is_a_constant_expression.lin:8:23
+  |
+8 | pub let most: UInt8 = nine()
+  |                       ^^^^^^ give it something the language can work out without running anything

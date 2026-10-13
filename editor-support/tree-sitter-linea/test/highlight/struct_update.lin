@@ -1,0 +1,7 @@
+fn tuned(limits: Limits) -> Limits {
+    Limits { timeout = 5, ..limits }
+//  ^ type
+//           ^ variable.other.member
+//                        ^ operator
+//                          ^ variable
+}

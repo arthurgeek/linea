@@ -1,0 +1,7 @@
+// The same module, a file that wrote no import. An import binds a module name
+// inside the file that wrote it, so `ledger` is a name nothing has bound here,
+// and it is offered the way any module nobody imported is: carrying the import
+// that would bind it.
+fn twice(n: UInt8) -> UInt8 {
+    n + n
+}

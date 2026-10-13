@@ -1,0 +1,35 @@
+// `take` stops asking its source once it has yielded its count, and `skip`
+// asks for the items it passes and disposes of them. `into_inner` returns the
+// source so the program can read how many items were asked for.
+struct Counter {
+    last: UInt8,
+    asked: UInt8,
+}
+
+impl Iterator for Counter {
+    type Item = UInt8
+
+    fn next(inout self: Counter) -> Option[UInt8] {
+        self.asked += 1
+        self.last += 1
+        .Some(self.last)
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+
+    var taken = Counter { last = 0, asked = 0 }.take(3)
+    for n in &taken {
+        total += n
+    }
+    total += taken.into_inner().asked
+
+    var window = Counter { last = 0, asked = 0 }.skip(2).take(2)
+    for n in &window {
+        total += n
+    }
+    total += window.into_inner().into_inner().asked
+
+    total - 20
+}

@@ -1,0 +1,13 @@
+trait Measure[A] {
+    fn measure(self: Self, _context: A) -> UInt64
+}
+
+template impl[A] Measure[A] {
+    fn measure(self: Self, _context: A) -> Self {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

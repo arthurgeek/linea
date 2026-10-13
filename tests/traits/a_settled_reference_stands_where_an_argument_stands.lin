@@ -1,0 +1,30 @@
+// The other position one level in: an argument of a written type. The head here
+// is a constructor the module can see, so a reader stopping at the head finds a
+// name that settles nothing and never reaches the settled reference it was
+// given.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        let held: Option[Self.Item] = Option.Some(x.at)
+        match held {
+            None => 0,
+            Some(n) => n,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.of(c)
+}

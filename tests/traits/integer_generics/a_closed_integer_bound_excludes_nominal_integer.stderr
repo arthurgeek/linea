@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Integer`, and `Count` is not a built-in integer type
+ --> tests/traits/integer_generics/a_closed_integer_bound_excludes_nominal_integer.lin:8:5
+  |
+8 |     accept(Count(1))
+  |     ^^^^^^ supply a built-in integer type or an Integer-constrained parameter

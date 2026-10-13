@@ -1,0 +1,27 @@
+// The `Measure` this module reaches is the one `inner` declared, carried here
+// by a re-export. A module it imports declares another trait of that name, so a
+// lookup that asked which imported module declares the spelling would find that
+// one -- and the implementation below would be written for a trait nothing
+// calls, while the call reached an operation no type implements.
+//
+// A name reaching a trait is resolved the way every other name is: through what
+// the module can see, in the order it sees it.
+import mid
+import other
+
+use mid.Measure
+
+struct Coins {
+    count: UInt8,
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        x.count
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 4 }
+    Measure.of(c) + other.label()
+}

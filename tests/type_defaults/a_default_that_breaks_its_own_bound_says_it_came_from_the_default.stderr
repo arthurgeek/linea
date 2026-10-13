@@ -1,0 +1,5 @@
+error[T-Bound]: `T` is left to its default `UInt8`, which does not meet the bounds of `T`
+  --> tests/type_defaults/a_default_that_breaks_its_own_bound_says_it_came_from_the_default.lin:10:5
+   |
+10 |     f()
+   |     ^^^ pass an argument that settles the type, or give the type parameter a default that meets its bounds

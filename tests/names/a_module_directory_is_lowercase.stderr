@@ -1,0 +1,5 @@
+error[N-Case]: modules start with a lowercase letter
+ --> tests/names/a_module_directory_is_lowercase/main.lin:4:8
+  |
+4 | import Sub as sub
+  |        ^^^ rename it `sub`

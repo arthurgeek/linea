@@ -1,0 +1,12 @@
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/a_refused_call_cannot_use_a_moved_value.lin:17:18
+   |
+17 |     let _found = lookup(ticket)
+   |                  ^^^^^^ no binding with this name is in scope
+error[O-Move]: `ticket` has already been moved
+  --> tests/ownership/a_refused_call_cannot_use_a_moved_value.lin:17:25
+   |
+16 |     let row = redeem(ticket)
+   |                      ------ it was taken here
+17 |     let _found = lookup(ticket)
+   |                         ^^^^^^ it was already taken, and a value is taken once

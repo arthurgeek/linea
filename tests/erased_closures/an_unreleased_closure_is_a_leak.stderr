@@ -1,0 +1,9 @@
+error[O-Leak]: `next` (a linear `mem.Closure[fn(read UInt8) -> UInt8, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/erased_closures/an_unreleased_closure_is_a_leak.lin:7:9
+   |
+7  |     let next = mem.Closure.open(
+   |         ^^^^ never settled on the path that reaches the end of this block
+14 | }
+   | - the block ends here
+   |
+   = help: settle it first with `next.release()`

@@ -1,0 +1,7 @@
+// [S-Defer]. `defer` schedules an expression, so there has to be one to
+// schedule. A `defer` with nothing after it says to run nothing at the end of
+// the scope, which is what writing no `defer` already says.
+fn main() -> UInt8 {
+    defer
+    1
+}

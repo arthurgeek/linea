@@ -1,0 +1,7 @@
+// A callable's code-pointer representation is the compiler's and is not part
+// of the foreign ABI contract.
+extern fn _receives(_f: fn(read value: UInt8) -> UInt8) -> UInt8
+
+export fn sends(_f: fn(read value: UInt8) -> UInt8) -> UInt8 {
+    0
+}

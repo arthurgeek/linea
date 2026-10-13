@@ -1,0 +1,16 @@
+import std.io
+
+use io.IoError
+
+test fn checked() -> Result[(), IoError] {
+    return .Ok({})
+}
+
+extern fn foreign(value: UInt8) -> UInt8
+
+fn main() -> UInt8 {
+    let _test: fn() -> Result[(), IoError] = checked
+    let _extern: fn(read value: UInt8) -> UInt8 = foreign
+    let _projection = Index.at
+    0
+}

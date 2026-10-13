@@ -1,0 +1,8 @@
+// `std` says where a path starts and names no module of its own, so there is
+// nothing here for an import to bind. Reaching one library module is the
+// operation; pulling the whole library into a single name is not.
+import std
+
+fn main() -> UInt8 {
+    0
+}

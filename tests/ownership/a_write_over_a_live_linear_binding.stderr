@@ -1,0 +1,27 @@
+error[O-Leak]: `k` (a linear `Key`) is still owned when this write replaces it
+  --> tests/ownership/a_write_over_a_live_linear_binding/main.lin:28:5
+   |
+27 |     var k = mint(7)
+   |         - acquired here
+28 |     k = mint(9)
+   |     ^ this write drops the old value
+   |
+   = help: take it apart with a `match`, or give it to something that takes it
+error[O-Leak]: `h` (a linear `Holder`) is still owned when this write replaces it
+  --> tests/ownership/a_write_over_a_live_linear_binding/main.lin:35:5
+   |
+34 |     var h: Holder = .{ k = mint(7), n = 1 }
+   |         - acquired here
+35 |     h = .{ k = mint(9), n = 2 }
+   |     ^ this write drops the old value
+   |
+   = help: give it to something that takes it
+error[O-Leak]: `b` (a linear `Box`) is still owned when this write replaces it
+  --> tests/ownership/a_write_over_a_live_linear_binding/main.lin:41:5
+   |
+40 |     var b = Box.Has(mint(7))
+   |         - acquired here
+41 |     b = Box.Has(mint(9))
+   |     ^ this write drops the old value
+   |
+   = help: give it to something that takes it

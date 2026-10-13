@@ -1,0 +1,10 @@
+// A slice yields borrowed items, which a tuple pattern cannot take apart;
+// `for read (a, b)` lends each pair instead.
+fn main() -> UInt8 {
+    let pairs: [(UInt8, UInt8); 2] = [(1, 2), (3, 4)]
+    var total: UInt8 = 0
+    for (a, b) in pairs.as_slice() {
+        total += a + b
+    }
+    total
+}

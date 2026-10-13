@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/generics/a_refused_operation_for_another_instantiation_reports_its_declaration_once.lin:9:19
+  |
+9 |     fn get(_self: Nope) -> UInt8 {
+  |                   ^^^^ no type with this name is declared here

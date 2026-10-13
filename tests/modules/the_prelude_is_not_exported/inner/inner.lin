@@ -1,0 +1,6 @@
+pub fn ping(sink o: Option[UInt8]) -> UInt8 {
+    match o {
+        None => 0,
+        Some(n) => n,
+    }
+}

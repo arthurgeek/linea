@@ -1,0 +1,23 @@
+// An implementation supplies a body for every signature its trait declares.
+// One it omits leaves a hole nothing else can fill: a bound admitting this
+// type promises the operation exists, and a call through the trait would reach
+// nothing.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+
+    fn scaled(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

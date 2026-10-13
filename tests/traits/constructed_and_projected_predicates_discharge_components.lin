@@ -1,0 +1,45 @@
+trait Required {}
+
+trait Ready {}
+
+template impl Ready where reflect.components: Required {}
+
+struct Wrapper[T] {
+    value: T,
+}
+
+struct Constructed[T] {
+    value: Wrapper[T],
+}
+
+impl Required for Wrapper[UInt8] {}
+
+derive[T] Ready for Constructed[T] where Wrapper[T]: Required
+
+trait Source {
+    type Item
+}
+
+struct Provider {}
+
+impl Source for Provider {
+    type Item = UInt8
+}
+
+struct Projected[I: Source] {
+    value: I.Item,
+}
+
+impl Required for UInt8 {}
+
+derive[I: Source] Ready for Projected[I] where I.Item: Required
+
+fn accept[T: Ready](_value: T) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let constructed: Constructed[UInt8] = .{ value = .{ value = 1 } }
+    let projected: Projected[Provider] = .{ value = 2 }
+    accept(constructed) + accept(projected)
+}

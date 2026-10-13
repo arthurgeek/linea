@@ -1,0 +1,9 @@
+error[O-Leak]: `_value` (a linear `Holder`) is still owned when this path leaves
+  --> tests/release/a_derived_release_is_never_scheduled.lin:20:9
+   |
+20 |     let _value: Holder = .{ leaf = .Value }
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+22 | }
+   | - the block ends here
+   |
+   = help: settle it first with `_value.release()`

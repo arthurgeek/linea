@@ -1,0 +1,38 @@
+import std.testing
+
+// Map an ASCII capital letter to its lowercase form, and leave every other
+// byte as it is.
+fn ascii_fold(byte: UInt8) -> UInt8 {
+    if byte >= 65 && byte <= 90 {
+        byte + 32
+    } else {
+        byte
+    }
+}
+
+impl Str {
+    // Return whether the texts are equal ignoring ASCII case. ASCII case
+    // folding maps A (65) through Z (90) to a (97) through z (122); every other
+    // byte, including a UTF-8 continuation byte, compares unchanged.
+    pub fn equals_ascii_folded(self: Self, other: Str) -> Bool {
+        if self.length() != other.length() {
+            return false
+        }
+        for i in 0..self.length() {
+            if ascii_fold(self.byte(i).unwrap()) != ascii_fold(other.byte(i).unwrap()) {
+                return false
+            }
+        }
+        true
+    }
+}
+
+test fn ascii_folding_ignores_case_and_nothing_else() {
+    testing.assert("Content-Length".equals_ascii_folded("content-length"), "case mattered")?
+    testing.assert(!"Content-Length".equals_ascii_folded("content-lengths"), "length ignored")?
+    testing.assert(!"É".equals_ascii_folded("é"), "non-ASCII folded")?
+    testing.assert(!"[".equals_ascii_folded(r"{"), "punctuation folded")?
+    testing.assert(!"@".equals_ascii_folded("`"), "the byte below A folded with the byte below a")?
+    testing.assert(!"A".equals_ascii_folded("@"), "A folded with the byte just below it")?
+    .Ok(())
+}

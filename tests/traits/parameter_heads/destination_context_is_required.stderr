@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Deliver`'s `T`
+  --> tests/traits/parameter_heads/destination_context_is_required.lin:24:19
+   |
+24 |     let _answer = UInt8(0).deliver()
+   |                   ^^^^^^^^^^^^^^^^^^ pass what it stands for, or say what the call returns

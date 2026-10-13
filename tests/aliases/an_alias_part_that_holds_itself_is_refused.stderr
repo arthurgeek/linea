@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: S contains Again contains S
+ --> tests/aliases/an_alias_part_that_holds_itself_is_refused.lin:4:8
+  |
+4 |     v: Again[T],
+  |        ^^^^^ a value would have to hold one, so it has no size

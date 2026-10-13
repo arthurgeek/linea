@@ -1,0 +1,5 @@
+error[T-Bound]: `X` requires `Discardable`, and `Box[UInt8]` does not have that capability
+  --> tests/generics/a_nested_discardable_bound_checks_earlier_declared_components.lin:19:8
+   |
+19 |     w: Held[Box[UInt8]],
+   |        ^^^^ use a type meeting the capability requirement, or relax the bound

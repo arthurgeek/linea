@@ -1,0 +1,10 @@
+error[T-Derive]: this template requires a `struct` target
+ --> tests/json_typed/encode_enum_refused.lin:5:13
+  |
+5 | derive json.Encode for Choice
+  |             ^^^^^^ derive this trait for the declaration kind required by its template
+error[T-Bound]: `T` requires `Encode`, and `Choice` does not implement it
+  --> tests/json_typed/encode_enum_refused.lin:10:10
+   |
+10 |     json.encode(&output, value).unwrap()
+   |          ^^^^^^ implement it for that type, or drop the bound

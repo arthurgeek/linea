@@ -1,0 +1,14 @@
+@linear
+enum Permit { Preserve, Exact(UInt64) }
+
+fn settle(sink permit: Permit = .Preserve) -> UInt64 {
+    match permit { Preserve => 1, Exact(bits) => bits }
+}
+
+fn main() -> UInt8 {
+    if settle() + settle() + settle(.Exact(3)) == 5 {
+        0
+    } else {
+        1
+    }
+}

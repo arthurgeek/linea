@@ -1,0 +1,47 @@
+// Compare annual and continuous growth, and estimate when the balance doubles.
+import std.io
+import std.testing
+
+use io.IoError
+use io.println
+
+// The annual rate is applied to fractional years too, so the balance grows
+// smoothly between anniversaries instead of being credited once a year.
+fn annual_balance(opening: Float64, rate: Float64, years: Float64) -> Float64 {
+    opening * (1.0 + rate).pow(exponent: years)
+}
+
+fn continuous_balance(opening: Float64, rate: Float64, years: Float64) -> Float64 {
+    opening * (rate * years).exp()
+}
+
+fn years_to_target(opening: Float64, target: Float64, rate: Float64) -> Float64 {
+    // Callers pass positive balances and a positive rate: `ln` of a negative
+    // number is NaN, and a zero rate would divide by `ln(1.0)`, which is zero.
+    (target / opening).ln() / (1.0 + rate).ln()
+}
+
+test fn projections_retain_the_opening_balance_at_zero_years() {
+    testing.assert_eq(annual_balance(opening: 1000.0, rate: 0.05, years: 0.0), 1000.0, "annual projection at opening")?
+    testing.assert_eq(continuous_balance(opening: 1000.0, rate: 0.05, years: 0.0), 1000.0, "continuous projection at opening")?
+}
+
+test fn annual_target_time_reconstructs_the_target() {
+    let years = years_to_target(opening: 1000.0, target: 2000.0, rate: 0.05)
+    let projected = annual_balance(opening: 1000.0, rate: 0.05, years: years)
+    testing.assert((projected - 2000.0).abs() < 1e-8, "the logarithmic target time agrees with annual growth")?
+    let continuous = continuous_balance(opening: 1000.0, rate: 0.05, years: 10.0)
+    let annual = annual_balance(opening: 1000.0, rate: 0.05, years: 10.0)
+    testing.assert(continuous > annual, "continuous compounding yields more at a positive rate")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let annual = annual_balance(opening: 1000.0, rate: 0.05, years: 10.0)
+    let continuous = continuous_balance(opening: 1000.0, rate: 0.05, years: 10.0)
+    // Round up to the first complete month at which the projection reaches its target.
+    let months = UInt64((12.0 * years_to_target(opening: 1000.0, target: 2000.0, rate: 0.05)).ceil())
+    // `:.0` rounds each balance to a whole amount as it prints.
+    println("After 10 years at 5%: annual {annual:.0}, continuous {continuous:.0}")?
+    println("Growing 5% a year, the balance reaches 2000 after {months} months")?
+    .Ok(0)
+}

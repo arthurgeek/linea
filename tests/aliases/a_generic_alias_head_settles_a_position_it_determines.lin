@@ -1,0 +1,17 @@
+import std.collections
+import std.mem
+
+// `Counts[A]` writes the key type in terms of `A`, so the allocator the call is
+// given settles the key as well.
+alias Counts[A: Allocator] = collections.Map[String[A], UInt64, A]
+
+fn size_of_new[A: Allocator](allocator: A) -> UInt64 {
+    let counts = Counts.new_in(allocator)
+    let size = counts.length()
+    counts.release()
+    size
+}
+
+fn main() -> UInt8 {
+    UInt8(size_of_new(mem.system()) + 5)
+}

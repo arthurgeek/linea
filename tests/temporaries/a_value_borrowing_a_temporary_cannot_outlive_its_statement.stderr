@@ -1,0 +1,9 @@
+error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
+  --> tests/temporaries/a_value_borrowing_a_temporary_cannot_outlive_its_statement.lin:13:24
+   |
+13 |     let kept = reading(42)
+   |                        ^^ this temporary ends with its statement
+14 |     UInt8(*kept.value)
+   |           ----------- and a value borrowing it is used here
+   |
+   = help: bind the value with `let` first, and borrow the binding

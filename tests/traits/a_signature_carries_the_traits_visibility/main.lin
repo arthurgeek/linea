@@ -1,0 +1,22 @@
+// A signature carries no visibility of its own -- `pub` on one is a syntax
+// error -- so what governs reaching a trait's operation is the visibility of
+// the trait. Holding the signature to [M-Vis] would make every operation of
+// every foreign trait unreachable, which is the whole of what a trait is for.
+import measure
+
+use measure.Measure
+
+struct Account {
+    balance: UInt8,
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.of(a)
+}

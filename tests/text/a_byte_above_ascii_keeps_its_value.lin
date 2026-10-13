@@ -1,0 +1,29 @@
+// A byte is a number from zero to 255, and a `Str` holds bytes from both halves
+// of that range: `á` is 0xC3 0xA1, and every multi-byte character is made of
+// values above 127. So asking for one has to answer the number that is there.
+//
+// Written as two comparisons against the values themselves rather than as
+// arithmetic over both, because a sum says only that something was wrong. Each
+// read is named by the status it answers with, so a failure says which of the
+// two bytes was not what the storage holds.
+fn main() -> UInt8 {
+    let s = "á"
+
+    let lead: UInt8 = match Str.byte(s, 0) {
+        Some(b) => b,
+        None => 0,
+    }
+
+    let continuation: UInt8 = match Str.byte(s, 1) {
+        Some(b) => b,
+        None => 0,
+    }
+
+    if lead != 195 {
+        return 1
+    }
+    if continuation != 161 {
+        return 2
+    }
+    0
+}

@@ -1,0 +1,8 @@
+struct Board { values: [UInt8; 3] }
+
+impl Index[Int64] for Board via values
+
+fn main() -> UInt8 {
+    let board = Board { values = [2, 3, 4] }
+    board[UInt64(0)]
+}

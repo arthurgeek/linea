@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let forward = |value: borrow UInt64| {
+        copy(value)
+    }
+    var owner: UInt64 = 7
+    let escaped = forward(borrow owner)
+    owner = 9
+    UInt8(*escaped + owner)
+}

@@ -1,0 +1,37 @@
+// What the arguments leave unsettled, the expectation settles. The return type
+// is written in the callee's own parameters, so matching it against the type
+// the call has to produce reads them off -- and without that a function with no
+// arguments over a type parameter is uncallable.
+//
+// After the arguments and never instead of them: an argument is written where
+// the call is and says what was actually passed, so a disagreement between the
+// two belongs to the argument. This only fills holes.
+struct Box[T] {
+    it: T,
+}
+
+fn empty[T]() -> Option[Box[T]] {
+    .None
+}
+
+fn main() -> UInt8 {
+    // Two instantiations of one declaration, neither of which passes anything.
+    // The parameter sits two constructors deep, so the walk reaches it through
+    // both.
+    let a: Option[Box[UInt8]] = empty()
+    let b: Option[Box[Bool]] = empty()
+
+    let x: UInt8 = match a {
+        None => 3,
+        Some(p) => p.it,
+    }
+    let y: UInt8 = match b {
+        None => 4,
+        Some(q) => if q.it {
+            1
+        } else {
+            2
+        },
+    }
+    x + y
+}

@@ -1,0 +1,34 @@
+// A length that names a constant is worth what that constant is worth, and a
+// constant naming another is worth what that one is worth. `n` and `m` are
+// written differently and reach 4 apiece through two hops, so the two
+// implementations are one implementation written twice.
+let base: UInt8 = 2
+
+let n: UInt8 = base + 2
+
+let m: UInt8 = base + base
+
+trait Give[phantom U] {
+    fn give(self: Self) -> UInt8
+}
+
+struct Holder {
+    n: UInt8,
+}
+
+impl Give[[UInt8; n]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Give[[UInt8; m]] for Holder {
+    fn give(self: Self) -> UInt8 {
+        self.n + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder = .{ n = 7 }
+    h.n
+}

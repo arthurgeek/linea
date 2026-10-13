@@ -1,0 +1,19 @@
+// `nope` names nothing and `ticket.row` names no field, so neither binding
+// holds a value anyone built, and neither is owed.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(1)
+    let _unnamed: Ticket = nope
+    let _unselected: Ticket = ticket.row
+    redeem(ticket)
+}

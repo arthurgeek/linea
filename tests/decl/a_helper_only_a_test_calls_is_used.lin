@@ -1,0 +1,20 @@
+// A test is a declaration the compiler calls, so it is not unused and neither
+// is what it calls. `doubled` is named nowhere else, and an unused declaration
+// is an error -- so this program compiles only because a test counts as a use.
+import std.io
+
+use io.IoError
+use io.println
+
+fn doubled(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+test fn doubling_two_gives_four() -> Result[(), IoError] {
+    println(doubled(2))?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Handle` is already implemented for `fn(input: UInt8) -> UInt8`
+  --> tests/traits/callable_heads/one_implementation_answers_each_callable_shape.lin:14:6
+   |
+8  | impl Handle for fn(input: UInt64) -> UInt64 {
+   |      ------ already implemented here
+14 | impl Handle for fn(input: UInt8) -> UInt8 {
+   |      ^^^^^^ a trait is implemented once for each callable shape

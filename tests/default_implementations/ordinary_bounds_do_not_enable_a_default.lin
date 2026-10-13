@@ -1,0 +1,24 @@
+trait Selected {
+    fn selected(self: Self) -> UInt8
+}
+
+default impl[T] Selected for T {
+    fn selected(_self: T) -> UInt8 {
+        1
+    }
+}
+
+struct Box[T] { value: T }
+
+trait Permitted {}
+
+impl[T: Permitted] Selected for Box[T] {
+    fn selected(_self: Box[T]) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let value: Box[Bool] = .{ value = false }
+    Selected.selected(value)
+}

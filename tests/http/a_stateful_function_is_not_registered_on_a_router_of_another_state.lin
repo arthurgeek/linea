@@ -1,0 +1,24 @@
+// A function taking `inout counter: Counter` is registered on a router whose
+// state is a `Counter`, and not on one with no state.
+import std.http
+
+@derive(Release)
+struct Counter {
+    count: UInt64,
+}
+
+fn count(inout counter: Counter, request: http.Request) -> Result[http.Response, http.Error] {
+    counter.count += 1
+    http.text(request, "{counter.count}")
+}
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let routed = &router.route("GET /", count)
+    router.release()
+    if routed.is_ok() {
+        0
+    } else {
+        1
+    }
+}

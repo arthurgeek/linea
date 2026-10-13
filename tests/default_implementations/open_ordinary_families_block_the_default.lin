@@ -1,0 +1,38 @@
+trait Selected {
+    type Query
+
+    fn selected(self: Self, query: Self.Query) -> Bool
+}
+
+default impl[T] Selected for T {
+    type Query = T
+
+    fn selected(_self: T, _query: T) -> Bool {
+        true
+    }
+}
+
+trait Permitted {}
+
+struct Box[T] { value: T }
+
+impl[T: Permitted] Selected for Box[T] {
+    type Query = UInt8
+
+    fn selected(_self: Box[T], query: UInt8) -> Bool {
+        query == 1
+    }
+}
+
+fn ask[T](value: Box[T]) -> Bool {
+    Selected.selected(value, value)
+}
+
+fn main() -> UInt8 {
+    let value: Box[Bool] = .{ value = false }
+    if ask(value) {
+        0
+    } else {
+        1
+    }
+}

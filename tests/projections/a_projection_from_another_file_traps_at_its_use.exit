@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/projections/a_projection_from_another_file_traps_at_its_use.lin:6:5

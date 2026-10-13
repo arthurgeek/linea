@@ -1,0 +1,397 @@
+import std.fmt
+import std.mem
+import std.testing
+
+// The runtime reads a clock into whole seconds and the nanoseconds past them,
+// and answers 0, or a negated errno when the clock cannot be read.
+extern fn linea_clock_read(clock: UInt8, inout seconds: Int64, inout nanoseconds: UInt64) -> Int64
+
+// The runtime blocks until the monotonic clock has moved `nanoseconds` past
+// its reading at the call, and answers 0, or a negated errno when the clock
+// cannot be read or the system refuses to sleep.
+extern fn linea_clock_sleep(nanoseconds: UInt64) -> Int64
+
+// The runtime numbers its clocks: 0 is the wall clock, UTC time since the
+// Unix epoch, and 1 is the monotonic clock, which only moves forward.
+let wall_clock: UInt8 = 0
+
+let monotonic_clock: UInt8 = 1
+
+// A microsecond is 1,000 nanoseconds, a millisecond 1,000,000, and a second
+// 1,000,000,000. A day is 86,400 seconds.
+let nanoseconds_per_microsecond: UInt64 = 1000
+
+let nanoseconds_per_millisecond: UInt64 = 1000000
+
+let nanoseconds_per_second: UInt64 = 1000000000
+
+let seconds_per_day: UInt64 = 86400
+
+// 0000-01-01T00:00:00Z is 62,167,219,200 seconds before the Unix epoch, and
+// 9999-12-31T23:59:59Z is 253,402,300,799 seconds after it. A timestamp lies
+// between them, so its year is always written with four digits.
+let earliest_unix_second: Int64 = -62167219200
+
+let latest_unix_second: Int64 = 253402300799
+
+// `Timestamp` is a moment in UTC: whole seconds since the Unix epoch,
+// 1970-01-01T00:00:00Z, and the nanoseconds past them. Its years run from
+// 0000 to 9999, the years RFC 3339 can write. Display writes it in RFC 3339 to
+// the second, such as `2026-09-25T09:31:02Z`.
+@(opaque, copyable, derive(Equatable, Comparable, Debug))
+struct Timestamp {
+    seconds: Int64,
+    nanoseconds: UInt32,
+}
+
+// `now` reads the wall clock. A clock the system cannot read, or one set
+// outside the years 0000 to 9999, is a fault of the machine rather than of the
+// program, so it panics instead of returning an error every caller would have
+// to handle.
+pub fn now() -> Timestamp {
+    var seconds: Int64 = 0
+    var nanoseconds: UInt64 = 0
+    if linea_clock_read(wall_clock, &seconds, &nanoseconds) != 0 {
+        panic("the wall clock cannot be read")
+    }
+    let stamp = Timestamp.from_unix(seconds, UInt32(nanoseconds)) else {
+        panic("the wall clock is set outside the years 0000 to 9999")
+    }
+    stamp
+}
+
+// The wall clock of any machine running this test is past 2026-01-01.
+test fn now_reads_the_present() {
+    let start_of_2026 = Timestamp.from_unix(1767225600, 0).unwrap()
+    testing.assert(now() >= start_of_2026, "the wall clock read a moment before 2026")?
+    .Ok(())
+}
+
+impl Timestamp {
+    // `from_unix` makes the timestamp `seconds` and `nanoseconds` after the
+    // Unix epoch; negative seconds are before it. It answers `None` for
+    // nanoseconds past a whole second, or a moment outside the years 0000 to
+    // 9999.
+    pub fn from_unix(seconds: Int64, nanoseconds: UInt32) -> Option[Timestamp] {
+        if UInt64(nanoseconds) >= nanoseconds_per_second || seconds < earliest_unix_second || seconds > latest_unix_second {
+            return .None
+        }
+        .Some(.{ seconds, nanoseconds })
+    }
+}
+
+test fn a_timestamp_is_made_only_inside_the_years_rfc_3339_writes() {
+    testing.assert(Timestamp.from_unix(0, 999999999).is_some(), "the last nanosecond of a second was refused")?
+    testing.assert(Timestamp.from_unix(0, 1000000000).is_none(), "a whole second of nanoseconds was accepted")?
+    testing.assert(Timestamp.from_unix(-62167219200, 0).is_some(), "the start of year 0000 was refused")?
+    testing.assert(Timestamp.from_unix(-62167219201, 0).is_none(), "a moment before year 0000 was accepted")?
+    testing.assert(Timestamp.from_unix(253402300799, 0).is_some(), "the end of year 9999 was refused")?
+    testing.assert(Timestamp.from_unix(253402300800, 0).is_none(), "a moment after year 9999 was accepted")?
+    .Ok(())
+}
+
+impl Timestamp {
+    // `unix_seconds` returns the whole seconds since the Unix epoch, negative
+    // before it.
+    pub fn unix_seconds(self: Self) -> Int64 {
+        self.seconds
+    }
+}
+
+test fn unix_seconds_counts_from_the_epoch() {
+    testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().unix_seconds(), Int64(-5), "the seconds changed")?
+    .Ok(())
+}
+
+impl Timestamp {
+    // `nanoseconds` returns the nanoseconds past the whole second.
+    pub fn nanoseconds(self: Self) -> UInt32 {
+        self.nanoseconds
+    }
+}
+
+test fn nanoseconds_returns_the_part_of_a_second() {
+    testing.assert_eq(Timestamp.from_unix(-5, 250).unwrap().nanoseconds(), UInt32(250), "the nanoseconds changed")?
+    .Ok(())
+}
+
+// A `Civil` date and time of day in UTC, as a calendar and a clock show it.
+struct Civil {
+    year: UInt64,
+    month: UInt64,
+    day: UInt64,
+    hour: UInt64,
+    minute: UInt64,
+    second: UInt64,
+}
+
+// Days in a 400-year era of the Gregorian calendar, which repeats every era.
+let days_per_era: UInt64 = 146097
+
+// 0000-03-01 is 60 days after 0000-01-01. Counting days from a March 1st puts
+// the leap day at the end of the counted year, so month lengths do not depend
+// on the year until the very last day.
+let days_from_january_to_march: UInt64 = 60
+
+// `civil` finds the calendar date and time of day of a timestamp. It counts
+// days from 0000-03-01 and splits them into 400-year eras, years, and months
+// of the year that starts in March.
+fn civil(stamp: Timestamp) -> Civil {
+    // Count seconds from 0000-01-01T00:00:00Z, which no timestamp precedes.
+    let since_year_zero = UInt64(stamp.seconds - earliest_unix_second)
+    let seconds_of_day = since_year_zero % seconds_per_day
+    // One era is added so the count from 0000-03-01 stays positive for
+    // January and February of year 0000; it is taken off the year below.
+    let days = since_year_zero / seconds_per_day + days_per_era - days_from_january_to_march
+    let era = days / days_per_era
+    let day_of_era = days % days_per_era
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100)
+    // Months count from March: 0 is March and 11 is February.
+    let shifted_month = (5 * day_of_year + 2) / 153
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    }
+    // January and February belong to the year after the one starting in March.
+    // The added era is taken off last, so January of year 0000 never counts
+    // below zero on the way.
+    let january_or_february = if month <= 2 {
+        UInt64(1)
+    } else {
+        UInt64(0)
+    }
+    let year = year_of_era + january_or_february + era * 400 - 400
+    .{ year, month, day, hour = seconds_of_day / 3600, minute = seconds_of_day / 60 % 60, second = seconds_of_day % 60 }
+}
+
+// A timestamp writes as RFC 3339 in UTC to the second:
+// `YYYY-MM-DDTHH:MM:SSZ`. The nanoseconds are not written.
+impl Display for Timestamp {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let Civil { year, month, day, hour, minute, second } = civil(self)
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z".fmt(&w)
+    }
+}
+
+test fn a_timestamp_displays_as_rfc_3339() {
+    displays_as(0, "1970-01-01T00:00:00Z", "the epoch changed")?
+    displays_as(1767225600, "2026-01-01T00:00:00Z", "the start of 2026 changed")?
+    displays_as(1790323862, "2026-09-25T08:11:02Z", "a moment in 2026 changed")?
+    displays_as(951782400, "2000-02-29T00:00:00Z", "a leap day changed")?
+    displays_as(-1, "1969-12-31T23:59:59Z", "the second before the epoch changed")?
+    displays_as(-62167219200, "0000-01-01T00:00:00Z", "the first moment changed")?
+    displays_as(-62162035201, "0000-02-29T23:59:59Z", "the leap day of year 0000 changed")?
+    displays_as(253402300799, "9999-12-31T23:59:59Z", "the last moment changed")?
+    .Ok(())
+}
+
+// `displays_as` checks that the timestamp `seconds` after the epoch displays
+// as `expected`.
+fn displays_as(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    let written = fmt.render_owned(mem.system(), Timestamp.from_unix(seconds, 0).unwrap()).unwrap()
+    let checked = testing.assert_eq(written.view(), expected, said)
+    written.release()
+    checked
+}
+
+// `Instant` is a reading of the monotonic clock, which only moves forward and
+// is not set with the wall clock, so the time between two instants is a
+// duration even when the wall clock is changed between them. An instant means
+// nothing on its own: it counts from a start the system chooses.
+@(opaque, copyable, derive(Equatable, Comparable, Debug))
+struct Instant {
+    nanoseconds: UInt64,
+}
+
+impl Instant {
+    // `Instant.now` reads the monotonic clock. A monotonic clock the system
+    // cannot read is a fault of the machine, so it panics.
+    pub fn now() -> Instant {
+        var seconds: Int64 = 0
+        var nanoseconds: UInt64 = 0
+        if linea_clock_read(monotonic_clock, &seconds, &nanoseconds) != 0 {
+            panic("the monotonic clock cannot be read")
+        }
+        .{ nanoseconds = UInt64(seconds) * nanoseconds_per_second + nanoseconds }
+    }
+}
+
+test fn the_monotonic_clock_never_moves_back() {
+    let first = Instant.now()
+    let second = Instant.now()
+    testing.assert(second >= first, "the monotonic clock moved back")?
+    .Ok(())
+}
+
+impl Instant {
+    // `since` returns how long after `earlier` this instant is, or a zero
+    // duration when `earlier` is the later of the two.
+    pub fn since(self: Self, earlier: Instant) -> Duration {
+        if self.nanoseconds <= earlier.nanoseconds {
+            return .{ nanoseconds = 0 }
+        }
+        .{ nanoseconds = self.nanoseconds - earlier.nanoseconds }
+    }
+}
+
+test fn an_instant_measures_the_time_since_another() {
+    let earlier = Instant { nanoseconds = 1000 }
+    let later = Instant { nanoseconds = 3500 }
+    testing.assert_eq(later.since(earlier), Duration.from_nanoseconds(2500), "the time between two instants changed")?
+    testing.assert_eq(earlier.since(later), Duration.from_nanoseconds(0), "an earlier instant was a positive time after a later one")?
+    .Ok(())
+}
+
+impl Instant {
+    // `elapsed` returns how long ago this instant was read.
+    pub fn elapsed(self: Self) -> Duration {
+        Instant.now().since(self)
+    }
+}
+
+test fn an_instant_measures_the_time_since_it_was_read() {
+    let start = Instant.now()
+    let before = start.elapsed()
+    let after = start.elapsed()
+    testing.assert(after >= before, "the time since an instant shrank")?
+    .Ok(())
+}
+
+// `Duration` is a span of time in nanoseconds. Display writes it in the
+// largest unit below it, with the fraction that is not zero: `0s`, `750ns`,
+// `12.5µs`, `3.25ms`, `2s`, `90.125s`. Seconds are the largest unit.
+@(opaque, copyable, derive(Equatable, Comparable, Debug))
+struct Duration {
+    nanoseconds: UInt64,
+}
+
+impl Duration {
+    // `from_nanoseconds` makes a duration `nanoseconds` long.
+    pub fn from_nanoseconds(nanoseconds: UInt64) -> Duration {
+        .{ nanoseconds }
+    }
+}
+
+test fn from_nanoseconds_makes_a_duration_that_long() {
+    testing.assert_eq(Duration.from_nanoseconds(2000000), Duration.from_milliseconds(2), "two milliseconds changed")?
+    .Ok(())
+}
+
+impl Duration {
+    // `nanoseconds` returns the length of the duration in nanoseconds.
+    pub fn nanoseconds(self: Self) -> UInt64 {
+        self.nanoseconds
+    }
+}
+
+test fn a_duration_returns_its_nanoseconds() {
+    testing.assert_eq(Duration.from_nanoseconds(1500).nanoseconds(), UInt64(1500), "the nanoseconds changed")?
+    .Ok(())
+}
+
+impl Duration {
+    // `from_milliseconds` makes a duration `milliseconds` long. A length past
+    // 2^64 - 1 nanoseconds, about 584 years, overflows and traps.
+    pub fn from_milliseconds(milliseconds: UInt64) -> Duration {
+        .{ nanoseconds = milliseconds * nanoseconds_per_millisecond }
+    }
+}
+
+test fn a_duration_is_made_from_milliseconds() {
+    testing.assert_eq(Duration.from_milliseconds(250), Duration.from_nanoseconds(250000000), "a quarter second changed")?
+    testing.assert_eq(Duration.from_milliseconds(0), Duration.from_nanoseconds(0), "no time changed")?
+    .Ok(())
+}
+
+impl Duration {
+    // `from_seconds` makes a duration `seconds` long. A length past 2^64 - 1
+    // nanoseconds, about 584 years, overflows and traps.
+    pub fn from_seconds(seconds: UInt64) -> Duration {
+        .{ nanoseconds = seconds * nanoseconds_per_second }
+    }
+}
+
+test fn a_duration_is_made_from_seconds() {
+    testing.assert_eq(Duration.from_seconds(2), Duration.from_milliseconds(2000), "two seconds changed")?
+    testing.assert_eq(Duration.from_seconds(0), Duration.from_nanoseconds(0), "no time changed")?
+    .Ok(())
+}
+
+// `sleep` blocks the calling thread until at least `duration` has passed on
+// the monotonic clock. A signal that wakes it early does not cut the pause
+// short: it sleeps again for what remains. A clock or sleep the system cannot
+// provide is a fault of the machine, so it panics, as `now` does.
+pub fn sleep(duration: Duration) -> () {
+    if linea_clock_sleep(duration.nanoseconds) != 0 {
+        panic("the system cannot sleep on the monotonic clock")
+    }
+}
+
+test fn a_sleep_lasts_at_least_its_duration() {
+    let start = Instant.now()
+    sleep(Duration.from_milliseconds(20))
+    testing.assert(start.elapsed() >= Duration.from_milliseconds(20), "the sleep ended early")?
+    .Ok(())
+}
+
+impl Display for Duration {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let length = self.nanoseconds
+        if length == 0 {
+            return &w.write_str("0s")
+        }
+        if length < nanoseconds_per_microsecond {
+            return "{length}ns".fmt(&w)
+        }
+        if length < nanoseconds_per_millisecond {
+            return write_in_unit(length, nanoseconds_per_microsecond, 3, "µs", &w)
+        }
+        if length < nanoseconds_per_second {
+            return write_in_unit(length, nanoseconds_per_millisecond, 6, "ms", &w)
+        }
+        write_in_unit(length, nanoseconds_per_second, 9, "s", &w)
+    }
+}
+
+// Write `length` nanoseconds as a count of `per_unit` nanoseconds, then the
+// remainder as a decimal fraction of `digits` digits with its trailing zeros
+// dropped, then `unit`.
+fn write_in_unit[W: Writer](length: UInt64, per_unit: UInt64, digits: UInt64, unit: Str, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    let whole = length / per_unit
+    var fraction = length % per_unit
+    var width = digits
+    whole.fmt(&w)?
+    if fraction != 0 {
+        while fraction % 10 == 0 {
+            fraction /= 10
+            width -= 1
+        }
+        &w.write_str(".")?
+        fmt.write_integer(fraction, fmt.Spec { zero = true, ..fmt.Spec.padded(width) }, &w)?
+    }
+    &w.write_str(unit)
+}
+
+test fn a_duration_displays_in_the_largest_unit_below_it() {
+    duration_displays_as(0, "0s", "no time changed")?
+    duration_displays_as(750, "750ns", "nanoseconds changed")?
+    duration_displays_as(1000, "1µs", "a whole microsecond changed")?
+    duration_displays_as(12500, "12.5µs", "microseconds changed")?
+    duration_displays_as(3250000, "3.25ms", "milliseconds changed")?
+    duration_displays_as(1000001, "1.000001ms", "a fraction with leading zeros changed")?
+    duration_displays_as(2000000000, "2s", "whole seconds changed")?
+    duration_displays_as(90125000000, "90.125s", "seconds past a minute changed")?
+    .Ok(())
+}
+
+// `duration_displays_as` checks that a duration of `nanoseconds` displays as
+// `expected`.
+fn duration_displays_as(nanoseconds: UInt64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
+    let written = fmt.render_owned(mem.system(), Duration.from_nanoseconds(nanoseconds)).unwrap()
+    let checked = testing.assert_eq(written.view(), expected, said)
+    written.release()
+    checked
+}

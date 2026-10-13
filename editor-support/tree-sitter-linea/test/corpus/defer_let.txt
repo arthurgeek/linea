@@ -1,0 +1,57 @@
+==================
+A binding schedules its own release
+==================
+
+fn main() -> UInt8 {
+    defer let basket = Vec.open(mem.system())
+    defer var count: UInt8 = 1
+    defer let port = find() else |_| {
+        return 1
+    }
+    defer let first = open()?
+    count
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (defer_let_statement
+        (identifier)
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (call_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (argument_list)))))
+      (defer_let_statement
+        (identifier)
+        (type_identifier)
+        (integer_literal))
+      (defer_let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list))
+        (let_else
+          (wildcard_pattern)
+          (block
+            (expression_statement
+              (return_expression
+                (integer_literal))))))
+      (defer_let_statement
+        (identifier)
+        (try_expression
+          (call_expression
+            (identifier)
+            (argument_list))))
+      (expression_statement
+        (identifier)))))

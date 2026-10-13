@@ -1,0 +1,25 @@
+pub struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    pub fn make(width: UInt8) -> Door {
+        .{ width = width }
+    }
+
+    // Private: only this module can call it, so only calls written here
+    // reach it before `Shut.close`.
+    fn close(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+pub trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}

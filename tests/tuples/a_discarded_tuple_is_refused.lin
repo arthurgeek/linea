@@ -1,0 +1,6 @@
+// A tuple written as a statement is a value nobody binds, so it is discarded
+// and refused as any discarded value is.
+fn main() -> UInt8 {
+    (1, 2)
+    0
+}

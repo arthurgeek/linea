@@ -1,0 +1,19 @@
+struct Entry { number: UInt8 }
+
+fn accepts_discardable[T: Discardable](_value: T) -> () {}
+
+fn settle[F: Release](sink callback: F) -> () {
+    Release.release(callback)
+}
+
+fn main() -> UInt8 {
+    let first: Entry = .{ number = 1 }
+    accepts_discardable(first)
+    let direct = [sink first] || first.number
+    Release.release(direct)
+
+    let second: Entry = .{ number = 2 }
+    let generic = [sink second] || second.number
+    settle(generic)
+    0
+}

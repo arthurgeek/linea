@@ -1,0 +1,28 @@
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/an_unresolved_call_cannot_take_a_lent_or_read_part.lin:17:17
+   |
+17 |     let _lent = lookup(&ticket)
+   |                 ^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `lookup`
+  --> tests/ownership/an_unresolved_call_cannot_take_a_lent_or_read_part.lin:18:17
+   |
+18 |     let _read = lookup(holder.row)
+   |                 ^^^^^^ no binding with this name is in scope
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/ownership/an_unresolved_call_cannot_take_a_lent_or_read_part.lin:15:9
+   |
+15 |     var ticket = Ticket.Seat(1)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it
+error[O-Leak]: `holder` (a linear `Holder`) is still owned when this path leaves
+  --> tests/ownership/an_unresolved_call_cannot_take_a_lent_or_read_part.lin:16:9
+   |
+16 |     let holder = Holder { row = 2 }
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+20 | }
+   | - the block ends here
+   |
+   = help: take it apart with `let Holder { row: _ } = holder`, or give it to something that takes it

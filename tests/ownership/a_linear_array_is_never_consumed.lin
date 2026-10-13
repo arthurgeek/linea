@@ -1,0 +1,16 @@
+// [O-Leak]. An array of a Linear element is Linear -- N obligations, not none
+// -- and there is nothing that takes one apart, so a program that builds one
+// owes something it cannot pay.
+//
+// The rule is the one that was already there. What this records is that the
+// language has no way to discharge the obligation yet: a `sink` parameter can
+// carry the array onward, and the last holder still owes it.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let _ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+    0
+}

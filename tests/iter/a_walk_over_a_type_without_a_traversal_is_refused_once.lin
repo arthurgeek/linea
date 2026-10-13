@@ -1,0 +1,29 @@
+// `Grid` says what place a position stands for and declares no `trav` saying
+// which positions there are, so a lending walk over it is refused at the walk.
+// The binder it would have lent is unknown rather than taken, so breaking out
+// with it reports nothing more.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[Int64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: Int64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn first(grid: Grid) -> Option[UInt8] {
+    for read cell in grid {
+        break cell
+    }
+}
+
+fn main() -> UInt8 {
+    let grid: Grid = .{ cells = [1, 2, 3, 4] }
+    match first(grid) {
+        Some(value) => value,
+        None => 0,
+    }
+}

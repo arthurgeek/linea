@@ -1,0 +1,28 @@
+# Workspace-local Helix config. Helix merges this over your own config whenever
+# it is opened anywhere under this directory, so it affects only this project.
+#
+# `linea lsp` speaks the protocol over stdin and stdout. It is taken from
+# `$PATH`, so `zig build` first and put `zig-out/bin` on it -- a stale binary
+# is the usual reason an edit reports diagnostics that no longer match.
+#
+# The grammar's shared object is built into
+# $HOME/.config/helix/runtime/grammars/linea.so by flake.nix's shellHook on
+# `nix develop` entry, not by `hx --grammar build`. Launch `hx` from the repo
+# root so this workspace config is picked up.
+
+[language-server.linea]
+command = "linea"
+args = ["lsp"]
+
+[[language]]
+name = "linea"
+scope = "source.linea"
+file-types = ["lin"]
+comment-token = "//"
+indent = { tab-width = 4, unit = "    " }
+auto-format = true
+formatter = { command = "linea", args = ["fmt", "--stdin"] }
+language-servers = ["linea"]
+
+[[grammar]]
+name = "linea"

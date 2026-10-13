@@ -1,0 +1,5 @@
+error[T-Refine]: 5..=4 admits no value for `Empty`
+ --> tests/newtypes/a_refinement_admitting_no_value_is_refused.lin:4:10
+  |
+4 | pub type Empty = UInt8 where it in 5..=4
+  |          ^^^^^ widen the range, or write no clause at all

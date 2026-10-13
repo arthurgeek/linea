@@ -1,0 +1,29 @@
+struct Flags { a: Bool, b: Bool, c: UInt8 }
+
+struct Held { flags: Flags, n: UInt8 }
+
+fn pick(f: Flags) -> UInt8 {
+    if f.a {
+        if f.b {
+            1
+        } else {
+            2
+        }
+    } else {
+        f.c
+    }
+}
+
+fn main() -> UInt8 {
+    // Three parts in three bytes. A `Bool` is one byte wide and is not an
+    // integer, so a backend taking its width from an integer query writes a
+    // whole word here -- over the two fields after it, and over whatever the
+    // structure is packed beside.
+    let f: Flags = .{ a = false, b = true, c = 9 }
+
+    // And held inside another, where the damage reaches further than the
+    // value that caused it.
+    let h: Held = .{ flags = .{ a = true, b = false, c = 3 }, n = 4 }
+
+    pick(f) + pick(h.flags) + h.n
+}

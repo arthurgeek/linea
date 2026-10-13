@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/ownership/match_arms_disagree/main.lin:13:5
+   |
+13 |     match Pick.Second {
+   |     ^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

@@ -1,0 +1,5 @@
+type Percent = UInt8
+
+pub fn marker() -> UInt8 {
+    1
+}

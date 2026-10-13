@@ -1,0 +1,39 @@
+// An implementation cannot add Copyable to a member parameter that the
+// trait signature promises only has ordinary behavior.
+@linear
+struct Handle {
+    id: UInt8,
+}
+
+trait Sink {
+    fn take(inout self: Self, n: UInt8) -> UInt8
+}
+
+impl Sink for Handle {
+    fn take(inout self: Handle, n: UInt8) -> UInt8 {
+        self.id + n
+    }
+}
+
+struct Tag {
+    at: UInt8,
+}
+
+trait Render {
+    fn draw[W: Sink](self: Self, inout w: W) -> UInt8
+}
+
+impl Render for Tag {
+    fn draw[W: Sink + Copyable](self: Tag, inout w: W) -> UInt8 {
+        var twin: W = copy(w)
+        Sink.take(&twin, 1) + Sink.take(&w, self.at)
+    }
+}
+
+fn main() -> UInt8 {
+    var h: Handle = .{ id = 1 }
+    let t: Tag = .{ at = 2 }
+    let n: UInt8 = Render.draw(t, &h)
+    let Handle { id: _k } = h
+    n
+}

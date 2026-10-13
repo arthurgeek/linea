@@ -1,0 +1,9 @@
+let equal = "one" == "one"
+
+fn main() -> UInt8 {
+    if equal {
+        0
+    } else {
+        1
+    }
+}

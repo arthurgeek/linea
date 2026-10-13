@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `grow` with more than it was given
+  --> tests/generics/recursion_that_grows_through_a_trait_receiver.lin:17:9
+   |
+17 |         Grow.grow(e)
+   |         ^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

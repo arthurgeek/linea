@@ -1,0 +1,5 @@
+error[T-For]: `Int64` implements no `Sequence`
+ --> tests/iter/a_for_over_no_sequence_is_refused.lin:4:15
+  |
+4 |     for _x in 3 {}
+  |               ^ a `for` walks what a `Sequence` says how to walk

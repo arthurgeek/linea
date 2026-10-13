@@ -1,0 +1,19 @@
+// A symbol carries the types a function was instantiated with, and a type is
+// spelled for a reader rather than for a tool: the unit type is written `()`,
+// which no emitted format reads as part of a name. Nothing can annotate a
+// binding with it, so the instantiation is reached the only way it can be --
+// by inference, from an argument that produces nothing.
+//
+// The program checked clean and then failed to build, against generated code
+// the programmer never wrote.
+fn ident[T: Copyable](v: T) -> T {
+    copy(v)
+}
+
+fn main() -> UInt8 {
+    let nothing = ident({})
+    let answer: UInt8 = match nothing {
+        _ => 7,
+    }
+    answer
+}

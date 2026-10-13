@@ -1,0 +1,13 @@
+// A rooted path names a module of the standard library, and the library is a
+// fixed set of them. A path naming none is refused where it is written rather
+// than becoming a name that resolves to nothing later.
+//
+// Not the same mistake as descending into a directory that is not there: `std`
+// does not descend, so there is no directory beside this file that could have
+// held one, and no arrangement of the program would make this path name
+// anything.
+import std.nosuch
+
+fn main() -> UInt8 {
+    0
+}

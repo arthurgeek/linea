@@ -1,0 +1,30 @@
+error[S-Equals]: expected `=`
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:5
+  |
+7 |     let .{ x = b }
+  |     ^^^ a binding needs an initialiser
+error[S-Expr]: expected an expression
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:5
+  |
+7 |     let .{ x = b }
+  |     ^ this is not the start of an expression
+error[S-Name]: expected a name after `let`
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:9
+  |
+7 |     let .{ x = b }
+  |         ^ a binding needs a name
+error[S-Equals]: expected `=`
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:9
+  |
+7 |     let .{ x = b }
+  |         ^ a binding needs an initialiser
+error[N-Undefined]: undefined name `b`
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:16
+  |
+7 |     let .{ x = b }
+  |                ^ no binding with this name is in scope
+error[T-Infer]: the type of this literal cannot be determined
+ --> tests/recovery/a_binding_missing_its_parts.lin:7:9
+  |
+7 |     let .{ x = b }
+  |         ^^^^^^^^^^ give the binding a type, or name one

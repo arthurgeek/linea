@@ -1,0 +1,48 @@
+@(opaque, copyable)
+struct Str {
+    bytes: std.mem.Slice[UInt8],
+}
+
+@copyable
+struct P {
+    a: UInt8,
+    b: UInt8,
+}
+
+@(opaque, copyable, derive(Release))
+struct Slice[UInt8] {
+    at: UInt64,
+    len: UInt64,
+}
+
+fn ;main() -> UInt8 {
+    let f = ;id[fn$28read$3astd.text.Str$3avalue$3a$22];x;[$22,read$3aP$3avalue$3a0$3drecord[1$3aa$401,1$3ab$402,];1$3di1;2$3di2;$29$2d$3eUInt8](greet)
+    let g = ;id[fn$28read$3astd.text.Str$3avalue$3a$22]$22,read$3aP$3avalue$3a0$3drecord[1$3aa$401,1$3ab$402,];1$3di1;2$3di2;$29$2d$3eUInt8](hail)
+    f() + g() - 6
+}
+
+fn ;greet(n: std.text.Str = "];x;[", p: P = P { a = 1, b = 2 }) -> UInt8 {
+    let _n = std.text;Str.length(n)
+    p.a + p.b
+}
+
+fn ;id[fn$28read$3astd.text.Str$3avalue$3a$22];x;[$22,read$3aP$3avalue$3a0$3drecord[1$3aa$401,1$3ab$402,];1$3di1;2$3di2;$29$2d$3eUInt8](sink t: fn(read:std.text.Str:value:"];x;[",read:P:value:0=record[1:a@1,1:b@2,];1=i1;2=i2;)->UInt8) -> fn(read:std.text.Str:value:"];x;[",read:P:value:0=record[1:a@1,1:b@2,];1=i1;2=i2;)->UInt8 {
+    t
+}
+
+fn ;hail(n: std.text.Str = "]", p: P = P { a = 1, b = 2 }) -> UInt8 {
+    let _n = std.text;Str.length(n)
+    p.a + p.b
+}
+
+fn ;id[fn$28read$3astd.text.Str$3avalue$3a$22]$22,read$3aP$3avalue$3a0$3drecord[1$3aa$401,1$3ab$402,];1$3di1;2$3di2;$29$2d$3eUInt8](sink t: fn(read:std.text.Str:value:"]",read:P:value:0=record[1:a@1,1:b@2,];1=i1;2=i2;)->UInt8) -> fn(read:std.text.Str:value:"]",read:P:value:0=record[1:a@1,1:b@2,];1=i1;2=i2;)->UInt8 {
+    t
+}
+
+pub fn std.text;Str.length(self: std.text.Str) -> UInt64 {
+    std.mem;Slice[UInt8].length(self.bytes)
+}
+
+pub fn std.mem;Slice[UInt8].length(self: std.mem.Slice[UInt8]) -> UInt64 {
+    self.len
+}

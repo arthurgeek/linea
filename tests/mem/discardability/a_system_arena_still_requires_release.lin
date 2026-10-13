@@ -1,0 +1,11 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    let _handle = arena.handle()
+    0
+}

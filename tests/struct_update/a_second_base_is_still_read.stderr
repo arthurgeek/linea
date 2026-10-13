@@ -1,0 +1,10 @@
+error[S-BaseLast]: the base of a structure literal comes last
+  --> tests/struct_update/a_second_base_is_still_read.lin:10:43
+   |
+10 |     let wide = Size { width = 8, ..small, ..undefined_size }
+   |                                           ^^ write this before `..`
+error[N-Undefined]: undefined name `undefined_size`
+  --> tests/struct_update/a_second_base_is_still_read.lin:10:45
+   |
+10 |     let wide = Size { width = 8, ..small, ..undefined_size }
+   |                                             ^^^^^^^^^^^^^^ no binding with this name is in scope

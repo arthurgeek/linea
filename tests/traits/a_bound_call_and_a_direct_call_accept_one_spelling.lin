@@ -1,0 +1,27 @@
+// One declaration answers for what a call may name and for what an omitted
+// parameter is worth, so the spellings of a call agree by construction: a body
+// generic over the bound, a receiver of a settled type, and the call written
+// out through the trait all read the signature. Each leaves the defaulted
+// parameter out and each is handed the same value. The implementation restates
+// neither the names nor the default, so there is nothing per type for the three
+// to disagree about.
+trait Pad {
+    fn pad(s: Self, width: UInt8 = 8) -> UInt8
+}
+
+impl Pad for UInt8 {
+    fn pad(s: UInt8, width: UInt8) -> UInt8 {
+        s + width
+    }
+}
+
+fn widened[T: Pad](x: T) -> UInt8 {
+    x.pad()
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let b: UInt8 = 2
+    let c: UInt8 = 3
+    widened(a) + b.pad() + Pad.pad(c)
+}

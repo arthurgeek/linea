@@ -1,0 +1,24 @@
+trait Make[A: Copyable] {
+    fn make(sink input: A) -> Self where carries(input)
+}
+
+@copyable
+struct Wrap[A: Copyable] {
+    value: A,
+}
+
+impl[A: Copyable] Make[A] for Bool {
+    fn make(sink input: A) -> Self where carries(input) {
+        let wrapped: Wrap[A] = .{ value = input }
+        return Make.make(wrapped)
+    }
+}
+
+fn main() -> UInt8 {
+    let result: Bool = Make.make(UInt8(7))
+    if result {
+        0
+    } else {
+        1
+    }
+}

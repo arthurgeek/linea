@@ -1,0 +1,12 @@
+error[T-DuplicateParameter]: `a` is already given
+ --> tests/decl/a_parameter_is_given_once.lin:8:28
+  |
+8 |     let _twice = add(a: 1, a: 2, b: 3)
+  |                         - given here
+  |                            ^ given twice
+error[T-DuplicateParameter]: `a` is already given
+ --> tests/decl/a_parameter_is_given_once.lin:9:15
+  |
+9 |     add(1, 2, a: 3)
+  |         - given here
+  |               ^ given twice

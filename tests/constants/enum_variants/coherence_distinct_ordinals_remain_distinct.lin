@@ -1,0 +1,17 @@
+enum Mode { Preserve, Replace }
+
+trait Select[phantom F] {}
+
+struct Holder {}
+
+impl Select[fn(read mode: Mode = .Preserve) -> UInt8] for Holder {}
+
+impl Select[fn(read mode: Mode = Mode.Replace) -> UInt8] for Holder {}
+
+fn require[T: Select[fn(read mode: Mode = Mode.Preserve) -> UInt8] + Select[fn(read mode: Mode = .Replace) -> UInt8]](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    require(Holder {})
+}

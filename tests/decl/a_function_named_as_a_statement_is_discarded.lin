@@ -1,0 +1,14 @@
+// A function named on its own line is a value of its function type, and a
+// statement that computes a value and drops it is refused: the name was meant
+// to be called.
+fn nothing() -> () {}
+
+fn value() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    nothing
+    value
+    0
+}

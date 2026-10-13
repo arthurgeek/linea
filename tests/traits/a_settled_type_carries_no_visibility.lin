@@ -1,0 +1,24 @@
+// A type an implementation settles carries no visibility of its own. What a
+// trait implementation supplies is the trait's, reachable wherever the trait
+// is, so `pub` on one would say nothing — and a modifier that says nothing is
+// a modifier a reader has to be told to ignore.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    pub type Item = UInt8
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

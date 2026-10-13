@@ -1,0 +1,34 @@
+import std.testing
+
+// `exchange` puts `next` in `slot` and returns the value that was there. A
+// caller that holds a place `inout`, such as a vector's element or a map's
+// bucket, moves a value out of it this way, leaving another in its stead, so
+// a linear value is moved exactly once.
+internal fn exchange[T](inout slot: T, sink next: T) -> T where carries(slot), retains(slot: next) {
+    let previous = slot
+    slot = next
+    previous
+}
+
+test fn an_exchange_returns_the_value_it_replaces() {
+    var slot: UInt64 = 1
+    let previous = exchange(&slot, 2)
+    testing.assert_eq(previous, UInt64(1), "the previous value changed")?
+    testing.assert_eq(slot, UInt64(2), "the slot did not take the new value")?
+    .Ok(())
+}
+
+// `take` moves the value out of `slot` and leaves the type's default in its
+// place, as `exchange(&slot, T.default())` does.
+internal fn take[T: Default](inout slot: T) -> T where carries(slot) {
+    let empty = T.default()
+    exchange(&slot, empty)
+}
+
+test fn take_leaves_the_default_behind() {
+    var pending: Option[UInt64] = .Some(5)
+    let taken = take(&pending)
+    testing.assert_eq(taken, Option.Some(UInt64(5)), "the taken value changed")?
+    testing.assert(pending.is_none(), "the slot did not return to its default")?
+    .Ok(())
+}

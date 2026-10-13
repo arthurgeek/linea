@@ -1,0 +1,25 @@
+// Two modules may each declare a `Measure`, which is most of what a module is
+// for. Neither name reaches the other's trait, so an implementation written
+// against one says nothing about the other -- and coherence, which compares the
+// declarations an implementation names rather than the text that reached them,
+// sees two implementations of two traits.
+import inner
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+struct Account {
+    balance: UInt8,
+}
+
+impl Measure for Account {
+    fn of(x: Account) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 5 }
+    Measure.of(a) + inner.weigh()
+}

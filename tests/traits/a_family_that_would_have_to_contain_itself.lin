@@ -1,0 +1,34 @@
+// Two implementations whose arguments would have to make a type contain
+// itself to meet. `T` on one side would have to equal `Box[Box[T]]` on the
+// other for any substitution to make them agree, and no finite type satisfies
+// that, so the two never overlap.
+trait Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Box[T] {
+    v: T,
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T] Give[Box[Box[T]]] for Holder[T] {
+    fn give(_self: Self, _u: Box[Box[T]]) -> UInt8 {
+        2
+    }
+}
+
+impl[U] Give[U] for Holder[U] {
+    fn give(_self: Self, _u: U) -> UInt8 {
+        9
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 1 }
+    let boxed: Box[Box[UInt8]] = .{ v = .{ v = 3 } }
+    let five: UInt8 = 5
+    Give.give(h, boxed) + Give.give(h, five)
+}

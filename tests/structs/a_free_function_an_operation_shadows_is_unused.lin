@@ -1,0 +1,21 @@
+// `c.total()` runs the operation `Counter` declares, so the free function
+// `total` is never called: a dot never reaches a free function. It is
+// reported unused like any function nothing calls.
+struct Counter {
+    value: UInt8,
+}
+
+impl Counter {
+    pub fn total(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn total(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    let c = Counter { value = 3 }
+    c.total()
+}

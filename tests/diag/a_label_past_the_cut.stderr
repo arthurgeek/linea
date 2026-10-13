@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `zzz`
+ --> tests/diag/a_label_past_the_cut.lin:2:205
+  |
+2 | ... 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + zzz + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1  ...
+  |                                                                 ^^^ no binding with this name is in scope

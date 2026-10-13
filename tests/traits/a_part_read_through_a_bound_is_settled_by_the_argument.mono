@@ -1,0 +1,35 @@
+struct Counter {
+    at: UInt8,
+}
+
+struct Flag {
+    on: UInt8,
+}
+
+struct Holder[Counter] {
+    v: UInt8,
+}
+
+struct Holder[Flag] {
+    v: Bool,
+}
+
+fn ;main() -> UInt8 {
+    let c: Counter = .{ at = 6 }
+    let f: Flag = .{ on = 1 }
+    let counted: Holder[Counter] = .{ v = Counter;;Measure.of(c) }
+    let flagged: Holder[Flag] = .{ v = Flag;;Measure.of(f) }
+    if flagged.v {
+        counted.v + 1
+    } else {
+        0
+    }
+}
+
+fn Counter;;Measure.of(x: Counter) -> UInt8 {
+    x.at
+}
+
+fn Flag;;Measure.of(x: Flag) -> Bool {
+    x.on == 1
+}

@@ -1,0 +1,10 @@
+error[N-Unused]: `U` is never used
+ --> tests/aliases/a_generic_alias_names_every_parameter.lin:1:17
+  |
+1 | alias Tagged[T, U] = Option[T]
+  |                 ^ name it in this declaration, or remove it
+error[T-Phantom]: `phantom` is not an alias's to declare
+ --> tests/aliases/a_generic_alias_names_every_parameter.lin:2:21
+  |
+2 | alias Brand[phantom T] = UInt8
+  |                     ^ an alias is the type it names, and has no identity of its own to brand

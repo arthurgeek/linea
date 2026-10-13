@@ -1,0 +1,2 @@
+trap
+linea: misaligned access at std/mem/buffer.lin:L:C

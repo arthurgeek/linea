@@ -1,0 +1,8 @@
+fn helper() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let _ = helper.Red
+    0
+}

@@ -1,0 +1,263 @@
+// Serve a year's calendar as a CSV file, one line per day.
+// GET /calendar/{year} answers `date,weekday,day_of_year` for every day of
+// the year, written to the connection as it is produced rather than built
+// whole in memory first. A year that is not a number is answered 400, naming
+// the path value, and a year past 1 to 9999 is answered 400 after the handler
+// logs it. Every request is logged to standard error.
+import std.env
+import std.http
+import std.io
+import std.log
+import std.mem
+import std.net
+import std.testing
+
+// `use` brings a trait's operations into scope, so a test can call
+// `&router.serve_http(&app, request)` on a router directly. `Writer` is in
+// the prelude, so `write_days` calls `&body.write_str(text)` without a `use`.
+use http.Handler
+use mem.Owner
+
+// `weekday` numbers the days from Sunday, and this array names them in that
+// order. `_` in `[Str; _]` takes the length from the literal, here 7.
+let weekday_names: [Str; _] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+// This array holds how many days each month has in a year that is not a leap
+// year. The length is written out because a year has 12 months and
+// `days_in` indexes the array by month: the compiler checks the literal holds
+// exactly 12 entries, so a month left out or written twice does not compile.
+let month_days: [UInt64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+// Sakamoto's weekday method adds one of these numbers for each month, so
+// this array is held to 12 entries too.
+let month_offsets: [UInt64; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+
+// A leap year is divisible by 4, except a century not divisible by 400.
+fn is_leap(year: UInt64) -> Bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn days_in(year: UInt64, month: UInt64) -> UInt64 {
+    if month == 2 && is_leap(year) {
+        return 29
+    }
+    month_days[month - 1]
+}
+
+// `weekday` finds the day of the week a Gregorian date falls on, 0 for Sunday.
+fn weekday(year: UInt64, month: UInt64, day: UInt64) -> UInt64 {
+    // January and February count as the end of the year before.
+    let shifted = if month < 3 {
+        year - 1
+    } else {
+        year
+    }
+    let sum = shifted + shifted / 4 - shifted / 100 + shifted / 400 + month_offsets[month - 1] + day
+    sum % 7
+}
+
+// `App` is the state the routes share. `http.with_state` owns it and lends it
+// down to each route as `inout app`. The logger is the only value they share,
+// so it is the only field; another shared value would be another field.
+@derive(Release)
+struct App {
+    logger: log.Logger[io.Descriptor],
+}
+
+// Refuse a year out of range before anything is sent; otherwise answer with
+// a CSV body that `write_days` streams once the head has gone out. The
+// closure captures the checked year with `[sink year]`, so the year is read
+// from the path once, and `http.stream` keeps the closure until the body runs.
+// A refused year is logged as a warning with the year the path asked for.
+fn calendar(inout app: App, request: http.Request) -> Result[http.Response, http.Error] {
+    // `http.Path[UInt64]` reads the route's only path value, `{year}`, as a
+    // `UInt64`, and refuses with 400 when it is not a number, naming the value
+    // and why it could not be read. `else |error|` logs that refusal before
+    // returning it, where `?` would return it at once.
+    let year = request.extract[http.Path[UInt64]]() else |error| {
+        app.logger.warn("refused a year", log.field("year", request.path_value("year").unwrap_or("")))
+        return .Err(error)
+    }
+    if year < 1 || year > 9999 {
+        app.logger.warn("refused a year", log.field("year", year))
+        return .Err(http.error(request, .BadRequest, "{year} is not a year from 1 to 9999"))
+    }
+    var response = http.stream(request, [sink year] |inout body| write_days(year, &body))?
+    &response.set_header("Content-Type", "text/csv; charset=utf-8")?
+    .Ok(response)
+}
+
+// Register the calendar's route. `calendar` reads its own year to log a
+// refusal before answering it, so it takes the state and the request and is
+// registered with `route_raw`; a handler whose parameters name what it reads
+// is registered with `route`, as `countdown-server` does. `route_raw` hands the
+// handler the `App` it is lent on every request.
+fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
+    &router.route_raw(r"GET /calendar/{year}", calendar)
+}
+
+// Write the calendar of `year` to `body` a line at a time. Each `?` stops at
+// a failed write: the client has gone, and the server resets the connection.
+fn write_days(year: UInt64, inout body: http.BodyWriter) -> Result[(), http.Error] {
+    &body.write_str("date,weekday,day_of_year\n")?
+    var day_of_year: UInt64 = 0
+    for month in UInt64(1)..=12 {
+        for day in UInt64(1)..=days_in(year, month) {
+            day_of_year += 1
+            let name = weekday_names[weekday(year, month, day)]
+            write_date(&body, year, month, day)?
+            ",{name},{day_of_year}\n".fmt(&body)?
+        }
+    }
+    .Ok(())
+}
+
+// Write `year-month-day` with a four-digit year and two-digit months and
+// days. The format spec `:04` pads a number with leading zeros to four
+// digits, and `:02` to two, so 7 March 987 is written `0987-03-07`.
+fn write_date[W: Writer](inout out: W, year: UInt64, month: UInt64, day: UInt64) -> Result[(), W.Error] where carries(.Err: out) {
+    "{year:04}-{month:02}-{day:02}".fmt(&out)
+}
+
+fn main() -> UInt8 {
+    let options = parse_options(env.args()) else {
+        io.eprintln("usage: calendar-export --port PORT [--requests N]")
+        return 64
+    }
+    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    // The annotation names the state the routes take, `App`.
+    var router: http.Router[App] = http.Router.new()
+    let _ = routes(&router) else |error| {
+        logger.error("cannot register a route", log.field("error", error))
+        router.release()
+        return 2
+    }
+    // `http.logged` logs the address the server listens on, and then one line
+    // per request once its response has been sent.
+    // `copy(logger)` gives `http.logged` and `App` loggers of their own and
+    // keeps this one for the line `main` writes if serving stops. A logger to
+    // standard error owns nothing, so a copy costs nothing.
+    let server = http.logged(copy(logger), router)
+    let app = App { logger = copy(logger) }
+    // `..http.Limits.default()` takes every limit not written here from the
+    // standard limits, so only the connection count changes.
+    let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
+    // `listen_and_serve` opens the listener, takes the server and lends `app`
+    // to the route on every request, closes the listener when it stops, and
+    // reports a failure to listen or to serve through `error`. Port 0 asks the
+    // operating system for any free port, and `http.logged` logs the one it
+    // chose. It returns `app`, which `main` releases.
+    let finished = http.listen_and_serve(net.loopback(options.port), server, state: app, limits: limits) else |error| {
+        logger.error("serving stopped", log.field("error", error))
+        return 1
+    }
+    finished.release()
+    0
+}
+
+// `Options` holds what the command line asked for: the port to listen on,
+// and how many requests to answer before stopping, or `.None` to serve until
+// killed.
+struct Options {
+    port: UInt16,
+    requests: Option[UInt64],
+}
+
+// Read `--port PORT` and an optional `--requests N`, in either order.
+fn parse_options(args: env.Args) -> Option[Options] {
+    var port: Option[UInt16] = .None
+    var requests: Option[UInt64] = .None
+    var index: UInt64 = 1
+    while index < args.count() {
+        let flag = args.at(index)?
+        let value = args.at(index + 1)?
+        if flag == "--port" {
+            let number = value.parse[UInt16]() else |_| {
+                return .None
+            }
+            port = .Some(number)
+        } else if flag == "--requests" {
+            let number = value.parse[UInt64]() else |_| {
+                return .None
+            }
+            requests = .Some(number)
+        } else {
+            return .None
+        }
+        index += 2
+    }
+    .Some(.{ port = port?, requests })
+}
+
+test fn leap_years_follow_the_gregorian_rule() {
+    testing.assert(is_leap(2024), "2024 is a leap year")?
+    testing.assert(!is_leap(2026), "2026 is not a leap year")?
+    testing.assert(!is_leap(1900), "1900 is not a leap year")?
+    testing.assert(is_leap(2000), "2000 is a leap year")?
+    testing.assert_eq(days_in(2024, 2), 29, "February 2024 lost its leap day")?
+}
+
+test fn a_weekday_is_found_from_the_date() {
+    // 1 January 2026 is a Thursday, and 29 February 2024 was one too.
+    testing.assert_eq(weekday_names[weekday(2026, 1, 1)], "Thursday", "1 January 2026 moved")?
+    testing.assert_eq(weekday_names[weekday(2024, 2, 29)], "Thursday", "29 February 2024 moved")?
+    testing.assert_eq(weekday_names[weekday(2000, 12, 31)], "Sunday", "31 December 2000 moved")?
+}
+
+test fn a_date_is_written_with_leading_zeros() {
+    defer var out = String.new()
+    write_date(&out, 987, 3, 7).unwrap()
+    testing.assert_eq(out.view(), "0987-03-07", "the date changed")?
+}
+
+// The tests hand the handler a state whose logger writes only errors, so the
+// lines it logs while answering stay out of the test report.
+fn quiet() -> App {
+    .{ logger = log.to_stderr(mem.system(), minimum: .Error) }
+}
+
+// A request built in an arena goes through the router, which records the
+// path value the handler reads.
+test fn a_year_out_of_range_is_refused_before_streaming() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let late = http.new_request(arena.handle(), "GET", "/calendar/12000", body: "").unwrap()
+    let refused = match &router.serve_http(&app, late.request()) {
+        Ok(_) => return testing.assert(false, "a year past 9999 was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("12000 is not a year from 1 to 9999"), "the message changed")?
+    let named = http.new_request(arena.handle(), "GET", "/calendar/next", body: "").unwrap()
+    let unread = match &router.serve_http(&app, named.request()) {
+        Ok(_) => return testing.assert(false, "a year that is not a number was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(unread.message(), Option.Some(r#"cannot read path value "year" from "next": invalid decimal syntax at byte 0"#), "the refusal of a word changed")?
+    let valid = http.new_request(arena.handle(), "GET", "/calendar/2026", body: "").unwrap()
+    let answered = &router.serve_http(&app, valid.request()).unwrap()
+    testing.assert_eq(answered.header("Content-Type"), Option.Some("text/csv; charset=utf-8"), "a valid year was not answered with CSV")?
+}
+
+// `recorded_body` runs the streamed body into the request's arena, so a test
+// reads the CSV a client would receive.
+test fn a_year_streams_one_line_per_day() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    var app = quiet()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
+    let csv = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
+    let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
+    var lines: UInt64 = 0
+    for byte in calendar_text.as_bytes() {
+        if *byte == 10 {
+            lines += 1
+        }
+    }
+    testing.assert(calendar_text.starts_with("date,weekday,day_of_year\n2024-01-01,Monday,1\n"), "the calendar's first lines changed")?
+    testing.assert(calendar_text.ends_with("2024-12-31,Tuesday,366\n"), "the calendar's last line changed")?
+    testing.assert_eq(lines, 367, "a leap year did not have 366 days and a header")?
+}

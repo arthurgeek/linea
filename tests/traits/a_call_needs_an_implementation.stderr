@@ -1,0 +1,5 @@
+error[T-Bound]: `Measure` requires `Self` to implement it, and `Ledger` does not
+  --> tests/traits/a_call_needs_an_implementation.lin:25:32
+   |
+25 |     Measure.of(a) + Measure.of(l)
+   |                                ^ implement it for that type, or reach the operation on one that does

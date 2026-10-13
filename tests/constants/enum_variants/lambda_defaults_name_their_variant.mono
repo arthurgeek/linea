@@ -1,0 +1,10 @@
+enum Mode { Preserve, Replace }
+
+fn ;main() -> UInt8 {
+    let pick = |mode: Mode = .Replace| match read mode { Preserve => UInt8(0), Replace => UInt8(1) }
+    closure.0() - 1
+}
+
+fn closure.0(read mode: Mode = .Replace) -> UInt8 {
+    match read mode { Preserve => UInt8(0), Replace => UInt8(1) }
+}

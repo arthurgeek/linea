@@ -1,0 +1,14 @@
+// A pattern's bound is a value the compiler folds -- a literal, or a name
+// the constant table answers. A local is neither: what it holds is the
+// program's to compute, and a pattern is checked before anything runs.
+fn inner(top: UInt8) -> UInt8 {
+    let x: UInt8 = 5
+    match x {
+        0..=top => 1,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    inner(9)
+}

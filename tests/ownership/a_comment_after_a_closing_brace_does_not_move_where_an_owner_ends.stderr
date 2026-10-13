@@ -1,0 +1,11 @@
+error[O-Borrow]: `name` ends while a value borrowing it is still used
+  --> tests/ownership/a_comment_after_a_closing_brace_does_not_move_where_an_owner_ends.lin:22:5
+   |
+21 |         "hello {name}"
+   |                 ---- borrowed here
+22 |     } // the owner ends before this comment
+   |     ^ `name` ends here
+23 |     println(greeting)?
+   |             -------- the observation is still used here
+   |
+   = help: keep the borrowing value inside the scope, or declare what it borrows outside it

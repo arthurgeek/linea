@@ -1,0 +1,32 @@
+trait Required {}
+
+trait Extra {}
+
+trait Base {}
+
+trait Law: Base {}
+
+template impl Base {}
+
+template impl Law where reflect.supertraits: derived {}
+
+struct Box[T] {
+    value: T,
+}
+
+derive[T: Required] Base for Box[T]
+
+derive[T: Required + Extra] Law for Box[T]
+
+impl Required for UInt8 {}
+
+impl Extra for UInt8 {}
+
+fn accepts[T: Law](_value: T) -> UInt8 {
+    9
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 1 }
+    accepts(box)
+}

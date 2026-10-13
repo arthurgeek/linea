@@ -1,0 +1,22 @@
+// The error moves into the `else` block's binding, which decides what the
+// function answers.
+enum Fault {
+    Missing(UInt8),
+}
+
+fn lookup(key: UInt8) -> Result[UInt8, Fault] {
+    if key == 3 {
+        Result.Ok(40)
+    } else {
+        Result.Err(Fault.Missing(key))
+    }
+}
+
+fn main() -> UInt8 {
+    let found = lookup(9) else |error| {
+        return match error {
+            Missing(key) => key + 10,
+        }
+    }
+    found
+}

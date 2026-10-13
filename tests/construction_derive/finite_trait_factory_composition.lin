@@ -1,0 +1,37 @@
+trait Make[A: Copyable] {
+    fn make(input: A) -> Self where carries(input)
+}
+
+struct Leaf[A: Copyable] {
+    value: A,
+}
+
+impl[A: Copyable] Make[A] for Leaf[A] {
+    fn make(input: A) -> Self where carries(input) {
+        .{ value = copy(input) }
+    }
+}
+
+fn build[A: Copyable, T: Make[A]](input: A) -> T where carries(input) {
+    Make.make(input)
+}
+
+struct Record[A: Copyable] {
+    child: Leaf[A],
+}
+
+impl[A: Copyable] Make[A] for Record[A] {
+    fn make(input: A) -> Self where carries(input) {
+        let child: Leaf[A] = build(input)
+        return .{ child = child }
+    }
+}
+
+fn main() -> UInt8 {
+    let record: Record[UInt8] = Make.make(UInt8(7))
+    if record.child.value == 7 {
+        0
+    } else {
+        1
+    }
+}

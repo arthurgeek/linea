@@ -1,0 +1,20 @@
+import std.mem
+import std.testing
+
+// `each_allocation_failure` consumes its body, so the first walk moves `body`
+// and the second cannot pass it again.
+fn main() -> UInt8 {
+    let body = |allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[(), mem.Oom] {
+        let held = allocator.acquire(8)?
+        held.release()
+        .Ok(())
+    }
+    let refused = |_error: mem.Oom| true
+    let first = testing.each_allocation_failure(mem.system(), body, copy(refused))
+    let second = testing.each_allocation_failure(mem.system(), body, refused)
+    if first.is_ok() && second.is_ok() {
+        0
+    } else {
+        1
+    }
+}

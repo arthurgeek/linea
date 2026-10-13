@@ -1,0 +1,7 @@
+fn f(a: UInt8) -> UInt8 {
+    a
+}
+
+fn main() -> UInt8 {
+    f()
+}

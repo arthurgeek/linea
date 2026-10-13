@@ -1,0 +1,8 @@
+// `else` runs where the initializer failed, and only an `Option` or a `Result`
+// can fail.
+fn main() -> UInt8 {
+    let n = 4 else {
+        return 1
+    }
+    n
+}

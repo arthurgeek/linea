@@ -1,0 +1,29 @@
+// A response lives in its request's arena, so a handler that fails after
+// building one simply returns the error: the response is dropped with the
+// arena, and nothing has to be released.
+import std.http
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn cached[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
+    var response = http.text(request, "hello")?
+    &response.set_header("Cache-Control", "no-store")?
+    &response.add_header("Vary", "Accept")?
+    return .Ok(response)
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let answered = match cached(sent.request()) {
+        Ok(response) => {
+            let _printed = io.println("{response.status().code()} {response.header("Vary").unwrap_or("")}")
+            0
+        },
+        Err(_) => 1,
+    }
+    arena.release()
+    answered
+}

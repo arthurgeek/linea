@@ -1,0 +1,13 @@
+// `is_ok` answers a `Bool` whatever the call's `T` is, so the annotation says
+// nothing about `T`.
+fn nothing_yet[T]() -> Result[Option[T], UInt8] {
+    .Ok(.None)
+}
+
+fn main() -> UInt8 {
+    let ready: Bool = nothing_yet().is_ok()
+    if ready {
+        return 0
+    }
+    return 1
+}

@@ -1,0 +1,28 @@
+// [O-Loop] is about how many times a move runs, and a loop runs its body as
+// many times as it says wherever the loop is written. What a `break` or a
+// `return` carries out is exempt because it leaves -- that exemption belongs
+// to the operand and not to a loop the operand happens to contain, so the two
+// functions below must be answered the same way.
+//
+// While the exemption reached into the nested loop, `wrapped` was accepted and
+// `plain` was refused: the identical body, judged on whether someone had
+// written `return` in front of it.
+fn wrapped() -> UInt8 {
+    let k = mint(1)
+    return loop {
+        release(k)
+        break 0
+    }
+}
+
+fn plain() -> UInt8 {
+    let k = mint(1)
+    loop {
+        release(k)
+        break 0
+    }
+}
+
+fn main() -> UInt8 {
+    wrapped() + plain()
+}

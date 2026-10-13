@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// Two paths ending in the same element are two modules, and which of them\n// was meant is not a question about the name.\nfn main() -> UInt8 {\n    hash.digest()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"main.lin"},"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":8}},"context":{"diagnostics":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":8}},"severity":1,"code":"N-Undefined","source":"linea","message":"undefined name `hash`"}]}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

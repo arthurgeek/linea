@@ -1,0 +1,10 @@
+// [T-ArraySize]. A length is part of the type, and a type holds as many
+// elements as the length says: a count no array could have is refused where it
+// is written, and being a constant expression is what gets it as far as being
+// read at all.
+let wide: Int64 = 5000000000
+
+fn main() -> UInt8 {
+    let _xs: [UInt8; wide] = [1]
+    0
+}

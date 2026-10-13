@@ -1,0 +1,12 @@
+@opaque
+struct Account { balance: UInt8 }
+
+impl Account {
+    pub fn open(balance: UInt8) -> Account {
+        .{ balance = balance }
+    }
+
+    pub fn balance(account: Account) -> UInt8 {
+        account.balance
+    }
+}

@@ -1,0 +1,30 @@
+// A leak report names the operations that would settle the value. Whether
+// one does depends on whether its result owes anything, and that result may be
+// a type the leaking function never mentions: here `Receipt` appears nowhere
+// in `issue`, whose bound gives it a scope of its own. The report still names
+// `redeem`, whose result owes nothing.
+@linear
+struct Ticket {
+    code: UInt64,
+}
+
+struct Receipt {
+    code: UInt64,
+}
+
+impl Ticket {
+    fn redeem(sink self: Self) -> Receipt {
+        let Ticket { code } = self
+        Receipt { code }
+    }
+}
+
+fn issue[T: Copyable](count: T) -> T {
+    let _ticket = Ticket { code = 1 }
+    copy(count)
+}
+
+fn main() -> UInt8 {
+    let receipt = Ticket { code = 2 }.redeem()
+    issue(UInt8(receipt.code))
+}

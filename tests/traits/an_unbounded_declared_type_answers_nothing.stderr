@@ -1,0 +1,5 @@
+error[T-Bound]: `Elem` requires `Self` to implement it, and `H.Iter` does not
+  --> tests/traits/an_unbounded_declared_type_answers_nothing.lin:32:14
+   |
+32 |     Elem.one(Holder.get(h))
+   |              ^^^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

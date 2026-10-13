@@ -1,0 +1,31 @@
+// Tuples of one arity share one head, so a trait implemented for one pair of
+// types is implemented for every pair. A triple is a different head.
+struct First {}
+
+struct Second {}
+
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (First, UInt8) {
+    fn show(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+impl Show for (Second, UInt8) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Show for (First, UInt8, UInt8) {
+    fn show(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

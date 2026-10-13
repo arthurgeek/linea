@@ -1,0 +1,5 @@
+extern fn linea_close(fd: Int64, flags: Int64) -> UInt8
+
+export fn call_it(value: Int64) -> Int64 {
+    Int64(linea_close(value, 0))
+}

@@ -1,0 +1,10 @@
+error[T-ArraySize]: an inferred array length needs an array literal to count
+ --> tests/arrays/inferred_length/bindings_without_literals_cannot_count.lin:4:21
+  |
+4 | let copied: [UInt8; _] = source
+  |                     ^ supply an array literal or write an explicit length
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/bindings_without_literals_cannot_count.lin:8:26
+  |
+8 | fn total(values: [UInt8; _] = [1, 2]) -> UInt8 {
+  |                          ^ write an explicit length in this type

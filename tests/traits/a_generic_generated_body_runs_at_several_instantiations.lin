@@ -1,0 +1,37 @@
+trait Value {}
+
+trait Total {
+    fn total(self: Self) -> UInt8
+}
+
+template impl Total where reflect.components: Value {
+    fn total(_self: Self) -> UInt8 {
+        var sum: UInt8 = 0
+        match read _self {
+            reflect.case => {
+                for component in reflect.components {
+                    let _ = copy(component.of(_self))
+                    sum = sum + 1
+                }
+            },
+        }
+        sum
+    }
+}
+
+struct Pair[T] {
+    left: T,
+    right: T,
+}
+
+impl Value for UInt8 {}
+
+impl Value for Bool {}
+
+derive[T: Value + Copyable] Total for Pair[T]
+
+fn main() -> UInt8 {
+    let numbers: Pair[UInt8] = .{ left = 2, right = 3 }
+    let flags: Pair[Bool] = .{ left = true, right = false }
+    numbers.total() + flags.total()
+}

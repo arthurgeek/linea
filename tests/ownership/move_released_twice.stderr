@@ -1,0 +1,7 @@
+error[O-Move]: `k` has already been moved
+ --> tests/ownership/move_released_twice/main.lin:6:13
+  |
+5 |     release(k)
+  |             - it was taken here
+6 |     release(k)
+  |             ^ it was already taken, and a value is taken once

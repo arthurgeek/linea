@@ -1,0 +1,34 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/function_values/unsettled_function_values.lin:34:22
+   |
+34 |     let _flag = same(true)
+   |                 ---- expected because of this parameter
+   |                      ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `fn(read UInt8) -> UInt8`
+  --> tests/function_values/unsettled_function_values.lin:35:30
+   |
+35 |     let _byte_value: UInt8 = add_one
+   |                      ----- expected because of this annotation
+   |                              ^^^^^^^ expected `UInt8`, found `fn(read UInt8) -> UInt8`
+error[T-Discard]: this expression produces a `fn(read UInt8) -> UInt8` that is discarded
+  --> tests/function_values/unsettled_function_values.lin:36:5
+   |
+36 |     add_one
+   |     ^^^^^^^ call it with `(...)`, or bind it with `let _ =` to discard it deliberately
+error[T-Infer]: nothing that uses `identity` here says what `T` is
+  --> tests/function_values/unsettled_function_values.lin:28:25
+   |
+28 |     let _never_called = identity
+   |                         ^^^^^^^^ write the function type it is used as, with a type in place of each `_`: `fn(read value: _) -> _ where carries(value)`
+error[T-Infer]: nothing that uses `cents` here says what `Self` is
+  --> tests/function_values/unsettled_function_values.lin:29:21
+   |
+29 |     let _no_price = Priced.cents
+   |                     ^^^^^^^^^^^^ write the function type it is used as, with a type in place of each `_`: `fn(read self: _) -> UInt64`
+error[T-Bound]: `Priced` requires `Self` to implement it, and `Pebble` does not
+  --> tests/function_values/unsettled_function_values.lin:30:17
+   |
+30 |     let price = Priced.cents
+   |                 ^^^^^^^^^^^^ implement it for that type, or reach the operation on one that does
+31 |     let _pebble = price(Pebble { grams = 3 })
+   |                         -------------------- `Self` settled to `Pebble` here

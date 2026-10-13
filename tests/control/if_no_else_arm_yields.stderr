@@ -1,0 +1,7 @@
+error[T-Arms]: expected `()`, found `Int64`
+ --> tests/control/if_no_else_arm_yields.lin:3:9
+  |
+2 |     if true {
+  |     -- an `if` with no `else` yields `()`
+3 |         1
+  |         ^ this arm produces a value

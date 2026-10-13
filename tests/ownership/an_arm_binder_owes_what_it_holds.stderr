@@ -1,0 +1,13 @@
+error[N-Unused]: `k` is never used
+  --> tests/ownership/an_arm_binder_owes_what_it_holds.lin:24:14
+   |
+24 |         Full(k) => 1,
+   |              ^ bind it as `_` if the value is not wanted
+error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
+  --> tests/ownership/an_arm_binder_owes_what_it_holds.lin:24:14
+   |
+24 |         Full(k) => 1,
+   |              ^ never settled on the path that reaches the end of its scope
+   |                    - its scope ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

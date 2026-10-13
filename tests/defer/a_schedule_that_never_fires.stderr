@@ -1,0 +1,5 @@
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/a_schedule_that_never_fires.lin:17:11
+   |
+17 |     defer take(k)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it

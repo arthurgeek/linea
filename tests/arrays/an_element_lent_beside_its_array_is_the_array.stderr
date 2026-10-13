@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/arrays/an_element_lent_beside_its_array_is_the_array.lin:12:14
+   |
+12 |     f(&a[0], a)
+   |       ----- mutated by this argument
+   |              ^ already passed `&` here

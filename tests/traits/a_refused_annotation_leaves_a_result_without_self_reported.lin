@@ -1,0 +1,17 @@
+// An annotation that names no type settles only a `Self` written in what the
+// call returns. Here the result is a `UInt8`, so the call still names no
+// implementation and is reported beside the annotation.
+trait Count {
+    fn count() -> UInt8
+}
+
+impl Count for Bool {
+    fn count() -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let _counted: Missing = Count.count()
+    0
+}

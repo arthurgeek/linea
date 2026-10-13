@@ -1,0 +1,13 @@
+// Two traits each requiring the other are two traits neither of which can be
+// implemented first.
+trait Here: There {
+    fn here(self: Self) -> UInt8
+}
+
+trait There: Here {
+    fn there(self: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

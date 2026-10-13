@@ -1,0 +1,35 @@
+// The binder's scope is one iteration, so what a walk hands over is a fresh
+// value every time round rather than the previous one moved again. Consuming a
+// Linear element inside the body is therefore consuming it once, which is what
+// [O-Loop] would otherwise refuse -- the binder is declared in the loop's own
+// head, where the loop stack already holds this loop.
+@linear
+struct Token {
+    n: UInt8,
+}
+
+struct Tokens {
+    left: UInt8,
+}
+
+impl Iterator for Tokens {
+    type Item = Token
+
+    fn next(inout self: Tokens) -> Option[Token] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left = self.left - 1
+        return .Some(.{ n = self.left })
+    }
+}
+
+fn main() -> UInt8 {
+    let ts: Tokens = .{ left = 3 }
+    var total: UInt8 = 0
+    for t in ts {
+        let Token { n: v } = t
+        total += v
+    }
+    total
+}

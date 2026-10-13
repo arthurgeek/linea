@@ -1,0 +1,24 @@
+// A template's member adopts the contract of the trait signature it supplies,
+// as the implementations derived from it do.
+import std.io
+
+trait Prefixed {
+    fn prefixed(self: Self, prefix: Str) -> Str where carries(prefix)
+}
+
+template impl Prefixed {
+    fn prefixed(_self: Self, prefix: Str) -> Str {
+        copy(prefix)
+    }
+}
+
+struct Point {
+    x: Int64,
+}
+
+derive Prefixed for Point
+
+fn main() -> UInt8 {
+    let _printed = io.println(Point { x = 1 }.prefixed("point"))
+    0
+}

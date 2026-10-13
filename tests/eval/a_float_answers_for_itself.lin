@@ -1,0 +1,22 @@
+fn main() -> UInt8 {
+    let zero = 0.0
+    let nan = zero / zero
+    if !Float64.is_nan(nan) {
+        return 1
+    }
+    let steady = 1.5
+    if Float64.is_nan(steady) {
+        return 2
+    }
+    let low = -2.5
+    if Float64.abs(low) != 2.5 {
+        return 3
+    }
+    if Float64.abs(2.5) != 2.5 {
+        return 4
+    }
+    if !Float64.is_nan(Float64.abs(nan)) {
+        return 5
+    }
+    0
+}

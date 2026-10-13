@@ -1,0 +1,129 @@
+import std.testing
+
+// SystemAllocator is a reusable handle to the system allocator. Each returned
+// Buffer owns its allocation; the handle itself owns no storage.
+@(copyable, derive(Equatable, Equivalent, Debug))
+pub enum SystemAllocator {
+    System,
+}
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn system_allocator_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+test fn derived_system_allocator_equality_compares_its_case() {
+    let allocator: SystemAllocator = .System
+    let same: SystemAllocator = .System
+    testing.assert(allocator.equals(same), "system allocators differed")?
+    testing.assert(system_allocator_test_accepts_equivalent(same), "SystemAllocator did not derive Equivalent")?
+    .Ok(())
+}
+
+test fn derived_system_allocator_debug_renders_its_case() {
+    let allocator: SystemAllocator = .System
+    let a = system()
+    var writer = testing.Recorder.of(a, 64).unwrap()
+    let wrote = "{allocator:?}".fmt(&writer).is_ok()
+    let rendered = writer.holds("System")
+    writer.release()
+    testing.assert(wrote, "rendering SystemAllocator failed")?
+    testing.assert(rendered, "SystemAllocator.Debug did not render its case")?
+    .Ok(())
+}
+
+// Return a handle to the system allocator.
+pub fn system() -> SystemAllocator {
+    .System
+}
+
+test fn one_handle_serves_more_than_one_allocation() {
+    let a = system()
+
+    match a.acquire(16) {
+        Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
+        Ok(first) => {
+            let n = first.length()
+            first.release()
+            testing.assert_eq(n, 16, "a buffer did not arrive at the size asked for")?
+        },
+    }
+
+    match a.acquire(8) {
+        Err(_) => testing.assert(false, "a second buffer was refused")?,
+        Ok(second) => {
+            let m = second.length()
+            second.release()
+            testing.assert_eq(m, 8, "a handle did not serve a second allocation")?
+        },
+    }
+
+    .Ok(())
+}
+
+// An Allocator hands out zeroed buffers that retain the allocator needed for
+// their release. Copying an allocator preserves its owner dependencies.
+// Disposal consumes that buffer and takes its allocator from the owned value.
+// Implementations belong to std.mem, where Buffer can be constructed.
+pub trait Allocator: Copyable {
+    type Obligation
+
+    fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] where carries(.Ok: self)
+
+    fn dispose(sink b: Buffer[Self]) -> ()
+}
+
+// An owner provides a non-owning allocator handle. For an arena, the handle
+// borrows its storage and cannot outlive it; a system handle has no such owner.
+pub trait Owner {
+    type Handle: Allocator
+
+    fn handle(self: Self) -> Self.Handle where borrows(self)
+}
+
+impl Allocator for SystemAllocator {
+    type Obligation = SystemAllocation
+
+    // Allocate size zeroed bytes, or return Oom. A zero address means failure,
+    // including for a request of zero bytes.
+    fn acquire(self: Self, size: UInt64) -> Result[Buffer[SystemAllocator], Oom] where carries() {
+        match read self {
+            System => {
+                let at = linea_alloc(size, Buffer.alignment)
+                if at == 0 {
+                    .Err(Oom.Exhausted)
+                } else {
+                    // Empty buffers reserve one byte. Retain that size for disposal,
+                    // while reporting the requested length to callers.
+                    let reserved = if size == 0 {
+                        1
+                    } else {
+                        size
+                    }
+                    Result.Ok(.{ at = at, len = size, allocated = reserved, allocator = self, obligation = .{} })
+                }
+            },
+        }
+    }
+
+    fn dispose(sink b: Buffer[SystemAllocator]) -> () {
+        let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: obligation } = b
+        let SystemAllocation {} = obligation
+        match allocator {
+            System => linea_free(at, allocated, Buffer.alignment),
+        }
+    }
+}
+
+// SystemAllocation is the obligation a system buffer carries. It is linear and
+// empty, so even an empty system allocation must reach its explicit disposal.
+@linear
+struct SystemAllocation {}
+
+impl Owner for SystemAllocator {
+    type Handle = SystemAllocator
+
+    fn handle(self: Self) -> SystemAllocator where carries() {
+        self
+    }
+}

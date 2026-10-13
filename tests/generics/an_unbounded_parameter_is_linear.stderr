@@ -1,0 +1,14 @@
+error[N-Unused]: `a` is never used
+ --> tests/generics/an_unbounded_parameter_is_linear.lin:3:17
+  |
+3 | fn take[T](sink a: T) -> UInt8 {
+  |                 ^ name it with a leading `_` if the value is not wanted
+error[O-Leak]: `a` (a linear `T`) is still owned when this path leaves
+ --> tests/generics/an_unbounded_parameter_is_linear.lin:3:17
+  |
+3 | fn take[T](sink a: T) -> UInt8 {
+  |                 ^ never settled on the path that reaches the end of this block
+5 | }
+  | - the block ends here
+  |
+  = help: give it to something that takes it

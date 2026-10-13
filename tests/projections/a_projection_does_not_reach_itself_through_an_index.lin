@@ -1,0 +1,22 @@
+// A projection's index expression is spliced into the site with its spine, so
+// a bracket standing inside one reaches an implementation exactly as a bracket
+// on the spine does. A chain that returns to an implementation already on it
+// is refused whichever of the two it ran through.
+struct Cycle {
+    cells: [UInt64; 2],
+}
+
+impl Index[UInt64] for Cycle {
+    type Elem = UInt64
+
+    proj at(inout self: Cycle, i: UInt64) -> UInt64 {
+        self.cells[self[i]]
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Cycle = .{ cells = [0, 1] }
+    let v: UInt64 = c[0]
+    let _ = v
+    0
+}

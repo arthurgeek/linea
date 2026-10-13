@@ -1,0 +1,35 @@
+// Two traits the module can see declare `of` for this type, so `a.of()` says
+// nothing about which was meant. A diagnostic rather than an order of
+// preference: a rule that silently picked one would make importing a library
+// change what an existing call means.
+//
+// The fix is in the message, because it is always available and never
+// ambiguous -- writing the call out names the trait it goes through.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+trait Weigh {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+impl Weigh for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    a.of() + Measure.of(a) + Weigh.of(a)
+}

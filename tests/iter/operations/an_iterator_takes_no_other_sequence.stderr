@@ -1,0 +1,8 @@
+error[T-Impl]: these two both answer `Sequence` for `Pages`
+  --> tests/iter/operations/an_iterator_takes_no_other_sequence.lin:20:6
+   |
+20 | impl Sequence for Pages {
+   |      ^^^^^^^^ no instantiation may answer to two implementations of one trait
+  ::: std/iter/iter.lin
+L  | impl[I: Iterator] Sequence for I {
+   |                   -------- the other implementation

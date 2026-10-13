@@ -1,0 +1,13 @@
+@linear
+enum Ticket { Issued }
+
+enum Choice { Empty, Held(Ticket) }
+
+let empty = Choice.Empty
+
+fn main() -> UInt8 {
+    match empty {
+        Empty => 0,
+        Held(ticket) => match ticket { Issued => 1 },
+    }
+}

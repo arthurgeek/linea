@@ -1,0 +1,9 @@
+enum Mode { Preserve, Exact(UInt64) }
+
+fn select(mode: Mode = Mode.Exact(384)) -> UInt8 {
+    match read mode { Preserve => 0, Exact(_) => 1 }
+}
+
+fn main() -> UInt8 {
+    select()
+}

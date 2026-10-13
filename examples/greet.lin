@@ -1,0 +1,83 @@
+// Greet each name given on the command line.
+// Use `env.args()` to access command-line arguments after importing `std.env`.
+// `use env.args` lets this file call it as `args()`. Each argument is a `Str`
+// view into process-owned storage, so reading it needs no allocation or cleanup.
+import std.env
+import std.testing
+import std.io
+
+use env.args
+use io.IoError
+use io.line
+
+// `W: Writer` lets this function write to any type implementing `Writer`.
+// `inout w` allows mutation; callers mark that argument with `&w`.
+// `W.Error` is the error type supplied by that writer's implementation.
+// `?` returns a writing error immediately; the last call supplies the result.
+fn usage[W: Writer](inout w: W) -> Result[(), W.Error] {
+    line("greet: say hello to each name given", &w)?
+    line("usage: greet <name>...", &w)
+}
+
+// A `String` is a `Writer` too, so a test writes into one and compares the text.
+test fn usage_explains_how_to_supply_names() {
+    defer var written = String.new()
+    usage(&written).unwrap()
+    // The empty last line stands for the line break `line` writes after the
+    // usage.
+    let expected =
+        \\greet: say hello to each name given
+        \\usage: greet <name>...
+        \\
+    testing.assert_eq(written.view(), expected, "usage is not the two lines it prints")?
+}
+
+// `where carries(.Err: w)` states that an error result may depend on the
+// writer `w`, so a caller keeps the writer alive while it holds the error.
+fn hello[W: Writer](name: Str, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    line("Hello, {name}!", &w)
+}
+
+test fn each_name_gets_a_greeting() {
+    defer var written = String.new()
+    hello("Ada", &written).unwrap()
+    hello("José", &written).unwrap()
+    let expected =
+        \\Hello, Ada!
+        \\Hello, José!
+        \\
+    testing.assert_eq(written.view(), expected, "each supplied name appears on its own line")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let given = args()
+
+    // Keep a standard-output descriptor and lend it to each writing function.
+    var out = io.stdout()
+
+    // Index zero is the executable name. User arguments begin at one, so
+    // `count() - 1` is the number of names to greet.
+    // Without names the usage goes to standard error, and 64 is the
+    // conventional exit status for a command used wrongly.
+    if given.count() <= 1 {
+        var err = io.stderr()
+        usage(&err)?
+        return .Ok(64)
+    }
+
+    line("greeting {given.count() - 1}:", &out)?
+
+    // `1..given.count()` excludes its upper bound, so the loop visits every
+    // user argument after the executable name.
+    for i in 1..given.count() {
+        // `at` returns `Some(Str)` for an argument containing valid UTF-8.
+        // It returns `None` for a missing index or invalid UTF-8; this loop's
+        // bounds exclude missing indexes, so `None` handles invalid text.
+        match given.at(i) {
+            Some(name) => hello(name, &out)?,
+            None => line("Skipping argument {i}: invalid UTF-8.", &out)?,
+        }
+    }
+
+    .Ok(0)
+}

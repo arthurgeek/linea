@@ -1,0 +1,9 @@
+@linear
+struct Ticket { serial: UInt8 }
+
+let ticket: Ticket = .{ serial = 7 }
+
+fn main() -> UInt8 {
+    let { serial } = ticket
+    serial
+}

@@ -1,0 +1,10 @@
+@linear
+struct Token { number: UInt8 }
+
+struct Envelope { token: Token, stamp: UInt8 }
+
+fn main() -> UInt8 {
+    let envelope = Envelope { token = Token { number = 3 }, stamp = 5 }
+    let read Envelope { token: _, stamp } = envelope
+    stamp
+}

@@ -1,0 +1,11 @@
+fn identity(value: borrow UInt64) -> borrow UInt64 where carries(value) {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let forward: fn(read value: borrow UInt64) -> borrow UInt64 where carries(value) = identity
+    var owner: UInt64 = 7
+    let escaped = forward(borrow owner)
+    owner = 9
+    UInt8(*escaped + owner)
+}

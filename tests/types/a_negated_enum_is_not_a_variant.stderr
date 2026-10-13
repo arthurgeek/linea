@@ -1,0 +1,5 @@
+error[T-Operands]: `Colour` is not a number
+  --> tests/types/a_negated_enum_is_not_a_variant.lin:16:21
+   |
+16 |     let c: Colour = -mk()
+   |                     ^ negation is defined over integers

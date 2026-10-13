@@ -1,0 +1,30 @@
+// [O-Merge]. The release `defer let` schedules fires on the path that kept the
+// value and not on the one that gave it away, exactly as for a written `defer`.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id: _ } = self
+    }
+}
+
+fn give(sink lamp: Lamp) -> UInt8 {
+    let Lamp { id } = lamp
+    id
+}
+
+fn go(flag: Bool) -> UInt8 {
+    defer let lamp: Lamp = .{ id = 7 }
+    if flag {
+        give(lamp)
+    } else {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    go(true)
+}

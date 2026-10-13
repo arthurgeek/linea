@@ -1,0 +1,11 @@
+// A `let` is in scope only after its initializer, so `text.ParseError` on the
+// right of `let text =` still names the module. Below it, `text` is the error.
+import std.text
+
+fn main() -> UInt8 {
+    let text = text.ParseError.Syntax(3)
+    match text {
+        Syntax(at) => UInt8.try_from(at).unwrap_or(0),
+        _ => 0,
+    }
+}

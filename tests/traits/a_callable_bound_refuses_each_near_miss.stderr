@@ -1,0 +1,27 @@
+error[T-Call]: this lambda takes `lhs` as `sink`, and the expected callable passes parameter 1 as `read`
+ --> tests/traits/a_callable_bound_refuses_each_near_miss.lin:6:47
+  |
+6 |     let _ = reduce2(UInt8(2), UInt8(3), |sink lhs, rhs = 2| lhs + rhs)
+  |                                               ^^^ write `lhs` with no convention
+error[T-Call]: this lambda gives `lhs` the type `UInt16`, and parameter 1 of the expected callable is `UInt8`
+ --> tests/traits/a_callable_bound_refuses_each_near_miss.lin:7:42
+  |
+7 |     let _ = reduce2(UInt8(2), UInt8(3), |lhs: UInt16, rhs = 2| UInt8(lhs) + rhs)
+  |                                          ^^^ write `lhs: UInt8`, or leave the type out
+error[T-Call]: this lambda gives `rhs` no default, and parameter 2 of the expected callable defaults to `2`
+ --> tests/traits/a_callable_bound_refuses_each_near_miss.lin:8:47
+  |
+8 |     let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs| lhs + rhs)
+  |                                               ^^^ write `rhs = 2`
+error[T-Call]: this lambda defaults `rhs` to `3`, and parameter 2 of the expected callable defaults to `2`
+ --> tests/traits/a_callable_bound_refuses_each_near_miss.lin:9:47
+  |
+9 |     let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs = 1 + 2| lhs + rhs)
+  |                                               ^^^ write `rhs = 2`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/a_callable_bound_refuses_each_near_miss.lin:10:56
+   |
+1  | fn reduce2[T, F: fn(read lhs: T, read rhs: UInt8 = 2) -> T](lhs: T, rhs: UInt8, combine: F) -> T where carries(lhs, comb ...
+   |                                                                                 ------- expected because of this parameter
+10 |     let _ = reduce2(UInt8(2), UInt8(3), |lhs, rhs = 2| lhs == rhs)
+   |                                                        ^^^^^^^^^^ expected `UInt8`, found `Bool`

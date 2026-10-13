@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `dispatch.Handler` has no operation `run`
+ --> tests/modules/a_method_call_does_not_reveal_a_sealed_field/main.lin:8:5
+  |
+8 |     handler.run(3)
+  |     ^^^^^^^^^^^ no operation of this name is declared for this type

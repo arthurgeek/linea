@@ -1,0 +1,5 @@
+// A module's files see each other's declarations, so a name is used in more
+// than the file that declares it, and every file it is written in is named.
+fn main() -> UInt8 {
+    size() + twice()
+}

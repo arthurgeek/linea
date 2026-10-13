@@ -1,0 +1,29 @@
+// A chain broken anywhere is written one selection per line, each line opening
+// with its `.` and indented once below the line the chain starts on. The first
+// selection stays beside the name it selects from unless it was written on a
+// line of its own. A chain kept on one line stays there, and so does one
+// written inside an argument of a broken chain. A chain broken after a `.` is
+// written with the `.` opening the next line.
+fn doubled_total(steps: [UInt64; 3]) -> UInt64 {
+    steps.as_slice()
+        .map(|sink step| *step * 2)
+        .fold(0, |sink total, sink step| total + step)
+}
+
+fn main() -> UInt8 {
+    let steps = [UInt64(1), 2, 3]
+    let kept = steps.as_slice().map(|sink step| *step).fold(0, |sink total, sink step| total + step)
+    let total = steps.as_slice()
+        .map(|sink step| *step * 2)
+        .fold(steps.as_slice().map(|sink step| *step).fold(0, |sink sum, sink step| sum + step), |sink total, sink step| total + step)
+    let trailing = steps.as_slice()
+        .map(|sink step| *step)
+        .fold(0, |sink total, sink step| total + step)
+    let apart = steps
+        .as_slice()
+        .map(|sink step| *step)
+        .fold(0, |sink total, sink step| total + step)
+    // `kept`, `trailing` and `apart` are 6, and `total` and the doubled total
+    // are 12 + 6 and 12.
+    UInt8(total + doubled_total(steps) - kept - trailing - apart)
+}

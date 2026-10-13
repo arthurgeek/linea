@@ -1,0 +1,34 @@
+import std.testing
+
+// A query matches at most one equality class of stored keys. A matching query
+// and key must have equal hashes. Equivalent stored keys must match the same
+// queries; comparisons must not change the stored key.
+pub trait Key: Hash {
+    type Query: Hash
+
+    fn matches(self: Self, query: Self.Query) -> Bool
+}
+
+// By default a key is its own query, and a query matches an equal key.
+default impl[T: Hash] Key for T {
+    type Query = T
+
+    fn matches(self: Self, query: T) -> Bool {
+        self.equals(query)
+    }
+}
+
+test fn integer_queries_preserve_numeric_type_and_equality() {
+    let key: UInt64 = 7
+    testing.assert(key.matches(7), "equal integer query did not match")?
+    testing.assert(!key.matches(8), "different integer query matched")?
+}
+
+test fn boolean_queries_match_only_the_same_value() {
+    testing.assert(Key.matches(true, true), "equal Boolean query did not match")?
+    testing.assert(!Key.matches(true, false), "different Boolean query matched")?
+}
+
+test fn unit_queries_match() {
+    testing.assert(Key.matches((), ()), "unit query did not match")?
+}

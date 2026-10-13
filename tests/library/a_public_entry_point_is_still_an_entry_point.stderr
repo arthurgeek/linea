@@ -1,0 +1,5 @@
+error[M-Entry]: a library declares no entry point
+ --> tests/library/a_public_entry_point_is_still_an_entry_point/main.lin:1:8
+  |
+1 | pub fn main() -> UInt8 {
+  |        ^^^^ a library has nothing to run: drop it, or name this root a program

@@ -1,0 +1,5 @@
+error[T-Reflection]: state `reflect.target: enum` in the template
+ --> tests/derive_from/reflect_wrap_needs_an_enum_target.lin:7:9
+  |
+7 |         reflect.wrap(value)
+  |         ^^^^^^^^^^^^^^^^^^^ `reflect.wrap` constructs an enum variant

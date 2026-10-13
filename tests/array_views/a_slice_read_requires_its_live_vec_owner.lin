@@ -1,0 +1,9 @@
+import std.mem
+
+fn main() -> UInt8 {
+    var values: Vec[UInt8, mem.SystemAllocator] = Vec.new()
+    Vec.push(&values, 7).unwrap()
+    let slice = values.as_slice()
+    values.release()
+    slice[0]
+}

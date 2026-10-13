@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: the default of `T` reaches itself
+ --> tests/type_defaults/two_defaults_that_need_each_other_are_refused.lin:1:14
+  |
+1 | struct A[T = B] {
+  |              ^ write the arguments this type takes, so its default does not need itself

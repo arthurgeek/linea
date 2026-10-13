@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `hash` is declared by `Hash`, which is not in scope here
+ --> tests/traits/a_method_whose_trait_is_out_of_scope_says_so.lin:8:18
+  |
+8 |     let digest = seat.hash()
+  |                  ^^^^^^^^^ write `use hash.Hash`: an operation is reached through the trait that declares it

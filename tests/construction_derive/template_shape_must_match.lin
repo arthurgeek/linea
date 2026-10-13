@@ -1,0 +1,20 @@
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+template impl Label where reflect.target: struct {
+    fn label(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+enum Choice {
+    First,
+}
+
+derive Label for Choice
+
+fn main() -> UInt8 {
+    let _choice: Choice = .First
+    0
+}

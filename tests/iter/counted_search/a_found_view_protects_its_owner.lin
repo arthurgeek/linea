@@ -1,0 +1,15 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let owner = "one,two".to_owned(mem.system()).unwrap()
+    var source = owner.view().split(",").unwrap()
+    let report = &source.find_counted(|item| item == "one")
+    let { found, inspected: _inspected } = report
+    let _remaining = source
+    owner.release()
+    if found.unwrap() == "one" {
+        0
+    } else {
+        1
+    }
+}

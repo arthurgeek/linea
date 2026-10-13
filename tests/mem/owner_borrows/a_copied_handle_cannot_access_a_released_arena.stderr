@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/a_copied_handle_cannot_access_a_released_arena.lin:13:5
+   |
+13 |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+14 |     let second = copied.acquire(8).unwrap()
+   |                  ------ the observation is still used here

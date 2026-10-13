@@ -1,0 +1,63 @@
+// `@derive(From[S])` writes `impl From[S] for Failure` that wraps the source in
+// the variant holding exactly an `S`, so `?` converts each step's error.
+struct Missing {
+    key: UInt8,
+}
+
+struct Malformed {
+    line: UInt8,
+}
+
+@derive(From[Missing], From[Malformed])
+enum Failure {
+    Absent(Missing),
+    Syntax(Malformed),
+    Unknown,
+}
+
+fn find(key: UInt8) -> Result[UInt8, Missing] {
+    if key == 0 {
+        .Err(Missing { key = key })
+    } else {
+        .Ok(key)
+    }
+}
+
+fn parse(line: UInt8) -> Result[UInt8, Malformed] {
+    if line > 9 {
+        .Err(Malformed { line = line })
+    } else {
+        .Ok(line)
+    }
+}
+
+fn run(key: UInt8, line: UInt8) -> Result[UInt8, Failure] {
+    let found = find(key)?
+    let parsed = parse(line)?
+    .Ok(found + parsed)
+}
+
+fn code(sink outcome: Result[UInt8, Failure]) -> UInt8 {
+    match outcome {
+        Ok(total) => total,
+        Err(failure) => match failure {
+            Absent(missing) => 100 + missing.key,
+            Syntax(malformed) => 200 + malformed.line,
+            Unknown => 255,
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    let converted: Failure = Missing { key = 0 }.into()
+    let into_ok = match converted {
+        Absent(missing) => missing.key == 0,
+        Syntax(_) => false,
+        Unknown => false,
+    }
+    if into_ok && code(run(3, 4)) == 7 && code(run(0, 4)) == 100 && code(run(3, 12)) == 212 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,9 @@
+// An index is one value. Brackets after a value holding a list, as a
+// two-dimensional index would be written elsewhere, are refused once, and the
+// names in the list are still uses.
+fn main() -> UInt8 {
+    let grid = [[UInt8(1), 2], [3, 4]]
+    let row: UInt64 = 1
+    let col: UInt64 = 0
+    grid[row, col]
+}

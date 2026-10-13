@@ -1,0 +1,14 @@
+fn next(inout state: UInt8) -> UInt8 {
+    state = state + 1
+    state
+}
+
+fn main() -> UInt8 {
+    var state: UInt8 = 0
+    let values = next(&state)..next(&state)
+    if values.lo == 1 && values.hi == 2 && state == 2 {
+        0
+    } else {
+        1
+    }
+}

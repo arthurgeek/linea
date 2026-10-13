@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let port = parse(text) else |error| {
+//                         ^ keyword.control.conditional
+//                               ^ variable
+        return 1
+    }
+    let first = values.first() else {
+//                             ^ keyword.control.conditional
+        return 0
+    }
+    first
+}

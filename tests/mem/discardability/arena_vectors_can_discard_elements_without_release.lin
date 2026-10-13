@@ -1,0 +1,25 @@
+import std.mem
+
+use mem.Arena
+use mem.Handle
+use mem.Owner
+use mem.SystemAllocator
+use mem.system
+
+struct Entry { value: UInt64 }
+
+fn make_entry(index: UInt64) -> Entry {
+    .{ value = index }
+}
+
+fn main() -> UInt8 {
+    let arena = Arena.open(system(), 128)
+    defer arena.release()
+    let built: Result[Vec[Entry, Handle[SystemAllocator]], mem.Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: make_entry)
+    let values = built.unwrap()
+    if values[2].value == 2 {
+        0
+    } else {
+        1
+    }
+}

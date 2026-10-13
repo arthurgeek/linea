@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let big = -1.0e30
+    let _n = Int64(big)
+    0
+}

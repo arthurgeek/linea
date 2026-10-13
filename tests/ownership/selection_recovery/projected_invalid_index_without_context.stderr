@@ -1,0 +1,5 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/ownership/selection_recovery/projected_invalid_index_without_context.lin:13:23
+   |
+13 |     let _wrong = grid[9]
+   |                       ^ the length is 1, so the last index is 0

@@ -1,0 +1,37 @@
+static s0 Label
+  +0 UInt8 3
+  +8 UInt64 bytes0
+  +16 UInt64 3
+  +24 Bool 1
+function ;main
+local $0 borrow Label value storage=ptr
+local $1 UInt8 value storage=i8
+@0:
+  %0 = call borrow Label value computation=ptr @f1()
+  store borrow Label $0 %0
+  %2 = load borrow Label value computation=ptr $0
+  %3 = observe Label managed-address %2
+  %4 = constant UInt64 value computation=i64 24
+  %5 = field_addr Bool managed-address %3, %4
+  %6 = load_indirect Bool value computation=i1 %5
+  branch %6, @1, @2
+@1:
+  %8 = load borrow Label value computation=ptr $0
+  %9 = observe Label managed-address %8
+  %10 = constant UInt64 value computation=i64 0
+  %11 = field_addr UInt8 managed-address %9, %10
+  %12 = load_indirect UInt8 value computation=i64 %11
+  store UInt8 $1 %12
+  jump @3
+@2:
+  %15 = constant UInt8 value computation=i64 0
+  store UInt8 $1 %15
+  jump @3
+@3:
+  %18 = load UInt8 value computation=i64 $1
+  ret %18
+function ;label
+@0:
+  %0 = static_addr Label managed-address s0
+  %1 = borrow borrow Label value computation=ptr %0
+  ret %1

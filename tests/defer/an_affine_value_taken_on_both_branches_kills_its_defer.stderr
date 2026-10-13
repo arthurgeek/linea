@@ -1,0 +1,5 @@
+error[O-DeferDead]: what this schedules never runs: the value is gone on every path out
+  --> tests/defer/an_affine_value_taken_on_both_branches_kills_its_defer.lin:18:11
+   |
+18 |     defer lock(k)
+   |           ^^^^^^^ delete the `defer`, or move what takes the value after it

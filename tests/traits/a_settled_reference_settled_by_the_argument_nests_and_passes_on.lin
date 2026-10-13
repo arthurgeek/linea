@@ -1,0 +1,39 @@
+// A settled reference stands wherever a type stands, so it stands inside
+// another type's arguments and it crosses from one generic body into the next.
+// `Option[W.Item]` is one instantiation per argument, and the `W` two bodies
+// write is each body's own -- so passing one along substitutes the caller's
+// head into the callee's key before either is settled, and both come back as
+// the type the argument named.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+fn wrapped[W: Measure](w: W) -> Option[W.Item] {
+    .Some(Measure.of(w))
+}
+
+fn twice[W: Measure](w: W) -> Option[W.Item] {
+    wrapped(w)
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    match twice(c) {
+        None => 0,
+        Some(v) => v,
+    }
+}

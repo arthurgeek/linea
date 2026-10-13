@@ -1,0 +1,10 @@
+error[S-Default]: only a `read` or `sink` parameter may carry a default
+ --> tests/decl/a_default_sits_on_a_trailing_read_or_sink_parameter.lin:4:21
+  |
+4 | fn f(inout a: UInt8 = 1, b: UInt8 = 2, c: UInt8) -> UInt8 {
+  |                     ^ this parameter is `inout`
+error[S-Default]: defaulted parameters form a suffix
+ --> tests/decl/a_default_sits_on_a_trailing_read_or_sink_parameter.lin:4:35
+  |
+4 | fn f(inout a: UInt8 = 1, b: UInt8 = 2, c: UInt8) -> UInt8 {
+  |                                   ^ a parameter after this one has no default

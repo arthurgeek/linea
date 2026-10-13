@@ -1,0 +1,31 @@
+// A path may name its index parameter more than once, and a count back from an
+// end is one expression in the program however many places the path hands it
+// to. What the site wrote runs where it is written, which is once, whether the
+// number it produced is read as a count once, twice, or not at all.
+struct Row {
+    cells: [UInt8; 2],
+}
+
+struct Grid {
+    rows: [Row; 2],
+}
+
+impl Index[FromEnd] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: FromEnd) -> UInt8 {
+        self.rows[i].cells[i]
+    }
+}
+
+fn bump(inout n: UInt8) -> UInt64 {
+    n = n + 1
+    1
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ rows = [.{ cells = [1, 2] }, .{ cells = [7, 4] }] }
+    var n: UInt8 = 0
+    let e: UInt8 = g[^bump(&n)]
+    e + n
+}

@@ -1,0 +1,25 @@
+// [O-Move]. There is no partial move: an element taken out of an array is a
+// part of the binding, and a partially-moved value is a state the language
+// would then have to describe everywhere else.
+//
+// No rule is added for this. An index is a step in a path, so the rule that
+// refuses `take(o.inner)` refuses `take(ks[0])` for the same reason and from
+// the same place.
+//
+// [O-Leak] beside it is not a second mistake. Nothing in the language takes an
+// array apart, so an array of a Linear element cannot be discharged at all --
+// which the case beside this one records on its own.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> UInt8 {
+    let Key { n } = k
+    n
+}
+
+fn main() -> UInt8 {
+    let ks: [Key; 2] = [.{ n = 1 }, .{ n = 2 }]
+    take(ks[0])
+}

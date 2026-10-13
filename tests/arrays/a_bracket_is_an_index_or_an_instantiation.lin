@@ -1,0 +1,16 @@
+// A bracket after a value indexes it. Directly before a call, a bracket after
+// a function's name holds that function's type arguments, and a type is
+// written inside it.
+fn id[T](sink v: T) -> T {
+    v
+}
+
+fn main() -> UInt8 {
+    let xs: [UInt8; 3] = [1, 2, 3]
+
+    // A value on the left: an index, and an element comes back.
+    let first = xs[0]
+
+    // A function on the left, and a type inside the bracket.
+    id[UInt8](7) + first - 8
+}

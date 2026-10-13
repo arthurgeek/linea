@@ -1,0 +1,21 @@
+// An inherent method has no trait to adopt a contract from. With two eligible
+// sources it must write a clause, and the ambiguity is its only error.
+struct Greeter {
+    motd: Str,
+}
+
+impl Greeter {
+    fn greet(self: Self, name: Str) -> Str {
+        if name.length() > 0 {
+            copy(name)
+        } else {
+            copy(self.motd)
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let greeter = Greeter { motd = "hi" }
+    let _greeting = greeter.greet("world")
+    0
+}

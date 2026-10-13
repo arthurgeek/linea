@@ -1,0 +1,21 @@
+// `&(ticker.next)()` invokes the function the field `next` holds, which
+// changes what it captured: the parentheses make the selection a value, and
+// `&` marks its invocation. `&ticker.next()` would call an operation `next`.
+struct Ticker[F: inout fn() -> UInt8] {
+    next: F,
+}
+
+fn start[F: inout fn() -> UInt8](sink next: F) -> Ticker[F] {
+    .{ next }
+}
+
+fn main() -> UInt8 {
+    var ticker = start(
+        inout [sink count = UInt8(0)] || {
+            count += 1
+            count
+        },
+    )
+    let first = &(ticker.next)()
+    first + &(ticker.next)()
+}

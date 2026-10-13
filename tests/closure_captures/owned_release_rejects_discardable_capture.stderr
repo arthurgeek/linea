@@ -1,0 +1,10 @@
+error[T-Bound]: `Release` requires `Self` to implement it, and `<closure>` does not
+  --> tests/closure_captures/owned_release_rejects_discardable_capture.lin:13:21
+   |
+13 |     Release.release(direct)
+   |                     ^^^^^^ implement it for that type, or reach the operation on one that does
+error[T-Bound]: `F` requires `Release`, and `<closure>` does not implement it
+  --> tests/closure_captures/owned_release_rejects_discardable_capture.lin:17:5
+   |
+17 |     settle(generic)
+   |     ^^^^^^ implement it for that type, or drop the bound

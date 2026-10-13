@@ -1,0 +1,5 @@
+error[S-Test]: only a function is a test
+ --> tests/decl/an_impl_is_not_a_test.lin:7:1
+  |
+7 | test impl Box {
+  | ^^^^ an impl declares no body to run

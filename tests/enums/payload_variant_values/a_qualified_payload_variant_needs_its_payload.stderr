@@ -1,0 +1,5 @@
+error[T-Arity]: `Exact` carries 1 value(s), and this builds it with none
+ --> tests/enums/payload_variant_values/a_qualified_payload_variant_needs_its_payload.lin:7:22
+  |
+7 |     let mode: Mode = Mode.Exact
+  |                      ^^^^^^^^^^ supply its values, such as `Variant(value)`

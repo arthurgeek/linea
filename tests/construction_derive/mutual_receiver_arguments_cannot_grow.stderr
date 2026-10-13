@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `run` with more than it was given
+  --> tests/construction_derive/mutual_receiver_arguments_cannot_grow.lin:25:17
+   |
+25 |                 Run.run(next)
+   |                 ^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

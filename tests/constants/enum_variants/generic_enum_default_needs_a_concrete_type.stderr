@@ -1,0 +1,5 @@
+error[T-Default]: a default cannot have the type `Choice[T]`, which depends on a type parameter
+ --> tests/constants/enum_variants/generic_enum_default_needs_a_concrete_type.lin:3:46
+  |
+3 | fn select[T: Discardable](value: Choice[T] = .Empty) -> UInt8 {
+  |                                              ^^^^^^ a default is one value, and this type is settled by the call

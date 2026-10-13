@@ -1,0 +1,19 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let weights = [UInt64(1200), 3500, 6400]
+    var inspected: UInt64 = 0
+    let accepted = weights.as_slice().filter(
+        inout [inout inspected] |parcel| {
+            inspected += 1
+            *parcel <= 5000
+        },
+    )
+    let { values, iterator: _ } = accepted.collect(mem.system()).settled() else |_| {
+        return 1
+    }
+    inspected = 0
+    let count = values.length()
+    values.release()
+    UInt8(count)
+}

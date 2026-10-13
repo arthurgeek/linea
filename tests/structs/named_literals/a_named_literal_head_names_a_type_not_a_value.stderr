@@ -1,0 +1,15 @@
+error[N-NotAType]: `wrap` is not a type
+ --> tests/structs/named_literals/a_named_literal_head_names_a_type_not_a_value.lin:9:18
+  |
+9 |     let _field = wrap.inner { x = 2 }
+  |                  ^^^^^^^^^^ a named literal's head is a type
+error[N-NotAType]: `Shape` is not a type
+  --> tests/structs/named_literals/a_named_literal_head_names_a_type_not_a_value.lin:10:18
+   |
+10 |     let _trait = Shape { r = 1 }
+   |                  ^^^^^ a named literal's head is a type
+error[N-NotAType]: `main` is not a type
+  --> tests/structs/named_literals/a_named_literal_head_names_a_type_not_a_value.lin:11:21
+   |
+11 |     let _function = main { r = 1 }
+   |                     ^^^^ a named literal's head is a type

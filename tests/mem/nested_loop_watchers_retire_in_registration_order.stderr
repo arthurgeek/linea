@@ -1,0 +1,10 @@
+error[O-Loop]: `source` is moved inside a loop, so this would run more than once
+ --> tests/mem/nested_loop_watchers_retire_in_registration_order.lin:8:18
+  |
+8 |         answer = source
+  |                  ^^^^^^ consume it outside the loop, or restructure until it is consumed once
+error[O-Loop]: `source` is moved inside a loop, so this would run more than once
+  --> tests/mem/nested_loop_watchers_retire_in_registration_order.lin:10:22
+   |
+10 |             answer = source
+   |                      ^^^^^^ consume it outside the loop, or restructure until it is consumed once

@@ -1,0 +1,50 @@
+==================
+A line opening with a dot and a lowercase name continues a chain
+==================
+
+fn total(scores: Slice[UInt64]) -> UInt64 {
+    scores
+        .map(|sink score| *score)
+        // Only the even scores count.
+        .fold(0, |sink sum, sink score| sum + score)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))))
+    (type_identifier)
+    (block
+      (expression_statement
+        (call_expression
+          (field_expression
+            (call_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (argument_list
+                (lambda_expression
+                  (parameter
+                    (identifier))
+                  (unary_expression
+                    (identifier)))))
+            (line_comment)
+            (identifier))
+          (argument_list
+            (integer_literal)
+            (lambda_expression
+              (parameter
+                (identifier))
+              (parameter
+                (identifier))
+              (binary_expression
+                (identifier)
+                (identifier)))))))))

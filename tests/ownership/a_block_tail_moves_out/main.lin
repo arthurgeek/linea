@@ -1,0 +1,20 @@
+// A block's tail sits where the block sits, so a value reaching it is taken in
+// exactly the position the block occupies. Nothing about the braces decides
+// that -- a move is decided by position, and a bare block is one more place a
+// value may be written rather than one more rule about where it may go.
+fn main() -> UInt8 {
+    let k = {
+        let minted = mint(7)
+        minted
+    }
+    release(k)
+
+    // Taken inside a block, where the outer scope cannot see it happen. The
+    // graph does: a block is not a boundary a move stops at.
+    let j = mint(1)
+    {
+        release(j)
+    }
+
+    0
+}

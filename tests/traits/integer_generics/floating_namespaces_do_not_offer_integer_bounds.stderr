@@ -1,0 +1,5 @@
+error[N-Undefined]: `Float64` declares no `max`
+ --> tests/traits/integer_generics/floating_namespaces_do_not_offer_integer_bounds.lin:2:13
+  |
+2 |     Float64.max
+  |             ^^^ a primitive holds what the standard library writes for it

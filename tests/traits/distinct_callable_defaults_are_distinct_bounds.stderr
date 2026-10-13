@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Give[fn(read UInt8 = 2) -> UInt8]`, and `Holder` does not implement it
+  --> tests/traits/distinct_callable_defaults_are_distinct_bounds.lin:15:5
+   |
+15 |     _needs(holder)
+   |     ^^^^^^ implement it for that type, or drop the bound

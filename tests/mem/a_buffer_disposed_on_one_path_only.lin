@@ -1,0 +1,23 @@
+// The check is per path: one arm disposes and the other does not, and the
+// join is where the disagreement is said. A whole-function check would see
+// a disposal
+// and be satisfied; that the two paths must agree about the buffer is what
+// the graph holds.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(8) {
+        Ok(b) => {
+            if b.length() == 8 {
+                b.release()
+                1
+            } else {
+                2
+            }
+        },
+        Err(_) => 0,
+    }
+}

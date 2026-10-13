@@ -1,0 +1,22 @@
+// The representation, and what `opaque` seals.
+@opaque
+struct Account {
+    id: UInt8,
+}
+
+impl Account {
+    // Not `pub`, so it is reachable through `Account` only from inside this
+    // module. Sealing a representation and exporting what a type can do are
+    // two separate decisions, which is why they are written in two places.
+    fn secret() -> UInt8 {
+        1
+    }
+
+    pub fn open(id: UInt8) -> Account {
+        .{ id = id }
+    }
+}
+
+pub fn check() -> UInt8 {
+    Account.secret()
+}

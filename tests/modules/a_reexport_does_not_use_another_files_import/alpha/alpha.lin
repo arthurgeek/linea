@@ -1,0 +1,3 @@
+pub fn pick() -> UInt8 {
+    1
+}

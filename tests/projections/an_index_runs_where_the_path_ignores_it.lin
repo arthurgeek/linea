@@ -1,0 +1,27 @@
+// An index expression is code the site wrote, so it runs where it is written
+// whether or not the implementation's path reads it. This one names the place
+// by a number of its own and never looks at the index; the counter says the
+// call in the brackets happened, and happened once.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, _i: UInt64) -> UInt8 {
+        self.cells[0]
+    }
+}
+
+fn bump(inout n: UInt8) -> UInt64 {
+    n = n + 1
+    0
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [7, 2, 3, 4] }
+    var n: UInt8 = 0
+    let e: UInt8 = g[bump(&n)]
+    e + n
+}

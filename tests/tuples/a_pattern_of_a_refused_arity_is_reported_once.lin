@@ -1,0 +1,11 @@
+// A tuple pattern has two to eight binders. One outside that bound is
+// refused where it is written, and the refusal is the only report: the
+// pattern is held against neither the value's arity nor its kind.
+fn main() -> UInt8 {
+    let pair: (UInt8, Bool) = (1, true)
+    let (_a,) = pair
+    let (_b,) = 5
+    let eight: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = (1, 2, 3, 4, 5, 6, 7, 8)
+    let (_c, _d, _e, _f, _g, _h, _i, _j, _k) = eight
+    0
+}

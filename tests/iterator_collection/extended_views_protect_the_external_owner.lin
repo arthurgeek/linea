@@ -1,0 +1,17 @@
+import std.iter
+import std.mem
+
+fn main() -> UInt8 {
+    let owner = "one,two".to_owned(mem.system()).unwrap()
+    var source = owner.view().split(",").unwrap()
+    var values: Vec[Str, mem.SystemAllocator] = Vec.new()
+    iter.extend(&values, &source).unwrap()
+    owner.release()
+    let result: UInt8 = if values[0] == "one" {
+        0
+    } else {
+        1
+    }
+    values.release()
+    result
+}

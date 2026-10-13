@@ -1,0 +1,15 @@
+// `Self` stands for the type of an implementation for a named type or a
+// tuple. Unit has no name, so an implementation for `()` writes `()`.
+trait Value {
+    fn value(self: Self) -> UInt8
+}
+
+impl Value for () {
+    fn value(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+fn main() -> UInt8 {
+    Value.value({})
+}

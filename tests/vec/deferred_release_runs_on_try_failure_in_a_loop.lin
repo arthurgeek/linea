@@ -1,0 +1,38 @@
+import std.mem
+import std.io
+
+@linear
+struct Token { number: UInt64 }
+
+impl Release for Token {
+    fn release(sink self: Self) -> () {
+        let Token { number: number } = self
+        match io.println("released {number}") { Ok(_) => {}, Err(_) => {} }
+    }
+}
+
+fn refuse() -> Result[(), UInt8] {
+    .Err(7)
+}
+
+fn run() -> Result[(), UInt8] {
+    var values: Vec[Token, mem.SystemAllocator] = Vec.new()
+    defer values.release()
+    let token: Token = .{ number = 19 }
+    match Vec.push(&values, token) { Ok(_) => {}, Err(_) => panic("push failed") }
+    for _position in 0..3 {
+        refuse()?
+    }
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    match run() {
+        Err(code) => if code == 7 {
+            0
+        } else {
+            1
+        },
+        Ok(_) => 2,
+    }
+}

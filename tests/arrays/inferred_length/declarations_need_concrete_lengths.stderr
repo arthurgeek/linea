@@ -1,0 +1,15 @@
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/declarations_need_concrete_lengths.lin:1:32
+  |
+1 | struct Table { values: [UInt8; _] }
+  |                                ^ write an explicit length in this type
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/declarations_need_concrete_lengths.lin:3:27
+  |
+3 | fn values(_input: [UInt8; _]) -> [UInt8; _] {
+  |                           ^ write an explicit length in this type
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/declarations_need_concrete_lengths.lin:3:42
+  |
+3 | fn values(_input: [UInt8; _]) -> [UInt8; _] {
+  |                                          ^ write an explicit length in this type

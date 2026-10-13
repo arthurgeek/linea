@@ -1,0 +1,20 @@
+error[N-TypeAlias]: `Spot` is an alias, and an implementation names a type's own declaration
+  --> tests/aliases/an_alias_is_not_an_impl_head.lin:38:18
+   |
+38 | derive Debug for Spot
+   |                  ^^^^ write it for the type the alias names, `Point`
+error[N-TypeAlias]: `Spot` is an alias, and an implementation names a type's own declaration
+  --> tests/aliases/an_alias_is_not_an_impl_head.lin:20:15
+   |
+20 | impl Area for Spot {
+   |               ^^^^ write it for the type the alias names, `Point`
+error[N-TypeAlias]: `Held8` is an alias, and an implementation names a type's own declaration
+  --> tests/aliases/an_alias_is_not_an_impl_head.lin:26:15
+   |
+26 | impl Area for Held8 {
+   |               ^^^^^ write it for the type the alias names, `Holder[UInt8]`
+error[N-TypeAlias]: `Spot` is an alias, and an implementation names a type's own declaration
+  --> tests/aliases/an_alias_is_not_an_impl_head.lin:32:6
+   |
+32 | impl Spot {
+   |      ^^^^ write it for the type the alias names, `Point`

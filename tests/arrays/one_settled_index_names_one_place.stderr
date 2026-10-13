@@ -1,0 +1,12 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/arrays/one_settled_index_names_one_place.lin:14:17
+   |
+14 |     two(&xs[0], xs[0]) + two(&ys[^1], ys[3])
+   |         ------ mutated by this argument
+   |                 ^^^^^ already passed `&` here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/arrays/one_settled_index_names_one_place.lin:14:39
+   |
+14 |     two(&xs[0], xs[0]) + two(&ys[^1], ys[3])
+   |                              ------- mutated by this argument
+   |                                       ^^^^^ already passed `&` here

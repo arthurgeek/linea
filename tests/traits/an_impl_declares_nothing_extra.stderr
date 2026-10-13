@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares no `doubled`
+  --> tests/traits/an_impl_declares_nothing_extra.lin:17:8
+   |
+17 |     fn doubled(x: Self) -> UInt8 {
+   |        ^^^^^^^ declare it on the trait, or move it to an inherent `impl`

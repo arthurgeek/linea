@@ -1,0 +1,5 @@
+error[S-Break]: `break` cannot leave a loop outside the closure it is written in
+ --> tests/iter/lent_walks/a_break_inside_a_closure_leaves_no_loop.lin:8:17
+  |
+8 |                 break
+  |                 ^^^^^ a closure's body is a function of its own; return a value that tells the loop to stop

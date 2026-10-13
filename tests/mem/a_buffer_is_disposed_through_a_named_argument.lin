@@ -1,0 +1,19 @@
+// What an argument's name reaches is the parameter its callee declared, so a
+// name is available across a module boundary under the spelling that module
+// chose. The release of heap memory is an ordinary call, and naming its `sink`
+// discharges the buffer exactly as the postfix spelling does.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(7) {
+        Ok(buffer) => {
+            let n = UInt8(buffer.length())
+            Release.release(self: buffer)
+            n
+        },
+        Err(_) => 0,
+    }
+}

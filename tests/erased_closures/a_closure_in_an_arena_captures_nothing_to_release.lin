@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Owner
+
+// A closure in an arena may be dropped when the arena is released, so it
+// cannot own a vector from the system allocator, which must be released.
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), size: 1024)
+    let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    let count = mem.Closure.open(
+        arena.handle(),
+        [sink scores] || -> UInt64 {
+            scores.length()
+        },
+    ).unwrap()
+    let counted = count()
+    arena.release()
+    UInt8(counted)
+}

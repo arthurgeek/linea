@@ -1,0 +1,5 @@
+error[T-Impl]: a settled reference selects `Item` through a bound, and `C` carries none
+  --> tests/generics/a_member_type_needs_a_bound_that_declares_it.lin:20:23
+   |
+20 | fn first[C](_c: C) -> C.Item {
+   |                       ^^^^^^ bound it by the trait that declares the name

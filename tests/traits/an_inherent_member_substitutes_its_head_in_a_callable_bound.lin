@@ -1,0 +1,16 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    pub fn map[U, F: fn(sink value: T) -> U](sink self: Holder[T], transform: F) -> U where carries(self, transform) {
+        let Holder { value } = self
+        transform(value)
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 4 }
+    let mapped: UInt8 = holder.map(|sink value| value + 3)
+    mapped
+}

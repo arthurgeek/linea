@@ -1,0 +1,33 @@
+// `log.field` borrows its value. A constant's storage is static, so a closure
+// may return a field that borrows one, and the field may be logged by a later
+// statement.
+import std.io
+import std.log
+import std.mem
+
+let service_name = "api"
+
+// A sink that prints each line, which ends in a newline, after its timestamp:
+// the text before the first space.
+@copyable
+struct Untimed {}
+
+impl log.Sink for Untimed {
+    type Error = io.IoError
+
+    fn write_line(_self: Self, line: Str) -> Result[(), io.IoError] where carries() {
+        let start = match line.find(" ") {
+            Some(space) => space + 1,
+            None => 0,
+        }
+        io.print(line.slice(start, line.length()).unwrap())
+    }
+}
+
+fn main() -> UInt8 {
+    let logger = log.Logger.open(Untimed {}, mem.system(), minimum: .Info)
+    let service = || log.field("service", service_name)
+    let field = service()
+    logger.info("started", field)
+    0
+}

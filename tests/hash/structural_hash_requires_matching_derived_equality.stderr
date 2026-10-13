@@ -1,0 +1,10 @@
+error[T-Derive]: `Key` cannot derive `Hash` because its `Equivalent` implementation is handwritten
+  --> tests/hash/structural_hash_requires_matching_derived_equality.lin:13:13
+   |
+13 | derive hash.Hash for Key
+   |             ^^^^ replace the handwritten prerequisite with a derive, or write this implementation by hand
+  ::: std/hash/hash.lin
+L  | pub trait Hash: Equivalent {
+   |                 ---------- this is a direct supertrait
+L  |     reflect.supertraits: derived,
+   |             ----------- the template requires derived evidence for every direct supertrait

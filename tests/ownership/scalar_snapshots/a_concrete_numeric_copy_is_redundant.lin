@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let duplicate = copy(number)
+    if number == duplicate {
+        0
+    } else {
+        1
+    }
+}

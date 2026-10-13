@@ -1,0 +1,5 @@
+error[M-Vis]: `hidden` is private to `a`
+ --> tests/modules/private_is_private/main.lin:4:7
+  |
+4 |     a.hidden()
+  |       ^^^^^^ declare it `pub` in its own module, or do not name it here

@@ -1,0 +1,21 @@
+// A symbol names the module a declaration belongs to, and the root module's
+// route is empty. So a type in the root spelled like another module writes
+// the same parts that module's own names do: `_1` then `helper`. The route is
+// ended by a separator no name holds, the root's empty one included, so the
+// two helpers are two symbols whatever either is spelled.
+import _1 as one
+
+struct _1 {
+    a: UInt8,
+}
+
+impl _1 {
+    pub fn helper() -> UInt8 {
+        3
+    }
+}
+
+fn main() -> UInt8 {
+    let v: _1 = .{ a = 0 }
+    v.a + _1.helper() + one.helper() - 8
+}

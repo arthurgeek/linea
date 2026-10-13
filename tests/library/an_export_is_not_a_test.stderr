@@ -1,0 +1,5 @@
+error[M-Export]: a `test` is called by the compiler, so nothing outside links against it
+ --> tests/library/an_export_is_not_a_test/main.lin:1:16
+  |
+1 | export test fn probe() -> Result[(), UInt8] {
+  |                ^^^^^ a test is run where it is declared, and an export ships

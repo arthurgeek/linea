@@ -1,0 +1,30 @@
+error[N-Duplicate]: `side` is already declared by this pattern
+ --> tests/names/a_pattern_binds_each_name_once.lin:8:35
+  |
+8 |     let Pair { left: side, right: side } = Pair { left = 1, right = 2 }
+  |                      ---- already declared here
+  |                                   ^^^^ a pattern declares each name once
+error[N-Duplicate]: `width` is already declared by this pattern
+ --> tests/names/a_pattern_binds_each_name_once.lin:9:17
+  |
+9 |     let (width, width) = (3, 4)
+  |          ----- already declared here
+  |                 ^^^^^ a pattern declares each name once
+error[N-Duplicate]: `w` is already declared by this pattern
+  --> tests/names/a_pattern_binds_each_name_once.lin:13:17
+   |
+13 |         Rect(w, w) => w,
+   |              - already declared here
+   |                 ^ a pattern declares each name once
+error[N-Duplicate]: `v` is already declared by this pattern
+  --> tests/names/a_pattern_binds_each_name_once.lin:18:13
+   |
+18 |         (v, v) => v,
+   |          - already declared here
+   |             ^ a pattern declares each name once
+error[N-Duplicate]: `n` is already declared by this pattern
+  --> tests/names/a_pattern_binds_each_name_once.lin:22:13
+   |
+22 |     for (n, n) in items {
+   |          - already declared here
+   |             ^ a pattern declares each name once

@@ -1,0 +1,36 @@
+// An implementation's member is spelled from the type it is for, the trait's
+// module, the trait, and the arguments the implementation supplies to it.
+// Here the root trait `_1` is supplied `W`, and module `_1` declares a trait
+// `W`: both members are `size` for `A`. The trait's module ends at a
+// separator and its arguments sit in brackets, so the two stay two symbols.
+import _1 as one
+
+struct W {
+    b: UInt8,
+}
+
+struct A {
+    v: UInt8,
+}
+
+trait _1[P] {
+    fn size(x: Self, p: P) -> UInt8
+}
+
+impl _1[W] for A {
+    fn size(x: Self, p: W) -> UInt8 {
+        x.v + p.b
+    }
+}
+
+impl one.W for A {
+    fn size(x: Self) -> UInt8 {
+        x.v + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let a: A = .{ v = 1 }
+    let w: W = .{ b = 0 }
+    _1.size(a, w) + one.W.size(a) - 3
+}

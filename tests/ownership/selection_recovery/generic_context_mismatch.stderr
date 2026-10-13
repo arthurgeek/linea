@@ -1,0 +1,5 @@
+error[T-Mismatch]: `T` was already settled as `Bool` here, and this is a `UInt8`
+ --> tests/ownership/selection_recovery/generic_context_mismatch.lin:8:16
+  |
+8 |     same(flag, pair.value)
+  |                ^^^^^^^^^^ one type parameter, two types

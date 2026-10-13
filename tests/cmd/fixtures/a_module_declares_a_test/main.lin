@@ -1,0 +1,8 @@
+import deep
+
+// A program that runs, beside a test that does not. What `linea build` emits
+// holds this and nothing the test reaches; what a test binary holds is the
+// other way round.
+fn main() -> UInt8 {
+    deep.doubled(1)
+}

@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let n: UInt8 = 2
+    if 0 < n {
+        0
+    } else {
+        1
+    }
+}

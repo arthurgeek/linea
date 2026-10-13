@@ -1,0 +1,21 @@
+@copyable struct Point { number: UInt64 }
+// ^ keyword.storage.modifier
+
+fn observe(read region: UInt64) -> borrow UInt64 where borrows(region) {
+//              ^ variable.parameter
+//                                 ^ keyword.operator
+//                                                     ^ keyword.storage.modifier
+    borrow region
+//  ^ keyword.operator
+//         ^ variable
+}
+
+fn forward(sink value: borrow UInt64) -> Result[borrow UInt64, UInt8] where carries(.Ok: value) {
+//                                                                          ^ keyword.storage.modifier
+    .Ok(value)
+}
+
+fn replace(inout value: borrow UInt64, sink next: borrow UInt64) -> () where retains(value: next) {
+//                                                                           ^ keyword.storage.modifier
+    value = next
+}

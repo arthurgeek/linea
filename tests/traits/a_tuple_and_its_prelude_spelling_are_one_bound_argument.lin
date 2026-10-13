@@ -1,0 +1,21 @@
+// `(UInt8, Bool)` and `Tuple2[UInt8, Bool]` name one type, so the two bounds
+// are one bound and `C.Elem` reads through it without ambiguity.
+trait Lookup[phantom I] {
+    type Elem
+}
+
+struct Shelf {
+    count: UInt8,
+}
+
+impl Lookup[(UInt8, Bool)] for Shelf {
+    type Elem = UInt8
+}
+
+fn count[C: Lookup[(UInt8, Bool)] + Lookup[Tuple2[UInt8, Bool]]](_shelf: C) -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    count(Shelf { count = 1 }) - 7
+}

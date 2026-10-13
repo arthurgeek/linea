@@ -1,0 +1,36 @@
+// The pin against the other direction. A promise discharges a bound only where
+// it was made: `S` carries `Near` and nothing carries `Show`, so the family
+// answering `Show` for a `Holder` answers for no `Holder[S]` a caller can
+// supply, and reaching the operation on one is refused where it is written.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Near {
+    fn near(self: Self) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+impl[T: Show] Show for Holder[T] {
+    fn show(self: Self) -> UInt8 {
+        Show.show(self.v) + 1
+    }
+}
+
+impl Near for UInt8 {
+    fn near(self: UInt8) -> UInt8 {
+        self
+    }
+}
+
+fn wrapped[S: Near](h: Holder[S]) -> UInt8 {
+    Show.show(h)
+}
+
+fn main() -> UInt8 {
+    let h: Holder[UInt8] = .{ v = 5 }
+    wrapped(h)
+}

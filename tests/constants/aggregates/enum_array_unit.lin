@@ -1,0 +1,33 @@
+@copyable
+enum Mode { Plain, Sized(UInt64) }
+
+@copyable
+struct Entry { name: Str, mode: Mode }
+
+let rows: [Entry; 2] = [.{ name = "a", mode = .Plain }, .{ name = "tea", mode = Mode.Sized(700) }]
+
+let empty: () = ()
+
+fn settle(_value: () = empty) -> UInt8 {
+    0
+}
+
+fn size(mode: Mode = .Sized(11)) -> UInt64 {
+    match read mode { Plain => 0, Sized(value) => value }
+}
+
+fn main() -> UInt8 {
+    if rows[UInt64(1)].name != "tea" {
+        return 1
+    }
+    if size(rows[UInt64(1)].mode) != 700 {
+        return 2
+    }
+    if size(rows[UInt64(0)].mode) != 0 {
+        return 3
+    }
+    if size() != 11 {
+        return 4
+    }
+    settle()
+}

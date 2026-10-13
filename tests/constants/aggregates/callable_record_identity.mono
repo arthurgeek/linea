@@ -1,0 +1,42 @@
+@copyable
+struct Config { width: UInt8, enabled: Bool }
+
+fn ;main() -> UInt8 {
+    if ;invoke[fn$28read$3aConfig$3avalue$3a0$3drecord[7$3aenabled$401,5$3awidth$402,];1$3dtrue;2$3di7;$29$2d$3eUInt8](width) != 7 {
+        return 1
+    }
+    if ;invoke[closure0[]](
+        |config = settings| if config.enabled {
+            config.width
+        } else {
+            0
+        },
+    ) != 7 {
+        return 2
+    }
+    0
+}
+
+fn ;width(config: Config = settings) -> UInt8 {
+    if config.enabled {
+        config.width
+    } else {
+        0
+    }
+}
+
+fn ;invoke[fn$28read$3aConfig$3avalue$3a0$3drecord[7$3aenabled$401,5$3awidth$402,];1$3dtrue;2$3di7;$29$2d$3eUInt8](callback: fn(read:Config:value:0=record[7:enabled@1,5:width@2,];1=true;2=i7;)->UInt8) -> UInt8 {
+    callback()
+}
+
+fn ;invoke[closure0[]](callback: closure0[]) -> UInt8 {
+    closure.0()
+}
+
+fn closure.0(read config: Config = .{ .enabled = true, .width = 7 }) -> UInt8 {
+    if config.enabled {
+        config.width
+    } else {
+        0
+    }
+}

@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+ --> tests/inout_captures/a_lent_place_is_not_written_while_its_closure_is_used.lin:7:5
+  |
+3 |     var tick = inout [inout count] || {
+  |                             ----- lent `inout` here
+7 |     count = 10
+  |     ^^^^^ this uses the place while it is lent
+8 |     &tick()
+  |      ---- a value holding the lend is still used here
+  |
+  = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

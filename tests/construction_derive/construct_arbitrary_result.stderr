@@ -1,0 +1,10 @@
+error[T-Reflection]: name a local `let` or `var` from this recipe
+  --> tests/construction_derive/construct_arbitrary_result.lin:17:17
+   |
+17 |                 Zero.zero()
+   |                 ^^^^^^^^^^^ an arbitrary expression cannot be a construction recipe result
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_arbitrary_result.lin:32:22
+   |
+32 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

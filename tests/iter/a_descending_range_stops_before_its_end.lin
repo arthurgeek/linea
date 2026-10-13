@@ -1,0 +1,18 @@
+// Exclusive means the end is not visited, whichever side the walk comes from.
+// A descending `4..0` stops before `0` and yields four values, and the
+// inclusive form over the same ends yields five.
+fn main() -> UInt8 {
+    let below: Range[UInt8] = 4..0
+    var counted: UInt8 = 0
+    for _x in below {
+        counted += 1
+    }
+
+    let through: Range[UInt8] = 4..=0
+    var counted_through: UInt8 = 0
+    for _y in through {
+        counted_through += 1
+    }
+
+    counted * 10 + counted_through
+}

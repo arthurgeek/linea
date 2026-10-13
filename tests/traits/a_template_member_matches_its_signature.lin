@@ -1,0 +1,13 @@
+trait Structural {
+    fn value(self: Self, amount: UInt8) -> UInt8
+}
+
+template impl Structural {
+    fn value(_self: Self, _amount: Int64) -> UInt8 {
+        0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,25 @@
+// `Release` is visible in every module, so a type that declares its own
+// `release` and also implements `Release` has two operations of one name.
+// A postfix call reaches the type's own; the trait's is written out.
+struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    fn release(self: Ticket) -> UInt8 {
+        self.seat
+    }
+}
+
+impl Release for Ticket {
+    fn release(sink self: Ticket) -> () {
+        let Ticket { seat: _seat } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket { seat = 4 }
+    let seat = ticket.release()
+    Release.release(ticket)
+    seat
+}

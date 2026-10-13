@@ -1,0 +1,5 @@
+error[S-Params]: expected `:`
+ --> tests/recovery/an_unreadable_annotation_asks_nothing_of_its_value.lin:5:26
+  |
+5 |     let steps: [fn(UInt64) -> UInt64; 2] = [|c: UInt64| c + 1, |c: UInt64| c * 2]
+  |                          ^ a parameter is always annotated

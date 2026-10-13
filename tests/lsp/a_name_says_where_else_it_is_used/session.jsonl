@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A name says where else it is used: the declaration that introduced it and\n// every expression that reaches it. A client that asks for the uses alone is\n// not sent the declaration.\nfn twice(a: UInt8) -> UInt8 {\n    a + a\n}\n\nfn main() -> UInt8 {\n    let total: UInt8 = twice(1)\n    total + total\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":9,"character":5}}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":false},"position":{"line":9,"character":5}}}
+{"jsonrpc":"2.0","id":4,"method":"shutdown"}

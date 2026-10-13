@@ -1,0 +1,11 @@
+// `phantom` says the parameter appears in no field, and here it appears in
+// one -- a modifier is refused where what it says is false, and this one
+// would tell a reader the parameter can brand when it really carries bytes.
+struct Box[phantom T] {
+    held: T,
+}
+
+fn main() -> UInt8 {
+    let b: Box[UInt8] = .{ held = 1 }
+    b.held
+}

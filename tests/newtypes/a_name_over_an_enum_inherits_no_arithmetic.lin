@@ -1,0 +1,21 @@
+// An enum is a tag and a tag is not a number, and a name over one is no more
+// a number than the enum is: the sum of two tags is a value no variant has,
+// which a match covering every variant would then fall out of.
+enum Color {
+    Red,
+    Green,
+}
+
+type Hue = Color
+
+fn mix(sink a: Hue, sink b: Hue) -> Hue {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let Hue(c) = mix(Hue(Color.Green), Hue(Color.Green))
+    match c {
+        Red => 10,
+        Green => 20,
+    }
+}

@@ -1,0 +1,35 @@
+// `?` converts the error where it is written, before the function's deferred
+// operations run on the way out, as `return .Err(From.from(error))` would.
+import std.io
+
+enum ParseError {
+    Bad,
+}
+
+enum LoadError {
+    Parse,
+}
+
+impl From[ParseError] for LoadError {
+    fn from(sink _source: ParseError) -> LoadError {
+        io.print("converting the error\n").unwrap()
+        return .Parse
+    }
+}
+
+fn parse() -> Result[UInt8, ParseError] {
+    return .Err(.Bad)
+}
+
+fn load() -> Result[UInt8, LoadError] {
+    defer io.print("running the deferred operation\n").unwrap()
+    let value = parse()?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match load() {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

@@ -1,0 +1,5 @@
+error[T-UnknownField]: `UInt8` has no field `value`
+ --> tests/borrows/transparent/a_scalar_observation_has_no_synthetic_value_field.lin:4:5
+  |
+4 |     view.value
+  |     ^^^^^^^^^^ not a field of this value

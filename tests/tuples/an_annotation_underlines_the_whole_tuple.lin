@@ -1,0 +1,6 @@
+// A value that does not match its annotation is reported against the whole
+// annotated tuple type, from its opening to its closing parenthesis.
+fn main() -> UInt8 {
+    let _pair: (UInt8, Str) = 1
+    0
+}

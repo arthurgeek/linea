@@ -1,0 +1,21 @@
+struct Account {
+    pub owner: UInt8,
+    @linear
+    balance: UInt8,
+    fn total() -> UInt8 { 0 }
+    fn width() -> UInt8
+    limit: UInt8,
+}
+
+enum Tier {
+    internal Basic,
+    pub fn rank() -> UInt8 { 1 },
+    internal fn level() -> UInt8
+    Gold,
+}
+
+fn main() -> UInt8 {
+    let account = Account { owner = 1, balance = 2, limit = 3 }
+    let _tier = Tier.Gold
+    account.owner + account.balance + account.limit
+}

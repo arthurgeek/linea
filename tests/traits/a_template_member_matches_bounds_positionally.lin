@@ -1,0 +1,36 @@
+trait First {}
+
+trait Relation[phantom T] {}
+
+trait Structural {
+    fn value[A: First, B: Relation[A]](self: Self, first: A, second: B) -> UInt8
+}
+
+template impl Structural {
+    fn value[X: First, Y: Relation[X]](_self: Self, _first: X, _second: Y) -> UInt8 {
+        7
+    }
+}
+
+enum Left {
+    Value,
+}
+
+impl First for Left {}
+
+enum Right {
+    Value,
+}
+
+impl Relation[Left] for Right {}
+
+struct Item {}
+
+derive Structural for Item
+
+fn main() -> UInt8 {
+    let item: Item = .{}
+    let left: Left = .Value
+    let right: Right = .Value
+    Structural.value(item, left, right)
+}

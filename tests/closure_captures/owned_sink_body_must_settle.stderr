@@ -1,0 +1,8 @@
+error[O-Leak]: `key` (a linear `Key`) is still owned when this path leaves
+ --> tests/closure_captures/owned_sink_body_must_settle.lin:6:30
+  |
+6 |     let inspect = sink [sink key] || key.id
+  |                              ^^^ never settled on the path that reaches the end of its scope
+  |                                      ------ its scope ends here
+  |
+  = help: take it apart with `let Key { id: _ } = key`, or give it to something that takes it

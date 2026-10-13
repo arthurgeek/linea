@@ -1,0 +1,11 @@
+// A constant built from a value outside the refinement is refused where the
+// construction is written, exactly as it would be anywhere else.
+@copyable
+type Percent = UInt8 where it in 0..=100
+
+let cap: Percent = Percent(150)
+
+fn main() -> UInt8 {
+    let Percent(limit) = cap
+    limit
+}

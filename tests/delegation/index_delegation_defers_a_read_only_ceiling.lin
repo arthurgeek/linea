@@ -1,0 +1,19 @@
+struct Inner { values: [UInt8; 2] }
+
+struct Wrapper[C] { inner: C }
+
+impl Index[UInt64] for Inner {
+    type Elem = UInt8
+
+    proj at(self: Inner, i: UInt64) -> UInt8 {
+        self.values[i]
+    }
+}
+
+impl[C: Index[UInt64]] Index[UInt64] for Wrapper[C] via inner
+
+fn main() -> UInt8 {
+    var wrapped: Wrapper[Inner] = .{ inner = .{ values = [2, 3] } }
+    wrapped[0] = 4
+    return wrapped[0]
+}

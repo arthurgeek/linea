@@ -1,0 +1,26 @@
+// A trait declares members of two kinds, and an implementation answers the one
+// it was asked. A body where a type was asked for settles nothing, and a type
+// where an operation was asked for is a call with nothing to run — so the two
+// are refused where they are paired rather than at the call that would reach
+// them.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    fn Item(x: Self) -> UInt8 {
+        x.at
+    }
+
+    type of = UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

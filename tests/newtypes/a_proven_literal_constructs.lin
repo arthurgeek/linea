@@ -1,0 +1,11 @@
+// A literal that folds inside the range constructs directly: the compiler
+// proves it at the call, and nothing runs to check it again.
+type Percent = UInt8 where it in 0..=99
+
+fn wants(_p: Percent) -> UInt8 {
+    9
+}
+
+fn main() -> UInt8 {
+    wants(Percent(50))
+}

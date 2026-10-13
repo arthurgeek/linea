@@ -1,0 +1,7 @@
+// A published alias is reached like any other published type: through the
+// module, or by the name a `use` brings in.
+pub alias Meters = UInt64
+
+pub fn stride() -> Meters {
+    40
+}

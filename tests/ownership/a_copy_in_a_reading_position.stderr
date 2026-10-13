@@ -1,0 +1,5 @@
+error[O-CopyRead]: nothing here takes `token`, so this copy has no effect
+  --> tests/ownership/a_copy_in_a_reading_position.lin:11:16
+   |
+11 |     read_value(copy(token))
+   |                ^^^^^^^^^^^ delete the `copy`

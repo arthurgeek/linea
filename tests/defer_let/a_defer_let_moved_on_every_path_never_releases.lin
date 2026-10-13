@@ -1,0 +1,22 @@
+// [O-DeferDead]. The lamp moves into `give` on the only path out, so the
+// release `defer let` scheduled never runs; `let` is what the program means.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) -> () {
+        let Lamp { id: _ } = self
+    }
+}
+
+fn give(sink lamp: Lamp) -> UInt8 {
+    let Lamp { id } = lamp
+    id
+}
+
+fn main() -> UInt8 {
+    defer let lamp: Lamp = .{ id = 4 }
+    give(lamp)
+}

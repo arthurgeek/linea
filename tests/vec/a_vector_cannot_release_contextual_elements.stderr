@@ -1,0 +1,7 @@
+error[T-Bound]: `Release` requires `Self` to implement it, and `Vec[Transaction, mem.SystemAllocator]` does not
+ --> tests/vec/a_vector_cannot_release_contextual_elements.lin:8:21
+  |
+8 |     Release.release(values)
+  |                     ^^^^^^ implement it for that type, or reach the operation on one that does
+  |
+  = help: `Vec[T, A]` implements `Release` when `T` implements `Release`, and `Transaction` does not

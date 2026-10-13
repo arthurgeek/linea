@@ -1,0 +1,271 @@
+import std.mem
+import std.testing
+
+// Write `value` as a JSON string: quoted, with quote, backslash and control
+// bytes escaped. The text between escapes is written as whole spans, without
+// copying the source.
+fn write_string[W: Writer](inout writer: W, value: Str) -> Result[(), W.Error] where carries(.Err: writer) {
+    &writer.write_str("\"")?
+    var start: UInt64 = 0
+    var offset: UInt64 = 0
+    while offset < value.length() {
+        let byte = value.byte(offset).unwrap()
+        // JSON escapes ASCII quote, backslash and the bytes below space.
+        if byte == 34 || byte == 92 || byte < 32 {
+            if start < offset {
+                &writer.write_str(value.slice(start, offset).unwrap())?
+            }
+            match read byte {
+                34 => &writer.write_str(r#"\""#)?,
+                92 => &writer.write_str(r"\\")?,
+                8 => &writer.write_str(r"\b")?,
+                9 => &writer.write_str(r"\t")?,
+                10 => &writer.write_str(r"\n")?,
+                12 => &writer.write_str(r"\f")?,
+                13 => &writer.write_str(r"\r")?,
+                _ => {
+                    let digits = "0123456789abcdef"
+                    let high = UInt64(byte) / 16
+                    let low = UInt64(byte) % 16
+                    &writer.write_str(r"\u00")?
+                    &writer.write_str(digits.slice(high, high + 1).unwrap())?
+                    &writer.write_str(digits.slice(low, low + 1).unwrap())?
+                },
+            }
+            start = offset + 1
+        }
+        offset += 1
+    }
+    if start < offset {
+        &writer.write_str(value.slice(start, offset).unwrap())?
+    }
+    &writer.write_str("\"")
+}
+
+// RefusingJsonWriter accepts `remaining` bytes, then fails every write with
+// `error`.
+struct RefusingJsonWriter {
+    remaining: UInt64,
+    accepted: UInt64,
+    error: Str,
+}
+
+impl Writer for RefusingJsonWriter {
+    type Error = Str
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), Str] {
+        if s.length() > self.remaining {
+            return .Err(copy(self.error))
+        }
+        self.remaining -= s.length()
+        self.accepted += s.length()
+        .Ok(())
+    }
+}
+
+// Write `value` as compact JSON text. A number keeps its token's spelling, and
+// an object's members follow the map's bucket order, not the order they were
+// inserted in.
+pub fn write[A: Allocator, W: Writer](inout writer: W, value: Value[A]) -> Result[(), W.Error] where carries(.Err: writer) {
+    match read value.node {
+        Null => &writer.write_str("null")?,
+        Boolean(flag) => {
+            let text = if flag {
+                "true"
+            } else {
+                "false"
+            }
+            &writer.write_str(text)?
+        },
+        Number(number) => &writer.write_str(number.text())?,
+        String(string) => write_string(&writer, string.view())?,
+        Array(values) => {
+            &writer.write_str("[")?
+            var first = true
+            for read child in values {
+                if !first {
+                    &writer.write_str(",")?
+                }
+                write(&writer, child)?
+                first = false
+            }
+            &writer.write_str("]")?
+        },
+        Object(values) => {
+            &writer.write_str(r"{")?
+            var first = true
+            for entry in values.entries() {
+                if !first {
+                    &writer.write_str(",")?
+                }
+                write_string(&writer, entry.key.view())?
+                &writer.write_str(":")?
+                write(&writer, entry.value)?
+                first = false
+            }
+            &writer.write_str(r"}")?
+        },
+    }
+    .Ok(())
+}
+
+test fn write_preserves_borrowed_writer_failures_and_the_document() {
+    defer let message = "stopped".to_owned(mem.system()).unwrap()
+    defer let document = parse(mem.system(), r#"[1,"tea"]"#).unwrap()
+    for budget in UInt64(0)..9 {
+        var writer: RefusingJsonWriter = .{ remaining = budget, accepted = 0, error = message.view() }
+        let result = write(&writer, document)
+        let refused = match result {
+            Err(error) => {
+                testing.assert_eq(error, "stopped", "writer error changed while crossing JSON")?
+                true
+            },
+            Ok(_) => false,
+        }
+        testing.assert(refused, "a bounded writer accepted more than its budget")?
+        testing.assert(writer.accepted <= budget, "JSON exceeded the writer's accepted prefix")?
+        testing.assert_eq(document.at(1).unwrap().as_str().unwrap(), "tea", "writer failure consumed the document")?
+    }
+}
+
+// Render `value` as JSON text into a new String from `allocator`.
+pub fn render[A: Allocator, B: Allocator](allocator: B, value: Value[A]) -> Result[String[B], mem.Oom] where carries(.Ok: allocator) {
+    defer var output = String.new_in(allocator)
+    write(&output, value)?
+    .Ok(output)
+}
+
+test fn document_output_preserves_number_tokens_and_escapes_text() {
+    defer let document = parse(mem.system(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#).unwrap()
+    defer let output = render(mem.system(), document).unwrap()
+    testing.assert_eq(output.view(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#, "JSON output changed values or token spelling")?
+}
+
+test fn rendered_text_is_independent_of_the_document() {
+    let document = parse(mem.system(), r#"{"name":"tea"}"#).unwrap()
+    let output = render(mem.system(), document).unwrap()
+    document.release()
+    defer output.release()
+    testing.assert_eq(output.view(), r#"{"name":"tea"}"#, "rendered output retained document storage")?
+}
+
+test fn render_allocation_failure_leaves_the_document_usable() {
+    defer let document = parse(mem.system(), "[1,2,3]").unwrap()
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    let failed = match render(arena.handle(), document) {
+        Err(_) => true,
+        Ok(output) => {
+            output.release()
+            false
+        },
+    }
+    testing.assert(failed, "render ignored allocation refusal")?
+    testing.assert_eq(document.at(1).unwrap().as_uint64().unwrap(), UInt64(2), "failed rendering changed the document")?
+}
+
+test fn a_document_renders_into_an_arena() {
+    defer let document = parse(mem.system(), r#"{"tea":[1,2]}"#).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), 256)
+    let rendered = render(arena.handle(), document).unwrap()
+    testing.assert_eq(rendered.view(), r#"{"tea":[1,2]}"#, "a document rendered into an arena changed")?
+}
+
+// Return whether two documents hold the same values, matching object members
+// by key rather than by order.
+fn same_document[A: Allocator, B: Allocator](left: Value[A], right: Value[B]) -> Bool {
+    if left.kind() != right.kind() {
+        return false
+    }
+    match read left.node {
+        Null => true,
+        Boolean(flag) => right.as_bool().unwrap() == flag,
+        Number(number) => right.number_text().unwrap() == number.text(),
+        String(string) => right.as_str().unwrap() == string.view(),
+        Array(values) => {
+            if values.length() != right.elements().unwrap().length() {
+                return false
+            }
+            for index in UInt64(0)..values.length() {
+                if !same_document(values[index], *right.at(index).unwrap()) {
+                    return false
+                }
+            }
+            true
+        },
+        Object(values) => {
+            var count: UInt64 = 0
+            for _entry in right.members().unwrap() {
+                count += 1
+            }
+            if count != values.length() {
+                return false
+            }
+            for entry in values.entries() {
+                let other = right.get(entry.key.view()) else {
+                    return false
+                }
+                if !same_document(entry.value, *other) {
+                    return false
+                }
+            }
+            true
+        },
+    }
+}
+
+test fn document_round_trips_preserve_structure_independent_of_member_order() {
+    let inputs = ["null", "[]", r"{}", r#"[false,-0,1.00,1e400,"é😀"]"#, r#"{"a":[{"b":2}],"c":null,"d":{}}"#]
+    for input in inputs {
+        defer let first = parse(mem.system(), input).unwrap()
+        let output = render(mem.system(), first).unwrap()
+        let second = parse(mem.system(), output.view()).unwrap()
+        output.release()
+        defer second.release()
+        testing.assert(same_document(first, second), "rendering changed the document's structure")?
+    }
+}
+
+test fn document_output_escapes_every_control_byte() {
+    let bytes = Vec.from_fn(mem.system(), count: 32, initializer: |index| UInt8(index)).unwrap()
+    let source = String.from_bytes(bytes).unwrap()
+    let document = Value.string(mem.system(), source.view()).unwrap()
+    source.release()
+    defer document.release()
+    defer let rendered = render(mem.system(), document).unwrap()
+    for byte in rendered.as_bytes() {
+        testing.assert(*byte >= 32, "writer emitted a raw control byte")?
+    }
+    defer let decoded = parse(mem.system(), rendered.view()).unwrap()
+    testing.assert_eq(decoded.as_str().unwrap(), document.as_str().unwrap(), "control escape round-trip changed text")?
+}
+
+// This walk refuses each attempt by hand rather than through
+// `testing.each_allocation_failure`, which accepts a refused run that
+// completes: here every refusal must be reported as an allocation error, and
+// nothing may be allocated after it.
+test fn json_render_disposes_partial_output_on_each_allocation_refusal() {
+    defer let document = parse(mem.system(), r#"{"message":"a longer string with \n escapes and text","values":[1,2,3,4,5,6,7,8,9,10]}"#).unwrap()
+    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let allocator = baseline.allocator()
+    let rendered = render(allocator, document).unwrap()
+    rendered.release()
+    let attempts = baseline.attempts()
+    testing.assert(attempts > 0, "render did not exercise output allocation")?
+    testing.assert(baseline.all_disposed(), "rendered text release lost or repeated an allocation")?
+    for refusal in UInt64(1)..(attempts + 1) {
+        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
+        let failing = log.allocator()
+        let refused = match render(failing, document) {
+            Err(_) => true,
+            Ok(value) => {
+                value.release()
+                false
+            },
+        }
+        testing.assert(refused, "render ignored an allocation refusal")?
+        testing.assert_eq(log.attempts(), refusal, "render allocated after its first refusal")?
+        testing.assert_eq(log.acquired(), refusal - 1, "render acquired after its refusal")?
+        testing.assert(log.all_disposed(), "render refusal lost or repeated partial output")?
+        testing.assert_eq(document.get("values").unwrap().elements().unwrap().length(), UInt64(10), "render refusal changed the document")?
+    }
+}

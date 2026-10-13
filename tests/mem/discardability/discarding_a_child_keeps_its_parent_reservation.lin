@@ -1,0 +1,24 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let outer = Arena.open(system(), 40)
+    defer outer.release()
+    {
+        let child = Arena.open(outer.handle(), 24)
+        let bytes = child.handle().acquire(8).unwrap()
+        if bytes.length() != 8 {
+            return 1
+        }
+    }
+    match outer.handle().acquire(16) {
+        Err(_) => 0,
+        Ok(bytes) => {
+            bytes.release()
+            2
+        },
+    }
+}

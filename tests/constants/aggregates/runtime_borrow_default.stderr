@@ -1,0 +1,5 @@
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/constants/aggregates/runtime_borrow_default.lin:7:36
+  |
+7 |     let read_value = |view: View = view| *view.value
+  |                                    ^^^^ this is not a constant

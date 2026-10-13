@@ -1,0 +1,12 @@
+error[S-Name]: expected a name
+  --> tests/receivers/a_marked_receiver_is_a_writable_place.lin:18:7
+   |
+18 |     &(fresh()).bump()
+   |       ^^^^^^^ `&` marks a binding the call writes to
+error[N-Immutable]: `fixed` is declared with `let`
+  --> tests/receivers/a_marked_receiver_is_a_writable_place.lin:17:6
+   |
+16 |     let fixed = Counter { count = 0 }
+   |         ----- declared with `let` here
+17 |     &fixed.bump()
+   |      ^^^^^ this binding cannot be assigned

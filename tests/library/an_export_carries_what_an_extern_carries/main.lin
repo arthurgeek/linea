@@ -1,0 +1,5 @@
+struct Pair { first: Int32, second: Int32 }
+
+export fn takes_a_struct(it: Pair) -> Int32 {
+    it.first
+}

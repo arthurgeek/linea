@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/constants/string_is_not_an_array_length.lin:4:26
+  |
+4 |     let _values: [UInt8; count] = [1, 2, 3]
+  |                          ^^^^^ this is not a number

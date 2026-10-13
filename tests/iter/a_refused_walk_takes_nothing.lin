@@ -1,0 +1,14 @@
+// A `for` over a value that is no sequence is refused. A refused walk never
+// runs, so reading `prices` after the loop and releasing it with `defer` are
+// not reported as uses of a vector the loop took.
+import std.mem
+
+fn main() -> UInt8 {
+    var prices: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    defer prices.release()
+    var total = UInt64(0)
+    for cents in prices {
+        total += cents
+    }
+    UInt8(prices.length() + total)
+}

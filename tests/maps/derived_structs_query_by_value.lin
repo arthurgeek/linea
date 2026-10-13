@@ -1,0 +1,53 @@
+import std.collections
+import std.hash
+import std.mem
+
+struct Point { x: Int64, y: Int64 }
+
+derive (Equatable, Equivalent, hash.Hash, Release) for Point
+
+struct Cell[T] { row: T, column: T }
+
+derive[T: Equatable] Equatable for Cell[T]
+
+derive[T: Equivalent] Equivalent for Cell[T]
+
+derive[T: hash.Hash] hash.Hash for Cell[T]
+
+derive[T: Release] Release for Cell[T]
+
+fn main() -> UInt8 {
+    var points: collections.Map[Point, UInt64, mem.SystemAllocator] = collections.Map.new()
+    defer points.release()
+    collections.Map.insert(&points, .{ x = 2, y = 3 }, 5).unwrap().release()
+    collections.Map.insert(&points, .{ x = 2, y = 4 }, 8).unwrap().release()
+    if *points.get(.{ x = 2, y = 3 }).unwrap() != 5 || !points.get(.{ x = 3, y = 2 }).is_none() {
+        return 1
+    }
+    if !collections.Map.update(&points, .{ x = 2, y = 3 }, |sink value| value + 1) {
+        return 2
+    }
+    let removed = collections.Map.remove(&points, .{ x = 2, y = 3 }).unwrap()
+    let removed_value = removed.value
+    removed.release()
+    if removed_value != 6 || !points.get(.{ x = 2, y = 3 }).is_none() || *points.get(.{ x = 2, y = 4 }).unwrap() != 8 {
+        return 3
+    }
+    var cells: collections.Map[Cell[UInt16], UInt64, mem.SystemAllocator] = collections.Map.new()
+    defer cells.release()
+    collections.Map.insert(&cells, .{ row = 4, column = 9 }, 12).unwrap().release()
+    if *cells.get(.{ row = 4, column = 9 }).unwrap() != 12 || !cells.get(.{ row = 9, column = 4 }).is_none() {
+        return 4
+    }
+    if !collections.Map.update(&cells, .{ row = 4, column = 9 }, |sink value| value + 1) {
+        return 5
+    }
+    let cell = collections.Map.remove(&cells, .{ row = 4, column = 9 }).unwrap()
+    let cell_value = cell.value
+    cell.release()
+    if cell_value == 13 && cells.length() == 0 {
+        0
+    } else {
+        6
+    }
+}

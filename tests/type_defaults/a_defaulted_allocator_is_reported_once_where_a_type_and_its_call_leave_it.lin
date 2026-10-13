@@ -1,0 +1,23 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+struct Buf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+impl[T, A: Allocator] Buf[T, A] {
+    fn empty() -> Self {
+        panic("no buffer is built")
+    }
+}
+
+fn _count[P: Allocator](_allocator: P) -> UInt64 {
+    let buffer: Buf[UInt8] = Buf.empty()
+    buffer.items.length()
+}
+
+fn main() -> UInt8 {
+    0
+}

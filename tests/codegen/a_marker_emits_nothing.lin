@@ -1,0 +1,29 @@
+// A trait declaring no members has no body to emit, so an implementation of
+// one contributes no function and no symbol.
+trait Same {
+    fn alike(self: Self, other: Self) -> Bool
+}
+
+trait Settled: Same {}
+
+struct Tag {
+    value: UInt8,
+}
+
+impl Same for Tag {
+    fn alike(self: Tag, other: Tag) -> Bool {
+        self.value == other.value
+    }
+}
+
+impl Settled for Tag {}
+
+fn main() -> UInt8 {
+    let a: Tag = .{ value = 1 }
+    let b: Tag = .{ value = 1 }
+    if Same.alike(a, b) {
+        0
+    } else {
+        1
+    }
+}

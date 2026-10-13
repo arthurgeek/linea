@@ -1,0 +1,33 @@
+// A callback passed to a trait operation meets the operation's bound as the
+// call reads it: `Self.Reading` is `UInt16` for a `Tank`, and `flip` takes a
+// `Bool`.
+trait Gauge {
+    type Reading
+
+    fn reading_as[U, F: fn(sink reading: Self.Reading) -> U](self: Self, convert: F) -> U where carries(convert)
+}
+
+struct Tank {
+    litres: UInt16,
+}
+
+impl Gauge for Tank {
+    type Reading = UInt16
+
+    fn reading_as[U, F: fn(sink reading: UInt16) -> U](self: Self, convert: F) -> U where carries(convert) {
+        convert(self.litres)
+    }
+}
+
+fn flip(sink open: Bool) -> Bool {
+    !open
+}
+
+fn main() -> UInt8 {
+    let tank = Tank { litres = 7 }
+    if tank.reading_as(flip) {
+        1
+    } else {
+        0
+    }
+}

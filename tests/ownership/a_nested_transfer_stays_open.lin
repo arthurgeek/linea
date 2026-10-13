@@ -1,0 +1,30 @@
+// Two transfers are open at the `return`: the outer `use2` has `d`, the inner
+// `join` has `e`, and the inner call completing closes only its own. A walk
+// that replaced the open set on entering the inner construct rather than
+// adding to it accepts this and refuses nothing else -- every other case in
+// this directory passes either way.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn join(sink a: Key, sink b: Key) -> Key {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    let sum: Key = .{ n = x + y }
+    sum
+}
+
+fn go(sink d: Key, sink e: Key) -> UInt8 {
+    use2(d, join(e, return 7))
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 }, .{ n = 3 })
+}

@@ -1,0 +1,27 @@
+// A module constant writes `_` for a length its array literal already gives.
+let weekday_names: [Str; _] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+// Each nested `_` counts the first row at its level.
+let opening_hours: [[UInt8; _]; _] = [[9, 17], [10, 16]]
+
+// A constant without an annotation takes its whole type from the literal.
+let seasons = ["spring", "summer", "autumn", "winter"]
+
+struct Calendar {}
+
+impl Calendar {
+    // An `impl` constant counts its literal the same way.
+    let month_lengths: [UInt8; _] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+}
+
+fn main() -> UInt8 {
+    let week: [Str; 7] = weekday_names
+    let hours: [[UInt8; 2]; 2] = opening_hours
+    let every_season: [Str; 4] = seasons
+    let months: [UInt8; 12] = Calendar.month_lengths
+    if week[6] == "Saturday" && hours[1][0] == 10 && every_season[3] == "winter" && months[1] == 28 {
+        0
+    } else {
+        1
+    }
+}

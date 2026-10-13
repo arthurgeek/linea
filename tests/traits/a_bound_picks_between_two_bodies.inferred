@@ -1,0 +1,50 @@
+// One function written against a bound, called at two types, so the call is
+// monomorphised into two and each copy must reach its own body. One
+// implementation would exercise the machinery and say nothing about which
+// body it picked: every dispatch answers correctly when there is only one
+// answer.
+//
+// The answer is what tells them apart. Both bodies compare and both return a
+// number the other never returns, so a call that reached the wrong body is a
+// different exit status rather than a program that still works.
+struct Coins {
+    count: UInt8,
+}
+
+struct Notes {
+    count: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Coins {
+    fn of(x: Self) -> UInt8 {
+        if x.count < 4 {
+            1
+        } else {
+            2
+        }
+    }
+}
+
+impl Measure for Notes {
+    fn of(x: Self) -> UInt8 {
+        if x.count < 4 {
+            10
+        } else {
+            20
+        }
+    }
+}
+
+fn measured[T: Measure](v: T) -> UInt8 {
+    Measure[T].of(v)
+}
+
+fn main() -> UInt8 {
+    let c: Coins = Coins { count = 3 }
+    let n: Notes = Notes { count = 9 }
+    measured[Coins](c) + measured[Notes](n)
+}

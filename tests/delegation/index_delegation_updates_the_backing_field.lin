@@ -1,0 +1,14 @@
+struct Board {
+    scores: [UInt8; 4],
+}
+
+impl Index[UInt64] for Board via scores
+
+impl Index[FromEnd] for Board via scores
+
+fn main() -> UInt8 {
+    var board: Board = .{ scores = [1, 2, 3, 4] }
+    board[0] += 2
+    board[^1] += 1
+    return board[0] + board[^1] - 8
+}

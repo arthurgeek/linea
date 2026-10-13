@@ -1,0 +1,52 @@
+import std.mem
+
+use mem.SystemAllocator
+
+alias SysVec[T] = Vec[T, SystemAllocator]
+alias Failing[T] = Result[T, Int64]
+alias Twice[T] = Pair[T, T]
+alias Keyed[V] = Pair[Str, V]
+alias Wrapped[T] = Pair[Option[T], UInt8]
+
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+impl[A, B] Pair[A, B] {
+    fn make(sink a: A, sink b: B) -> Pair[A, B] where carries(a, b) {
+        .{ a = a, b = b }
+    }
+}
+
+fn open_with_a_number() -> UInt8 {
+    let names: SysVec[UInt8] = SysVec.new_in(4)
+    names.release()
+    0
+}
+
+fn fail_with_text() -> Result[UInt8, Str] {
+    Failing.Err("no")
+}
+
+fn another_parameter_fixed_to_text() -> UInt8 {
+    let _keyed = Keyed.make(1, 2)
+    0
+}
+
+fn one_parameter_two_types() -> Pair[UInt8, Str] {
+    Twice.make(1, "x")
+}
+
+fn written_position_disagrees() -> Pair[UInt8, UInt8] {
+    Wrapped.make(1, 2)
+}
+
+fn main() -> UInt8 {
+    let _opened = open_with_a_number()
+    let _failed = fail_with_text()
+    let _keyed = another_parameter_fixed_to_text()
+    let _twice = one_parameter_two_types()
+    let _wrapped = written_position_disagrees()
+    0
+}

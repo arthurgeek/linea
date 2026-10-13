@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `nope`
+ --> tests/lsp/an_unsettled_binding_is_hinted_with_no_type/main.lin:5:21
+  |
+5 |     let unsettled = nope()
+  |                     ^^^^ no binding with this name is in scope
+error[N-Unused]: `unsettled` is never used
+ --> tests/lsp/an_unsettled_binding_is_hinted_with_no_type/main.lin:5:9
+  |
+5 |     let unsettled = nope()
+  |         ^^^^^^^^^ bind it as `_` if the value is not wanted

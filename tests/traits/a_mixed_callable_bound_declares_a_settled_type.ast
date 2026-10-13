@@ -1,0 +1,14 @@
+program decls=5
+  decl associated_type "Item" tokens 3..5
+    in Measure
+  decl trait_ "Measure" tokens 0..6
+  decl function "measured" tokens 9..36
+    in _Use
+    type param "F" : fn(read value: UInt8) -> UInt8 + Measure
+    param read "_value" : F
+    returns F.Item
+  decl trait_ "_Use" tokens 6..37
+  decl function "main" tokens 37..46
+    returns UInt8
+    expr %1 block tokens 43..46
+      expr %0 int_literal tokens 44..45 "0"

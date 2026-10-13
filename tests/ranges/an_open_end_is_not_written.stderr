@@ -1,0 +1,10 @@
+error[S-Range]: an open end awaits a consumer that gives it meaning
+ --> tests/ranges/an_open_end_is_not_written.lin:2:13
+  |
+2 |     let r = ..9
+  |             ^^ `..b`, `a..`, and bare `..` have no consumer yet
+error[S-Range]: an open end awaits a consumer that gives it meaning
+ --> tests/ranges/an_open_end_is_not_written.lin:3:14
+  |
+3 |     let s = 3..
+  |              ^^ `..b`, `a..`, and bare `..` have no consumer yet

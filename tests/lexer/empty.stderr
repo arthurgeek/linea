@@ -1,0 +1,5 @@
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/lexer/empty.lin:1:1
+  |
+1 | 
+  | ^ found 0

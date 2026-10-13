@@ -1,0 +1,22 @@
+import std.mem
+
+use mem.Allocator
+use mem.SystemAllocator
+
+struct Shelf[T, A: Allocator = SystemAllocator] {
+    items: Vec[T, A],
+}
+
+trait Counted {
+    fn counted(self: Self) -> UInt64
+}
+
+impl[T] Counted for Shelf[T] {
+    fn counted(self: Self) -> UInt64 {
+        self.items.length()
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Export]: `Pair` may not cross the foreign boundary: only an integer's representation is the language's to fix
+ --> tests/library/an_export_carries_what_an_extern_carries/main.lin:3:26
+  |
+3 | export fn takes_a_struct(it: Pair) -> Int32 {
+  |                          ^^ pass what it is made of, as integers

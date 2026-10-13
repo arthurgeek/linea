@@ -1,0 +1,37 @@
+trait Rank {
+    fn rank(left: Self, right: Self) -> UInt64
+}
+
+template impl Rank {
+    fn rank(left: Self, right: Self) -> UInt64 {
+        let left_case = reflect.ordinal_of(left)
+        match read left {
+            reflect.case => match read right {
+                reflect.same_case => {
+                    for component in reflect.components {
+                        let _name: Str = component.name
+                        let _ordinal: UInt64 = component.ordinal
+                        let _left = component.of(left)
+                        let _right = component.of(right)
+                    }
+                    reflect.case.ordinal
+                },
+                reflect.other_case => left_case,
+            },
+        }
+    }
+}
+
+enum Shape {
+    Empty,
+    One(UInt8),
+    Pair(UInt8, UInt8),
+}
+
+derive Rank for Shape
+
+fn main() -> UInt8 {
+    let same = Rank.rank(Shape.Pair(1, 2), Shape.Pair(3, 4))
+    let other = Rank.rank(Shape.One(5), Shape.Empty)
+    UInt8(same + other)
+}

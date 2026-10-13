@@ -1,0 +1,14 @@
+// A `Vec` is not a sequence, so a plain `for` over one is refused: taking
+// its elements out is a separate choice. The report names the walks a
+// vector offers instead.
+import std.mem
+
+fn main() -> UInt8 {
+    var prices: Vec[UInt64, mem.SystemAllocator] = Vec.new()
+    defer prices.release()
+    var total = UInt64(0)
+    for cents in prices {
+        total += cents
+    }
+    UInt8(total)
+}

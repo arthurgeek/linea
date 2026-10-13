@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Copyable`, and `Token` does not have that capability
+ --> tests/structs/named_literals/named_heads_enforce_generic_bounds.lin:7:16
+  |
+7 |     let _box = Box[Token] { value = token }
+  |                ^^^ use a type meeting the capability requirement, or relax the bound

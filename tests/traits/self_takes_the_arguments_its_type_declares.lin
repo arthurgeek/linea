@@ -1,0 +1,28 @@
+// An implementation for a type that takes parameters names the type and not an
+// instantiation of it, so `Self` stands for a template rather than a type --
+// and a template is not something a parameter can have. Refused here rather
+// than carried into a program where `Self` would mean whichever instantiation
+// happened to be asked about.
+//
+// This is the boundary a generic implementation moves. Written as
+// `impl[T] Measure for Option[T]`, which does not parse today, `Self` would be
+// the instantiation and this rule would no longer be what refuses it -- so a
+// change that admits one has to answer what `Self` becomes everywhere it is
+// substituted, including in a dump of the monomorphised program.
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Option {
+    fn of(x: Self) -> UInt8 {
+        match x {
+            None => 0,
+            Some(n) => n,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Option[UInt8] = .Some(3)
+    Measure.of(a)
+}

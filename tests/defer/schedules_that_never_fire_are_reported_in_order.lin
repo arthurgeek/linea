@@ -1,0 +1,46 @@
+// [O-DeferDead], six times. Each value is given away before its scope ends,
+// so none of the schedules can fire.
+//
+// Six of them, because the order the compiler speaks in is the order they are
+// written. A reader fixes the first thing they are told about, and a report
+// arriving in some other order sends them to the wrong line.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> () {
+    let Key { n: _n } = k
+}
+
+fn go() -> UInt8 {
+    let a: Key = .{ n = 1 }
+    defer take(a)
+    take(a)
+
+    let b: Key = .{ n = 2 }
+    defer take(b)
+    take(b)
+
+    let c: Key = .{ n = 3 }
+    defer take(c)
+    take(c)
+
+    let d: Key = .{ n = 4 }
+    defer take(d)
+    take(d)
+
+    let e: Key = .{ n = 5 }
+    defer take(e)
+    take(e)
+
+    let f: Key = .{ n = 6 }
+    defer take(f)
+    take(f)
+
+    3
+}
+
+fn main() -> UInt8 {
+    go()
+}

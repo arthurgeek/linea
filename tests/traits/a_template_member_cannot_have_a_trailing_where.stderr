@@ -1,0 +1,5 @@
+error[T-Template]: this structural template is not supported
+ --> tests/traits/a_template_member_cannot_have_a_trailing_where.lin:5:1
+  |
+5 | template impl Structural {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^ the template supplies each function the trait declares exactly once

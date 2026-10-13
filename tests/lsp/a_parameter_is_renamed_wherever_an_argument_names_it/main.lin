@@ -1,0 +1,10 @@
+// An argument that names the parameter it fills is a reference to that
+// parameter, so renaming the parameter rewrites every name that fills it, and
+// a cursor on such a name starts that rename.
+fn add(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    add(b: 2, a: 40) + add(40, b: 2)
+}

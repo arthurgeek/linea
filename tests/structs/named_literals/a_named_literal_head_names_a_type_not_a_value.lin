@@ -1,0 +1,13 @@
+struct Inner { x: UInt8 }
+
+struct Wrap { inner: Inner }
+
+trait Shape {}
+
+fn main() -> UInt8 {
+    let wrap = Wrap { inner = Inner { x = 1 } }
+    let _field = wrap.inner { x = 2 }
+    let _trait = Shape { r = 1 }
+    let _function = main { r = 1 }
+    0
+}

@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Frame` wraps exactly `[UInt8; 1 + 1]`
+ --> tests/derive_from/a_from_derive_help_names_the_array_length_rule.lin:1:9
+  |
+1 | @derive(From[[UInt8; 1 + 1]])
+  |         ^^^^^^^^^^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type (array lengths match only when spelled alike); `Frame` has `Pair([UInt8; 2])`, `Unknown`

@@ -1,0 +1,11 @@
+// A rename changes a name where it was declared and everywhere it is used, one
+// edit per place it is written. Nothing is matched by spelling: what is edited
+// is what the resolver said each name reaches.
+fn twice(a: UInt8) -> UInt8 {
+    a + a
+}
+
+fn main() -> UInt8 {
+    let total: UInt8 = twice(1)
+    total + total
+}

@@ -1,0 +1,24 @@
+// A module may declare its own `Result`. `?` still propagates the standard
+// library's `Result`, and an entry point may still return it.
+import std.result
+
+struct Result {
+    score: UInt8,
+}
+
+fn halve(value: UInt8) -> result.Result[UInt8, Str] {
+    if value % 2 == 1 {
+        return .Err("odd")
+    }
+    return .Ok(value / 2)
+}
+
+fn quarter(value: UInt8) -> result.Result[UInt8, Str] {
+    let half = halve(value)?
+    halve(half)
+}
+
+fn main() -> result.Result[UInt8, Str] {
+    let own = Result { score = quarter(24)? }
+    return .Ok(own.score)
+}

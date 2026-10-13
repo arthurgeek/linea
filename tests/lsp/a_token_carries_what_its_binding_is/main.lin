@@ -1,0 +1,21 @@
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn open(sink k: Key) -> UInt8 {
+    let Key { n: taken } = k
+    taken
+}
+
+fn main() -> UInt8 {
+    let k: Key = .{ n = 1 }
+    var total: UInt8 = 0
+    total = open(k)
+    let ceiling: UInt8 = UInt8.max
+    if total < ceiling {
+        total
+    } else {
+        0
+    }
+}

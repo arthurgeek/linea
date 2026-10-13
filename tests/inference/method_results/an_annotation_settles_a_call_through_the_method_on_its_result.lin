@@ -1,0 +1,13 @@
+// The annotation settles `T` through `unwrap`: its result is the success the
+// call's `Result` carries, so `Option[T]` meets `Option[UInt64]`.
+fn nothing_yet[T]() -> Result[Option[T], UInt8] {
+    .Ok(.None)
+}
+
+fn main() -> UInt8 {
+    let pending: Option[UInt64] = nothing_yet().unwrap()
+    if pending.is_none() {
+        return 0
+    }
+    return 1
+}

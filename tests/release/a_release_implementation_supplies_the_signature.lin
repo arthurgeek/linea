@@ -1,0 +1,16 @@
+// Release is checked by the same implementation-conformance rule as every
+// trait. The declaration takes Self; an implementation may not merely read it
+// and leave the consuming promise to its caller.
+struct Stamp {
+    code: UInt8,
+}
+
+impl Release for Stamp {
+    fn release(self: Self) -> () {
+        let _code = self.code
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

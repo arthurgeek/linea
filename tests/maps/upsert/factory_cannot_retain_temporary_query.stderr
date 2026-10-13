@@ -1,0 +1,5 @@
+error[T-Bound]: `Make` requires `inout fn(read query: K.Query, read allocator: A) -> Result[Entry[K, V], E]`, and `<closure>` is not that callable type
+  --> tests/maps/upsert/factory_cannot_retain_temporary_query.lin:11:21
+   |
+11 |     collections.Map.upsert(&values, "query", make, |sink value| value).unwrap()
+   |                     ^^^^^^ give it the exact callable type the bound names

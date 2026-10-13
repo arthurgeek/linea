@@ -1,0 +1,17 @@
+// An operator takes two values of one type. The left settles it and the right
+// is checked against it, so the report sits at the operand that differs and
+// names the one that decided -- there is no promotion to describe, because
+// nothing widens.
+//
+// Distinct from the mismatch a context imposes, and reported under its own
+// rule: nothing outside this expression required either type, so neither
+// operand failed to be what something asked for.
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let b: Int64 = 2
+    // Deliberately unused, so nothing downstream imposes a type on the sum:
+    // an annotation or a use would make the context the thing it disagreed
+    // with, which is the neighbouring rule rather than this one.
+    let _wide = a + b
+    0
+}

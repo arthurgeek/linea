@@ -1,0 +1,10 @@
+error[S-Chain]: comparisons cannot be chained
+ --> tests/control/comparison_not_chained.lin:2:21
+  |
+2 |     let bad = 1 < 2 < 3;
+  |                     ^ compare one pair at a time
+error[S-Expr]: expected an expression
+ --> tests/control/comparison_not_chained.lin:2:15
+  |
+2 |     let bad = 1 < 2 < 3;
+  |               ^^^^^^^^^ this is not the start of an expression

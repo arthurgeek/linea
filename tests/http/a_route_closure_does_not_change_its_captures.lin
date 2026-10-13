@@ -1,0 +1,17 @@
+// A route's closure is called for reading: what it captures is fixed when it
+// is registered. What changes between requests lives in the state
+// `http.with_state` lends each route.
+import std.http
+
+fn main() -> UInt8 {
+    var router = http.Router.new()
+    let _registered = &router.route_raw(
+        "GET /hits",
+        inout [sink hits = UInt64(0)] |inout _, request| {
+            hits += 1
+            http.text(request, "{hits} hits")
+        },
+    )
+    router.release()
+    0
+}

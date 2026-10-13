@@ -1,0 +1,9 @@
+error[O-Leak]: `b` (a linear `Box`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_bare_variant_arm_names_no_payload/main.lin:20:9
+   |
+19 |     match b {
+   |           - taken apart here
+20 |         Has => 7,
+   |         ^^^ this arm names none of what it holds
+   |
+   = help: name what it holds in the arm, so something can settle it

@@ -1,0 +1,22 @@
+// Inside `count_heavy`, `filter` makes a `Filter[S.Iter, F]`, which walks only
+// where the items it drops may be dropped. The bounds of `count_heavy` prove
+// that, so the chain continues with `fold`.
+trait Heavy {
+    fn heavy(self: Self) -> Bool
+}
+
+impl Heavy for UInt64 {
+    fn heavy(self: Self) -> Bool {
+        self > 10
+    }
+}
+
+// Count the items of any sequence that are heavy.
+fn count_heavy[S: Sequence](sink values: S) -> UInt64 where S.Iter: Discardable, S.Iter.Item: Heavy + Discardable {
+    values.filter(|value| value.heavy()).fold(0, |sink total, sink _value| total + 1)
+}
+
+fn main() -> UInt8 {
+    let weights = [UInt64(3), 12, 40, 7]
+    UInt8(count_heavy(weights.as_slice().map(|sink weight| *weight)))
+}

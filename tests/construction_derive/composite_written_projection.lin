@@ -1,0 +1,18 @@
+trait Source {
+    type Item
+}
+
+struct Wrapper[T] { value: T }
+
+impl[T] Source for Wrapper[T] {
+    type Item = T
+}
+
+fn identity[T](sink value: Wrapper[T].Item) -> T where carries(value) {
+    value
+}
+
+fn main() -> UInt8 {
+    let value: UInt8 = identity(7)
+    value - 7
+}

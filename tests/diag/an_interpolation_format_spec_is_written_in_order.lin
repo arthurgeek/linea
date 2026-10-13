@@ -1,0 +1,17 @@
+// A colon in an interpolation begins a format spec, written in the order
+// `[[fill]align][+][0][width][.precision][?]`. A colon with nothing after it,
+// a part out of that order, zero padding beside an alignment, an alignment or
+// zero padding without a width, a width or precision above 65535, and a `{`
+// or `\` as the fill are each refused.
+fn _empty(x: UInt8) -> () { let _message = "{x:}" }
+fn _named(x: UInt8) -> () { let _message = "{x:name}" }
+fn _zero_and_align(x: UInt8) -> () { let _message = "{x:<05}" }
+fn _zero_alone(x: UInt8) -> () { let _message = "{x:0}" }
+fn _align_alone(x: UInt8) -> () { let _message = "{x:>}" }
+fn _point_alone(x: Float64) -> () { let _message = "{x:.}" }
+fn _too_wide(x: UInt8) -> () { let _message = "{x:65536}" }
+fn _too_precise(x: Float64) -> () { let _message = "{x:.70000}" }
+fn _debug_first(x: UInt8) -> () { let _message = "{x:?4}" }
+fn _sign_after_zero(x: UInt8) -> () { let _message = "{x:0+4}" }
+fn _brace_fill(x: UInt8) -> () { let _message = "{x:{>4}" }
+fn main() -> UInt8 { 0 }

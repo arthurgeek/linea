@@ -1,0 +1,7 @@
+fn pair[A = UInt8, B = UInt16](_a: A = 1, _b: B = 2) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    pair[UInt8]()
+}

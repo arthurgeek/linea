@@ -1,0 +1,8 @@
+struct Point { value: UInt8 }
+
+@copyable
+impl Point {
+    fn zero() -> Point { Point { value = 0 } }
+}
+
+fn main() -> UInt8 { Point.zero().value }

@@ -1,0 +1,14 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/all_owner_consuming_branches_respect_a_live_handle.lin:11:9
+   |
+11 |         owner.release()
+   |         ^^^^^ keep this place available until the last use of its observation
+16 |     let bytes = handle.acquire(8).unwrap()
+   |                 ------ the observation is still used here
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/owner_borrows/all_owner_consuming_branches_respect_a_live_handle.lin:13:21
+   |
+13 |         let moved = owner
+   |                     ^^^^^ keep this place available until the last use of its observation
+16 |     let bytes = handle.acquire(8).unwrap()
+   |                 ------ the observation is still used here

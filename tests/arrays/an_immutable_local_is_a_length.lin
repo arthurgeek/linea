@@ -1,0 +1,9 @@
+// [T-ArraySize]. A block's own immutable binding is a binding like a module's,
+// so a length may name one: what the last clause of the constant-expression
+// list admits is where the binding was written, and it says nothing about
+// which scope wrote it.
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    let xs: [UInt8; n] = [1, 2, 3]
+    xs[n - 1]
+}

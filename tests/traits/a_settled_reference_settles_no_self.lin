@@ -1,0 +1,35 @@
+// `Self.Item` is a type of its own and not the type it is written off, so a
+// parameter written with it settles nothing: the argument standing there is of
+// whatever the implementation settled, and reading it as `Self` would settle
+// the trait's own type to what `Item` was settled to.
+//
+// The settled reference stands first, where the reading that confused the two
+// would reach it before the parameter that does settle `Self`.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+
+    fn of(x: Self) -> Self.Item
+
+    fn plus(v: Self.Item, x: Self) -> Self.Item where carries(v, x)
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+
+    fn plus(v: Self.Item, x: Self) -> Self.Item where carries(v, x) {
+        v + x.at
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    Measure.plus(2, c)
+}

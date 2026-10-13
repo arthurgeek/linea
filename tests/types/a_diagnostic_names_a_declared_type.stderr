@@ -1,0 +1,33 @@
+error[T-Discard]: this expression produces a `Pair` that is discarded
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:19:5
+   |
+19 |     make()
+   |     ^^^^^^ bind it with `let _ =` to discard it deliberately
+error[T-Condition]: expected `Bool`, found `Pair`
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:24:8
+   |
+24 |     if make() {
+   |     -- a condition must be a `Bool`
+   |        ^^^^^^ expected `Bool`, found `Pair`
+error[T-Arms]: expected `()`, found `Pair`
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:33:9
+   |
+32 |     if 1 > 0 {
+   |     -- an `if` with no `else` yields `()`
+33 |         make()
+   |         ^^^^^^ this arm produces a value
+error[T-Discard]: this body produces a `Pair` that is discarded
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:40:9
+   |
+40 |         make()
+   |         ^^^^^^ a `while` runs its body for its effect
+error[T-Convert]: `Pair` does not convert to `UInt8`
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:47:5
+   |
+47 |     UInt8(p)
+   |     ^^^^^^^^ a conversion is between numbers
+error[T-Bound]: `Pair` does not implement `Comparable`
+  --> tests/types/a_diagnostic_names_a_declared_type.lin:53:10
+   |
+53 |     if p < q {
+   |          ^ the operator is a call on that trait, so implement it for this type

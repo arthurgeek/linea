@@ -1,0 +1,15 @@
+// Discardability does not supply an optional release capability. A generic operation
+// bounded by Release refuses a user type with no implementation.
+struct Plain {
+    value: UInt8,
+}
+
+fn discard[T: Release](sink value: T) -> () {
+    value.release()
+}
+
+fn main() -> UInt8 {
+    let plain: Plain = .{ value = 1 }
+    discard(plain)
+    0
+}

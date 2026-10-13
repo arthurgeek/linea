@@ -1,0 +1,34 @@
+// The transfer is opened in one basic block and left in another. `d` is given
+// up before the branch, and only one arm returns -- so a walk that kept the
+// open transfers of the block it is in, rather than of the path that reaches
+// it, sees nothing open where control leaves and accepts this.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn key() -> Key {
+    .{ n = 2 }
+}
+
+fn go(sink d: Key, c: Bool) -> UInt8 {
+    use2(
+        d,
+        if c {
+            return 7
+            key()
+        } else {
+            key()
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 }, true)
+}

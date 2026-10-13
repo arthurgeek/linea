@@ -1,0 +1,28 @@
+// A trait is a namespace, so a name it does not declare is undefined there --
+// and undefined is all it is. The type has a `remaining`, and reaching it
+// through the trait does not find it: an implementation associates the two
+// namespaces without merging them.
+struct Account {
+    balance: UInt8,
+}
+
+impl Account {
+    pub fn remaining(x: Account) -> UInt8 {
+        x.balance
+    }
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        Account.remaining(x)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 7 }
+    Measure.remaining(a)
+}

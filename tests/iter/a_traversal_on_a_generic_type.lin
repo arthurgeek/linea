@@ -1,0 +1,28 @@
+// A traversal is declared on the type rather than on one instantiation of it,
+// so a walk over `Pair[UInt8]` runs the positions `Pair[T]` names -- and the
+// expression it names them with is read under the implementation that declares
+// it, not under the body the walk is written in.
+struct Pair[T] {
+    both: [T; 2],
+}
+
+impl[T] Index[Int64] for Pair[T] {
+    type Elem = T
+
+    proj at(inout self: Pair[T], i: Int64) -> T {
+        self.both[i]
+    }
+}
+
+impl[T] Pair[T] {
+    trav positions = 0..2
+}
+
+fn main() -> UInt8 {
+    let p: Pair[UInt8] = .{ both = [3, 4] }
+    var total: UInt8 = 0
+    for read v in p {
+        total += v
+    }
+    total
+}

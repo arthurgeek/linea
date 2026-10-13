@@ -1,0 +1,6 @@
+// The binding is in scope for the rest of its block, and not before it.
+fn main() -> UInt8 {
+    let before = lamp
+    defer let lamp: UInt8 = 4
+    before
+}

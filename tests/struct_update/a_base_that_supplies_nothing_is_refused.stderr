@@ -1,0 +1,5 @@
+error[T-UnusedBase]: `small` supplies no field
+  --> tests/struct_update/a_base_that_supplies_nothing_is_refused.lin:10:49
+   |
+10 |     let large = Size { width = 8, height = 9, ..small }
+   |                                                 ^^^^^ every field is written, so nothing is taken from here

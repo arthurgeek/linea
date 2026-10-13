@@ -1,0 +1,5 @@
+error[T-Bound]: nothing here settles `Make`'s `Self`
+  --> tests/traits/an_expectation_of_another_constructor.lin:24:38
+   |
+24 |     let made: Result[Coins, UInt8] = Make.some()
+   |                                      ^^^^^^^^^^^ pass what `Self` stands for, or say what the call returns

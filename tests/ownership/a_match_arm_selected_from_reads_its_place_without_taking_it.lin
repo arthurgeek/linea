@@ -1,0 +1,17 @@
+// Selecting a field of a `match` reads the arm's value without taking it, so
+// the place a block-tail arm names stays held for the read that follows.
+struct Pair {
+    left: UInt8,
+    right: UInt8,
+}
+
+fn main() -> UInt8 {
+    let kept: Pair = .{ left = 4, right = 5 }
+    let picked = (match kept.left {
+        9 => Pair { left = 1, right = 1 },
+        _ => {
+            kept
+        },
+    }).right
+    picked + kept.left
+}

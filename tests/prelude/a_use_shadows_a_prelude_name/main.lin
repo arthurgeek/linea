@@ -1,0 +1,14 @@
+// `use shapes.Range` binds the module's `Range` here, in place of the
+// prelude's. A range expression still builds the prelude's `Range`.
+import shapes
+
+use shapes.Range
+
+fn main() -> UInt8 {
+    let seats = Range { first = 3, last = 7 }
+    var counted = UInt8(0)
+    for _seat in UInt8(0)..shapes.width(seats) {
+        counted = counted + 1
+    }
+    counted
+}

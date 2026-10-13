@@ -1,0 +1,12 @@
+// The three the compiler calls to run a test, held to what `report` is held to.
+//
+// A test binary's entry point is generated, and what it calls is found by module
+// and name. Each is private, so none of them is a name a program can write --
+// which keeps the library's public surface a decision rather than a consequence
+// of how the compiler happens to find things.
+fn main() -> UInt8 {
+    let _chosen = selected("a.name")
+    let _status = ran(0)
+    let _usage = no_such_test()
+    0
+}

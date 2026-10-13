@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `nope`
+  --> tests/decl/a_test_body_is_checked_in_an_ordinary_build.lin:10:13
+   |
+10 |     println(nope)?
+   |             ^^^^ no binding with this name is in scope

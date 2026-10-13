@@ -1,0 +1,83 @@
+// A phantom parameter takes a bound, and the bound is checked where the
+// argument is written.
+//
+// Representation and well-formedness are separate questions. `phantom` answers
+// the first: the parameter appears in no field, so it costs no byte and the
+// value carries nothing about it. A bound answers the second: which types may
+// stand there at all. Reading the first as settling the second is what made a
+// bound refused here, and it does not follow -- nothing inspects the argument
+// in a value precisely because there is no value to inspect it in, while the
+// argument itself is a type, and a type is what a bound constrains.
+//
+// What the parameter is for is exactly the case that needs it. A tag saying
+// which thing produced a handle is worth nothing if any type at all can be
+// written as the tag: `Held[UInt8]` would be a type whose name claims a
+// provenance it does not have.
+import std.testing
+
+trait Source {
+    fn label(self: Self) -> UInt8
+}
+
+enum Upstream {
+    Only,
+}
+
+enum Downstream {
+    Only,
+}
+
+impl Source for Upstream {
+    fn label(_self: Upstream) -> UInt8 {
+        1
+    }
+}
+
+impl Source for Downstream {
+    fn label(_self: Downstream) -> UInt8 {
+        2
+    }
+}
+
+// The parameter appears in no field, so it is phantom; it must be a `Source`,
+// so it is bounded. Both, and neither says what the other says.
+struct Held[phantom A: Source] {
+    at: UInt64,
+}
+
+impl[A: Source] Held[A] {
+    fn of(at: UInt64) -> Held[A] {
+        .{ at = at }
+    }
+
+    fn where_it_is(h: Held[A]) -> UInt64 {
+        h.at
+    }
+}
+
+// The tag still tells the types apart: these are two types, not one, and a
+// function written for one does not take the other.
+fn upstream_only(h: Held[Upstream]) -> UInt64 {
+    h.where_it_is()
+}
+
+// And it still costs nothing. A `Held` is its `at` and no more, so two tags
+// over one layout stay one layout -- asserted by the sizes agreeing, since a
+// parameter that reached the representation would make them differ.
+test fn a_tag_tells_types_apart_and_costs_no_bytes() -> Result[(), testing.Failure] {
+    let up: Held[Upstream] = Held.of(7)
+    let down: Held[Downstream] = Held.of(9)
+
+    let here = upstream_only(up)
+    let there = down.where_it_is()
+
+    testing.assert(here == 7, "a tagged handle lost what it was given")?
+    testing.assert(there == 9, "a differently tagged handle lost what it was given")?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    let up: Held[Upstream] = Held.of(3)
+    let down: Held[Downstream] = Held.of(4)
+    UInt8(up.where_it_is() + down.where_it_is())
+}

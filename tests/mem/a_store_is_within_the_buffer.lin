@@ -1,0 +1,21 @@
+// A store inside the buffer is a store, and a load at the same offset answers
+// what was stored. The status carries the loaded value rather than a constant,
+// so it says the bytes really travelled through the memory -- a constant would
+// read the same over a store that went nowhere.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(16) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store(&b, 8, 41)
+            let v = UInt8(b.load(8))
+            b.release()
+            v
+        },
+        Err(_) => 0,
+    }
+}

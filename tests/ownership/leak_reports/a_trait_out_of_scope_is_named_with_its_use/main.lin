@@ -1,0 +1,8 @@
+// `Close` settles a locker, but this module has not brought it into scope.
+// The help names the operation together with the `use` that reaches it.
+import vault
+
+fn main() -> UInt8 {
+    let locker = vault.open(3)
+    locker.deposit()
+}

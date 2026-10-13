@@ -1,0 +1,6 @@
+error[T-Literal]: `T` cannot hold 256
+ --> tests/traits/integer_generics/a_contextual_integer_literal_must_fit_the_whole_family.lin:2:20
+  |
+2 |     let value: T = 256
+  |                - expected because of this annotation
+  |                    ^^^ literal is out of range for its type

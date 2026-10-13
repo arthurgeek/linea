@@ -1,0 +1,28 @@
+@linear
+struct Token { n: UInt8 }
+
+@linear
+struct Board { values: [Token; 2] }
+
+impl Index[UInt64] for Board via values
+
+impl Board {
+    trav positions via values
+}
+
+fn main() -> UInt8 {
+    var board: Board = .{ values = [.{ n = 2 }, .{ n = 3 }] }
+    for inout token in board {
+        token.n += 1
+    }
+    var total: UInt8 = 0
+    for read token in board {
+        total += token.n
+    }
+    let Board { values } = board
+    for token in values {
+        let Token { n } = token
+        total += n
+    }
+    return total - 14
+}

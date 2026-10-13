@@ -1,0 +1,10 @@
+// The default of `state` is `()`, so a call that settles `S` as another type
+// cannot leave `state` out.
+fn pass[S: Release = ()](sink state: S = ()) -> S where carries(state) {
+    state
+}
+
+fn main() -> UInt8 {
+    let wide: UInt8 = pass()
+    wide
+}

@@ -1,0 +1,14 @@
+import vault
+
+use vault.Token
+
+// Three doors, one rule: a direct construction, a fallible one, and a
+// destructure, each reaching for `Token`'s representation from outside the
+// module that declares it.
+fn main() -> UInt8 {
+    let t = vault.mint()
+    let _a = Token(1)
+    let _b = Token?(1)
+    let Token(_x) = t
+    0
+}

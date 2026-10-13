@@ -1,0 +1,18 @@
+import std.mem
+
+fn double(value: UInt64) -> UInt64 {
+    value * 2
+}
+
+// A named function and a function value capture nothing; each closure keeps
+// the code address it calls, and both are called like any closure.
+fn main() -> Result[UInt8, mem.Oom] {
+    let doubling: mem.Closure[fn(value: UInt64) -> UInt64, mem.SystemAllocator] = mem.Closure.open(mem.system(), double)?
+    let doubled = doubling(20)
+    doubling.release()
+    let add_one: fn(value: UInt64) -> UInt64 = |value| value + 1
+    let adding = mem.Closure.open(mem.system(), add_one)?
+    let result = adding(doubled)
+    adding.release()
+    return .Ok(UInt8(result))
+}

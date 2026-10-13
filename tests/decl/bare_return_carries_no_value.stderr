@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/decl/bare_return_carries_no_value.lin:2:5
+  |
+1 | fn f() -> UInt8 {
+  |           ----- expected because of this return type
+2 |     return
+  |     ^^^^^^ this `return` carries no value

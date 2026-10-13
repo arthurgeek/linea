@@ -1,0 +1,10 @@
+error[S-Params]: expected `)`
+ --> tests/derive_from/a_derive_entry_with_trailing_garbage_is_reported_once.lin:1:21
+  |
+1 | @derive(From[UInt8] 7)
+  |                     ^ a grouped derive closes its trait list
+error[S-Entry]: an attribute requires a nominal type declaration
+ --> tests/derive_from/a_derive_entry_with_trailing_garbage_is_reported_once.lin:1:1
+  |
+1 | @derive(From[UInt8] 7)
+  | ^ write a struct, enum, or newtype after this attribute

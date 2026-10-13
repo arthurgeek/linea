@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var peek = inout [inout count] || -> borrow UInt8 {
+        count += 1
+        borrow count
+    }
+    let seen = &peek()
+    *seen
+}

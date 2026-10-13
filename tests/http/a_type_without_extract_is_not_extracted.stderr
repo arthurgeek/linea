@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Extract[P]`, and `Visitor` does not implement it
+ --> tests/http/a_type_without_extract_is_not_extracted.lin:9:35
+  |
+9 |     let visitor = request.extract[Visitor]()?
+  |                                   ^^^^^^^ implement it for that type, or drop the bound

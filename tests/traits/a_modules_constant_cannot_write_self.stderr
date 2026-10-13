@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Self`
+ --> tests/traits/a_modules_constant_cannot_write_self.lin:6:15
+  |
+6 | pub let most: Self = 9
+  |               ^^^^ `Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit

@@ -1,0 +1,40 @@
+// A value consumed before a `continue` is consumed again when the iteration
+// comes back round, and that is what the edge to the loop's head is for: with
+// no edge, the state after the body never reached the next iteration and the
+// second consume was of a value the graph thought was still there.
+//
+// The binder is an arm's, which is where this hid: the loop rule exempted one,
+// because an arm's binder used to be declared nowhere and the exemption stood
+// in for that. It is declared where it is bound now, so the exemption is gone.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+@linear
+enum Holder {
+    Empty,
+    Full(Key),
+}
+
+fn burn(sink k: Key) -> UInt8 {
+    match k {
+        Forged(n) => n,
+    }
+}
+
+fn main() -> UInt8 {
+    let held: Holder = .Full(Key.Forged(1))
+    var i: UInt8 = 0
+    match held {
+        Empty => 0,
+        Full(k) => loop {
+            let r: UInt8 = burn(k)
+            i = i + 1
+            if i < 2 {
+                continue
+            }
+            break r
+        },
+    }
+}

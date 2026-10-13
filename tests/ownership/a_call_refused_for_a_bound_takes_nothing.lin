@@ -1,0 +1,15 @@
+// `Note` does not implement `Release`, so `Release.release(note)` is refused,
+// and a refused call takes nothing: `note` is still there to read afterwards.
+struct Note {
+    words: UInt8,
+}
+
+fn count(note: Note) -> UInt8 {
+    note.words
+}
+
+fn main() -> UInt8 {
+    let note = Note { words = 2 }
+    Release.release(note)
+    count(note)
+}

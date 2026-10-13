@@ -1,0 +1,18 @@
+struct Holder[T] {
+    value: T,
+}
+
+impl[T] Holder[T] {
+    fn invoke[F: fn(sink value: T) -> T](_self: Holder[T], sink value: T, f: F) -> T where carries(value, f) {
+        f(value)
+    }
+
+    pub fn apply(self: Holder[T], sink value: T) -> T where carries(value) {
+        Holder.invoke(self, value, |sink value| value)
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ value = 1 }
+    Holder.apply(holder, 7)
+}

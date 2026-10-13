@@ -1,0 +1,13 @@
+import std.collections
+import std.mem
+
+fn main() -> UInt8 {
+    var values: collections.Map[String[mem.SystemAllocator], Str, mem.SystemAllocator] = collections.Map.new()
+    defer values.release()
+    let make = |query: Str, allocator: mem.SystemAllocator| -> Result[collections.Entry[String[mem.SystemAllocator], Str], mem.Oom] where carries(.Ok: query, allocator) {
+        let key = query.to_owned(allocator)?
+        return .Ok(.{ key, value = copy(query) })
+    }
+    collections.Map.upsert(&values, "query", make, |sink value| value).unwrap()
+    0
+}

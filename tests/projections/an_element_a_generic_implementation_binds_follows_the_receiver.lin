@@ -1,0 +1,27 @@
+// An associated element type substitutes the receiver implementation
+// arguments when indexing each concrete Pair.
+struct Pair[T] {
+    cells: [T; 2],
+}
+
+impl[T] Index[T] for Pair[T] {
+    type Elem = T
+
+    proj at(inout self: Pair[T], _i: T) -> T where carries(self) {
+        self.cells[0]
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Pair[UInt8] = .{ cells = [3, 4] }
+    let f: Pair[Bool] = .{ cells = [false, true] }
+    let k: UInt8 = 0
+    let t: Bool = false
+    let n: UInt8 = b[k]
+    let p: Bool = f[t]
+    if p {
+        1
+    } else {
+        n
+    }
+}

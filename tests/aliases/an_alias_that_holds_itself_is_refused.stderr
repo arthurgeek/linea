@@ -1,0 +1,5 @@
+error[N-TypeAlias]: `Chain` reaches itself through the type it names
+ --> tests/aliases/an_alias_that_holds_itself_is_refused.lin:1:7
+  |
+1 | alias Chain = Option[Chain]
+  |       ^^^^^ an alias names a type that already exists; a type holding itself is a `struct` or an `enum`

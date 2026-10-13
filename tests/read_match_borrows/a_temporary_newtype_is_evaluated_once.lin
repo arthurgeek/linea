@@ -1,0 +1,16 @@
+type Count = UInt64
+
+fn next_count(inout calls: UInt64) -> Count {
+    calls += 1
+    Count(calls)
+}
+
+fn main() -> UInt8 {
+    var calls: UInt64 = 0
+    let number = match read next_count(&calls) { Count(value) => value }
+    if calls == 1 && number == 1 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,26 @@
+// A program's own type supplies a trait the library declares, so the parameters
+// the member declares are the signature's parameters -- spelled the same, and
+// held to that spelling by a trait written in another file.
+import std.io
+
+use io.IoError
+use io.println
+
+struct Box {
+    v: UInt8,
+}
+
+impl Display for Box {
+    fn fmt[W: Writer](self: Box, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        let n: UInt8 = self.v
+        Display.fmt(n, &w)
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let b: Box = .{ v = 7 }
+    match println(b) {
+        Ok(_) => .Ok(0),
+        Err(e) => .Err(e),
+    }
+}

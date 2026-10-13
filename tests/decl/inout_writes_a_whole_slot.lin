@@ -1,0 +1,35 @@
+// Inout writes and local reads use the same natural storage width.
+// Replacing a negative value with a positive one works at every signed width.
+fn set8(inout x: Int8) -> () {
+    x = 5
+}
+
+fn set16(inout x: Int16) -> () {
+    x = 6
+}
+
+fn set32(inout x: Int32) -> () {
+    x = 7
+}
+
+fn main() -> UInt8 {
+    var a: Int8 = 0 - 1
+    var b: Int16 = 0 - 1
+    var c: Int32 = 0 - 1
+    set8(&a)
+    set16(&b)
+    set32(&c)
+    if a == 5 {
+        if b == 6 {
+            if c == 7 {
+                9
+            } else {
+                3
+            }
+        } else {
+            2
+        }
+    } else {
+        1
+    }
+}

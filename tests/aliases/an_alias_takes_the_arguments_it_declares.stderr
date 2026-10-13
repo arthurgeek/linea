@@ -1,0 +1,10 @@
+error[T-Bound]: `Meters` takes 0 type argument(s), and was given 1
+ --> tests/aliases/an_alias_takes_the_arguments_it_declares.lin:5:17
+  |
+5 |     let _plain: Meters[UInt8] = 0
+  |                 ^^^^^^ this type takes no arguments
+error[T-Bound]: `Both` takes 1 type argument(s), and was given 0
+ --> tests/aliases/an_alias_takes_the_arguments_it_declares.lin:6:16
+  |
+6 |     let _bare: Both = [0, 0]
+  |                ^^^^ give it the arguments it declares

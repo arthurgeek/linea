@@ -1,0 +1,15 @@
+error[M-Vis]: `Leak` reaches further than `Secret`, which it names
+  --> tests/aliases/an_alias_reaches_no_further_than_what_it_names.lin:13:18
+   |
+13 | pub alias Leak = Secret
+   |                  ^^^^^^ declare `Secret` as widely as `Leak`, or narrow `Leak`
+error[M-Vis]: `Spread` reaches further than `Secret`, which it names
+  --> tests/aliases/an_alias_reaches_no_further_than_what_it_names.lin:14:32
+   |
+14 | internal alias Spread = Option[Secret]
+   |                                ^^^^^^ declare `Secret` as widely as `Spread`, or narrow `Spread`
+error[M-Vis]: `Widened` reaches further than `Shared`, which it names
+  --> tests/aliases/an_alias_reaches_no_further_than_what_it_names.lin:15:21
+   |
+15 | pub alias Widened = Shared
+   |                     ^^^^^^ declare `Shared` as widely as `Widened`, or narrow `Widened`

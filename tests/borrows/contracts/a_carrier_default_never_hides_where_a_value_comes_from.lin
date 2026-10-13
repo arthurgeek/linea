@@ -1,0 +1,20 @@
+// The carrier default is the signature's contract: a result that comes from
+// another parameter is refused, and the report names where it came from.
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn bad(session: Session, other: Str) -> Str {
+    if session.user.length() > 0 {
+        copy(other)
+    } else {
+        copy(other)
+    }
+}
+
+fn main() -> UInt8 {
+    let session = Session { user = "ada" }
+    let _bad = bad(session, "other")
+    0
+}

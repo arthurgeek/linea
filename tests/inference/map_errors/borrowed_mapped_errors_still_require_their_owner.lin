@@ -1,0 +1,18 @@
+fn clear(inout value: UInt64) -> () {
+    value = 0
+}
+
+fn fail(value: UInt64) -> Result[UInt8, borrow UInt64] where borrows(.Err: value) {
+    .Err(borrow value)
+}
+
+fn work(inout owner: UInt64) -> Result[UInt8, borrow UInt64] where borrows(.Err: owner) {
+    defer clear(&owner)
+    let value = fail(owner).map_err(|sink error| error)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    var owner: UInt64 = 7
+    match work(&owner) { Ok(value) => value, Err(view) => UInt8(*view) }
+}

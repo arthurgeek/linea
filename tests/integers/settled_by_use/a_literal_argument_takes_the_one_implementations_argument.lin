@@ -1,0 +1,31 @@
+// `Wallet` grows by a `UInt64` and by nothing else, so a literal argument at
+// the trait's parameter takes `UInt64` rather than the default `Int64`. That
+// holds for the postfix form, the call through the trait, the call through
+// the type, and a conversion whose `Self` the annotation settles.
+trait Grow[T] {
+    fn grown(self: Self, by: T) -> UInt64
+}
+
+@copyable
+struct Wallet {
+    cents: UInt64,
+}
+
+impl Grow[UInt64] for Wallet {
+    fn grown(self: Wallet, by: UInt64) -> UInt64 {
+        self.cents + by
+    }
+}
+
+impl From[UInt64] for Wallet {
+    fn from(sink source: UInt64) -> Wallet {
+        .{ cents = source }
+    }
+}
+
+fn main() -> UInt8 {
+    let wallet: Wallet = From.from(10)
+    let total = wallet.grown(1) + Grow.grown(wallet, 2) + Wallet.grown(wallet, 3)
+    // 11 + 12 + 13
+    UInt8(total)
+}

@@ -1,0 +1,8 @@
+export fn increment(num: Int32) -> Int32 {
+    num + 1
+}
+
+export fn apply(num: Int32) -> Int32 {
+    let selected: fn(read num: Int32) -> Int32 = increment
+    selected(num)
+}

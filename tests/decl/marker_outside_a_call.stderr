@@ -1,0 +1,5 @@
+error[S-Mutation]: `&` marks an argument passed for mutation, or the iterator a plain `for` walks
+ --> tests/decl/marker_outside_a_call.lin:3:20
+  |
+3 |     let y: UInt8 = &x
+  |                    ^^ it belongs at a call site or directly after `in`, and nowhere else

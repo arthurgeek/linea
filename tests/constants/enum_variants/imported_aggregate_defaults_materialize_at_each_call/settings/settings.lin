@@ -1,0 +1,7 @@
+pub enum Mode { Preserve, Exact(UInt64) }
+
+pub let selected: Mode = .Preserve
+
+pub fn read_mode(mode: Mode = selected) -> UInt64 {
+    match read mode { Preserve => 7, Exact(bits) => bits }
+}

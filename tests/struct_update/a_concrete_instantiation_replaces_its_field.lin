@@ -1,0 +1,12 @@
+struct Slot[T] {
+    held: T,
+    count: UInt8,
+}
+
+fn main() -> UInt8 {
+    let slot: Slot[UInt8] = .{ held = 1, count = 2 }
+    // Here `held` is a `UInt8`, which owes nothing, so it may be replaced.
+    let next = Slot[UInt8] { held = 5, ..slot }
+    // 5 + 2
+    next.held + next.count
+}

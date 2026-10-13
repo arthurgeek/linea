@@ -1,0 +1,10 @@
+fn forward[T](value: borrow T) -> borrow T where carries(value) {
+    let callback = [sink saved = copy(value)] || -> where carries(saved) copy(saved)
+    callback()
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let observation = forward(borrow number)
+    *observation
+}

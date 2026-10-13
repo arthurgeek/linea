@@ -1,0 +1,15 @@
+error[S-Name]: expected a name after `struct`
+ --> tests/recovery/an_attached_derive_on_a_struct_named_by_a_number.lin:2:8
+  |
+2 | struct 1 { x: UInt8 }
+  |        ^ a struct needs a name
+error[S-Struct]: expected `{`
+ --> tests/recovery/an_attached_derive_on_a_struct_named_by_a_number.lin:2:8
+  |
+2 | struct 1 { x: UInt8 }
+  |        ^ a struct lists its fields
+error[S-Entry]: a program is a list of declarations
+ --> tests/recovery/an_attached_derive_on_a_struct_named_by_a_number.lin:2:8
+  |
+2 | struct 1 { x: UInt8 }
+  |        ^ expected `fn` here

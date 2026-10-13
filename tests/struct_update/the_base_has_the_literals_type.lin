@@ -1,0 +1,17 @@
+struct Size {
+    width: UInt8,
+    height: UInt8,
+}
+
+struct Area {
+    width: UInt8,
+    height: UInt8,
+}
+
+fn main() -> UInt8 {
+    let area: Area = .{ width = 2, height = 3 }
+    // A base is a value of the literal's own type, even when another type
+    // has the same fields.
+    let size = Size { width = 4, ..area }
+    size.width
+}

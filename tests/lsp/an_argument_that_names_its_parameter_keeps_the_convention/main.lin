@@ -1,0 +1,22 @@
+// Where the argument is a variable of the parameter's own name, the name is
+// the half a reader can already see and the convention is the half they
+// cannot: `spent` is gone after the first call and nothing on that line says
+// so. Where the parameter carries no convention either, there is nothing left
+// to say.
+struct Coins {
+    amount: UInt8,
+}
+
+fn hand(coppers: UInt8, sink spent: Coins, tally: UInt8) -> UInt8 {
+    spent.amount + coppers + tally
+}
+
+fn main() -> UInt8 {
+    let coppers: UInt8 = 1
+    let spent: Coins = .{ amount = 2 }
+    let tally: UInt8 = 3
+    let purse: UInt8 = 4
+    let fee: Coins = .{ amount = 5 }
+    let count: UInt8 = 6
+    hand(coppers, spent, tally) + hand(purse, fee, count)
+}

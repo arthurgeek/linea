@@ -1,0 +1,5 @@
+error[T-Impl]: implementation parameter `A` cannot be recovered from its key
+ --> tests/construction_derive/ordinary_projection_cannot_determine_parameter.lin:9:6
+  |
+9 | impl[A: Source] Measure[A.Item] for UInt64 {
+  |      ^ place the parameter in the receiver or trait arguments outside associated-type projections

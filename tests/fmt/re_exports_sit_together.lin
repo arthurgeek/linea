@@ -1,0 +1,14 @@
+// A list of re-exports is one piece of structure rather than several, as a
+// list of imports is. Each is one line, and a blank line between every pair
+// spaces out something that reads as a list -- which is what the prelude's
+// manifest is, and it is the file where these appear in numbers.
+//
+// Between the two kinds a blank line is structure, because the imports and
+// what they publish are two lists rather than one.
+import alpha
+import beta
+pub use alpha.Thing
+pub use beta.Other
+fn main() -> UInt8 {
+    0
+}

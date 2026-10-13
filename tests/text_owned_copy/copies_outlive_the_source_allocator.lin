@@ -1,0 +1,19 @@
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let copied = {
+        let arena = mem.Arena.open(mem.system(), size: 64)
+        defer arena.release()
+        let original = "café\u{0}".to_owned(arena.handle()).unwrap()
+        defer original.release()
+        original.view().to_owned(mem.system()).unwrap()
+    }
+    defer copied.release()
+    if copied.view() == "café\u{0}" {
+        0
+    } else {
+        1
+    }
+}

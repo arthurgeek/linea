@@ -1,0 +1,42 @@
+// An unconstrained associated type may require settlement. A generic body
+// cannot discard its result without a Discardable requirement.
+@linear
+struct Coin {
+    minted: UInt8,
+}
+
+struct Coins {
+    count: UInt8,
+}
+
+trait Holds[A] {
+    type Item
+
+    fn of(x: Self, a: A) -> Self.Item where carries()
+
+    fn spend(x: Self, a: A, sink v: Self.Item) -> UInt8
+}
+
+impl Holds[UInt8] for Coins {
+    type Item = Coin
+
+    fn of(x: Self, _a: UInt8) -> Self.Item where carries() {
+        .{ minted = x.count }
+    }
+
+    fn spend(_x: Self, a: UInt8, sink v: Self.Item) -> UInt8 {
+        let Coin { minted } = v
+        minted + a
+    }
+}
+
+fn wrap[A](c: Coins, a: A) -> UInt8 {
+    let _held = Holds.of(c, a)
+    0
+}
+
+fn main() -> UInt8 {
+    let c: Coins = .{ count = 3 }
+    let n: UInt8 = 4
+    wrap(c, n)
+}

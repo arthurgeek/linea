@@ -1,0 +1,16 @@
+struct Board { values: [borrow UInt8; 2] }
+
+impl Index[FromEnd] for Board via values
+
+fn replaced(owner: UInt8) -> borrow UInt8 where borrows(owner) {
+    let local: UInt8 = 1
+    var board: Board = .{ values = [borrow local, borrow local] }
+    board[^2] = borrow owner
+    copy(board[^2])
+}
+
+fn main() -> UInt8 {
+    let owner: UInt8 = 0
+    let result = replaced(owner)
+    *result
+}

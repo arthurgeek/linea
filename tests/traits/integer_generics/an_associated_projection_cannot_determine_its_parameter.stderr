@@ -1,0 +1,5 @@
+error[T-Impl]: implementation parameter `S` cannot be recovered from its key
+ --> tests/traits/integer_generics/an_associated_projection_cannot_determine_its_parameter.lin:9:6
+  |
+9 | impl[S: ItemSource, T: Integer] Transfer[S.Item] for T {
+  |      ^ place the parameter in the receiver or trait arguments outside associated-type projections

@@ -1,0 +1,26 @@
+@(copyable, derive(Equatable))
+struct Point { x: UInt8, y: UInt8 }
+
+enum Kind { Near, Far }
+
+fn main() -> UInt8 {
+    let kind = Kind.Near
+    let origin = Point { x = 1, y = 2 }
+    var score: UInt8 = 0
+    // Match arms, `copy(...)` and interpolations each delimit what they hold,
+    // so a named literal inside them keeps its own braces in a control header.
+    if match kind { Near => Point { x = 1, y = 2 }.x == 1, Far => false } {
+        score += 1
+    }
+    if copy(Point { x = 1, y = 2 }) == origin {
+        score += 1
+    }
+    match "{Point { x = 3, y = 4 }.y}" {
+        _ => score += 1,
+    }
+    if score == 3 {
+        0
+    } else {
+        1
+    }
+}

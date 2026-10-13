@@ -1,0 +1,24 @@
+// What `!` negates is a condition, so it asks for a `Bool` and settles a
+// trait's parameter written only as the signature's return type.
+struct Envelope[T] {
+    v: T,
+}
+
+trait Innermost[U] {
+    fn of(x: Self) -> U
+}
+
+impl Innermost[Bool] for Envelope[Bool] {
+    fn of(x: Self) -> Bool {
+        x.v
+    }
+}
+
+fn main() -> UInt8 {
+    let f: Envelope[Bool] = .{ v = false }
+    if !Innermost.of(f) {
+        13
+    } else {
+        3
+    }
+}

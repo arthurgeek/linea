@@ -1,0 +1,5 @@
+error[T-Bound]: `pair` takes 2 type argument(s), and was given 1
+ --> tests/type_defaults/a_call_writes_all_of_a_functions_type_arguments_or_none.lin:6:9
+  |
+6 |     pair[UInt8]()
+  |         ^^^^^^^ name all 2 of `A`, `B`, or none to let the call settle them

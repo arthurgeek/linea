@@ -1,0 +1,5 @@
+error[T-Convert]: `UInt8` cannot hold 999
+ --> tests/types/conversion_out_of_range.lin:2:5
+  |
+2 |     UInt8(999)
+  |     ^^^^^^^^^^ this conversion cannot succeed

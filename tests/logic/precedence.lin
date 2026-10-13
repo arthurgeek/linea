@@ -1,0 +1,13 @@
+// `||` binds loosest and `&&` next, so the comparisons group first and `!`
+// binds tighter than either.
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let grouped = a < 2 && a > 0 || !true && false
+    let negated_first = !true && false
+    let parenthesised = !(true && false)
+    if grouped && parenthesised && !negated_first {
+        9
+    } else {
+        0
+    }
+}

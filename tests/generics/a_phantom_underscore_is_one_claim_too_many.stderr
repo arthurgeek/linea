@@ -1,0 +1,5 @@
+error[T-Phantom]: `_Tag` is declared `phantom`, read for identity, and the underscore says it is not read at all
+ --> tests/generics/a_phantom_underscore_is_one_claim_too_many.lin:4:23
+  |
+4 | struct Handle[phantom _Tag] {
+  |                       ^^^^ drop the underscore: one claim per parameter

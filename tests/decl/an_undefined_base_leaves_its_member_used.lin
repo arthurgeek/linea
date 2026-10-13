@@ -1,0 +1,21 @@
+// `Countr` names nothing, so the call reports the undefined name and nothing
+// else: `start` was written as the selected name, and calling it unused would
+// report a second mistake the program does not make.
+struct Counter {
+    n: UInt8,
+}
+
+impl Counter {
+    fn start() -> UInt8 {
+        3
+    }
+
+    pub fn make() -> Counter {
+        .{ n = Countr.start() }
+    }
+}
+
+fn main() -> UInt8 {
+    let c = Counter.make()
+    c.n
+}

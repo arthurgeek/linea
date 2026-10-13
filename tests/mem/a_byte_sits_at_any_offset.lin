@@ -1,0 +1,38 @@
+// A byte store asks the bound and nothing else.
+//
+// The wide pair checks two things: that the access fits, and that the offset is
+// a multiple of its width. A byte is one wide, so every offset is a multiple of
+// it -- and the alignment check is absent rather than trivially true, because a
+// misalignment a byte can report is a misalignment that has no meaning.
+//
+// Written at odd offsets on purpose: three and seven are exactly where the wide
+// store traps, so a byte access that survives them is one asking a different
+// question rather than the same question about a smaller number.
+import std.mem
+
+use mem.system
+
+fn main() -> UInt8 {
+    let a = system()
+    match a.acquire(16) {
+        Ok(acquired) => {
+            var b = acquired
+            mem.Buffer.store_byte(&b, 3, 41)
+            mem.Buffer.store_byte(&b, 7, 1)
+
+            // The last offset a buffer of sixteen holds, which the wide store
+            // cannot reach at all: eight bytes from fifteen run off the end.
+            mem.Buffer.store_byte(&b, 15, 200)
+
+            let odd = b.load_byte(3) + b.load_byte(7)
+            let last = b.load_byte(15)
+
+            // And a byte nothing wrote is the zero the allocator answered with.
+            let untouched = b.load_byte(0)
+
+            b.release()
+            odd + last + untouched
+        },
+        Err(_) => 1,
+    }
+}

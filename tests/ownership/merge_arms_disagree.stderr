@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+ --> tests/ownership/merge_arms_disagree/main.lin:7:5
+  |
+7 |     if c == 7 {
+  |     ^^^^^^^^^^^ consume it on the other path too, or on neither

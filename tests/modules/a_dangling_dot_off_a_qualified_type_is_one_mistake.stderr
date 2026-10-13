@@ -1,0 +1,5 @@
+error[S-Name]: expected a name after `.`
+  --> tests/modules/a_dangling_dot_off_a_qualified_type_is_one_mistake/main.lin:10:5
+   |
+10 |     0
+   |     ^ a `.` selects a part

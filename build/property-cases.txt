@@ -1,0 +1,58 @@
+# Paths are relative to the tests root. Module directories select one whole case.
+# Aggregate storage, comparisons in every dump view, logic, fields and calls.
+codegen/aggregate_returns_keep_input_and_mutation_values.lin
+# Function addresses, distinct signatures and indirect argument extents.
+codegen/a_function_pointer_returns_an_aggregate.lin
+# Named arguments through an indirect call, including defaults.
+codegen/a_function_pointer_keeps_named_defaults.lin
+# Member ordering, namespace mutation and formatting around retained comments.
+fmt/a_hatch_around_an_impl_member.lin
+# Trait versus inherent implementation, annotated bindings and return types.
+traits/an_inherent_member_and_a_trait_member.lin
+# Enum variants, exhaustive arm rotation and unused phantom parameters.
+generics/a_phantom_brands_an_enum.lin
+# Linear disposal as a statement and as a binding; leak, copy, repeat and escape.
+ownership/disposed_in_sequence.lin
+ownership/a_disposal_binds_a_name_nothing_reads.lin
+# Named consuming arguments must keep their declaration-order meaning.
+ownership/a_named_argument_fills_the_sink_it_names.lin
+# Range coverage and refined newtype construction/destructuring mutations.
+ranges/a_match_covers_its_type_with_ranges.lin
+newtypes/a_destructure_reads_what_was_proven.lin
+# Consuming iterator desugaring, array lending, and a declared traversal.
+iter/a_for_walks_a_range.lin
+iter/an_inout_loop_writes_every_element.lin
+iter/a_lending_loop_over_a_declared_traversal.lin
+# A lending head evaluates once even when it produces a temporary aggregate.
+iter/a_lending_walk_names_places_in_one_value.lin
+# Concrete component implementation and generic derive-bound mutations.
+traits/a_newtype_has_one_required_component.lin
+traits/a_generic_derive_states_every_component_bound.lin
+# Closed requirement arguments can be mutated to an open generic constructor.
+traits/component_requirements_accept_generic_trait_arguments.lin
+# Template member bounds can be removed or replaced independently.
+traits/a_template_member_matches_bounds_positionally.lin
+# Materialization across modules, grouped standard derives, and linear release.
+traits/materialized_derives_are_ordinary_source
+# Rejected input retains reached views and editor diagnostics without codegen.
+traits/a_template_member_matches_its_signature.lin
+# Executable source whose canonical formatting changes its written bytes.
+fmt/an_else_if_is_printed_back.lin
+# Consumed linear elements must be settled exactly once in each loop body.
+iter/a_for_moves_linear_elements_out_of_an_array.lin
+# Raw literals under renaming (a binding named `r`), reordering and reformatting.
+raw_strings/a_raw_literal_holds_its_bytes.lin
+# Multi-line literals under reordering and reformatting, beside the calls and statements around them.
+multiline_strings/a_multiline_literal_joins_its_lines.lin
+# A postfix call marking its receiver `&` written out lends the receiver.
+iter/lent_walks/a_break_in_an_inner_loop_leaves_only_that_loop.lin
+# A capture recovery the file alone cannot settle declines the rename.
+iter/operations/a_callback_owning_a_resource_is_lent_to_the_inout_form.lin
+# An iterator's item Discardable by the function's bounds owes nothing to a walk.
+iter/operations/a_generic_iterator_offers_the_operations.lin
+# A binding that schedules its own release, written out as the binding and the defer it means.
+defer_let/a_defer_let_after_else_releases_the_bound_value.lin
+defer_let/a_defer_let_in_a_loop_releases_each_iteration.lin
+defer_let/a_defer_var_releases_the_value_held_at_the_exit.lin
+# A callable head: declaration reversal, renamed head parameters, reformatted source.
+traits/callable_heads/a_callable_type_heads_a_trait_implementation.lin

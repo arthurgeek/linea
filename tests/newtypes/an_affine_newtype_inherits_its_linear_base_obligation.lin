@@ -1,0 +1,15 @@
+// An ordinary newtype inherits its base's mandatory consumption.
+// Destructuring the newtype and then its base settles the whole value.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+type OwnedKey = Key
+
+fn main() -> UInt8 {
+    let wrapped = OwnedKey(.{ id = 7 })
+    let OwnedKey(key) = wrapped
+    let Key { id: answer } = key
+    answer
+}

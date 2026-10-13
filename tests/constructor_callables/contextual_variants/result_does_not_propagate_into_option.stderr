@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may return `Result[UInt8, RenderError]`, and the function answers with `Option[UInt8]`
+ --> tests/constructor_callables/contextual_variants/result_does_not_propagate_into_option.lin:6:17
+  |
+6 |     let value = mapped?
+  |                 ^^^^^^^ `?` returns from the function it is written in

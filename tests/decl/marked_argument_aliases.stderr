@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+ --> tests/decl/marked_argument_aliases.lin:7:18
+  |
+7 |     add_into(&x, x)
+  |              -- mutated by this argument
+  |                  ^ already passed `&` here

@@ -1,0 +1,7 @@
+error[O-Move]: `b` has already been moved
+  --> tests/mem/a_buffer_disposed_twice.lin:13:13
+   |
+12 |             b.release()
+   |             - it was taken here
+13 |             b.release()
+   |             ^ it was already taken, and a value is taken once

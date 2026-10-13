@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+  --> tests/ranges/a_span_across_touching_arms_is_covered_ground.lin:10:9
+   |
+10 |         5..=15 => 3,
+   |         ^^^^^^ this interval is already covered

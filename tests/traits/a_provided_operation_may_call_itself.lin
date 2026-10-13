@@ -1,0 +1,67 @@
+// A provided operation may call itself, as a function may: `countdown` calls
+// itself by dot, and `rundown` through the trait's name. `Ticks[K]` does the
+// same over a trait that takes a parameter, reached through a bound.
+trait Clock {
+    fn tick(self: Self) -> UInt8
+
+    fn countdown(self: Self, left: UInt8) -> UInt8 {
+        if left == 0 {
+            self.tick()
+        } else {
+            self.countdown(left - 1) + 1
+        }
+    }
+
+    fn rundown(self: Self, left: UInt8) -> UInt8 {
+        if left == 0 {
+            self.tick()
+        } else {
+            Clock.rundown(self, left - 1) + 1
+        }
+    }
+}
+
+trait Ticks[K] {
+    fn step(self: Self, sink value: K) -> K where carries(value)
+
+    fn done(self: Self, value: K) -> Bool
+
+    fn settle(self: Self, sink value: K) -> K where carries(value) {
+        if self.done(value) {
+            value
+        } else {
+            self.settle(self.step(value))
+        }
+    }
+}
+
+struct Timer {
+    start: UInt8,
+}
+
+impl Clock for Timer {
+    fn tick(self: Self) -> UInt8 {
+        self.start
+    }
+}
+
+impl Ticks[UInt8] for Timer {
+    fn step(self: Self, sink value: UInt8) -> UInt8 where carries(value) {
+        value + self.start
+    }
+
+    fn done(self: Self, value: UInt8) -> Bool {
+        value >= self.start * 3
+    }
+}
+
+// Reach `countdown` through a bound.
+fn through[T: Clock](clock: T) -> UInt8 {
+    clock.countdown(2)
+}
+
+fn main() -> UInt8 {
+    let timer = Timer { start = 4 }
+    // 4 + 3, 4 + 2 and 4 + 2, and 0 stepped by 4 until it reaches 12
+    timer.countdown(3) + timer.rundown(2) + through(timer) + timer.settle(0)
+}

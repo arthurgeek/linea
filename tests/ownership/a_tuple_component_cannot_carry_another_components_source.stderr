@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/a_tuple_component_cannot_carry_another_components_source.lin:4:5
+  |
+4 |     (copy(b), copy(a))
+  |     ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

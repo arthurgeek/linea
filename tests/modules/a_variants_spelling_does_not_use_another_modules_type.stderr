@@ -1,0 +1,5 @@
+error[N-Unused]: `Percent` is never used
+ --> tests/modules/a_variants_spelling_does_not_use_another_modules_type/other/other.lin:1:6
+  |
+1 | type Percent = UInt8
+  |      ^^^^^^^ name it in an annotation, or remove it

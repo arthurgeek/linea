@@ -1,0 +1,20 @@
+fn ;main() -> UInt8 {
+    let n: UInt8 = 3
+    let once: UInt8 = ;ident[UInt8](n)
+    let twice: UInt8 = ;ident[UInt8](once)
+    let other: Bool = ;ident[Bool](true)
+
+    if other {
+        twice
+    } else {
+        0
+    }
+}
+
+fn ;ident[UInt8](a: UInt8) -> UInt8 {
+    copy(a)
+}
+
+fn ;ident[Bool](a: Bool) -> Bool {
+    copy(a)
+}

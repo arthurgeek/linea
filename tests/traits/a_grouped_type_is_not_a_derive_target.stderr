@@ -1,0 +1,5 @@
+error[S-Name]: expected a type name, `()` or a tuple; `(T)` groups a type
+ --> tests/traits/a_grouped_type_is_not_a_derive_target.lin:8:22
+  |
+8 | derive[A] Marker for (A)
+  |                      ^ a derive request names its target type

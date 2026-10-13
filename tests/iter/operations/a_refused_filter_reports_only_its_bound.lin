@@ -1,0 +1,41 @@
+// `filter` drops the items its predicate rejects, so it needs them
+// Discardable, and a walk of linear tickets is refused at the `filter`. A
+// `for` over what the refused call would have made, directly or through a
+// binding, is not reported again.
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+// Tickets yields tickets for seats 1 up to `last`.
+struct Tickets {
+    issued: UInt8,
+    last: UInt8,
+}
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.issued == self.last {
+            return .None
+        }
+        self.issued += 1
+        .Some(.{ seat = self.issued })
+    }
+}
+
+fn main() -> UInt8 {
+    let tickets = Tickets { issued = 0, last = 4 }
+    var even: UInt8 = 0
+    for ticket in tickets.filter(|ticket| ticket.seat % 2 == 0) {
+        let Ticket { seat: _ } = ticket
+        even += 1
+    }
+    let kept = Tickets { issued = 0, last = 4 }.filter(|ticket| ticket.seat > 2)
+    for ticket in kept {
+        let Ticket { seat: _ } = ticket
+        even += 1
+    }
+    even
+}

@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt64`
+ --> tests/constructor_callables/constructor_rejects_incompatible_payload.lin:5:33
+  |
+5 |     let _mapped = input.map_err(Failure.Refused)
+  |                                 ^^^^^^^^^^^^^^^ expected `UInt8`, found `UInt64`
+  |                                 --------------- expected because of what this variant carries

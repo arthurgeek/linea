@@ -1,0 +1,10 @@
+error[T-Template]: this structural template is not supported
+ --> tests/construction_derive/template_arguments_follow_parameter_order.lin:5:1
+  |
+5 | template impl[A, B] Measure[B, A] {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a template applies every parameter once in declaration order to its trait, with no trailing constraints
+error[T-Template]: `Measure` declares `measure`'s `_first` as `A`, and this takes `B`
+ --> tests/construction_derive/template_arguments_follow_parameter_order.lin:6:8
+  |
+6 |     fn measure(_self: Self, _first: B, _second: A) -> UInt64 {
+  |        ^^^^^^^ take the type the signature declares

@@ -1,0 +1,37 @@
+// A trait bounded at two arguments is two bounds on one parameter, and each is
+// discharged by the implementation written at its own argument. Handing the
+// parameter to a generic bounded on the second is what reads it, so a rule
+// keying an admitted bound on the trait alone would lose whichever of the two
+// was written second.
+trait Lookup[I] {
+    fn at(self: Self, i: I) -> UInt8
+}
+
+struct Board {
+    cells: [UInt8; 4],
+}
+
+impl Lookup[UInt64] for Board {
+    fn at(self: Board, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+impl Lookup[Bool] for Board {
+    fn at(_self: Board, _i: Bool) -> UInt8 {
+        1
+    }
+}
+
+fn inner[D: Lookup[Bool]](d: D) -> UInt8 {
+    Lookup.at(d, true)
+}
+
+fn outer[C: Lookup[UInt64] + Lookup[Bool]](c: C) -> UInt8 {
+    inner(c)
+}
+
+fn main() -> UInt8 {
+    let b: Board = .{ cells = [1, 2, 3, 4] }
+    outer(b)
+}

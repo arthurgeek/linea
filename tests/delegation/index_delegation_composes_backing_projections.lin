@@ -1,0 +1,17 @@
+struct Inner {
+    values: [UInt8; 2],
+}
+
+struct Outer {
+    inner: Inner,
+}
+
+impl Index[UInt64] for Outer via inner
+
+impl Index[UInt64] for Inner via values
+
+fn main() -> UInt8 {
+    var outer: Outer = .{ inner = .{ values = [2, 3] } }
+    outer[1] += 1
+    return outer[0] + outer[1] - 6
+}

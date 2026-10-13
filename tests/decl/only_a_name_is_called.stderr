@@ -1,0 +1,5 @@
+error[N-NotCallable]: this expression has type `Int64`, which carries no callable signature
+ --> tests/decl/only_a_name_is_called.lin:5:5
+  |
+5 |     (3 + 4)()
+  |     ^^^^^^^ call a function or callable value

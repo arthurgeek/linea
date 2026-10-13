@@ -1,0 +1,19 @@
+// What a variant carries is a part, and it is held to the layout question a
+// field is held to: `Node` carries a `Wrap[Tree[T]]`, which holds a `Tree[T]`,
+// so every arm of the enum would have to contain the enum.
+struct Wrap[T] {
+    inner: T,
+}
+
+enum Tree[T] {
+    Leaf,
+    Node(T, Wrap[Tree[T]]),
+}
+
+fn _keep[T](_t: Tree[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

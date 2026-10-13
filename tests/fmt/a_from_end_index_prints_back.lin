@@ -1,0 +1,11 @@
+// The tree keeps `^k` as written, because the desugar is the checker's: the
+// formatter prints back the caret and the parentheses around what it counts.
+//
+// Written badly on purpose: the spacing inside the brackets is the formatter's
+// to settle, and the two indexes have to come back as the two that were
+// written.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    var k: UInt64 = 1
+    a[ ^2 ] + a[^( k + 1 )]
+}

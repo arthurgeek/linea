@@ -1,0 +1,53 @@
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn total(self: Self) -> UInt8 {
+        self.count
+    }
+
+    fn add(inout self: Self, amount: UInt8) -> () {
+        self.count += amount
+    }
+
+    fn next(inout self: Self) -> UInt8 {
+        self.count += 1
+        self.count
+    }
+
+    fn absorb(inout self: Self, inout other: Counter) -> () {
+        self.count += other.count
+        other.count = 0
+    }
+}
+
+fn sum(a: UInt8, b: UInt8) -> UInt8 {
+    a + b
+}
+
+struct Pair {
+    left: Counter,
+    right: Counter,
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 1 }
+    &counter.add(counter.total())
+    &counter.add(counter.count)
+    &counter.absorb(&counter)
+    // A call lending its receiver inside an argument mutates it too.
+    let _both = sum(counter.total(), &counter.next())
+
+    // Two fields of one value are two places.
+    var pair = Pair { left = Counter { count = 1 }, right = Counter { count = 2 } }
+    &pair.left.absorb(&pair.right)
+    &pair.left.add(pair.count())
+    pair.left.count
+}
+
+impl Pair {
+    fn count(self: Self) -> UInt8 {
+        self.left.count + self.right.count
+    }
+}

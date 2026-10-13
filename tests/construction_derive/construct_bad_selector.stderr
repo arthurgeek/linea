@@ -1,0 +1,10 @@
+error[T-Reflection]: select `reflect.product` or the active `reflect.case`
+  --> tests/construction_derive/construct_bad_selector.lin:14:13
+   |
+14 |             reflect.components,
+   |             ^^^^^^^^^^^^^^^^^^ this expression does not select a construction target
+error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
+  --> tests/construction_derive/construct_bad_selector.lin:32:22
+   |
+32 |     let pair: Pair = Zero.zero()
+   |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

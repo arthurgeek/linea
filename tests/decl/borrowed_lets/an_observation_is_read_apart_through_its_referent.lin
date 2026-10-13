@@ -1,0 +1,8 @@
+struct Point { x: UInt8 }
+
+fn main() -> UInt8 {
+    let point = Point { x = 31 }
+    let seen = borrow point
+    let read Point { x } = seen
+    x
+}

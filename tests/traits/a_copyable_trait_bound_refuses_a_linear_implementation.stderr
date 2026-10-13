@@ -1,0 +1,5 @@
+error[T-Bound]: `Duplicable` requires `Copyable`, and `Owned` does not have that capability
+  --> tests/traits/a_copyable_trait_bound_refuses_a_linear_implementation.lin:11:6
+   |
+11 | impl Duplicable for Owned {
+   |      ^^^^^^^^^^ use a type meeting the capability requirement, or relax the bound

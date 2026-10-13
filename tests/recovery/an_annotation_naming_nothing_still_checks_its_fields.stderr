@@ -1,0 +1,33 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:3:17
+  |
+3 | fn take(_given: Nope) -> UInt8 {
+  |                 ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+ --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:8:15
+  |
+8 |     let _one: Nope = .{
+  |               ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:14:17
+   |
+14 |     let _many: [Nope; 1] = [
+   |                 ^^^^ no type with this name is declared here
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:10:28
+   |
+10 |             let w: UInt8 = "t"
+   |                    ----- expected because of this annotation
+   |                            ^^^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:17:32
+   |
+17 |                 let v: UInt8 = "u"
+   |                        ----- expected because of this annotation
+   |                                ^^^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/recovery/an_annotation_naming_nothing_still_checks_its_fields.lin:25:32
+   |
+25 |                 let u: UInt8 = "v"
+   |                        ----- expected because of this annotation
+   |                                ^^^ expected `UInt8`, found `Str`

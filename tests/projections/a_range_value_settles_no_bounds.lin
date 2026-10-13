@@ -1,0 +1,16 @@
+// A range place's bounds are the two the bracket names, so a range that
+// arrived as a value settles nothing: there is no pair of numbers here for the
+// place's type to be read off, whatever the value holds when the program runs.
+// A binding is one way for one to arrive and a call is another, and the answer
+// is the same on either side of an assignment.
+fn mk() -> Range[UInt64] {
+    1..3
+}
+
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    let r: Range[UInt64] = 0..2
+    let head: [UInt8; 2] = copy(a[r])
+    a[mk()] = [7, 8]
+    head[0] + head[1] + a[2]
+}

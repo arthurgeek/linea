@@ -1,0 +1,8 @@
+// A `fn` type calls its value for reading, so the closure it annotates cannot
+// be declared `inout`.
+fn main() -> UInt8 {
+    let count: fn() -> UInt8 = inout [] || {
+        UInt8(1)
+    }
+    count()
+}

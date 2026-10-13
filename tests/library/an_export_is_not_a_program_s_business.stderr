@@ -1,0 +1,5 @@
+error[M-Export]: an `export` publishes a library's entry point, and this root is a program
+ --> tests/library/an_export_is_not_a_program_s_business/main.lin:1:11
+  |
+1 | export fn published(num: Int32) -> Int32 {
+  |           ^^^^^^^^^ a program is entered through `main`

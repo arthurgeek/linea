@@ -1,0 +1,18 @@
+// `_` says the programmer will not use the value. That is not the same claim
+// as that it may be discarded, and §5.5 says so in as many words. A consuming
+// `match` takes the value apart, so an arm that names none of it destroys
+// whatever the value held -- here a `Key` that is never released.
+//
+// `Has(_)` is already refused. A bare `_` matches every variant, payload and
+// all, so it must be refused for the same reason.
+@linear
+enum Box {
+    Has(Key),
+}
+
+fn main() -> UInt8 {
+    let b = Box.Has(mint(7))
+    match b {
+        _ => 0,
+    }
+}

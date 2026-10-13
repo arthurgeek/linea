@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `Str`
+ --> tests/ranges/a_combining_sequence_is_not_one_scalar.lin:7:9
+  |
+7 |         "e\u{301}"..="z" => 1,
+  |         ^^^^^^^^^^ expected `UInt8`, found `Str`
+  |         ---------- expected because of this end

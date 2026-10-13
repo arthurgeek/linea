@@ -1,0 +1,18 @@
+import std.mem
+
+fn main() -> UInt8 {
+    var number: UInt64 = 7
+    var values: Vec[borrow UInt64, mem.SystemAllocator] = Vec.new()
+    for _index in UInt64(0)..9 {
+        Vec.push(&values, borrow number).unwrap()
+    }
+    number = 8
+    let first = *values[0]
+    let last = *values[8]
+    values.release()
+    if first == 7 && last == 7 {
+        0
+    } else {
+        1
+    }
+}

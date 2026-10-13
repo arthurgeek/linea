@@ -1,0 +1,18 @@
+// A type is named with the number of arguments it declares, and a type that
+// declares none is named with none. Giving arguments to one breaks it for the
+// same reason giving too few to a generic type does: what was supplied is not
+// what the parameter list admits, so both are [T-Bound] rather than two rules
+// that would have to keep agreeing.
+struct Plain {
+    v: UInt8,
+}
+
+struct Cell[T] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let given: Plain[UInt8] = .{ v = 1 }
+    let short: Cell = .{ v = 2 }
+    given.v + short.v
+}

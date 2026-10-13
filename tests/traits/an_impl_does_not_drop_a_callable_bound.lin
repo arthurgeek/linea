@@ -1,0 +1,16 @@
+trait Apply {
+    fn run[F: fn(read value: UInt8) -> UInt8](_self: Self, _f: F) -> ()
+}
+
+struct Tag {
+    value: UInt8,
+}
+
+impl Apply for Tag {
+    fn run[F](_self: Tag, _f: F) -> () {}
+}
+
+fn main() -> UInt8 {
+    let _tag: Tag = .{ value = 0 }
+    0
+}

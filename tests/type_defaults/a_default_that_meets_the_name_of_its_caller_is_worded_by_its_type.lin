@@ -1,0 +1,10 @@
+fn rec[T: Copyable = UInt8](n: UInt8, a: T = 1) -> T where carries(a) {
+    if n == 0 {
+        return copy(a)
+    }
+    rec(n - 1)
+}
+
+fn main() -> UInt8 {
+    rec(2)
+}

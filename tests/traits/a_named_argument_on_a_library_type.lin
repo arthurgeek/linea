@@ -1,0 +1,18 @@
+// A named argument says which parameter it fills wherever the call is written,
+// and the receiver being a type the library declares changes nothing about it:
+// the name is matched against the parameters of whatever operation the postfix
+// call reaches.
+trait Pad {
+    fn pad(s: Self, width: UInt8) -> UInt8
+}
+
+impl Pad for Str {
+    fn pad(s: Str, width: UInt8) -> UInt8 {
+        UInt8(Str.length(s)) + width
+    }
+}
+
+fn main() -> UInt8 {
+    let t: Str = "abc"
+    t.pad(width: 3)
+}

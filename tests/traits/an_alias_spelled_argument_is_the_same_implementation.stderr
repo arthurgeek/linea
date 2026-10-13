@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Give` is already implemented for `Holder` with the same arguments
+  --> tests/traits/an_alias_spelled_argument_is_the_same_implementation.lin:23:6
+   |
+17 | impl Give[Cell] for Holder {
+   |      ---- already implemented here
+23 | impl Give[Spot] for Holder {
+   |      ^^^^ a trait is implemented once per arguments and type

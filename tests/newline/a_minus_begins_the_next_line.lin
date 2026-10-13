@@ -1,0 +1,10 @@
+// Read as two statements: a negation of `b`, not a subtraction from `a`. Both
+// readings are programs, which is why the parser notes the token rather than
+// choosing for the author.
+fn main() -> UInt8 {
+    let a = 3
+    let b = 1
+    a
+    -b
+    0
+}

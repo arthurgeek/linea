@@ -1,0 +1,5 @@
+// A primitive is introduced at no token: nothing declares `UInt8`, so there is
+// no declaration to change and every use of it belongs to someone else.
+fn main() -> UInt8 {
+    UInt8.max
+}

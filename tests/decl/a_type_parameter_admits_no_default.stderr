@@ -1,0 +1,5 @@
+error[T-Default]: a default cannot have the parameter type `T`
+  --> tests/decl/a_type_parameter_admits_no_default.lin:18:31
+   |
+18 | fn weighed[T: Measure](x: T = 1) -> UInt8 {
+   |                               ^ the parameter type is settled by the call

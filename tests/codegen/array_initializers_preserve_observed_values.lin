@@ -1,0 +1,64 @@
+fn prefix(n: UInt64) -> UInt64 {
+    var slots: [UInt64; 4] = [11, 12, 13, 14]
+    let count = n % 5
+    var i: UInt64 = 0
+    while i < count {
+        slots[i] = i + 1
+        i += 1
+    }
+    i = 0
+    var total: UInt64 = 0
+    while i < count {
+        total += slots[i]
+        i += 1
+    }
+    total
+}
+
+fn suffix(n: UInt64) -> UInt64 {
+    var slots: [UInt64; 4] = [11, 12, 13, 14]
+    let count = n % 4
+    var i: UInt64 = 0
+    while i < count {
+        slots[i] = i + 1
+        i += 1
+    }
+    slots[3]
+}
+
+fn prior_read(n: UInt64) -> UInt64 {
+    var slots: [UInt64; 4] = [11, 12, 13, 14]
+    let first = slots[0]
+    let count = n % 5
+    var i: UInt64 = 0
+    while i < count {
+        slots[i] = i + 1
+        i += 1
+    }
+    i = 0
+    var total: UInt64 = 0
+    while i < count {
+        total += slots[i]
+        i += 1
+    }
+    total + first
+}
+
+fn main() -> UInt8 {
+    var n: UInt64 = 0
+    while n < 20 {
+        let count = n % 5
+        let expected = count * (count + 1) / 2
+        if prefix(n) != expected {
+            return 1
+        }
+        if prior_read(n) != expected + 11 {
+            return 2
+        }
+        if suffix(n) != 14 {
+            return 3
+        }
+        n += 1
+    }
+    0
+}

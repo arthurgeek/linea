@@ -1,0 +1,15 @@
+// Outside `box_office` a `Ticket` is sold and refunded, and its seat is sealed.
+@opaque
+struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    pub fn sell(seat: UInt8) -> Ticket {
+        .{ seat = seat }
+    }
+
+    pub fn refund(self: Ticket) -> UInt8 {
+        self.seat
+    }
+}

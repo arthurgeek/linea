@@ -1,0 +1,309 @@
+import std.mem
+import std.testing
+
+// A Range holds the endpoints of lo..hi or lo..=hi and whether hi is
+// included. Empty and descending ranges are valid values.
+pub struct Range[T] {
+    lo: T,
+    hi: T,
+    /// Include hi when true. Keeping this flag permits inclusive ranges at
+    /// a type's maximum, such as 0..=255 for UInt8, without a larger endpoint.
+    inclusive: Bool,
+}
+
+derive[T: Equatable] Equatable for Range[T]
+
+derive[T: Equivalent] Equivalent for Range[T]
+
+derive[T: Debug] Debug for Range[T]
+
+derive[T: Release] Release for Range[T]
+
+// Accept any Equivalent value, so a call proves its argument's type is one.
+fn range_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
+    true
+}
+
+test fn derived_range_equality_compares_every_field() {
+    let range: Range[UInt8] = 1..4
+    let same: Range[UInt8] = 1..4
+    let inclusive: Range[UInt8] = 1..=4
+    testing.assert(range.equals(same), "equal ranges differed")?
+    testing.assert(!range.equals(inclusive), "a range ignored its inclusive field")?
+    testing.assert(range_test_accepts_equivalent(same), "Range did not derive Equivalent")?
+    .Ok(())
+}
+
+test fn derived_range_debug_renders_every_field() {
+    let range: Range[UInt8] = 1..4
+    let a = mem.system()
+    // Sixty-four bytes leave room for the complete debug text checked below.
+    var writer = testing.Recorder.of(a, 64).unwrap()
+    let wrote = range.debug(&writer).is_ok()
+    let rendered = writer.holds(r"Range { lo: 1, hi: 4, inclusive: false }")
+    writer.release()
+    testing.assert(wrote, "rendering Range failed")?
+    testing.assert(rendered, "Range.Debug did not render its fields")?
+    .Ok(())
+}
+
+test fn derived_range_release_releases_its_endpoints_in_reverse_field_order() {
+    let log = mem.ReleaseLog.open(2)
+    let range = Range[mem.ReleaseTag] { lo = log.tag(40), hi = log.tag(50), inclusive = false }
+    range.release()
+    let released = log.holds([UInt64(50), 40].as_slice())
+    log.release()
+    testing.assert(released, "derived release skipped, repeated or reordered an endpoint")?
+    .Ok(())
+}
+
+// Render the source notation: lo..hi, or lo..=hi when hi is included.
+impl[T: Display] Display for Range[T] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.lo.fmt(&w)?
+        if self.inclusive {
+            &w.write_str("..=")?
+        } else {
+            &w.write_str("..")?
+        }
+        self.hi.fmt(&w)
+    }
+}
+
+test fn a_range_displays_its_source_notation() {
+    let exclusive: Range[UInt8] = 1..4
+    let inclusive: Range[UInt8] = 0..=255
+    let descending: Range[Int64] = 3..-2
+    // The 64-byte recorder holds all three ranges and their separators.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = exclusive.fmt(&writer).is_ok() && &writer.write_str(", ").is_ok() && inclusive.fmt(&writer).is_ok() && &writer.write_str(", ").is_ok() && descending.fmt(&writer).is_ok()
+    let rendered = writer.holds("1..4, 0..=255, 3..-2")
+    writer.release()
+    testing.assert(wrote && rendered, "Range.Display changed its endpoints or inclusion")?
+    .Ok(())
+}
+
+// Iterate from lo toward hi, ascending or descending as the endpoints require.
+// lo records the next value. At an included endpoint, clear inclusive to
+// leave the empty range hi..hi; subsequent calls keep returning None.
+// This avoids stepping beyond the type's minimum or maximum.
+// Ordered makes every pair of endpoints comparable. Copyable permits copying
+// each yielded value while the range retains its position.
+impl[T: Ordered + Steppable + Copyable] Iterator for Range[T] {
+    type Item = T
+
+    fn next(inout self: Self) -> Option[T] {
+        // lo < hi guarantees that a forward step cannot exceed the maximum.
+        if self.lo.less(self.hi) {
+            let out = copy(self.lo)
+            self.lo = self.lo.forward()
+            return .Some(out)
+        }
+
+        // lo > hi guarantees that a backward step cannot pass the minimum.
+        if self.hi.less(self.lo) {
+            let out = copy(self.lo)
+            self.lo = self.lo.backward()
+            return .Some(out)
+        }
+
+        // Yield the included endpoint once, then leave an empty range.
+        if self.inclusive && self.lo.equals(self.hi) {
+            self.inclusive = false
+            return .Some(copy(self.lo))
+        }
+
+        .None
+    }
+}
+
+// Folding the digits into one number checks their order as well as membership.
+test fn a_range_yields_its_values_in_order_and_then_nothing() {
+    var r: Range[UInt8] = 1..4
+
+    var seen: UInt8 = 0
+    var count: UInt8 = 0
+    loop {
+        match &r.next() {
+            Some(v) => {
+                // Append one decimal digit to preserve visitation order.
+                seen = seen * 10 + v
+                count = count + 1
+            },
+            None => {
+                break
+            },
+        }
+    }
+
+    testing.assert_eq(count, 3, "a range of three values yielded another number of them")?
+    testing.assert_eq(seen, 123, "a range did not yield its values in order")?
+    testing.assert(exhausted(&r), "a spent range yielded something after its end")?
+
+    .Ok(())
+}
+
+// The accumulated digits distinguish descending from ascending order.
+test fn a_descending_range_yields_its_values_downwards() {
+    var down: Range[UInt8] = 4..0
+
+    var seen: UInt16 = 0
+    var count: UInt8 = 0
+    loop {
+        match &down.next() {
+            Some(v) => {
+                // Append one decimal digit to preserve visitation order.
+                seen = seen * 10 + UInt16(v)
+                count = count + 1
+            },
+            None => {
+                break
+            },
+        }
+    }
+
+    testing.assert_eq(count, 4, "a descending range of four values yielded another number of them")?
+    testing.assert_eq(seen, 4321, "a descending range did not yield its values in order")?
+    testing.assert(exhausted(&down), "a spent descending range yielded something after its end")?
+
+    .Ok(())
+}
+
+test fn a_descending_inclusive_range_yields_the_end_it_stops_at() {
+    var down: Range[UInt8] = 2..=0
+
+    var seen: UInt16 = 0
+    var count: UInt8 = 0
+    loop {
+        match &down.next() {
+            Some(v) => {
+                // Append one decimal digit to preserve visitation order.
+                seen = seen * 10 + UInt16(v)
+                count = count + 1
+            },
+            None => {
+                break
+            },
+        }
+    }
+
+    testing.assert_eq(count, 3, "a descending inclusive range yielded the wrong number of values")?
+    testing.assert_eq(seen, 210, "a descending inclusive range did not yield its end")?
+
+    .Ok(())
+}
+
+test fn a_range_ending_at_the_smallest_value_finishes_without_stepping_past_it() {
+    var bottom: Range[UInt8] = 1..=0
+
+    match &bottom.next() {
+        Some(v) => testing.assert_eq(v, 1, "a descending range did not start at its upper end")?,
+        None => testing.assert(false, "a descending range at the bottom of its type yielded nothing")?,
+    }
+    match &bottom.next() {
+        Some(v) => testing.assert_eq(v, 0, "a descending range did not yield the value it ends at")?,
+        None => testing.assert(false, "a descending range at the bottom of its type skipped its end")?,
+    }
+    testing.assert(exhausted(&bottom), "a descending range at the bottom of its type did not finish")?
+
+    .Ok(())
+}
+
+test fn an_empty_range_yields_nothing() {
+    var empty: Range[UInt8] = 5..5
+    testing.assert(exhausted(&empty), "an empty range yielded a value")?
+
+    // Equal exclusive endpoints are empty; reversed endpoints count down.
+    var also_empty: Range[UInt8] = 5..5
+    testing.assert(exhausted(&also_empty), "an empty range yielded a value")?
+
+    // Including the shared endpoint yields one value.
+    var one: Range[UInt8] = 5..=5
+    match &one.next() {
+        Some(v) => testing.assert_eq(v, 5, "an inclusive range of one value yielded another")?,
+        None => testing.assert(false, "an inclusive range of one value yielded nothing")?,
+    }
+    testing.assert(exhausted(&one), "an inclusive range yielded its one value twice")?
+
+    .Ok(())
+}
+
+test fn an_inclusive_range_yields_the_end_an_exclusive_one_stops_before() {
+    var upto: Range[UInt8] = 1..=3
+    var last: UInt8 = 0
+    var counted: UInt8 = 0
+    loop {
+        match &upto.next() {
+            Some(v) => {
+                last = v
+                counted = counted + 1
+            },
+            None => {
+                break
+            },
+        }
+    }
+    testing.assert_eq(counted, 3, "an inclusive range yielded the wrong number of values")?
+    testing.assert_eq(last, 3, "an inclusive range did not yield the value it ends at")?
+
+    var below: Range[UInt8] = 1..3
+    var stopped: UInt8 = 0
+    var below_counted: UInt8 = 0
+    loop {
+        match &below.next() {
+            Some(v) => {
+                stopped = v
+                below_counted = below_counted + 1
+            },
+            None => {
+                break
+            },
+        }
+    }
+    testing.assert_eq(below_counted, 2, "an exclusive range yielded the wrong number of values")?
+    testing.assert_eq(stopped, 2, "an exclusive range yielded the value it stops before")?
+
+    .Ok(())
+}
+
+test fn a_range_ending_at_the_largest_value_finishes_without_stepping_past_it() {
+    // Start one below UInt8.max (255), so yielding the endpoint must not step.
+    var top: Range[UInt8] = 254..=UInt8.max
+
+    match &top.next() {
+        Some(v) => testing.assert_eq(v, 254, "a range did not start at its lower end")?,
+        None => testing.assert(false, "a range at the top of its type yielded nothing")?,
+    }
+    match &top.next() {
+        Some(v) => testing.assert_eq(v, 255, "a range did not yield the value it ends at")?,
+        None => testing.assert(false, "a range at the top of its type skipped its end")?,
+    }
+    testing.assert(exhausted(&top), "a range at the top of its type did not finish")?
+
+    .Ok(())
+}
+
+test fn a_range_walks_as_the_sequence_it_is() {
+    let r: Range[UInt8] = 7..9
+    var walking = r.iterate()
+
+    match &walking.next() {
+        Some(v) => testing.assert_eq(v, 7, "a walk of a sequence did not start where it does")?,
+        None => testing.assert(false, "a walk of a two-value sequence yielded nothing")?,
+    }
+    match &walking.next() {
+        Some(v) => testing.assert_eq(v, 8, "a walk of a sequence did not go on where it should")?,
+        None => testing.assert(false, "a walk of a two-value sequence yielded one value")?,
+    }
+    testing.assert(exhausted(&walking), "a walk of a two-value sequence went past its end")?
+
+    .Ok(())
+}
+
+// Return whether two more calls to `next` both answer None, so a spent range
+// stays spent.
+fn exhausted(inout r: Range[UInt8]) -> Bool {
+    let first = &r.next().is_none()
+    let again = &r.next().is_none()
+    first && again
+}

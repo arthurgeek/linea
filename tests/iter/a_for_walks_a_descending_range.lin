@@ -1,0 +1,18 @@
+// A range takes its direction from its ends, so a `for` over ends written the
+// other way round walks the other way. Nothing about the loop says so: the
+// range decides, exactly as it decides where a walk stops.
+//
+// Where it starts and where it finishes is what says the direction. A sum
+// would not: the same four values add to the same number either way round.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 4..0
+    var first: UInt8 = 9
+    var last: UInt8 = 9
+    for x in xs {
+        if first == 9 {
+            first = x
+        }
+        last = x
+    }
+    first * 10 + last
+}

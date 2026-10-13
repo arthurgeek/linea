@@ -1,0 +1,38 @@
+// Every argument the process was started with, one to a line.
+//
+// The count includes the executable's own path and the walk starts at one, so
+// what this prints does not depend on where the binary was written -- which is
+// what lets the same program be a case with no arguments and a command case
+// with several.
+import std.env
+import std.io
+
+use env.Args
+use env.args
+use io.IoError
+use io.println
+
+fn main() -> Result[UInt8, IoError] {
+    let a: Args = args()
+    println("count {a.count()}")?
+
+    // `while` and an index: a sequence is not something a value can be yet, so
+    // walking one is a count and a subscript.
+    var i: UInt64 = 1
+    while i < a.count() {
+        match a.at(i) {
+            Some(s) => println("[{s}]")?,
+            None => println("<none>")?,
+        }
+        i = i + 1
+    }
+
+    // One past the end, which is the answer a reader most wants stated: an
+    // index off the end is nothing, and is not a trap.
+    match a.at(a.count()) {
+        Some(_) => println("past the end is something")?,
+        None => println("past the end is nothing")?,
+    }
+
+    return .Ok(0)
+}

@@ -1,0 +1,16 @@
+// An array source selects the variant holding an array of the same element
+// type and length.
+@derive(From[[UInt8; 4]])
+enum Frame {
+    Header([UInt8; 4]),
+    Padding([UInt8; 2]),
+}
+
+fn main() -> UInt8 {
+    let bytes: [UInt8; 4] = [1, 2, 3, 4]
+    let frame: Frame = bytes.into()
+    match frame {
+        Header(header) => header[3] - 4,
+        Padding(_) => 1,
+    }
+}

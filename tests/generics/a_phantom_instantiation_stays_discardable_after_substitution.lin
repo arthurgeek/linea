@@ -1,0 +1,26 @@
+// The exemption holds at the refill as it does at the minting. `Carrier` is
+// declared above the templates it names, so its instantiations are settled
+// again once those templates are filled -- by the same rule, or the two
+// passes would disagree about the one thing they both decide: a phantom
+// argument obliges nothing, however linear the type it names.
+struct Carrier {
+    h: Handle[Box[Key]],
+}
+
+struct Handle[phantom Tag] {
+    slot: UInt8,
+}
+
+struct Box[T] {
+    v: T,
+}
+
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn main() -> UInt8 {
+    let c: Carrier = .{ h = .{ slot = 9 } }
+    c.h.slot + c.h.slot
+}

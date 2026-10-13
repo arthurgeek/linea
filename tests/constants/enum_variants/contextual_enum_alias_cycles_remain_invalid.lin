@@ -1,0 +1,13 @@
+enum Mode { Preserve, Replace }
+
+let first: Mode = second
+
+let second: Mode = first
+
+fn select(mode: Mode = first) -> UInt8 {
+    match read mode { Preserve => 0, Replace => 1 }
+}
+
+fn main() -> UInt8 {
+    select()
+}

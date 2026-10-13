@@ -1,0 +1,14 @@
+struct Holder[T] {
+    value: T,
+}
+
+alias Held[T] = Holder[T]
+alias Same[T: Equatable] = Option[T]
+
+fn main() -> UInt8 {
+    let s: Same[Held[UInt8]] = .None
+    match s {
+        Some(_) => 1,
+        None => 0,
+    }
+}

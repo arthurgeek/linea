@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"struct List { n: UInt8 }\n\nimpl List {\n    fn push(inout self: Self, value: UInt8) -> () {\n        self.n += value\n    }\n\n    fn length(self: Self) -> UInt8 {\n        self.n\n    }\n}\n\nstruct Holder { list: List }\n\nimpl Holder {\n    fn tryIt(self: Self) -> UInt8 {\n        self.list.length()\n    }\n}\n\nfn main() -> UInt8 {\n    let holder: Holder = .{ list = .{ n = 0 } }\n    holder.tryIt()\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":16,"character":18}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

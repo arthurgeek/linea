@@ -1,0 +1,9 @@
+// A default is resolved the same as any expression the declaration writes:
+// an undefined name in one is `N-Undefined`, not a value nothing ever reads.
+fn f(sink a: UInt8, b: UInt8 = zzz) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    f(1, 2)
+}

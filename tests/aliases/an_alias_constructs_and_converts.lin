@@ -1,0 +1,13 @@
+// A call on an alias is the call on the type it names: an alias of a newtype
+// constructs one, and an alias of a primitive converts to it.
+type Score = UInt8 where it in 0..=100
+
+alias Points = Score
+alias Cents = UInt64
+
+fn main() -> UInt8 {
+    let small: UInt8 = 3
+    let cents = Cents(small)
+    let Score(points) = Points(40)
+    points - UInt8(cents) - 30
+}

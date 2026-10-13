@@ -1,0 +1,8 @@
+@copyable
+struct Entry { number: UInt8 }
+
+fn main() -> UInt8 {
+    let original: Entry = .{ number = 7 }
+    let moved = original
+    original.number + moved.number
+}

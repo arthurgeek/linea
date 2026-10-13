@@ -1,0 +1,29 @@
+// A `read` lend is a view, and views share. Reading the walked value by
+// another path while the walk runs is two readers of what neither changes, so
+// nothing is refused -- and a binder that names one part of a value says
+// nothing about another part, which is why a step is compared rather than only
+// the root the path is rooted at.
+struct Pair {
+    a: UInt64,
+    b: UInt64,
+}
+
+fn main() -> UInt8 {
+    let xs: [UInt64; 3] = [1, 2, 3]
+    var t: UInt64 = 0
+    for read x in xs {
+        t += x + xs[0]
+    }
+
+    var p: Pair = .{ a = 4, b = 5 }
+    match read p {
+        Pair { a: _q, b: r } => {
+            // The binder names `p.b`, so writing `p.a` overlaps nothing it
+            // could be reading.
+            p.a = 9
+            t += r
+        },
+    }
+
+    UInt8(t + p.a)
+}

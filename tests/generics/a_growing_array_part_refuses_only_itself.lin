@@ -1,0 +1,28 @@
+// A part refused for growing is answered with poison, because resolving it is
+// the substitution that does not terminate. That answer is about the one part:
+// every other part of every other declaration is checked on its own terms, so
+// `Holds` is held to [O-Universe] here exactly as it would be with `S` absent.
+//
+// An array names nothing, so a written type is identified by where it begins
+// rather than by its head. Two array parts share no head to be confused by.
+@linear
+struct Cell {
+    v: UInt8,
+}
+
+struct S[T] {
+    v: [S[S[T]]; 1],
+}
+
+@copyable
+struct Holds {
+    c: [Cell; 1],
+}
+
+fn _look(_h: Holds) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    0
+}

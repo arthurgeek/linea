@@ -1,0 +1,7 @@
+error[T-Default]: a default is built again at every call that omits it, so `Config` must be copyable
+ --> tests/constants/aggregates/affine_callable_default.lin:5:40
+  |
+5 | fn _invoke[F: fn(read config: Config = .{ amount = 7 }) -> UInt8](callback: F) -> UInt8 {
+  |                                        ^^^^^^^^^^^^^^^ built from the parts of `Config`, which is not copyable
+  |
+  = help: mark `Config` `@copyable`

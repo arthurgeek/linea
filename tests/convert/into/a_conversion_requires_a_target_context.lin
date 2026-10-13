@@ -1,0 +1,23 @@
+struct Source { code: UInt8 }
+
+struct Narrow { code: UInt8 }
+
+struct Wide { code: UInt64 }
+
+impl From[Source] for Narrow {
+    fn from(sink source: Source) -> Narrow where carries(source) {
+        .{ code = source.code }
+    }
+}
+
+impl From[Source] for Wide {
+    fn from(sink source: Source) -> Wide where carries(source) {
+        .{ code = UInt64(source.code) }
+    }
+}
+
+fn main() -> UInt8 {
+    let source: Source = .{ code = 7 }
+    let _converted = source.into()
+    0
+}

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/maps/an_entry_observation_prevents_insertion.lin:10:5
+   |
+10 |     collections.Map.insert(&values, 2, 9).unwrap().release()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+11 |     let observed = entry.value
+   |                    ----------- the observation is still used here

@@ -1,0 +1,23 @@
+fn family[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn incomplete[U, T: Copyable + fn(read other: U) -> U](value: T) -> T {
+    copy(value)
+}
+
+@linear
+struct Token {
+    value: UInt8,
+}
+
+fn bounded[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let _incomplete: fn(read value: fn(read other: UInt8) -> UInt8) -> fn(read other: UInt8) -> UInt8 = incomplete
+    let _conflicting_result: fn(read value: UInt8) -> UInt16 = family
+    let _outside_bound: fn(read value: Token) -> Token = bounded
+    0
+}

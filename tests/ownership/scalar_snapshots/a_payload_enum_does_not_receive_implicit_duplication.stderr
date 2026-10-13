@@ -1,0 +1,7 @@
+error[O-Move]: `original` has already been moved
+ --> tests/ownership/scalar_snapshots/a_payload_enum_does_not_receive_implicit_duplication.lin:7:28
+  |
+6 |     let moved = original
+  |                 -------- it was taken here
+7 |     let first = match read original { Number(value) => value + 0, Empty => 0 }
+  |                            ^^^^^^^^ it was already taken, and a value is taken once

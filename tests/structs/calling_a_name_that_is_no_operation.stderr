@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Account` has no operation `nope`
+ --> tests/structs/calling_a_name_that_is_no_operation.lin:9:5
+  |
+9 |     a.nope()
+  |     ^^^^^^ no operation of this name is declared for this type

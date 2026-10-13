@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `nope`
+  --> tests/ownership/a_binding_of_a_rejected_place_owes_nothing.lin:16:28
+   |
+16 |     let _unnamed: Ticket = nope
+   |                            ^^^^ no binding with this name is in scope
+error[T-UnknownField]: `Ticket` has no field `row`
+  --> tests/ownership/a_binding_of_a_rejected_place_owes_nothing.lin:17:31
+   |
+17 |     let _unselected: Ticket = ticket.row
+   |                               ^^^^^^^^^^ not a field of this value

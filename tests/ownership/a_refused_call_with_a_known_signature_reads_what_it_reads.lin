@@ -1,0 +1,16 @@
+// `show` is refused, because `Ticket` is not copyable, but its signature is
+// known: it reads `ticket` and takes nothing, so `ticket` is still owned
+// where `main` ends.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn show[T: Copyable](_shown: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket.Seat(4)
+    show(ticket)
+}

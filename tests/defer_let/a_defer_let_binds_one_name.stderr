@@ -1,0 +1,5 @@
+error[S-DeferLet]: `defer let` binds one name
+  --> tests/defer_let/a_defer_let_binds_one_name.lin:16:15
+   |
+16 |     defer let Pair { left, right } = Pair { left = 1, right = 2 }
+   |               ^^^^ take the value apart with `let`, then `defer` the release of each part that needs one

@@ -1,0 +1,16 @@
+// A generic naming itself as a part holds itself at every argument, and no
+// other declaration has to be involved: the part is `Rec[T]` at the argument
+// `Rec` was given, so nothing grows and the whole of what is wrong is that the
+// value would contain one.
+struct Rec[T] {
+    a: T,
+    b: Rec[T],
+}
+
+fn _keep[T](_s: Rec[T]) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    0
+}

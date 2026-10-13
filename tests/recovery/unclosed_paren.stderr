@@ -1,0 +1,10 @@
+error[S-Expr]: expected an expression
+ --> tests/recovery/unclosed_paren.lin:3:1
+  |
+3 | }
+  | ^ this is not the start of an expression
+error[S-Paren]: unclosed `(`
+ --> tests/recovery/unclosed_paren.lin:2:5
+  |
+2 |     (1 + 
+  |     ^ this group is never closed

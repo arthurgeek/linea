@@ -1,0 +1,5 @@
+error[O-Move]: `inner` is a lend, and this takes it
+  --> tests/ownership/a_read_match_lends_a_struct_pattern/main.lin:26:47
+   |
+26 |         Holder { k: inner, n: _count } => eat(inner),
+   |                                               ^^^^^ `copy` it, or use the plain form of the construct, which does take the value

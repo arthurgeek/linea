@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt64`, found `Int64`
+ --> tests/integers/settled_by_use/a_typed_value_never_settles_another_type.lin:3:25
+  |
+3 |     let total: UInt64 = n
+  |                ------ expected because of this annotation
+  |                         ^ expected `UInt64`, found `Int64`

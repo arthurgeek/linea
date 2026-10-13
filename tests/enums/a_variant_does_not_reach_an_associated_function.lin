@@ -1,0 +1,21 @@
+// A qualified variant is a value, and a function without a receiver is
+// reached through its type, never through a value of it.
+@copyable
+enum Light {
+    Off,
+    On,
+}
+
+impl Light {
+    fn make() -> Light {
+        .On
+    }
+}
+
+fn main() -> UInt8 {
+    let x = Light.Off.make()
+    match read x {
+        Off => 1,
+        On => 2,
+    }
+}

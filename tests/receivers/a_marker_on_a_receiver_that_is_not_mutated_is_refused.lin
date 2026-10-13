@@ -1,0 +1,24 @@
+struct Counter {
+    count: UInt8,
+}
+
+impl Counter {
+    fn total(self: Self) -> UInt8 {
+        self.count
+    }
+
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+
+    fn close(sink self: Self) -> UInt8 {
+        self.count
+    }
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { count = 0 }
+    &counter.bump()
+    let total = &counter.total()
+    total + &counter.close()
+}

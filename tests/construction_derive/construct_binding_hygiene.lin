@@ -1,0 +1,57 @@
+trait Make {
+    fn make(base: UInt64) -> Self
+}
+
+impl Make for UInt64 {
+    fn make(base: UInt64) -> Self {
+        base
+    }
+}
+
+struct Holder { value: UInt64 }
+
+impl Holder {
+    fn of(value: UInt64) -> Self {
+        .{ value }
+    }
+}
+
+template impl Make where reflect.target: struct, reflect.components: Make {
+    fn make(base: UInt64) -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let seed = Holder.of(base)
+                var value = seed.value + component.ordinal
+                value += 1
+                let holder: Holder = .{ value }
+                let Holder { value } = holder
+                let callback = [value, base] || {
+                    let value = value + base
+                    let nested = [value] || value
+                    nested()
+                }
+                let computed = callback()
+                let renamed = [saved = computed] || saved
+                let field: component.Type = Make.make(renamed())
+                field
+            },
+            {
+                let _base = base
+            },
+        )
+    }
+}
+
+struct Pair { first: UInt64, second: UInt64 }
+
+derive Make for Pair
+
+fn main() -> UInt8 {
+    let pair: Pair = Make.make(10)
+    if pair.first == 21 && pair.second == 22 {
+        0
+    } else {
+        1
+    }
+}

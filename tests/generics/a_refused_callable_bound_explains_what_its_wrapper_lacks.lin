@@ -1,0 +1,27 @@
+// A bound may ask for an exact callable signature, and a refusal of one is a
+// demand like a trait's or a capability's. `make` refuses `check` for the
+// signature `F` names, and `Wrap[F]` lacks `Shout` for exactly that
+// signature, so the operation it would have supplied is not reported again.
+trait Shout {
+    fn shout(_self: Self) -> UInt8
+}
+
+struct Wrap[F] {
+    check: F,
+}
+
+impl[F: fn(value: UInt8) -> Bool] Shout for Wrap[F] {
+    fn shout(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn make[F: fn(value: UInt8) -> Bool](sink check: F) -> Wrap[F] where carries(check) {
+    .{ check = check }
+}
+
+fn main() -> UInt8 {
+    let check = |value: UInt16| value > 2
+    let wrapped = make(check)
+    wrapped.shout()
+}

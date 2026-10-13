@@ -1,0 +1,22 @@
+// A program that says something on standard error and then stops. Both go to
+// the same descriptor, so what the runtime writes to explain the trap arrives
+// after what the program wrote, and the two are one stream.
+//
+// The exit status is where that stream is recorded, because a trap is
+// explained by naming the source position it happened at and the answer is
+// what carries it. So what this case says on standard error is nothing of its
+// own: the `.err` beside it is empty, and the bytes are in the `.exit`.
+import std.io
+
+use io.eprint
+
+fn at(xs: [UInt8; 3], i: UInt8) -> UInt8 {
+    xs[i]
+}
+
+fn main() -> UInt8 {
+    let complaint: Str = "about to stop\n"
+    eprint(complaint)
+    let xs: [UInt8; 3] = [1, 2, 3]
+    at(xs, 7)
+}

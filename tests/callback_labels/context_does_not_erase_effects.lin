@@ -1,0 +1,9 @@
+fn observe(number: UInt8) -> borrow UInt8 where borrows(number) {
+    borrow number
+}
+
+fn main() -> UInt8 {
+    let _selected: fn(read value: UInt8) -> borrow UInt8 where carries() = observe
+    let _lambda: fn(read value: UInt8) -> borrow UInt8 where carries() = |entry| -> where borrows(entry) borrow entry
+    0
+}

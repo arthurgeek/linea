@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/mem/a_refusing_allocator_is_used_after_its_log_is_released.lin:9:5
+   |
+9  |     log.release()
+   |     ^^^ keep this place available until the last use of its observation
+10 |     match allocator.acquire(64) {
+   |           --------- the observation is still used here

@@ -1,0 +1,6 @@
+// A call's head may be any expression carrying a callable signature. Arithmetic
+// carries none, so saying which type is not callable stops this from compiling
+// to an answer of its own.
+fn main() -> UInt8 {
+    (3 + 4)()
+}

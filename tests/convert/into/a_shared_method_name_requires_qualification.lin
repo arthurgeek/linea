@@ -1,0 +1,25 @@
+struct Source { code: UInt64 }
+
+struct Code { value: UInt64 }
+
+trait Extract {
+    fn into(sink self: Self) -> Code
+}
+
+impl From[Source] for Code {
+    fn from(sink source: Source) -> Code where carries(source) {
+        .{ value = source.code }
+    }
+}
+
+impl Extract for Source {
+    fn into(sink self: Source) -> Code {
+        .{ value = self.code }
+    }
+}
+
+fn main() -> UInt8 {
+    let source: Source = .{ code = 7 }
+    let code: Code = source.into()
+    UInt8(code.value)
+}

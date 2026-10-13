@@ -1,0 +1,35 @@
+// `?` converts through the library's `std.From`. A trait the program
+// declares under the same name is an unrelated trait.
+trait From[T] {
+    fn from(sink source: T) -> Self
+}
+
+enum Parse {
+    Malformed,
+}
+
+enum Io {
+    Refused,
+}
+
+impl From[Parse] for Io {
+    fn from(sink _source: Parse) -> Io {
+        return .Refused
+    }
+}
+
+fn parsed() -> Result[UInt8, Parse] {
+    return .Err(.Malformed)
+}
+
+fn go() -> Result[UInt8, Io] {
+    let n = parsed()?
+    return .Ok(n)
+}
+
+fn main() -> UInt8 {
+    match go() {
+        Ok(n) => n,
+        Err(_) => 0,
+    }
+}

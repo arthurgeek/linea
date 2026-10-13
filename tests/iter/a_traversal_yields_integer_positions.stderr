@@ -1,0 +1,5 @@
+error[T-Lend]: this traversal yields `Bool`, and a position is an integer
+  --> tests/iter/a_traversal_yields_integer_positions.lin:29:22
+   |
+29 |     trav positions = once()
+   |                      ^^^^^^ a position is what a bracket is written with, and a projection is indexed by one

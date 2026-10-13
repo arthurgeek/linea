@@ -1,0 +1,10 @@
+error[T-Impl]: a default implementation requires one bare parameter head and a zero-argument trait
+ --> tests/default_implementations/a_default_requires_a_bare_parameter_head.lin:7:30
+  |
+7 | default impl[T] Selected for Box[T] {
+  |                              ^^^ use one parameter as the whole head of a zero-argument trait
+error[T-Bound]: `Selected` requires `Self` to implement it, and `Box[Bool]` does not
+  --> tests/default_implementations/a_default_requires_a_bare_parameter_head.lin:15:23
+   |
+15 |     Selected.selected(value)
+   |                       ^^^^^ implement it for that type, or reach the operation on one that does

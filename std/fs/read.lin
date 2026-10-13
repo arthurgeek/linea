@@ -1,0 +1,420 @@
+import std.mem
+import std.io
+import std.release
+import std.testing
+import std.text
+
+use io.ReadAllFailure
+
+// ReadFileError says whether opening or reading the file failed.
+@(copyable, derive(Debug, Release))
+pub enum ReadFileError {
+    Open(FsFailure),
+    Read(io.ReadAllError[io.IoError]),
+}
+
+// ReadFileReason says why reading a file failed. Reading and closing can both
+// fail, so the reason holds the open or read error and the close error
+// separately; a read that reached EOF and failed only to close has no primary
+// error.
+@(copyable, derive(Debug, Release))
+pub struct ReadFileReason {
+    primary: Option[ReadFileError],
+    close: Option[io.IoError],
+}
+
+impl ReadFileReason {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self.primary {
+            Some(error) => match read error { Open(failure) => failure.is_refusal(), Read(cause) => cause.is_refusal() },
+            None => false,
+        }
+    }
+}
+
+// A failed file read owns the bytes it read before the failure, including
+// every byte of a read that succeeded and failed only to close.
+@derive(Release)
+pub struct ReadFileFailure[A: Allocator] {
+    partial: Option[Vec[UInt8, A]],
+    reason: ReadFileReason,
+}
+
+impl Display for ReadFileError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Open(failure) => failure.fmt(&w),
+            Read(error) => error.fmt(&w),
+        }
+    }
+}
+
+// Render the read failure, then a close failure as cleanup.
+impl Display for ReadFileReason {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("file read failed")?
+        match read self.primary {
+            Some(error) => {
+                &w.write_str(": ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        match read self.close {
+            Some(error) => {
+                &w.write_str("; file cleanup: ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        .Ok(())
+    }
+}
+
+// Display renders the reason and borrows any partial bytes, which remain with
+// the caller.
+impl[A: Allocator] Display for ReadFileFailure[A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.reason.fmt(&w)
+    }
+}
+
+// Settling a failed file read releases the bytes read before the failure and
+// keeps both the read error and the close error.
+impl[A: Allocator] release.Settle for ReadFileFailure[A] {
+    type Reason = ReadFileReason
+
+    fn settle(sink self: Self) -> ReadFileReason where carries(self) {
+        let ReadFileFailure { partial, reason } = self
+        partial.release()
+        reason
+    }
+}
+
+test fn settling_a_failed_file_read_keeps_the_read_and_close_errors() {
+    var file = File { fd = -1 }
+    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    let settled = finish_file_read(file, outcome).settled()
+    let both = match settled {
+        Ok(bytes) => {
+            bytes.release()
+            false
+        },
+        Err(reason) => reason.primary.is_some() && reason.close.is_some(),
+    }
+    testing.assert(both, "settling a failed file read lost a read or close error")?
+    .Ok(())
+}
+
+// Read the file at `path` through EOF, without treating metadata as a size
+// guarantee. A file longer than `max_bytes` fails with a limit error whose
+// partial bytes run one byte past the limit. Every opened descriptor is closed
+// once, including after a read or limit failure.
+pub fn read_file[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, A], ReadFileFailure[A]] where carries(.Ok: allocator), carries(.Err.partial.Some: allocator) {
+    var file = File.open(allocator, path) else |reason| {
+        return .Err(.{ partial = .None, reason = .{ primary = .Some(.Open(reason)), close = .None } })
+    }
+    let outcome = io.read_all(allocator, &file, max_bytes)
+    finish_file_read(file, outcome)
+}
+
+test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let input = "abcde"
+    let _written = write_file(mem.system(), path, input.as_bytes(), policy: .CreateNew).unwrap()
+    match read_file(mem.system(), path, max_bytes: 3) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an oversized file read succeeded")
+        },
+        Err(failure) => {
+            let limited = match read failure.reason.primary { Some(reason) => match read reason { Read(error) => match read error { Limit => true, _ => false }, _ => false }, None => false }
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 4 && bytes[0] == 97 && bytes[3] == 100, None => false }
+            let closed = failure.reason.close.is_none()
+            failure.release()
+            testing.assert(limited && intact && closed, "file limit failure lost partial bytes or failed to close")?
+        },
+    }
+    .Ok(())
+}
+
+test fn reading_a_file_accepts_its_exact_byte_limit() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let input = "a\0á"
+    let _written = write_file(mem.system(), path, input.as_bytes(), policy: .CreateNew).unwrap()
+    defer let bytes = read_file(mem.system(), path, max_bytes: 4).unwrap()
+    testing.assert_eq(bytes.length(), UInt64(4), "reading a file changed its exact-limit length")?
+    for index in 0..bytes.length() {
+        testing.assert_eq(bytes[index], input.byte(index).unwrap(), "reading a file changed a byte")?
+    }
+    .Ok(())
+}
+
+test fn reading_a_file_allocates_its_bytes_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let _written = write_file(mem.system(), path, "green tea".as_bytes(), policy: .CreateNew).unwrap()
+    // An arena's bytes are reclaimed with the arena, so the vector is dropped.
+    let bytes = read_file(allocator, path, max_bytes: 16) else |_| {
+        return testing.assert(false, "reading a file into an arena failed")
+    }
+    testing.assert_eq(bytes.as_slice(), "green tea".as_bytes(), "reading a file into an arena changed its bytes")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), ReadFileReason] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            // Five thousand bytes outgrow the first 4096-byte read buffer.
+            defer let input = Vec.filled(mem.system(), count: 5000, value: UInt8(7)).unwrap()
+            let _written = write_file(mem.system(), path, input.as_slice(), policy: .CreateNew).unwrap()
+            let bytes = read_file(allocator, path, max_bytes: 5000).settled()?
+            bytes.release()
+            return .Ok(())
+        },
+        ReadFileReason.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing file read was reported as failing")?
+    .Ok(())
+}
+
+test fn a_file_open_failure_has_no_partial_allocation() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    match read_file(mem.system(), path, max_bytes: 8) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "a missing file was opened")
+        },
+        Err(failure) => {
+            let opening = match read failure.reason.primary { Some(reason) => match read reason { Open(_) => true, _ => false }, None => false }
+            let no_data = failure.partial.is_none()
+            let no_close = failure.reason.close.is_none()
+            failure.release()
+            testing.assert(opening && no_data && no_close, "opening failure invented data or an owned file to close")?
+        },
+    }
+    .Ok(())
+}
+
+// ReadTextError says whether reading the file or decoding it as UTF-8 failed.
+// It owns nothing: `read_text` and `read_text_in` release the bytes of either failure.
+@(copyable, derive(Debug, Release, From[ReadFileReason], From[text.Utf8Error]))
+pub enum ReadTextError {
+    Read(ReadFileReason),
+    Encoding(text.Utf8Error),
+}
+
+impl ReadTextError {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self { Read(reason) => reason.is_refusal(), Encoding(_) => false }
+    }
+}
+
+impl Display for ReadTextError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Read(reason) => reason.fmt(&w),
+            Encoding(error) => {
+                &w.write_str("file is not UTF-8: ")?
+                error.fmt(&w)
+            },
+        }
+    }
+}
+
+// Read the file at `path` as UTF-8 text, under the limits of `read_file`. A
+// read that fails, or bytes that are not UTF-8, release what was read and
+// leave only the reason.
+pub fn read_text_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -> Result[String[A], ReadTextError] where carries(.Ok: allocator) {
+    let bytes = read_file(allocator, path, max_bytes).settled()?
+    let text = String.from_bytes(bytes).settled()?
+    .Ok(text)
+}
+
+// Read the file at `path` as UTF-8 text from the system allocator. See
+// `read_text_in`.
+pub fn read_text(path: Path, max_bytes: UInt64) -> Result[String, ReadTextError] {
+    read_text_in(mem.system(), path, max_bytes)
+}
+
+test fn reading_text_decodes_the_file_as_utf8() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let _written = write_file(mem.system(), path, "café\n".as_bytes(), policy: .CreateNew).unwrap()
+    defer let text = read_text(path, max_bytes: 16).unwrap()
+    testing.assert_eq(text.view(), "café\n", "reading text changed the file's contents")?
+}
+
+test fn reading_text_names_the_offset_of_invalid_utf8() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    // The bytes are ASCII a followed by ED A0 80, which would encode the
+    // forbidden surrogate U+D800.
+    let invalid = [UInt8(97), 237, 160, 128]
+    let _written = write_file(mem.system(), path, invalid.as_slice(), policy: .CreateNew).unwrap()
+    let outcome = read_text(path, max_bytes: 16)
+    let offset = match outcome {
+        Ok(text) => {
+            text.release()
+            UInt64.max
+        },
+        Err(error) => match error {
+            Encoding(encoding) => encoding.offset,
+            Read(_) => UInt64.max,
+        },
+    }
+    testing.assert_eq(offset, UInt64(1), "invalid UTF-8 was not reported at its first bad byte")?
+}
+
+test fn reading_text_reports_a_missing_file_as_a_read_failure() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    let opening = match read_text(path, max_bytes: 16) {
+        Ok(text) => {
+            text.release()
+            false
+        },
+        Err(error) => match error {
+            Read(reason) => reason.primary.is_some(),
+            Encoding(_) => false,
+        },
+    }
+    testing.assert(opening, "a missing file was not a read failure")?
+}
+
+test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> Result[(), testing.Failure] {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let invalid = [UInt8(97), 237, 160, 128]
+    let _written = write_file(mem.system(), path, invalid.as_slice(), policy: .CreateNew).unwrap()
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        [path] |allocator| -> Result[(), ReadTextError] {
+            // Invalid text is the expected answer, and a refusal is the other
+            // acceptable one; both must leave nothing allocated.
+            match read_text_in(allocator, path, max_bytes: 16) {
+                Ok(decoded) => {
+                    decoded.release()
+                    .Err(.Encoding(text.Utf8Error { offset = 0 }))
+                },
+                Err(error) => match error {
+                    Encoding(_) => .Ok(()),
+                    Read(reason) => .Err(.Read(reason)),
+                },
+            }
+        },
+        ReadTextError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a failed text read left bytes allocated")?
+    .Ok(())
+}
+
+// Close the file and combine the close outcome with the read outcome, keeping
+// every byte that was read.
+fn finish_file_read[A: Allocator](sink file: File, sink outcome: Result[Vec[UInt8, A], io.ReadAllFailure[A, io.IoError]]) -> Result[Vec[UInt8, A], ReadFileFailure[A]] where carries(.Ok: outcome), carries(.Err.partial.Some: outcome) {
+    let closed = file.close()
+    match outcome {
+        Ok(bytes) => match closed {
+            Ok(_) => .Ok(bytes),
+            Err(reason) => .Err(.{ partial = .Some(bytes), reason = .{ primary = .None, close = .Some(reason) } }),
+        },
+        Err(failure) => {
+            let ReadAllFailure { partial: partial, reason: reason } = failure
+            let close: Option[io.IoError] = match closed { Ok(_) => .None, Err(reason) => .Some(reason) }
+            return .Err(.{ partial = partial, reason = .{ primary = .Some(.Read(reason)), close = close } })
+        },
+    }
+}
+
+test fn a_file_close_failure_returns_all_successfully_read_bytes() {
+    let bytes = Vec.filled(mem.system(), count: 3, value: UInt8(7)).unwrap()
+    let file = File { fd = -1 }
+    let outcome: Result[Vec[UInt8], io.ReadAllFailure[mem.SystemAllocator, io.IoError]] = .Ok(bytes)
+    match finish_file_read(file, outcome) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "a failed file close became success")
+        },
+        Err(failure) => {
+            let intact = match read failure.partial { Some(bytes) => bytes.length() == 3 && bytes[0] == 7 && bytes[2] == 7, None => false }
+            let read_succeeded = failure.reason.primary.is_none()
+            let close_failed = match read failure.reason.close { Some(error) => match read error.category { InvalidDescriptor => true, _ => false }, None => false }
+            failure.release()
+            testing.assert(intact && read_succeeded && close_failed, "close failure discarded bytes or invented a read error")?
+        },
+    }
+    .Ok(())
+}
+
+test fn a_file_read_failure_and_close_failure_are_both_retained() {
+    var file = File { fd = -1 }
+    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    match finish_file_read(file, outcome) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an invalid file descriptor was read successfully")
+        },
+        Err(failure) => {
+            let read_failed = match read failure.reason.primary {
+                Some(reason) => match read reason {
+                    Read(error) => match read error {
+                        Input(input) => input.stream_offset == 0 && match read input.reason.category { InvalidDescriptor => true, _ => false },
+                        _ => false,
+                    },
+                    _ => false,
+                },
+                None => false,
+            }
+            let close_failed = match read failure.reason.close { Some(error) => match read error.category { InvalidDescriptor => true, _ => false }, None => false }
+            let no_bytes = match read failure.partial { Some(bytes) => bytes.length() == 0, None => false }
+            failure.release()
+            testing.assert(read_failed && close_failed && no_bytes, "file cleanup replaced its primary read failure")?
+        },
+    }
+    .Ok(())
+}
+
+test fn a_file_read_failure_displays_its_primary_and_cleanup_reasons() {
+    var file = File { fd = -1 }
+    let outcome = io.read_all(mem.system(), &file, max_bytes: 8)
+    let failure = match finish_file_read(file, outcome) {
+        Ok(bytes) => {
+            bytes.release()
+            return testing.assert(false, "an invalid file descriptor was read successfully")
+        },
+        Err(failure) => failure,
+    }
+    let opening: ReadFileError = .Open(FsFailure.new(.InvalidPermissions))
+    // The 320-byte recorder holds both renderings and their separator.
+    var writer = testing.Recorder.of(mem.system(), 320).unwrap()
+    let wrote = failure.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok() && opening.fmt(&writer).is_ok()
+    let expected =
+        \\file read failed: input failed at stream byte 0: Read failed (InvalidDescriptor) after 0 bytes; errno 9; file cleanup: Close failed (InvalidDescriptor) after 0 bytes; errno 9
+        \\file operation failed after 0 bytes: permissions must contain only ordinary 0777 bits
+    let equal = writer.holds(expected)
+    writer.release()
+    // Display borrows the failure; its partial bytes remain to be released.
+    failure.release()
+    testing.assert(wrote && equal, "a file read failure lost a primary or cleanup reason")?
+    .Ok(())
+}

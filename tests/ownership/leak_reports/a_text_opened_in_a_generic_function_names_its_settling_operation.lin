@@ -1,0 +1,13 @@
+// `measure` takes any allocator, so the `String[A]` it opens has an allocator
+// type the function names only by its parameter. The report still names
+// `release`, which settles a string whatever allocator it holds.
+import std.mem
+
+fn measure[A: Allocator](allocator: A) -> UInt8 {
+    let line = String.new_in(allocator)
+    UInt8(line.length())
+}
+
+fn main() -> UInt8 {
+    measure(mem.system())
+}

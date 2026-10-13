@@ -1,0 +1,14 @@
+// `a` and `c` each declare an `Id`, so `Conv[a.Id]` and `Conv[c.Id]` are two
+// arguments of one trait for `Foo`, and each module's implementation answers
+// for its own.
+import a
+import c
+
+use c.Conv
+
+fn main() -> UInt8 {
+    let foo: a.Foo = .{ n = 4 }
+    let first: a.Id = .{ n = 2 }
+    let second: c.Id = .{ n = 3 }
+    Conv.conv(foo, first) + Conv.conv(foo, second)
+}

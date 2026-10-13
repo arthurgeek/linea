@@ -1,0 +1,5 @@
+error[S-Lambda]: expected a capture list after the invocation mode
+ --> tests/closure_captures/invocation_mode_requires_capture_list.lin:2:20
+  |
+2 |     let get = read || 0
+  |                    ^^ write `[]` for an empty capture list

@@ -1,0 +1,31 @@
+// A bound constrains what may be supplied, and a body is checked once under
+// what the bound promised. An argument the bound does not admit makes that one
+// check wrong for this instantiation: a `[T: Copyable]` body may copy and may
+// drop, so a Linear argument is duplicated and leaked with nothing to say so.
+//
+// [T-Bound] was the argument count and nothing else. The bound was parsed,
+// its name was checked, and then it was dropped -- so this program compiled
+// and consumed one `Key` twice.
+@linear
+enum Key {
+    Forged(UInt8),
+}
+
+fn twin[T: Copyable](x: T) -> T {
+    copy(x)
+}
+
+fn drop_it[T: Discardable](sink _x: T) -> UInt8 {
+    0
+}
+
+struct Held[T: Discardable] {
+    v: T,
+}
+
+fn main() -> UInt8 {
+    let k: Key = .Forged(1)
+    let _kept: Held[Key] = .{ v = Key.Forged(2) }
+    let _copy: Key = twin(k)
+    drop_it(Key.Forged(3))
+}

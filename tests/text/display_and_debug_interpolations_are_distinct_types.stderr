@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `{interpolation UInt8:?}`, found `{interpolation UInt8}`
+ --> tests/text/display_and_debug_interpolations_are_distinct_types.lin:8:9
+  |
+6 |         "{x:?}"
+  |         ------- expected because of this arm
+8 |         "{x}"
+  |         ^^^^^ expected `{interpolation UInt8:?}`, found `{interpolation UInt8}`

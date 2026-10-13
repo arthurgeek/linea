@@ -1,0 +1,12 @@
+// The value written after `in` sits in a consuming position, so the loop takes
+// it and nothing after the loop may name it. Nothing about the loop decides
+// that: a value written where a walk begins is a value the walk takes, which
+// is the rule a `let` initialiser and a `match` scrutinee already answer to.
+fn main() -> UInt8 {
+    let xs: Range[UInt8] = 0..5
+    var total: UInt8 = 0
+    for x in xs {
+        total += x
+    }
+    total + xs.lo
+}

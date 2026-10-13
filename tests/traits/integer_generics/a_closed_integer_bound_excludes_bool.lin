@@ -1,0 +1,7 @@
+fn accept[T: Integer](_value: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    accept(true)
+}

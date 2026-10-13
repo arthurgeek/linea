@@ -1,0 +1,25 @@
+struct Envelope[UInt8] {
+    v: UInt8,
+}
+
+struct Envelope[Bool] {
+    v: Bool,
+}
+
+fn ;main() -> UInt8 {
+    let a: Envelope[UInt8] = .{ v = 3 }
+    let b: Envelope[Bool] = .{ v = true }
+    if Envelope[Bool];;Innermost[Bool].of(b) {
+        Envelope[UInt8];;Innermost[UInt8].of(a) + 10
+    } else {
+        Envelope[UInt8];;Innermost[UInt8].of(a)
+    }
+}
+
+fn Envelope[Bool];;Innermost[Bool].of(x: Envelope[Bool]) -> Bool {
+    x.v
+}
+
+fn Envelope[UInt8];;Innermost[UInt8].of(x: Envelope[UInt8]) -> UInt8 {
+    x.v
+}

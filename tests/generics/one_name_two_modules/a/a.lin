@@ -1,0 +1,8 @@
+@copyable
+pub struct Thing {
+    v: UInt8,
+}
+
+pub fn make() -> Thing {
+    .{ v = 1 }
+}

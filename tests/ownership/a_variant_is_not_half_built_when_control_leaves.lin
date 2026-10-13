@@ -1,0 +1,28 @@
+// A variant payload is the third construct that takes several values and
+// completes as one. `d` is in the payload and the variant is never built.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+@linear
+enum Holder {
+    Both(Key, Key),
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn go(sink d: Key) -> UInt8 {
+    let h: Holder = Holder.Both(d, return 7)
+    match h {
+        Both(one, two) => use2(one, two),
+    }
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 })
+}

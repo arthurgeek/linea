@@ -1,0 +1,9 @@
+error[O-Leak]: `h.k` (a linear `Key`) is still owned when this write replaces it
+  --> tests/ownership/a_write_over_a_linear_field/main.lin:21:5
+   |
+19 |     var h: Holder = .{ k = mint(7), n = 1 }
+   |         - acquired here
+21 |     h.k = j
+   |     ^^^ this write drops the old value
+   |
+   = help: settle what this part holds before writing over it

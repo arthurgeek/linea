@@ -1,0 +1,5 @@
+error[T-Bound]: `Item` takes 0 type argument(s), and was given 1
+  --> tests/construction_derive/selection_member_takes_no_arguments.lin:12:16
+   |
+12 |     let value: Wrapper[UInt8].Item[UInt8] = 7
+   |                ^^^^^^^^^^^^^^^^^^^ this type takes no arguments

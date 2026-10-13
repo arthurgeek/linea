@@ -1,0 +1,34 @@
+error[O-Move]: `k` has already been moved
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:18:13
+   |
+18 |         eat(k)
+   |             ^ it was already taken, and a value is taken once
+error[O-Move]: `k` has already been moved
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:24:13
+   |
+18 |         eat(k)
+   |             - it was taken here
+24 |     release(k)
+   |             ^ it was already taken, and a value is taken once
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:17:5
+   |
+17 |     while (if n == 0 {
+   |     ^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
+error[O-Move]: `k` has already been moved
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:31:25
+   |
+31 |     while n == 0 && eat(k) {
+   |                         ^ it was already taken, and a value is taken once
+error[O-Move]: `k` has already been moved
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:34:13
+   |
+31 |     while n == 0 && eat(k) {
+   |                         - it was taken here
+34 |     release(k)
+   |             ^ it was already taken, and a value is taken once
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/ownership/a_consume_in_a_branching_loop_condition/main.lin:31:5
+   |
+31 |     while n == 0 && eat(k) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

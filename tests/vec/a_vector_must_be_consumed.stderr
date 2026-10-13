@@ -1,0 +1,9 @@
+error[O-Leak]: `values` (a linear `Vec[Token, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/vec/a_vector_must_be_consumed.lin:13:9
+   |
+13 |     var values: Vec[Token, mem.SystemAllocator] = Vec.new()
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+18 | }
+   | - the block ends here
+   |
+   = help: settle it first with `values.release()`

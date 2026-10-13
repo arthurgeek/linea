@@ -1,0 +1,13 @@
+// The `;` here is doing work. Without it the next line opens with `-`, which
+// could have continued the expression above, and the parser notes that. The
+// separator is the only way to say which reading was meant, so deleting it
+// would leave a note the author has no way to answer -- and would put it back
+// on every save.
+fn refund(paid: Int64) -> Int64 {
+    let owed = paid - 10;
+    -owed
+}
+
+fn main() -> UInt8 {
+    UInt8.try_from(refund(3)).unwrap_or(0)
+}

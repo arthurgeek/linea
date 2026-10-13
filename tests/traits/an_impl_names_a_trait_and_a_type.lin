@@ -1,0 +1,36 @@
+// An `impl` names one thing or two. `impl Account { … }` declares what the
+// type itself can do, and its members belong to the type's namespace.
+// `impl Measure for Account { … }` says the type satisfies a trait, and its
+// members belong to the trait's.
+//
+// Both forms sit here so the case fails if reading one ever changes how the
+// other is read: the parser cannot know which it has until it sees whether a
+// `for` follows the first name.
+//
+// Nothing else names `Measure`, and it is not reported unused: an
+// implementation names the trait it implements, exactly as an annotation names
+// the type it mentions.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Account {
+    pub fn opened(balance: UInt8) -> Account {
+        .{ balance = balance }
+    }
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Account = Account.opened(7)
+    a.balance
+}

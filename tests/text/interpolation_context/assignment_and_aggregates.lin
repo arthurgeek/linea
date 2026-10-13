@@ -1,0 +1,13 @@
+struct Message {
+    text: Str,
+}
+
+fn main() -> UInt8 {
+    var text: Str = "plain"
+    text = "hello {1}"
+    let _read = text
+    let _message: Message = .{ text = "hello {2}" }
+    let _texts: [Str; 1] = ["hello {3}"]
+    let _optional: Option[Str] = .Some("hello {4}")
+    0
+}

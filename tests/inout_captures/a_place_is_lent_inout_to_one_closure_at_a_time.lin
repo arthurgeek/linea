@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    var once = inout [inout count] || {
+        count += 1
+    }
+    var twice = inout [inout count] || {
+        count += 2
+    }
+    &once()
+    &twice()
+    count
+}

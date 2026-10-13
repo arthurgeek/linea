@@ -1,0 +1,24 @@
+error[T-UnknownParameter]: `Mix` declares no parameter `r`
+  --> tests/decl/a_name_no_parameter_declares.lin:14:29
+   |
+14 |     let _mixed = Colour.Mix(r: 1)
+   |                             ^ no such parameter
+error[T-UnknownParameter]: `UInt8` declares no parameter `x`
+  --> tests/decl/a_name_no_parameter_declares.lin:15:27
+   |
+15 |     let _narrowed = UInt8(x: 3)
+   |                           ^ no such parameter
+error[T-UnknownParameter]: `add` declares no parameter `c`
+  --> tests/decl/a_name_no_parameter_declares.lin:16:16
+   |
+9  | fn add(a: UInt8, b: UInt8) -> UInt8 {
+   |    --- declared here
+16 |     add(a: 40, c: 2)
+   |                ^ no such parameter
+error[T-MissingArgument]: `b` receives no argument
+  --> tests/decl/a_name_no_parameter_declares.lin:16:5
+   |
+9  | fn add(a: UInt8, b: UInt8) -> UInt8 {
+   |                  - declared here
+16 |     add(a: 40, c: 2)
+   |     ^^^^^^^^^^^^^^^^ every parameter receives one

@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `y`
+ --> tests/diag/undefined_name.lin:2:5
+  |
+2 |     y + 1
+  |     ^ no binding with this name is in scope

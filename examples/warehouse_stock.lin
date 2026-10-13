@@ -1,0 +1,57 @@
+// Total each product's deliveries per warehouse in a hash map.
+import std.collections
+import std.hash
+import std.io
+
+// `@derive` generates equality, hashing and release from every field, so tea
+// at north and tea at south are different keys. A map key must be
+// `Equivalent` and `Hash`; with both derived, a lookup can pass any StockKey.
+@derive(Equatable, Equivalent, hash.Hash, Release)
+struct StockKey {
+    product: Str,
+    warehouse: Str,
+}
+
+struct Delivery {
+    product: Str,
+    warehouse: Str,
+    units: UInt64,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let deliveries: [Delivery; _] = [
+        .{ product = "tea", warehouse = "north", units = 12 },
+        .{ product = "tea", warehouse = "south", units = 8 },
+        .{ product = "coffee", warehouse = "north", units = 5 },
+        .{ product = "tea", warehouse = "north", units = 6 },
+    ]
+    defer var stock: collections.Map[StockKey, UInt64] = collections.Map.new()
+    for delivery in deliveries {
+        // The pattern takes the delivery apart, and its product and warehouse
+        // become the key.
+        let Delivery { product, warehouse, units } = delivery
+        let key = StockKey { product, warehouse }
+        // `merge` adds the units to an existing entry, or inserts them for a
+        // new product and warehouse. If allocation fails, the failure hands the
+        // key and units back; `settled()` releases them and keeps only why.
+        if &stock.merge(key, units, |sink current, sink added| current + added).settled().is_err() {
+            io.eprintln("could not allocate warehouse stock")
+            return .Ok(1)
+        }
+    }
+    // Lookup compares field values, so a freshly built StockKey finds the
+    // entry stored under an equal key.
+    let queries: [StockKey; _] = [
+        .{ product = "tea", warehouse = "north" },
+        .{ product = "tea", warehouse = "south" },
+        .{ product = "coffee", warehouse = "north" },
+        .{ product = "coffee", warehouse = "south" },
+    ]
+    for query in queries {
+        // `get` points at the stored count, if there is one; `map` reads it,
+        // and a product never delivered there has none.
+        let units = stock.get(query).map(|sink units| *units).unwrap_or(0)
+        io.println("{query.product} at {query.warehouse}: {units} units")?
+    }
+    .Ok(0)
+}

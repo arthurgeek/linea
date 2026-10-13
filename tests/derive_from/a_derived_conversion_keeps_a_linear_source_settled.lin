@@ -1,0 +1,22 @@
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+@derive(From[Ticket])
+enum Pending {
+    Held(Ticket),
+    Idle,
+}
+
+fn main() -> UInt8 {
+    let ticket = Ticket { number = 6 }
+    let pending: Pending = ticket.into()
+    match pending {
+        Held(held) => {
+            let Ticket { number } = held
+            number - 6
+        },
+        Idle => 1,
+    }
+}

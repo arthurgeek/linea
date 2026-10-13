@@ -1,0 +1,41 @@
+// `From` declares no receiver and `Equivalent` declares no operation, so a
+// type's own `from` or `equivalent` never meets them in a postfix call.
+// `Meters.from(x)` calls the type's own function and `From.from(x)` the
+// trait's, with no warning and no ambiguity.
+@(copyable, derive(Equatable, Equivalent))
+struct Meters {
+    value: UInt64,
+}
+
+impl Meters {
+    fn from(feet: UInt64) -> Meters {
+        Meters { value = feet * 3 / 10 }
+    }
+
+    fn equivalent(self: Meters, other: Meters) -> Bool {
+        self.value / 10 == other.value / 10
+    }
+}
+
+impl From[UInt64] for Meters {
+    fn from(sink source: UInt64) -> Meters {
+        Meters { value = source }
+    }
+}
+
+fn same[T: Equivalent](a: T, b: T) -> Bool {
+    a == b
+}
+
+fn main() -> UInt8 {
+    let converted = Meters.from(UInt64(100))
+    let taken: Meters = From.from(UInt64(30))
+    var score = UInt8(0)
+    if same(converted, taken) {
+        score = score + 1
+    }
+    if converted.equivalent(Meters { value = 35 }) {
+        score = score + 2
+    }
+    score
+}

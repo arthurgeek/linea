@@ -1,0 +1,6 @@
+error[T-Condition]: expected `Bool`, found `Int64`
+ --> tests/control/while_condition_not_bool.lin:2:11
+  |
+2 |     while 1 {}
+  |     ----- a condition must be a `Bool`
+  |           ^ expected `Bool`, found `Int64`

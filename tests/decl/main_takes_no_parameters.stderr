@@ -1,0 +1,5 @@
+error[S-Entry]: a program's `main` takes no parameters
+ --> tests/decl/main_takes_no_parameters.lin:5:9
+  |
+5 | fn main(x: UInt8) -> UInt8 {
+  |         ^ the runtime calls the entry point with none

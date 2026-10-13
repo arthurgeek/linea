@@ -1,0 +1,11 @@
+error[T-Mismatch]: expected `Vec[UInt8, UInt8]`, found `Vec[UInt8, mem.SystemAllocator]`
+ --> tests/aliases/a_generic_alias_argument_meets_its_bound.lin:6:31
+  |
+6 |     let _held: Bytes[UInt8] = Vec.new()
+  |                ----- expected because of this annotation; `Bytes` is an alias of `Vec[UInt8, UInt8]`
+  |                               ^^^^^^^^^ expected `Vec[UInt8, UInt8]`, found `Vec[UInt8, mem.SystemAllocator]`
+error[T-Bound]: `A` requires `Allocator`, and `UInt8` does not implement it
+ --> tests/aliases/a_generic_alias_argument_meets_its_bound.lin:6:16
+  |
+6 |     let _held: Bytes[UInt8] = Vec.new()
+  |                ^^^^^ implement it for that type, or drop the bound

@@ -1,0 +1,24 @@
+// [O-DeferDead]. The value is given away before the scope ends, so the
+// schedule is cancelled on the one path out and the disposal never runs.
+//
+// Said out loud for the reason [O-CopyDead] exists: a `defer` that cannot fire
+// asserts nothing, and an assertion that is always vacuous is a comment.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn take(sink k: Key) -> () {
+    let Key { n: _n } = k
+}
+
+fn go() -> UInt8 {
+    let k: Key = .{ n = 7 }
+    defer take(k)
+    take(k)
+    3
+}
+
+fn main() -> UInt8 {
+    go()
+}

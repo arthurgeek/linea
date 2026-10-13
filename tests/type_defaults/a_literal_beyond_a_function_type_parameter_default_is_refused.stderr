@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/type_defaults/a_literal_beyond_a_function_type_parameter_default_is_refused.lin:6:9
+  |
+1 | fn two[T: Copyable = UInt8](a: T) -> T where carries(a) {
+  |                             - expected because of this parameter
+6 |     two(300)
+  |         ^^^ literal is out of range for its type

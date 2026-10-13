@@ -1,0 +1,5 @@
+// An array is indexed by one integer, so a tuple is refused as an index.
+fn main() -> UInt8 {
+    let a = [1, 2]
+    a[(0, 1)]
+}

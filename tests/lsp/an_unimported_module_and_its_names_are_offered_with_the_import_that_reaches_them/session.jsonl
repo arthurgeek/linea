@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A module this file has not imported. What binds its name is the import, so\n// the module is offered with that import beside it, and each name it exports\n// is offered qualified -- the only spelling that crosses a module boundary.\nfn main() -> UInt8 {\n    0\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"main.lin"},"position":{"line":4,"character":5}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

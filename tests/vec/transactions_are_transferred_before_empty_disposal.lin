@@ -1,0 +1,55 @@
+import std.mem
+import std.io
+
+@linear
+struct Transaction {
+    number: UInt64,
+}
+
+fn commit(sink transaction: Transaction) -> () {
+    let Transaction { number: number } = transaction
+    match io.print("commit {number}\n") { Ok(_) => {}, Err(_) => {} }
+}
+
+fn rollback(sink transaction: Transaction) -> () {
+    let Transaction { number: number } = transaction
+    match io.print("rollback {number}\n") { Ok(_) => {}, Err(_) => {} }
+}
+
+fn main() -> UInt8 {
+    var values: Vec[Transaction, mem.SystemAllocator] = Vec.new()
+    let positions: Range[UInt64] = 0..3
+    for number in positions {
+        let transaction: Transaction = .{ number = number }
+        match Vec.push(&values, transaction) {
+            Ok(_) => {},
+            Err(_) => panic("push failed"),
+        }
+    }
+    values = match Vec.finish(values) {
+        Err(still_owned) => still_owned,
+        Ok(_) => panic("nonempty vector was disposed"),
+    }
+    while values.length() > 0 {
+        let position = values.length() - 1
+        match Vec.remove(&values, position) {
+            None => panic("missing transaction"),
+            Some(transaction) => {
+                if position == 1 {
+                    rollback(transaction)
+                } else {
+                    commit(transaction)
+                }
+            },
+        }
+    }
+    match Vec.remove(&values, 0) {
+        None => {},
+        Some(_) => panic("empty vector yielded a transaction"),
+    }
+    match Vec.finish(values) {
+        Ok(_) => {},
+        Err(_) => panic("empty vector was not disposed"),
+    }
+    0
+}

@@ -1,0 +1,8 @@
+// Counting back by nothing names the position past the last element wherever
+// it is written, so a count the compiler cannot settle is held to at least one
+// as well as to the length.
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    var k: UInt64 = 0
+    a[^k]
+}

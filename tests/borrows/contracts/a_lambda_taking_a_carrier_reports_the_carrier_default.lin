@@ -1,0 +1,19 @@
+// A lambda that writes no clause and takes one carrier has that carrier's
+// contract, and the report of a result from another parameter says so.
+@carrier
+struct Session {
+    user: Str,
+}
+
+fn main() -> UInt8 {
+    let pick = |session: Session, tag: Str| -> Str {
+        if session.user.length() > 0 {
+            copy(tag)
+        } else {
+            copy(tag)
+        }
+    }
+    let session = Session { user = "ada" }
+    let _picked = pick(session, "x")
+    0
+}

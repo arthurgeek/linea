@@ -1,0 +1,5 @@
+error[T-Infer]: the type of parameter `value` cannot be inferred without an expected callable type
+ --> tests/decl/a_lambda_needs_parameter_types_without_context.lin:2:20
+  |
+2 |     let identity = |value| value
+  |                    ^^^^^^^^^^^^^ write the parameter type

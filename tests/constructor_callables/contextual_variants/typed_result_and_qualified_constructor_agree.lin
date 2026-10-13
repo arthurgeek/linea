@@ -1,0 +1,15 @@
+enum RenderError { Allocation(UInt8) }
+
+fn main() -> UInt8 {
+    let first: Result[UInt8, UInt8] = .Err(7)
+    let second: Result[UInt8, UInt8] = .Err(7)
+    let inferred: Result[UInt8, RenderError] = first.map_err(.Allocation)
+    let qualified = second.map_err(RenderError.Allocation)
+    let a = match inferred { Ok(_) => UInt8(0), Err(error) => match error { Allocation(code) => code } }
+    let b = match qualified { Ok(_) => UInt8(0), Err(error) => match error { Allocation(code) => code } }
+    if a == 7 && b == a {
+        0
+    } else {
+        1
+    }
+}

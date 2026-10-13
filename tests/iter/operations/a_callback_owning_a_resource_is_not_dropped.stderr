@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Discardable`, because a value of it may be dropped without a release, and this closure captures `seen`, a `Vec[UInt64, mem.SystemAllocator]` that must be released
+  --> tests/iter/operations/a_callback_owning_a_resource_is_not_dropped.lin:10:33
+   |
+10 |     let found = (UInt64(1)..10).any(heavy)
+   |                                 ^^^ capture `seen` by `read`, or build it in memory that is dropped with its owner, such as an arena's

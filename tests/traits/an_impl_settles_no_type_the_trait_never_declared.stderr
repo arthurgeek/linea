@@ -1,0 +1,5 @@
+error[T-Impl]: `Measure` declares no `Item`
+  --> tests/traits/an_impl_settles_no_type_the_trait_never_declared.lin:14:10
+   |
+14 |     type Item = UInt8
+   |          ^^^^ declare it on the trait, or drop it

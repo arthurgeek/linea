@@ -1,0 +1,23 @@
+error[N-Unused]: `a` is never used
+  --> tests/projections/a_live_linear_element_is_not_range_written.lin:11:9
+   |
+11 |     var a: [Key; 4] = [.{ n = 1 }, .{ n = 2 }, .{ n = 3 }, .{ n = 4 }]
+   |         ^ bind it as `_` if the value is not wanted
+error[O-Leak]: `a[0..2]` (a linear `[Key; 2]`) is still owned when this write replaces it
+  --> tests/projections/a_live_linear_element_is_not_range_written.lin:13:5
+   |
+11 |     var a: [Key; 4] = [.{ n = 1 }, .{ n = 2 }, .{ n = 3 }, .{ n = 4 }]
+   |         - acquired here
+13 |     a[0..2] = pair
+   |     ^^^^^^^ this write drops the old value
+   |
+   = help: settle what this part holds before writing over it
+error[O-Leak]: `a` (a linear `[Key; 4]`) is still owned when this path leaves
+  --> tests/projections/a_live_linear_element_is_not_range_written.lin:11:9
+   |
+11 |     var a: [Key; 4] = [.{ n = 1 }, .{ n = 2 }, .{ n = 3 }, .{ n = 4 }]
+   |         ^ never settled on the path that reaches the end of this block
+15 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

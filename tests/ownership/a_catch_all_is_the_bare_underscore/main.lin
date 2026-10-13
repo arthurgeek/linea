@@ -1,0 +1,21 @@
+// `_()` is a call whose callee is `_`, and the grammar spells no such pattern:
+// a binder list holds at least one name. The parser accepted it anyway, and
+// three passes then read it as the catch-all on its text alone while the
+// fourth read the tag and did not -- so the checker closed the variant cover,
+// lowering jumped into the arm unconditionally, ownership did not ask what the
+// arm discarded, and the `Key` was gone with no diagnostic.
+//
+// The editor grammars do spell the rule and could not parse what the compiler
+// accepted, which is the drift the grammar gates exist to catch.
+@linear
+enum Box {
+    Has(Key),
+}
+
+fn main() -> UInt8 {
+    let k: Key = mint(3)
+    let b: Box = Box.Has(k)
+    match b {
+        _() => 5,
+    }
+}

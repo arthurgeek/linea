@@ -1,0 +1,5 @@
+error[N-Duplicate]: `Item` is already declared in this type
+  --> tests/traits/an_implementation_binds_an_associated_type_once.lin:18:10
+   |
+18 |     type Item = Box
+   |          ^^^^ a name is declared once

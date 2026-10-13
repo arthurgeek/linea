@@ -1,0 +1,23 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn refuse(owner: Arena[mem.SystemAllocator]) -> Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.Oom] where borrows(.Ok: owner) {
+    owner.handle().acquire(UInt64.max)
+}
+
+fn main() -> UInt8 {
+    let owner = Arena.open(system(), 64)
+    let reason = match refuse(owner) {
+        Err(reason) => reason,
+        Ok(bytes) => {
+            bytes.release()
+            owner.release()
+            return 1
+        },
+    }
+    owner.release()
+    match reason { Exhausted => 0 }
+}

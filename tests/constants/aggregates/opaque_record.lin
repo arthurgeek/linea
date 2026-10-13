@@ -1,0 +1,8 @@
+import std.fs
+
+let path: fs.Path = .{}
+
+fn main() -> UInt8 {
+    let _path = copy(path)
+    0
+}

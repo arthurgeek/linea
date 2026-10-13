@@ -1,0 +1,202 @@
+==================
+Callable invocation modes
+==================
+fn apply[R: read fn() -> UInt8, M: inout fn() -> UInt8, S: sink fn() -> UInt8](read r: R, inout m: M, sink s: S) -> UInt8 {
+    r() + &m() + s()
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (callable_type
+            (parameter_list)
+            (type_identifier))))
+      (type_parameter
+        (type_identifier)
+        (bound
+          (callable_type
+            (parameter_list)
+            (type_identifier))))
+      (type_parameter
+        (type_identifier)
+        (bound
+          (callable_type
+            (parameter_list)
+            (type_identifier)))))
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier))
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier))
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block
+      (expression_statement
+        (binary_expression
+          (binary_expression
+            (call_expression
+              (identifier)
+              (argument_list))
+            (call_expression
+              (identifier)
+              (argument_list)))
+          (call_expression
+            (identifier)
+            (argument_list)))))))
+
+==================
+Mutable invocation composes with operators and postfixes
+==================
+fn calls() -> UInt8 {
+    let first = &callback() + 1
+    assert_eq(&callback(), 1)
+    let value = &callback()?
+    let projected = &record.callback().field
+    let indexed = &callbacks[0]()
+    update(&(record.field), &items[0], &*view)
+    first + value + projected + indexed
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (let_statement
+        (identifier)
+        (binary_expression
+          (call_expression
+            (identifier)
+            (argument_list))
+          (integer_literal)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (call_expression
+              (identifier)
+              (argument_list))
+            (integer_literal))))
+      (let_statement
+        (identifier)
+        (try_expression
+          (call_expression
+            (identifier)
+            (argument_list))))
+      (let_statement
+        (identifier)
+        (field_expression
+          (call_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (argument_list))
+          (identifier)))
+      (let_statement
+        (identifier)
+        (call_expression
+          (index_expression
+            (identifier)
+            (integer_literal))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (marked_expression
+              (parenthesised_expression
+                (field_expression
+                  (identifier)
+                  (identifier))))
+            (marked_expression
+              (index_expression
+                (identifier)
+                (integer_literal)))
+            (marked_expression
+              (unary_expression
+                (identifier))))))
+      (expression_statement
+        (binary_expression
+          (binary_expression
+            (binary_expression
+              (identifier)
+              (identifier))
+            (identifier))
+          (identifier))))))
+
+==================
+A marked postfix call lends its receiver, and the mark binds to the first call
+==================
+fn calls() -> () {
+    &counter.bump()
+    &tally.counter.add(2)
+    &counters[1].bump()
+    let doubled = &counter.advance().doubled()
+    &(ticker.next)()
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (unit_type)
+    (block
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (field_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (identifier))
+          (argument_list
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (field_expression
+            (index_expression
+              (identifier)
+              (integer_literal))
+            (identifier))
+          (argument_list)))
+      (let_statement
+        (identifier)
+        (call_expression
+          (field_expression
+            (call_expression
+              (field_expression
+                (identifier)
+                (identifier))
+              (argument_list))
+            (identifier))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (parenthesised_expression
+            (field_expression
+              (identifier)
+              (identifier)))
+          (argument_list))))))

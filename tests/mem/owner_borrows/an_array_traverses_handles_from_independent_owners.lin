@@ -1,0 +1,20 @@
+import std.mem
+
+use mem.Arena
+use mem.Owner
+use mem.system
+
+fn main() -> UInt8 {
+    let first = Arena.open(system(), 64)
+    let second = Arena.open(system(), 64)
+    let handles = [first.handle(), second.handle()]
+    var total: UInt64 = 0
+    for handle in handles {
+        let bytes = handle.acquire(8).unwrap()
+        total += bytes.length()
+        bytes.release()
+    }
+    first.release()
+    second.release()
+    UInt8(total)
+}

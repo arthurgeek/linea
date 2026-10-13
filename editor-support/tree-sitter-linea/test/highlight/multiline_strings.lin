@@ -1,0 +1,11 @@
+fn letter() -> Str {
+    let body =
+        \\Dear {name} // text
+//      ^ string
+//             ^ string
+//                     ^ string
+        \\"done"
+//          ^ string
+    body
+//  ^ variable
+}

@@ -1,0 +1,42 @@
+error[N-Undefined]: undefined name `lookup`
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:37:5
+   |
+37 |     lookup(
+   |     ^^^^^^ no binding with this name is in scope
+error[T-Mismatch]: expected `UInt8`, found `Str`
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:20:19
+   |
+18 |     let outer = || -> UInt8 {
+   |                       ----- expected because of this return type
+20 |         inner() + "one"
+   |                   ^^^^^ expected `UInt8`, found `Str`
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:19:31
+   |
+19 |         let inner = || redeem(ticket)
+   |                               ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `ticket` away, so it must own it: write `sink [sink ticket]` before the parameters, which makes a closure called once
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:28:31
+   |
+28 |         let inner = || redeem(ticket)
+   |                               ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `ticket` away, so it must own it: write `sink [sink ticket]` before the parameters, which makes a closure called once
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:39:35
+   |
+39 |             let inner = || redeem(ticket)
+   |                                   ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: the closure gives `ticket` away, so it must own it: write `sink [sink ticket]` before the parameters, which makes a closure called once
+error[O-Leak]: `_spare` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/closure_captures/a_name_an_inner_closure_takes_is_not_left_owed.lin:36:9
+   |
+36 |     let _spare = Ticket.Seat(4)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+43 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

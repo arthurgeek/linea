@@ -1,0 +1,20 @@
+// `?` never gives up a value for you. A refused `push` hands the name back
+// inside its failure, and giving it up is written `.settled()`, so the
+// function returning `mem.Oom` cannot drop a `String` unseen.
+import std.mem
+
+fn remember(inout names: Vec[String, mem.SystemAllocator], sink name: String) -> Result[(), mem.Oom] {
+    &names.push(name)?
+    return .Ok({})
+}
+
+fn main() -> UInt8 {
+    var names: Vec[String, mem.SystemAllocator] = Vec.new()
+    let remembered = remember(&names, String.new())
+    names.release()
+    if remembered.is_ok() {
+        0
+    } else {
+        1
+    }
+}

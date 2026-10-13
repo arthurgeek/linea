@@ -1,0 +1,27 @@
+// A derive list names traits the way every other name is written, so where a
+// module declares its own `Release` the bare name is that trait. The standard
+// library's trait is derived through its module.
+import std.release
+
+// Returning a library book to the shelf it came from.
+trait Release {
+    fn shelf(self: Self) -> UInt8
+}
+
+@derive(release.Release)
+struct Book {
+    shelf: UInt8,
+}
+
+impl Release for Book {
+    fn shelf(self: Book) -> UInt8 {
+        self.shelf
+    }
+}
+
+fn main() -> UInt8 {
+    let book = Book { shelf = 6 }
+    let shelf = Release.shelf(book)
+    release.Release.release(book)
+    shelf
+}

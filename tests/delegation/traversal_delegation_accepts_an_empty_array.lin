@@ -1,0 +1,16 @@
+struct Board { values: [UInt8; 0] }
+
+impl Index[UInt64] for Board via values
+
+impl Board {
+    trav positions via values
+}
+
+fn main() -> UInt8 {
+    let board: Board = .{ values = [] }
+    var count: UInt8 = 0
+    for read _value in board {
+        count += 1
+    }
+    return count
+}

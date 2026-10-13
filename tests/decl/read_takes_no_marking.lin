@@ -1,0 +1,9 @@
+fn twice(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    var x: UInt8 = 1
+    x = twice(&x)
+    x
+}

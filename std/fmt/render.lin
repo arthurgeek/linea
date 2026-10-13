@@ -1,0 +1,469 @@
+import std.mem
+import std.testing
+import std.text
+
+use text.ParseError
+use text.SplitError
+use text.Utf8Error
+use text.Utf8Failure
+use text.TextError
+use mem.Owner
+
+// Render `value` with Display into a new String allocated from `allocator`.
+// The result owns its text, so it outlives any storage `value` borrows. When
+// allocation fails part way, the partial string is released and the refusal
+// is returned.
+pub fn render_owned[A: Allocator, T: Display](allocator: A, value: T) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    defer var rendered = String.new_in(allocator)
+    value.fmt(&rendered)?
+    .Ok(rendered)
+}
+
+test fn owned_rendering_formats_interpolation_values() {
+    let count: UInt64 = 3
+    let enabled = true
+    defer let rendered = render_owned(mem.system(), "count={count}, enabled={enabled}").unwrap()
+    testing.assert_eq(rendered.view(), "count=3, enabled=true", "owned interpolation rendering changed its values")?
+    .Ok(())
+}
+
+test fn owned_rendering_outlives_its_input_owner() {
+    defer let rendered = {
+        defer let source = "source á".to_owned(mem.system()).unwrap()
+        render_owned(mem.system(), source.view()).unwrap()
+    }
+    testing.assert_eq(rendered.view(), "source á", "owned rendering retained its source owner")?
+    .Ok(())
+}
+
+struct PartialRenderFixture {}
+
+impl Display for PartialRenderFixture {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("a")?
+        &w.write_str("0123456789")
+    }
+}
+
+test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
+    // The eight-byte cursor and rounded first allocation consume 16 bytes.
+    // The remaining eight cannot hold the next fragment's 16-byte reservation.
+    let arena = mem.Arena.open(mem.system(), 24)
+    let value = PartialRenderFixture {}
+    let refused = match render_owned(arena.handle(), value) {
+        Ok(rendered) => {
+            rendered.release()
+            false
+        },
+        Err(_) => true,
+    }
+    arena.release()
+    testing.assert(refused, "owned rendering ignored an allocation refusal after its first fragment")?
+    .Ok(())
+}
+
+test fn owned_rendering_allocates_its_text_from_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let count: UInt64 = 3
+    let rendered = render_owned(arena.handle(), "{count} teas").unwrap()
+    testing.assert_eq(rendered.view(), "3 teas", "owned rendering into an arena changed its text")?
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_an_owned_rendering() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), mem.Oom] {
+            let count: UInt64 = 3
+            let rendered = render_owned(allocator, "{count} teas, rendered into text long enough to grow its string twice")?
+            rendered.release()
+            return .Ok(())
+        },
+        mem.Oom.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing owned rendering was reported as failing")?
+    .Ok(())
+}
+
+impl Display for Str {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(self)
+    }
+}
+
+test fn string_display_preserves_empty_and_unicode_text() {
+    testing.assert(display_text_equals("", ""), "Str.Display changed empty text")?
+    testing.assert(display_text_equals("café 🚀", "café 🚀"), "Str.Display changed UTF-8 text")?
+    .Ok(())
+}
+
+impl Display for Bool {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        if self {
+            &w.write_str("true")
+        } else {
+            &w.write_str("false")
+        }
+    }
+}
+
+impl Debug for Bool {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.fmt(&w)
+    }
+}
+
+test fn boolean_renderers_name_both_values() {
+    testing.assert(display_text_equals(true, "true"), "Bool.Display changed true")?
+    testing.assert(display_text_equals(false, "false"), "Bool.Display changed false")?
+    testing.assert(debug_text_equals(true, "true"), "Bool.Debug changed true")?
+    testing.assert(debug_text_equals(false, "false"), "Bool.Debug changed false")?
+    .Ok(())
+}
+
+// `Never` has no values, so rendering one is unreachable. These let a type
+// such as `Option[Never]` render, where the `Never` case cannot occur.
+impl Display for Never {
+    fn fmt[W: Writer](self: Self, inout _w: W) -> Result[(), W.Error] {
+        match read self {}
+    }
+}
+
+impl Debug for Never {
+    fn debug[W: Writer](self: Self, inout _w: W) -> Result[(), W.Error] {
+        match read self {}
+    }
+}
+
+test fn an_impossible_close_error_renders_as_none() {
+    let absent: Option[Never] = .None
+    // The 16-byte recorder holds the rendered option.
+    var writer = testing.Recorder.of(mem.system(), 16).unwrap()
+    let wrote = absent.debug(&writer).is_ok()
+    let equal = writer.holds("None")
+    writer.release()
+    testing.assert(wrote && equal, "an option of Never did not render")?
+    .Ok(())
+}
+
+// Slice one UTF-8 character beginning at i, trying at most four bytes.
+// Continuation-byte offsets return None so each character is written once.
+fn character_at(s: Str, i: UInt64) -> Option[Str] where carries(.Some: s) {
+    let len = s.length()
+    let remaining = len - i
+    let width = if remaining < 4 {
+        remaining
+    } else {
+        4
+    }
+    let stop = i + width
+    var end = i + 1
+    while end <= stop {
+        match s.slice(from: i, to: end) {
+            Some(part) => return .Some(part),
+            None => end = end + 1,
+        }
+    }
+    .None
+}
+
+impl Debug for Str {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("\"")?
+
+        let span: Range[UInt64] = 0..self.length()
+        for i in span {
+            match self.byte(i) {
+                Some(b) => {
+                    // ASCII quote, backslash, LF, tab, CR and NUL require escapes.
+                    if b == 34 {
+                        &w.write_str(r#"\""#)?
+                    } else if b == 92 {
+                        &w.write_str(r"\\")?
+                    } else if b == 10 {
+                        &w.write_str(r"\n")?
+                    } else if b == 9 {
+                        &w.write_str(r"\t")?
+                    } else if b == 13 {
+                        &w.write_str(r"\r")?
+                    } else if b == 0 {
+                        &w.write_str(r"\0")?
+                    } else {
+                        match character_at(self, i) {
+                            Some(part) => &w.write_str(part)?,
+                            None => {},
+                        }
+                    }
+                },
+                None => {},
+            }
+        }
+
+        &w.write_str("\"")
+    }
+}
+
+test fn string_debug_quotes_escapes_and_preserves_utf8_scalars() {
+    testing.assert(debug_text_equals("", r#""""#), "Str.Debug changed empty text")?
+    testing.assert(debug_text_equals("café 🚀", r#""café 🚀""#), "Str.Debug split a UTF-8 scalar")?
+    testing.assert(debug_text_equals("\"\\\n\t\r\0", r#""\"\\\n\t\r\0""#), "Str.Debug changed an escape")?
+    .Ok(())
+}
+
+// Unit renders as `()`, so a whole `Result[(), E]` can be compared and reported.
+impl Debug for () {
+    fn debug[W: Writer](_self: (), inout w: W) -> Result[(), W.Error] {
+        &w.write_str("()")
+    }
+}
+
+test fn unit_debug_renders_as_empty_parentheses() {
+    testing.assert(debug_text_equals((), "()"), "Unit.Debug changed ()")?
+    let succeeded: Result[(), UInt8] = .Ok(())
+    testing.assert(debug_text_equals(succeeded, "Ok(())"), "a unit success lost its payload")?
+    .Ok(())
+}
+
+// Display writes a present value's text, and `none` when it is absent.
+impl[T: Display] Display for Option[T] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Some(v) => v.fmt(&w),
+            None => &w.write_str("none"),
+        }
+    }
+}
+
+test fn option_display_distinguishes_absence_and_renders_its_payload() {
+    let present: Option[UInt8] = .Some(37)
+    let absent: Option[UInt8] = .None
+    testing.assert(display_text_equals(present, "37"), "Option.Display changed its payload")?
+    testing.assert(display_text_equals(absent, "none"), "Option.Display changed absence")?
+    .Ok(())
+}
+
+// Display writes whichever payload a Result holds, without an Ok or Err label.
+impl[T: Display, E: Display] Display for Result[T, E] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Ok(v) => v.fmt(&w),
+            Err(e) => e.fmt(&w),
+        }
+    }
+}
+
+test fn result_display_renders_both_payloads() {
+    let ok: Result[UInt8, Str] = .Ok(42)
+    let error: Result[UInt8, Str] = .Err("refused")
+    testing.assert(display_text_equals(ok, "42"), "Result.Display changed success")?
+    testing.assert(display_text_equals(error, "refused"), "Result.Display changed failure")?
+    .Ok(())
+}
+
+type RefusingRendererWriter = UInt64
+
+// A distinctive fixture error verifies that renderers preserve the writer's
+// error value rather than replacing it with their own status.
+let renderer_refusal: UInt8 = 73
+
+impl Writer for RefusingRendererWriter {
+    type Error = UInt8
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), UInt8] where carries() {
+        let _bytes = s.length()
+        let read RefusingRendererWriter(calls) = self
+        self = RefusingRendererWriter(calls + 1)
+        .Err(renderer_refusal)
+    }
+}
+
+fn display_preserves_writer_failure[T: Display](value: T) -> Bool {
+    var writer = RefusingRendererWriter(0)
+    let failed = match value.fmt(&writer) {
+        Ok(_) => false,
+        Err(error) => error == renderer_refusal,
+    }
+    let RefusingRendererWriter(calls) = writer
+    failed && calls == 1
+}
+
+fn debug_preserves_writer_failure[T: Debug](value: T) -> Bool {
+    var writer = RefusingRendererWriter(0)
+    let failed = match value.debug(&writer) {
+        Ok(_) => false,
+        Err(error) => error == renderer_refusal,
+    }
+    let RefusingRendererWriter(calls) = writer
+    failed && calls == 1
+}
+
+test fn renderers_stop_at_the_first_writer_failure() {
+    testing.assert(display_preserves_writer_failure("text"), "Str.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure("text"), "Str.Debug wrote after failure")?
+    testing.assert(display_preserves_writer_failure(true), "Bool.Display lost a writer failure")?
+    testing.assert(debug_preserves_writer_failure(false), "Bool.Debug lost a writer failure")?
+    let present: Option[UInt8] = .Some(8)
+    let absent: Option[UInt8] = .None
+    testing.assert(display_preserves_writer_failure(present), "Option.Display lost a payload failure")?
+    testing.assert(display_preserves_writer_failure(absent), "Option.Display lost an absence failure")?
+    let ok: Result[UInt8, Str] = .Ok(8)
+    let error: Result[UInt8, Str] = .Err("no")
+    testing.assert(display_preserves_writer_failure(ok), "Result.Display lost a success payload failure")?
+    testing.assert(display_preserves_writer_failure(error), "Result.Display lost an error payload failure")?
+    .Ok(())
+}
+
+// Record Display output for an exact comparison in formatting tests.
+fn display_text_equals[T: Copyable + Display](value: T, expected: Str) -> Bool {
+    let allocator = mem.system()
+    // A 256-byte recorder holds the decimal and nested-value fixtures.
+    var writer = testing.Recorder.of(allocator, 256) else |_| {
+        return false
+    }
+    let rendered = "{value}"
+    let wrote = rendered.fmt(&writer).is_ok()
+    let equal = writer.holds(expected)
+    writer.release()
+    wrote && equal
+}
+
+// Record Debug output for an exact comparison in formatting tests.
+fn debug_text_equals[T: Copyable + Debug](value: T, expected: Str) -> Bool {
+    let allocator = mem.system()
+    // A 256-byte recorder also leaves room for quotes and structural names.
+    var writer = testing.Recorder.of(allocator, 256) else |_| {
+        return false
+    }
+    let rendered = "{value:?}"
+    let wrote = rendered.fmt(&writer).is_ok()
+    let equal = writer.holds(expected)
+    writer.release()
+    wrote && equal
+}
+
+impl Display for ParseError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Syntax(offset) => {
+                &w.write_str("invalid decimal syntax at byte ")?
+                offset.fmt(&w)
+            },
+            Overflow(offset) => {
+                &w.write_str("decimal integer overflow at byte ")?
+                offset.fmt(&w)
+            },
+            OutOfRange => &w.write_str("decimal value is out of range"),
+            TokenLimit => &w.write_str("decimal token exceeds the parse limit"),
+        }
+    }
+}
+
+impl Display for SplitError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            EmptySeparator => &w.write_str("split separator must not be empty"),
+        }
+    }
+}
+
+test fn text_errors_render_the_reason_and_byte_offset() {
+    let allocator = mem.system()
+    // The 160-byte recorder holds all five error renderings and separators.
+    var writer = testing.Recorder.of(allocator, 160).unwrap()
+    let syntax: ParseError = .Syntax(2)
+    let overflow: ParseError = .Overflow(19)
+    let separator: SplitError = .EmptySeparator
+    let written = "{syntax}; {overflow}; {separator}; {overflow:?}; {separator:?}".fmt(&writer).is_ok()
+    let rendered = writer.holds("invalid decimal syntax at byte 2; decimal integer overflow at byte 19; split separator must not be empty; Overflow(19); EmptySeparator")
+    writer.release()
+    testing.assert(written, "text errors did not fit their output")?
+    testing.assert(rendered, "text errors lost their reason or byte offset")?
+    .Ok(())
+}
+
+test fn a_nullary_parse_error_renders_its_reason() {
+    let allocator = mem.system()
+    var writer = testing.Recorder.of(allocator, 96).unwrap()
+    let out_of_range: ParseError = .OutOfRange
+    let token_limit: ParseError = .TokenLimit
+    let written = "{out_of_range}; {token_limit}".fmt(&writer).is_ok()
+    let rendered = writer.holds("decimal value is out of range; decimal token exceeds the parse limit")
+    writer.release()
+    testing.assert(written, "nullary parse errors did not fit their output")?
+    testing.assert(rendered, "nullary parse errors lost their reason")?
+    .Ok(())
+}
+
+impl[A: Allocator] Display for String[A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.view().fmt(&w)
+    }
+}
+
+impl[A: Allocator] Debug for String[A] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.view().debug(&w)
+    }
+}
+
+impl Display for Utf8Error {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("invalid UTF-8 sequence at byte ")?
+        self.offset.fmt(&w)
+    }
+}
+
+// Display renders the offset and borrows the rejected bytes.
+impl[A: Allocator] Display for Utf8Failure[A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.error.fmt(&w)
+    }
+}
+
+impl Display for TextError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Encoding(error) => error.fmt(&w),
+            Allocation(error) => error.fmt(&w),
+        }
+    }
+}
+
+test fn owned_text_renders_content_and_encoding_errors() {
+    defer let value = "á\n".to_owned(mem.system()).unwrap()
+    let allocator = mem.system()
+    // The 128-byte recorder holds raw text, its quoted form and the error message.
+    var writer = testing.Recorder.of(allocator, 128).unwrap()
+    let error = text.Utf8Error { offset = 3 }
+    value.fmt(&writer).unwrap()
+    &writer.write_str("|").unwrap()
+    value.debug(&writer).unwrap()
+    &writer.write_str("|").unwrap()
+    error.fmt(&writer).unwrap()
+    let rendered = writer.holds("á\n|\"á\\n\"|invalid UTF-8 sequence at byte 3")
+    writer.release()
+    testing.assert(rendered, "owned text formatting changed content or byte offset")?
+    .Ok(())
+}
+
+test fn a_utf8_failure_displays_its_offset_and_keeps_its_bytes() {
+    var bytes = Vec.filled(mem.system(), count: 3, value: UInt8(97)).unwrap()
+    // 255 is never valid in UTF-8.
+    bytes[2] = 255
+    let failure = match String.from_bytes(bytes) {
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "an invalid byte was accepted as UTF-8")
+        },
+        Err(failure) => failure,
+    }
+    // The 64-byte recorder holds the offset message.
+    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    let wrote = failure.fmt(&writer).is_ok()
+    let equal = writer.holds("invalid UTF-8 sequence at byte 2")
+    writer.release()
+    let intact = failure.bytes.length() == 3 && failure.bytes[2] == 255
+    failure.release()
+    testing.assert(wrote && equal, "a UTF-8 failure lost its offset")?
+    testing.assert(intact, "displaying a UTF-8 failure changed its bytes")?
+    .Ok(())
+}

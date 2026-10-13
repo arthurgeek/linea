@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/erased_closures/a_result_carries_what_the_closure_observes.lin:15:5
+   |
+15 |     scores.release()
+   |     ^^^^^^ keep this place available until the last use of its observation
+16 |     UInt8(shown.length())
+   |           ----- the observation is still used here

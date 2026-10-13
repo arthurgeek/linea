@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Echo[UInt8]` for `UInt64`
+  --> tests/construction_derive/ordinary_complete_keys_overlap.lin:11:6
+   |
+5  | impl[A: Copyable] Echo[A] for UInt64 {
+   |                   ---- the other implementation
+11 | impl Echo[UInt8] for UInt64 {
+   |      ^^^^ no instantiation may answer to two implementations of one trait

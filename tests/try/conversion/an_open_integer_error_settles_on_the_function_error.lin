@@ -1,0 +1,18 @@
+// An integer literal's type is settled by its uses. Under `?`, an error type
+// the literal left open settles on the function's error type, so no `From`
+// conversion is needed for it.
+fn fail[E](sink error: E) -> Result[UInt8, E] where carries(.Err: error) {
+    return .Err(error)
+}
+
+fn check() -> Result[UInt8, UInt16] {
+    let value = fail(300)?
+    return .Ok(value)
+}
+
+fn main() -> UInt8 {
+    match check() {
+        Ok(_) => 0,
+        Err(code) => UInt8(code - 250),
+    }
+}

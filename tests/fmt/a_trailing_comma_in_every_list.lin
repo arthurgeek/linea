@@ -1,0 +1,37 @@
+// The trailing comma is the explode marker, so every list the parser accepts
+// one in is a list a programmer can break one element per line. Four of them
+// were absent from the grammar the document publishes: a parameter list, a
+// variant's payload, a pattern's binders, and an argument list. All four are
+// here at once, which is the program the published definition could not
+// derive.
+enum Pair {
+    Both(
+        UInt8,
+        UInt8,
+    ),
+    None,
+}
+
+fn g(
+    a: UInt8,
+    b: UInt8,
+) -> UInt8 {
+    a + b
+}
+
+fn main() -> UInt8 {
+    let p: Pair = Pair.Both(
+        1,
+        2,
+    )
+    match p {
+        Both(
+            x,
+            y,
+        ) => g(
+            x,
+            y,
+        ),
+        None => 0,
+    }
+}

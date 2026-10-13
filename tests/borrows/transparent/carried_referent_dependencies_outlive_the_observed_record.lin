@@ -1,0 +1,15 @@
+@copyable
+struct Holder { item: borrow UInt8 }
+
+fn extract(view: borrow Holder) -> borrow UInt8 where carries(*view) {
+    copy(view.item)
+}
+
+fn main() -> UInt8 {
+    let number: UInt8 = 7
+    let saved = {
+        let holder: Holder = .{ item = borrow number }
+        extract(borrow holder)
+    }
+    *saved
+}

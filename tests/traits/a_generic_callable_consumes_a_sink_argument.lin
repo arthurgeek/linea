@@ -1,0 +1,19 @@
+@linear
+enum Coin {
+    Struck(UInt8),
+}
+
+fn value(sink coin: Coin) -> UInt8 {
+    match coin {
+        Struck(amount) => amount,
+    }
+}
+
+fn consume[F: fn(sink coin: Coin) -> UInt8](sink coin: Coin, f: F) -> UInt8 {
+    f(coin)
+}
+
+fn main() -> UInt8 {
+    let coin: Coin = .Struck(7)
+    consume(coin, |sink coin| value(coin))
+}

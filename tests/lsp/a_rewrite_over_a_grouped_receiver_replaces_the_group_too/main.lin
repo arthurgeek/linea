@@ -1,0 +1,35 @@
+// Two traits declare the operation, so the postfix call is [N-Ambiguous] and
+// accepting an offer replaces it with the written-out form. The range is the
+// call as it was written, which includes the parentheses around the receiver:
+// a range that began inside them would leave the opening bracket behind with
+// nothing to close it, and accepting an offer would report a rule the program
+// did not have.
+trait Measure {
+    fn weight(self: Self) -> UInt8
+}
+
+trait Weigh {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Coins {
+    n: UInt8,
+}
+
+impl Measure for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Weigh for Coins {
+    fn weight(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let coppers: Coins = .{ n = 3 }
+    let held: UInt8 = (coppers).weight()
+    held
+}

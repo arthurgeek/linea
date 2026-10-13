@@ -1,0 +1,15 @@
+import std.mem
+
+struct Record { number: UInt64 }
+
+fn main() -> UInt8 {
+    var values: Vec[Record, mem.SystemAllocator] = Vec.new()
+    Vec.push(&values, .{ number = 7 }).unwrap()
+    var iterator = values.as_slice().iterate()
+    let item = Iterator.next(&iterator).unwrap()
+    let moved = *item
+    iterator.release()
+    let _removed = Vec.remove(&values, 0).unwrap()
+    Vec.finish(values).unwrap()
+    UInt8(moved.number)
+}

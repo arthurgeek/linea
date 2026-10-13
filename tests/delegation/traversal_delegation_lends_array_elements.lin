@@ -1,0 +1,24 @@
+struct Board {
+    scores: [UInt8; 4],
+}
+
+impl Index[UInt64] for Board via scores
+
+impl Board {
+    trav positions via scores
+}
+
+fn main() -> UInt8 {
+    var board: Board = .{ scores = [1, 2, 3, 4] }
+    for inout score in board {
+        score += 1
+    }
+    if board[0] != 2 || board[1] != 3 || board[2] != 4 || board[3] != 5 {
+        return 1
+    }
+    var total: UInt8 = 0
+    for read score in board {
+        total += score
+    }
+    return total - 14
+}

@@ -1,0 +1,17 @@
+pub struct Tally {
+    total: UInt8,
+}
+
+impl Tally {
+    pub fn fresh() -> Tally {
+        Tally { total = 0 }
+    }
+
+    fn secret() -> UInt8 {
+        7
+    }
+}
+
+fn reset() -> UInt8 {
+    0
+}

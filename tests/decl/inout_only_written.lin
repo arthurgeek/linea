@@ -1,0 +1,29 @@
+// A setter. `inout_mutates.lin` reads its parameter before writing it, which
+// is what every other case here did too, so the function whose entire effect
+// is the write went untested.
+//
+// The write is the value leaving, exactly as a result leaves through the
+// return type, and the caller is what observes it. Reporting the parameter
+// unused would make this function unwritable except as `_n`, which claims the
+// value is not wanted when it is the only thing wanted.
+fn set(inout n: UInt8) -> () {
+    n = 7
+}
+
+struct Point { x: UInt8, y: UInt8 }
+
+// Through a field, where the binding is named to reach a part of it. The part
+// is what the caller reads back, so naming it is a use for the same reason.
+fn shift(inout p: Point) -> () {
+    p.x = 3
+}
+
+fn main() -> UInt8 {
+    var n: UInt8 = 0
+    set(&n)
+
+    var p: Point = .{ x = 0, y = 2 }
+    shift(&p)
+
+    n + p.x + p.y
+}

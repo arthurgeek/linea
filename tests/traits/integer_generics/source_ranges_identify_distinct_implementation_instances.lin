@@ -1,0 +1,20 @@
+trait SourceRange[S] {
+    fn maximum(target: Self, source: S) -> UInt64
+}
+
+impl[S: Integer, T: Integer] SourceRange[S] for T {
+    fn maximum(_target: T, _source: S) -> UInt64 {
+        UInt64(S.max)
+    }
+}
+
+fn main() -> UInt8 {
+    let narrow = SourceRange.maximum(UInt32(0), UInt8(0))
+    let wide = SourceRange.maximum(UInt32(0), UInt16(0))
+    let other_target = SourceRange.maximum(UInt8(0), UInt16(0))
+    if narrow == UInt64(255) && wide == UInt64(65535) && other_target == UInt64(65535) {
+        0
+    } else {
+        1
+    }
+}

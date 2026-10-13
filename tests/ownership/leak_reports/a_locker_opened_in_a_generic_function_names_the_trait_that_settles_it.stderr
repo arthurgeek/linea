@@ -1,0 +1,14 @@
+error[N-Unused]: `locker` is never used
+ --> tests/ownership/leak_reports/a_locker_opened_in_a_generic_function_names_the_trait_that_settles_it/main.lin:7:9
+  |
+7 |     let locker = vault.open(item)
+  |         ^^^^^^ bind it as `_` if the value is not wanted
+error[O-Leak]: `locker` (a linear `vault.Locker[T]`) is still owned when this path leaves
+ --> tests/ownership/leak_reports/a_locker_opened_in_a_generic_function_names_the_trait_that_settles_it/main.lin:7:9
+  |
+7 |     let locker = vault.open(item)
+  |         ^^^^^^ never settled on the path that reaches the end of this block
+9 | }
+  | - the block ends here
+  |
+  = help: settle it first with `locker.close()` after `use vault.Close`, or take it apart with `let Locker { item: _ } = locker`

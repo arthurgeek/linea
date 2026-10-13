@@ -1,0 +1,39 @@
+// A provided operation may pass a closure that captures `self` to a generic
+// function. Inside the closure, `self` still has the type the operation runs
+// at, so `self.rate()` reaches that type's implementation of `Taxed`.
+trait Taxed {
+    fn rate(self: Self) -> UInt8
+
+    fn taxed(self: Self, price: UInt8) -> UInt8 {
+        twice(price, [self] |amount| amount + self.rate())
+    }
+}
+
+fn twice[F: fn(read amount: UInt8) -> UInt8](start: UInt8, step: F) -> UInt8 {
+    step(step(start))
+}
+
+@copyable
+struct Shop {
+    tax: UInt8,
+}
+
+impl Taxed for Shop {
+    fn rate(self: Self) -> UInt8 {
+        self.tax
+    }
+}
+
+@copyable
+struct Stall {}
+
+impl Taxed for Stall {
+    fn rate(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    // 10 + 3 + 3, and 10 + 1 + 1
+    Shop { tax = 3 }.taxed(10) + Stall {}.taxed(10)
+}

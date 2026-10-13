@@ -1,0 +1,10 @@
+// An empty `[Never; 0]` is written with `Never` as its element type, so it
+// settles the element parameter `T` of `[T; 0]` as `Never`.
+fn length[T](items: [T; 0]) -> UInt64 {
+    items.length()
+}
+
+fn main() -> UInt8 {
+    let none: [Never; 0] = []
+    UInt8(length(none))
+}

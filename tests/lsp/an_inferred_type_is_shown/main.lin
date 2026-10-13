@@ -1,0 +1,17 @@
+// Three bindings carry a written type and two do not, so a hint on one of the
+// first three is as visible as a missing hint on one of the last two. The
+// array is there because its written type has no name: a reader that asked
+// whether a name was written would put a hint on the one annotation that
+// cannot be read that way.
+fn add(x: UInt8, y: UInt8) -> UInt8 {
+    x + y
+}
+
+fn main() -> UInt8 {
+    let a: UInt8 = 1
+    let b = add(a, 2)
+    let xs: [UInt8; 2] = [b, 3]
+    let first = xs[0]
+    let last: UInt8 = xs[1]
+    add(first, last)
+}

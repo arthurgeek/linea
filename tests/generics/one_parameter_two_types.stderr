@@ -1,0 +1,20 @@
+error[N-Unused]: `T` is never used
+  --> tests/generics/one_parameter_two_types.lin:11:12
+   |
+11 | fn nothing[T: Copyable](n: UInt8) -> UInt8 {
+   |            ^ name it in this declaration, or remove it
+error[N-Unused]: `b` is never used
+ --> tests/generics/one_parameter_two_types.lin:4:28
+  |
+4 | fn pick[T: Copyable](a: T, b: T) -> T where carries(a) {
+  |                            ^ name it with a leading `_` if the value is not wanted
+error[T-Mismatch]: `T` was already settled as `UInt8` here, and this is a `Bool`
+  --> tests/generics/one_parameter_two_types.lin:17:30
+   |
+17 |     let bad: UInt8 = pick(n, true)
+   |                              ^^^^ one type parameter, two types
+error[T-Infer]: nothing here says what `T` is
+  --> tests/generics/one_parameter_two_types.lin:18:24
+   |
+18 |     let worse: UInt8 = nothing(2)
+   |                        ^^^^^^^^^^ no argument determines it, and nothing expects a type of it

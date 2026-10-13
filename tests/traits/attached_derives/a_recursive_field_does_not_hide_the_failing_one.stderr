@@ -1,0 +1,7 @@
+error[T-Bound]: `release` comes from `Release`, and `Tree[Token]` does not implement it
+  --> tests/traits/attached_derives/a_recursive_field_does_not_hide_the_failing_one.lin:17:5
+   |
+17 |     tree.release()
+   |     ^^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Tree[T]` implements `Release` when `T` implements `Release`, and `Token` does not

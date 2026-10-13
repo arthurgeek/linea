@@ -1,0 +1,7 @@
+fn converted[T: Integer](_type_witness: T) -> T {
+    T(256)
+}
+
+fn main() -> UInt8 {
+    converted(UInt8(0))
+}

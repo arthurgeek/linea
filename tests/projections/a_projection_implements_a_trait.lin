@@ -1,0 +1,18 @@
+// A projection answers a projection a trait declares. What a bracket reaches
+// is the trait's member, so a projection written where no trait declares one
+// is a place nothing names.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Grid {
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

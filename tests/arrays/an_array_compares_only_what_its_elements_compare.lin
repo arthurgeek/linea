@@ -1,0 +1,11 @@
+// An array implements a comparison trait only where its element type does.
+struct Token {}
+
+fn main() -> UInt8 {
+    let first = [Token {}, Token {}]
+    let second = [Token {}, Token {}]
+    if first == second {
+        return 1
+    }
+    0
+}

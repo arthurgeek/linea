@@ -1,0 +1,10 @@
+struct Point { x: UInt8 }
+
+fn bump(inout point: Point) -> () {
+    point.x += 1
+}
+
+fn main() -> UInt8 {
+    bump(&Point { x = 1 })
+    0
+}

@@ -1,0 +1,15 @@
+struct A[T = B] {
+    value: T,
+}
+
+struct B[U = A] {
+    value: U,
+}
+
+fn _use_a(_a: A) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

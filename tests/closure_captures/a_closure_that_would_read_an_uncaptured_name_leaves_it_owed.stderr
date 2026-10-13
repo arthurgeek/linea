@@ -1,0 +1,16 @@
+error[O-Capture]: this name is not declared in the closure capture list
+  --> tests/closure_captures/a_closure_that_would_read_an_uncaptured_name_leaves_it_owed.lin:16:24
+   |
+16 |     let look = || peek(ticket)
+   |                        ^^^^^^ this name belongs to an enclosing body
+   |
+   = help: write `[ticket]` before the parameters to read it where it is, or `[sink ticket]` to move it into the closure
+error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/closure_captures/a_closure_that_would_read_an_uncaptured_name_leaves_it_owed.lin:15:9
+   |
+15 |     let ticket = Ticket.Seat(4)
+   |         ^^^^^^ never settled on the path that reaches the end of this block
+18 | }
+   | - the block ends here
+   |
+   = help: take it apart with a `match`, or give it to something that takes it

@@ -1,0 +1,18 @@
+// A generic body cannot duplicate an unbounded parameter. Its concrete
+// linear instantiation must not gain a second independently consumed value.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn dup[T](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let k: Key = .{ n = 1 }
+    let twin = dup(k)
+    let Key { n: a } = k
+    let Key { n: b } = twin
+    a + b
+}

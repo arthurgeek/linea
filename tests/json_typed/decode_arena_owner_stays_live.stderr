@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/json_typed/decode_arena_owner_stays_live.lin:10:5
+   |
+10 |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+11 |     value.release()
+   |     ----- the observation is still used here

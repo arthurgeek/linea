@@ -1,0 +1,23 @@
+// And for nothing else. A type an implementation settles that its trait never
+// declared is named by neither namespace: not the trait's, which has no such
+// name, and not the type's, because a trait implementation's members are the
+// trait's.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Counter {
+    type Item = UInt8
+
+    fn of(x: Self) -> UInt8 {
+        x.at
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,30 @@
+==================
+A walk lent the iterator it advances
+==================
+fn main() -> UInt8 {
+    for reading in &pending {
+        total += reading
+    }
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (parameter_list)
+    return_type: (type_identifier)
+    body: (block
+      (block_statement
+        (for_expression
+          binder: (identifier)
+          sequence: (marked_expression
+            (identifier))
+          (block
+            (expression_statement
+              (assignment_expression
+                (identifier)
+                (identifier))))))
+      (expression_statement
+        (integer_literal)))))

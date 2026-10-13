@@ -1,0 +1,12 @@
+fn upper[T: Integer](_type_witness: T) -> T {
+    let value: T = 127
+    value
+}
+
+fn main() -> UInt8 {
+    if upper(Int8(0)) == Int8(127) && upper(UInt64(0)) == UInt64(127) {
+        0
+    } else {
+        1
+    }
+}

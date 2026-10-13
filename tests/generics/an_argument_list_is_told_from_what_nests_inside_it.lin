@@ -1,0 +1,57 @@
+// A symbol says what a name was instantiated with, and there are three shapes
+// it has to tell apart: a list of two arguments, a list of one holding another
+// list, and two lists side by side. A separator that does not nest cannot say
+// which of them it is looking at -- `g.X.Y` is `g[X,Y]` and `g[X[Y]]` alike --
+// so the spelling carries the shape in its delimiters instead.
+//
+// Every instantiation below is called, so every symbol is emitted rather than
+// merely computed. Two that came to one name would be two definitions of one
+// symbol, which the module verifier refuses and the assembler answers for; the
+// `.mlir` golden beside this records the six as they are spelled, so a scheme
+// that stopped distinguishing them moves it.
+struct Wrap[T] {
+    held: T,
+}
+
+// A list of two, and a list of one. Written over the same types so the two
+// spellings differ only in where the nesting sits.
+fn two[A: Discardable, B: Discardable](sink _a: A, sink _b: B) -> UInt8 {
+    1
+}
+
+fn one[T: Discardable](sink _t: T) -> UInt8 {
+    2
+}
+
+// Two lists side by side: the head carries its own, and the member carries
+// another. An inherent `impl` generic over its head is one member per
+// receiver, so the head alone would spell one symbol for all of them.
+impl[T: Discardable] Wrap[T] {
+    fn mix[U: Discardable](sink _self: Wrap[T], sink _other: U) -> UInt8 {
+        4
+    }
+}
+
+fn main() -> UInt8 {
+    let w2: Wrap[UInt8] = .{ held = 2 }
+    let w3: Wrap[UInt8] = .{ held = 3 }
+    let w5: Wrap[UInt8] = .{ held = 5 }
+    let w6: Wrap[Wrap[UInt8]] = .{ held = .{ held = 6 } }
+    let w7: Wrap[UInt8] = .{ held = 7 }
+    let w9: Wrap[Wrap[UInt8]] = .{ held = .{ held = 9 } }
+    let w10: Wrap[UInt8] = .{ held = 10 }
+
+    // The same types, nested on opposite sides of one list.
+    let a: UInt8 = two(1, w2)
+    let b: UInt8 = two(w3, 4)
+
+    // A list of one holding a list, and one holding two levels of them.
+    let c: UInt8 = one(w5)
+    let d: UInt8 = one(w6)
+
+    // And the two-list shape, at two different receivers.
+    let e: UInt8 = Wrap.mix(w7, 8)
+    let f: UInt8 = Wrap.mix(w9, w10)
+
+    a + b + c + d + e + f
+}

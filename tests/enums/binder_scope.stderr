@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `n`
+ --> tests/enums/binder_scope.lin:8:5
+  |
+8 |     n
+  |     ^ no binding with this name is in scope

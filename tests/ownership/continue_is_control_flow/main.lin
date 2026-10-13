@@ -1,0 +1,17 @@
+// `continue` leaves the rest of the body unrun and goes back to the loop head,
+// so a value minted before it and released after it is not released on that
+// path. The ownership graph has to see the jump: grouping it with the literals
+// -- tokens that produce a value and change nothing -- made the graph believe
+// execution falls through, and the leak was accepted.
+fn main() -> UInt8 {
+    var n: UInt8 = 0
+    loop {
+        let k = mint(7)
+        n = n + 1
+        if n == 1 {
+            continue
+        }
+        release(k)
+        break 0
+    }
+}

@@ -1,0 +1,6 @@
+Point { x: 1, y: raw }
+None
+Some("debug")
+Meters(7)
+Empty
+Pair(2, raw)

@@ -1,0 +1,4 @@
+program decls=1
+  decl function "main" tokens 0..8
+    returns UInt8
+    expr %0 block tokens 6..8

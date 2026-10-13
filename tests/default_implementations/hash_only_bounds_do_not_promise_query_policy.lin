@@ -1,0 +1,25 @@
+trait Required {}
+
+trait Queryable {
+    fn accepts(self: Self) -> Bool
+}
+
+default impl[T: Required] Queryable for T {
+    fn accepts(_self: T) -> Bool {
+        true
+    }
+}
+
+impl Required for Bool {}
+
+fn ask[T: Required](value: T) -> Bool {
+    Queryable.accepts(value)
+}
+
+fn main() -> UInt8 {
+    if ask(false) {
+        0
+    } else {
+        1
+    }
+}

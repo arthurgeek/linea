@@ -1,0 +1,7 @@
+pub struct Counter {
+    count: UInt8,
+}
+
+pub fn start() -> Counter {
+    .{ count = 1 }
+}

@@ -1,0 +1,2 @@
+@opaque
+enum Error { Allocation(UInt8) }

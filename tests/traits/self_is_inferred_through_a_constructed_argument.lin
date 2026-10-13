@@ -1,0 +1,20 @@
+// The argument supplies `Self` through `Option[Self]`; inference follows the
+// constructor and selects the implementation for its contained type.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(_b: Option[Self]) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(_b: Option[Self]) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let o: Option[Account] = .Some(.{ balance = 4 })
+    Measure.of(o)
+}

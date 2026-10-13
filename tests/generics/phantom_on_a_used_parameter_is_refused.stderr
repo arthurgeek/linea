@@ -1,0 +1,5 @@
+error[T-Phantom]: `T` appears in this declaration, and `phantom` says it appears nowhere
+ --> tests/generics/phantom_on_a_used_parameter_is_refused.lin:4:20
+  |
+4 | struct Box[phantom T] {
+  |                    ^ remove `phantom`: the parameter carries bytes

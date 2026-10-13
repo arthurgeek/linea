@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A `use` path names a module with a token rather than an expression, and the\n// qualified call below names the same module as one.\n// The import that bound it and both are places this module is used.\nimport sizes\n\nuse sizes.Width\n\nfn main() -> UInt8 {\n    let w: Width = .{ of = 2 }\n    sizes.twice(w.of)\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sizes/sizes.lin","languageId":"linea","version":1,"text":"pub struct Width {\n    of: UInt8,\n}\n\npub fn twice(n: UInt8) -> UInt8 {\n    n * 2\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":5,"character":5}}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}

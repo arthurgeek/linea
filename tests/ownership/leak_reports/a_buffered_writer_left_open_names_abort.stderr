@@ -1,0 +1,9 @@
+error[O-Leak]: `_kept` (a linear `io.BufferedWriter[io.Descriptor, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/ownership/leak_reports/a_buffered_writer_left_open_names_abort.lin:10:17
+   |
+10 |             let _kept = output
+   |                 ^^^^^ never settled on the path that reaches the end of this block
+12 |         },
+   |         - the block ends here
+   |
+   = help: settle it first with `_kept.abort()`

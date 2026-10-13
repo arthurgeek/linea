@@ -1,0 +1,27 @@
+// The path is spliced with what the site wrote, and a path may name its index
+// parameter more than once. What the site wrote runs where it is written, which
+// is once: it is one expression in the program however many times the
+// implementation reads the number it produced.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i - i]
+    }
+}
+
+fn bump(inout n: UInt8) -> UInt64 {
+    n = n + 1
+    0
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [7, 2, 3, 4] }
+    var n: UInt8 = 0
+    let e: UInt8 = g[bump(&n)]
+    e + n
+}

@@ -1,0 +1,46 @@
+// Two implementations whose settled references name the same path supply the
+// trait the same argument, so they are one key: comparing the path is what
+// tells these apart from two that select different declared types through one
+// head, and it does not excuse writing one of them twice.
+trait Pair {
+    type A
+
+    fn a(self: Self) -> Self.A
+}
+
+trait _Give[U] {
+    fn give(self: Self, u: U) -> UInt8
+}
+
+struct Holder[T] {
+    v: T,
+}
+
+struct One {
+    x: UInt8,
+}
+
+impl Pair for One {
+    type A = UInt8
+
+    fn a(self: Self) -> Self.A {
+        self.x
+    }
+}
+
+impl[T: Pair] _Give[T.A] for Holder[T] {
+    fn give(_self: Self, _u: T.A) -> UInt8 {
+        1
+    }
+}
+
+impl[T: Pair] _Give[T.A] for Holder[T] {
+    fn give(_self: Self, _u: T.A) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let h: Holder[One] = .{ v = .{ x = 4 } }
+    Pair.a(h.v)
+}

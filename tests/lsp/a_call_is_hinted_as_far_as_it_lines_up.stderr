@@ -1,0 +1,19 @@
+error[N-Undefined]: undefined name `nope`
+  --> tests/lsp/a_call_is_hinted_as_far_as_it_lines_up/main.lin:10:33
+   |
+10 |     total(1) + total(1, 2, 3) + nope(1, 2)
+   |                                 ^^^^ no binding with this name is in scope
+error[T-MissingArgument]: `b` receives no argument
+  --> tests/lsp/a_call_is_hinted_as_far_as_it_lines_up/main.lin:10:5
+   |
+5  | fn total(a: UInt8, b: UInt8) -> UInt8 {
+   |                    - declared here
+10 |     total(1) + total(1, 2, 3) + nope(1, 2)
+   |     ^^^^^^^^ every parameter receives one
+error[T-Arity]: expected 2 argument(s), found 3
+  --> tests/lsp/a_call_is_hinted_as_far_as_it_lines_up/main.lin:10:16
+   |
+5  | fn total(a: UInt8, b: UInt8) -> UInt8 {
+   |    ----- declared here
+10 |     total(1) + total(1, 2, 3) + nope(1, 2)
+   |                ^^^^^^^^^^^^^^ the wrong number of arguments

@@ -1,0 +1,12 @@
+// [T-ArraySize]. A parameter is whatever the caller passed, so a name reaching
+// one stands for nothing the language can work out where the type is written.
+// The constant-expression list reaches a binding written with an initialiser,
+// and a parameter is written with none.
+fn sized(k: UInt8) -> UInt8 {
+    let _xs: [UInt8; k] = [1, 2, 3]
+    k
+}
+
+fn main() -> UInt8 {
+    sized(3)
+}

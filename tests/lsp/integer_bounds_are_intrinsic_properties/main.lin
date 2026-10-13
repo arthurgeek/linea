@@ -1,0 +1,17 @@
+fn upper[T: Integer](_witness: T) -> T {
+    T.max
+}
+
+fn lower[T: Integer](_witness: T) -> T {
+    T.min
+}
+
+fn main() -> UInt8 {
+    let highest = UInt8.max
+    let lowest = UInt8.min
+    if upper(UInt8(0)) == highest && lower(UInt8(0)) == lowest {
+        0
+    } else {
+        1
+    }
+}

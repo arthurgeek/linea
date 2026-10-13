@@ -1,0 +1,7 @@
+let first = second
+
+let second: UInt8 = first
+
+fn main() -> UInt8 {
+    first
+}

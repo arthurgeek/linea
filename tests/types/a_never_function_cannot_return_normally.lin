@@ -1,0 +1,5 @@
+fn _stop() -> Never {}
+
+fn main() -> UInt8 {
+    0
+}

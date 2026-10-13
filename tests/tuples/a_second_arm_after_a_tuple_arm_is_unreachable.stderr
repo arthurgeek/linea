@@ -1,0 +1,5 @@
+error[T-Unreachable]: no value reaches this arm
+ --> tests/tuples/a_second_arm_after_a_tuple_arm_is_unreachable.lin:7:9
+  |
+7 |         _ => 0,
+  |         ^ an earlier arm already takes every value

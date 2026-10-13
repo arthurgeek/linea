@@ -1,0 +1,8 @@
+// An import binds a module in the file that wrote it and carries nothing
+// onward: `pub import inner` left `mid.inner` naming nothing, so the word was
+// read and thrown away. `pub use` is what re-exports a name.
+pub import inner
+
+pub fn ping() -> UInt8 {
+    inner.helper(1)
+}

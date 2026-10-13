@@ -1,0 +1,20 @@
+// The ceiling is a maximum and `sink` is above every one a trait can write:
+// moving an element out leaves a hole the container has to mediate, and
+// mediation is an operation with a body rather than a place.
+struct Fixed {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Fixed {
+    type Elem = UInt8
+
+    proj at(sink self: Fixed, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let f: Fixed = .{ cells = [5, 6] }
+    let _ = f
+    0
+}

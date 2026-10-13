@@ -1,0 +1,25 @@
+// A name says which parameter an argument fills, and the parameter's
+// convention says what becomes of the value. Two `sink` parameters named out
+// of written order therefore take the values their names give them, each
+// exactly once, and the weights below distinguish the slots: a call that
+// filled them by position would answer 32.
+@linear
+enum Coin {
+    Struck(UInt8),
+}
+
+fn value(sink c: Coin) -> UInt8 {
+    match c {
+        Struck(n) => n,
+    }
+}
+
+fn settle(sink high: Coin, sink low: Coin) -> UInt8 {
+    value(high) * 10 + value(low)
+}
+
+fn main() -> UInt8 {
+    let first: Coin = .Struck(2)
+    let second: Coin = .Struck(3)
+    settle(low: second, high: first)
+}

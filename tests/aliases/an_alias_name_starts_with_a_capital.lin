@@ -1,0 +1,6 @@
+alias meters = UInt64
+
+fn main() -> UInt8 {
+    let _unused: meters = 0
+    0
+}

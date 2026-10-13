@@ -1,0 +1,8 @@
+error[O-Leak]: the base's `held` (a linear `T`) is replaced and never settled
+ --> tests/struct_update/a_generic_field_may_owe_settlement.lin:9:15
+  |
+9 |     Slot[T] { held = Default.default(), ..slot }
+  |               ^^^^ this field replaces the base's value
+  |                                           ---- the base is taken here
+  |
+  = help: settle the base's `held` before building from it, or let the base supply it

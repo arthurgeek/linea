@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: `Shelf` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_call_in_an_allocator_generic_declaration_writes_the_allocator_it_leaves_to_a_default.lin:18:17
+   |
+18 |     let shelf = Shelf.blank()
+   |                 ^^^^^ write the allocator: `B`, or `SystemAllocator` where the system allocator is meant

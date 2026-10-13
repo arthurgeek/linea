@@ -1,0 +1,24 @@
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Ticket` does not have that capability
+  --> tests/iter/operations/a_refused_filter_held_in_a_var_reports_only_its_bound.lin:29:49
+   |
+29 |     var kept = Tickets { issued = 0, last = 4 }.filter(|ticket| ticket.seat > 2)
+   |                                                 ^^^^^^ `filter` may dispose of a `Ticket`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Ticket` does not have that capability
+  --> tests/iter/operations/a_refused_filter_held_in_a_var_reports_only_its_bound.lin:33:52
+   |
+33 |     let counted = Tickets { issued = 0, last = 4 }.filter(|ticket| ticket.seat > 1)
+   |                                                    ^^^^^^ `filter` may dispose of a `Ticket`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause
+error[T-Bound]: `Self.Iter.Item` requires `Discardable`, and `Ticket` does not have that capability
+  --> tests/iter/operations/a_refused_filter_held_in_a_var_reports_only_its_bound.lin:41:52
+   |
+41 |     var stepped = Tickets { issued = 0, last = 4 }.filter(|ticket| ticket.seat > 3)
+   |                                                    ^^^^^^ `filter` may dispose of a `Ticket`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before
+  ::: std/iter/iter.lin
+L  |         Self.Iter.Item: Discardable
+   |         -------------- required by this `where` clause

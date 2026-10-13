@@ -1,0 +1,7 @@
+export fn published(num: Int32) -> Int32 {
+    num
+}
+
+pub export fn both(num: Int32) -> Int32 {
+    published(num)
+}

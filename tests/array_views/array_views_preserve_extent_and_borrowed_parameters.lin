@@ -1,0 +1,18 @@
+import std.mem
+
+fn view(values: [UInt64; 3]) -> mem.Slice[UInt64] where borrows(values) {
+    values.as_slice()
+}
+
+fn main() -> UInt8 {
+    var values = [UInt64(11), UInt64(22), UInt64(33)]
+    let slice = view(values)
+    let tail = slice.subspan(start: 1, count: 2).unwrap()
+    let valid = slice.length() == 3 && tail[0] == 22 && tail[1] == 33 && slice.get(3).is_none()
+    values[0] = 44
+    if valid && values[0] == 44 {
+        0
+    } else {
+        1
+    }
+}

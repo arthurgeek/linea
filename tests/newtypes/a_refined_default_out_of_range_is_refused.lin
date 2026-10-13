@@ -1,0 +1,13 @@
+// A default built from a value outside the refinement is refused where the
+// default is written.
+@copyable
+type Percent = UInt8 where it in 0..=100
+
+fn scale(value: UInt8, by: Percent = Percent(101)) -> UInt8 {
+    let Percent(percent) = copy(by)
+    value / 10 * percent / 10
+}
+
+fn main() -> UInt8 {
+    scale(50)
+}

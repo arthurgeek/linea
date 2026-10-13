@@ -1,0 +1,7 @@
+error[O-Uncommitted]: `use2` has not been given `d` yet, and control leaves here
+  --> tests/ownership/a_break_does_not_cross_a_pending_argument.lin:28:17
+   |
+26 |             d,
+   |             - it was given up here
+28 |                 break
+   |                 ^^^^^ give the value up after this, not before it

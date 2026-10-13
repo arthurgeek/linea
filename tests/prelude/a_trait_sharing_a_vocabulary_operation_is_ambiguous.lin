@@ -1,0 +1,79 @@
+// `From`, `Into`, `Release` and `Writer` are visible in every module. A
+// program trait declaring an operation of the same name makes a postfix call
+// ambiguous for a type implementing both, and the call is written out instead.
+trait Recycle {
+    fn release(self: Self) -> UInt8
+}
+
+trait Pour {
+    fn into(self: Self) -> UInt8
+}
+
+// The money a returned bottle is worth.
+struct Refund {
+    amount: UInt8,
+}
+
+trait Journal {
+    fn write_str(inout self: Self, s: Str) -> Result[(), Str] where carries()
+}
+
+@linear
+struct Bottle {
+    deposit: UInt8,
+}
+
+impl Recycle for Bottle {
+    fn release(self: Bottle) -> UInt8 {
+        self.deposit
+    }
+}
+
+impl Release for Bottle {
+    fn release(sink self: Bottle) -> () {
+        let Bottle { deposit: _deposit } = self
+    }
+}
+
+impl Pour for Bottle {
+    fn into(self: Bottle) -> UInt8 {
+        self.deposit + 1
+    }
+}
+
+impl From[Bottle] for Refund {
+    fn from(sink source: Bottle) -> Refund {
+        let Bottle { deposit } = source
+        Refund { amount = deposit }
+    }
+}
+
+struct Log {
+    lines: UInt8,
+}
+
+impl Journal for Log {
+    fn write_str(inout self: Log, _s: Str) -> Result[(), Str] {
+        self.lines = self.lines + 1
+        return .Ok({})
+    }
+}
+
+impl Writer for Log {
+    type Error = Str
+
+    fn write_str(inout self: Log, _s: Str) -> Result[(), Str] {
+        self.lines = self.lines + 2
+        return .Ok({})
+    }
+}
+
+fn main() -> UInt8 {
+    let bottle = Bottle { deposit = 3 }
+    let refund = bottle.release()
+    let poured = bottle.into()
+    var log = Log { lines = 0 }
+    &log.write_str("recycled").unwrap()
+    bottle.release()
+    refund + poured + log.lines
+}

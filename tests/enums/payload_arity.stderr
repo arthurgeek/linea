@@ -1,0 +1,10 @@
+error[T-Arity]: expected 1 name(s), found 2
+ --> tests/enums/payload_arity.lin:5:9
+  |
+5 |         Circle(a, b) => a + b,
+  |         ^^^^^^^^^^^^ the wrong number of names
+error[T-Arity]: expected 0 name(s), found 1
+ --> tests/enums/payload_arity.lin:6:9
+  |
+6 |         Square(x) => x,
+  |         ^^^^^^^^^ the wrong number of names

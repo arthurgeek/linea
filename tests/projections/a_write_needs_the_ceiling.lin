@@ -1,0 +1,21 @@
+// The mode on the implementation's `self` is the most a site's position may
+// reach through the place. A container that hands its elements out to be read
+// declares `read self`, and an assignment through its bracket asks for more
+// than it grants.
+struct Fixed {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Fixed {
+    type Elem = UInt8
+
+    proj at(self: Fixed, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var f: Fixed = .{ cells = [5, 6] }
+    f[0] = 1
+    f[1]
+}

@@ -1,0 +1,5 @@
+error[T-BorrowContract]: a contract path must name a declared source
+ --> tests/borrows/contracts/a_refused_trait_clause_is_reported_once.lin:8:66
+  |
+8 |     fn handle(self: Self, request: Request) -> Str where carries(_request)
+  |                                                                  ^^^^^^^^ this source is not declared

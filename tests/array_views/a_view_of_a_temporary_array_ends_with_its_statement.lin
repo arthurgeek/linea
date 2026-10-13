@@ -1,0 +1,6 @@
+// A temporary array ends with its statement, so a view of it cannot be kept
+// in a binding for the next one.
+fn main() -> UInt8 {
+    let values = [UInt8(1), UInt8(2)].as_slice()
+    UInt8(values.length())
+}

@@ -1,0 +1,22 @@
+// A binder is one step from the place the pattern took apart, not the whole of
+// it. `&e.a` does not name what `y` names, and a rule that made every binder
+// overlap its scrutinee whole would refuse this -- an ordinary thing to
+// write, and the reason the step is compared rather than only the root.
+struct Inner {
+    v: UInt8,
+}
+
+struct Pair {
+    a: Inner,
+    b: Inner,
+}
+
+fn grow(inout s: Inner, p: Inner) -> UInt8 {
+    s = .{ v = 9 }
+    p.v
+}
+
+fn main() -> UInt8 {
+    var e: Pair = .{ a = .{ v = 1 }, b = .{ v = 2 } }
+    match read e { Pair { a: _, b: y } => grow(&e.a, y) }
+}

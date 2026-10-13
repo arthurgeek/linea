@@ -1,0 +1,7 @@
+export struct Point { x: Int32 }
+
+export let answer: Int32 = 42
+
+export fn published(num: Int32) -> Int32 {
+    num
+}

@@ -1,0 +1,6 @@
+// The expected `UInt64` settles the fold's accumulator, and adding each item
+// to it settles the range's literals, so the range walks `UInt64`.
+fn main() -> UInt8 {
+    let total: UInt64 = (0..4).fold(0, |sink sum, sink item| sum + item)
+    UInt8(total)
+}

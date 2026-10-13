@@ -1,0 +1,7 @@
+error[T-Bound]: `Tag` requires `Self` to implement it, and `Holder[Source]` does not
+  --> tests/traits/integer_generics/an_implementation_bound_preserves_its_trait_arguments.lin:29:13
+   |
+29 |     Tag.tag(held)
+   |             ^^^^ implement it for that type, or reach the operation on one that does
+   |
+   = help: `Holder[T]` implements `Tag` when `T` implements `Supplies[UInt16]`, and `Source` does not

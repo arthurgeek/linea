@@ -1,0 +1,12 @@
+// A root that declares tests and no `main`.
+//
+// The entry point of a test binary is one the compiler writes, so there is
+// nothing here for a programmer to declare. Without this a module of tests
+// alone could not be tested -- which is what the standard library is.
+import std.io
+
+use io.IoError
+
+test fn a_thing_holds() -> Result[(), IoError] {
+    return .Ok({})
+}

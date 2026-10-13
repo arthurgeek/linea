@@ -1,0 +1,12 @@
+// A bracket on a value that is not an array is the trait's projection, so a
+// type that implements no `Index` has no place for one to name. The refusal is
+// the one a comparison over a type without `Comparable` gets.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn main() -> UInt8 {
+    let s: Pair = .{ a = 1, b = 2 }
+    copy(s[0])
+}

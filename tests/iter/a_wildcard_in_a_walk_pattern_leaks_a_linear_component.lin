@@ -1,0 +1,15 @@
+// A walk's tuple pattern takes each pair apart, so a `_` that names a linear
+// component leaves it unsettled on every iteration.
+@linear
+struct Ticket {
+    id: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pairs = [(Ticket { id = 1 }, UInt8(2)), (Ticket { id = 3 }, UInt8(4))]
+    var total: UInt8 = 0
+    for (_, n) in pairs {
+        total += n
+    }
+    total
+}

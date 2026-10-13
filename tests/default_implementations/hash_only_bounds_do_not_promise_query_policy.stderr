@@ -1,0 +1,5 @@
+error[T-Bound]: `Queryable` requires `Self` to implement it, and `T` does not
+  --> tests/default_implementations/hash_only_bounds_do_not_promise_query_policy.lin:16:23
+   |
+16 |     Queryable.accepts(value)
+   |                       ^^^^^ implement it for that type, or reach the operation on one that does

@@ -1,0 +1,18 @@
+trait Echo[A: Copyable] {
+    fn echo(_self: Self, input: A) -> A where carries(input)
+}
+
+template impl[A: Copyable] Echo[A] {
+    fn echo(_self: Self, input: A) -> A where carries(input) {
+        copy(input)
+    }
+}
+
+struct Product {}
+
+derive Echo[UInt8] for Product
+
+fn main() -> UInt8 {
+    let product: Product = .{}
+    Echo.echo(product, UInt8(0))
+}

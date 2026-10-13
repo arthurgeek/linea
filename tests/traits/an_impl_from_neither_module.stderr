@@ -1,0 +1,5 @@
+error[M-Impl]: `Account` is declared in `account`
+  --> tests/traits/an_impl_from_neither_module/main.lin:15:18
+   |
+15 | impl Measure for Account {
+   |                  ^^^^^^^ write it where the trait is declared, or where the type is

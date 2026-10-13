@@ -1,0 +1,14 @@
+trait Parent[phantom T] {}
+
+trait Child: Parent[UInt8] {}
+
+template impl Child where reflect.supertraits: derived {}
+
+struct Item {}
+
+derive Child for Item
+
+fn main() -> UInt8 {
+    let _item: Item = .{}
+    0
+}

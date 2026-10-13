@@ -1,0 +1,10 @@
+error[T-Template]: a component requirement names traits using closed types or template parameters
+ --> tests/traits/component_requirements_name_only_traits.lin:3:43
+  |
+3 | template impl CapabilityRequirement where reflect.components: Copyable {}
+  |                                           ^^^^^^^ this requirement contains a capability bound, callable, reflection descriptor or unsupported parameter
+error[T-Template]: a component requirement names traits using closed types or template parameters
+ --> tests/traits/component_requirements_name_only_traits.lin:7:41
+  |
+7 | template impl CallableRequirement where reflect.components: fn(read value: UInt8) -> UInt8 {}
+  |                                         ^^^^^^^ this requirement contains a capability bound, callable, reflection descriptor or unsupported parameter

@@ -1,0 +1,8 @@
+pub let limit = 11
+
+@copyable
+pub struct Config {
+    limit: Int64,
+}
+
+pub let config: Config = .{ limit = 5 }

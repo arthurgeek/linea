@@ -1,0 +1,20 @@
+// A path is its elements and the dots between them. A comment may sit inside
+// one, and concatenating every token in the range wrote it into the middle of
+// the path -- so the `//` swallowed the rest of the line and what came out no
+// longer parsed. Destroying working source is the one thing fmt must not do.
+//
+// A path reaches the next line only where the dot ends the line before the
+// break: a newline ends a statement, and a line ending in a name has ended
+// one -- so a case written the other way round parses with errors, and a case
+// that does not parse is passed over by every property here.
+import inner.
+    // which directory it names
+    hash;
+
+pub use inner.
+    // which name it re-exports
+    Maybe;
+
+fn main() -> UInt8 {
+    1
+}

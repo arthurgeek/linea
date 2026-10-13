@@ -1,0 +1,7 @@
+error[T-MissingArgument]: `a` receives no argument
+ --> tests/decl/arity_too_few.lin:6:5
+  |
+1 | fn f(a: UInt8) -> UInt8 {
+  |      - declared here
+6 |     f()
+  |     ^^^ every parameter receives one

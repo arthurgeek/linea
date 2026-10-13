@@ -1,0 +1,25 @@
+// The contract a callable type promises is part of what an implementation is
+// written for, so a function whose result carries from nothing is another type
+// and does not implement the trait.
+trait Pick {
+    fn pick(self: Self, text: Str) -> Str where carries(text)
+}
+
+impl Pick for fn(text: Str) -> Str where carries(text) {
+    fn pick(self: Self, text: Str) -> Str where carries(text) {
+        self(text)
+    }
+}
+
+fn fixed(_text: Str) -> Str where carries() {
+    "fixed"
+}
+
+fn run[H: Pick](handler: H, text: Str) -> Str where carries(text) {
+    handler.pick(text)
+}
+
+fn main() -> UInt8 {
+    let _fixed = run(fixed, "dropped")
+    0
+}

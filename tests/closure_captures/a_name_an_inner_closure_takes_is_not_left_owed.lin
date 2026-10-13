@@ -1,0 +1,47 @@
+// Each inner closure gives `ticket` away without capturing it, inside an
+// enclosing closure refused for a reason of its own. Whether the enclosing
+// closure took `ticket` is unknown, so no leak of it is reported. `spare` is
+// never given away, and its leak is reported.
+@linear
+enum Ticket {
+    Seat(UInt8),
+}
+
+fn redeem(sink ticket: Ticket) -> UInt8 {
+    match ticket {
+        Seat(row) => row,
+    }
+}
+
+fn wrong_result() -> UInt8 {
+    let ticket = Ticket.Seat(1)
+    let outer = || -> UInt8 {
+        let inner = || redeem(ticket)
+        inner() + "one"
+    }
+    outer()
+}
+
+fn wrong_annotation() -> UInt8 {
+    let ticket = Ticket.Seat(2)
+    let _outer: UInt8 = || {
+        let inner = || redeem(ticket)
+        inner()
+    }
+    0
+}
+
+fn unknown_callee() -> UInt8 {
+    let ticket = Ticket.Seat(3)
+    let _spare = Ticket.Seat(4)
+    lookup(
+        || {
+            let inner = || redeem(ticket)
+            inner()
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    wrong_result() + wrong_annotation() + unknown_callee()
+}

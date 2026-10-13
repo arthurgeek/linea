@@ -1,0 +1,5 @@
+error[T-ArraySize]: an inferred array length belongs to a binding initialized with an array literal
+ --> tests/arrays/inferred_length/trait_arguments_need_concrete_lengths.lin:5:20
+  |
+5 | impl Count[[UInt8; _]] for Counter {}
+  |                    ^ write an explicit length in this type

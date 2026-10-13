@@ -1,0 +1,4 @@
+// linea fmt: off
+fn main() -> UInt8 {
+    let x = 1;
+}

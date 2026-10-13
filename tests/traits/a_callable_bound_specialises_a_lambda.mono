@@ -1,0 +1,11 @@
+fn ;main() -> UInt8 {
+    ;reduce2[UInt8,closure0[]](2, 3, |lhs, rhs| lhs + rhs)
+}
+
+fn ;reduce2[UInt8,closure0[]](lhs: UInt8, rhs: UInt8, combine: closure0[]) -> UInt8 where carries(lhs, rhs, combine) {
+    closure.0(lhs, rhs)
+}
+
+fn closure.0(read lhs: UInt8, read rhs: UInt8) -> UInt8 {
+    lhs + rhs
+}

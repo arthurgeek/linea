@@ -1,0 +1,16 @@
+// A closure that changes a binding of the body around it must have it lent:
+// `inout [inout count]` lends `count` until the closure's last use.
+import std.mem
+
+fn main() -> UInt8 {
+    var count: UInt8 = 0
+    let tick = || {
+        count += 1
+    }
+    var names: Vec[UInt8, mem.SystemAllocator] = Vec.new()
+    let add = [count] || &names.push(count)
+    tick()
+    let _added = add()
+    names.release()
+    count
+}

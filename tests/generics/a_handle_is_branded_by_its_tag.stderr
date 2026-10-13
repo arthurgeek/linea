@@ -1,0 +1,5 @@
+error[T-Mismatch]: `Tag` was already settled as `DocTag` here, and this is an `AstTag`
+  --> tests/generics/a_handle_is_branded_by_its_tag.lin:21:21
+   |
+21 |     UInt8(paired(d, a))
+   |                     ^ one type parameter, two types

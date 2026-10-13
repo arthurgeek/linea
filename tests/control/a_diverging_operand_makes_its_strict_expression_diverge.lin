@@ -1,0 +1,89 @@
+enum Maybe {
+    None,
+    Some(UInt8),
+}
+
+struct Box { value: UInt8 }
+
+fn array_value(_value: [UInt8; 1]) -> UInt8 {
+    1
+}
+
+fn box_value(_value: Box) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let _conversion: Bool = if false {
+        UInt8(panic("conversion"))
+    } else {
+        true
+    }
+    let _arithmetic: Bool = if false {
+        1 + panic("arithmetic")
+    } else {
+        true
+    }
+    let _variant: Bool = if false {
+        Maybe.Some(panic("variant"))
+    } else {
+        true
+    }
+    let _not: Bool = if false {
+        !panic("not")
+    } else {
+        true
+    }
+    let _negate: Bool = if false {
+        -panic("negate")
+    } else {
+        true
+    }
+    let _logical: Bool = if false {
+        panic("logical") && true
+    } else {
+        true
+    }
+    let _conditional: Bool = if false {
+        if panic("condition") {
+            true
+        } else {
+            false
+        }
+    } else {
+        true
+    }
+    let _while: Bool = if false {
+        while panic("while") {}
+    } else {
+        true
+    }
+    let _array: Bool = if false {
+        array_value([panic("array")])
+    } else {
+        true
+    }
+    let _array_context: Bool = if false {
+        [panic("array context")]
+    } else {
+        true
+    }
+    let _struct: Bool = if false {
+        box_value(.{ value = panic("struct") })
+    } else {
+        true
+    }
+    let interpolation_message = "interpolation"
+    let _interpolation: Bool = if false {
+        "value={panic(interpolation_message)}"
+    } else {
+        true
+    }
+    var xs: [UInt8; 1] = [0]
+    let _assignment: Bool = if false {
+        xs[panic("place")] = 1
+    } else {
+        true
+    }
+    xs[0]
+}

@@ -1,0 +1,14 @@
+@copyable
+pub struct Thing {
+    v: UInt8,
+}
+
+pub fn make() -> Thing {
+    .{ v = 1 }
+}
+
+impl Display for Thing {
+    fn fmt[W: Writer](_self: Thing, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "AAA")
+    }
+}

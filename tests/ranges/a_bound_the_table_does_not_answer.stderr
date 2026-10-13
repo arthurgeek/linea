@@ -1,0 +1,5 @@
+error[T-Const]: a pattern's bound must be a constant the compiler can work out
+ --> tests/ranges/a_bound_the_table_does_not_answer.lin:7:13
+  |
+7 |         0..=top => 1,
+  |             ^^^ not a constant expression

@@ -1,0 +1,16 @@
+// A dot on an enum's name opens the namespace that name is written for, and
+// what may follow it is a variant, `Colour.Red`, or an operation of a trait
+// the enum implements. What a value of the enum holds is a different
+// question, asked of a value, and the enum's name is not one.
+enum Colour { Red, Green }
+
+fn shade(c: Colour) -> UInt8 {
+    match read c {
+        Red => 1,
+        Green => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    shade(Colour.Red)
+}

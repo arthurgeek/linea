@@ -1,0 +1,5 @@
+error[T-Operands]: `Byte` is not a number
+ --> tests/newtypes/an_unrefined_name_inherits_no_arithmetic.lin:7:7
+  |
+7 |     a + b
+  |       ^ a name over a base does not inherit its operators: take the value apart to reach them

@@ -1,0 +1,7 @@
+error[N-Immutable]: `count` is declared with `let`
+ --> tests/inout_captures/an_inout_capture_needs_a_variable.lin:3:29
+  |
+2 |     let count: UInt8 = 0
+  |         ----- declared with `let` here
+3 |     var tick = inout [inout count] || {
+  |                             ^^^^^ this binding cannot be assigned

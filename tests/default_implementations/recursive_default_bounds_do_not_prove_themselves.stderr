@@ -1,0 +1,5 @@
+error[T-Bound]: `First` requires `Self` to implement it, and `Bool` does not
+  --> tests/default_implementations/recursive_default_bounds_do_not_prove_themselves.lin:16:17
+   |
+16 |     First.first(false)
+   |                 ^^^^^ implement it for that type, or reach the operation on one that does

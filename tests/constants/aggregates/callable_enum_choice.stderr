@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `fn(read Mode = .Second) -> UInt8`, found `fn(read Mode = .First) -> UInt8`
+  --> tests/constants/aggregates/callable_enum_choice.lin:13:12
+   |
+8  | fn invoke[F: fn(read mode: Mode = .Second) -> UInt8](callback: F) -> UInt8 {
+   |                                                      -------- expected because of this parameter
+13 |     invoke(choose)
+   |            ^^^^^^ expected `fn(read Mode = .Second) -> UInt8`, found `fn(read Mode = .First) -> UInt8`

@@ -1,0 +1,9 @@
+let limit = 5
+
+fn narrow(value: UInt8) -> UInt8 {
+    value
+}
+
+fn main() -> UInt8 {
+    narrow(limit)
+}

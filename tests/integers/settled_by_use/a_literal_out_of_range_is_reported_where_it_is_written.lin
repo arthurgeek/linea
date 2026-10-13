@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let big = 300
+    let small: UInt8 = big
+    small
+}

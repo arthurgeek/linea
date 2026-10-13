@@ -1,0 +1,1827 @@
+import std.testing
+import std.mem
+
+// An Iterator transfers ownership of one Item at a time, updating its
+// position. Item may be linear, so the caller must settle each one. After next
+// returns None, every later call also returns None.
+//
+// Every iterator also offers the searches below, which run in place: the
+// iterator stays with the caller, positioned just after the last item a search
+// inspected, so a later search continues from there. An operation ending in
+// `_inout` borrows a callback whose state the caller keeps.
+pub trait Iterator {
+    type Item
+
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self)
+
+    // Search for the first item `predicate` accepts and report how many items
+    // were inspected. The items before the match are dropped, and so is
+    // `predicate` once the search ends.
+    fn find_counted[F: inout fn(read item: Self.Item) -> Bool](inout self: Self, sink predicate: F) -> FindReport[Self.Item] where
+        carries(.found: self),
+        Self.Item: Discardable,
+        F: Discardable
+    {
+        var searching = predicate
+        &self.find_counted_inout(&searching)
+    }
+
+    // Search as `find_counted` does, with a predicate whose state the caller
+    // keeps.
+    fn find_counted_inout[F: inout fn(read item: Self.Item) -> Bool](inout self: Self, inout predicate: F) -> FindReport[Self.Item] where
+        carries(.found: self),
+        Self.Item: Discardable
+    {
+        var inspected: UInt64 = 0
+        return loop {
+            match &self.next() {
+                Some(item) => {
+                    inspected += 1
+                    if &predicate(item) {
+                        break .{ found = .Some(item), inspected }
+                    }
+                },
+                None => break .{ found = .None, inspected },
+            }
+        }
+    }
+}
+
+// A Sequence is consumed to obtain its iterator; a `for` loop does this. The
+// Iter bound guarantees next is available. Iter and Item may both be linear;
+// generic consumers must arrange to consume them or require Discardable.
+//
+// Every sequence also offers the operations below, so a pipeline reads left to
+// right from what it walks: `values.map(f).filter(p).fold(0, add)`. Each takes
+// the sequence and walks the iterator `iterate` gives it. `map`, `filter_map`
+// and `filter` are lazy and return an adapter that is itself an iterator; the
+// others walk now. An operation ending in `_inout` borrows a callback whose
+// state the caller keeps, where the plain one takes the callback by value.
+pub trait Sequence {
+    type Iter: Iterator
+
+    fn iterate(sink self: Self) -> Self.Iter where carries(self)
+
+    // Transform each item with `transform`, lazily: nothing runs until the
+    // result is walked.
+    fn map[U, F: inout fn(sink item: Self.Iter.Item) -> U](sink self: Self, sink transform: F) -> Map[Self.Iter, U, F] where carries(self, transform) {
+        .{ iterator = self.iterate(), transform = transform }
+    }
+
+    // Transform each item lazily, keeping only the values `transform` returns
+    // as Some.
+    fn filter_map[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, sink transform: F) -> FilterMap[Self.Iter, U, F] where carries(self, transform) {
+        .{ iterator = self.iterate(), transform = transform }
+    }
+
+    // Keep only the items `predicate` accepts, lazily. `filter` disposes of
+    // the rejected items, so they must be Discardable; `filter_map` hands
+    // every item to its callback instead, and accepts linear items.
+    fn filter[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Filter[Self.Iter, F] where
+        carries(self, predicate),
+        Self.Iter.Item: Discardable
+    {
+        .{ iterator = self.iterate(), predicate = predicate }
+    }
+
+    // Pair each item with its position, counting from zero, lazily.
+    fn enumerate(sink self: Self) -> Enumerate[Self.Iter] where carries(self) {
+        .{ iterator = self.iterate(), position = 0 }
+    }
+
+    // Pair the items of this sequence with the items of `other`, lazily,
+    // ending when either sequence ends. `zip` draws from this sequence before
+    // `other`, so when `other` ends first `zip` disposes of the item already
+    // drawn from this sequence. Only this sequence's items must be Discardable:
+    // `xs.zip(ys)` can be refused for a linear item while `ys.zip(xs)` is
+    // accepted.
+    fn zip[S: Sequence](sink self: Self, sink other: S) -> Zip[Self.Iter, S.Iter] where
+        carries(self, other),
+        Self.Iter.Item: Discardable
+    {
+        .{ first = self.iterate(), second = other.iterate() }
+    }
+
+    // Yield at most `count` items, lazily. Once it has yielded them, `take`
+    // stops asking for more, so it disposes of nothing and accepts linear items.
+    fn take(sink self: Self, count: UInt64) -> Take[Self.Iter] where carries(self) {
+        .{ iterator = self.iterate(), remaining = count }
+    }
+
+    // Pass over the first `count` items, lazily, then yield the rest. `skip`
+    // disposes of the passed items, so they must be Discardable.
+    fn skip(sink self: Self, count: UInt64) -> Skip[Self.Iter] where
+        carries(self),
+        Self.Iter.Item: Discardable
+    {
+        .{ iterator = self.iterate(), remaining = count }
+    }
+
+    // Combine every item into `initial`, in order, and return the result.
+    // `combine` is dropped at the end.
+    fn fold[
+        A,
+        F: inout fn(sink accumulator: A, sink item: Self.Iter.Item) -> A where carries(accumulator, item),
+    ](sink self: Self, sink initial: A, sink combine: F) -> A where
+        carries(self, initial, combine),
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var combining = combine
+        self.fold_inout(initial, &combining)
+    }
+
+    // Fold as `fold` does, with a callback whose state the caller keeps.
+    fn fold_inout[
+        A,
+        F: inout fn(sink accumulator: A, sink item: Self.Iter.Item) -> A where carries(accumulator, item),
+    ](sink self: Self, sink initial: A, inout combine: F) -> A where
+        carries(self, initial, combine),
+        Self.Iter: Discardable
+    {
+        var walking = self.iterate()
+        var accumulator = initial
+        loop {
+            match &walking.next() {
+                Some(item) => fold_one_inout(&accumulator, item, &combine),
+                None => {
+                    break
+                },
+            }
+        }
+        accumulator
+    }
+
+    // Return the first Some that `select` returns, stopping there. `select`
+    // is dropped at the end.
+    fn find_map[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, sink select: F) -> Option[U] where
+        carries(.Some: self, select),
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var selecting = select
+        self.find_map_inout(&selecting)
+    }
+
+    // Search as `find_map` does, with a selector whose state the caller keeps.
+    fn find_map_inout[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, inout select: F) -> Option[U] where
+        carries(.Some: self, select),
+        Self.Iter: Discardable
+    {
+        var walking = self.iterate()
+        loop {
+            match &walking.next() {
+                Some(item) => match &select(item) {
+                    Some(value) => break .Some(value),
+                    None => {},
+                },
+                None => break .None,
+            }
+        }
+    }
+
+    // Hand every item to `visit`, in order. `visit` is dropped at the end.
+    fn for_each[F: inout fn(sink item: Self.Iter.Item) -> ()](sink self: Self, sink visit: F) -> () where
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var visiting = visit
+        self.for_each_inout(&visiting)
+    }
+
+    // Visit every item as `for_each` does, with a visitor whose state the
+    // caller keeps.
+    fn for_each_inout[F: inout fn(sink item: Self.Iter.Item) -> ()](sink self: Self, inout visit: F) -> () where Self.Iter: Discardable {
+        var walking = self.iterate()
+        loop {
+            match &walking.next() {
+                Some(item) => &visit(item),
+                None => {
+                    break
+                },
+            }
+        }
+    }
+
+    // Return whether any item satisfies `predicate`, stopping at the first
+    // that does. Empty input has none. `predicate` is dropped at the end.
+    fn any[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Bool where
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var checking = predicate
+        self.any_inout(&checking)
+    }
+
+    // Search as `any` does, with a predicate whose state the caller keeps.
+    fn any_inout[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
+        var walking = self.iterate()
+        loop {
+            match &walking.next() {
+                Some(item) => if &predicate(item) {
+                    break true
+                },
+                None => break false,
+            }
+        }
+    }
+
+    // Return whether every item satisfies `predicate`, stopping at the first
+    // that does not. Empty input satisfies it. `predicate` is dropped at the
+    // end.
+    fn all[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Bool where
+        Self.Iter: Discardable,
+        F: Discardable
+    {
+        var checking = predicate
+        self.all_inout(&checking)
+    }
+
+    // Search as `all` does, with a predicate whose state the caller keeps.
+    fn all_inout[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Bool where Self.Iter: Discardable {
+        var walking = self.iterate()
+        loop {
+            match &walking.next() {
+                Some(item) => if !&predicate(item) {
+                    break false
+                },
+                None => break true,
+            }
+        }
+    }
+
+    // Return the first item `predicate` accepts. The items before it are
+    // dropped, and so is `predicate` at the end.
+    fn find[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Option[Self.Iter.Item] where
+        carries(.Some: self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: Discardable,
+        F: Discardable
+    {
+        var checking = predicate
+        self.find_inout(&checking)
+    }
+
+    // Search as `find` does, with a predicate whose state the caller keeps.
+    fn find_inout[F: inout fn(read item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Option[Self.Iter.Item] where
+        carries(.Some: self),
+        Self.Iter: Discardable,
+        Self.Iter.Item: Discardable
+    {
+        var walking = self.iterate()
+        return loop {
+            match &walking.next() {
+                Some(item) => if &predicate(item) {
+                    break .Some(item)
+                },
+                None => break .None,
+            }
+        }
+    }
+
+    // Collect every item into a new vector from `allocator`, and return the
+    // vector and the iterator together, including after a refused insertion.
+    // Empty input requires no allocation; refusal retains the already-produced
+    // item.
+    fn collect[A: Allocator](sink self: Self, allocator: A) -> Result[Collected[Self.Iter, A, Self.Iter.Item], CollectFailure[Self.Iter, A, Self.Iter.Item]] where
+        carries(.Ok.values: allocator, self),
+        carries(.Ok.iterator: self),
+        carries(.Err.collected.values: allocator, self),
+        carries(.Err.collected.iterator: self),
+        carries(.Err.failure.value: self)
+    {
+        var values: Vec[Self.Iter.Item, A] = Vec.new_in(allocator)
+        var walking = self.iterate()
+        match extend(&values, &walking) {
+            Ok(_) => .Ok(.{ values, iterator = walking }),
+            Err(failure) => .Err(.{ collected = .{ values, iterator = walking }, failure }),
+        }
+    }
+}
+
+// The callback convention of the Sequence operations:
+// Each plain operation takes its callback `sink`, bounded by an `inout fn`, and
+// calls it `inout`. A read callable satisfies that bound, and a closure written
+// in the call may change its captures or a place it is lent, as in
+// `xs.fold(0, inout [inout n] |sum, x| { n += 1; sum + x })`. The operation
+// consumes its callback and drops it when it returns, so it requires the
+// callback to be Discardable. A named callback is therefore moved by its first
+// use, and a copyable one is used again by passing `copy(f)` to the earlier
+// walk. A generic function that forwards a callback it only borrowed cannot
+// move it; it takes the callback `sink`, lends it to the `_inout` form where
+// the operation has one, or requires `F: Copyable` and passes `copy(f)`. An
+// operation without an `_inout` form takes a callback that cannot be copied only
+// once, so such a callback is written at each call, or captures by `read` what
+// it would own. An `_inout` form borrows a callback the caller keeps, to call it
+// again or to read or settle what it owns. The library's other operations that
+// call a callback follow the same convention: `Option` and `Result` `map`,
+// `map_err`, `and_then` and `unwrap_or_else`, `Vec.from_fn`, `Map` `merge`,
+// `update` and `upsert`, and `testing.each_allocation_failure`.
+
+// Every iterator is a sequence of itself: walking it walks the items it has
+// left. A type that implements `Iterator` has no other `Sequence`
+// implementation, so this is what walking any iterator means.
+impl[I: Iterator] Sequence for I {
+    type Iter = I
+
+    fn iterate(sink self: Self) -> I where carries(self) {
+        self
+    }
+}
+
+// Counter yields `at` up to but not including `stop`.
+struct Counter {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for Counter {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] where carries() {
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        .Some(value)
+    }
+}
+
+test fn an_iterator_walks_as_a_sequence_of_itself() {
+    let counter = Counter { at = 1, stop = 4 }
+    var encoded: UInt16 = 0
+    for item in counter {
+        // Append one decimal digit to preserve visitation order.
+        encoded = encoded * 10 + UInt16(item)
+    }
+    testing.assert_eq(encoded, 123, "walking the counter lost or reordered items")?
+    .Ok(())
+}
+
+// TicketCounter is a linear counter with a Release implementation.
+@linear
+struct TicketCounter {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for TicketCounter {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] where carries() {
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        .Some(value)
+    }
+}
+
+impl Release for TicketCounter {
+    fn release(sink self: Self) -> () {
+        let TicketCounter { at: _, stop: _ } = self
+    }
+}
+
+// TransactionCursor is a linear counter with no Release implementation;
+// `rollback_cursor` settles it.
+@linear
+struct TransactionCursor {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for TransactionCursor {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] where carries() {
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        .Some(value)
+    }
+}
+
+fn rollback_cursor(sink cursor: TransactionCursor) -> () {
+    let TransactionCursor { at: _, stop: _ } = cursor
+}
+
+// A Token is a linear item, so an adapter must hand each one on rather than
+// drop it.
+@linear
+enum Token {
+    Number(UInt8),
+}
+
+// TokenCounter yields tokens numbered from `at` up to `stop`.
+struct TokenCounter {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for TokenCounter {
+    type Item = Token
+
+    fn next(inout self: Self) -> Option[Token] where carries() {
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        .Some(.Number(value))
+    }
+}
+
+// Settle a token.
+fn consume_token(sink item: Token) -> () {
+    match item {
+        Number(_) => {},
+    }
+}
+
+// Make a token of a number.
+fn number_token(sink item: UInt8) -> Token {
+    .Number(item)
+}
+
+// Make a token of an odd number, and drop an even one.
+fn odd_token(sink item: UInt8) -> Option[Token] {
+    if item % 2 == 0 {
+        .None
+    } else {
+        .Some(.Number(item))
+    }
+}
+
+// A LoggedCursor yields the single item 19 and records its tag in a release
+// log when it is released, so a test sees an adapter release it exactly once.
+@linear
+struct LoggedCursor {
+    tag: mem.ReleaseTag,
+    visited: Bool,
+}
+
+impl Iterator for LoggedCursor {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] {
+        if self.visited {
+            return .None
+        }
+        self.visited = true
+        .Some(19)
+    }
+}
+
+impl Release for LoggedCursor {
+    fn release(sink self: Self) -> () {
+        let LoggedCursor { tag, visited: _ } = self
+        tag.release()
+    }
+}
+
+// Return the item unchanged.
+fn same_number(sink item: UInt8) -> UInt8 {
+    item
+}
+
+// Keep every item.
+fn some_number(sink item: UInt8) -> Option[UInt8] {
+    .Some(item)
+}
+
+// Accept only the item 19.
+fn is_nineteen(item: UInt8) -> Bool {
+    item == 19
+}
+
+// Map applies `transform` to each item of `iterator` when the item is
+// requested.
+@opaque
+struct Map[I, phantom U, F] {
+    iterator: I,
+    transform: F,
+}
+
+// FilterMap applies `transform` to each item of `iterator` and yields only the
+// values it returns as Some.
+@opaque
+struct FilterMap[I, phantom U, F] {
+    iterator: I,
+    transform: F,
+}
+
+// Filter yields only the items of `iterator` that `predicate` accepts.
+@opaque
+struct Filter[I, F] {
+    iterator: I,
+    predicate: F,
+}
+
+// Enumerate pairs each item of `iterator` with its position, counting from
+// zero. The position is checked arithmetic, so counting past the greatest
+// UInt64 traps like any other overflowing addition.
+@opaque
+struct Enumerate[I] {
+    iterator: I,
+    position: UInt64,
+}
+
+// Zip pairs the next item of `first` with the next item of `second`;
+// `into_parts` recovers both sources.
+@opaque
+struct Zip[A, B] {
+    first: A,
+    second: B,
+}
+
+// Take yields at most `remaining` more items of `iterator`.
+@opaque
+struct Take[I] {
+    iterator: I,
+    remaining: UInt64,
+}
+
+// Skip disposes of `remaining` more items of `iterator` before it yields any.
+@opaque
+struct Skip[I] {
+    iterator: I,
+    remaining: UInt64,
+}
+
+// A FindReport holds the first matching item, if any, and how many items the
+// search inspected.
+pub struct FindReport[T] {
+    found: Option[T],
+    inspected: UInt64,
+}
+
+derive[T: Equatable] Equatable for FindReport[T]
+
+derive[T: Debug] Debug for FindReport[T]
+
+derive[T: Release] Release for FindReport[T]
+
+test fn a_sequence_offers_every_operation_without_iterate() {
+    let values = [UInt64(1), 2, 3, 4]
+    let chained = values
+        .as_slice()
+        .map(|sink value| *value * 2)
+        .filter(|value| value > 2)
+        .fold(0, |sink total, sink value| total + value)
+    let written = Sequence.fold(Sequence.filter(Sequence.map(values.as_slice(), |sink value| *value * 2), |value| value > 2), 0, |sink total, sink value| total + value)
+    testing.assert_eq(chained, UInt64(18), "a chain over a slice lost or changed an item")?
+    testing.assert_eq(written, chained, "the operations written through Sequence disagreed with the chain")?
+}
+
+// Widen an item. A thousand exceeds UInt8, so the result requires the wider
+// output type.
+fn widen_item(sink item: UInt8) -> UInt64 {
+    UInt64(item) * 1000
+}
+
+// A Word wraps borrowed text, so a type-changing adapter must keep its
+// backing alive.
+struct Word {
+    value: Str,
+}
+
+// Wrap a piece of text in a Word.
+fn wrap_word(sink item: Str) -> Word where carries(item) {
+    .{ value = item }
+}
+
+// Keep the text of the word "b" and drop every other word.
+fn select_word(sink item: Word) -> Option[Str] where carries(item) {
+    let Word { value } = item
+    if value == "b" {
+        .Some(value)
+    } else {
+        .None
+    }
+}
+
+test fn map_changes_the_item_type() {
+    let counter = Counter { at = 1, stop = 3 }
+    var mapped = counter.map(widen_item)
+    testing.assert_eq(&mapped.next(), Option.Some(UInt64(1000)), "map must yield the transform's output type")?
+    testing.assert_eq(&mapped.next(), Option.Some(UInt64(2000)), "map must advance its source once per output")?
+    testing.assert(&mapped.next().is_none(), "map must exhaust with its source")?
+}
+
+test fn map_transforms_lazily_and_stays_exhausted() {
+    let counter = Counter { at = 1, stop = 4 }
+    var mapped = counter.map(|sink item| item * 2)
+
+    match &mapped.next() {
+        Some(value) => testing.assert_eq(value, 2, "map changed the first item incorrectly")?,
+        None => testing.assert(false, "map ended before its first item")?,
+    }
+    match &mapped.next() {
+        Some(value) => testing.assert_eq(value, 4, "map changed the second item incorrectly")?,
+        None => testing.assert(false, "map ended before its second item")?,
+    }
+    match &mapped.next() {
+        Some(value) => testing.assert_eq(value, 6, "map changed the third item incorrectly")?,
+        None => testing.assert(false, "map ended before its third item")?,
+    }
+    match &mapped.next() {
+        Some(_) => testing.assert(false, "map yielded past its inner iterator")?,
+        None => {},
+    }
+    match &mapped.next() {
+        Some(_) => testing.assert(false, "an exhausted map yielded again")?,
+        None => {},
+    }
+}
+
+test fn type_changing_adapters_preserve_borrowed_outputs() {
+    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    let parts = owned.split(",").unwrap()
+    var selected = parts.map(wrap_word).filter_map(select_word)
+    testing.assert_eq(&selected.next().unwrap(), "b", "changing item types must preserve borrowed text")?
+    testing.assert(&selected.next().is_none(), "selection must skip the remaining word")?
+}
+
+impl[
+    I: Iterator,
+    U,
+    F: inout fn(sink item: I.Item) -> U,
+] Iterator for Map[I, U, F] {
+    type Item = U
+
+    fn next(inout self: Self) -> Option[U] where carries(.Some: self) {
+        match &self.iterator.next() {
+            Some(item) => Option.Some(&(self.transform)(item)),
+            None => .None,
+        }
+    }
+}
+
+test fn a_map_walks_as_a_sequence() {
+    let counter = Counter { at = 1, stop = 4 }
+    let mapped = counter.map(|sink item| item * 2)
+    var total: UInt8 = 0
+    for item in mapped {
+        total += item
+    }
+    testing.assert_eq(total, 12, "a discardable map did not walk as its Sequence")?
+}
+
+impl[
+    I: Iterator,
+    U,
+    F: inout fn(sink item: I.Item) -> U + Discardable,
+] Map[I, U, F] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Map { iterator, transform: _ } = self
+        iterator
+    }
+}
+
+test fn map_into_inner_returns_the_advanced_iterator() {
+    let transaction = TransactionCursor { at = 0, stop = 2 }
+    var protocol = transaction.map(|sink item| UInt64(item) + 1)
+    match &protocol.next() {
+        Some(_) => {},
+        None => {},
+    }
+    let cursor = protocol.into_inner()
+    match testing.assert_eq(cursor.at, 1, "map.into_inner did not return the advanced iterator") {
+        Ok(_) => rollback_cursor(cursor),
+        Err(failure) => {
+            rollback_cursor(cursor)
+            return .Err(failure)
+        },
+    }
+}
+
+impl[
+    I: Iterator + Release,
+    U,
+    F: inout fn(sink item: I.Item) -> U + Discardable,
+] Release for Map[I, U, F] {
+    fn release(sink self: Self) -> () {
+        let Map { iterator, transform: _ } = self
+        iterator.release()
+    }
+}
+
+test fn a_map_releases_its_inner_iterator() {
+    let releasable_inner = TicketCounter { at = 0, stop = 2 }
+    let releasable = releasable_inner.map(number_token)
+    releasable.release()
+}
+
+test fn releasing_a_map_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var mapped = (LoggedCursor { tag = log.tag(11), visited = false }).map(same_number)
+    let item = &mapped.next()
+    let done = &mapped.next().is_none()
+    mapped.release()
+    let released = log.holds([UInt64(11)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some(UInt8(19)), "map changed its item")?
+    testing.assert(done, "map yielded past its iterator")?
+    testing.assert(released, "releasing a map did not release its iterator exactly once")?
+}
+
+impl[I, U, F] Map[I, U, F] {
+    // Recover the source iterator, as far as it advanced, and the callback
+    // with any state it gathered, as a pair. Neither is discarded or settled.
+    // State a callback updates belongs outside the adapter, lent to it with
+    // an `inout` capture.
+    pub fn into_parts(sink self: Self) -> (I, F) where carries(._0: self.iterator), carries(._1: self.transform) {
+        let Map { iterator, transform } = self
+        (iterator, transform)
+    }
+}
+
+test fn map_recovers_the_advanced_source_and_mutated_callback() {
+    let source = Counter { at = 1, stop = 4 }
+    let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+        calls += 1
+        item + calls
+    }
+    var mapped = source.map(callback)
+    let first = &mapped.next()
+    let second = &mapped.next()
+    let (recovered, transform) = mapped.into_parts()
+    let { calls } = transform.into_captures()
+    testing.assert_eq(first, Option.Some(UInt8(2)), "map did not invoke its stored callback")?
+    testing.assert_eq(second, Option.Some(UInt8(4)), "map did not preserve callback state")?
+    testing.assert_eq(recovered.at, UInt8(3), "map recovery lost source progress")?
+    testing.assert_eq(calls, UInt8(2), "map recovery lost callback progress")?
+}
+
+test fn empty_map_recovers_protocol_captures_without_settling_them() {
+    let source = TransactionCursor { at = 0, stop = 0 }
+    let transaction = TransactionCursor { at = 7, stop = 9 }
+    let callback = [sink transaction] |sink item: UInt8| item + transaction.at
+    var mapped = source.map(callback)
+    let exhausted = &mapped.next()
+    let (recovered, transform) = mapped.into_parts()
+    let { transaction: captured } = transform.into_captures()
+    let position = captured.at
+    rollback_cursor(recovered)
+    rollback_cursor(captured)
+    testing.assert(exhausted.is_none(), "empty map produced an item")?
+    testing.assert_eq(position, UInt8(7), "empty map changed its protocol capture")?
+}
+
+// Widen odd items and drop even ones.
+fn widen_odd_item(sink item: UInt8) -> Option[UInt64] {
+    if item % 2 == 0 {
+        .None
+    } else {
+        .Some(UInt64(item) * 1000)
+    }
+}
+
+test fn filter_map_changes_the_item_type() {
+    let counter = Counter { at = 0, stop = 4 }
+    var mapped = counter.filter_map(widen_odd_item)
+    testing.assert_eq(&mapped.next(), Option.Some(UInt64(1000)), "filter_map must skip rejected input")?
+    testing.assert_eq(&mapped.next(), Option.Some(UInt64(3000)), "filter_map must yield the transform's output type")?
+    testing.assert(&mapped.next().is_none(), "filter_map must exhaust with its source")?
+}
+
+test fn filter_map_skips_consumed_items() {
+    let counter = Counter { at = 1, stop = 6 }
+    var selected = counter.filter_map(
+        |sink item| if item >= 3 {
+            .Some(item + 1)
+        } else {
+            .None
+        },
+    )
+
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 4, "filter_map selected or transformed the wrong first item")?,
+        None => testing.assert(false, "filter_map skipped every item")?,
+    }
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 5, "filter_map selected the wrong second item")?,
+        None => testing.assert(false, "filter_map ended after one selected item")?,
+    }
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 6, "filter_map selected the wrong third item")?,
+        None => testing.assert(false, "filter_map ended after two selected items")?,
+    }
+    match &selected.next() {
+        Some(_) => testing.assert(false, "filter_map yielded after exhaustion")?,
+        None => {},
+    }
+}
+
+test fn map_and_filter_map_compose() {
+    let counter = Counter { at = 1, stop = 4 }
+    let doubled = counter.map(|sink item| item * 2)
+    var selected = doubled.filter_map(
+        |sink item| if item >= 4 {
+            .Some(item)
+        } else {
+            .None
+        },
+    )
+
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 4, "composed adapters selected the wrong first item")?,
+        None => testing.assert(false, "composed adapters skipped every item")?,
+    }
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 6, "composed adapters selected the wrong second item")?,
+        None => testing.assert(false, "composed adapters ended after one item")?,
+    }
+}
+
+test fn filter_map_that_rejects_every_item_reaches_exhaustion() {
+    let counter = Counter { at = 0, stop = 4 }
+    var selected = counter.filter_map(
+        |sink item| {
+            let _discarded = item
+            let missing: Option[UInt64] = .None
+            missing
+        },
+    )
+    match &selected.next() {
+        Some(_) => testing.assert(false, "filter_map yielded an item its callback rejected")?,
+        None => {},
+    }
+    match &selected.next() {
+        Some(_) => testing.assert(false, "an exhausted filter_map retained a rejected item")?,
+        None => {},
+    }
+}
+
+test fn type_changing_adapters_transfer_linear_outputs() {
+    let mapped = (UInt8(0)..3).map(number_token)
+    mapped.for_each(consume_token)
+    let selected = (UInt8(0)..3).filter_map(odd_token)
+    selected.for_each(consume_token)
+    // No Token exists until next produces it, so an unused adapter is discardable.
+    let _unused_map = (UInt8(0)..3).map(number_token)
+    let _unused_selection = (UInt8(0)..3).filter_map(odd_token)
+}
+
+impl[
+    I: Iterator,
+    U,
+    F: inout fn(sink item: I.Item) -> Option[U],
+] Iterator for FilterMap[I, U, F] {
+    type Item = U
+
+    fn next(inout self: Self) -> Option[U] where carries(.Some: self) {
+        loop {
+            match &self.iterator.next() {
+                Some(item) => {
+                    match &(self.transform)(item) {
+                        Some(value) => break .Some(value),
+                        None => {},
+                    }
+                },
+                None => break .None,
+            }
+        }
+    }
+}
+
+test fn a_filter_map_sequence_preserves_transformed_order() {
+    let counter = Counter { at = 1, stop = 4 }
+    let selected = counter.filter_map(
+        |sink item| if item > 1 {
+            .Some(item + 1)
+        } else {
+            .None
+        },
+    )
+    var encoded: UInt16 = 0
+    for item in selected {
+        // Append one decimal digit to preserve visitation order.
+        encoded = encoded * 10 + UInt16(item)
+    }
+    testing.assert_eq(encoded, 34, "the filter-map sequence lost or reordered transformed items")?
+    .Ok(())
+}
+
+impl[
+    I: Iterator,
+    U,
+    F: inout fn(sink item: I.Item) -> Option[U] + Discardable,
+] FilterMap[I, U, F] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let FilterMap { iterator, transform: _ } = self
+        iterator
+    }
+}
+
+test fn filter_map_recovers_its_inner_iterator() {
+    let counter = TicketCounter { at = 0, stop = 3 }
+    var selected = counter.filter_map(|sink item| .Some(UInt64(item)))
+    match &selected.next() {
+        Some(value) => match testing.assert_eq(value, 0, "filter_map did not advance before recovery") {
+            Ok(_) => {},
+            Err(failure) => {
+                selected.release()
+                return .Err(failure)
+            },
+        },
+        None => {
+            selected.release()
+            return testing.assert(false, "filter_map ended before recovery")
+        },
+    }
+    let inner = selected.into_inner()
+    match testing.assert_eq(inner.at, 1, "filter_map.into_inner did not return the advanced iterator") {
+        Ok(_) => inner.release(),
+        Err(failure) => {
+            inner.release()
+            return .Err(failure)
+        },
+    }
+}
+
+impl[
+    I: Iterator + Release,
+    U,
+    F: inout fn(sink item: I.Item) -> Option[U] + Discardable,
+] Release for FilterMap[I, U, F] {
+    fn release(sink self: Self) -> () {
+        let FilterMap { iterator, transform: _ } = self
+        iterator.release()
+    }
+}
+
+test fn a_filter_map_releases_its_inner_iterator() {
+    let counter = TicketCounter { at = 0, stop = 3 }
+    let selected = counter.filter_map(|sink item| .Some(UInt64(item)))
+    selected.release()
+}
+
+test fn releasing_a_filter_map_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var selected = (LoggedCursor { tag = log.tag(22), visited = false }).filter_map(some_number)
+    let item = &selected.next()
+    let done = &selected.next().is_none()
+    selected.release()
+    let released = log.holds([UInt64(22)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some(UInt8(19)), "filter_map changed its item")?
+    testing.assert(done, "filter_map yielded past its iterator")?
+    testing.assert(released, "releasing a filter_map did not release its iterator exactly once")?
+}
+
+impl[I, U, F] FilterMap[I, U, F] {
+    // Recover the source iterator, as far as it advanced, and the callback
+    // with any state it gathered, as a pair. Neither is discarded or settled.
+    // State a callback updates belongs outside the adapter, lent to it with
+    // an `inout` capture.
+    pub fn into_parts(sink self: Self) -> (I, F) where carries(._0: self.iterator), carries(._1: self.transform) {
+        let FilterMap { iterator, transform } = self
+        (iterator, transform)
+    }
+}
+
+test fn filter_map_recovers_callback_state_after_exhaustion() {
+    let source = Counter { at = 0, stop = 3 }
+    let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+        calls += 1
+        if item == 1 {
+            Option.Some(UInt64(calls))
+        } else {
+            .None
+        }
+    }
+    var selected = source.filter_map(callback)
+    let first = &selected.next()
+    let exhausted = &selected.next()
+    let still_exhausted = &selected.next()
+    let (recovered, transform) = selected.into_parts()
+    let { calls } = transform.into_captures()
+    testing.assert_eq(first, Option.Some(UInt64(2)), "filter_map lost callback updates before selection")?
+    testing.assert(exhausted.is_none() && still_exhausted.is_none(), "filter_map did not stay exhausted")?
+    testing.assert_eq(recovered.at, UInt8(3), "filter_map recovery lost source progress")?
+    testing.assert_eq(calls, UInt8(3), "filter_map invoked its callback after exhaustion")?
+}
+
+test fn filter_skips_false_items_and_stays_exhausted() {
+    let counter = Counter { at = 1, stop = 6 }
+    var selected = counter.filter(|item| item >= 3)
+
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 3, "filter selected the wrong first item")?,
+        None => testing.assert(false, "filter skipped every item")?,
+    }
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 4, "filter selected the wrong second item")?,
+        None => testing.assert(false, "filter ended after one selected item")?,
+    }
+    match &selected.next() {
+        Some(value) => testing.assert_eq(value, 5, "filter selected the wrong third item")?,
+        None => testing.assert(false, "filter ended after two selected items")?,
+    }
+    match &selected.next() {
+        Some(_) => testing.assert(false, "filter yielded after exhaustion")?,
+        None => {},
+    }
+    match &selected.next() {
+        Some(_) => testing.assert(false, "an exhausted filter yielded again")?,
+        None => {},
+    }
+}
+
+// An AffineFilterItem is affine, so a filter may discard it; AffineFilterItems
+// yields three of them, numbered 0 to 2.
+struct AffineFilterItem { number: UInt8 }
+
+struct AffineFilterItems { next_number: UInt8 }
+
+impl Iterator for AffineFilterItems {
+    type Item = AffineFilterItem
+
+    fn next(inout self: Self) -> Option[AffineFilterItem] where carries() {
+        if self.next_number == 3 {
+            return .None
+        }
+        let number = self.next_number
+        self.next_number += 1
+        .Some(.{ number = number })
+    }
+}
+
+test fn filtering_can_discard_affine_items() {
+    let source = AffineFilterItems { next_number = 0 }
+    var selected = source.filter(|item| item.number == 2)
+    match &selected.next() {
+        Some(item) => testing.assert_eq(item.number, UInt8(2), "filter retained the wrong affine item")?,
+        None => return testing.assert(false, "filter discarded its matching affine item"),
+    }
+    testing.assert(&selected.next().is_none(), "affine filter did not finish")?
+}
+
+impl[
+    I: Iterator,
+    F: inout fn(read item: I.Item) -> Bool,
+] Iterator for Filter[I, F]
+where I.Item: Discardable {
+    type Item = I.Item
+
+    fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        loop {
+            match &self.iterator.next() {
+                Some(item) => {
+                    if &(self.predicate)(item) {
+                        break .Some(item)
+                    }
+                },
+                None => break .None,
+            }
+        }
+    }
+}
+
+test fn a_filter_sequence_preserves_selected_order() {
+    let counter = Counter { at = 1, stop = 6 }
+    let selected = counter.filter(|item| item % 2 == 1)
+    var encoded: UInt16 = 0
+    for item in selected {
+        // Append one decimal digit to preserve visitation order.
+        encoded = encoded * 10 + UInt16(item)
+    }
+    testing.assert_eq(encoded, 135, "the filter sequence lost or reordered selected items")?
+    .Ok(())
+}
+
+impl[
+    I: Iterator + Release,
+    F: inout fn(read item: I.Item) -> Bool + Discardable,
+] Release for Filter[I, F] {
+    fn release(sink self: Self) -> () {
+        let Filter { iterator, predicate: _ } = self
+        iterator.release()
+    }
+}
+
+test fn a_filter_releases_its_inner_iterator() {
+    let counter = TicketCounter { at = 0, stop = 3 }
+    let selected = counter.filter(|item| item >= 1)
+    selected.release()
+}
+
+test fn releasing_a_filter_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var selected = (LoggedCursor { tag = log.tag(33), visited = false }).filter(is_nineteen)
+    let item = &selected.next()
+    let done = &selected.next().is_none()
+    selected.release()
+    let released = log.holds([UInt64(33)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some(UInt8(19)), "filter changed its item")?
+    testing.assert(done, "filter yielded past its iterator")?
+    testing.assert(released, "releasing a filter did not release its iterator exactly once")?
+}
+
+impl[
+    I: Iterator,
+    F: inout fn(read item: I.Item) -> Bool + Discardable,
+] Filter[I, F] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Filter { iterator, predicate: _ } = self
+        iterator
+    }
+}
+
+test fn filter_into_inner_returns_the_advanced_iterator() {
+    let transaction = TransactionCursor { at = 0, stop = 3 }
+    var selected = transaction.filter(|item| item >= 1)
+    match &selected.next() {
+        Some(_) => {},
+        None => {},
+    }
+    let cursor = selected.into_inner()
+    match testing.assert_eq(cursor.at, 2, "filter.into_inner did not return the advanced iterator") {
+        Ok(_) => rollback_cursor(cursor),
+        Err(failure) => {
+            rollback_cursor(cursor)
+            return .Err(failure)
+        },
+    }
+}
+
+impl[I, F] Filter[I, F] {
+    // Recover the source iterator, as far as it advanced, and the predicate
+    // with any state it gathered, as a pair. Neither is discarded or settled.
+    pub fn into_parts(sink self: Self) -> (I, F) where carries(._0: self.iterator), carries(._1: self.predicate) {
+        let Filter { iterator, predicate } = self
+        (iterator, predicate)
+    }
+}
+
+test fn filter_recovers_callback_state_after_rejected_items() {
+    let source = Counter { at = 0, stop = 4 }
+    let callback = inout [sink calls = UInt8(0)] |item: UInt8| {
+        calls += 1
+        item == 2
+    }
+    var selected = source.filter(callback)
+    let found = &selected.next()
+    let (recovered, predicate) = selected.into_parts()
+    let { calls } = predicate.into_captures()
+    testing.assert_eq(found, Option.Some(UInt8(2)), "filter selected the wrong item")?
+    testing.assert_eq(recovered.at, UInt8(3), "filter recovery lost source progress")?
+    testing.assert_eq(calls, UInt8(3), "filter did not retain rejected-item callback updates")?
+}
+
+impl[I: Iterator] Iterator for Enumerate[I] {
+    type Item = (UInt64, I.Item)
+
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self) {
+        match &self.iterator.next() {
+            Some(item) => {
+                let at = self.position
+                self.position += 1
+                .Some((at, item))
+            },
+            None => .None,
+        }
+    }
+}
+
+// AskedSource yields the numbers from `at` up to but not including `stop` and
+// counts every request, including the one that finds it exhausted.
+struct AskedSource {
+    at: UInt8,
+    stop: UInt8,
+    asked: UInt8,
+}
+
+impl Iterator for AskedSource {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] where carries() {
+        self.asked += 1
+        if self.at >= self.stop {
+            return .None
+        }
+        let value = self.at
+        self.at += 1
+        .Some(value)
+    }
+}
+
+test fn enumerate_pairs_positions_from_zero() {
+    var numbered = (UInt8(7)..9).enumerate()
+    testing.assert_eq(&numbered.next(), Option.Some((UInt64(0), UInt8(7))), "enumerate did not start at position zero")?
+    testing.assert_eq(&numbered.next(), Option.Some((UInt64(1), UInt8(8))), "enumerate did not count the second item")?
+    testing.assert(&numbered.next().is_none(), "enumerate yielded past its source")?
+}
+
+impl[I: Iterator] Enumerate[I] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Enumerate { iterator, position: _ } = self
+        iterator
+    }
+}
+
+test fn enumerate_into_inner_returns_the_advanced_iterator() {
+    var numbered = (AskedSource { at = 0, stop = 4, asked = 0 }).enumerate()
+    let _first = &numbered.next()
+    let source = numbered.into_inner()
+    testing.assert_eq(source.asked, UInt8(1), "enumerate asked its source more than once per item")?
+}
+
+impl[I: Iterator + Release] Release for Enumerate[I] {
+    fn release(sink self: Self) -> () {
+        let Enumerate { iterator, position: _ } = self
+        iterator.release()
+    }
+}
+
+test fn releasing_an_enumerate_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var numbered = (LoggedCursor { tag = log.tag(44), visited = false }).enumerate()
+    let item = &numbered.next()
+    numbered.release()
+    let released = log.holds([UInt64(44)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some((UInt64(0), UInt8(19))), "enumerate changed its item")?
+    testing.assert(released, "releasing an enumerate did not release its iterator exactly once")?
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Zip[A, B]
+where A.Item: Discardable {
+    type Item = (A.Item, B.Item)
+
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self) {
+        match &self.first.next() {
+            Some(a) => match &self.second.next() {
+                Some(b) => .Some((a, b)),
+                None => .None,
+            },
+            None => .None,
+        }
+    }
+}
+
+test fn zip_stops_at_the_shorter_sequence() {
+    var zipped = (UInt8(1)..4).zip(UInt8(10)..12)
+    testing.assert_eq(&zipped.next(), Option.Some((UInt8(1), UInt8(10))), "zip changed the first pair")?
+    testing.assert_eq(&zipped.next(), Option.Some((UInt8(2), UInt8(11))), "zip changed the second pair")?
+    testing.assert(&zipped.next().is_none(), "zip yielded past its shorter sequence")?
+}
+
+test fn zip_disposes_of_the_first_item_taken_past_the_end() {
+    var zipped = (AskedSource { at = 1, stop = 4, asked = 0 }).zip(AskedSource { at = 0, stop = 2, asked = 0 })
+    let _first = &zipped.next()
+    let _second = &zipped.next()
+    let done = &zipped.next().is_none()
+    testing.assert(done, "zip yielded past its shorter sequence")?
+    testing.assert_eq(zipped.first.asked, UInt8(3), "zip did not draw the first sequence's third item")?
+    testing.assert_eq(zipped.second.asked, UInt8(3), "zip did not ask the second sequence once more")?
+}
+
+test fn zip_asks_the_second_sequence_nothing_once_the_first_ends() {
+    var zipped = (AskedSource { at = 0, stop = 0, asked = 0 }).zip(AskedSource { at = 0, stop = 2, asked = 0 })
+    testing.assert(&zipped.next().is_none(), "zip yielded from an empty first sequence")?
+    testing.assert_eq(zipped.second.asked, UInt8(0), "zip asked the second sequence after the first ended")?
+}
+
+impl[A, B] Zip[A, B] {
+    // Recover both sources, as far as each advanced, as a pair. Neither is
+    // discarded or settled.
+    pub fn into_parts(sink self: Self) -> (A, B) where carries(._0: self.first), carries(._1: self.second) {
+        let Zip { first, second } = self
+        (first, second)
+    }
+}
+
+test fn zip_recovers_both_sources_as_far_as_each_advanced() {
+    var zipped = (AskedSource { at = 0, stop = 9, asked = 0 }).zip(AskedSource { at = 5, stop = 9, asked = 0 })
+    let first = &zipped.next()
+    let (left, right) = zipped.into_parts()
+    testing.assert_eq(first, Option.Some((UInt8(0), UInt8(5))), "zip changed its pair")?
+    testing.assert_eq(left.asked, UInt8(1), "zip recovery lost the first source's progress")?
+    testing.assert_eq(right.at, UInt8(6), "zip recovery lost the second source's progress")?
+}
+
+// Releasing a zip settles the second source and then the first, last component
+// first as a tuple's derived Release does.
+impl[A: Iterator + Release, B: Iterator + Release] Release for Zip[A, B] {
+    fn release(sink self: Self) -> () {
+        let Zip { first, second } = self
+        second.release()
+        first.release()
+    }
+}
+
+test fn releasing_a_zip_releases_both_iterators_once() {
+    let log = mem.ReleaseLog.open(2)
+    var zipped = (LoggedCursor { tag = log.tag(55), visited = false }).zip(LoggedCursor { tag = log.tag(66), visited = false })
+    let item = &zipped.next()
+    zipped.release()
+    let released = log.holds([UInt64(66), 55].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some((UInt8(19), UInt8(19))), "zip changed its pair")?
+    testing.assert(released, "releasing a zip did not release both iterators exactly once, the second first")?
+}
+
+impl[I: Iterator] Iterator for Take[I] {
+    type Item = I.Item
+
+    fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        if self.remaining == 0 {
+            return .None
+        }
+        self.remaining -= 1
+        &self.iterator.next()
+    }
+}
+
+test fn take_asks_for_no_more_than_it_yields() {
+    var taken = (AskedSource { at = 0, stop = 9, asked = 0 }).take(2)
+    testing.assert_eq(&taken.next(), Option.Some(UInt8(0)), "take changed the first item")?
+    testing.assert_eq(&taken.next(), Option.Some(UInt8(1)), "take changed the second item")?
+    testing.assert(&taken.next().is_none(), "take yielded past its count")?
+    testing.assert(&taken.next().is_none(), "an exhausted take yielded again")?
+    let source = taken.into_inner()
+    testing.assert_eq(source.asked, UInt8(2), "take asked its source for more than it yielded")?
+}
+
+test fn take_ends_with_its_source() {
+    var taken = (UInt8(0)..1).take(5)
+    testing.assert_eq(&taken.next(), Option.Some(UInt8(0)), "take changed its only item")?
+    testing.assert(&taken.next().is_none(), "take yielded past its source")?
+}
+
+impl[I: Iterator] Take[I] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Take { iterator, remaining: _ } = self
+        iterator
+    }
+}
+
+test fn take_into_inner_returns_the_advanced_iterator() {
+    var taken = (AskedSource { at = 0, stop = 9, asked = 0 }).take(3)
+    let _first = &taken.next()
+    let source = taken.into_inner()
+    testing.assert_eq(source.asked, UInt8(1), "take recovered its source without the progress it made")?
+}
+
+impl[I: Iterator + Release] Release for Take[I] {
+    fn release(sink self: Self) -> () {
+        let Take { iterator, remaining: _ } = self
+        iterator.release()
+    }
+}
+
+test fn releasing_a_take_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var taken = (LoggedCursor { tag = log.tag(77), visited = false }).take(1)
+    let item = &taken.next()
+    taken.release()
+    let released = log.holds([UInt64(77)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some(UInt8(19)), "take changed its item")?
+    testing.assert(released, "releasing a take did not release its iterator exactly once")?
+}
+
+impl[I: Iterator] Iterator for Skip[I]
+where I.Item: Discardable {
+    type Item = I.Item
+
+    fn next(inout self: Self) -> Option[I.Item] where carries(.Some: self) {
+        loop {
+            if self.remaining == 0 {
+                break
+            }
+            self.remaining -= 1
+            match &self.iterator.next() {
+                Some(_) => {},
+                None => return .None,
+            }
+        }
+        &self.iterator.next()
+    }
+}
+
+test fn skip_disposes_of_what_it_passes() {
+    var skipped = (AffineFilterItems { next_number = 0 }).skip(2)
+    match &skipped.next() {
+        Some(item) => testing.assert_eq(item.number, UInt8(2), "skip did not pass exactly its count")?,
+        None => return testing.assert(false, "skip passed more items than its source holds"),
+    }
+    testing.assert(&skipped.next().is_none(), "skip did not finish with its source")?
+}
+
+test fn skip_ends_with_its_source_while_passing() {
+    var skipped = (UInt8(0)..2).skip(5)
+    testing.assert(&skipped.next().is_none(), "skip yielded from a source shorter than its count")?
+}
+
+impl[I: Iterator] Skip[I] {
+    pub fn into_inner(sink self: Self) -> I where carries(self.iterator) {
+        let Skip { iterator, remaining: _ } = self
+        iterator
+    }
+}
+
+test fn skip_into_inner_returns_the_advanced_iterator() {
+    var skipped = (AskedSource { at = 0, stop = 9, asked = 0 }).skip(3)
+    let _first = &skipped.next()
+    let source = skipped.into_inner()
+    testing.assert_eq(source.asked, UInt8(4), "skip asked its source more than its count plus one")?
+}
+
+impl[I: Iterator + Release] Release for Skip[I] {
+    fn release(sink self: Self) -> () {
+        let Skip { iterator, remaining: _ } = self
+        iterator.release()
+    }
+}
+
+test fn releasing_a_skip_releases_its_iterator_once() {
+    let log = mem.ReleaseLog.open(1)
+    var skipped = (LoggedCursor { tag = log.tag(88), visited = false }).skip(0)
+    let item = &skipped.next()
+    skipped.release()
+    let released = log.holds([UInt64(88)].as_slice())
+    log.release()
+    testing.assert_eq(item, Option.Some(UInt8(19)), "skip changed its item")?
+    testing.assert(released, "releasing a skip did not release its iterator exactly once")?
+}
+
+test fn fold_moves_one_accumulator_through_every_item() {
+    let counter = Counter { at = 1, stop = 5 }
+    let total = counter.fold(UInt16(0), |sink accumulator, sink item| accumulator + UInt16(item))
+    testing.assert_eq(total, 10, "fold did not combine every item in order")?
+}
+
+test fn folding_text_can_return_a_borrowed_item() {
+    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    let parts = owned.split(",").unwrap()
+    let last = parts.fold(
+        "",
+        |sink accumulator, sink item| {
+            let _previous = accumulator
+            item
+        },
+    )
+    testing.assert_eq(last, "c", "fold lost the last item's backing observation")?
+}
+
+test fn fold_takes_a_closure_that_changes_a_lent_count() {
+    var combined = UInt8(0)
+    let sum = (UInt8(1)..4).fold(
+        UInt8(0),
+        inout [inout combined] |sink accumulator, sink item| {
+            combined += 1
+            accumulator + item
+        },
+    )
+    testing.assert_eq(sum, UInt8(6), "fold did not combine every item")?
+    testing.assert_eq(combined, UInt8(3), "fold did not call its callback once per item")?
+}
+
+// Combine one item into the accumulator with a stateful callback.
+fn fold_one_inout[
+    A,
+    T,
+    F: inout fn(sink accumulator: A, sink item: T) -> A where carries(accumulator, item),
+](inout accumulator: A, sink item: T, inout combine: F) -> () where retains(accumulator: item, combine) {
+    accumulator = &combine(accumulator, item)
+}
+
+test fn a_mutable_fold_leaves_callback_state_with_the_caller() {
+    var combine = inout [sink calls = UInt8(0)] |sink accumulator: UInt8, sink item: UInt8| {
+        calls += 1
+        accumulator + item
+    }
+    let sum = (UInt8(1)..4).fold_inout(UInt8(0), &combine)
+    let empty_sum = (UInt8(0)..0).fold_inout(sum, &combine)
+    let { calls } = combine.into_captures()
+    testing.assert_eq(sum, UInt8(6), "mutable fold did not combine every item")?
+    testing.assert_eq(empty_sum, UInt8(6), "mutable fold changed its empty-input accumulator")?
+    testing.assert_eq(calls, UInt8(3), "mutable fold invoked its callback on empty input")?
+}
+
+test fn find_map_stops_at_the_first_selected_item() {
+    let present = Counter { at = 1, stop = 6 }
+    let found: Option[UInt8] = present.find_map(
+        |sink item| if item >= 3 {
+            .Some(item * 2)
+        } else {
+            .None
+        },
+    )
+    match found {
+        Some(value) => testing.assert_eq(value, 6, "find_map did not return its first selected item")?,
+        None => testing.assert(false, "find_map found no selected item")?,
+    }
+
+    let absent = Counter { at = 1, stop = 3 }
+    let missing: Option[UInt8] = absent.find_map(
+        |sink item| if item > 9 {
+            .Some(item)
+        } else {
+            .None
+        },
+    )
+    match missing {
+        Some(_) => testing.assert(false, "find_map selected an item that did not match")?,
+        None => {},
+    }
+}
+
+test fn a_mutable_find_map_stops_at_its_selection_and_keeps_callback_state() {
+    var select = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+        calls += 1
+        if item == 2 {
+            Option.Some(UInt64(item))
+        } else {
+            .None
+        }
+    }
+    let selected = (UInt8(0)..5).find_map_inout(&select)
+    let empty = (UInt8(0)..0).find_map_inout(&select)
+    let { calls } = select.into_captures()
+    testing.assert_eq(selected, Option.Some(UInt64(2)), "mutable find_map selected the wrong item")?
+    testing.assert(empty.is_none(), "mutable find_map found an item in empty input")?
+    testing.assert_eq(calls, UInt8(3), "mutable find_map did not stop at selection")?
+}
+
+test fn for_each_consumes_linear_items() {
+    let counter = TokenCounter { at = 0, stop = 3 }
+    counter.for_each(consume_token)
+}
+
+// TagSource yields tags numbered from `next_code` up to `limit`, each recording
+// in `log` when it is released.
+struct TagSource {
+    log: borrow mem.ReleaseLog,
+    next_code: UInt64,
+    limit: UInt64,
+}
+
+impl Iterator for TagSource {
+    type Item = mem.ReleaseTag
+
+    fn next(inout self: Self) -> Option[mem.ReleaseTag] {
+        if self.next_code >= self.limit {
+            return .None
+        }
+        let tag = self.log.tag(self.next_code)
+        self.next_code += 1
+        .Some(tag)
+    }
+}
+
+test fn for_each_visits_every_linear_item_in_order() {
+    let log = mem.ReleaseLog.open(3)
+    let tags = TagSource { log = borrow log, next_code = 1, limit = 4 }
+    tags.for_each(Release.release)
+    let ordered = log.holds([UInt64(1), 2, 3].as_slice())
+    log.release()
+    testing.assert(ordered, "for_each skipped, duplicated, or reordered a linear item")?
+}
+
+test fn a_mutable_for_each_leaves_visitor_state_with_the_caller() {
+    var visit = inout [sink total = UInt8(0)] |sink item: UInt8| {
+        total += item
+    }
+    let counted = UInt8(1)..4
+    counted.for_each_inout(&visit)
+    let empty = UInt8(0)..0
+    empty.for_each_inout(&visit)
+    let { total } = visit.into_captures()
+    testing.assert_eq(total, UInt8(6), "mutable for_each did not retain callback state")?
+}
+
+test fn mutable_terminals_borrow_read_callbacks_and_preserve_protocol_captures() {
+    var consume = consume_token
+    let tokens = TokenCounter { at = 0, stop = 3 }
+    tokens.for_each_inout(&consume)
+    let transaction = TransactionCursor { at = 7, stop = 9 }
+    var visit = [sink transaction] |sink item: UInt8| {
+        let _position = transaction.at + item
+    }
+    let empty = UInt8(0)..0
+    empty.for_each_inout(&visit)
+    let visited = UInt8(0)..2
+    visited.for_each_inout(&visit)
+    let { transaction: recovered } = visit.into_captures()
+    let position = recovered.at
+    rollback_cursor(recovered)
+    testing.assert_eq(position, UInt8(7), "mutable terminal settled its caller-owned protocol capture")?
+}
+
+// Accept the token numbered 2. A token past it panics, which proves `any`
+// stopped at its first match.
+fn token_is_two(sink item: Token) -> Bool {
+    match item {
+        Number(value) => {
+            if value > 2 {
+                panic("any evaluated its predicate after a true result")
+            }
+            value == 2
+        },
+    }
+}
+
+test fn any_short_circuits_and_is_false_for_empty() {
+    let present = TokenCounter { at = 0, stop = 4 }
+    testing.assert(present.any(token_is_two), "any did not find a matching Linear item")?
+
+    let empty = TokenCounter { at = 0, stop = 0 }
+    testing.assert(!empty.any(token_is_two), "any returned true for an empty iterator")?
+}
+
+test fn a_mutable_any_stops_at_its_match_and_keeps_callback_state() {
+    var predicate = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+        calls += 1
+        item == 2
+    }
+    let found = (UInt8(0)..5).any_inout(&predicate)
+    let empty = (UInt8(0)..0).any_inout(&predicate)
+    let { calls } = predicate.into_captures()
+    testing.assert(found && !empty, "mutable any returned the wrong result")?
+    testing.assert_eq(calls, UInt8(3), "mutable any did not stop at its match")?
+}
+
+// Accept tokens numbered below 2. A token past 2 panics, which proves `all`
+// stopped at its first rejection.
+fn token_is_below_two(sink item: Token) -> Bool {
+    match item {
+        Number(value) => {
+            if value > 2 {
+                panic("all evaluated its predicate after a false result")
+            }
+            value < 2
+        },
+    }
+}
+
+test fn all_short_circuits_and_is_true_for_empty() {
+    let rejected = TokenCounter { at = 0, stop = 4 }
+    testing.assert(!rejected.all(token_is_below_two), "all accepted a false Linear item")?
+
+    let empty = TokenCounter { at = 0, stop = 0 }
+    testing.assert(empty.all(token_is_below_two), "all returned false for an empty iterator")?
+}
+
+test fn a_mutable_all_stops_at_its_first_rejection_and_keeps_callback_state() {
+    var predicate = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+        calls += 1
+        item == 2
+    }
+    let found = (UInt8(0)..5).all_inout(&predicate)
+    let empty = (UInt8(0)..0).all_inout(&predicate)
+    let { calls } = predicate.into_captures()
+    testing.assert(!found && empty, "mutable all returned the wrong result")?
+    testing.assert_eq(calls, UInt8(1), "mutable all did not stop at its first rejection")?
+}
+
+// Accept the item 3. An item past it panics, which proves `find` stopped at
+// its match.
+fn item_is_three(item: UInt8) -> Bool {
+    if item > 3 {
+        panic("find evaluated its predicate after finding a match")
+    }
+    item == 3
+}
+
+// Accept only the item 10.
+fn item_is_ten(item: UInt8) -> Bool {
+    item == 10
+}
+
+test fn find_returns_the_first_matching_item_or_none() {
+    let present = Counter { at = 1, stop = 6 }
+    let found = present.find(item_is_three)
+    match found {
+        Some(value) => testing.assert_eq(value, 3, "find did not return its first matching item")?,
+        None => testing.assert(false, "find returned None for a matching item")?,
+    }
+
+    let absent = Counter { at = 1, stop = 4 }
+    let missing = absent.find(item_is_ten)
+    match missing {
+        Some(_) => testing.assert(false, "find returned an item that did not match")?,
+        None => {},
+    }
+}
+
+test fn text_adapters_preserve_the_borrowed_backing() {
+    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    let parts = owned.split(",").unwrap()
+    let mapped = parts.map(|sink item| item)
+    let selected = mapped.filter_map(|sink item| .Some(item))
+    let found = selected.find(|item| item == "b")
+    testing.assert_eq(found.unwrap(), "b", "iterator adapters changed borrowed text")?
+}
+
+test fn a_mutable_find_stops_at_its_match_and_keeps_callback_state() {
+    var observe = inout [sink calls = UInt8(0)] |item: UInt8| {
+        calls += 1
+        item == 2
+    }
+    let found = (UInt8(0)..5).find_inout(&observe)
+    let empty = (UInt8(0)..0).find_inout(&observe)
+    let { calls } = observe.into_captures()
+    testing.assert_eq(found, Option.Some(UInt8(2)), "mutable find selected the wrong item")?
+    testing.assert(empty.is_none(), "mutable find found an item in empty input")?
+    testing.assert_eq(calls, UInt8(3), "mutable find did not stop at selection")?
+}
+
+test fn counted_find_reports_empty_absent_first_and_last_matches() {
+    var empty = UInt64(0)..0
+    let empty_report = &empty.find_counted(|item| item == 0)
+    let empty_expected = FindReport[UInt64] { found = .None, inspected = 0 }
+    testing.assert_eq(empty_report, empty_expected, "empty counted search inspected an item")?
+
+    var absent = UInt64(1)..4
+    let absent_report = &absent.find_counted(|item| item == 9)
+    let absent_expected = FindReport[UInt64] { found = .None, inspected = 3 }
+    testing.assert_eq(absent_report, absent_expected, "absent counted search reported the wrong count")?
+
+    var first = UInt64(1)..4
+    let first_report = &first.find_counted(|item| item == 1)
+    let first_expected = FindReport[UInt64] { found = .Some(1), inspected = 1 }
+    testing.assert_eq(first_report, first_expected, "first-match counted search reported the wrong result")?
+
+    var last = UInt64(1)..4
+    let last_report = &last.find_counted(|item| item == 3)
+    let last_expected = FindReport[UInt64] { found = .Some(3), inspected = 3 }
+    testing.assert_eq(last_report, last_expected, "last-match counted search reported the wrong result")?
+}
+
+test fn counted_find_preserves_a_borrowed_items_external_owner() {
+    defer let owned = "one,two,three".to_owned(mem.system()).unwrap()
+    var words = owned.split(",").unwrap()
+    let report = &words.find_counted(|item| item == "two")
+    let { found, inspected } = report
+    testing.assert_eq(inspected, UInt64(2), "counted search miscounted borrowed items")?
+    testing.assert_eq(found.unwrap(), "two", "counted search lost a borrowed matching item")?
+}
+
+test fn counted_find_observes_linear_elements_without_settling_them() {
+    var tickets: Vec[TransactionCursor] = Vec.new()
+    &tickets.push(.{ at = 1, stop = 4 }).unwrap()
+    &tickets.push(.{ at = 2, stop = 5 }).unwrap()
+    &tickets.push(.{ at = 3, stop = 6 }).unwrap()
+    var iterator = tickets.as_slice().iterate()
+    let report = &iterator.find_counted(|ticket| ticket.at == 2)
+    let { found, inspected } = report
+    let observed = found.unwrap().at
+    iterator.release()
+    var settled: UInt8 = 0
+    var pending = tickets.drain()
+    for ticket in &pending {
+        settled += ticket.at
+        rollback_cursor(ticket)
+    }
+    pending.finish().unwrap()
+    testing.assert_eq(observed, UInt8(2), "counted search returned the wrong borrowed Linear item")?
+    testing.assert_eq(inspected, UInt64(2), "counted search miscounted borrowed Linear items")?
+    testing.assert_eq(settled, UInt8(6), "counted search settled or lost a Linear source element")?
+}
+
+test fn counted_find_stops_without_lookahead_and_leaves_the_remainder() {
+    var arrivals = UInt64(1)..6
+    var predicate = inout [sink calls = UInt64(0)] |item: UInt64| {
+        calls += 1
+        item == 3
+    }
+    let report = &arrivals.find_counted_inout(&predicate)
+    let next = &arrivals.next()
+    let repeated = &arrivals.find_counted_inout(&predicate)
+    let { calls } = predicate.into_captures()
+    let expected = FindReport[UInt64] { found = .Some(3), inspected = 3 }
+    let repeated_expected = FindReport[UInt64] { found = .None, inspected = 1 }
+    testing.assert_eq(report, expected, "counted search did not include the matching item")?
+    testing.assert_eq(next, Option.Some(UInt64(4)), "counted search read past the matching item")?
+    testing.assert_eq(repeated, repeated_expected, "repeated counted search did not continue from the source position")?
+    testing.assert_eq(calls, UInt64(4), "counted search invoked its predicate outside inspected items")?
+}
+
+test fn counted_find_borrows_a_linear_iterator_and_resource_owning_callback() {
+    var transaction = TransactionCursor { at = 1, stop = 5 }
+    let captured = TransactionCursor { at = 7, stop = 9 }
+    var predicate = inout [sink captured] |item: UInt8| {
+        let _position = captured.at + item
+        item == 2
+    }
+    let report = &transaction.find_counted_inout(&predicate)
+    let cursor_position = transaction.at
+    let { captured: recovered } = predicate.into_captures()
+    let callback_position = recovered.at
+    rollback_cursor(transaction)
+    rollback_cursor(recovered)
+    let expected = FindReport[UInt8] { found = .Some(2), inspected = 2 }
+    testing.assert_eq(report, expected, "counted search mishandled a Linear iterator")?
+    testing.assert_eq(cursor_position, UInt8(3), "counted search did not leave its Linear iterator with the caller")?
+    testing.assert_eq(callback_position, UInt8(7), "counted search settled its caller-owned callback")?
+}

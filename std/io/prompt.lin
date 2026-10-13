@@ -1,0 +1,372 @@
+import std.mem
+import std.testing
+
+// A PromptError says which step of a prompt failed: writing the message,
+// flushing it, or reading the response. An output failure stops before any
+// input is read, and the caller keeps its buffered reader.
+@copyable
+pub enum PromptError[I, O] {
+    Write(WriteFailure[O]),
+    Flush(WriteFailure[O]),
+    Read(LineError[I]),
+}
+
+derive[I: Debug, O: Debug] Debug for PromptError[I, O]
+
+derive[I: Release, O: Release] Release for PromptError[I, O]
+
+impl[I, O] PromptError[I, O] {
+    // Return whether this failure is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self { Read(error) => error.is_refusal(), _ => false }
+    }
+}
+
+impl[I: Display, O: Display] Display for PromptError[I, O] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Write(failure) => {
+                &w.write_str("could not write the prompt: ")?
+                failure.fmt(&w)
+            },
+            Flush(failure) => {
+                &w.write_str("could not flush the prompt: ")?
+                failure.fmt(&w)
+            },
+            Read(error) => {
+                &w.write_str("could not read the response: ")?
+                error.fmt(&w)
+            },
+        }
+    }
+}
+
+test fn prompt_errors_display_the_failed_step_and_its_reason() {
+    let output: PromptError[Str, Str] = .Write(.{ kind = .Underlying, reason = .Some("pipe closed"), written = 1 })
+    let flush: PromptError[Str, Str] = .Flush(.{ kind = .NoProgress, reason = .None, written = 0 })
+    let response: PromptError[Str, Str] = .Read(.Limit)
+    // The 256-byte recorder holds all three failures, one per line.
+    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    let wrote = "{output}\n{flush}\n{response}".fmt(&writer).is_ok()
+    let expected =
+        \\could not write the prompt: write failed after 1 bytes: pipe closed
+        \\could not flush the prompt: write failed after 0 bytes: the writer made no progress
+        \\could not read the response: line exceeded the byte limit
+    let equal = writer.holds(expected)
+    writer.release()
+    testing.assert(wrote && equal, "a prompt error lost its step or reason")?
+    .Ok(())
+}
+
+// PromptTestReader delivers `bytes` and counts its reads in `calls`.
+struct PromptTestReader {
+    bytes: mem.Slice[UInt8],
+    position: UInt64,
+    calls: UInt64,
+}
+
+impl Reader for PromptTestReader {
+    type Error = UInt8
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, UInt8] where carries() {
+        self.calls += 1
+        var amount = self.bytes.length() - self.position
+        if amount > count {
+            amount = count
+        }
+        for i in 0..amount {
+            &buffer.store_byte(offset + i, self.bytes[self.position + i])
+        }
+        self.position += amount
+        .Ok(amount)
+    }
+}
+
+// PromptTestWriter accepts one byte per write into eight bytes of storage, and
+// fails its writes or its flush when asked to.
+struct PromptTestWriter {
+    bytes: [UInt8; 8],
+    length: UInt64,
+    flushed: Bool,
+    fail_write: Bool,
+    fail_flush: Bool,
+}
+
+impl ByteWriter for PromptTestWriter {
+    type Error = UInt8
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, WriteFailure[UInt8]] where carries() {
+        if self.fail_write {
+            return .Err(.{ kind = .Underlying, reason = .Some(7), written = 0 })
+        }
+        let byte = bytes[0]
+        self.bytes[self.length] = byte
+        self.length += 1
+        .Ok(1)
+    }
+
+    fn flush(inout self: Self) -> Result[UInt64, WriteFailure[UInt8]] where carries() {
+        self.flushed = true
+        if self.fail_flush {
+            return .Err(.{ kind = .Underlying, reason = .Some(8), written = 0 })
+        }
+        .Ok(0)
+    }
+}
+
+// Write `message` to `writer`, flush it, then read one line of at most
+// `max_bytes` bytes from `reader`. Input `reader` already buffered is kept.
+pub fn prompt_with[R: Reader, A: Allocator, W: ByteWriter](inout reader: BufferedReader[R, A], inout writer: W, message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[R.Error, W.Error]] where carries(.Ok: reader.record, reader.allocator), carries(.Err.Read.Input.reason: reader.reader), carries(.Err.Write: writer), carries(.Err.Flush: writer), retains(reader.record: reader.allocator) {
+    match write_all(&writer, message.as_bytes()) {
+        Err(failure) => return .Err(.Write(failure)),
+        Ok(_) => {},
+    }
+    match &writer.flush() {
+        Err(failure) => return .Err(.Flush(failure)),
+        Ok(_) => {},
+    }
+    match &reader.read_line(max_bytes) {
+        Ok(line) => .Ok(line),
+        Err(failure) => .Err(.Read(failure)),
+    }
+}
+
+test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
+    let input = "one\ntwo\n"
+    let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+        return testing.assert(false, "reader allocation failed")
+    }
+    var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
+    let first = match prompt_with(&reader, &writer, "go> ", max_bytes: 3) {
+        Ok(line) => match line {
+            Some(value) => {
+                let good = value.view() == "one"
+                value.release()
+                good
+            },
+            None => false,
+        },
+        Err(_) => false,
+    }
+    let second = match &reader.read_line(max_bytes: 3) {
+        Ok(line) => match line {
+            Some(value) => {
+                let good = value.view() == "two"
+                value.release()
+                good
+            },
+            None => false,
+        },
+        Err(_) => false,
+    }
+    let source = reader.abandon()
+    testing.assert(first && second, "prompt lost an owned line or buffered lookahead")?
+    testing.assert_eq(source.calls, 1, "prompt discarded existing read-ahead")?
+    testing.assert(writer.flushed, "prompt did not flush output")?
+    testing.assert_eq(writer.length, 4, "prompt stopped after a short write")?
+    testing.assert(writer.bytes[0] == 103 && writer.bytes[1] == 111 && writer.bytes[2] == 62 && writer.bytes[3] == 32, "prompt bytes changed")?
+    .Ok(())
+}
+
+test fn a_failed_prompt_write_does_not_read_input() {
+    let input = "answer\n"
+    let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+        return testing.assert(false, "reader allocation failed")
+    }
+    var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = true, fail_flush = false }
+    let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 6) {
+        Err(error) => match read error { Write(failure) => failure.written == 0, _ => false },
+        Ok(line) => {
+            line.release()
+            false
+        },
+    }
+    let source = reader.abandon()
+    testing.assert(failed, "prompt lost the output failure")?
+    testing.assert_eq(source.calls, 0, "failed output consumed input")?
+    testing.assert(!writer.flushed, "failed output proceeded to flush")?
+    .Ok(())
+}
+
+test fn a_failed_prompt_flush_does_not_read_input() {
+    let input = "answer\n"
+    let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+        return testing.assert(false, "reader allocation failed")
+    }
+    var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = true }
+    let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 6) {
+        Err(error) => match read error { Flush(failure) => failure.written == 0, _ => false },
+        Ok(line) => {
+            line.release()
+            false
+        },
+    }
+    let source = reader.abandon()
+    testing.assert(failed && writer.flushed, "prompt lost the flush failure")?
+    testing.assert_eq(source.calls, 0, "input happened before a successful flush")?
+    testing.assert_eq(writer.length, 2, "flush happened before complete output")?
+    .Ok(())
+}
+
+test fn a_failed_prompt_preserves_existing_input_lookahead() {
+    let input = "one\ntwo\n"
+    let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: source) else |_| {
+        return testing.assert(false, "reader allocation failed")
+    }
+    let first = match &reader.read_line(max_bytes: 3) {
+        Ok(line) => match line {
+            Some(value) => {
+                let good = value.view() == "one"
+                value.release()
+                good
+            },
+            None => false,
+        },
+        Err(_) => false,
+    }
+    var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = true }
+    let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 3) {
+        Err(error) => match read error { Flush(_) => true, _ => false },
+        Ok(line) => {
+            line.release()
+            false
+        },
+    }
+    let second = match &reader.read_line(max_bytes: 3) {
+        Ok(line) => match line {
+            Some(value) => {
+                let good = value.view() == "two"
+                value.release()
+                good
+            },
+            None => false,
+        },
+        Err(_) => false,
+    }
+    let source = reader.abandon()
+    testing.assert(first && failed && second, "failed prompt consumed an existing buffered line")?
+    testing.assert_eq(source.calls, 1, "failed prompt discarded existing read-ahead")?
+    .Ok(())
+}
+
+test fn a_prompt_reads_its_response_into_an_arena() {
+    // The arena holds the read-ahead buffer and every record the response grows into.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let input = "a response long enough to grow its record\n"
+    let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+    var reader = BufferedReader.open(arena.handle(), capacity: 4, reader: source) else |_| {
+        return testing.assert(false, "an arena reader was refused")
+    }
+    var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
+    let answered = match prompt_with(&reader, &writer, "go> ", max_bytes: 64) {
+        Ok(line) => match line {
+            Some(value) => value.view() == "a response long enough to grow its record",
+            None => false,
+        },
+        Err(_) => false,
+    }
+    let _source = reader.abandon()
+    testing.assert(answered, "a prompt lost its response in an arena")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_every_growth_step_of_a_prompt() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), PromptError[UInt8, UInt8]] {
+            let input = "a response long enough to grow its record\n"
+            let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
+            var reader = BufferedReader.open(allocator, capacity: 4, reader: source) else |_| {
+                return .Err(.Read(.Allocation(.Exhausted)))
+            }
+            var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
+            let outcome: Result[(), PromptError[UInt8, UInt8]] = match prompt_with(&reader, &writer, "go> ", max_bytes: 64) {
+                Ok(line) => {
+                    line.release()
+                    .Ok(())
+                },
+                Err(error) => .Err(error),
+            }
+            let _source = reader.abandon()
+            outcome
+        },
+        PromptError.is_refusal,
+    )
+    testing.assert(checked.is_ok(), "a growing prompt response was reported as failing")?
+    .Ok(())
+}
+
+// `prompt` writes `message` to standard error and reads the response from
+// `reader`, keeping any standard-input read-ahead it already holds.
+pub fn prompt[A: Allocator](inout reader: BufferedReader[Descriptor, A], message: Str, max_bytes: UInt64) -> Result[Option[String[A]], PromptError[IoError, IoError]] where carries(.Ok: reader.record, reader.allocator), retains(reader.record: reader.allocator) {
+    var writer = stderr()
+    prompt_with(&reader, &writer, message, max_bytes)
+}
+
+test fn prompt_writes_to_standard_error_and_reads_its_reader() {
+    // An invalid descriptor stands in for standard input, so the read fails
+    // after the empty message is written to standard error and flushed.
+    var reader = BufferedReader.open(mem.system(), capacity: 8, reader: descriptor(-1)) else |_| {
+        return testing.assert(false, "reader allocation failed")
+    }
+    let failed = match prompt(&reader, "", max_bytes: 8) {
+        Err(error) => match read error { Read(_) => true, _ => false },
+        Ok(line) => {
+            line.release()
+            false
+        },
+    }
+    let _source = reader.abandon()
+    testing.assert(failed, "a failed read was not reported as the response")?
+    .Ok(())
+}
+
+test fn prompt_reads_through_a_reader_in_an_arena() {
+    // `/dev/null` stands in for standard input and reads as empty, so the
+    // prompt succeeds with no response; the read-ahead buffer comes from the
+    // arena.
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let input = open_empty_input()
+    var reader = BufferedReader.open(arena.handle(), capacity: 8, reader: descriptor(input)) else |_| {
+        let _closed = mem._close_fd(input)
+        return testing.assert(false, "an arena reader was refused")
+    }
+    let ended = match prompt(&reader, "", max_bytes: 8) {
+        Ok(line) => line.is_none(),
+        Err(_) => false,
+    }
+    let _source = reader.abandon()
+    let _closed = mem._close_fd(input)
+    testing.assert(ended, "a prompt over an empty input did not answer the end of input")?
+    .Ok(())
+}
+
+// `open_empty_input` opens `/dev/null` for reading and returns its descriptor,
+// which the caller closes.
+fn open_empty_input() -> Int32 {
+    let directory = mem._terminated(mem.system(), "/dev".as_bytes()).unwrap()
+    let name = mem._terminated(mem.system(), "null".as_bytes()).unwrap()
+    let parent = mem._open_parent_fd(directory)
+    directory.release()
+    if parent < 0 {
+        name.release()
+        panic("/dev could not be opened")
+    }
+    // Reading an existing file creates nothing, so the mode is unused.
+    let opened = mem._open_at_fd(name, Int32(parent), .ReadExisting, mode: 0)
+    name.release()
+    let _closed = mem._close_fd(Int32(parent))
+    if opened < 0 {
+        panic("/dev/null could not be opened")
+    }
+    Int32(opened)
+}

@@ -1,0 +1,20 @@
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/ownership/a_part_under_a_rejected_index_is_still_only_part.lin:37:31
+   |
+37 |     let ticket = holder.slots[5].ticket
+   |                               ^ the length is 2, so the last index is 1
+error[T-Index]: no element sits here, and the length is part of the type
+  --> tests/ownership/a_part_under_a_rejected_index_is_still_only_part.lin:43:25
+   |
+43 |     let ticket = holder[9].ticket
+   |                         ^ the length is 2, so the last index is 1
+error[O-Move]: only part of `holder` is named here
+  --> tests/ownership/a_part_under_a_rejected_index_is_still_only_part.lin:37:18
+   |
+37 |     let ticket = holder.slots[5].ticket
+   |                  ^^^^^^^^^^^^^^^^^^^^^^ move the whole binding, or `copy` this part out of it
+error[O-Move]: only part of `holder` is named here
+  --> tests/ownership/a_part_under_a_rejected_index_is_still_only_part.lin:43:18
+   |
+43 |     let ticket = holder[9].ticket
+   |                  ^^^^^^^^^^^^^^^^ move the whole binding, or `copy` this part out of it

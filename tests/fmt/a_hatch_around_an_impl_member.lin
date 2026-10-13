@@ -1,0 +1,26 @@
+// An `impl` writes its members one at a time, like any other list, so it has
+// to skip the one a hatch already copied. Writing it again declared the same
+// name twice and the type stopped compiling. The separator between members is
+// emitted before the flush, so a member's own comments still land where they
+// did, and a member the copy wrote counts as written -- otherwise everything
+// after it runs together.
+struct Cell {
+    v: UInt8,
+}
+
+impl Cell {
+// linea fmt: off
+    pub fn make() -> Cell {
+        .{ v = 1 }
+    }
+// linea fmt: on
+
+    pub fn get(c: Cell) -> UInt8 {
+        c.v
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Cell = Cell.make()
+    Cell.get(c)
+}

@@ -1,0 +1,32 @@
+enum OuterError { Allocation(UInt8) }
+
+enum InnerError { Allocation(UInt8) }
+
+fn render() -> Result[UInt8, OuterError] {
+    let inner = || -> Result[UInt8, InnerError] {
+        let input: Result[UInt8, UInt8] = .Err(7)
+        let value = input.map_err(.Allocation)?
+        return .Ok(value)
+    }
+    let accepted = match inner() { Ok(_) => false, Err(error) => match error { Allocation(code) => code == 7 } }
+    let source: Result[UInt8, UInt8] = .Ok(11)
+    let value = source.map_err(.Allocation)?
+    return .Ok(
+        if accepted {
+            value
+        } else {
+            1
+        },
+    )
+}
+
+fn main() -> UInt8 {
+    match render() {
+        Ok(value) => if value == 11 {
+            0
+        } else {
+            1
+        },
+        Err(_) => 2,
+    }
+}

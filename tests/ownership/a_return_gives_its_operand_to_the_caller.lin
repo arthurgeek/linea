@@ -1,0 +1,30 @@
+// What a `return` carries out is handed to the caller, which takes it. It is
+// not an operand of whatever the `return` was written inside, so `k` is
+// received before control goes anywhere and nothing is open when it does.
+//
+// The other operand is a number, which gives up nothing at all. A `Key` there
+// could not do the job whatever it was written as: naming one opens a transfer
+// and making one opens a transfer, so the only operand that leaves the
+// `return`'s own as the single value in flight is one that owes nothing.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn mix(a: UInt8, sink b: Key) -> UInt8 {
+    let Key { n: y } = b
+    a + y
+}
+
+fn one(sink a: Key) -> UInt8 {
+    let Key { n: x } = a
+    x
+}
+
+fn go(sink k: Key) -> UInt8 {
+    mix(3, return one(k))
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 3 })
+}

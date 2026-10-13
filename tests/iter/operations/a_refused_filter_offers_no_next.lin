@@ -1,0 +1,36 @@
+// `filter` needs Discardable items, and a walk of linear tickets is refused at
+// the `filter`. What the refused filter would have been lacks `Iterator` for
+// the same reason, so asking it for `next` is not reported again.
+@linear
+struct Ticket {
+    seat: UInt8,
+}
+
+// Tickets yields tickets for seats 1 up to `last`.
+struct Tickets {
+    issued: UInt8,
+    last: UInt8,
+}
+
+impl Iterator for Tickets {
+    type Item = Ticket
+
+    fn next(inout self: Self) -> Option[Ticket] {
+        if self.issued == self.last {
+            return .None
+        }
+        self.issued += 1
+        .Some(.{ seat = self.issued })
+    }
+}
+
+fn main() -> UInt8 {
+    let tickets = Tickets { issued = 0, last = 4 }
+    match tickets.filter(|ticket| ticket.seat > 2).next() {
+        Some(ticket) => {
+            let Ticket { seat } = ticket
+            seat
+        },
+        None => 0,
+    }
+}

@@ -1,0 +1,24 @@
+// A generic implementation's path is checked once, in terms of its own
+// parameters, and every type it names -- including a field's, inside the
+// index arithmetic a bracket over it runs -- is read through the receiver's
+// own instantiation wherever the bracket sits, exactly as the element `type
+// Elem` names is. An index past the first is what a stride computed from the
+// parameter itself, rather than from what the receiver settled it to, gets
+// wrong: the first element sits at both answers, and only a later one tells
+// them apart.
+struct Row[T] {
+    cells: [T; 4],
+}
+
+impl[T] Index[UInt64] for Row[T] {
+    type Elem = T
+
+    proj at(inout self: Row[T], i: UInt64) -> T {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let r: Row[UInt8] = .{ cells = [10, 20, 30, 40] }
+    r[2]
+}

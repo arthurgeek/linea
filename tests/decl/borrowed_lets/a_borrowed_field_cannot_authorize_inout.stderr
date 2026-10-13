@@ -1,0 +1,7 @@
+error[N-Immutable]: `x` is declared with `let`
+  --> tests/decl/borrowed_lets/a_borrowed_field_cannot_authorize_inout.lin:10:11
+   |
+9  |     let read Point { x } = point
+   |                      - declared with `let` here
+10 |     bump(&x)
+   |           ^ this binding cannot be assigned

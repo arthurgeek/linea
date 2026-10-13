@@ -1,0 +1,5 @@
+error[T-Impl]: `Emit` bounds `put`'s `W` by `Sink`, and this does not
+  --> tests/traits/an_impl_asks_no_less_of_a_type_parameter_than_the_signature_does.lin:18:8
+   |
+18 |     fn put[W](self: Note, inout _w: W) -> UInt8 {
+   |        ^^^ bound it the way the signature bounds it

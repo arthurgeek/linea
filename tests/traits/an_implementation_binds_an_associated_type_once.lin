@@ -1,0 +1,27 @@
+// A bare name standing for a declared type takes nothing away from the rule
+// that the declaration is settled once. Two answers for one name leave which
+// type a signature written `-> Item` returns decided by which of them a reader
+// happened to reach, so the second is refused where it is written rather than
+// at the signature that would read it.
+trait Holder {
+    type Item
+
+    fn get(self: Self) -> Item
+}
+
+struct Box {
+    n: UInt8,
+}
+
+impl Holder for Box {
+    type Item = UInt8
+    type Item = Box
+
+    fn get(self: Box) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

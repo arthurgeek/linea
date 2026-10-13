@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Buffer[Elsewhere]`, found `Buffer[mem.SystemAllocator]`
+  --> tests/mem/a_buffer_cannot_select_another_allocator_type_for_disposal.lin:33:31
+   |
+24 | fn dispose_elsewhere(sink buffer: Buffer[Elsewhere]) -> () {
+   |                           ------ expected because of this parameter
+33 |             dispose_elsewhere(buffer)
+   |                               ^^^^^^ expected `Buffer[Elsewhere]`, found `Buffer[mem.SystemAllocator]`

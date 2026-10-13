@@ -1,0 +1,81 @@
+// `self.up()` is a `Self.Up`, and each recurring call below reaches the
+// operation again at that associated type: `depth` by dot, `named_depth`
+// through the trait's name, and `walked_depth` through a function that
+// reaches it again through a bound. An associated type is a structural step
+// whatever an implementation defines it as, so these calls grow what the
+// operation is instantiated with, as `walk[S]` calling `walk[S.Iter]` does,
+// even though `Page` and `Book` name each other.
+trait Nested {
+    type Up: Nested + Copyable
+
+    fn tag(self: Self) -> UInt8
+
+    fn up(self: Self) -> Self.Up
+
+    fn depth(self: Self, steps: UInt8) -> UInt8 {
+        if steps == 0 {
+            self.tag()
+        } else {
+            self.up().depth(steps - 1) + 1
+        }
+    }
+
+    fn named_depth(self: Self, steps: UInt8) -> UInt8 {
+        if steps == 0 {
+            self.tag()
+        } else {
+            Nested.named_depth(self.up(), steps - 1) + 1
+        }
+    }
+
+    fn walked_depth(self: Self, steps: UInt8) -> UInt8 {
+        if steps == 0 {
+            self.tag()
+        } else {
+            walk(self.up(), steps - 1) + 1
+        }
+    }
+}
+
+fn walk[T: Nested](nested: T, steps: UInt8) -> UInt8 {
+    nested.walked_depth(steps)
+}
+
+@copyable
+struct Page {
+    number: UInt8,
+}
+
+@copyable
+struct Book {
+    number: UInt8,
+}
+
+impl Nested for Page {
+    type Up = Book
+
+    fn tag(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn up(self: Self) -> Book {
+        Book { number = self.number + 1 }
+    }
+}
+
+impl Nested for Book {
+    type Up = Page
+
+    fn tag(self: Self) -> UInt8 {
+        self.number
+    }
+
+    fn up(self: Self) -> Page {
+        Page { number = self.number + 1 }
+    }
+}
+
+fn main() -> UInt8 {
+    let page = Page { number = 1 }
+    page.depth(3) + page.named_depth(3) + page.walked_depth(3)
+}

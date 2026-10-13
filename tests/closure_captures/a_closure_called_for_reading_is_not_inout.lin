@@ -1,0 +1,15 @@
+// `apply` calls its callback for reading, so the callback cannot be an
+// `inout` closure that changes its captures; what changes belongs in a value
+// `apply` lends it.
+fn apply[F: fn() -> UInt8](callback: F) -> UInt8 {
+    callback()
+}
+
+fn main() -> UInt8 {
+    apply(
+        inout [sink seen = UInt8(0)] || {
+            seen += 1
+            seen
+        },
+    )
+}

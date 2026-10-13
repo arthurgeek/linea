@@ -1,0 +1,30 @@
+struct Reading { value: Float64 }
+
+fn empty(_values: [UInt8; 0]) -> Bool {
+    true
+}
+
+fn pair[T: Copyable](item: T) -> [T; 2] {
+    let values: [T; _] = [copy(item), copy(item)]
+    values
+}
+
+fn main() -> UInt8 {
+    let values: ([UInt8; _]) = [1, 2]
+    let readings: [Reading; _] = [.{ value = 32.0 }, .{ value = 104.0 }]
+    var grouped: [UInt8; _] = (([3, 4]))
+    grouped[0] = 7
+    let nothing: [UInt8; _] = []
+    let grid: [[UInt8; _]; _] = [[1, 2], [3, 4]]
+    let mixed: [[UInt8; _]; 2] = [[5], [6]]
+    let duplicates = pair(UInt8(3))
+    let empty_grid: [[UInt8; 2]; _] = []
+    let empty_rows: [[UInt8; _]; _] = [[], []]
+    let _same_empty_grid: [[UInt8; 2]; 0] = empty_grid
+    let _same_empty_rows: [[UInt8; 0]; 2] = empty_rows
+    if mixed[1][0] == 6 && duplicates[1] == 3 && values[1] == 2 && readings[1].value == 104.0 && grouped[0] == 7 && empty(nothing) && grid[1][0] == 3 {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,17 @@
+trait Combine[S] {
+    fn combine(left: Self, right: S) -> UInt8
+}
+
+impl[T: Integer] Combine[T] for T {
+    fn combine(left: T, right: T) -> UInt8 {
+        UInt8(left) + UInt8(right)
+    }
+}
+
+fn main() -> UInt8 {
+    if Combine.combine(UInt16(3), UInt16(4)) == 7 {
+        0
+    } else {
+        1
+    }
+}

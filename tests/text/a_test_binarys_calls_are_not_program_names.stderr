@@ -1,0 +1,15 @@
+error[N-Undefined]: undefined name `selected`
+ --> tests/text/a_test_binarys_calls_are_not_program_names.lin:8:19
+  |
+8 |     let _chosen = selected("a.name")
+  |                   ^^^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `ran`
+ --> tests/text/a_test_binarys_calls_are_not_program_names.lin:9:19
+  |
+9 |     let _status = ran(0)
+  |                   ^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `no_such_test`
+  --> tests/text/a_test_binarys_calls_are_not_program_names.lin:10:18
+   |
+10 |     let _usage = no_such_test()
+   |                  ^^^^^^^^^^^^ no binding with this name is in scope

@@ -1,0 +1,22 @@
+// A tuple holding a linear component is linear. Releasing the tuple releases
+// the component; taking it apart hands the component to a name that must
+// settle it.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) -> () {
+        let Ticket { number: _number } = self
+    }
+}
+
+fn main() -> UInt8 {
+    let whole: (Ticket, UInt8) = (.{ number = 1 }, 2)
+    Release.release(whole)
+    let parts: (Ticket, UInt8) = (.{ number = 3 }, 4)
+    let (ticket, n) = parts
+    Release.release(ticket)
+    n - 4
+}

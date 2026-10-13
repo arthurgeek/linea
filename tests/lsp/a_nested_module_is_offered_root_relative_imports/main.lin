@@ -1,0 +1,8 @@
+// Every module resolves imports from the program's source root. `ledger` sits
+// beneath that root, so it has the same spelling here and in `vault` one
+// module down.
+import vault
+
+fn main() -> UInt8 {
+    vault.open()
+}

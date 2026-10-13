@@ -1,0 +1,30 @@
+// A piece that selects a part of a value a call computed is built into the
+// literal like any computed piece, while a piece naming a variable's part is
+// copied and leaves the variable whole.
+@copyable
+struct Word {
+    value: UInt8,
+    extra: UInt8,
+}
+
+impl Display for Word {
+    fn fmt[W: Writer](_self: Word, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, "word")
+    }
+}
+
+struct Entry {
+    word: Word,
+    rank: UInt8,
+}
+
+fn make() -> Entry {
+    .{ word = .{ value = 3, extra = 4 }, rank = 1 }
+}
+
+fn main() -> UInt8 {
+    let entry = make()
+    let _line = "{make().word} {entry.word}"
+    let _again = "{entry.word}"
+    entry.rank + entry.word.extra
+}

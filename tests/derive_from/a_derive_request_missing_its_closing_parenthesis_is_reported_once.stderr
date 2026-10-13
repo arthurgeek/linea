@@ -1,0 +1,5 @@
+error[S-Params]: expected `)`
+ --> tests/derive_from/a_derive_request_missing_its_closing_parenthesis_is_reported_once.lin:2:1
+  |
+2 | enum Failure {
+  | ^^^^ a grouped derive closes its trait list

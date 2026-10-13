@@ -1,0 +1,14 @@
+// Inside `twice` the local `shapes` shadows that import, and the alias
+// `figures` still reaches the module, so the call is suggested through it.
+import shapes
+import shapes as figures
+
+fn twice(n: UInt8) -> UInt8 {
+    let shapes: UInt8 = 1
+    n.double() + shapes
+}
+
+fn main() -> UInt8 {
+    let _kind = shapes.big()
+    twice(2) + figures.make().size
+}

@@ -1,0 +1,26 @@
+import std.tuple
+
+// `tuple.Tuple2[UInt8, Bool]`, reached through the module that declares it,
+// and `(UInt8, Bool)` name one type, so implementing a trait for both
+// spellings implements it twice.
+struct P {}
+
+trait Takes[T] {
+    fn take(self: Self, value: T) -> UInt8
+}
+
+impl Takes[tuple.Tuple2[UInt8, Bool]] for P {
+    fn take(_self: Self, _value: tuple.Tuple2[UInt8, Bool]) -> UInt8 {
+        1
+    }
+}
+
+impl Takes[(UInt8, Bool)] for P {
+    fn take(_self: Self, _value: (UInt8, Bool)) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

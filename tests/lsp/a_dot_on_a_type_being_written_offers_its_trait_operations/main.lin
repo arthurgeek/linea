@@ -1,0 +1,18 @@
+// While `Gauge.` is still being written, the dot offers what `Gauge` declares,
+// `reset`, and the operations of the traits in scope it implements, among them
+// `default`, which its derived `Default` gives it.
+@(copyable, derive(Default))
+struct Gauge {
+    level: UInt8,
+}
+
+impl Gauge {
+    fn reset(level: UInt8) -> Gauge {
+        .{ level = level }
+    }
+}
+
+fn main() -> UInt8 {
+    let gauge = Gauge.reset(3)
+    Gauge.
+}

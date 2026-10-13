@@ -1,0 +1,30 @@
+// `digest` takes any `T` that implements `Weigh`, and a `Plain` does not, so
+// `digest(p)` would be refused as well. The report says `digest` is a
+// function and does not suggest that call.
+trait Weigh {
+    fn weight(self: Self) -> UInt8
+}
+
+struct Plain {
+    value: UInt8,
+}
+
+struct Heavy {
+    value: UInt8,
+}
+
+impl Weigh for Heavy {
+    fn weight(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn digest[T: Weigh](value: T) -> UInt8 {
+    value.weight()
+}
+
+fn main() -> UInt8 {
+    let p = Plain { value = 1 }
+    let h = Heavy { value = 2 }
+    p.digest() + digest(h)
+}

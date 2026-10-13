@@ -1,0 +1,24 @@
+// An implementation supplies the members its trait declares and no others. A
+// projection it introduces answers nothing: a bracket reaches the trait's
+// declaration, and there is no declaration here for a site to be typed against.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+
+    proj first(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    let _ = g
+    0
+}

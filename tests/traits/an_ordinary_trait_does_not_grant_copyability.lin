@@ -1,0 +1,25 @@
+// An ordinary trait grants behavior without granting duplication. A generic
+// body bounded only by Measure cannot copy the value it reads.
+struct Account {
+    balance: UInt8,
+}
+
+trait Measure {
+    fn of(x: Self) -> UInt8
+}
+
+impl Measure for Account {
+    fn of(x: Self) -> UInt8 {
+        x.balance
+    }
+}
+
+fn twice[T: Measure](x: T) -> T {
+    copy(x)
+}
+
+fn main() -> UInt8 {
+    let a: Account = .{ balance = 4 }
+    let b: Account = twice(a)
+    Measure.of(b)
+}

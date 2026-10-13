@@ -1,0 +1,8 @@
+// An unrefined newtype admits every value its base does, so nothing about
+// `?` could ever decline: the fallible form would assert something false.
+type Meters = UInt64
+
+fn main() -> UInt8 {
+    let _bad = Meters?(5)
+    0
+}

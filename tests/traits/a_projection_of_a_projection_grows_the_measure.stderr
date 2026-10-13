@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `walk` with more than it was given
+  --> tests/traits/a_projection_of_a_projection_grows_the_measure.lin:25:5
+   |
+25 |     walk(Step.onward(Step.onward(s)))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

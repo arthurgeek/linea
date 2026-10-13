@@ -1,0 +1,29 @@
+==================
+Traversal receiver
+==================
+
+impl Grid {
+    trav positions(read self: Self) = UInt64(0)..copy(self.len)
+}
+
+---
+
+(source_file
+  (impl_block
+    (type_identifier)
+    (traversal_declaration
+      (identifier)
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (self_type)))
+      (range_expression
+        (call_expression
+          (identifier)
+          (argument_list
+            (integer_literal)))
+        (copy_expression
+          (field_expression
+            (identifier)
+            (identifier)))))))

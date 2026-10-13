@@ -1,0 +1,25 @@
+// An enum's parameter appearing in no variant is the struct rule one form
+// over: `phantom` declares it, the brand distinguishes the instantiations,
+// and the value stays as free as its variants say.
+struct Up {}
+
+struct Down {}
+
+enum Signal[phantom Dir] {
+    Quiet,
+    Loud(UInt8),
+}
+
+fn main() -> UInt8 {
+    let u: Signal[Up] = .Loud(4)
+    let d: Signal[Down] = .Quiet
+    let first: UInt8 = match u {
+        Quiet => 0,
+        Loud(n) => n,
+    }
+    let second: UInt8 = match d {
+        Quiet => 3,
+        Loud(n) => n,
+    }
+    first + second
+}

@@ -1,0 +1,4 @@
+
+# Build output: `tree-sitter build` writes the compiled grammar here.
+*.dylib
+*.so

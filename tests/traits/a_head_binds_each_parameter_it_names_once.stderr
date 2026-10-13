@@ -1,0 +1,16 @@
+error[N-Duplicate]: `_T` is already declared by this declaration
+  --> tests/traits/a_head_binds_each_parameter_it_names_once.lin:23:10
+   |
+23 | impl[_T, _T] Give[_T] for Pair[_T, _T] {
+   |      -- already declared here
+   |          ^^ a declaration declares each parameter once
+error[T-Impl]: implementation parameter `_T` cannot be recovered from its key
+  --> tests/traits/a_head_binds_each_parameter_it_names_once.lin:23:10
+   |
+23 | impl[_T, _T] Give[_T] for Pair[_T, _T] {
+   |          ^^ place the parameter in the receiver or trait arguments outside associated-type projections
+error[T-Bound]: `Pair[UInt8, UInt8]` does not implement `Give[UInt8]`
+  --> tests/traits/a_head_binds_each_parameter_it_names_once.lin:32:5
+   |
+32 |     Give.give(p, n)
+   |     ^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are

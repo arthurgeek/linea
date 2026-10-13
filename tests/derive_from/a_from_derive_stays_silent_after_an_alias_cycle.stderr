@@ -1,0 +1,5 @@
+error[N-TypeAlias]: `First` reaches itself through the type it names
+ --> tests/derive_from/a_from_derive_stays_silent_after_an_alias_cycle.lin:1:7
+  |
+1 | alias First = Second
+  |       ^^^^^ an alias names a type that already exists; a type holding itself is a `struct` or an `enum`

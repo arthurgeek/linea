@@ -1,0 +1,9 @@
+// A lambda parameter pattern binds every component of the pair the expected
+// callable passes, so a pattern naming three of two is refused.
+fn apply[F: fn(read pair: (UInt8, UInt8)) -> UInt8](pair: (UInt8, UInt8), check: F) -> UInt8 {
+    check(pair)
+}
+
+fn main() -> UInt8 {
+    apply((3, 4), |(a, b, _)| a + b)
+}

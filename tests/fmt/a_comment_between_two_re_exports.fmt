@@ -1,0 +1,18 @@
+// A comment between two re-exports settles where it was written. Hoisting it
+// above the one before it left the same thing true of that one, so the next
+// run moved it again and the file never reached a normal form -- a comment
+// walking one declaration per run is what a formatter that has no fixed point
+// looks like from the outside.
+import inner
+
+use inner.First
+
+// about the second
+use inner.Second
+
+// about the third
+use inner.Third
+
+fn main() -> UInt8 {
+    0
+}

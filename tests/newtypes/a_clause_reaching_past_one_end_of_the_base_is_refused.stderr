@@ -1,0 +1,5 @@
+error[T-Refine]: 0..=1000 reaches outside `UInt8`, which `Big` refines
+ --> tests/newtypes/a_clause_reaching_past_one_end_of_the_base_is_refused.lin:4:6
+  |
+4 | type Big = UInt8 where it in 0..=1000
+  |      ^^^ narrow the range to what the base can hold

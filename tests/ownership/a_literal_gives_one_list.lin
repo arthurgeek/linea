@@ -1,0 +1,17 @@
+// The same of a literal's field values, which the tree holds beside their
+// names and the rule reads through.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn bump(inout n: UInt8) -> UInt8 {
+    n = 9
+    1
+}
+
+fn main() -> UInt8 {
+    var p: UInt8 = 2
+    let s: Pair = .{ a = bump(&p), b = p }
+    s.a + s.b
+}

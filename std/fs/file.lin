@@ -1,0 +1,512 @@
+import std.mem
+import std.io
+import std.log
+import std.testing
+
+use io.ByteWriter
+use log.Sink
+use mem.Owner
+
+// File owns one descriptor. Explicit close reports failure and consumes it;
+// release makes one best-effort close and never flushes buffered output.
+@(opaque, linear)
+struct File {
+    fd: Int32,
+}
+
+// CreateNew refuses a path that already names an entry. Replace creates the
+// file or truncates an existing one.
+@derive(Debug, Release)
+pub enum WritePolicy {
+    CreateNew,
+    Replace,
+}
+
+// Preserve keeps an existing file's permissions and gives a new file octal
+// 0666 less the process umask. Exact accepts the nine POSIX rwx bits (octal
+// 0000 through 0777).
+@(copyable, derive(Debug, Release))
+pub enum SavePermissions {
+    Preserve,
+    Exact(UInt64),
+}
+
+// FsError says why a file operation failed: permission bits outside 0777, an
+// unusable path, refused scratch storage, or an operating-system error.
+@(copyable, derive(Debug, Release))
+pub enum FsError {
+    InvalidPermissions,
+    Path(PathError),
+    Allocation(mem.Oom),
+    Io(io.IoError),
+}
+
+// FsFailure reports a file operation's primary error beside every cleanup
+// error, since cleanup can fail after another step already failed. `written`
+// counts the bytes accepted before the failure, and `published` says whether
+// an atomic save installed the destination entry.
+@(copyable, derive(Debug, Release))
+pub struct FsFailure {
+    primary: Option[FsError],
+    close: Option[io.IoError],
+    remove: Option[io.IoError],
+    parent_close: Option[io.IoError],
+    published: Bool,
+    written: UInt64,
+}
+
+impl FsFailure {
+    // Return whether the operation failed because an allocation was refused,
+    // which an allocation-failure walk accepts from a refused run; a failure
+    // only in cleanup is not one.
+    fn is_refusal(self: Self) -> Bool {
+        match read self.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false }
+    }
+}
+
+// The runtime sets a descriptor's mode and returns zero or a negated errno.
+extern fn linea_set_mode(fd: Int32, mode: UInt64) -> Int64
+
+// A new file starts with mode octal 0666 (rw-rw-rw-), and the process umask
+// then removes bits from it.
+let default_file_mode: UInt64 = 438
+
+impl FsFailure {
+    fn new(sink reason: FsError, written: UInt64 = 0) -> Self where carries(.primary.Some: reason) {
+        .{ primary = .Some(reason), written, ..FsFailure.empty() }
+    }
+
+    fn empty() -> Self {
+        .{ primary = .None, close = .None, remove = .None, parent_close = .None, published = false, written = 0 }
+    }
+
+    // Return Err when any step failed, including cleanup, and Ok otherwise.
+    fn result(sink self: Self) -> Result[(), Self] where carries(.Err: self) {
+        let failed = self.primary.is_some() || self.close.is_some() || self.remove.is_some() || self.parent_close.is_some()
+        if failed {
+            return .Err(self)
+        }
+        .Ok(())
+    }
+}
+
+// Close `fd`, returning the error of a failed close.
+fn close_descriptor(fd: Int32) -> Option[io.IoError] where carries() {
+    let answer = mem._close_fd(fd)
+    if answer < 0 {
+        return .Some(io.IoError.from_os(.Close, Int32(-answer)))
+    }
+    .None
+}
+
+// A target is an operation's open parent directory and its NUL-terminated
+// final name, so the parent is resolved once for the whole operation.
+@linear
+struct Target[A: Allocator] {
+    parent: Int32,
+    name: mem.Buffer[A],
+}
+
+// Resolve the parent once and keep it open throughout the operation.
+fn prepare[A: Allocator](allocator: A, path: Path) -> Result[Target[A], FsFailure] where carries(.Ok: allocator) {
+    let parts = path.components() else |reason| {
+        return .Err(FsFailure.new(.Path(reason)))
+    }
+    let parent = mem._terminated(allocator, parts.parent) else |reason| {
+        return .Err(FsFailure.new(.Allocation(reason)))
+    }
+    let name = mem._terminated(allocator, parts.name) else |reason| {
+        parent.release()
+        return .Err(FsFailure.new(.Allocation(reason)))
+    }
+    let answer = mem._open_parent_fd(parent)
+    parent.release()
+    if answer < 0 {
+        name.release()
+        return .Err(FsFailure.new(.Io(io.IoError.from_os(.Open, Int32(-answer)))))
+    }
+    .Ok(.{ parent = Int32(answer), name = name })
+}
+
+// Settle both scratch and parent ownership, retaining a failed parent close.
+fn complete[A: Allocator](sink target: Target[A], sink failure: FsFailure) -> Result[(), FsFailure] where carries(.Err: failure) {
+    let Target { parent: parent, name: name } = target
+    name.release()
+    FsFailure { parent_close = close_descriptor(parent), ..failure }.result()
+}
+
+impl File {
+    // Open an existing file for reading.
+    pub fn open[A: Allocator](allocator: A, path: Path) -> Result[File, FsFailure] where carries() {
+        open_file(allocator, path, .ReadExisting)
+    }
+}
+
+test fn opening_a_path_reports_scratch_allocation_failure() {
+    let system = mem.system()
+    defer let arena = mem.Arena.open(system, 0)
+    let allocator = arena.handle()
+    let path = Path.from_str("/tmp/linea-file-must-not-open").unwrap()
+    match File.open(allocator, path) {
+        Ok(file) => {
+            file.release()
+            return testing.assert(false, "opening a path skipped refused scratch")
+        },
+        Err(failure) => testing.assert(match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false }, "scratch refusal lost allocation context")?,
+    }
+    .Ok(())
+}
+
+test fn opening_a_file_takes_its_path_scratch_from_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let _written = write_file(mem.system(), path, "tea".as_bytes(), policy: .CreateNew).unwrap()
+    var file = File.open(arena.handle(), path) else |_| {
+        return testing.assert(false, "opening a file over an arena failed")
+    }
+    defer var bytes = mem.system().acquire(8).unwrap()
+    let received = &file.read_some(&bytes, offset: 0, count: 8)
+    file.close().unwrap()
+    testing.assert_eq(received.unwrap(), UInt64(3), "a file opened over an arena read the wrong extent")?
+    .Ok(())
+}
+
+impl File {
+    // Create a file for writing under `policy`. Replace may truncate the
+    // destination before a later write fails.
+    pub fn create[A: Allocator](allocator: A, path: Path, policy: WritePolicy) -> Result[File, FsFailure] where carries() {
+        let code: mem.OpenPolicy = match read policy { CreateNew => .CreateNew, Replace => .CreateOrTruncate }
+        open_file(allocator, path, code)
+    }
+}
+
+test fn create_refuses_an_existing_entry_unless_it_replaces_it() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let first = File.create(mem.system(), path, policy: .CreateNew).unwrap()
+    first.close().unwrap()
+    let refused = match File.create(mem.system(), path, policy: .CreateNew) {
+        Ok(file) => {
+            file.release()
+            false
+        },
+        Err(_) => true,
+    }
+    let replaced = File.create(mem.system(), path, policy: .Replace).unwrap()
+    replaced.close().unwrap()
+    testing.assert(refused, "creating a new file replaced an existing entry")?
+    .Ok(())
+}
+
+test fn creating_a_file_takes_its_path_scratch_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let file = File.create(allocator, path, policy: .CreateNew) else |_| {
+        return testing.assert(false, "creating a file over an arena failed")
+    }
+    file.close().unwrap()
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_creating_a_file() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            let file = File.create(allocator, path, policy: .CreateNew)?
+            file.close().unwrap()
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path and the file name are the walk's two acquisitions.
+    testing.assert(checked.unwrap_or(0) == 2, "creating a file was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+test fn creating_a_file_reports_scratch_allocation_failure() {
+    // An empty arena refuses every acquisition, so the call fails only if its
+    // scratch comes from the allocator it was given.
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let refused = match File.create(arena.handle(), path, policy: .CreateNew) {
+        Ok(file) => {
+            file.release()
+            false
+        },
+        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+    }
+    testing.assert(refused, "creating a file took its scratch from another allocator")?
+    .Ok(())
+}
+
+impl File {
+    // Close the file, reporting a failed close, which `Release` ignores.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let File { fd: fd } = self
+        match close_descriptor(fd) {
+            Some(reason) => .Err(reason),
+            None => .Ok(()),
+        }
+    }
+}
+
+test fn file_close_consumes_a_failed_descriptor() {
+    let file = File { fd = -1 }
+    match file.close() {
+        Ok(_) => return testing.assert(false, "invalid close succeeded"),
+        Err(error) => testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "close lost the native error")?,
+    }
+    .Ok(())
+}
+
+// Generic code closes a file through `io.Close`; this forwards to `File.close`.
+impl io.Close for File {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        self.close()
+    }
+}
+
+// Open the final name of `path` relative to its parent under a runtime open
+// policy, closing the parent whether or not the open succeeds.
+fn open_file[A: Allocator](allocator: A, path: Path, policy: mem.OpenPolicy) -> Result[File, FsFailure] where carries() {
+    let target = prepare(allocator, path)?
+    let answer = mem._open_at_fd(target.name, target.parent, policy, default_file_mode)
+    if answer < 0 {
+        let failure = FsFailure.new(.Io(io.IoError.from_os(.Open, Int32(-answer))))
+        match complete(target, failure) {
+            Err(reason) => return .Err(reason),
+            Ok(_) => panic("a failed open lost its error"),
+        }
+    }
+    let file = File { fd = Int32(answer) }
+    match complete(target, FsFailure.empty()) {
+        Ok(_) => .Ok(file),
+        Err(reason) => {
+            return .Err(FsFailure { close = match file.close() { Ok(_) => .None, Err(error) => .Some(error) }, ..reason })
+        },
+    }
+}
+
+// Write `bytes` to a file created under `policy` and return how many were
+// written. Direct replacement can leave a partial destination. Report accepted
+// bytes and an applicable close failure together, without retrying either
+// operation.
+pub fn write_file[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy) -> Result[UInt64, FsFailure] where carries() {
+    var file = File.create(allocator, path, policy)?
+    let written_outcome = match io.write_all(&file, bytes) {
+        Ok(written) => {
+            FsFailure { written, ..FsFailure.empty() }
+        },
+        Err(reason) => {
+            let error = io.IoError.from(reason)
+            FsFailure.new(.Io(copy(error)), written: error.progress)
+        },
+    }
+    let result = FsFailure { close = match file.close() { Ok(_) => .None, Err(error) => .Some(error) }, ..written_outcome }
+    let written = result.written
+    match result.result() {
+        Ok(_) => .Ok(written),
+        Err(failure) => .Err(failure),
+    }
+}
+
+test fn direct_file_writes_require_a_policy_and_report_the_accepted_extent() {
+    let allocator = mem.system()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let first = "first"
+    testing.assert_eq(write_file(allocator, path, first.as_bytes(), policy: .CreateNew).unwrap(), UInt64(5), "direct write lost its accepted count")?
+    let next = "next"
+    match write_file(allocator, path, next.as_bytes(), policy: .CreateNew) {
+        Ok(_) => return testing.assert(false, "direct create-new replaced an existing entry"),
+        Err(failure) => testing.assert_eq(failure.written, UInt64(0), "refused creation claimed accepted bytes")?,
+    }
+    testing.assert_eq(write_file(allocator, path, next.as_bytes(), policy: .Replace).unwrap(), UInt64(4), "direct replace lost its accepted count")?
+    var file = File.open(allocator, path).unwrap()
+    defer var buffer = allocator.acquire(16).unwrap()
+    let received = &file.read_some(&buffer, offset: 0, count: 16)
+    file.close().unwrap()
+    testing.assert_eq(received.unwrap(), UInt64(4), "direct replacement did not truncate the old extent")?
+    for index in 0..next.length() {
+        testing.assert_eq(buffer.load_byte(index), next.byte(index).unwrap(), "direct replacement changed bytes")?
+    }
+    .Ok(())
+}
+
+test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
+    // The arena holds the path scratch and anything the operation returns.
+    defer let arena = mem.Arena.open(mem.system(), size: 1024)
+    let allocator = arena.handle()
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let written = write_file(allocator, path, "tea".as_bytes(), policy: .CreateNew) else |_| {
+        return testing.assert(false, "a direct write over an arena failed")
+    }
+    testing.assert_eq(written, UInt64(3), "a direct write over an arena lost its accepted count")?
+    .Ok(())
+}
+
+test fn each_allocation_failure_covers_a_direct_file_write() -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let path = Path.from_str(owned.view()).unwrap()
+            defer remove_scratch(path)
+            let _written = write_file(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path and the file name are the walk's two acquisitions.
+    testing.assert(checked.unwrap_or(0) == 2, "a direct file write was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+test fn a_direct_file_write_reports_scratch_allocation_failure() {
+    // An empty arena refuses every acquisition, so the call fails only if its
+    // scratch comes from the allocator it was given.
+    defer let arena = mem.Arena.open(mem.system(), 0)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let refused = match write_file(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+    }
+    testing.assert(refused, "a direct write took its scratch from another allocator")?
+    .Ok(())
+}
+
+impl Release for File {
+    fn release(sink self: Self) -> () {
+        let File { fd: fd } = self
+        let _closed = close_descriptor(fd)
+    }
+}
+
+impl io.Reader for File {
+    type Error = io.IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        var descriptor = io.descriptor(self.fd)
+        &descriptor.read_some(&buffer, offset, count)
+    }
+}
+
+impl io.ByteWriter for File {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        var descriptor = io.descriptor(self.fd)
+        &descriptor.write_some(bytes)
+    }
+
+    fn flush(inout self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        var descriptor = io.descriptor(self.fd)
+        &descriptor.flush()
+    }
+}
+
+impl Writer for File {
+    type Error = io.IoError
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), io.IoError] where carries() {
+        var descriptor = io.descriptor(self.fd)
+        &descriptor.write_str(s)
+    }
+}
+
+// A file takes a logger's lines through its descriptor, which writing does not
+// change, so a logger can own a file and still log through a read-only
+// receiver.
+impl log.Sink for File {
+    type Error = io.IoError
+
+    fn write_line(self: Self, line: Str) -> Result[(), io.IoError] where carries() {
+        var descriptor = io.descriptor(self.fd)
+        &descriptor.write_str(line)
+    }
+}
+
+test fn a_file_takes_a_logged_line() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    let file = File.create(mem.system(), path, policy: .Replace).unwrap()
+    let wrote = file.write_line("ready\n").is_ok()
+    file.close().unwrap()
+    defer let bytes = read_file(mem.system(), path, max_bytes: 64).unwrap()
+    testing.assert(wrote, "the file refused the line")?
+    testing.assert_eq(Str.from_bytes(bytes.as_slice()).unwrap(), "ready\n", "the file holds something else")?
+    .Ok(())
+}
+
+impl Display for FsError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            InvalidPermissions => &w.write_str("permissions must contain only ordinary 0777 bits"),
+            Path(error) => error.fmt(&w),
+            Allocation(error) => error.fmt(&w),
+            Io(error) => error.fmt(&w),
+        }
+    }
+}
+
+impl Display for FsFailure {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        "file operation failed after {self.written} bytes".fmt(&w)?
+        if self.published {
+            &w.write_str(" after publication")?
+        }
+        match read self.primary {
+            Some(error) => {
+                &w.write_str(": ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        match read self.close {
+            Some(error) => {
+                &w.write_str("; file cleanup: ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        match read self.remove {
+            Some(error) => {
+                &w.write_str("; temporary cleanup: ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        match read self.parent_close {
+            Some(error) => {
+                &w.write_str("; parent cleanup: ")?
+                error.fmt(&w)?
+            },
+            None => {},
+        }
+        .Ok(())
+    }
+}

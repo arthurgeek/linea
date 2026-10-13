@@ -1,0 +1,26 @@
+// `Door` declares `open` itself and `close` through `Shut`. No name is
+// declared on both sides, so nothing is shadowed and nothing is reported.
+struct Door {
+    width: UInt8,
+}
+
+impl Door {
+    fn open(self: Door) -> UInt8 {
+        self.width
+    }
+}
+
+trait Shut {
+    fn close(x: Self) -> UInt8
+}
+
+impl Shut for Door {
+    fn close(x: Self) -> UInt8 {
+        x.width + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let door: Door = .{ width = 4 }
+    door.open() + door.close()
+}

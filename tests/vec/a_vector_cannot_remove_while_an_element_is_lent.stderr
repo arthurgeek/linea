@@ -1,0 +1,5 @@
+error[O-Lent]: this writes a place the construct around it is lending
+ --> tests/vec/a_vector_cannot_remove_while_an_element_is_lent.lin:7:35
+  |
+7 |         let _removed = Vec.remove(&values, 0)
+  |                                   ^^^^^^^ write it after the construct ends, or take what it names instead of lending it

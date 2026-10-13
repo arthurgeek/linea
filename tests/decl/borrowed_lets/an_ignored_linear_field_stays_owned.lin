@@ -1,0 +1,21 @@
+@linear
+struct Token { number: UInt8 }
+
+struct Envelope { token: Token, stamp: UInt8 }
+
+fn close(sink envelope: Envelope) -> UInt8 {
+    let Envelope { token, stamp } = envelope
+    let Token { number } = token
+    number + stamp
+}
+
+fn main() -> UInt8 {
+    let envelope = Envelope { token = Token { number = 3 }, stamp = 5 }
+    let read Envelope { token: _, stamp } = envelope
+    let saved = stamp
+    if close(envelope) == 8 && saved == 5 {
+        0
+    } else {
+        1
+    }
+}

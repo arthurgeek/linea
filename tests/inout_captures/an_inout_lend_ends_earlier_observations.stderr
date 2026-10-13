@@ -1,0 +1,9 @@
+error[O-Borrow]: this `inout` capture lends a place that an earlier observation still needs
+ --> tests/inout_captures/an_inout_lend_ends_earlier_observations.lin:4:29
+  |
+4 |     var tick = inout [inout count] || {
+  |                             ^^^^^ lending the place `inout` here ends its earlier observations
+8 |     *before
+  |     ------- the observation is still used here
+  |
+  = help: make the capture after the observation's last use

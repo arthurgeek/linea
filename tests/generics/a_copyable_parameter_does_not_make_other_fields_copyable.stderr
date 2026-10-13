@@ -1,0 +1,5 @@
+error[O-Copy]: `Bad[T]` does not permit copying
+  --> tests/generics/a_copyable_parameter_does_not_make_other_fields_copyable.lin:23:21
+   |
+23 |     let c: Bad[T] = copy(b)
+   |                     ^^^^^^^ move the value, or declare a copyable representation

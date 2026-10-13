@@ -1,0 +1,5 @@
+error[N-Undefined]: `UInt8` declares no `middle`
+ --> tests/types/a_primitive_declares_no_such_name.lin:6:11
+  |
+6 |     UInt8.middle
+  |           ^^^^^^ a primitive holds what the standard library writes for it

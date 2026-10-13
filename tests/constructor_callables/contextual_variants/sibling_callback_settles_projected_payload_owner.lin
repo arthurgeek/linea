@@ -1,0 +1,25 @@
+trait Source {
+    type Item
+}
+
+struct Bytes {}
+
+impl Source for Bytes {
+    type Item = UInt8
+}
+
+enum Wrap[T: Source] { Value(T.Item) }
+
+fn known(sink value: UInt8) -> Wrap[Bytes] {
+    return .Value(value)
+}
+
+fn choose[T: Source, F: fn(sink value: UInt8) -> Wrap[T], G: fn(sink value: UInt8) -> Wrap[T]](first: F, _second: G) -> Wrap[T]
+where carries(first, _second) {
+    return first(7)
+}
+
+fn main() -> UInt8 {
+    let wrapped = choose(.Value, known)
+    match wrapped { Value(value) => value }
+}

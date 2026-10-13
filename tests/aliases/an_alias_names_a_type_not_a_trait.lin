@@ -1,0 +1,5 @@
+alias Show = Debug
+
+fn main() -> UInt8 {
+    0
+}

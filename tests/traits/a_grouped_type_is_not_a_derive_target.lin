@@ -1,0 +1,12 @@
+// A derive request's target is a type name or a tuple, as an implementation
+// head is. `(A)` groups a type and names none, so it is refused where it is
+// written, and the refusal is the only report.
+trait Marker {}
+
+template impl Marker {}
+
+derive[A] Marker for (A)
+
+fn main() -> UInt8 {
+    0
+}

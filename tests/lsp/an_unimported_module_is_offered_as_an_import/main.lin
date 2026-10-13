@@ -1,0 +1,5 @@
+// A module a file has not imported is a name nothing has bound. What binds
+// it is the import, so that is what is offered.
+fn main() -> UInt8 {
+    ledger.size()
+}

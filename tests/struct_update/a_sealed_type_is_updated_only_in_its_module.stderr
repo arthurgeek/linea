@@ -1,0 +1,5 @@
+error[M-Opaque]: `Account` is opaque outside `vault`
+ --> tests/struct_update/a_sealed_type_is_updated_only_in_its_module/main.lin:7:18
+  |
+7 |     let richer = vault.Account { balance = 100, ..account }
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

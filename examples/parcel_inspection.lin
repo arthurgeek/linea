@@ -1,0 +1,59 @@
+// Inspect parcels in arrival order and stop at the first weight over the limit.
+// Weights and the limit are measured in grams.
+import std.io
+import std.mem
+import std.testing
+
+@derive(Equatable, Debug)
+struct Inspection {
+    overweight: Option[UInt64],
+    inspected: UInt64,
+}
+
+fn inspect(sink weights: mem.Slice[UInt64], limit: UInt64) -> Inspection {
+    // `map` reads each parcel's weight in arrival order. `find_counted` stops
+    // at the first weight over `limit` and counts every parcel it inspected,
+    // the overweight one included.
+    var arrivals = weights.map(|sink weight| *weight)
+    let { found, inspected } = &arrivals.find_counted([limit] |weight| weight > limit)
+    .{ overweight = found, inspected }
+}
+
+test fn inspection_stops_at_the_first_overweight_parcel() {
+    let weights = [UInt64(1200), 3500, 6400, 5100, 900]
+    let expected = Inspection { overweight = .Some(6400), inspected = 3 }
+    testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection continued beyond the first overweight parcel")?
+    let accepted = Inspection { overweight = .None, inspected = 5 }
+    testing.assert_eq(inspect(weights.as_slice(), limit: 7000), accepted, "inspection ignored the configured weight limit")?
+}
+
+test fn an_empty_batch_inspects_no_parcels() {
+    let expected = Inspection { overweight = .None, inspected = 0 }
+    let weights: [UInt64; 0] = []
+    testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "empty inspection has a nonzero count")?
+}
+
+test fn a_batch_below_the_limit_is_fully_inspected() {
+    let expected = Inspection { overweight = .None, inspected = 3 }
+    let weights = [UInt64(1200), 3500, 900]
+    testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection skipped parcels below the limit")?
+}
+
+test fn a_parcel_at_the_limit_is_accepted() {
+    let expected = Inspection { overweight = .Some(5001), inspected = 2 }
+    let weights = [UInt64(5000), 5001]
+    testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection treated the weight limit as overweight")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let weights = [UInt64(1200), 3500, 6400, 5100, 900]
+    let limit = 5000
+    let report = inspect(weights.as_slice(), limit)
+    // `match read` looks at the Option and leaves it in `report`.
+    match read report.overweight {
+        Some(weight) => io.println("First overweight parcel: {weight} g (limit: {limit} g)")?,
+        None => io.println("All parcels are within the {limit} g limit")?,
+    }
+    io.println("Parcels inspected: {report.inspected}")?
+    .Ok(0)
+}

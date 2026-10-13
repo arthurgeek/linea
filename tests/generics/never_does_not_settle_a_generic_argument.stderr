@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `T` is
+ --> tests/generics/never_does_not_settle_a_generic_argument.lin:8:19
+  |
+8 |     let _answer = choose(panic("stop"))
+  |                   ^^^^^^^^^^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it

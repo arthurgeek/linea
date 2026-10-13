@@ -1,0 +1,12 @@
+fn compose[U, F: fn(sink error: UInt8) -> U, G: fn(sink value: U) -> UInt64](later: G, earlier: F) -> UInt64 {
+    later(earlier(7))
+}
+
+fn main() -> UInt8 {
+    let value = compose(|sink value| UInt64(value) + 1, |sink error| UInt16(error) + 1)
+    if value == 9 {
+        0
+    } else {
+        1
+    }
+}

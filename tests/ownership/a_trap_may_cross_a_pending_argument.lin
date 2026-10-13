@@ -1,0 +1,22 @@
+// A trap is not abrupt completion: it has no successor state, so there is no
+// reachable state in which a value is owned by nobody. Refusing this would
+// refuse every argument list holding a division or a conversion, and the fix
+// would be reordering for a reason a reader cannot see.
+@linear
+struct Key {
+    n: UInt8,
+}
+
+fn use2(sink a: Key, sink b: Key) -> UInt8 {
+    let Key { n: x } = a
+    let Key { n: y } = b
+    x + y
+}
+
+fn go(sink d: Key, x: UInt8, y: UInt8) -> UInt8 {
+    use2(d, .{ n = x / y })
+}
+
+fn main() -> UInt8 {
+    go(.{ n = 2 }, 6, 3)
+}

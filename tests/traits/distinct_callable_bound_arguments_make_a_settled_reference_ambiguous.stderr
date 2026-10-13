@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Give` and `Give` both declare `Item`, and a type carrying both bounds reads it through neither
+ --> tests/traits/distinct_callable_bound_arguments_make_a_settled_reference_ambiguous.lin:7:11
+  |
+7 | ](_value: T.Item) -> () {}
+  |           ^^^^^^ bound it by one of them

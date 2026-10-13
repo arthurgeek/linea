@@ -1,0 +1,17 @@
+let maximum: UInt8 = UInt8.max
+
+let minimum: Int8 = Int8.min
+
+fn bounds(high: UInt8 = maximum, low: Int8 = minimum) -> Bool {
+    high == 255 && low == -128
+}
+
+fn main() -> UInt8 {
+    // The one-element array depends on a folded concrete integer bound.
+    let values: [UInt8; UInt8.min + 1] = [7]
+    if bounds() && values[0] == 7 {
+        0
+    } else {
+        1
+    }
+}

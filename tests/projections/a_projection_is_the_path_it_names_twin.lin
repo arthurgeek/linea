@@ -1,0 +1,19 @@
+// The path written out by hand. Everything else is the case beside this one,
+// down to the implementation nothing here reaches through a bracket, so the two
+// records of what the backend receives are the same record.
+struct Grid {
+    cells: [UInt8; 4],
+}
+
+impl Index[UInt64] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Grid, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn main() -> UInt8 {
+    let g: Grid = .{ cells = [1, 2, 3, 4] }
+    g.cells[2]
+}

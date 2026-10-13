@@ -1,0 +1,20 @@
+// The payload list is a list like the others, so it steps over what the region
+// already copied. Without that it writes the copied element again and the
+// variant carries one more field on every run.
+enum Pair {
+    Both(
+        // linea fmt: off
+        UInt8,
+        // linea fmt: on
+        UInt8,
+    ),
+    Neither,
+}
+
+fn main() -> UInt8 {
+    let p: Pair = .Neither
+    match p {
+        Both(x, y) => x + y,
+        Neither => 4,
+    }
+}

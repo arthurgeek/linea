@@ -1,0 +1,17 @@
+// A leading `_` says a name is deliberately unused, and the case is read from
+// the letter after it: `_count` is a lowercase name and `_T` a capitalised one.
+enum Signal {
+    _Spare,
+    Go,
+}
+
+fn pick[_T, _u](_first: UInt8, _Second: UInt8) -> UInt8 {
+    let _ = Signal.Go
+    let _Ignored = 3
+    let _kept = 4
+    0
+}
+
+fn main() -> UInt8 {
+    pick[Bool, Bool](1, 2)
+}

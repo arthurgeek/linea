@@ -1,0 +1,5 @@
+error[T-Index]: an index counts elements, so it is a whole number
+ --> tests/arrays/an_index_counts_elements.lin:5:8
+  |
+5 |     xs[true]
+  |        ^^^^ this is a `Bool`

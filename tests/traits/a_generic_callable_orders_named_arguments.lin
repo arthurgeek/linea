@@ -1,0 +1,7 @@
+fn combine[T, F: fn(read high: T, read low: T) -> T where carries(high, low)](high: T, low: T, f: F) -> T where carries(high, low, f) {
+    f(low: low, high: high)
+}
+
+fn main() -> UInt8 {
+    combine(9, 4, |high, low| high - low)
+}

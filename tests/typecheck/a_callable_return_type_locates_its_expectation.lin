@@ -1,0 +1,7 @@
+fn _gives_number() -> fn(read x: UInt8) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,57 @@
+// A trait operation's callable bound may name `Self` and what `Self`'s
+// implementation settles. A call reads it at the receiver it was made on, so
+// a lambda takes its parameter types from it and a named function settles the
+// operation's own parameters through it.
+trait Gauge {
+    type Reading
+
+    fn level(self: Self) -> Self.Reading
+
+    fn apply[U, F: fn(sink gauge: Self) -> U](sink self: Self, convert: F) -> U where carries(convert)
+
+    fn reading_as[U, F: fn(sink reading: Self.Reading) -> U](self: Self, convert: F) -> U where carries(convert)
+}
+
+struct Tank {
+    litres: UInt16,
+}
+
+impl Gauge for Tank {
+    type Reading = UInt16
+
+    fn level(self: Self) -> UInt16 {
+        self.litres
+    }
+
+    fn apply[U, F: fn(sink gauge: Tank) -> U](sink self: Self, convert: F) -> U where carries(convert) {
+        convert(self)
+    }
+
+    fn reading_as[U, F: fn(sink reading: UInt16) -> U](self: Self, convert: F) -> U where carries(convert) {
+        convert(self.litres)
+    }
+}
+
+// Convert a reading in litres to whole cubic decimetres times ten.
+fn tenths(sink litres: UInt16) -> UInt32 {
+    UInt32(litres) * 10
+}
+
+// A generic receiver reads the bound at the type parameter.
+fn counted[G: Gauge](gauge: G) -> UInt8 where G.Reading: Discardable {
+    gauge.reading_as(|sink _reading| UInt8(1))
+}
+
+fn main() -> UInt8 {
+    let tank = Tank { litres = 7 }
+    let full = tank.reading_as(|sink reading| reading == 7)
+    let tenfold = tank.reading_as(tenths)
+    let written = Gauge.reading_as(tank, |sink reading| UInt64(reading) + 1)
+    let count = counted(tank)
+    let litres = tank.apply(|sink gauge| gauge.level())
+    if full && tenfold == 70 && written == 8 && count == 1 && litres == 7 {
+        0
+    } else {
+        1
+    }
+}

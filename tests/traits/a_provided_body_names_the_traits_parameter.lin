@@ -1,0 +1,25 @@
+// A provided body may name the trait's parameters as its signature does: `K`
+// in `let unit: K` is whatever the implementation reached settles it to.
+trait Scale[K] {
+    fn unit(self: Self) -> K
+
+    fn measured(self: Self) -> K {
+        let unit: K = self.unit()
+        unit
+    }
+}
+
+struct Crate {
+    weight: UInt8,
+}
+
+impl Scale[UInt8] for Crate {
+    fn unit(self: Self) -> UInt8 {
+        self.weight
+    }
+}
+
+fn main() -> UInt8 {
+    let crate = Crate { weight = 3 }
+    crate.measured()
+}

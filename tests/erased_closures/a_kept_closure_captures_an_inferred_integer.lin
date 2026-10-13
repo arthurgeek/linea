@@ -1,0 +1,40 @@
+import std.io
+import std.mem
+
+// Each captured literal takes its type from the closure body that uses it, so
+// every capture here is a UInt64, a Float64 or a closure holding a UInt64, and
+// a kept closure releases each of them.
+fn main() -> Result[UInt8, mem.Oom] {
+    let fee = 499
+    let shipping = mem.Closure.open(mem.system(), [sink fee] |cents: UInt64| cents + fee)?
+    defer shipping.release()
+
+    let tax = 120
+    let add_tax = [sink tax] |cents: UInt64| cents + tax
+    let taxed = mem.Closure.open(mem.system(), add_tax)?
+    defer taxed.release()
+
+    let discount = 250
+    let discounted = mem.Closure.open(mem.system(), [sink off = discount] |cents: UInt64| cents - off)?
+    defer discounted.release()
+
+    let tip = 75
+    let tipped = mem.Closure.open(mem.system(), [read tip] |cents: UInt64| cents + tip)?
+    defer tipped.release()
+
+    let bonus = 10
+    let add_bonus = [sink bonus] |cents: UInt64| cents + bonus
+    let rewarded = mem.Closure.open(mem.system(), [sink add_bonus] |cents: UInt64| add_bonus(cents) + 1)?
+    defer rewarded.release()
+
+    let rate = 1.5
+    let scaled = mem.Closure.open(mem.system(), [sink rate] |amount: Float64| amount * rate)?
+    defer scaled.release()
+
+    let order = discounted(taxed(shipping(6000)))
+    match io.println("order {order}, tipped {tipped(order)}, rewarded {rewarded(order)}, scaled {scaled(2.0)}") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+    return .Ok(0)
+}

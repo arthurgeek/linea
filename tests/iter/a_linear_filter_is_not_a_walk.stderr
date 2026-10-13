@@ -1,0 +1,7 @@
+error[O-LinearWalk]: walking an `iter.Filter[Protocol, <closure>]` abandons it where the walk ends, and it is linear
+  --> tests/iter/a_linear_filter_is_not_a_walk.lin:25:18
+   |
+25 |     for _item in selected {}
+   |                  ^^^^^^^^ it holds a `Protocol`, which is linear
+   |
+   = help: walk it lent with `for _item in &selected`, then settle `selected` after the loop
