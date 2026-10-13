@@ -83,7 +83,8 @@ test "CI outcome snapshots preserve restore and save contracts" {
         try testing.expectEqualStrings("${{ steps.outcomes_restore.outputs.cache-primary-key }}", source.between(save, "          key: ", "\n").?);
 
         const lane = if (std.mem.eql(u8, job_name, "sanitize")) "-${{ matrix.sanitizer }}" else "";
-        const prefix = try std.mem.concat(testing.allocator, u8, &.{ "outcomes-${{ github.job }}", lane, "-${{ runner.os }}-${{ hashFiles('flake.lock') }}-" });
+        const key_lane = if (std.mem.eql(u8, job_name, "check")) "-${{ matrix.schedule }}" else lane;
+        const prefix = try std.mem.concat(testing.allocator, u8, &.{ "outcomes-${{ github.job }}", key_lane, "-${{ runner.os }}-${{ hashFiles('flake.lock') }}-" });
         defer testing.allocator.free(prefix);
         const key = try std.mem.concat(testing.allocator, u8, &.{ prefix, "${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}" });
         defer testing.allocator.free(key);
