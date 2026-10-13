@@ -1304,6 +1304,37 @@ to move was never meant to be released here. The `else` block runs before the
 name is bound, so it releases nothing of `milk`. `defer var` binds a place you
 may assign again and releases whatever it holds when the block ends.
 
+Write `defer let` when the value is never reassigned and never changed through
+`&name`, which is most of the time. Write `defer var` when the body changes it
+before it is released or returned, such as pushing into a `Vec` or appending to
+a `String`. The compiler tells them apart by the `&`, so a `defer var` that
+nothing mutates should be a `defer let`:
+
+```linea
+import std.io
+import std.mem
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Nothing changes `title` after it is built, so `defer let`.
+    defer let title = "Weekly plan".to_owned(mem.system()) else |_| {
+        return .Ok(1)
+    }
+    // The loop appends to `tasks`, so `defer var`.
+    defer var tasks: Vec[UInt64] = Vec.new()
+    for number in 1..4 {
+        if &tasks.push(number * 10).is_err() {
+            return .Ok(1)
+        }
+    }
+    io.println("{title.view()}: {tasks.length()} tasks")?
+    .Ok(0)
+}
+```
+
+```
+Weekly plan: 3 tasks
+```
+
 The compiler still never chooses an ending for you. `defer let` schedules
 `release()`, so it needs a type that implements `Release`. The transfer above
 has no such default, because committing and rolling back are both honest

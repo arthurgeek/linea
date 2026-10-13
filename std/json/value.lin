@@ -805,7 +805,7 @@ test fn json_mutation_allocation_refusals_preserve_destinations_and_return_subtr
         var mutation_attempts: UInt64 = 1
         var refusal: UInt64 = 0
         while refusal <= mutation_attempts {
-            defer var log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+            defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
             let allocator = log.allocator()
             defer var destination = json_mutation_destination(allocator, object)
             var incoming = Value.object_in(allocator)
@@ -871,7 +871,7 @@ test fn json_mutation_allocation_refusals_preserve_destinations_and_return_subtr
 }
 
 test fn json_replacement_and_removal_transfer_owners_without_allocation() {
-    defer var log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let allocator = log.allocator()
     defer var destination = json_mutation_destination(allocator, true)
     let replacement = Value.string_in(allocator, "replacement").unwrap()

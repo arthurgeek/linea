@@ -1,0 +1,147 @@
+// A web page that greets a visitor by the name in the address and counts how
+// often the browser has come back. GET /hello/{name} answers an HTML page and
+// remembers the count in a `visits` cookie. The service listens on 127.0.0.1 at
+// the port its first argument names.
+import std.env
+import std.fmt
+import std.html
+import std.http
+import std.io
+import std.mem
+import std.net
+import std.testing
+
+use http.Handler
+use mem.Owner
+
+// The count stops growing here, so a browser that sends a huge `visits` cookie
+// cannot overflow it.
+let visit_limit: UInt32 = 1000
+
+// The count of earlier visits the request's `visits` cookie holds. A browser
+// without the cookie, or with one that is not a number, has made none.
+fn earlier_visits(request: http.Request) -> UInt32 {
+    match request.cookie("visits") {
+        Some(text) => match text.parse[UInt32]() {
+            Ok(count) => count,
+            Err(_) => 0,
+        },
+        None => 0,
+    }
+}
+
+// The name comes from the address, so it may hold `<` or `"`. `html.escaped`
+// writes those as entities, and the page shows the name instead of running it.
+fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    let earlier = earlier_visits(request)
+    let visits = if earlier < visit_limit {
+        earlier + 1
+    } else {
+        visit_limit
+    }
+    var response = http.text(request, "<h1>Hello, {html.escaped(name.value)}!</h1><p>Visit {visits}.</p>")?
+    &response.set_header("Content-Type", "text/html; charset=utf-8")?
+    // The cookie lasts a year. `http_only` keeps scripts on the page from
+    // reading it, and `Lax` withholds it from requests other sites trigger.
+    let count = fmt.render_owned(request.allocator(), visits)?
+    &response.set_cookie("visits", count.view(), path: "/", max_age: .Some(31536000), http_only: true, same_site: .Some(.Lax))?
+    .Ok(response)
+}
+
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route(r"GET /hello/{name}", hello)
+}
+
+fn main() -> UInt8 {
+    match port_argument() {
+        Some(port) => serve(port),
+        None => {
+            io.eprintln("usage: welcome_back PORT")
+            64
+        },
+    }
+}
+
+// Read the first command-line argument as a port number.
+fn port_argument() -> Option[UInt16] {
+    let text = env.args().at(1)?
+    match text.parse[UInt16]() {
+        Ok(port) => .Some(port),
+        Err(_) => .None,
+    }
+}
+
+fn serve(port: UInt16) -> UInt8 {
+    var router = http.Router.new()
+    let _ = routes(&router) else |error| {
+        io.eprintln("cannot register a route: {error}")
+        router.release()
+        return 2
+    }
+    io.eprintln("listening on http://127.0.0.1:{port}")
+    let _ = http.listen_and_serve(net.loopback(port), router) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
+}
+
+fn body_of(response: http.Response) -> Str where borrows(response) {
+    Str.from_bytes(response.body().unwrap()).unwrap()
+}
+
+test fn a_first_visit_sets_the_cookie() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(response.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the content type changed")?
+    testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=1; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie changed")?
+    testing.assert_eq(body_of(response), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "the page changed")?
+}
+
+test fn a_returning_visitor_is_counted() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    &sent.add_header("Cookie", "theme=dark; visits=2").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), "<h1>Hello, ada!</h1><p>Visit 3.</p>", "the count did not advance")?
+    testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=3; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie did not advance")?
+}
+
+test fn a_cookie_that_is_not_a_count_starts_over() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    &sent.add_header("Cookie", "visits=lots").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "a bad cookie was counted")?
+}
+
+test fn the_count_stops_at_its_limit() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    &sent.add_header("Cookie", "visits=4294967295").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), "<h1>Hello, ada!</h1><p>Visit 1000.</p>", "the count passed its limit")?
+}
+
+test fn a_name_with_markup_is_shown_as_text() {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    let sent = http.new_request(arena.handle(), "GET", "/hello/%3Cscript%3Ealert(%22x%22)%3C%2Fscript%3E", "").unwrap()
+    var nothing = ()
+    let response = &router.serve_http(&nothing, sent.request()).unwrap()
+    testing.assert_eq(body_of(response), "<h1>Hello, &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;!</h1><p>Visit 1.</p>", "the name was not escaped")?
+}

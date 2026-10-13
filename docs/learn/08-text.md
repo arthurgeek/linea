@@ -668,6 +668,77 @@ A multi-line literal is an ordinary `Str`, and it can be a module constant, as
 fills a `\\` template from a JSON list of orders, and the
 [TCP echo example](../../examples/tcp_echo.lin) keeps its usage text this way.
 
+## Escaping text for HTML
+
+A page that shows text a visitor typed must not let that text become markup. A
+name such as `<script>` would otherwise run in every browser that opens the
+page. `html.escaped(text)` replaces the five characters that matter, `&`, `<`,
+`>`, `"` and `'`, with entities. It returns a small value that borrows the text,
+allocates nothing, and writes the escaped form when something displays it, so it
+sits inside an interpolation like any other value:
+
+```linea
+import std.html
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let name = "Ada <ada@example.com>"
+    let message = "I <3 \"Linea\" & it's fast"
+    io.println("<li><b>{html.escaped(name)}</b>: {html.escaped(message)}</li>")?
+    io.println("<a title=\"{html.escaped(message)}\">link</a>")?
+    .Ok(0)
+}
+```
+
+```
+<li><b>Ada &lt;ada@example.com&gt;</b>: I &lt;3 &quot;Linea&quot; &amp; it&#39;s fast</li>
+<a title="I &lt;3 &quot;Linea&quot; &amp; it&#39;s fast">link</a>
+```
+
+The same five characters make text safe as an element's content and inside an
+attribute value in either kind of quote, so there is one function for both. Text
+that already holds an entity is escaped again, `&amp;` becoming `&amp;amp;`,
+because escaping cannot tell an entity from text that happens to look like one.
+Escape each piece of untrusted text once, where it enters the markup, and write
+the markup around it yourself.
+
+To write into a `String` or any other `Writer` without an interpolation,
+`html.escape(&writer, text)` appends the escaped text:
+
+```linea
+import std.html
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let names = ["Ada", "<script>", "Tom & Jerry"]
+    defer var page = String.new()
+    if &page.append("<ul>").is_err() {
+        return .Ok(1)
+    }
+    for name in names {
+        if &page.append("<li>").is_err() || html.escape(&page, name).is_err() || &page.append("</li>").is_err() {
+            return .Ok(1)
+        }
+    }
+    if &page.append("</ul>").is_err() {
+        return .Ok(1)
+    }
+    io.println(page.view())?
+    .Ok(0)
+}
+```
+
+```
+<ul><li>Ada</li><li>&lt;script&gt;</li><li>Tom &amp; Jerry</li></ul>
+```
+
+`escaped` calls `escape`, so the two always agree. Neither is enough for a value
+placed in an unquoted attribute, a `<script>` or `<style>` block, or a URL; keep
+untrusted text out of those places. An HTTP handler answers a page with
+`http.text` and `set_header("Content-Type", "text/html; charset=utf-8")`
+([Networking](09-networking.md#cookies)). The [welcome-back
+server](../../examples/welcome_back.lin) escapes a name taken from the address.
+
 ## What you have seen
 
 | You want | Write |
@@ -685,5 +756,6 @@ fills a `\\` template from a JSON list of orders, and the
 | a number or your own type from text | `"80".parse[UInt16]()`, `impl text.Parse for T` |
 | braces or backslashes as text | `r"…"`, or `r#"…"#` when the text has a `"` |
 | several lines | a run of `\\` lines |
+| untrusted text in HTML | `"<p>{html.escaped(text)}</p>"`, or `html.escape(&writer, text)` |
 
 Next: [Networking](09-networking.md) — TCP connections and HTTP servers.

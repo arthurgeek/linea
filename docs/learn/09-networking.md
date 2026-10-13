@@ -1014,7 +1014,10 @@ The response helpers each build one kind of answer:
 | `http.error(request, .BadRequest, message)` | an error: the status, with the message as a plain-text body |
 
 A response can take extra headers with `&response.set_header(name, value)?`
-before it is returned.
+before it is returned, and cookies with `&response.set_cookie(name, value)?`
+([Cookies](#cookies)). A page of HTML is `http.text` with a
+`text/html; charset=utf-8` content type, and it escapes the text a visitor
+supplied with [`html.escaped`](08-text.md#escaping-text-for-html).
 
 Errors travel with `?` like any other `Result`. The library's own failures —
 a body that is not JSON, an arena that is full, a push that ran out of room —
@@ -1393,6 +1396,77 @@ answering it, say, calls `request.extract[T]()` in its body and registers with
 where a parameter holds the `Path`, and `?` answers the request with the
 refusal. The [calendar
 export](../../examples/calendar-export/main.lin) does this.
+
+### Cookies
+
+A browser sends the cookies it holds in a `Cookie` header, `theme=dark;
+visits=3`, and a server sets one with a `Set-Cookie` header on a response.
+`request.cookie(name)` returns the value of the cookie with that name, or
+`None`; `request.cookies()` walks every `name=value` pair in the order they
+arrived. Both borrow the request and allocate nothing. Names are case-sensitive,
+whitespace around a pair is ignored, a pair that is not `name=value` is skipped
+without hiding the others, and the value is exactly what the browser sent: no
+decoding, and the quotes dropped if it sent any.
+
+`&response.set_cookie(name, value, ...)?` adds a `Set-Cookie` header. Its
+attributes are named arguments, each left out unless given: `path` and `domain`,
+`max_age` in seconds, `expires` as a `time.Timestamp`, `secure`, `http_only`
+and `same_site` (`.Strict`, `.Lax` or `.Unrestricted`, which sends
+`SameSite=None`). `clear_cookie(name, path:)` asks the browser to delete one.
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    var sent = http.new_request(arena.handle(), "GET", "/", "").unwrap()
+    &sent.add_header("Cookie", "theme=dark; visits=3").unwrap()
+    let request = sent.request()
+
+    // `cookie` finds one cookie by name; `cookies` walks them all.
+    io.println("theme: {request.cookie("theme"):?}")?
+    io.println("lang: {request.cookie("lang"):?}")?
+    for pair in request.cookies() {
+        io.println("{pair.name} = {pair.value}")?
+    }
+
+    var response = http.text(request, "ok").unwrap()
+    &response.set_cookie("visits", "4", path: "/", max_age: .Some(3600), http_only: true, same_site: .Some(.Lax)).unwrap()
+    io.println(response.header("Set-Cookie").unwrap())?
+
+    // A value that holds `;` would end the cookie early, so it is refused.
+    match &response.set_cookie("note", "a;b") {
+        Ok(_) => io.println("accepted")?,
+        Err(error) => io.println("refused: {error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+theme: Some("dark")
+lang: None
+theme = dark
+visits = 3
+visits=4; Path=/; Max-Age=3600; SameSite=Lax; HttpOnly
+refused: the cookie value holds a byte a cookie cannot carry
+```
+
+`set_cookie` refuses a cookie that would be sent malformed rather than send it,
+with a `CookieError`: a name that is not an HTTP token, a value holding a space,
+`"`, `,`, `;`, `\`, a control byte or anything outside ASCII (encode such text,
+for example in hexadecimal), a path that does not start with `/` or holds a
+space or `;`, a domain that is not letters, digits, hyphens and dots, and
+`SameSite=None` without `secure`, which browsers discard. Because a handler's
+own mistake is not the client's, `?` answers 500 for it. Set `http_only` on a
+cookie scripts do not need to read, and `secure` on any cookie that matters
+over HTTPS. The [welcome-back server](../../examples/welcome_back.lin) counts a
+browser's visits in a cookie and shows the visitor's name with
+[`html.escaped`](08-text.md#escaping-text-for-html).
 
 ### Handlers over another allocator
 
