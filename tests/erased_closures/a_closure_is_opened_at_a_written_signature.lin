@@ -3,7 +3,7 @@ import std.mem
 // `S` could be any type, so nothing here can check that `step` is callable as
 // it; a closure is opened where its `fn` type is written.
 fn keep[S, F: Release](sink step: F) -> Result[mem.Closure[S, mem.SystemAllocator], mem.Oom] {
-    mem.Closure.open(mem.system(), step)
+    mem.Closure.open(step)
 }
 
 fn main() -> Result[UInt8, mem.Oom] {

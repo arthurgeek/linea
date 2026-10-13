@@ -1,12 +1,12 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/json/observations/text_cannot_escape_document.lin:7:5
+ --> tests/json/observations/text_cannot_escape_document.lin:6:5
   |
-7 |     document.as_str().unwrap()
+6 |     document.as_str().unwrap()
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/json/observations/text_cannot_escape_document.lin:6:11
+ --> tests/json/observations/text_cannot_escape_document.lin:5:11
   |
-6 |     defer document.release()
+5 |     defer document.release()
   |           ^^^^^^^^ keep this place available until the last use of its observation
-7 |     document.as_str().unwrap()
+6 |     document.as_str().unwrap()
   |     -------------------------- the observation is returned here

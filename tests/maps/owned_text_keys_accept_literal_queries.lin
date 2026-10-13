@@ -4,7 +4,7 @@ import std.mem
 fn main() -> UInt8 {
     var counts: collections.Map[String[mem.SystemAllocator], UInt64, mem.SystemAllocator] = collections.Map.new()
     defer counts.release()
-    collections.Map.insert(&counts, "tea".to_owned(mem.system()).unwrap(), 2).unwrap().release()
+    collections.Map.insert(&counts, "tea".to_owned().unwrap(), 2).unwrap().release()
     let present = counts.get("tea")
     if present.is_none() {
         return 1

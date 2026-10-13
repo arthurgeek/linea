@@ -1,5 +1,4 @@
 import std.fmt
-import std.mem
 import std.testing
 
 // The runtime reads a clock into whole seconds and the nanoseconds past them,
@@ -191,7 +190,7 @@ test fn a_timestamp_displays_as_rfc_3339() {
 // `displays_as` checks that the timestamp `seconds` after the epoch displays
 // as `expected`.
 fn displays_as(seconds: Int64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
-    let written = fmt.render_owned(mem.system(), Timestamp.from_unix(seconds, 0).unwrap()).unwrap()
+    let written = fmt.render_owned(Timestamp.from_unix(seconds, 0).unwrap()).unwrap()
     let checked = testing.assert_eq(written.view(), expected, said)
     written.release()
     checked
@@ -390,7 +389,7 @@ test fn a_duration_displays_in_the_largest_unit_below_it() {
 // `duration_displays_as` checks that a duration of `nanoseconds` displays as
 // `expected`.
 fn duration_displays_as(nanoseconds: UInt64, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
-    let written = fmt.render_owned(mem.system(), Duration.from_nanoseconds(nanoseconds)).unwrap()
+    let written = fmt.render_owned(Duration.from_nanoseconds(nanoseconds)).unwrap()
     let checked = testing.assert_eq(written.view(), expected, said)
     written.release()
     checked

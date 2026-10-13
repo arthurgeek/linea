@@ -11,7 +11,7 @@ derive[A: Allocator] Release for Preferences[A]
 
 impl[A: Allocator] json.Decode[A] for Preferences[A] {
     fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
-        var fields = json.ObjectDecoder.open(value, allocator)?
+        var fields = json.ObjectDecoder.open_in(allocator, value)?
         defer fields.release()
         let title: String[A] = json.ObjectDecoder.field(&fields, "title")?
         defer title.release()
@@ -21,21 +21,20 @@ impl[A: Allocator] json.Decode[A] for Preferences[A] {
         let retries = match supplied { Some(count) => count, None => 3 }
         fields.finish()?
         if retries > 10 {
-            let failure = json.DecodeError.failure(allocator, .InvalidValue)
-            return .Err(json.DecodeError.at_field(failure, allocator, "retries"))
+            let failure = json.DecodeError.failure_in(allocator, .InvalidValue)
+            return .Err(json.DecodeError.at_field_in(failure, allocator, "retries"))
         }
         return .Ok(.{ title, tags, retries })
     }
 
     fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
-        .Err(json.DecodeError.failure(allocator, .MissingField))
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
     }
 }
 
 fn main() -> UInt8 {
-    let allocator = mem.system()
-    let input = r#"{"title":"Tea","tags":["green"]}"#.to_owned(allocator).unwrap()
-    let preferences_result: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(allocator, input.view())
+    let input = r#"{"title":"Tea","tags":["green"]}"#.to_owned().unwrap()
+    let preferences_result: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(input.view())
     let preferences = preferences_result.unwrap()
     input.release()
     let valid = preferences.title.view() == "Tea" && preferences.tags[UInt64(0)].view() == "green" && preferences.retries == 3
@@ -43,7 +42,7 @@ fn main() -> UInt8 {
     if !valid {
         return 1
     }
-    let failed: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(allocator, r#"{"title":"Tea","tags":["green"],"retries":false}"#)
+    let failed: Result[Preferences[mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(r#"{"title":"Tea","tags":["green"],"retries":false}"#)
     match failed {
         Ok(preferences) => {
             preferences.release()

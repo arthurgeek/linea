@@ -1,8 +1,7 @@
 import std.io
-import std.mem
 
 fn main() -> UInt8 {
-    var reader = match io.BufferedReader.open(mem.system(), capacity: 32, reader: io.stdin()) {
+    var reader = match io.BufferedReader.open(capacity: 32, reader: io.stdin()) {
         Ok(reader) => reader,
         Err(_) => return 1,
     }

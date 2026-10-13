@@ -128,7 +128,7 @@ error[T-Mismatch]: expected `Str`, found `{interpolation Str}`
 7   |     if &line.append("weather in {city}").is_err() {
     |                     ^^^^^^^^^^^^^^^^^^^ expected `Str`, found `{interpolation Str}`
    ::: std/text/string.lin
-395 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
+406 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
     |                                     ---- expected because of this parameter
 ```
 
@@ -162,12 +162,11 @@ both steps:
 ```linea
 import std.fmt
 import std.io
-import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
     let city = "Lisbon"
     let high = 27
-    defer let summary = fmt.render_owned(mem.system(), "{city} reaches {high} degrees") else |_| {
+    defer let summary = fmt.render_owned("{city} reaches {high} degrees") else |_| {
         return .Ok(1)
     }
     io.println("{summary.length()} bytes: {summary.view()}")?
@@ -219,7 +218,6 @@ settled:
 
 ```linea
 import std.io
-import std.mem
 
 // `Forecast` owns its city's name, so it must be released and cannot be copied.
 @derive(Debug, Release)
@@ -229,7 +227,7 @@ struct Forecast {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let city = "Lisbon".to_owned(mem.system()) else |_| {
+    let city = "Lisbon".to_owned() else |_| {
         return .Ok(1)
     }
     defer let forecast = Forecast { city, high = 27 }
@@ -259,11 +257,10 @@ straight into an interpolation:
 ```linea
 import std.fmt
 import std.io
-import std.mem
 
 // `title` builds owned text, which its caller must release.
 fn title(city: Str) -> String {
-    fmt.render_owned(mem.system(), "Weather in {city}").unwrap()
+    fmt.render_owned("Weather in {city}").unwrap()
 }
 
 fn main() -> Result[UInt8, io.IoError] {
@@ -274,9 +271,9 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 error[O-Leak]: this linear `String[mem.SystemAllocator]` is never settled
-  --> interp_owned_bad.lin:11:21
+  --> interp_owned_bad.lin:10:21
    |
-11 |     io.println("== {title("Lisbon")} ==")?
+10 |     io.println("== {title("Lisbon")} ==")?
    |                     ^^^^^^^^^^^^^^^ nothing can take what this yields
    |
    = help: bind it with `let`, or give it to something that takes it
@@ -292,7 +289,7 @@ import std.mem
 
 // `title` builds owned text, which its caller must release.
 fn title(city: Str) -> Result[String, mem.Oom] {
-    fmt.render_owned(mem.system(), "Weather in {city}")
+    fmt.render_owned("Weather in {city}")
 }
 
 fn main() -> Result[UInt8, io.IoError] {
@@ -312,7 +309,7 @@ fn main() -> Result[UInt8, io.IoError] {
 
 Some operations look at their arguments rather than taking them, and keep
 looking afterwards. A log field is one. `std.log` writes log lines:
-`log.to_stderr(mem.system(), minimum: .Info)` makes a logger to standard
+`log.to_stderr(minimum: .Info)` makes a logger to standard
 error, `logger.info(message, fields)` writes a line, and `log.field("port",
 port)` builds a field for it ([Networking](09-networking.md#logging) covers
 logging). The field holds a view of `port` until the line is logged. When the
@@ -322,10 +319,9 @@ the end of the statement it is written in, and no longer:
 
 ```linea
 import std.log
-import std.mem
 
 fn main() -> UInt8 {
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     let port: UInt16 = 8080
     // A field borrows its value; `port + 1` lives only until this statement ends.
     let fields = log.field("port", port + 1)
@@ -336,11 +332,11 @@ fn main() -> UInt8 {
 
 ```
 error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
- --> log_temp.lin:8:36
+ --> log_temp.lin:7:36
   |
-8 |     let fields = log.field("port", port + 1)
+7 |     let fields = log.field("port", port + 1)
   |                                    ^^^^^^^^ this temporary ends with its statement
-9 |     logger.info("listening", fields)
+8 |     logger.info("listening", fields)
   |                              ------ and a value borrowing it is used here
   |
   = help: bind the value with `let` first, and borrow the binding
@@ -681,7 +677,7 @@ fills a `\\` template from a JSON list of orders, and the
 | to count Unicode scalars (code points) | `for _scalar in text.scalars()` |
 | a value inside text | `"{value}"`, or `"{value:?}"` for `Debug` |
 | an interpolation in a `String` | `Display.fmt("…{value}…", &string)` |
-| an interpolation as a new `String` | `fmt.render_owned(allocator, "…")` |
+| an interpolation as a new `String` | `fmt.render_owned("…")`, or `fmt.render_owned_in(allocator, "…")` |
 | a function that takes any displayable value | `fn f[D: Display](value: D)` |
 | a column, padding or decimals | `{value:>8}`, `{day:02}`, `{price:.2}` |
 | a layout chosen at run time | `fmt.write_display(value, spec, &writer)` with a `fmt.Spec` |

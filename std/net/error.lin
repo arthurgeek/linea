@@ -27,7 +27,7 @@ impl Display for NetError {
 test fn a_net_error_displays_its_reason() {
     let refused = io.IoError { operation = .Connect, category = .ConnectionRefused, code = .None, progress = 0 }
     // The 256-byte recorder holds all three reasons, one per line.
-    var writer = testing.Recorder.of(mem.system(), 256).unwrap()
+    var writer = testing.Recorder.of(256).unwrap()
     var wrote = true
     for error in [NetError.AddressInUse, NetError.InvalidAddress, NetError.Io(refused)] {
         wrote = wrote && error.fmt(&writer).is_ok() && &writer.write_str("\n").is_ok()

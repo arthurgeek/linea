@@ -1,5 +1,3 @@
-import std.mem
-
 fn main() -> UInt8 {
     let weights = [UInt64(1200), 3500, 6400]
     var inspected: UInt64 = 0
@@ -9,7 +7,7 @@ fn main() -> UInt8 {
             *parcel <= 5000
         },
     )
-    let { values, iterator } = accepted.collect(mem.system()).settled() else |_| {
+    let { values, iterator } = accepted.collect().settled() else |_| {
         return 1
     }
     let seen = inspected

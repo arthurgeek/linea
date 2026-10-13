@@ -2,14 +2,13 @@
 // declarations name the one function the runtime provides, so closing a file
 // and closing a listener call the same symbol.
 import std.fs
-import std.mem
 import std.net
 
 use net.Acceptor
 
 fn main() -> UInt8 {
     let path = fs.Path.from_str("/dev/null").unwrap()
-    let file = fs.File.open(mem.system(), path).unwrap()
+    let file = fs.File.open(path).unwrap()
     let file_closed = file.close().is_ok()
     let listener = net.listen(net.loopback(0)).unwrap()
     let listener_closed = listener.close().is_ok()

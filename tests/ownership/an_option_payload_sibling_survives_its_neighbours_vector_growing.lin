@@ -5,8 +5,8 @@ import std.mem
 struct Holder { first: Option[mem.Slice[UInt64]], second: mem.Slice[UInt64] }
 
 fn main() -> UInt8 {
-    var a = Vec.filled(mem.system(), 2, UInt64(7)).unwrap()
-    var b = Vec.filled(mem.system(), 3, UInt64(7)).unwrap()
+    var a = Vec.filled(2, UInt64(7)).unwrap()
+    var b = Vec.filled(3, UInt64(7)).unwrap()
     let h = Holder { first = .Some(a.as_slice()), second = b.as_slice() }
     Vec.push(&a, 1).unwrap()
     let n = h.second.length()

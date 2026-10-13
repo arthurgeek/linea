@@ -1,8 +1,7 @@
 import std.json
-import std.mem
 
 fn text() -> Str {
-    let document = json.Value.string(mem.system(), "tea").unwrap()
+    let document = json.Value.string("tea").unwrap()
     defer document.release()
     document.as_str().unwrap()
 }

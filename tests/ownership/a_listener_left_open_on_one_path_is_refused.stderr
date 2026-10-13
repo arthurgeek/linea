@@ -1,9 +1,9 @@
 error[O-Leak]: `listener` (a linear `net.Listener`) is still owned when this path leaves
-  --> tests/ownership/a_listener_left_open_on_one_path_is_refused.lin:15:19
+  --> tests/ownership/a_listener_left_open_on_one_path_is_refused.lin:14:19
    |
-10 |     let listener = net.listen(net.loopback(0)).map_err(|sink error| http.ServeError.Accept(error))?
+9  |     let listener = net.listen(net.loopback(0)).map_err(|sink error| http.ServeError.Accept(error))?
    |         -------- acquired here
-15 |         Err(_) => return .Ok(1),
+14 |         Err(_) => return .Ok(1),
    |                   ^^^^^^ still owned here
    |
    = help: settle it first with `listener.release()` or `listener.close()`

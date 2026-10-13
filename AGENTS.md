@@ -469,6 +469,11 @@ APIs.
   alone. Supersede only decisions that were built against; an option weighed and
   discarded belongs under *Alternatives considered* in the record that rejected
   it. Records still on an unmerged branch are rewritten, not superseded.
+- A constructor or function that allocates has a system form and an `_in`
+  form: `x(...)` uses the system allocator and `x_in(allocator, ...)` takes
+  one, first after the receiver for a method. A constructor's base name says what it does: `new` builds and cannot
+  fail, and `open` can fail or acquires a resource. An allocator built over a
+  backing (`mem.Arena.open`) keeps its backing argument.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

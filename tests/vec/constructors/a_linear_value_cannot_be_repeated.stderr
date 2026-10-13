@@ -1,5 +1,5 @@
 error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capability
-  --> tests/vec/constructors/a_linear_value_cannot_be_repeated.lin:12:24
+  --> tests/vec/constructors/a_linear_value_cannot_be_repeated.lin:10:24
    |
-12 |     let repeated = Vec.filled(mem.system(), count: 2, value: ticket).unwrap()
+10 |     let repeated = Vec.filled(count: 2, value: ticket).unwrap()
    |                        ^^^^^^ use a type meeting the capability requirement, or relax the bound

@@ -3,7 +3,6 @@
 // it is given a port, so run without one it answers at once.
 import std.env
 import std.http
-import std.mem
 import std.net
 
 fn hello[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
@@ -28,7 +27,7 @@ fn main() -> UInt8 {
         Ok(listener) => listener,
         Err(_) => return 4,
     }
-    match http.serve(listener, &router, mem.system()) {
+    match http.serve(listener, &router) {
         Ok(_) => 0,
         Err(_) => 5,
     }

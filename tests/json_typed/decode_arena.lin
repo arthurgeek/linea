@@ -5,7 +5,7 @@ use mem.Owner
 
 fn main() -> UInt8 {
     let arena = mem.Arena.open(mem.system(), 65536)
-    let result: Result[Vec[String[mem.Handle[mem.SystemAllocator]], mem.Handle[mem.SystemAllocator]], json.DecodeError[mem.Handle[mem.SystemAllocator]]] = json.decode(arena.handle(), r#"["tea","coffee"]"#)
+    let result: Result[Vec[String[mem.Handle[mem.SystemAllocator]], mem.Handle[mem.SystemAllocator]], json.DecodeError[mem.Handle[mem.SystemAllocator]]] = json.decode_in(arena.handle(), r#"["tea","coffee"]"#)
     let values = result.unwrap()
     let correct = values.length() == 2 && values[UInt64(1)].view() == "coffee"
     values.release()

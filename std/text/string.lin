@@ -55,7 +55,7 @@ test fn empty_owned_text_needs_no_allocator_capacity() {
     let opened = String.new_in(arena.handle())
     let opened_empty = opened.length() == 0 && opened.view() == ""
     opened.release()
-    let copied = "".to_owned(arena.handle()).unwrap()
+    let copied = "".to_owned_in(arena.handle()).unwrap()
     let copied_empty = copied.length() == 0 && copied.view() == ""
     copied.release()
     testing.assert(opened_empty && copied_empty, "empty text required allocator capacity")?
@@ -89,9 +89,7 @@ impl[A: Allocator] String[A] {
 test fn invalid_owned_bytes_are_returned_with_the_sequence_offset() {
     // The bytes are ASCII a followed by ED A0 80, which would encode the
     // forbidden surrogate U+D800.
-    let allocator = mem.system()
     let built: Result[Vec[UInt8], mem.Oom] = Vec.from_fn(
-        allocator,
         count: 4,
         initializer: |index| match read index {
             0 => UInt8(97),
@@ -120,8 +118,7 @@ test fn invalid_owned_bytes_are_returned_with_the_sequence_offset() {
 }
 
 test fn valid_owned_bytes_keep_nul_and_bom() {
-    let allocator = mem.system()
-    let original = "\u{0}\u{feff}a".to_owned(allocator).unwrap()
+    let original = "\u{0}\u{feff}a".to_owned().unwrap()
     let bytes = original.into_bytes()
     match String.from_bytes(bytes) {
         Err(failure) => {
@@ -140,7 +137,7 @@ test fn valid_owned_bytes_keep_nul_and_bom() {
 test fn validated_byte_transfer_does_not_allocate() {
     // The cursor and first content reservation fill this arena.
     defer let arena = mem.Arena.open(mem.system(), 16)
-    let original = "á".to_owned(arena.handle()).unwrap()
+    let original = "á".to_owned_in(arena.handle()).unwrap()
     let bytes = original.into_bytes()
     match String.from_bytes(bytes) {
         Err(failure) => {
@@ -165,7 +162,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn into_bytes_returns_the_encoded_bytes() {
-    defer let bytes = "olá".to_owned(mem.system()).unwrap().into_bytes()
+    defer let bytes = "olá".to_owned().unwrap().into_bytes()
     testing.assert_eq(bytes.length(), UInt64(4), "the bytes lost part of the text")?
     testing.assert_eq(bytes[2], UInt8(195), "the lead byte of á changed")?
     .Ok(())
@@ -179,7 +176,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn length_counts_the_encoded_bytes_of_owned_text() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert_eq(text.length(), UInt64(4), "a two-byte character was counted once")?
     .Ok(())
 }
@@ -192,7 +189,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn view_reads_the_owned_text() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert_eq(text.view(), "olá", "the view changed the text")?
     .Ok(())
 }
@@ -201,16 +198,30 @@ test fn view_reads_the_owned_text() {
 // so the borrowed implementation stays the only one.
 impl[A: Allocator] String[A] {
     // Copy the text into storage owned by `allocator`.
-    pub fn to_owned[B: Allocator](self: Self, allocator: B) -> Result[String[B], Oom] where carries(.Ok: allocator) {
-        self.view().to_owned(allocator)
+    pub fn to_owned_in[B: Allocator](self: Self, allocator: B) -> Result[String[B], Oom] where carries(.Ok: allocator) {
+        self.view().to_owned_in(allocator)
     }
 }
 
 test fn owned_text_copies_into_another_allocator() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
-    defer let duplicate = text.to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
+    defer let duplicate = text.to_owned().unwrap()
     testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
     .Ok(())
+}
+
+impl[A: Allocator] String[A] {
+    // Copy the text into storage owned by the system allocator.
+    pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], Oom] where carries() {
+        self.to_owned_in(mem.system())
+    }
+}
+
+test fn owned_text_copies_into_the_system_allocator_from_an_arena() {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    defer let text = "olá".to_owned_in(arena.handle()).unwrap()
+    defer let duplicate = text.to_owned().unwrap()
+    testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
 }
 
 impl[A: Allocator] String[A] {
@@ -221,7 +232,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_views_its_encoded_bytes() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     let bytes = text.as_bytes()
     testing.assert_eq(bytes.length(), UInt64(4), "the byte view lost a byte")?
     testing.assert_eq(bytes[2], UInt8(195), "the byte view changed the lead byte of á")?
@@ -236,7 +247,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_reads_a_byte_by_offset() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert_eq(text.byte(0), Option.Some(UInt8(111)), "the first byte changed")?
     testing.assert_eq(text.byte(4), Option.None, "a byte past the end was found")?
     .Ok(())
@@ -251,7 +262,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_slices_on_character_boundaries() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert_eq(text.slice(1, 4), Option.Some("lá"), "the slice changed the text")?
     testing.assert(text.slice(3, 4).is_none(), "a slice began inside a character")?
     .Ok(())
@@ -266,7 +277,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_finds_a_needle() {
-    defer let text = "olá olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá olá".to_owned().unwrap()
     testing.assert_eq(text.find("á"), Option.Some(UInt64(2)), "the first match moved")?
     testing.assert_eq(text.find("á", 4), Option.Some(UInt64(7)), "the search ignored its start")?
     testing.assert(text.find("z").is_none(), "an absent needle was found")?
@@ -281,7 +292,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_checks_its_prefix() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert(text.starts_with("ol"), "a prefix was not recognised")?
     testing.assert(!text.starts_with("lá"), "a non-prefix was accepted")?
     .Ok(())
@@ -295,7 +306,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_checks_its_suffix() {
-    defer let text = "olá".to_owned(mem.system()).unwrap()
+    defer let text = "olá".to_owned().unwrap()
     testing.assert(text.ends_with("lá"), "a suffix was not recognised")?
     testing.assert(!text.ends_with("ol"), "a non-suffix was accepted")?
     .Ok(())
@@ -310,7 +321,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_splits_at_a_separator() {
-    defer let text = "a,b".to_owned(mem.system()).unwrap()
+    defer let text = "a,b".to_owned().unwrap()
     var fields = text.split(",").unwrap()
     testing.assert_eq(&fields.next(), Option.Some("a"), "the first field changed")?
     testing.assert_eq(&fields.next(), Option.Some("b"), "the second field changed")?
@@ -327,7 +338,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_trims_ascii_whitespace() {
-    defer let text = "  olá\t".to_owned(mem.system()).unwrap()
+    defer let text = "  olá\t".to_owned().unwrap()
     testing.assert_eq(text.trim_ascii(), "olá", "ASCII whitespace remained")?
     .Ok(())
 }
@@ -340,7 +351,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_trims_unicode_whitespace() {
-    defer let text = "\u{3000}olá\u{a0}".to_owned(mem.system()).unwrap()
+    defer let text = "\u{3000}olá\u{a0}".to_owned().unwrap()
     testing.assert_eq(text.trim_unicode(), "olá", "Unicode whitespace remained")?
     .Ok(())
 }
@@ -353,7 +364,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_parses_a_value() {
-    defer let text = "150".to_owned(mem.system()).unwrap()
+    defer let text = "150".to_owned().unwrap()
     let value: UInt16 = text.parse().unwrap()
     testing.assert_eq(value, UInt16(150), "the parsed value changed")?
     .Ok(())
@@ -367,7 +378,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_iterates_its_scalars() {
-    defer let text = "aá".to_owned(mem.system()).unwrap()
+    defer let text = "aá".to_owned().unwrap()
     var cursor = text.scalars()
     testing.assert_eq(&cursor.next().unwrap().value, UInt32(97), "the first scalar changed")?
     testing.assert_eq(&cursor.next().unwrap().value, UInt32(225), "the second scalar changed")?
@@ -383,7 +394,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_compares_ignoring_ascii_case() {
-    defer let text = "Olá".to_owned(mem.system()).unwrap()
+    defer let text = "Olá".to_owned().unwrap()
     testing.assert(text.equals_ascii_folded("oLá"), "ASCII case changed equality")?
     testing.assert(!text.equals_ascii_folded("olÁ"), "non-ASCII case was folded")?
     .Ok(())
@@ -398,8 +409,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn owned_text_copies_appends_and_transfers_bytes() {
-    let allocator = mem.system()
-    var text = "olá".to_owned(allocator).unwrap()
+    var text = "olá".to_owned().unwrap()
     &text.append(" 😀").unwrap()
     let length = text.length()
     let intact = text.view() == "olá 😀"
@@ -415,7 +425,7 @@ test fn owned_text_append_failure_preserves_complete_text() {
     // The 96-byte arena fits the initial text but not the 104-byte append.
     defer let arena = mem.Arena.open(mem.system(), 96)
     let allocator = arena.handle()
-    defer var text = "á".to_owned(allocator).unwrap()
+    defer var text = "á".to_owned_in(allocator).unwrap()
     let failed = &text.append("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").is_err()
     testing.assert(failed, "bounded allocator did not refuse the append")?
     testing.assert_eq(text.view(), "á", "failed append left a partial scalar or changed the original")?
@@ -451,7 +461,7 @@ impl[A: Allocator] String[A] {
 }
 
 test fn invalid_byte_append_leaves_text_and_input_unchanged() {
-    defer var text = "á".to_owned(mem.system()).unwrap()
+    defer var text = "á".to_owned().unwrap()
     let source = "😀".as_bytes().subspan(start: 0, count: 3).unwrap()
     let rejected = match &text.append_bytes(source) {
         Err(error) => match error {
@@ -529,7 +539,7 @@ fn release_failures[A: Allocator](sink failures: Vec[Utf8Failure[A], A]) -> () {
 
 test fn refused_conversions_held_in_a_vector_release_in_generic_code() {
     var failures: Vec[Utf8Failure[mem.SystemAllocator]] = Vec.new()
-    let bytes = Vec.filled(mem.system(), count: 1, value: UInt8(255)).unwrap()
+    let bytes = Vec.filled(count: 1, value: UInt8(255)).unwrap()
     let failure = match String.from_bytes(bytes) {
         Err(failure) => failure,
         Ok(_) => panic("a lone 0xFF byte was accepted as UTF-8"),
@@ -551,7 +561,7 @@ impl[A: Allocator] release.Settle for Utf8Failure[A] {
 }
 
 test fn settling_invalid_bytes_keeps_the_offset_of_the_bad_sequence() {
-    let bytes = Vec.filled(mem.system(), count: 3, value: UInt8(255)).unwrap()
+    let bytes = Vec.filled(count: 3, value: UInt8(255)).unwrap()
     let settled = String.from_bytes(bytes).settled()
     let offset = match settled {
         Ok(text) => {
@@ -643,7 +653,7 @@ test fn utf8_validation_rejects_non_scalar_and_incomplete_encodings() {
         [226, 130, 65, 0], // ASCII A replaces the final continuation.
     ]
     for read invalid in cases {
-        defer var bytes = Vec.filled(mem.system(), count: 5, value: UInt8(0)).unwrap()
+        defer var bytes = Vec.filled(count: 5, value: UInt8(0)).unwrap()
         // ASCII a makes the malformed sequence start at byte offset one.
         bytes[0] = 97
         for i in 0..invalid.length() {

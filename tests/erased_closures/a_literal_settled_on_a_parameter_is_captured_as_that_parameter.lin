@@ -4,7 +4,7 @@ import std.mem
 // `Integer` does not promise `Release`, so neither closure can be kept.
 fn offset[T: Integer](start: T) -> Result[T, mem.Oom] {
     let step = 3
-    let add = mem.Closure.open(mem.system(), [sink step] |x: T| x + step)?
+    let add = mem.Closure.open([sink step] |x: T| x + step)?
     defer add.release()
     return .Ok(add(start))
 }
@@ -12,7 +12,7 @@ fn offset[T: Integer](start: T) -> Result[T, mem.Oom] {
 fn shifted[T: Integer](start: T) -> Result[T, mem.Oom] {
     let step = 5
     let shift = [sink step] |x: T| x + step
-    let kept = mem.Closure.open(mem.system(), shift)?
+    let kept = mem.Closure.open(shift)?
     defer kept.release()
     return .Ok(kept(start))
 }

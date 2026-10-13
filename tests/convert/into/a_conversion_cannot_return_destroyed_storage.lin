@@ -14,7 +14,7 @@ impl From[OwnedLabel] for LabelView {
 }
 
 fn main() -> UInt8 {
-    let label: OwnedLabel = .{ text = "shipment".to_owned(mem.system()).unwrap() }
+    let label: OwnedLabel = .{ text = "shipment".to_owned().unwrap() }
     let view: LabelView = label.into()
     UInt8(view.text.length())
 }

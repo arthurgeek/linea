@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/json_typed/encode_writer_error_keeps_owner_live.lin:21:5
+  --> tests/json_typed/encode_writer_error_keeps_owner_live.lin:20:5
    |
-21 |     message.release()
+20 |     message.release()
    |     ^^^^^^^ keep this place available until the last use of its observation
-22 |     result.release()
+21 |     result.release()
    |     ------ the observation is still used here

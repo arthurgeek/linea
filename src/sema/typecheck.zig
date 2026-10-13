@@ -1083,7 +1083,7 @@ fn typecheckInternal(
                 bounds,
                 admits,
             );
-            if (d == c.raw_accesses.closure_open and k == 0) owned = try c.withClosureSignature(d, owned);
+            if (c.raw_accesses.opensClosure(d) and k == 0) owned = try c.withClosureSignature(d, owned);
             try c.builder.setCallableBounds(param_types[i][k], owned);
         }
     }
@@ -4674,6 +4674,9 @@ const Expected = struct {
     /// For a call's argument, the receiver the call was made on, so a
     /// mismatch can say where the receiver's type came from.
     receiver: ExprId = .none,
+    /// For a call's argument, the declaration the call reaches, so a
+    /// mismatch can name the partner that takes an allocator.
+    passed_to: node.DeclId = .none,
 
     const Reason = enum {
         return_type,
@@ -9642,7 +9645,7 @@ const Checker = struct {
             );
             return true;
         }
-        if (d == self.raw_accesses.closure_open and args.len == 1) if (enclosing) |outer| if (outer.settled.len > 0) {
+        if (self.raw_accesses.opensClosure(d) and args.len == 1) if (enclosing) |outer| if (outer.settled.len > 0) {
             const callback = args[0];
             const signature = outer.settled[0];
             if (callback == .poison or signature == .poison) return false;
@@ -9683,9 +9686,9 @@ const Checker = struct {
                 else
                     "this callback owns what must be released";
                 const hint = if (capture) |held|
-                    try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`", .{held.name})
+                    try std.fmt.allocPrint(self.sink.arena, "capture `{s}` by `read`, or keep the closure with `mem.Closure.open(closure)`, whose memory is released", .{held.name})
                 else
-                    "capture nothing that must be released, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`";
+                    "capture nothing that must be released, or keep the closure with `mem.Closure.open(closure)`, whose memory is released";
                 try self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(at),
@@ -12172,10 +12175,21 @@ const Checker = struct {
         else
             &.{};
         const fill_note = self.defaultedFillNote(id, actual, want) catch return self.recordMismatch(id);
-        const all_notes: []const []const u8 = if (fill_note) |text| blk: {
-            const joined = self.sink.arena.alloc([]const u8, notes.len + 1) catch return self.recordMismatch(id);
+        const allocator_note = self.allocatorPassedNote(actual, want) catch return self.recordMismatch(id);
+        var extra: [2][]const u8 = undefined;
+        var extras: usize = 0;
+        if (fill_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
+        if (allocator_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
+        const all_notes: []const []const u8 = if (extras > 0) blk: {
+            const joined = self.sink.arena.alloc([]const u8, notes.len + extras) catch return self.recordMismatch(id);
             @memcpy(joined[0..notes.len], notes);
-            joined[notes.len] = text;
+            @memcpy(joined[notes.len..], extra[0..extras]);
             break :blk joined;
         } else notes;
 
@@ -12208,7 +12222,7 @@ const Checker = struct {
         const wanted_signature = try self.withoutEnvironmentContracts(try self.callbackValueSignature(wanted));
         const found_signature = try self.withoutEnvironmentContracts(try self.callbackValueSignature(found));
         if (self.builder.view().callableSatisfies(found_signature, wanted_signature)) {
-            return "closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(allocator, closure)`; closures that capture nothing also convert to a written `fn` type";
+            return "closures called alike are kept together as `mem.Closure` values: open each with `mem.Closure.open(closure)`; closures that capture nothing also convert to a written `fn` type";
         }
         return std.fmt.allocPrint(
             self.sink.arena,
@@ -12230,6 +12244,18 @@ const Checker = struct {
         primary: []const u8,
         origin: ?Label,
     ) TypeId {
+        return self.reportWithOriginNotes(code, id, message, primary, origin, &.{});
+    }
+
+    fn reportWithOriginNotes(
+        self: *Checker,
+        code: Code,
+        id: ExprId,
+        message: []const u8,
+        primary: []const u8,
+        origin: ?Label,
+        notes: []const []const u8,
+    ) TypeId {
         const at = self.ast.exprSpan(id);
         const here: Label = .{ .file = self.ast.fileOfExpr(id), .span = at, .message = primary, .style = .primary };
 
@@ -12244,6 +12270,7 @@ const Checker = struct {
                 .code = code,
                 .message = message,
                 .labels = labels,
+                .notes = notes,
             }) catch {};
         } else {
             const labels = self.gpa.alloc(Label, 1) catch return self.record(id, .poison);
@@ -12253,6 +12280,7 @@ const Checker = struct {
                 .code = code,
                 .message = message,
                 .labels = labels,
+                .notes = notes,
             }) catch {};
         }
         return self.record(id, .poison);
@@ -16480,13 +16508,20 @@ const Checker = struct {
         if (self.option_decl == null or self.builder.view().declOfType(optional) != self.option_decl or optional_args.len != 1) return false;
         const buffer_args = self.builder.appliedTo(optional_args[0]);
         if (self.builder.view().declOfType(optional_args[0]) != raw.buffer or buffer_args.len != 1 or buffer_args[0] != allocator) return false;
-        // `open`'s callback is bounded by the implementation's first parameter,
-        // which must be `S`, and it is the one type parameter `open` declares.
-        const open = raw.closure_open;
+        // Each opener's callback is bounded by the implementation's first
+        // parameter, which must be `S`, and it is the one type parameter the
+        // opener declares. `open_in` takes the allocator and then the callback;
+        // `open`, on the system closure, takes the callback alone.
+        return self.validClosureOpener(raw.closure_open_in, .{ .head = 2, .params = 2 }) and
+            self.validClosureOpener(raw.closure_open, .{ .head = 1, .params = 1 });
+    }
+
+    fn validClosureOpener(self: *const Checker, open: DeclId, shape: struct { head: usize, params: usize }) bool {
         if (open == .none) return true;
         const head = self.headParametersOf(open);
-        return head != .none and self.ast.declTypeParams(head).len == 2 and self.ast.declTypeParams(open).len == 1 and
-            self.ast.declParams(open).len == 2 and self.ast.declParams(open)[1].convention == .sink;
+        const params = self.ast.declParams(open);
+        return head != .none and self.ast.declTypeParams(head).len == shape.head and self.ast.declTypeParams(open).len == 1 and
+            params.len == shape.params and params[shape.params - 1].convention == .sink;
     }
 
     fn validStorageEffects(self: *const Checker, d: DeclId) bool {
@@ -17524,7 +17559,7 @@ const Checker = struct {
             }
         }
         if (contextual != null and resolved_captures.len != 0 and !expected.?.callable_context) {
-            _ = self.report(.o_capture, id, "a capturing closure cannot become a function pointer", .{}, "keep its environment with `mem.Closure.open(allocator, closure)`, or take a generic callable parameter");
+            _ = self.report(.o_capture, id, "a capturing closure cannot become a function pointer", .{}, "keep its environment with `mem.Closure.open(closure)`, or take a generic callable parameter");
             refused = true;
         }
         const expected_params = try self.gpa.dupe(types_mod.CallableParam, if (contextual) |signature|
@@ -18457,7 +18492,7 @@ const Checker = struct {
         // Nothing is named, so each argument fills the parameter at its own
         // position and the tree's list already is the answer. Nearly every call
         // in a program takes this path, and none of them allocates.
-        if (!named_one) return self.positionalArguments(id, owner, target, given);
+        if (!named_one) return self.positionalArguments(id, owner, target, given, receiver);
 
         // A value nothing declared names for has no labels to match, so
         // its call takes arguments by position, and that is the one thing
@@ -18574,7 +18609,7 @@ const Checker = struct {
         }
 
         if (pairing_end == null and surplus) {
-            try self.reportSurplus(id, owner, param_count, given.len);
+            try self.reportSurplus(id, owner, param_count, given.len, receiver);
             refused = true;
         }
 
@@ -18614,10 +18649,11 @@ const Checker = struct {
         owner: CallParameters,
         target: types_mod.CallTarget,
         given: []const ExprId,
+        receiver: usize,
     ) std.mem.Allocator.Error!?Matched {
         const param_count = owner.len(self);
         if (given.len > param_count) {
-            try self.reportSurplus(id, owner, param_count, given.len);
+            try self.reportSurplus(id, owner, param_count, given.len, receiver);
             const slots = try self.gpa.alloc(?u32, given.len);
             defer self.gpa.free(slots);
             for (slots, 0..) |*slot, i| slot.* = if (i < param_count) @intCast(i) else null;
@@ -18651,21 +18687,69 @@ const Checker = struct {
     ///
     /// Counted rather than named, because there is no name to report one by: an
     /// argument past the end of the parameter list fills nothing, and how many
-    /// were written is what the programmer can see.
+    /// were written is what the programmer can see. A postfix call's receiver
+    /// is not written between the parentheses, so both counts leave it out; a
+    /// call through the type writes the receiver first and counts it.
     fn reportSurplus(
         self: *Checker,
         id: ExprId,
         owner: CallParameters,
         wanted: usize,
         found: usize,
+        receiver: usize,
     ) std.mem.Allocator.Error!void {
-        _ = self.reportWithOrigin(
+        const note = if (found == wanted + 1) try self.allocatorFormNote(owner) else null;
+        const notes: []const []const u8 = if (note) |text| try self.sink.arena.dupe([]const u8, &.{text}) else &.{};
+        _ = self.reportWithOriginNotes(
             .t_arity,
             id,
-            try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted, found }),
+            try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
             "the wrong number of arguments",
             owner.origin(self),
+            notes,
         );
+    }
+
+    /// The help that names the `_in` partner of the declaration a call
+    /// reaches, for a call that gave the system form an allocator.
+    fn allocatorFormNote(self: *Checker, owner: CallParameters) std.mem.Allocator.Error!?[]const u8 {
+        const name = (try self.allocatorFormOf(owner)) orelse return null;
+        return try std.fmt.allocPrint(self.sink.arena, "`{s}` uses the system allocator; use `{s}(allocator, …)` to choose the allocator", .{ name[0 .. name.len - 3], name });
+    }
+
+    /// An allocator passed where a parameter of another type stands, to a
+    /// declaration with an `_in` partner: the call most often meant the
+    /// partner. Asked only when the argument was already refused.
+    fn allocatorPassedNote(self: *Checker, actual: TypeId, want: Expected) std.mem.Allocator.Error!?[]const u8 {
+        if (want.reason != .parameter or want.passed_to == .none or self.allocator_decl == null) return null;
+        if (actual == .poison or want.ty == .poison) return null;
+        if (!try self.answersTrait(actual, self.allocator_decl)) return null;
+        if (try self.answersTrait(want.ty, self.allocator_decl)) return null;
+        return try self.allocatorFormNote(.{ .declaration = want.passed_to });
+    }
+
+    /// The name of the declaration beside `owner` that takes the allocator
+    /// first, `x_in` beside `x`, when there is one: a call that passed `x` one
+    /// argument too many most often meant to choose the allocator. Asked only
+    /// on this error path, of the declarations of the callee's own module.
+    fn allocatorFormOf(self: *Checker, owner: CallParameters) std.mem.Allocator.Error!?[]const u8 {
+        const d = switch (owner) {
+            .declaration => |d| d,
+            else => return null,
+        };
+        const name = self.ast.declName(d);
+        if (name == .none) return null;
+        const wanted = try std.fmt.allocPrint(self.sink.arena, "{s}_in", .{self.ast.tokenText(name)});
+        const owned_by = self.ast.declOwner(d);
+        for (self.program.declsOf(self.program.moduleOf(d))) |other| {
+            const other_name = self.ast.declName(other);
+            if (other_name == .none or !std.mem.eql(u8, self.ast.tokenText(other_name), wanted)) continue;
+            const other_owner = self.ast.declOwner(other);
+            if ((owned_by == .none) != (other_owner == .none)) continue;
+            if (owned_by != .none and !std.mem.eql(u8, self.ast.tokenText(owned_by), self.ast.tokenText(other_owner))) continue;
+            return wanted;
+        }
+        return null;
     }
 
     /// A parameter no argument filled and no declaration fills, named rather
@@ -19259,6 +19343,7 @@ const Checker = struct {
                 .at = .{ .file = self.ast.fileOf(p.name), .span = self.ast.tokenSpan(p.name) },
                 .reason = .parameter,
                 .receiver = try self.receiverArgument(d, args, params, j, try paramType(self, d, j)),
+                .passed_to = d,
             };
             var adjusted: ?types_mod.ReceiverAdjustment = null;
             if (readsSelf(self.ast, p)) {
@@ -28368,7 +28453,7 @@ const Checker = struct {
                         continue;
                     }
                     signature = try self.callableContext(bound, settling);
-                    got = try self.check(value, .{ .ty = signature, .at = at_parameter, .reason = .parameter, .callable_context = callable_context, .callee = d, .receiver = try self.receiverArgument(d, args, params, j, bound) });
+                    got = try self.check(value, .{ .ty = signature, .at = at_parameter, .reason = .parameter, .callable_context = callable_context, .callee = d, .receiver = try self.receiverArgument(d, args, params, j, bound), .passed_to = d });
                 } else {
                     got = try self.check(value, .{
                         .ty = signature,
@@ -28377,6 +28462,7 @@ const Checker = struct {
                         .callable_context = callable_context,
                         .callee = d,
                         .receiver = try self.receiverArgument(d, args, params, j, bound),
+                        .passed_to = d,
                         .infer_lambda_result = infer_result,
                         .inference = if (infer_result) settling else null,
                     });

@@ -206,12 +206,12 @@ fn served_headed[S](inout router: Router[S], inout state: S, target: Str, header
         Ok(response) => {
             let code = response.status().code()
             let body = Str.from_bytes(response.body().unwrap()).unwrap()
-            fmt.render_owned(mem.system(), "{code} {body}").unwrap()
+            fmt.render_owned("{code} {body}").unwrap()
         },
         Err(error) => {
             let code = error.status().code()
             let message = error.message().unwrap_or(error.status().reason())
-            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+            fmt.render_owned("{code} {message}").unwrap()
         },
     }
     arena.release()
@@ -516,8 +516,8 @@ fn probe(inout router: Router[CallCount], target: Str, refused: Str, answer: Str
     let extent = marker.extent
     marker.release()
     var calls = CallCount { calls = 0 }
-    let at_text = fmt.render_owned(mem.system(), "{at}").unwrap()
-    let extent_text = fmt.render_owned(mem.system(), "{extent}").unwrap()
+    let at_text = fmt.render_owned("{at}").unwrap()
+    let extent_text = fmt.render_owned("{extent}").unwrap()
     let described = served_headed(&router, &calls, target, ["X-Log-At", at_text.view(), "X-Log-Extent", extent_text.view(), "X-Refuse", copy(refused)].as_slice())
     let held = log.holds(released)
     let answered = described.view() == answer
@@ -615,8 +615,8 @@ test fn an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_rea
     let extent = marker.extent
     marker.release()
     var calls = CallCount { calls = 0 }
-    let at_text = fmt.render_owned(mem.system(), "{at}").unwrap()
-    let extent_text = fmt.render_owned(mem.system(), "{extent}").unwrap()
+    let at_text = fmt.render_owned("{at}").unwrap()
+    let extent_text = fmt.render_owned("{extent}").unwrap()
     let described = served_headed(&router, &calls, "/greedy", ["X-Log-At", at_text.view(), "X-Log-Extent", extent_text.view()].as_slice(), arena_bytes: 4096)
     let held = log.holds([UInt64(0), 1].as_slice())
     let status = described.starts_with("500")

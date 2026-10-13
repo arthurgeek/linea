@@ -10052,7 +10052,7 @@ test "string literal postfix chains retain their literal and interpolation nodes
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
     const source: Source = .{ .path = "t.lin", .text =
-        \\fn plain() -> UInt64 { "tea".to_owned(allocator).unwrap() }
+        \\fn plain() -> UInt64 { "tea".to_owned_in(allocator).unwrap() }
         \\fn interpolated() -> UInt64 { "{value}".render(allocator).unwrap() }
     };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);

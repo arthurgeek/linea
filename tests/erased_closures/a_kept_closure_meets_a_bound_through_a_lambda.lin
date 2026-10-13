@@ -9,14 +9,12 @@ fn twice[F: fn(value: UInt64) -> UInt64](step: F, value: UInt64) -> UInt64 {
 fn main() -> Result[UInt8, mem.Oom] {
     let bump: UInt64 = 3
     let add = mem.Closure.open(
-        mem.system(),
         [sink bump] |value: UInt64| -> UInt64 {
             value + bump
         },
     )?
     let applied = twice([add] |value| add(value), 1)
     let kept = mem.Closure.open(
-        mem.system(),
         [sink add] |value: UInt64| -> UInt64 {
             add(value) + 1
         },

@@ -1,5 +1,5 @@
 error[T-Bound]: `T` requires `Release`, and `io.BufferedWriter[io.Descriptor, mem.SystemAllocator]` does not implement it
-  --> tests/io/output/a_buffered_writer_requires_explicit_settlement.lin:13:5
+  --> tests/io/output/a_buffered_writer_requires_explicit_settlement.lin:12:5
    |
-13 |     consume(output)
+12 |     consume(output)
    |     ^^^^^^^ implement it for that type, or drop the bound

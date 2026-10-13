@@ -6,7 +6,6 @@ fn main() -> UInt8 {
     var scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
     let pushed = &scores.push(40).is_ok()
     let counted = mem.Closure.open(
-        mem.system(),
         [seen = scores] || -> UInt64 {
             seen.length()
         },

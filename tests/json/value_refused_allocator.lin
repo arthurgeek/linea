@@ -6,8 +6,8 @@ use mem.Owner
 fn main() -> UInt8 {
     let empty = mem.Arena.open(mem.system(), 0)
     let storage = mem.Arena.open(mem.system(), 1024)
-    var document = json.Value.array(empty.handle())
-    let incoming = json.Value.string(storage.handle(), "kept").unwrap()
+    var document = json.Value.array_in(empty.handle())
+    let incoming = json.Value.string_in(storage.handle(), "kept").unwrap()
     let failure = match json.Value.append(&document, incoming) {
         Err(failure) => failure,
         Ok(_) => panic("an exhausted allocator accepted a child"),

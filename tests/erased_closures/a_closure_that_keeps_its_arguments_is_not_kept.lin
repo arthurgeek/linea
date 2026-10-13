@@ -5,7 +5,6 @@ import std.mem
 fn main() -> Result[UInt8, mem.Oom] {
     let names: Vec[Str, mem.SystemAllocator] = Vec.new()
     var remember = mem.Closure.open(
-        mem.system(),
         inout [sink names] |name: Str| -> UInt64 where retains(names: name) {
             let _kept = &names.push(copy(name))
             names.length()

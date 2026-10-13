@@ -5,7 +5,6 @@
 import std.env
 import std.fs
 import std.io
-import std.mem
 import std.testing
 
 let sample =
@@ -43,7 +42,7 @@ test fn a_setting_is_read_from_the_line_that_names_it() {
 // each `else` block prints the reason and returns `None`.
 fn load(args: env.Args) -> Option[String] {
     if args.count() == 1 {
-        let copied = sample.to_owned(mem.system()) else |_| {
+        let copied = sample.to_owned() else |_| {
             io.eprintln("cannot allocate the sample settings")
             return .None
         }

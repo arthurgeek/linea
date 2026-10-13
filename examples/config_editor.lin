@@ -37,7 +37,7 @@ enum RenderError {
 }
 
 test fn configuration_parsing_retains_trimmed_views() {
-    defer let entries = parse(mem.system(), "# settings\n name = Ada \ncount=3\n").unwrap()
+    defer let entries = parse("# settings\n name = Ada \ncount=3\n").unwrap()
     testing.assert_eq(entries.length(), 2, "the comment line became an entry")?
     testing.assert_eq(entries[0].key, "name", "the key was not trimmed")?
     testing.assert_eq(entries[0].value, "Ada", "the value was not trimmed")?
@@ -45,14 +45,14 @@ test fn configuration_parsing_retains_trimmed_views() {
 }
 
 test fn configuration_parsing_refuses_ambiguous_or_malformed_records() {
-    let duplicate = match parse(mem.system(), "name=Ada\nname=Grace\n") {
+    let duplicate = match parse("name=Ada\nname=Grace\n") {
         Err(error) => match read error.reason { Duplicate => error.line == 2, _ => false },
         Ok(entries) => {
             entries.release()
             false
         },
     }
-    let malformed = match parse(mem.system(), "name\n") {
+    let malformed = match parse("name\n") {
         Err(error) => match read error.reason { Syntax => error.line == 1, _ => false },
         Ok(entries) => {
             entries.release()
@@ -73,7 +73,7 @@ test fn parsing_reports_the_record_that_exhausts_entry_storage() {
         \\d=4
         \\e=5
         \\
-    let refused = match parse(arena.handle(), records) {
+    let refused = match parse_in(arena.handle(), records) {
         Err(error) => error.line == 5 && match read error.reason { Allocation(_) => true, _ => false },
         Ok(entries) => {
             entries.release()
@@ -84,8 +84,10 @@ test fn parsing_reports_the_record_that_exhausts_entry_storage() {
 }
 
 // Entries borrow slices of input. The caller keeps that input alive until the
-// entries are released; no string copies are needed while parsing.
-fn parse[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], ConfigError] where carries(.Ok: allocator, input) {
+// entries are released; no string copies are needed while parsing. Like the
+// library's own functions, `parse_in` takes the allocator first and `parse`
+// passes it the system allocator.
+fn parse_in[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], ConfigError] where carries(.Ok: allocator, input) {
     // Error exits release partial entries; returning them transfers ownership.
     defer var entries: Vec[Entry, A] = Vec.new_in(allocator)
     var number: UInt64 = 0
@@ -114,9 +116,13 @@ fn parse[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], Config
     .Ok(entries)
 }
 
+fn parse(input: Str) -> Result[Vec[Entry], ConfigError] where carries(.Ok: input) {
+    parse_in(mem.system(), input)
+}
+
 // Rendering normalizes entries to key=value lines, omitting comments and blank
 // lines. The output borrows only its allocator, so it can outlive parsed input.
-fn render[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[B], RenderError] where carries(.Ok: allocator) {
+fn render_in[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[B], RenderError] where carries(.Ok: allocator) {
     // A failed write releases partial output; success moves it to the caller.
     defer var output = String.new_in(allocator)
     var replaced = false
@@ -140,12 +146,17 @@ fn render[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], key:
     .Ok(output)
 }
 
+// `render` renders into memory from the system allocator.
+fn render[A: Allocator](entries: Vec[Entry, A], key: Str, value: Str, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], RenderError] where carries() {
+    render_in(mem.system(), entries, key: key, value: value, max_bytes: max_bytes)
+}
+
 test fn rendering_reports_allocation_failure_after_a_short_entry() {
-    defer let entries = parse(mem.system(), "a=b\n").unwrap()
+    defer let entries = parse("a=b\n").unwrap()
     // Sixty-four bytes accommodate the short entry, but not this longer value.
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let value = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
-    let refused = match render(arena.handle(), entries, key: "next", value: value, max_bytes: max_config_bytes) {
+    let refused = match render_in(arena.handle(), entries, key: "next", value: value, max_bytes: max_config_bytes) {
         Err(error) => match read error { Allocation(_) => true, Limit => false },
         Ok(output) => {
             output.release()
@@ -156,26 +167,26 @@ test fn rendering_reports_allocation_failure_after_a_short_entry() {
 }
 
 test fn rendered_configuration_owns_its_bytes_after_input_is_released() {
-    let input = "name=Ada\ncount=3\n".to_owned(mem.system()).unwrap()
-    let entries = parse(mem.system(), input.view()).unwrap()
-    defer let rendered = render(mem.system(), entries, key: "name", value: "Grace", max_bytes: max_config_bytes).unwrap()
+    let input = "name=Ada\ncount=3\n".to_owned().unwrap()
+    let entries = parse(input.view()).unwrap()
+    defer let rendered = render(entries, key: "name", value: "Grace", max_bytes: max_config_bytes).unwrap()
     entries.release()
     input.release()
     testing.assert_eq(rendered.view(), "name=Grace\ncount=3\n", "rendered configuration retained an input dependency")?
 }
 
 test fn a_missing_configuration_key_is_appended() {
-    defer let entries = parse(mem.system(), "name=Ada\n").unwrap()
-    defer let rendered = render(mem.system(), entries, key: "count", value: "4", max_bytes: max_config_bytes).unwrap()
+    defer let entries = parse("name=Ada\n").unwrap()
+    defer let rendered = render(entries, key: "count", value: "4", max_bytes: max_config_bytes).unwrap()
     testing.assert_eq(rendered.view(), "name=Ada\ncount=4\n", "a new key replaced another entry or was omitted")?
 }
 
 test fn rendering_refuses_a_configuration_larger_than_its_read_limit() {
-    defer let entries = parse(mem.system(), "k=v\n").unwrap()
+    defer let entries = parse("k=v\n").unwrap()
     // "k=v\n" occupies exactly four bytes; appending another entry exceeds it.
-    defer let exact = render(mem.system(), entries, key: "k", value: "v", max_bytes: 4).unwrap()
+    defer let exact = render(entries, key: "k", value: "v", max_bytes: 4).unwrap()
     testing.assert_eq(exact.view(), "k=v\n", "a configuration at the limit was refused")?
-    let refused = match render(mem.system(), entries, key: "x", value: "y", max_bytes: 4) {
+    let refused = match render(entries, key: "x", value: "y", max_bytes: 4) {
         Err(error) => match read error { Limit => true, Allocation(_) => false },
         Ok(output) => {
             output.release()
@@ -299,7 +310,7 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
     } else {
         fs.read_text(path, max_bytes: max_config_bytes)?
     }
-    defer let entries = parse(mem.system(), input.view())?
+    defer let entries = parse(input.view())?
     defer let value = if args.count() == first + 3 {
         let given = args.at(first + 2) else {
             return .Err(.ArgumentEncoding)
@@ -309,9 +320,9 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
         }
         // `map_err` replaces the allocation failure with this step's own
         // variant, which `?` returns.
-        given.to_owned(mem.system()).map_err(|sink _oom| ConfigFailure.ValueAllocation)?
+        given.to_owned().map_err(|sink _oom| ConfigFailure.ValueAllocation)?
     } else {
-        var reader = io.BufferedReader.open(mem.system(), capacity: input_capacity, reader: io.stdin()) else |_| {
+        var reader = io.BufferedReader.open(capacity: input_capacity, reader: io.stdin()) else |_| {
             return .Err(.PromptBuffer)
         }
         let answer = io.prompt(&reader, message: "new value: ", max_bytes: max_value_bytes)
@@ -325,9 +336,9 @@ fn edit_configuration() -> Result[(), ConfigFailure] {
     if chosen.trim_ascii() != chosen || chosen.find("\n").is_some() || chosen.find("\r").is_some() {
         return .Err(.Value)
     }
-    defer let output = render(mem.system(), entries, key: key, value: chosen, max_bytes: max_config_bytes)?
+    defer let output = render(entries, key: key, value: chosen, max_bytes: max_config_bytes)?
     // Atomic publication installs the complete rendered file. The error also
     // says whether publication happened before a later cleanup failure.
-    fs.save_atomic(mem.system(), path, output.as_bytes(), policy: .Replace)?
+    fs.save_atomic(path, output.as_bytes(), policy: .Replace)?
     .Ok(())
 }

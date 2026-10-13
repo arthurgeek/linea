@@ -72,9 +72,9 @@ fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
     // unreached square. `Vec.filled` initializes every entry to the supplied
     // value and allocates exactly the requested capacity.
     let unreached = squares + 1
-    var distance = Vec.filled(memory, count: squares, value: unreached)?
+    var distance = Vec.filled_in(memory, count: squares, value: unreached)?
 
-    var counted = Vec.filled(memory, count: squares, value: UInt64(0))?
+    var counted = Vec.filled_in(memory, count: squares, value: UInt64(0))?
 
     distance[0] = 0
 
@@ -84,7 +84,7 @@ fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
         // Reserve the queue table plus its 64-byte bookkeeping/alignment allowance.
         let search = Arena.open(arena.handle(), size: table_bytes + 64)
         let search_memory = search.handle()
-        var queue = Vec.filled(search_memory, count: squares, value: UInt64(0))?
+        var queue = Vec.filled_in(search_memory, count: squares, value: UInt64(0))?
 
         // Eight moves combine two squares on one axis and one on the other.
         // Signed offsets represent moves in all directions. Check the new

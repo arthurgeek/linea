@@ -12,7 +12,6 @@
 import std.env
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.testing
 import std.time
@@ -114,7 +113,7 @@ fn parse_send(args: env.Args) -> Option[SendOptions] {
 
 fn run_serve(options: ServeOptions) -> UInt8 {
     // The server's logger writes lines at `Info` and above to standard error.
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     let address = net.loopback(options.port)
     // A port another program holds makes `listen` fail; the error is logged
     // with the address and the server stops.
@@ -166,7 +165,7 @@ fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: l
     // A refused buffer hands the connection back. `settled()` closes it and
     // keeps why the buffer was refused, together with a failed close, so the
     // log line reports both.
-    var reader = io.BufferedReader.open(mem.system(), capacity: read_capacity, reader: bounded).settled() else |reason| {
+    var reader = io.BufferedReader.open(capacity: read_capacity, reader: bounded).settled() else |reason| {
         logger.error("cannot buffer a connection", log.field("peer", peer).and("error", reason))
         return
     }
@@ -230,7 +229,7 @@ fn run_send(args: env.Args, options: SendOptions) -> UInt8 {
         let _closed = connection.close()
         return 1
     }
-    var reader = io.BufferedReader.open(mem.system(), capacity: read_capacity, reader: connection).settled() else |reason| {
+    var reader = io.BufferedReader.open(capacity: read_capacity, reader: connection).settled() else |reason| {
         io.eprintln("bounded_echo: cannot buffer the connection: {reason}")
         return 1
     }
@@ -306,7 +305,7 @@ fn serve_one(bounds: Bounds, lines: Str, silent: Bool) -> String {
         &client.shutdown_write().unwrap()
     }
     let Accepted { connection, address } = &listener.accept().unwrap()
-    echo_connection(connection, address, log.to_stderr(mem.system(), minimum: .Error), bounds)
+    echo_connection(connection, address, log.to_stderr(minimum: .Error), bounds)
     let text = io.read_text(&client, max_bytes: 4096).unwrap()
     client.close().unwrap()
     listener.close().unwrap()

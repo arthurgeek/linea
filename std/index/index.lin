@@ -1,4 +1,3 @@
-import std.mem
 import std.testing
 
 // Index gives bracket access to an element. The projection exposes a place
@@ -42,9 +41,8 @@ test fn derived_from_end_equality_compares_the_offset() {
 
 test fn derived_from_end_debug_renders_the_offset() {
     let two = FromEnd { k = 2 }
-    let a = mem.system()
     // Sixty-four bytes leave room for the complete debug text checked below.
-    var writer = testing.Recorder.of(a, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = two.debug(&writer).is_ok()
     let rendered = writer.holds(r"FromEnd { k: 2 }")
     writer.release()
@@ -57,7 +55,7 @@ test fn a_from_end_index_displays_its_source_notation() {
     let last = FromEnd { k = 1 }
     let past_end = FromEnd { k = 0 }
     // The 16-byte recorder holds both indexes and their separator.
-    var writer = testing.Recorder.of(mem.system(), 16).unwrap()
+    var writer = testing.Recorder.of(16).unwrap()
     let wrote = last.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && past_end.fmt(&writer).is_ok()
     let rendered = writer.holds("^1 ^0")
     writer.release()

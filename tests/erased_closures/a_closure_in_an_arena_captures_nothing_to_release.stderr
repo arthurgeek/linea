@@ -1,5 +1,5 @@
 error[T-Bound]: this closure captures `scores`, a `Vec[UInt64, mem.SystemAllocator]` that must be released, and a closure kept in memory from `mem.Handle[mem.SystemAllocator]` may be dropped without releasing it
   --> tests/erased_closures/a_closure_in_an_arena_captures_nothing_to_release.lin:10:29
    |
-10 |     let count = mem.Closure.open(
-   |                             ^^^^ capture `scores` by `read`, or keep the closure in memory from an allocator whose buffers must be released, such as `mem.system()`
+10 |     let count = mem.Closure.open_in(
+   |                             ^^^^^^^ capture `scores` by `read`, or keep the closure with `mem.Closure.open(closure)`, whose memory is released

@@ -1,6 +1,5 @@
 // Read severity-prefixed log records from stdin and emit selected records.
 import std.io
-import std.mem
 import std.env
 import std.testing
 
@@ -66,7 +65,7 @@ fn main() -> UInt8 {
         io.eprintln("minimum severity must be an unsigned decimal integer")
         return 1
     }
-    var input = io.BufferedReader.open(mem.system(), capacity: stream_capacity, reader: io.stdin()) else |_| {
+    var input = io.BufferedReader.open(capacity: stream_capacity, reader: io.stdin()) else |_| {
         io.eprintln("could not allocate the input buffer")
         return 1
     }
@@ -74,7 +73,7 @@ fn main() -> UInt8 {
     defer {
         let _stdin = input.abandon()
     }
-    var output = io.BufferedWriter.open(mem.system(), capacity: stream_capacity, writer: io.stdout()) else |_| {
+    var output = io.BufferedWriter.open(capacity: stream_capacity, writer: io.stdout()) else |_| {
         io.eprintln("could not allocate the output buffer")
         return 1
     }

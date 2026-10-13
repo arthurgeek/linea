@@ -191,7 +191,7 @@ test fn path_display_escapes_undecodable_bytes_without_losing_them() {
     &bytes.store_byte(1, 255)
     &bytes.store_byte(2, 92)
     let path = Path.from_bytes(bytes.as_slice()).unwrap()
-    var writer = testing.Recorder.of(allocator, 32).unwrap()
+    var writer = testing.Recorder.of(32).unwrap()
     let rendered = path.fmt(&writer)
     let equal = writer.holds(r"a\xff\x5c")
     writer.release()

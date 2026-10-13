@@ -3,7 +3,7 @@ import std.mem
 // The walk reads the vector's storage through its slice on every pass, so the
 // body cannot push: growing the vector may move that storage.
 fn main() -> UInt8 {
-    var values = mem.Vec.filled(mem.system(), 2, UInt64(7)) else |_| {
+    var values = mem.Vec.filled(2, UInt64(7)) else |_| {
         return 1
     }
     var walked: UInt64 = 0

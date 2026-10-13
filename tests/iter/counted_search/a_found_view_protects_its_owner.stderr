@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/iter/counted_search/a_found_view_protects_its_owner.lin:9:5
-   |
-9  |     owner.release()
-   |     ^^^^^ keep this place available until the last use of its observation
-10 |     if found.unwrap() == "one" {
-   |        ----- the observation is still used here
+ --> tests/iter/counted_search/a_found_view_protects_its_owner.lin:7:5
+  |
+7 |     owner.release()
+  |     ^^^^^ keep this place available until the last use of its observation
+8 |     if found.unwrap() == "one" {
+  |        ----- the observation is still used here

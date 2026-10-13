@@ -18,7 +18,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] From[iter.CollectFailure[I
 }
 
 fn gather(arena: mem.Arena[mem.SystemAllocator]) -> Result[UInt64, Shortage] {
-    let { values, iterator: _ } = (UInt64(0)..3).collect(arena.handle())?
+    let { values, iterator: _ } = (UInt64(0)..3).collect_in(arena.handle())?
     let count = values.length()
     values.release()
     Result.Ok(count)

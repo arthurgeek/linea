@@ -5,10 +5,10 @@ import std.mem
 struct Pair { a: mem.Slice[UInt64], b: mem.Slice[UInt64] }
 
 fn main() -> UInt8 {
-    var a = Vec.filled(mem.system(), 2, UInt64(7)) else |_| {
+    var a = Vec.filled(2, UInt64(7)) else |_| {
         return 1
     }
-    var b = Vec.filled(mem.system(), 3, UInt64(7)).unwrap()
+    var b = Vec.filled(3, UInt64(7)).unwrap()
     let pair = Pair { a = a.as_slice(), b = b.as_slice() }
     Vec.push(&a, 1).unwrap()
     let n = pair.b.length()

@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/slice_iteration/an_iterator_keeps_its_source_immutable.lin:7:5
+ --> tests/slice_iteration/an_iterator_keeps_its_source_immutable.lin:5:5
   |
-7 |     values[0] = 9
+5 |     values[0] = 9
   |     ^^^^^^^^^ keep this place available until the last use of its observation
-8 |     *Iterator.next(&iterator).unwrap()
+6 |     *Iterator.next(&iterator).unwrap()
   |                     -------- the observation is still used here

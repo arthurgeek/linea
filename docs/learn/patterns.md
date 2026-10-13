@@ -15,7 +15,7 @@ let _earlier = &bookings.insert(room, nights).settled()?
 
 // Gather a chain into a new Vec; `else` handles the refusal and `iterator: _`
 // drops the finished chain.
-let { values: names, iterator: _ } = chain.collect(mem.system()).settled() else |_| {
+let { values: names, iterator: _ } = chain.collect().settled() else |_| {
     return .Ok(1)
 }
 

@@ -83,9 +83,9 @@ fn main() -> Result[UInt8, io.IoError] {
 
     let storage = mem.Arena.open(mem.system(), 1024)
     defer storage.release()
-    var document = json.Value.array(storage.handle())
+    var document = json.Value.array_in(storage.handle())
     defer document.release()
-    let summary = json.Value.string(storage.handle(), "all clear").unwrap()
+    let summary = json.Value.string_in(storage.handle(), "all clear").unwrap()
     let summarized = summarize(&document, summary)
     io.println("summarize: {summarized:?}")?
     return .Ok(0)

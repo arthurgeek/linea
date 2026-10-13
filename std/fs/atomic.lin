@@ -12,7 +12,7 @@ use io.Reader
 // Omitted permissions keep an existing destination's mode, and give a new
 // file octal 0666 less the process umask; pass `permissions: .Exact(bits)` to
 // set the ordinary rwx bits instead.
-pub fn save_atomic[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, permissions: SavePermissions = .Preserve) -> Result[(), FsFailure] where carries() {
+pub fn save_atomic_in[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, permissions: SavePermissions = .Preserve) -> Result[(), FsFailure] where carries() {
     match read permissions {
         Exact(mode) => if mode > permission_bits {
             return .Err(FsFailure.new(.InvalidPermissions))
@@ -98,13 +98,27 @@ pub fn save_atomic[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UInt
     finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
 }
 
+// Save `bytes` to `path` atomically, as `save_atomic_in` does, with the system
+// allocator for the operation's scratch storage.
+pub fn save_atomic(path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, permissions: SavePermissions = .Preserve) -> Result[(), FsFailure] where carries() {
+    save_atomic_in(mem.system(), path, bytes, policy, permissions: permissions)
+}
+
+test fn saving_atomically_publishes_the_new_contents() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(path)
+    save_atomic(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
+    defer let text = read_text(path, max_bytes: 8).unwrap()
+    testing.assert_eq(text.view(), "abc", "an atomic save lost its contents")?
+}
+
 // Reject permission mistakes before allocating scratch or touching a path.
 test fn atomic_save_rejects_special_permission_bits_before_io() {
-    let allocator = mem.system()
     let path = Path.from_str("/tmp/linea-atomic-must-not-create").unwrap()
     let contents = "data"
     // 512 is octal 01000, the sticky bit just above the allowed rwx bits.
-    match save_atomic(allocator, path, contents.as_bytes(), policy: .CreateNew, permissions: .Exact(512)) {
+    match save_atomic(path, contents.as_bytes(), policy: .CreateNew, permissions: .Exact(512)) {
         Ok(_) => return testing.assert(false, "special permission bits were accepted"),
         Err(failure) => {
             testing.assert(!failure.published, "invalid permissions published a file")?
@@ -121,16 +135,16 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
     defer remove_scratch(path)
     let before = "before"
     // 416 is octal 0640 (rw-r-----); replacement must preserve these bits.
-    save_atomic(allocator, path, before.as_bytes(), policy: .CreateNew, permissions: .Exact(416)).unwrap()
+    save_atomic(path, before.as_bytes(), policy: .CreateNew, permissions: .Exact(416)).unwrap()
     let after = "after"
-    match save_atomic(allocator, path, after.as_bytes(), policy: .CreateNew) {
+    match save_atomic(path, after.as_bytes(), policy: .CreateNew) {
         Ok(_) => return testing.assert(false, "create-new replaced an existing entry"),
         Err(failure) => {
             testing.assert(!failure.published, "failed no-replace claimed publication")?
             testing.assert_eq(failure.written, UInt64(5), "publication failure lost temporary write progress")?
         },
     }
-    var file = File.open(allocator, path).unwrap()
+    var file = File.open(path).unwrap()
     defer var bytes = allocator.acquire(16).unwrap()
     let received = &file.read_some(&bytes, offset: 0, count: 16)
     file.close().unwrap()
@@ -138,8 +152,8 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
     for index in 0..before.length() {
         testing.assert_eq(bytes.load_byte(index), before.byte(index).unwrap(), "create conflict changed old contents")?
     }
-    save_atomic(allocator, path, after.as_bytes(), policy: .Replace).unwrap()
-    var changed = File.open(allocator, path).unwrap()
+    save_atomic(path, after.as_bytes(), policy: .Replace).unwrap()
+    var changed = File.open(path).unwrap()
     let received_after = &changed.read_some(&bytes, offset: 0, count: 16)
     changed.close().unwrap()
     testing.assert_eq(received_after.unwrap(), after.length(), "atomic replace lost the new extent")?
@@ -151,7 +165,7 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
     complete(target, FsFailure.empty()).unwrap()
     testing.assert_eq(mode, Int64(416), "replacement lost ordinary permissions")?
     // 384 is octal 0600 (rw-------), an explicit change from the preserved mode.
-    save_atomic(allocator, path, before.as_bytes(), policy: .Replace, permissions: .Exact(384)).unwrap()
+    save_atomic(path, before.as_bytes(), policy: .Replace, permissions: .Exact(384)).unwrap()
     let replaced = prepare(allocator, path).unwrap()
     let exact = mem._mode_at_fd(replaced.name, replaced.parent)
     complete(replaced, FsFailure.empty()).unwrap()
@@ -160,10 +174,9 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
 }
 
 test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() {
-    let allocator = mem.system()
     let path = Path.from_str("/dev").unwrap()
     let contents = "must not be written"
-    match save_atomic(allocator, path, contents.as_bytes(), policy: .Replace) {
+    match save_atomic(path, contents.as_bytes(), policy: .Replace) {
         Ok(_) => return testing.assert(false, "atomic save replaced a directory"),
         Err(failure) => {
             testing.assert(!failure.published, "nonregular destination was published")?
@@ -184,8 +197,8 @@ test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
-    testing.assert(save_atomic(allocator, path, "tea".as_bytes(), policy: .CreateNew).is_ok(), "an atomic save over an arena failed")?
-    defer let bytes = read_file(mem.system(), path, max_bytes: 8).unwrap()
+    testing.assert(save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew).is_ok(), "an atomic save over an arena failed")?
+    defer let bytes = read_file(path, max_bytes: 8).unwrap()
     testing.assert_eq(bytes.as_slice(), "tea".as_bytes(), "an atomic save over an arena changed its bytes")?
     .Ok(())
 }
@@ -197,7 +210,7 @@ test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() ->
             defer let owned = scratch_path()
             let path = Path.from_str(owned.view()).unwrap()
             defer remove_scratch(path)
-            save_atomic(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
+            save_atomic_in(allocator, path, "tea".as_bytes(), policy: .CreateNew)?
             return .Ok(())
         },
         FsFailure.is_refusal,
@@ -215,7 +228,7 @@ test fn an_atomic_save_reports_scratch_allocation_failure() {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
-    let refused = match save_atomic(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
+    let refused = match save_atomic_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
         Ok(_) => false,
         Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
     }
@@ -361,7 +374,7 @@ internal fn scratch_path() -> String {
     random_name(&bytes).unwrap()
     // The name is every byte before the trailing NUL.
     let name = Str.from_bytes(bytes.as_slice().subspan(start: 0, count: temporary_name_size - 1).unwrap()).unwrap()
-    var owned = "/tmp/".to_owned(allocator).unwrap()
+    var owned = "/tmp/".to_owned().unwrap()
     &owned.append(name).unwrap()
     owned
 }

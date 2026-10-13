@@ -70,14 +70,14 @@ impl Display for LetterError {
     }
 }
 
-// Copy the form, replacing each `{field}` with that field of the order.
-// `carries(.Ok: allocator)` states that the letter keeps using the allocator,
-// and `carries(.Err: form)` that an error's field name borrows from the form.
-fn fill[A: Allocator, B: Allocator](allocator: B, form: Str, order: Order[A]) -> Result[String[B], LetterError] where carries(.Ok: allocator), carries(.Err: form) {
+// Copy the form into a new letter from the system allocator, replacing each
+// `{field}` with that field of the order. `carries(.Err: form)` states that an
+// error's field name borrows from the form.
+fn fill[A: Allocator](form: Str, order: Order[A]) -> Result[String[mem.SystemAllocator], LetterError] where carries(.Err: form) {
     // `defer var` frees the partial letter when an error returns early.
     // Returning the finished letter hands it to the caller, so it is not freed
     // then.
-    defer var letter = String.new_in(allocator)
+    defer var letter: String[mem.SystemAllocator] = String.new()
     var at: UInt64 = 0
     loop {
         let opens = form.find(r"{", start: at) else {
@@ -116,16 +116,16 @@ fn write_field[A: Allocator, B: Allocator](inout letter: String[B], order: Order
 // inside are text. The annotation tells `json.decode` to build an `Order`,
 // and `unwrap` hands it over.
 test fn a_template_keeps_its_backslashes_and_fills_its_fields() {
-    defer let order: Order = json.decode(mem.system(), r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
+    defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
     // In a raw literal a backslash is an ordinary byte, so a Windows path
     // needs no escaping.
-    defer let path = fill(mem.system(), r"C:\letters\{name}-{count}.txt", order).unwrap()
+    defer let path = fill(r"C:\letters\{name}-{count}.txt", order).unwrap()
     testing.assert_eq(path.view(), r"C:\letters\Ada-3.txt", "the path lost a backslash")?
 }
 
 test fn a_field_the_order_lacks_is_refused() {
-    defer let order: Order = json.decode(mem.system(), r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
-    let refused = match fill(mem.system(), r"Hello {nickname}", order) {
+    defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
+    let refused = match fill(r"Hello {nickname}", order) {
         Err(error) => {
             let named = match read error { Missing(field) => field == "nickname", _ => false }
             error.release()
@@ -140,10 +140,10 @@ test fn a_field_the_order_lacks_is_refused() {
 }
 
 test fn an_order_with_a_count_in_words_is_refused() {
-    let decoded: Result[OrderList, json.DecodeError] = json.decode(mem.system(), r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
+    let decoded: Result[OrderList, json.DecodeError] = json.decode(r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
     defer let refused = match decoded {
         Err(error) => {
-            let shown = fmt.render_owned(mem.system(), error).unwrap()
+            let shown = fmt.render_owned(error).unwrap()
             error.release()
             shown
         },
@@ -157,10 +157,10 @@ test fn an_order_with_a_count_in_words_is_refused() {
 
 fn write_letters() -> Result[(), LetterError] {
     // The annotation tells `json.decode` to build a list of orders.
-    defer let list: OrderList = json.decode(mem.system(), orders)?
+    defer let list: OrderList = json.decode(orders)?
     var first = true
     for read order in list {
-        defer let letter = fill(mem.system(), letter_form, order)?
+        defer let letter = fill(letter_form, order)?
         // A blank line separates each letter from the one before it.
         if !first {
             io.println("")?

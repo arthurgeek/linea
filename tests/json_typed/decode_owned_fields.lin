@@ -2,8 +2,8 @@ import std.json
 import std.mem
 
 fn main() -> UInt8 {
-    let input = r#"["tea","coffee"]"#.to_owned(mem.system()).unwrap()
-    let decoded_result: Result[Vec[String[mem.SystemAllocator], mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(mem.system(), input.view())
+    let input = r#"["tea","coffee"]"#.to_owned().unwrap()
+    let decoded_result: Result[Vec[String[mem.SystemAllocator], mem.SystemAllocator], json.DecodeError[mem.SystemAllocator]] = json.decode(input.view())
     let decoded = decoded_result.unwrap()
     input.release()
     let correct = decoded.length() == 2 && decoded[UInt64(0)].view() == "tea" && decoded[UInt64(1)].view() == "coffee"

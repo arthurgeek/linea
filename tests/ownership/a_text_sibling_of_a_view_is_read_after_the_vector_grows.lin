@@ -5,7 +5,7 @@ import std.mem
 struct Holder { view: mem.Slice[UInt64], name: Str }
 
 fn main() -> UInt8 {
-    var a = Vec.filled(mem.system(), 2, UInt64(7)) else |_| {
+    var a = Vec.filled(2, UInt64(7)) else |_| {
         return 1
     }
     let h = Holder { view = a.as_slice(), name = "abc" }

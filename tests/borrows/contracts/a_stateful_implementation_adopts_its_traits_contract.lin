@@ -3,7 +3,6 @@
 // sources; adopting `carries(.Ok: request)` lets a direct call's greeting
 // outlive the greeter's own text.
 import std.io
-import std.mem
 
 struct Request {
     path: Str,
@@ -32,7 +31,7 @@ impl Handler for Greeter {
 }
 
 fn main() -> UInt8 {
-    let route = "/hello".to_owned(mem.system()).unwrap()
+    let route = "/hello".to_owned().unwrap()
     let greeter = Greeter { route = route.view() }
     let greeted = greeter.handle(Request { path = "/hello", name = "world" })
     route.release()

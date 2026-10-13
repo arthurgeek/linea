@@ -3,7 +3,7 @@ error[O-Leak]: `next` (a linear `mem.Closure[fn(read UInt8) -> UInt8, mem.System
    |
 7  |     let next = mem.Closure.open(
    |         ^^^^ never settled on the path that reaches the end of this block
-14 | }
+13 | }
    | - the block ends here
    |
    = help: settle it first with `next.release()`

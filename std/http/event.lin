@@ -114,7 +114,7 @@ test fn a_failure_displays_what_went_wrong() {
 
 // `failure_displays_as` checks that `failure` displays as `expected`.
 fn failure_displays_as(failure: Failure, expected: Str, said: Str) -> Result[(), testing.Failure] where carries(.Err: said) {
-    let written = fmt.render_owned(mem.system(), failure).unwrap()
+    let written = fmt.render_owned(failure).unwrap()
     let checked = testing.assert_eq(written.view(), expected, said)
     written.release()
     checked

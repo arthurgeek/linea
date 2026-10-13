@@ -18,7 +18,6 @@ fn main() -> Result[UInt8, mem.Oom] {
     keep(
         &rules,
         mem.Closure.open(
-            mem.system(),
             [sink threshold, sink rate] |cents| {
                 if cents >= threshold {
                     cents - cents * rate / 100
@@ -29,7 +28,7 @@ fn main() -> Result[UInt8, mem.Oom] {
         )?,
     )?
     let shipping: UInt64 = 499
-    keep(&rules, mem.Closure.open(mem.system(), [sink shipping] |cents| cents + shipping)?)?
+    keep(&rules, mem.Closure.open([sink shipping] |cents| cents + shipping)?)?
     var total: UInt64 = 6000
     for rule in rules.as_slice() {
         total = (*rule)(total)

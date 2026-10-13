@@ -13,7 +13,6 @@ struct Reading {
 
 fn main() -> UInt8 {
     let observe = mem.Closure.open(
-        mem.system(),
         |value: UInt64| -> Reading where borrows(.value: value) {
             .{ value = borrow value }
         },
@@ -22,7 +21,6 @@ fn main() -> UInt8 {
     let answer = *observe(base + 2).value
     let name = "Ada"
     let greet = mem.Closure.open(
-        mem.system(),
         [who = name, answer] || -> Result[(), IoError] {
             println("hi {who}, the answer is {answer} ({answer + 1} after)")
         },

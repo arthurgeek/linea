@@ -5,7 +5,6 @@ import std.mem
 fn main() -> UInt8 {
     let scores: Vec[UInt64, mem.SystemAllocator] = Vec.new()
     let listing = mem.Closure.open(
-        mem.system(),
         [seen = scores] || -> mem.Slice[UInt64] where borrows(seen) {
             seen.as_slice()
         },

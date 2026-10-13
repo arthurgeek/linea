@@ -117,7 +117,7 @@ fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
 // when it has sent everything, which is what ends `read_all`.
 fn echo(inout connection: net.Connection, client: net.Address) -> () {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read from {client}: {failure}")
         // The failure owns any bytes read before it, so it is released.
         failure.release()
@@ -174,7 +174,7 @@ fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
         return false
     }
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read the echo: {failure}")
         failure.release()
         return false

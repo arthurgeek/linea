@@ -28,9 +28,8 @@ impl Display for Failure {
 
 test fn a_failure_displays_the_callers_message() -> Result[(), Failure] {
     let failure = Failure { said = "the expected message", refusal = false }
-    let allocator = mem.system()
     // This capacity leaves spare bytes beyond the complete failure message.
-    var writer = Recorder.of(allocator, 256) else |_| {
+    var writer = Recorder.of(256) else |_| {
         return assert(false, "the display recorder was refused")
     }
     let wrote = failure.fmt(&writer).is_ok()
@@ -496,7 +495,7 @@ impl[A: Allocator] Recorder[A] {
     // Allocate a buffer with the requested capacity from `allocator`. The
     // recorder does not grow: writing beyond that capacity traps at the
     // checked byte store.
-    pub fn of(allocator: A, bytes: UInt64) -> Result[Recorder[A], Oom] where carries(.Ok: allocator) {
+    pub fn of_in(allocator: A, bytes: UInt64) -> Result[Recorder[A], Oom] where carries(.Ok: allocator) {
         let held = allocator.acquire(bytes)?
         .Ok(.{ held = held, len = 0 })
     }
@@ -504,7 +503,7 @@ impl[A: Allocator] Recorder[A] {
 
 test fn a_recorder_records_into_an_arena() -> Result[(), Failure] {
     defer let arena = mem.Arena.open(mem.system(), 64)
-    var recorder = Recorder.of(arena.handle(), 16) else |_| {
+    var recorder = Recorder.of_in(arena.handle(), 16) else |_| {
         return assert(false, "an arena recorder of sixteen bytes was refused")
     }
     let wrote = &recorder.write_str("olá").is_ok()
@@ -514,8 +513,26 @@ test fn a_recorder_records_into_an_arena() -> Result[(), Failure] {
     assert(kept, "an arena recorder lost what was written into it")
 }
 
+impl Recorder[mem.SystemAllocator] {
+    // Allocate a buffer with the requested capacity from the system
+    // allocator, as `of_in` does.
+    pub fn of(bytes: UInt64) -> Result[Recorder[mem.SystemAllocator], Oom] {
+        Recorder.of_in(mem.system(), bytes)
+    }
+}
+
+test fn a_recorder_records_into_the_system_allocator() -> Result[(), Failure] {
+    var recorder = Recorder.of(16) else |_| {
+        return assert(false, "a recorder of sixteen bytes was refused")
+    }
+    let wrote = &recorder.write_str("tea").is_ok()
+    let kept = recorder.holds("tea")
+    recorder.release()
+    assert(wrote && kept, "a system recorder lost what was written into it")
+}
+
 test fn a_new_recorder_holds_nothing() -> Result[(), Failure] {
-    var recorder = Recorder.of(mem.system(), 8) else |_| {
+    var recorder = Recorder.of(8) else |_| {
         return assert(false, "a recorder of eight bytes was refused")
     }
     let empty = recorder.length() == 0 && recorder.holds("")
@@ -531,7 +548,7 @@ impl[A: Allocator] Recorder[A] {
 }
 
 test fn length_counts_the_bytes_written() -> Result[(), Failure] {
-    var recorder = Recorder.of(mem.system(), 8) else |_| {
+    var recorder = Recorder.of(8) else |_| {
         return assert(false, "a recorder of eight bytes was refused")
     }
     let wrote = &recorder.write_str("olá").is_ok()
@@ -554,7 +571,7 @@ impl[A: Allocator] Recorder[A] {
 }
 
 test fn byte_reads_a_written_byte_and_nothing_past_the_end() -> Result[(), Failure] {
-    var recorder = Recorder.of(mem.system(), 8) else |_| {
+    var recorder = Recorder.of(8) else |_| {
         return assert(false, "a recorder of eight bytes was refused")
     }
     let wrote = &recorder.write_str("hi").is_ok()
@@ -590,9 +607,8 @@ impl[A: Allocator] Recorder[A] {
 // Recorded output can be checked as complete text, a byte count, or a byte
 // at a particular index.
 test fn a_recorder_keeps_what_was_rendered_into_it() -> Result[(), Failure] {
-    let a = mem.system()
     // Sixty-four bytes leave spare capacity beyond the five-byte word.
-    var w = Recorder.of(a, 64) else |_| {
+    var w = Recorder.of(64) else |_| {
         return assert(false, "a recorder of sixty-four bytes was refused")
     }
     let wrote = "hello".fmt(&w).is_ok()
@@ -638,9 +654,8 @@ impl[A: Allocator] Writer for Recorder[A] {
 }
 
 test trap fn a_recorder_traps_when_a_write_exceeds_its_storage() -> Result[(), Failure] {
-    let allocator = mem.system()
     // One byte cannot hold the two-byte write below; its second store traps.
-    var writer = Recorder.of(allocator, 1) else |_| {
+    var writer = Recorder.of(1) else |_| {
         return assert(false, "the recorder was refused")
     }
     match &writer.write_str("ab") {

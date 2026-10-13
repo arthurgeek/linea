@@ -110,8 +110,8 @@ pub fn write[A: Allocator, W: Writer](inout writer: W, value: Value[A]) -> Resul
 }
 
 test fn write_preserves_borrowed_writer_failures_and_the_document() {
-    defer let message = "stopped".to_owned(mem.system()).unwrap()
-    defer let document = parse(mem.system(), r#"[1,"tea"]"#).unwrap()
+    defer let message = "stopped".to_owned().unwrap()
+    defer let document = parse(r#"[1,"tea"]"#).unwrap()
     for budget in UInt64(0)..9 {
         var writer: RefusingJsonWriter = .{ remaining = budget, accepted = 0, error = message.view() }
         let result = write(&writer, document)
@@ -129,30 +129,41 @@ test fn write_preserves_borrowed_writer_failures_and_the_document() {
 }
 
 // Render `value` as JSON text into a new String from `allocator`.
-pub fn render[A: Allocator, B: Allocator](allocator: B, value: Value[A]) -> Result[String[B], mem.Oom] where carries(.Ok: allocator) {
+pub fn render_in[A: Allocator, B: Allocator](allocator: B, value: Value[A]) -> Result[String[B], mem.Oom] where carries(.Ok: allocator) {
     defer var output = String.new_in(allocator)
     write(&output, value)?
     .Ok(output)
 }
 
+// Render `value` as JSON text into a new String from the system allocator.
+pub fn render[A: Allocator](value: Value[A]) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+    render_in(mem.system(), value)
+}
+
+test fn render_allocates_the_text_from_the_system_allocator() {
+    defer let document = Value.array()
+    defer let output = render(document).unwrap()
+    testing.assert_eq(output.view(), "[]", "an empty array rendered as other text")?
+}
+
 test fn document_output_preserves_number_tokens_and_escapes_text() {
-    defer let document = parse(mem.system(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#).unwrap()
-    defer let output = render(mem.system(), document).unwrap()
+    defer let document = parse(r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#).unwrap()
+    defer let output = render(document).unwrap()
     testing.assert_eq(output.view(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#, "JSON output changed values or token spelling")?
 }
 
 test fn rendered_text_is_independent_of_the_document() {
-    let document = parse(mem.system(), r#"{"name":"tea"}"#).unwrap()
-    let output = render(mem.system(), document).unwrap()
+    let document = parse(r#"{"name":"tea"}"#).unwrap()
+    let output = render(document).unwrap()
     document.release()
     defer output.release()
     testing.assert_eq(output.view(), r#"{"name":"tea"}"#, "rendered output retained document storage")?
 }
 
 test fn render_allocation_failure_leaves_the_document_usable() {
-    defer let document = parse(mem.system(), "[1,2,3]").unwrap()
+    defer let document = parse("[1,2,3]").unwrap()
     defer let arena = mem.Arena.open(mem.system(), 0)
-    let failed = match render(arena.handle(), document) {
+    let failed = match render_in(arena.handle(), document) {
         Err(_) => true,
         Ok(output) => {
             output.release()
@@ -164,9 +175,9 @@ test fn render_allocation_failure_leaves_the_document_usable() {
 }
 
 test fn a_document_renders_into_an_arena() {
-    defer let document = parse(mem.system(), r#"{"tea":[1,2]}"#).unwrap()
+    defer let document = parse(r#"{"tea":[1,2]}"#).unwrap()
     defer let arena = mem.Arena.open(mem.system(), 256)
-    let rendered = render(arena.handle(), document).unwrap()
+    let rendered = render_in(arena.handle(), document).unwrap()
     testing.assert_eq(rendered.view(), r#"{"tea":[1,2]}"#, "a document rendered into an arena changed")?
 }
 
@@ -216,9 +227,9 @@ fn same_document[A: Allocator, B: Allocator](left: Value[A], right: Value[B]) ->
 test fn document_round_trips_preserve_structure_independent_of_member_order() {
     let inputs = ["null", "[]", r"{}", r#"[false,-0,1.00,1e400,"é😀"]"#, r#"{"a":[{"b":2}],"c":null,"d":{}}"#]
     for input in inputs {
-        defer let first = parse(mem.system(), input).unwrap()
-        let output = render(mem.system(), first).unwrap()
-        let second = parse(mem.system(), output.view()).unwrap()
+        defer let first = parse(input).unwrap()
+        let output = render(first).unwrap()
+        let second = parse(output.view()).unwrap()
         output.release()
         defer second.release()
         testing.assert(same_document(first, second), "rendering changed the document's structure")?
@@ -226,16 +237,16 @@ test fn document_round_trips_preserve_structure_independent_of_member_order() {
 }
 
 test fn document_output_escapes_every_control_byte() {
-    let bytes = Vec.from_fn(mem.system(), count: 32, initializer: |index| UInt8(index)).unwrap()
+    let bytes = Vec.from_fn(count: 32, initializer: |index| UInt8(index)).unwrap()
     let source = String.from_bytes(bytes).unwrap()
-    let document = Value.string(mem.system(), source.view()).unwrap()
+    let document = Value.string(source.view()).unwrap()
     source.release()
     defer document.release()
-    defer let rendered = render(mem.system(), document).unwrap()
+    defer let rendered = render(document).unwrap()
     for byte in rendered.as_bytes() {
         testing.assert(*byte >= 32, "writer emitted a raw control byte")?
     }
-    defer let decoded = parse(mem.system(), rendered.view()).unwrap()
+    defer let decoded = parse(rendered.view()).unwrap()
     testing.assert_eq(decoded.as_str().unwrap(), document.as_str().unwrap(), "control escape round-trip changed text")?
 }
 
@@ -244,10 +255,10 @@ test fn document_output_escapes_every_control_byte() {
 // completes: here every refusal must be reported as an allocation error, and
 // nothing may be allocated after it.
 test fn json_render_disposes_partial_output_on_each_allocation_refusal() {
-    defer let document = parse(mem.system(), r#"{"message":"a longer string with \n escapes and text","values":[1,2,3,4,5,6,7,8,9,10]}"#).unwrap()
+    defer let document = parse(r#"{"message":"a longer string with \n escapes and text","values":[1,2,3,4,5,6,7,8,9,10]}"#).unwrap()
     defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let allocator = baseline.allocator()
-    let rendered = render(allocator, document).unwrap()
+    let rendered = render_in(allocator, document).unwrap()
     rendered.release()
     let attempts = baseline.attempts()
     testing.assert(attempts > 0, "render did not exercise output allocation")?
@@ -255,7 +266,7 @@ test fn json_render_disposes_partial_output_on_each_allocation_refusal() {
     for refusal in UInt64(1)..(attempts + 1) {
         defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
         let failing = log.allocator()
-        let refused = match render(failing, document) {
+        let refused = match render_in(failing, document) {
             Err(_) => true,
             Ok(value) => {
                 value.release()

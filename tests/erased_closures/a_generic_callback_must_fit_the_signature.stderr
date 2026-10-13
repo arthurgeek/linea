@@ -1,5 +1,5 @@
 error[T-Bound]: the closure is called as `fn(read UInt64) -> UInt64`, and `F` cannot be called that way
  --> tests/erased_closures/a_generic_callback_must_fit_the_signature.lin:6:17
   |
-6 |     mem.Closure.open(mem.system(), step)
+6 |     mem.Closure.open(step)
   |                 ^^^^ give it a callable with exactly that signature

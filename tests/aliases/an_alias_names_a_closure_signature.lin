@@ -19,7 +19,7 @@ fn spelled_out(sink apply: Closure[fn(cents: UInt64) -> UInt64, SystemAllocator]
 
 fn main() -> Result[UInt8, mem.Oom] {
     let fee: UInt64 = 499
-    let rule = spelled_out(Closure.open(mem.system(), [sink fee] |cents| cents + fee)?)
+    let rule = spelled_out(Closure.open([sink fee] |cents| cents + fee)?)
     let total = (rule.apply)(1000)
     let _printed = io.println("{rule.name}: {total}")
     let Rule { name: _, apply } = rule

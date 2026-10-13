@@ -69,7 +69,13 @@ impl[S, A: Allocator] Closure[S, A] {
     // allocator's, so a read capture still pins the place it observes and a place
     // lent `inout` stays lent until the closure is released. Captures keep their
     // conventions.
-    pub fn open[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
+    pub fn open_in[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
+        Closure.erase(allocator, callback)
+    }
+
+    // Move `callback` into bytes from `allocator`. `open` and `open_in` both
+    // erase through this, so the callable is stored one way.
+    fn erase[F: Release](allocator: A, sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback, allocator) {
         let shape: SlotType[F] = .Type
         let size = closure_size(shape)
         var storage: Storage[F, A] = if size == 0 {
@@ -91,10 +97,30 @@ impl[S, A: Allocator] Closure[S, A] {
     }
 }
 
+impl[S] Closure[S] {
+    // Move `callback` into bytes from the system allocator and return the
+    // closure that calls it, as `open_in` does.
+    pub fn open[F: Release](sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback) {
+        Closure.erase(system(), callback)
+    }
+}
+
+test fn a_closure_opened_in_the_system_allocator_calls_what_it_captured() {
+    let step: UInt64 = 5
+    let bump: Result[Closure[fn(value: UInt64) -> UInt64], Oom] = Closure.open(
+        [sink step] |value: UInt64| -> UInt64 {
+            value + step
+        },
+    )
+    let kept = bump.unwrap()
+    let raised = kept(10)
+    kept.release()
+    testing.assert_eq(raised, UInt64(15), "the closure lost its capture")?
+}
+
 test fn a_closure_calls_what_it_captured() {
     let rate: UInt64 = 10
     let discount = Closure.open(
-        system(),
         [sink rate] |cents: UInt64| -> UInt64 {
             cents - cents * rate / 100
         },
@@ -110,7 +136,7 @@ test fn a_closure_keeps_its_captures_in_an_arena() {
     let rate: UInt64 = 10
     // Arena storage is reclaimed with the arena, so this closure is dropped
     // rather than released.
-    let discount = Closure.open(
+    let discount = Closure.open_in(
         arena.handle(),
         [sink rate] |cents: UInt64| -> UInt64 {
             cents - cents * rate / 100
@@ -128,7 +154,7 @@ test fn a_refused_allocation_releases_the_callback() {
         Err(_) => false,
     }
     log.refuse_attempt(2)
-    let opened = Closure.open(
+    let opened = Closure.open_in(
         log.allocator(),
         [sink kept] || -> UInt64 {
             kept.length()
@@ -151,7 +177,7 @@ test fn a_refused_allocation_releases_the_callback() {
 
 test fn a_lambda_that_captures_nothing_allocates_nothing() {
     let log = AllocationLog.open(system(), 0).unwrap()
-    let doubling = Closure.open(
+    let doubling = Closure.open_in(
         log.allocator(),
         |value: UInt64| -> UInt64 {
             value * 2
@@ -178,7 +204,7 @@ impl[S, A: Allocator] Release for Closure[S, A] {
 test fn releasing_a_closure_returns_its_bytes() {
     let log = AllocationLog.open(system(), 0).unwrap()
     let offset: UInt64 = 5
-    let shifted = Closure.open(
+    let shifted = Closure.open_in(
         log.allocator(),
         [sink offset] |value: UInt64| -> UInt64 {
             value + offset

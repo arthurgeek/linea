@@ -1,7 +1,7 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/json/observations/child_prevents_parent_mutation.lin:8:5
+ --> tests/json/observations/child_prevents_parent_mutation.lin:7:5
   |
-8 |     json.Value.append(&document, json.Value.null(mem.system())).unwrap()
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-9 |     let result = child.as_bool().unwrap()
+7 |     json.Value.append(&document, json.Value.null()).unwrap()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+8 |     let result = child.as_bool().unwrap()
   |                  ----- the observation is still used here

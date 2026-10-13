@@ -279,11 +279,23 @@ pub trait Sequence {
         }
     }
 
+    // Collect every item into a new vector from the system allocator, as
+    // `collect_in` does.
+    fn collect(sink self: Self) -> Result[Collected[Self.Iter, mem.SystemAllocator, Self.Iter.Item], CollectFailure[Self.Iter, mem.SystemAllocator, Self.Iter.Item]] where
+        carries(.Ok.values: self),
+        carries(.Ok.iterator: self),
+        carries(.Err.collected.values: self),
+        carries(.Err.collected.iterator: self),
+        carries(.Err.failure.value: self)
+    {
+        self.collect_in(mem.system())
+    }
+
     // Collect every item into a new vector from `allocator`, and return the
     // vector and the iterator together, including after a refused insertion.
     // Empty input requires no allocation; refusal retains the already-produced
     // item.
-    fn collect[A: Allocator](sink self: Self, allocator: A) -> Result[Collected[Self.Iter, A, Self.Iter.Item], CollectFailure[Self.Iter, A, Self.Iter.Item]] where
+    fn collect_in[A: Allocator](sink self: Self, allocator: A) -> Result[Collected[Self.Iter, A, Self.Iter.Item], CollectFailure[Self.Iter, A, Self.Iter.Item]] where
         carries(.Ok.values: allocator, self),
         carries(.Ok.iterator: self),
         carries(.Err.collected.values: allocator, self),
@@ -640,7 +652,7 @@ test fn map_transforms_lazily_and_stays_exhausted() {
 }
 
 test fn type_changing_adapters_preserve_borrowed_outputs() {
-    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    defer let owned = "a,b,c".to_owned().unwrap()
     let parts = owned.split(",").unwrap()
     var selected = parts.map(wrap_word).filter_map(select_word)
     testing.assert_eq(&selected.next().unwrap(), "b", "changing item types must preserve borrowed text")?
@@ -1461,7 +1473,7 @@ test fn fold_moves_one_accumulator_through_every_item() {
 }
 
 test fn folding_text_can_return_a_borrowed_item() {
-    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    defer let owned = "a,b,c".to_owned().unwrap()
     let parts = owned.split(",").unwrap()
     let last = parts.fold(
         "",
@@ -1715,7 +1727,7 @@ test fn find_returns_the_first_matching_item_or_none() {
 }
 
 test fn text_adapters_preserve_the_borrowed_backing() {
-    defer let owned = "a,b,c".to_owned(mem.system()).unwrap()
+    defer let owned = "a,b,c".to_owned().unwrap()
     let parts = owned.split(",").unwrap()
     let mapped = parts.map(|sink item| item)
     let selected = mapped.filter_map(|sink item| .Some(item))
@@ -1759,7 +1771,7 @@ test fn counted_find_reports_empty_absent_first_and_last_matches() {
 }
 
 test fn counted_find_preserves_a_borrowed_items_external_owner() {
-    defer let owned = "one,two,three".to_owned(mem.system()).unwrap()
+    defer let owned = "one,two,three".to_owned().unwrap()
     var words = owned.split(",").unwrap()
     let report = &words.find_counted(|item| item == "two")
     let { found, inspected } = report

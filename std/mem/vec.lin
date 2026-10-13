@@ -284,9 +284,9 @@ test fn vec_empty_construction_and_disposal_do_not_call_the_allocator() {
     &values.reserve(0).unwrap()
     let empty = values.as_slice().length() == 0
     values.release()
-    let generated: Result[Vec[UInt64, VecTestAllocator], Oom] = Vec.from_fn(allocator, 0, |index| vec_initializer_must_not_run(index))
+    let generated: Result[Vec[UInt64, VecTestAllocator], Oom] = Vec.from_fn_in(allocator, 0, |index| vec_initializer_must_not_run(index))
     generated.unwrap().release()
-    Vec.filled(allocator, 0, UInt64(9)).unwrap().release()
+    Vec.filled_in(allocator, 0, UInt64(9)).unwrap().release()
     testing.assert(empty, "empty storage exposed an element")?
     testing.assert_eq(log.load(64), UInt64(0), "empty construction allocated")?
     testing.assert_eq(log.load(0), UInt64(0), "empty disposal called the allocator")?
@@ -314,19 +314,35 @@ impl[T, A: Allocator] Vec[T, A] {
     // Allocate before calling the initializer once per index, in increasing
     // order. An empty or refused allocation never calls the initializer, and
     // the initializer is dropped at the end.
-    pub fn from_fn[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, sink initializer: F) -> Result[Self, Oom] where
+    pub fn from_fn_in[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, sink initializer: F) -> Result[Self, Oom] where
         carries(.Ok: allocator, initializer),
         F: Discardable
     {
         var initializing = initializer
-        Vec.from_fn_inout(allocator, count, &initializing)
+        Vec.from_fn_inout_in(allocator, count, &initializing)
     }
+}
+
+impl[T] Vec[T] {
+    // Build a vector in the system allocator by calling the initializer once
+    // per index, as `from_fn_in` does.
+    pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, sink initializer: F) -> Result[Self, Oom] where
+        carries(.Ok: initializer),
+        F: Discardable
+    {
+        Vec.from_fn_in(system(), count, initializer)
+    }
+}
+
+test fn from_fn_builds_a_vector_in_the_system_allocator() {
+    let built: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 3, initializer: |index| index + 1)
+    defer let values = built.unwrap()
+    testing.assert_eq(values.as_slice(), [UInt64(1), 2, 3].as_slice(), "from_fn built the wrong elements")?
 }
 
 test fn from_fn_takes_an_initializer_that_changes_a_lent_count() {
     var calls = UInt64(0)
     let built: Result[Vec[UInt64], Oom] = Vec.from_fn(
-        system(),
         count: 3,
         initializer: inout [inout calls] |index| {
             calls += 1
@@ -341,10 +357,10 @@ test fn from_fn_takes_an_initializer_that_changes_a_lent_count() {
 test fn vec_constructors_reserve_exact_capacity_once() {
     defer let log = system().acquire(72).unwrap()
     let allocator = VecTestAllocator { log_at = log.at, log_len = log.len }
-    defer let repeated = Vec.filled(allocator, count: 3, value: UInt64(7)).unwrap()
+    defer let repeated = Vec.filled_in(allocator, count: 3, value: UInt64(7)).unwrap()
     testing.assert_eq(log.load(64), UInt64(1), "filled allocated more than once")?
     testing.assert_eq(repeated.storage.len, UInt64(24), "filled rounded up capacity")?
-    let built: Result[Vec[UInt64, VecTestAllocator], Oom] = Vec.from_fn(allocator, count: 3, initializer: |index| index * index)
+    let built: Result[Vec[UInt64, VecTestAllocator], Oom] = Vec.from_fn_in(allocator, count: 3, initializer: |index| index * index)
     defer let generated = built.unwrap()
     testing.assert_eq(log.load(64), UInt64(2), "from_fn allocated more than once")?
     testing.assert_eq(generated.storage.len, UInt64(24), "from_fn rounded up capacity")?
@@ -352,12 +368,12 @@ test fn vec_constructors_reserve_exact_capacity_once() {
 }
 
 test fn vec_empty_and_refused_constructors_do_not_initialize() {
-    let opened: Result[Vec[UInt64], Oom] = Vec.from_fn(system(), count: 0, initializer: |index| vec_initializer_must_not_run(index))
+    let opened: Result[Vec[UInt64], Oom] = Vec.from_fn(count: 0, initializer: |index| vec_initializer_must_not_run(index))
     defer let empty = opened.unwrap()
     testing.assert_eq(empty.length(), UInt64(0), "empty constructor gained an element")?
-    defer let filled = Vec.filled(system(), count: 0, value: UInt64(9)).unwrap()
+    defer let filled = Vec.filled(count: 0, value: UInt64(9)).unwrap()
     testing.assert_eq(filled.length(), UInt64(0), "empty fill gained an element")?
-    let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn(system(), count: UInt64.max, initializer: |index| vec_initializer_must_not_run(index))
+    let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn(count: UInt64.max, initializer: |index| vec_initializer_must_not_run(index))
     match overflowing {
         Ok(values) => {
             values.release()
@@ -365,7 +381,7 @@ test fn vec_empty_and_refused_constructors_do_not_initialize() {
         },
         Err(_) => {},
     }
-    match Vec.filled(system(), count: UInt64.max, value: UInt64(9)) {
+    match Vec.filled(count: UInt64.max, value: UInt64(9)) {
         Ok(values) => {
             values.release()
             return testing.assert(false, "overflowing fill succeeded")
@@ -373,7 +389,7 @@ test fn vec_empty_and_refused_constructors_do_not_initialize() {
         Err(_) => {},
     }
     defer let arena = Arena.open(system(), 0)
-    let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn(arena.handle(), count: 1, initializer: |index| vec_initializer_must_not_run(index))
+    let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 1, initializer: |index| vec_initializer_must_not_run(index))
     match refused {
         Ok(values) => {
             values.release()
@@ -384,7 +400,7 @@ test fn vec_empty_and_refused_constructors_do_not_initialize() {
 }
 
 test fn vec_from_fn_constructs_linear_elements() {
-    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(system(), count: 4, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 4, initializer: vec_generated_element)
     var pending = built.unwrap().drain()
     var intact = true
     var index: UInt64 = 0
@@ -404,7 +420,6 @@ test fn vec_from_fn_preserves_records_borrowed_from_its_callback() {
     let source = VecGeneratedElement { index = 41 }
     let values = {
         Vec.from_fn(
-            system(),
             count: 3,
             initializer: [source] |index| {
                 let _position = index
@@ -428,7 +443,7 @@ test fn vec_from_fn_preserves_records_borrowed_from_its_callback() {
 
 test fn vec_from_fn_builds_its_elements_in_an_arena() {
     defer let arena = Arena.open(system(), 64)
-    let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn(
+    let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_in(
         arena.handle(),
         count: 4,
         initializer: |index: UInt64| -> UInt64 {
@@ -442,7 +457,7 @@ test fn vec_from_fn_builds_its_elements_in_an_arena() {
 impl[T, A: Allocator] Vec[T, A] {
     // Build a vector as `from_fn` does, with an initializer whose state the
     // caller keeps.
-    pub fn from_fn_inout[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: allocator, initializer) {
+    pub fn from_fn_inout_in[F: inout fn(index: UInt64) -> T](allocator: A, count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: allocator, initializer) {
         let allocated: Result[Self, Oom] = Vec.allocate(allocator, count)
         var values = allocated?
         let shape: SlotType[T] = .Type
@@ -466,7 +481,7 @@ test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
         let element = VecGeneratedElement { index = seed.index + index + calls }
         element
     }
-    let built: Result[Vec[VecGeneratedElement, VecTestAllocator], Oom] = Vec.from_fn_inout(allocator, count: 4, initializer: &initializer)
+    let built: Result[Vec[VecGeneratedElement, VecTestAllocator], Oom] = Vec.from_fn_inout_in(allocator, count: 4, initializer: &initializer)
     let values = built.unwrap()
     let capacity = values.storage.len
     var pending = values.drain()
@@ -490,17 +505,37 @@ test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
     testing.assert_eq(capacity, UInt64(32), "mutable vector constructor rounded up capacity")?
 }
 
+impl[T] Vec[T] {
+    // Build a vector in the system allocator as `from_fn_inout_in` does, with
+    // an initializer whose state the caller keeps.
+    pub fn from_fn_inout[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: initializer) {
+        Vec.from_fn_inout_in(system(), count, &initializer)
+    }
+}
+
+test fn from_fn_inout_builds_a_vector_in_the_system_allocator() {
+    var calls = UInt64(0)
+    var initializer = inout [inout calls] |index: UInt64| {
+        calls += 1
+        index * 2
+    }
+    let built: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: 2, initializer: &initializer)
+    defer let values = built.unwrap()
+    testing.assert_eq(values.as_slice(), [UInt64(0), 2].as_slice(), "from_fn_inout built the wrong elements")?
+    testing.assert_eq(calls, UInt64(2), "the initializer was not called once per index")?
+}
+
 test fn vec_from_fn_inout_preserves_callbacks_on_empty_overflow_and_refusal() {
     let seed = VecGeneratedElement { index = 7 }
     var initializer = inout [sink seed, sink calls = UInt64(0)] |index: UInt64| {
         calls += 1
         seed.index + index
     }
-    let opened: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(system(), count: 0, initializer: &initializer)
+    let opened: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: 0, initializer: &initializer)
     let empty = opened.unwrap()
     let empty_length = empty.length()
     empty.release()
-    let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(system(), count: UInt64.max, initializer: &initializer)
+    let overflowing: Result[Vec[UInt64], Oom] = Vec.from_fn_inout(count: UInt64.max, initializer: &initializer)
     let overflow_refused = match overflowing {
         Ok(values) => {
             values.release()
@@ -509,7 +544,7 @@ test fn vec_from_fn_inout_preserves_callbacks_on_empty_overflow_and_refusal() {
         Err(_) => true,
     }
     let arena = Arena.open(system(), 0)
-    let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout(arena.handle(), count: 1, initializer: &initializer)
+    let refused: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout_in(arena.handle(), count: 1, initializer: &initializer)
     let allocation_refused = match refused {
         Ok(values) => {
             values.release()
@@ -532,7 +567,7 @@ test fn vec_from_fn_inout_builds_its_elements_in_an_arena() {
         calls += 1
         index + calls
     }
-    let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout(arena.handle(), count: 3, initializer: &initializer)
+    let built: Result[Vec[UInt64, Handle], Oom] = Vec.from_fn_inout_in(arena.handle(), count: 3, initializer: &initializer)
     let values = built.unwrap()
     testing.assert_eq(values.as_slice(), [UInt64(1), 3, 5].as_slice(), "elements built in an arena lost the initializer's state")?
 }
@@ -737,7 +772,7 @@ test fn vec_first_insertion_refusal_keeps_empty_storage_and_the_item() {
     testing.assert_eq(failure.reason, Oom.Exhausted, "insertion reported another failure")?
     testing.assert_eq(failure.value, UInt8(7), "refusal lost the item")?
     // The 64-byte recorder holds the growth refusal.
-    var writer = testing.Recorder.of(system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = failure.fmt(&writer).is_ok()
     let equal = writer.holds("could not grow the vector: Exhausted")
     writer.release()
@@ -835,7 +870,7 @@ test fn vec_pop_takes_elements_last_first_and_keeps_capacity() {
 
 test fn vec_pop_hands_over_linear_elements_from_an_arena() {
     defer let arena = Arena.open(system(), 256)
-    let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn(arena.handle(), count: 3, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 3, initializer: vec_generated_element)
     var values = built.unwrap()
     var order: UInt64 = 0
     loop {
@@ -936,7 +971,7 @@ impl[T, A: Allocator] Vec[T, A] {
 }
 
 test fn vec_drain_hands_over_linear_elements_first_to_last() {
-    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(system(), count: 4, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 4, initializer: vec_generated_element)
     var pending = built.unwrap().drain()
     var order: UInt64 = 0
     for element in &pending {
@@ -1000,7 +1035,7 @@ test fn vec_drain_of_an_empty_vector_hands_over_nothing() {
 }
 
 test fn a_walk_lent_a_drain_may_stop_early_and_leave_the_rest_with_its_owner() {
-    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(system(), count: 4, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 4, initializer: vec_generated_element)
     var pending = built.unwrap().drain()
     var walked: UInt64 = 0
     for element in &pending {
@@ -1036,7 +1071,7 @@ impl[T, A: Allocator] Drain[T, A] {
 
 test fn a_drain_stopped_early_is_returned_by_finish_and_resumes() {
     defer let arena = Arena.open(system(), 256)
-    let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn(arena.handle(), count: 4, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 4, initializer: vec_generated_element)
     var pending = built.unwrap().drain()
     var order: UInt64 = 0
     for element in &pending {
@@ -1061,7 +1096,7 @@ test fn a_drain_stopped_early_is_returned_by_finish_and_resumes() {
 }
 
 test fn a_system_drain_stopped_early_is_returned_by_finish_with_its_storage() {
-    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(system(), count: 3, initializer: vec_generated_element)
+    let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 3, initializer: vec_generated_element)
     var pending = built.unwrap().drain()
     let VecGeneratedElement { index: first } = &pending.next().unwrap()
     var resumed = match pending.finish() {
@@ -1184,7 +1219,7 @@ test fn each_allocation_failure_covers_every_growth_step_in_an_append_bytes_sequ
 impl[T: Copyable, A: Allocator] Vec[T, A] {
     // Repeat a Copyable value into independent slots. Copies retain any observations
     // carried by the value, so copying a view does not copy its backing storage.
-    pub fn filled(allocator: A, count: UInt64, value: T) -> Result[Self, Oom] where carries(.Ok: allocator, value) {
+    pub fn filled_in(allocator: A, count: UInt64, value: T) -> Result[Self, Oom] where carries(.Ok: allocator, value) {
         let allocated: Result[Self, Oom] = Vec.allocate(allocator, count)
         var values = allocated?
         let shape: SlotType[T] = .Type
@@ -1199,10 +1234,23 @@ impl[T: Copyable, A: Allocator] Vec[T, A] {
     }
 }
 
+impl[T: Copyable] Vec[T] {
+    // Repeat a Copyable value into independent slots in the system allocator,
+    // as `filled_in` does.
+    pub fn filled(count: UInt64, value: T) -> Result[Self, Oom] where carries(.Ok: value) {
+        Vec.filled_in(system(), count, value)
+    }
+}
+
+test fn filled_repeats_a_value_in_the_system_allocator() {
+    defer let values = Vec.filled(count: 3, value: UInt8(4)).unwrap()
+    testing.assert_eq(values.as_slice(), [UInt8(4), 4, 4].as_slice(), "filled built the wrong elements")?
+}
+
 // Repetition copies each Copyable value into a distinct writable element.
 test fn vec_filled_initializes_independent_elements() {
     let seed: UInt64 = 17
-    defer var values = Vec.filled(system(), count: 5, value: seed).unwrap()
+    defer var values = Vec.filled(count: 5, value: seed).unwrap()
     testing.assert_eq(values.length(), UInt64(5), "filled vector has the wrong length")?
     values[2] = 99
     testing.assert_eq(seed, UInt64(17), "filling changed the seed")?
@@ -1218,7 +1266,7 @@ test fn vec_filled_initializes_independent_elements() {
 
 test fn vec_filled_preserves_the_observations_in_its_seed() {
     let number: UInt64 = 41
-    var pending = Vec.filled(system(), count: 3, value: borrow number).unwrap().drain()
+    var pending = Vec.filled(count: 3, value: borrow number).unwrap().drain()
     var intact = true
     for observation in &pending {
         intact = intact && *observation == 41

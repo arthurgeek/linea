@@ -1,9 +1,9 @@
 error[O-Temporary]: a value borrowing a temporary is used after the temporary's statement
-  --> tests/erased_closures/a_kept_closure_result_cannot_keep_a_temporary.lin:17:24
+  --> tests/erased_closures/a_kept_closure_result_cannot_keep_a_temporary.lin:16:24
    |
-17 |     let kept = observe(base + 2)
+16 |     let kept = observe(base + 2)
    |                        ^^^^^^^^ this temporary ends with its statement
-18 |     let answer = *kept.value
+17 |     let answer = *kept.value
    |                  ----------- and a value borrowing it is used here
    |
    = help: bind the value with `let` first, and borrow the binding

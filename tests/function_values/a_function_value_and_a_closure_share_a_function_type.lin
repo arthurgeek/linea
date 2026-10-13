@@ -49,17 +49,17 @@ fn main() -> Result[UInt8, mem.Oom] {
     } else {
         double
     }
-    let kept = mem.Closure.open(mem.system(), chosen)?
+    let kept = mem.Closure.open(chosen)?
     let doubled = kept(10) + other(0)
     kept.release()
     let unchanged = identity
-    let also_kept = mem.Closure.open(mem.system(), unchanged)?
+    let also_kept = mem.Closure.open(unchanged)?
     let same = also_kept(UInt64(1))
     also_kept.release()
-    let price = mem.Closure.open(mem.system(), Priced.cents)?
+    let price = mem.Closure.open(Priced.cents)?
     let cents = price(Pizza { slices = 2 })
     price.release()
-    let convert = mem.Closure.open(mem.system(), Convert.convert)?
+    let convert = mem.Closure.open(Convert.convert)?
     let slices: UInt64 = convert(Pizza { slices = 3 })
     convert.release()
     return .Ok(UInt8(doubled + same + cents / 100 + slices))

@@ -3,7 +3,6 @@
 // statement.
 import std.io
 import std.log
-import std.mem
 
 let service_name = "api"
 
@@ -25,7 +24,7 @@ impl log.Sink for Untimed {
 }
 
 fn main() -> UInt8 {
-    let logger = log.Logger.open(Untimed {}, mem.system(), minimum: .Info)
+    let logger = log.Logger.open(Untimed {}, minimum: .Info)
     let service = || log.field("service", service_name)
     let field = service()
     logger.info("started", field)

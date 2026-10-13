@@ -1,7 +1,5 @@
-import std.mem
-
 fn main() -> UInt8 {
-    let values = Vec.from_fn(mem.system(), count: 3, initializer: |index| index + 1).unwrap()
+    let values = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     defer values.release()
     let total = values.as_slice().fold(UInt64(0), |sink accumulator, sink item| accumulator + *item)
     if total == 6 {

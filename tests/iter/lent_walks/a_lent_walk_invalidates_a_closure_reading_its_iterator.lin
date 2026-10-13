@@ -13,7 +13,7 @@ fn commit(sink payment: Payment) -> UInt64 {
 }
 
 fn batch(n: UInt64) -> Vec[Payment, mem.SystemAllocator] {
-    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(mem.system(), count: n, initializer: |index| Payment { cents = (index + 1) * 100 })
+    let built: Result[Vec[Payment, mem.SystemAllocator], mem.Oom] = Vec.from_fn(count: n, initializer: |index| Payment { cents = (index + 1) * 100 })
     built.unwrap()
 }
 

@@ -33,7 +33,6 @@ fn percent_off(name: Str, threshold: UInt64, percent: UInt64) -> Result[Rule, me
         .{
             name = copy(name),
             apply = Closure.open(
-                mem.system(),
                 [sink threshold, sink percent] |cents| {
                     if cents >= threshold {
                         cents - cents * percent / 100
@@ -48,7 +47,7 @@ fn percent_off(name: Str, threshold: UInt64, percent: UInt64) -> Result[Rule, me
 
 // Add a flat fee, such as shipping.
 fn flat_fee(name: Str, fee: UInt64) -> Result[Rule, mem.Oom] where carries(.Ok: name) {
-    .Ok(.{ name = copy(name), apply = Closure.open(mem.system(), [sink fee] |cents| cents + fee)? })
+    .Ok(.{ name = copy(name), apply = Closure.open([sink fee] |cents| cents + fee)? })
 }
 
 // A named function captures nothing, and it becomes a rule the same way.
@@ -74,7 +73,7 @@ fn checkout_rules() -> Result[Rules, mem.Oom] {
 fn add_rules(inout rules: Rules) -> Result[(), mem.Oom] {
     &rules.push(percent_off("10% off over $50", threshold: 5000, percent: 10)?).settled()?
     &rules.push(flat_fee("shipping", fee: 499)?).settled()?
-    &rules.push(.{ name = "whole dollars", apply = Closure.open(mem.system(), whole_dollars)? }).settled()?
+    &rules.push(.{ name = "whole dollars", apply = Closure.open(whole_dollars)? }).settled()?
     .Ok(())
 }
 

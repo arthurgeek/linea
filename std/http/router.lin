@@ -233,7 +233,7 @@ impl[S, P: Allocator] Router[S, P] {
             handler.release()
             return .Err(refused)
         }
-        let kept = Closure.open(self.allocator, handler)?
+        let kept = Closure.open_in(self.allocator, handler)?
         let index = &self.add_handler(slot.path, kept)?
         if slot.subtree {
             &self.nodes[slot.node].subtree.register(slot.method, index)
@@ -371,7 +371,7 @@ impl[S, P: Allocator] Router[S, P] {
                     None => {},
                 }
                 let child = &self.push_node()?
-                let key = name.to_owned(self.allocator)?
+                let key = name.to_owned_in(self.allocator)?
                 let replaced = &self.nodes[at].literals.insert(key, child).settled()?
                 replaced.release()
                 return .Ok(child)
@@ -454,7 +454,7 @@ impl[S, P: Allocator] Router[S, P] {
 test fn a_match_visits_only_nodes_whose_prefix_matches() {
     defer var router = Router.new()
     for index in UInt64(0)..1000 {
-        let pattern = fmt.render_owned(mem.system(), "GET /r{index}/{{id}}").unwrap()
+        let pattern = fmt.render_owned("GET /r{index}/{{id}}").unwrap()
         let outcome = &router.route_raw(pattern.view(), first_handler)
         pattern.release()
         testing.assert_ok_eq(outcome, (), "registering a numbered route failed")?
@@ -1018,14 +1018,14 @@ fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, meth
             let code = response.status().code()
             let body = Str.from_bytes(response.body().unwrap()).unwrap()
             match response.header("Allow") {
-                Some(allow) => fmt.render_owned(mem.system(), "{code} {body} (Allow: {allow})").unwrap(),
-                None => fmt.render_owned(mem.system(), "{code} {body}").unwrap(),
+                Some(allow) => fmt.render_owned("{code} {body} (Allow: {allow})").unwrap(),
+                None => fmt.render_owned("{code} {body}").unwrap(),
             }
         },
         Err(error) => {
             let code = error.status().code()
             let message = error.message().unwrap_or(error.status().reason())
-            fmt.render_owned(mem.system(), "{code} {message}").unwrap()
+            fmt.render_owned("{code} {message}").unwrap()
         },
     }
     arena.release()

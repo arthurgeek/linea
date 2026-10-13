@@ -62,7 +62,6 @@ fn main() -> Result[UInt8, io.IoError] {
     io.println("result: {checked.unwrap_or(0)} {recovered} after {calls}")?
 
     let built = mem.Vec.from_fn(
-        mem.system(),
         3,
         inout [inout calls] |index| {
             calls += 1

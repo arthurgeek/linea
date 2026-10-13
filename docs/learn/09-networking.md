@@ -44,7 +44,7 @@ use net.Acceptor
 fn print_all(label: Str, inout connection: net.Connection) -> Result[(), io.IoError] {
     let arena = mem.Arena.open(mem.system(), size: 4096)
     defer arena.release()
-    let received = io.read_all(arena.handle(), &connection, max_bytes: 1024) else |failure| {
+    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 1024) else |failure| {
         // The failure owns any bytes read before it, so it is released.
         failure.release()
         return io.println("{label}: the read failed")
@@ -251,7 +251,7 @@ fn print_greeting(label: Str, sink client: net.Connection) -> () {
     var visitor = client
     let arena = mem.Arena.open(mem.system(), size: 4096)
     defer arena.release()
-    match io.read_all(arena.handle(), &visitor, max_bytes: 64) {
+    match io.read_all_in(arena.handle(), &visitor, max_bytes: 64) {
         Ok(bytes) => match Str.from_bytes(bytes.as_slice()) {
             Ok(text) => {
                 let _printed = io.print("{label}: {text}")
@@ -545,7 +545,7 @@ fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
 // when it has sent everything, which is what ends `read_all`.
 fn echo(inout connection: net.Connection, client: net.Address) -> () {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read from {client}: {failure}")
         // The failure owns any bytes read before it, so it is released.
         failure.release()
@@ -602,7 +602,7 @@ fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
         return false
     }
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let received = io.read_all(arena.handle(), &connection, max_bytes: 4096) else |failure| {
+    let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read the echo: {failure}")
         failure.release()
         return false
@@ -1261,7 +1261,7 @@ fn routes(inout router: http.Router[App], greeting: Str) -> Result[(), http.Rout
 }
 
 fn main() -> UInt8 {
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     // The annotation names the state the routes take.
     var router: http.Router[App] = http.Router.new()
     if routes(&router, "Weather stations report here.\n").is_err() {
@@ -1578,7 +1578,7 @@ long as the countdown did:
 
 ### Logging
 
-`log.to_stderr(mem.system(), minimum: .Info)` makes a logger that writes lines
+`log.to_stderr(minimum: .Info)` makes a logger that writes lines
 at `Info` and above to standard error. `logger.info(message, fields)` writes
 one line; `log.field("station", name).and("celsius", celsius)` builds its
 fields, each looking at its value. A line with no fields passes `()`, the one

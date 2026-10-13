@@ -19,7 +19,6 @@ fn main() -> Result[UInt8, mem.Oom] {
     var reminder = Reminder {
         minutes = 15,
         fire = mem.Closure.open(
-            mem.system(),
             inout [sink fired = UInt64(0)] |minutes| {
                 fired += minutes
                 fired

@@ -4,7 +4,6 @@ import std.env
 import std.http
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.text
 
@@ -38,13 +37,13 @@ fn main() -> UInt8 {
     var router = http.Router.new()
     http.Router.route_raw(&router, "GET /report", report).unwrap()
     let listener = net.listen(net.loopback(port)).unwrap()
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     let bound = listener.local_address().unwrap()
     logger.info("listening", log.field("address", bound))
     var server = http.logged(logger, router)
     defer server.release()
     let limits = http.Limits { connections = .Some(1), ..Default.default() }
-    match http.serve(listener, &server, mem.system(), limits) {
+    match http.serve(listener, &server, limits: limits) {
         Ok(_) => 0,
         Err(_) => 1,
     }

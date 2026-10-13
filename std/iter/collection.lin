@@ -22,7 +22,7 @@ pub fn extend[I: Iterator, A: Allocator](
 }
 
 test fn extend_appends_items_in_source_order() {
-    defer var values = Vec.filled(mem.system(), count: 1, value: UInt64(9)).unwrap()
+    defer var values = Vec.filled(count: 1, value: UInt64(9)).unwrap()
     var source = UInt64(1)..4
     match extend(&values, &source) {
         Ok(_) => {},
@@ -39,7 +39,7 @@ test fn extend_appends_items_in_source_order() {
 test fn extend_at_exact_capacity_does_not_allocate_after_exhaustion() {
     // Eight cursor bytes and four UInt64 slots leave no room for another allocation.
     defer let arena = mem.Arena.open(mem.system(), size: 40)
-    var values = Vec.filled(arena.handle(), count: 4, value: UInt64(7)).unwrap()
+    var values = Vec.filled_in(arena.handle(), count: 4, value: UInt64(7)).unwrap()
     var source = UInt64(0)..0
     testing.assert(extend(&values, &source).is_ok(), "empty extension attempted growth")?
     testing.assert_eq(values.length(), UInt64(4), "empty extension changed the prefix")?
@@ -148,7 +148,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] Release for CollectFailure
 test fn a_failed_collection_can_be_released_whole() {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let released = match (UInt64(0)..3).collect(arena.handle()) {
+    let released = match (UInt64(0)..3).collect_in(arena.handle()) {
         Ok(collected) => {
             let Collected { values, iterator: _ } = collected
             values.release()
@@ -180,7 +180,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] release.Settle for Collect
 test fn settling_a_failed_collection_keeps_the_allocation_reason() {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let settled = (UInt64(0)..3).collect(arena.handle()).settled()
+    let settled = (UInt64(0)..3).collect_in(arena.handle()).settled()
     let refused = match settled {
         Ok(collected) => {
             let Collected { values, iterator: _ } = collected
@@ -203,7 +203,7 @@ test fn collect_preserves_result_items_and_returns_exhausted_state() {
             }
         },
     )
-    let { values, iterator } = source.collect(mem.system()).unwrap()
+    let { values, iterator } = source.collect().unwrap()
     defer values.release()
     let (_remaining, callback) = iterator.into_parts()
     let { calls } = callback.into_captures()
@@ -214,7 +214,7 @@ test fn collect_preserves_result_items_and_returns_exhausted_state() {
 
 test fn collect_empty_input_succeeds_with_an_exhausted_allocator() {
     defer let arena = mem.Arena.open(mem.system(), size: 8)
-    let { values, iterator } = (UInt64(0)..0).collect(arena.handle()).unwrap()
+    let { values, iterator } = (UInt64(0)..0).collect_in(arena.handle()).unwrap()
     var iterator = iterator
     testing.assert_eq(values.length(), UInt64(0), "empty collection produced an item")?
     testing.assert(&iterator.next().is_none(), "empty source gained an item")?
@@ -231,13 +231,13 @@ test fn collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
             item
         },
     )
-    let refused = match source.collect(arena.handle()) {
+    let refused = match source.collect_in(arena.handle()) {
         Err(refused) => refused,
         Ok(_) => panic("an exhausted arena accepted an item"),
     }
     // Display borrows the failure before its parts are recovered below.
     // The 64-byte recorder holds the growth refusal.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let explained = refused.fmt(&writer).is_ok() && writer.holds("could not grow the vector: Exhausted")
     writer.release()
     let { collected, failure } = refused
@@ -270,7 +270,7 @@ test fn collect_returns_linear_elements_and_captures_after_success_or_refusal() 
         )
         var total: UInt64 = 0
         var refused = false
-        let completed = match source.collect(arena.handle()) {
+        let completed = match source.collect_in(arena.handle()) {
             Ok(completed) => completed,
             Err(failed) => {
                 refused = true
@@ -318,7 +318,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_collection() -> Re
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
-            let collected = (UInt64(0)..40).collect(allocator).settled()?
+            let collected = (UInt64(0)..40).collect_in(allocator).settled()?
             let Collected { values, iterator: _ } = collected
             values.release()
             return .Ok(())

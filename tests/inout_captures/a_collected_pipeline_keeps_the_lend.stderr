@@ -1,11 +1,11 @@
 error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
-  --> tests/inout_captures/a_collected_pipeline_keeps_the_lend.lin:15:16
+  --> tests/inout_captures/a_collected_pipeline_keeps_the_lend.lin:13:16
    |
-7  |         inout [inout inspected] |parcel| {
+5  |         inout [inout inspected] |parcel| {
    |                      --------- lent `inout` here
-15 |     let seen = inspected
+13 |     let seen = inspected
    |                ^^^^^^^^^ this uses the place while it is lent
-16 |     var rest = iterator
+14 |     var rest = iterator
    |                -------- a value holding the lend is still used here
    |
    = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure

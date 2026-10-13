@@ -9,7 +9,7 @@ use mem.Owner
 fn main() -> UInt8 {
     for stage in UInt8(0)..5 {
         io.println("stage {stage}").unwrap()
-        let bytes = "tea".to_owned(mem.system()).unwrap()
+        let bytes = "tea".to_owned().unwrap()
         let input: helpers.Input = .{ bytes = bytes.view(), fail_at = stage }
         let built: Result[model.Settings[mem.SystemAllocator], helpers.Failure] = protocol.FromFields.build(input, mem.system())
         bytes.release()

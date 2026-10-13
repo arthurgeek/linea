@@ -1,5 +1,4 @@
 import std.hash
-import std.mem
 import std.testing
 
 use hash.Hash
@@ -40,10 +39,10 @@ impl[A: Allocator] Equatable for String[A] {
 impl[A: Allocator] Equivalent for String[A] {}
 
 test fn owned_text_equality_compares_utf8_contents() {
-    defer let first = "café\u{0}".to_owned(mem.system()).unwrap()
-    defer let second = "café\u{0}".to_owned(mem.system()).unwrap()
-    defer let shorter = "café".to_owned(mem.system()).unwrap()
-    defer let different = "cafè\u{0}".to_owned(mem.system()).unwrap()
+    defer let first = "café\u{0}".to_owned().unwrap()
+    defer let second = "café\u{0}".to_owned().unwrap()
+    defer let shorter = "café".to_owned().unwrap()
+    defer let different = "cafè\u{0}".to_owned().unwrap()
     testing.assert(first.equals(second), "equal text in different allocations compared unequal")?
     testing.assert(!first.equals(shorter), "text equality ignored length")?
     testing.assert(!first.equals(different), "text equality ignored bytes")?
@@ -57,9 +56,9 @@ impl[A: Allocator] hash.Hash for String[A] {
 }
 
 test fn equal_owned_and_observed_text_share_a_content_hash() {
-    defer let first = "café\u{0}".to_owned(mem.system()).unwrap()
-    defer let second = "café\u{0}".to_owned(mem.system()).unwrap()
-    defer let shorter = "café".to_owned(mem.system()).unwrap()
+    defer let first = "café\u{0}".to_owned().unwrap()
+    defer let second = "café\u{0}".to_owned().unwrap()
+    defer let shorter = "café".to_owned().unwrap()
     testing.assert_eq(first.hash(), second.hash(), "equal owned text has different hashes")?
     testing.assert_eq(first.hash(), first.view().hash(), "owned and observed text hash different bytes")?
     testing.assert(first.hash() != shorter.hash(), "a trailing NUL was lost")?
@@ -76,7 +75,7 @@ impl[A: Allocator] hash.Key for String[A] {
 }
 
 test fn owned_text_accepts_unallocated_queries() {
-    defer let key = "café".to_owned(mem.system()).unwrap()
+    defer let key = "café".to_owned().unwrap()
     testing.assert(key.matches("café"), "equal literal query did not match")?
     testing.assert(!key.matches("cafè"), "different UTF-8 query matched")?
     testing.assert_eq(key.hash(), "café".hash(), "matching query and key have different hashes")?

@@ -124,7 +124,7 @@ fn main() -> UInt8 {
         io.eprintln("usage: calendar-export --port PORT [--requests N]")
         return 64
     }
-    let logger = log.to_stderr(mem.system(), minimum: .Info)
+    let logger = log.to_stderr(minimum: .Info)
     // The annotation names the state the routes take, `App`.
     var router: http.Router[App] = http.Router.new()
     let _ = routes(&router) else |error| {
@@ -213,7 +213,7 @@ test fn a_date_is_written_with_leading_zeros() {
 // The tests hand the handler a state whose logger writes only errors, so the
 // lines it logs while answering stay out of the test report.
 fn quiet() -> App {
-    .{ logger = log.to_stderr(mem.system(), minimum: .Error) }
+    .{ logger = log.to_stderr(minimum: .Error) }
 }
 
 // A request built in an arena goes through the router, which records the

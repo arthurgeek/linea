@@ -14,7 +14,7 @@ fn primes_below(limit: UInt64) -> Result[UInt64, Oom] {
     // the Oom error to the caller if the allocation fails.
     // `defer var` runs `candidates.release()` whenever the function returns, so
     // the table's memory is freed on every path.
-    defer var candidates = Vec.filled(mem.system(), count: limit, value: true)?
+    defer var candidates = Vec.filled(count: limit, value: true)?
 
     // Zero and one are nonprime; mark them only when their entries exist.
     if limit > 0 {

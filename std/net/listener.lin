@@ -115,7 +115,7 @@ test fn a_connection_reaches_its_own_listener() {
     let client_closed = client.close().is_ok()
     let Accepted { connection: connection, address: peer } = &listener.accept().unwrap()
     let from_loopback = peer == loopback(peer.port)
-    var reader = io.BufferedReader.open(mem.system(), capacity: 16, reader: connection) else |_| {
+    var reader = io.BufferedReader.open(capacity: 16, reader: connection) else |_| {
         panic("the reader was refused its buffer")
     }
     // The client closed after writing, so the line ends at end of input.

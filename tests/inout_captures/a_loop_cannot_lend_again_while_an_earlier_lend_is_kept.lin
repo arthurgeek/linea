@@ -6,7 +6,6 @@ fn main() -> Result[UInt8, mem.Oom] {
     var round: UInt8 = 0
     while round < 2 {
         let tick = mem.Closure.open(
-            mem.system(),
             inout [inout count] || {
                 count += 1
             },

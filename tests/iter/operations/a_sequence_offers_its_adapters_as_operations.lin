@@ -3,7 +3,6 @@
 // `iterate()`, an iterator is a sequence of itself, and `Sequence.map(values, f)`
 // is the same operation written through its trait.
 import std.io
-import std.mem
 
 // Countdown yields `left - 1` down to zero.
 struct Countdown {
@@ -70,7 +69,7 @@ fn main() -> Result[UInt8, io.IoError] {
     values.as_slice().map(|sink value| *value).for_each_inout(&visit)
     let { visited: seen } = visit.into_captures()
 
-    let { values: collected, iterator: _ } = values.as_slice().map(|sink value| *value * 3).collect(mem.system()).unwrap()
+    let { values: collected, iterator: _ } = values.as_slice().map(|sink value| *value * 3).collect().unwrap()
     let collected_total = collected.as_slice().fold(0, |sink total, sink value| total + *value)
     collected.release()
 

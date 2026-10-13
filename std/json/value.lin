@@ -52,90 +52,152 @@ fn value_from_number[A: Allocator](allocator: A, sink owned: Number[A]) -> Value
 
 impl[A: Allocator] Value[A] {
     // Make the null value. It allocates nothing.
-    pub fn null(allocator: A) -> Self where carries(allocator) {
+    pub fn null_in(allocator: A) -> Self where carries(allocator) {
         .{ node = .Null, height = 0, allocator = copy(allocator) }
     }
 }
 
 test fn null_makes_a_null_value_without_allocating() {
     defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let null = Value.null(arena.handle())
+    defer let null = Value.null_in(arena.handle())
     testing.assert_eq(null.kind(), Kind.Null, "null constructor changed kind")?
     testing.assert_eq(null.height, UInt64(0), "scalar height was not zero")?
 }
 
+impl Value {
+    // Make the null value in the system allocator. It allocates nothing.
+    pub fn null() -> Self {
+        Value.null_in(mem.system())
+    }
+}
+
+test fn null_makes_a_null_value_in_the_system_allocator() {
+    defer let null = Value.null()
+    testing.assert_eq(null.kind(), Kind.Null, "null constructor changed kind")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make a boolean value. It allocates nothing.
-    pub fn boolean(allocator: A, value: Bool) -> Self where carries(allocator) {
+    pub fn boolean_in(allocator: A, value: Bool) -> Self where carries(allocator) {
         .{ node = .Boolean(value), height = 0, allocator = copy(allocator) }
     }
 }
 
 test fn boolean_makes_a_boolean_value_without_allocating() {
     defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let boolean = Value.boolean(arena.handle(), true)
+    defer let boolean = Value.boolean_in(arena.handle(), true)
     testing.assert_eq(boolean.as_bool(), Option.Some(true), "boolean snapshot changed")?
     testing.assert_eq(boolean.height, UInt64(0), "scalar height was not zero")?
 }
 
+impl Value {
+    // Make a boolean value in the system allocator. It allocates nothing.
+    pub fn boolean(value: Bool) -> Self {
+        Value.boolean_in(mem.system(), value)
+    }
+}
+
+test fn boolean_makes_a_boolean_value_in_the_system_allocator() {
+    defer let boolean = Value.boolean(false)
+    testing.assert_eq(boolean.as_bool(), Option.Some(false), "boolean snapshot changed")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make an empty array. It allocates nothing until an element is appended.
-    pub fn array(allocator: A) -> Self where carries(allocator) {
+    pub fn array_in(allocator: A) -> Self where carries(allocator) {
         .{ node = .Array(Vec.new_in(allocator)), height = 1, allocator = copy(allocator) }
     }
 }
 
 test fn array_makes_an_empty_array_without_allocating() {
     defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let array = Value.array(arena.handle())
+    defer let array = Value.array_in(arena.handle())
     testing.assert_eq(array.elements().unwrap().length(), UInt64(0), "empty array contained children")?
     testing.assert_eq(array.height, UInt64(1), "empty array height was not one")?
 }
 
+impl Value {
+    // Make an empty array in the system allocator. It allocates nothing until
+    // an element is appended.
+    pub fn array() -> Self {
+        Value.array_in(mem.system())
+    }
+}
+
+test fn array_makes_an_empty_array_in_the_system_allocator() {
+    defer let array = Value.array()
+    testing.assert_eq(array.elements().unwrap().length(), UInt64(0), "empty array contained children")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make an empty object. It allocates nothing until a member is inserted.
-    pub fn object(allocator: A) -> Self where carries(allocator) {
+    pub fn object_in(allocator: A) -> Self where carries(allocator) {
         .{ node = .Object(collections.Map.new_in(allocator)), height = 1, allocator = copy(allocator) }
     }
 }
 
 test fn object_makes_an_empty_object_without_allocating() {
     defer let arena = mem.Arena.open(mem.system(), 0)
-    defer let object = Value.object(arena.handle())
+    defer let object = Value.object_in(arena.handle())
     testing.assert(object.get("missing").is_none(), "empty object contained a member")?
     testing.assert_eq(object.height, UInt64(1), "empty object height was not one")?
 }
 
+impl Value {
+    // Make an empty object in the system allocator. It allocates nothing until
+    // a member is inserted.
+    pub fn object() -> Self {
+        Value.object_in(mem.system())
+    }
+}
+
+test fn object_makes_an_empty_object_in_the_system_allocator() {
+    defer let object = Value.object()
+    testing.assert(object.get("missing").is_none(), "empty object contained a member")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make a string value holding a copy of `input`.
-    pub fn string(allocator: A, input: Str) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
-        let owned = input.to_owned(allocator)?
+    pub fn string_in(allocator: A, input: Str) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
+        let owned = input.to_owned_in(allocator)?
         .Ok(value_from_string(allocator, owned))
     }
 }
 
 test fn string_values_own_their_text() {
-    let allocator = mem.system()
-    let source = "tea".to_owned(allocator).unwrap()
-    let string = Value.string(allocator, source.view()).unwrap()
+    let source = "tea".to_owned().unwrap()
+    let string = Value.string(source.view()).unwrap()
     source.release()
     defer string.release()
     testing.assert_eq(string.as_str().unwrap(), "tea", "string retained its source")?
 }
 
+impl Value {
+    // Make a string value holding a copy of `input`, in the system allocator.
+    pub fn string(input: Str) -> Result[Self, mem.Oom] where carries() {
+        Value.string_in(mem.system(), input)
+    }
+}
+
+test fn string_copies_its_text_into_the_system_allocator() {
+    defer let string = Value.string("tea").unwrap()
+    testing.assert_eq(string.as_str().unwrap(), "tea", "string changed its text")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make a number value from `input`, which must be one complete JSON number;
     // its spelling is kept.
-    pub fn number(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
-        let owned = Number.parse(allocator, input)?
+    pub fn number_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
+        let owned = Number.parse_in(allocator, input)?
         .Ok(value_from_number(allocator, owned))
     }
 }
 
 test fn number_values_keep_their_spelling_and_refuse_other_text() {
-    defer let number = Value.number(mem.system(), "1.00").unwrap()
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    defer let number = Value.number_in(arena.handle(), "1.00").unwrap()
     testing.assert_eq(number.number_text().unwrap(), "1.00", "number lost its spelling")?
-    let refused = match Value.number(mem.system(), "01") {
+    let refused = match Value.number("01") {
         Ok(value) => {
             value.release()
             false
@@ -145,30 +207,69 @@ test fn number_values_keep_their_spelling_and_refuse_other_text() {
     testing.assert(refused, "a leading zero became a number")?
 }
 
+impl Value {
+    // Make a number value from `input` in the system allocator, as
+    // `number_in` does.
+    pub fn number(input: Str) -> Result[Self, NumberError] where carries() {
+        Value.number_in(mem.system(), input)
+    }
+}
+
+test fn number_keeps_its_spelling_in_the_system_allocator() {
+    defer let number = Value.number("2.50").unwrap()
+    testing.assert_eq(number.number_text().unwrap(), "2.50", "number lost its spelling")?
+}
+
 impl[A: Allocator] Value[A] {
     // Make a number value whose token is the decimal text of `value`.
-    pub fn from_int(allocator: A, value: Int64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
-        let owned = Number.from_int(allocator, value)?
+    pub fn from_int_in(allocator: A, value: Int64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
+        let owned = Number.from_int_in(allocator, value)?
         .Ok(value_from_number(allocator, owned))
     }
 }
 
 test fn from_int_makes_a_number_value() {
-    defer let signed = Value.from_int(mem.system(), Int64.min).unwrap()
+    defer let signed = Value.from_int(Int64.min).unwrap()
     testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed constructor changed its value")?
+}
+
+impl Value {
+    // Make a number value whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
+        Value.from_int_in(mem.system(), value)
+    }
+}
+
+test fn from_int_makes_a_number_value_in_the_system_allocator() {
+    defer let signed = Value.from_int(-7).unwrap()
+    testing.assert_eq(signed.as_int64().unwrap(), Int64(-7), "signed constructor changed its value")?
 }
 
 impl[A: Allocator] Value[A] {
     // Make a number value whose token is the decimal text of `value`.
-    pub fn from_uint(allocator: A, value: UInt64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
-        let owned = Number.from_uint(allocator, value)?
+    pub fn from_uint_in(allocator: A, value: UInt64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
+        let owned = Number.from_uint_in(allocator, value)?
         .Ok(value_from_number(allocator, owned))
     }
 }
 
 test fn from_uint_makes_a_number_value() {
-    defer let unsigned = Value.from_uint(mem.system(), UInt64.max).unwrap()
+    defer let unsigned = Value.from_uint(UInt64.max).unwrap()
     testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned constructor changed its value")?
+}
+
+impl Value {
+    // Make a number value whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
+        Value.from_uint_in(mem.system(), value)
+    }
+}
+
+test fn from_uint_makes_a_number_value_in_the_system_allocator() {
+    defer let unsigned = Value.from_uint(7).unwrap()
+    testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64(7), "unsigned constructor changed its value")?
 }
 
 impl[A: Allocator] Value[A] {
@@ -186,13 +287,12 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn kind_names_every_kind_of_value() {
-    let allocator = mem.system()
-    defer let null = Value.null(allocator)
-    defer let flag = Value.boolean(allocator, false)
-    defer let number = Value.from_uint(allocator, 1).unwrap()
-    defer let text = Value.string(allocator, "a").unwrap()
-    defer let array = Value.array(allocator)
-    defer let object = Value.object(allocator)
+    defer let null = Value.null()
+    defer let flag = Value.boolean(false)
+    defer let number = Value.from_uint(1).unwrap()
+    defer let text = Value.string("a").unwrap()
+    defer let array = Value.array()
+    defer let object = Value.object()
     testing.assert_eq(null.kind(), Kind.Null, "null reported another kind")?
     testing.assert_eq(flag.kind(), Kind.Boolean, "a boolean reported another kind")?
     testing.assert_eq(number.kind(), Kind.Number, "a number reported another kind")?
@@ -209,8 +309,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn as_bool_reads_only_a_boolean() {
-    defer let flag = Value.boolean(mem.system(), false)
-    defer let text = Value.string(mem.system(), "false").unwrap()
+    defer let flag = Value.boolean(false)
+    defer let text = Value.string("false").unwrap()
     testing.assert_eq(flag.as_bool(), Option.Some(false), "a boolean lost its flag")?
     testing.assert(text.as_bool().is_none(), "text was observed as a boolean")?
 }
@@ -223,8 +323,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn as_str_reads_only_a_string() {
-    defer let text = Value.string(mem.system(), "tea").unwrap()
-    defer let number = Value.number(mem.system(), "7").unwrap()
+    defer let text = Value.string("tea").unwrap()
+    defer let number = Value.number("7").unwrap()
     testing.assert_eq(text.as_str(), Option.Some("tea"), "a string lost its text")?
     testing.assert(number.as_str().is_none(), "a number was observed as text")?
 }
@@ -238,8 +338,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn number_text_reads_only_a_number() {
-    defer let number = Value.number(mem.system(), "-2.50e1").unwrap()
-    defer let text = Value.string(mem.system(), "-2.50e1").unwrap()
+    defer let number = Value.number("-2.50e1").unwrap()
+    defer let text = Value.string("-2.50e1").unwrap()
     testing.assert_eq(number.number_text(), Option.Some("-2.50e1"), "a number token changed")?
     testing.assert(text.number_text().is_none(), "text was observed as a number")?
 }
@@ -253,8 +353,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn as_int64_reads_a_number_value_and_refuses_other_kinds() {
-    defer let number = Value.from_int(mem.system(), -12).unwrap()
-    defer let text = Value.string(mem.system(), "-12").unwrap()
+    defer let number = Value.from_int(-12).unwrap()
+    defer let text = Value.string("-12").unwrap()
     testing.assert_eq(number.as_int64(), .Ok(Int64(-12)), "a signed value changed")?
     testing.assert(match text.as_int64() { Err(reason) => reason == NumberAccessError.WrongKind, Ok(_) => false }, "integer access accepted text")?
 }
@@ -268,8 +368,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn as_uint64_reads_a_number_value_and_refuses_other_kinds() {
-    defer let number = Value.from_uint(mem.system(), 12).unwrap()
-    defer let flag = Value.boolean(mem.system(), true)
+    defer let number = Value.from_uint(12).unwrap()
+    defer let flag = Value.boolean(true)
     testing.assert_eq(number.as_uint64(), .Ok(UInt64(12)), "an unsigned value changed")?
     testing.assert(match flag.as_uint64() { Err(reason) => reason == NumberAccessError.WrongKind, Ok(_) => false }, "integer access accepted a boolean")?
 }
@@ -283,11 +383,11 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn float_observations_are_independent_of_the_document() {
-    let document = Value.number(mem.system(), "1.25e2").unwrap()
+    let document = Value.number("1.25e2").unwrap()
     let value = document.as_float64().unwrap()
     document.release()
     testing.assert_eq(value, 125.0, "float observation retained the document")?
-    defer let text_value = Value.string(mem.system(), "1.25e2").unwrap()
+    defer let text_value = Value.string("1.25e2").unwrap()
     testing.assert(match text_value.as_float64() { Err(error) => error == NumberAccessError.WrongKind, Ok(_) => false }, "float access accepted a string")?
 }
 
@@ -299,10 +399,9 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn elements_borrow_only_an_arrays_children() {
-    let allocator = mem.system()
-    defer var array = Value.array(allocator)
-    &array.append(Value.boolean(allocator, true)).unwrap()
-    defer let object = Value.object(allocator)
+    defer var array = Value.array()
+    &array.append(Value.boolean(true)).unwrap()
+    defer let object = Value.object()
     testing.assert_eq(array.elements().unwrap().length(), UInt64(1), "an array lost its element")?
     testing.assert(object.elements().is_none(), "an object had elements")?
 }
@@ -315,15 +414,14 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn members_walk_only_an_objects_entries() {
-    let allocator = mem.system()
-    defer var object = Value.object(allocator)
-    &object.insert("a", Value.null(allocator)).unwrap().release()
-    &object.insert("b", Value.null(allocator)).unwrap().release()
+    defer var object = Value.object()
+    &object.insert("a", Value.null()).unwrap().release()
+    &object.insert("b", Value.null()).unwrap().release()
     var count: UInt64 = 0
     for _entry in object.members().unwrap() {
         count += 1
     }
-    defer let array = Value.array(allocator)
+    defer let array = Value.array()
     testing.assert_eq(count, UInt64(2), "an object lost a member")?
     testing.assert(array.members().is_none(), "an array had members")?
 }
@@ -337,13 +435,12 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn get_finds_a_member_by_name_without_retaining_the_query() {
-    let allocator = mem.system()
-    defer var object = Value.object(allocator)
-    &object.insert("tea", Value.string(allocator, "green").unwrap()).unwrap().release()
-    let query = "tea".to_owned(allocator).unwrap()
+    defer var object = Value.object()
+    &object.insert("tea", Value.string("green").unwrap()).unwrap().release()
+    let query = "tea".to_owned().unwrap()
     let observed = object.get(query.view()).unwrap()
     query.release()
-    defer let array = Value.array(allocator)
+    defer let array = Value.array()
     testing.assert_eq(observed.as_str().unwrap(), "green", "lookup retained its query")?
     testing.assert(object.get("coffee").is_none(), "a missing member was found")?
     testing.assert(array.get("tea").is_none(), "an array had a named member")?
@@ -358,11 +455,10 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn at_finds_an_element_by_position() {
-    let allocator = mem.system()
-    defer var array = Value.array(allocator)
-    &array.append(Value.boolean(allocator, true)).unwrap()
-    &array.append(Value.string(allocator, "tea").unwrap()).unwrap()
-    defer let object = Value.object(allocator)
+    defer var array = Value.array()
+    &array.append(Value.boolean(true)).unwrap()
+    &array.append(Value.string("tea").unwrap()).unwrap()
+    defer let object = Value.object()
     testing.assert_eq(array.at(1).unwrap().as_str().unwrap(), "tea", "an element moved")?
     testing.assert(array.at(2).is_none(), "an element past the end was found")?
     testing.assert(object.at(0).is_none(), "an object had a positioned element")?
@@ -418,9 +514,9 @@ fn object_height[A: Allocator](values: collections.Map[String[A], Value[A], A]) 
 // Build nested arrays `depth` deep around a null.
 fn depth_test_value[A: Allocator](allocator: A, depth: UInt64) -> Value[A] where carries(allocator) {
     if depth == 0 {
-        return Value.null(allocator)
+        return Value.null_in(allocator)
     }
-    var parent = Value.array(allocator)
+    var parent = Value.array_in(allocator)
     &parent.append(depth_test_value(allocator, depth - 1)).unwrap()
     parent
 }
@@ -428,12 +524,12 @@ fn depth_test_value[A: Allocator](allocator: A, depth: UInt64) -> Value[A] where
 // Build an array or an object holding eight strings.
 fn json_mutation_destination(allocator: mem.RefusingAllocator[mem.SystemAllocator], object: Bool) -> Value[mem.RefusingAllocator[mem.SystemAllocator]] where carries(allocator) {
     var destination = if object {
-        Value.object(allocator)
+        Value.object_in(allocator)
     } else {
-        Value.array(allocator)
+        Value.array_in(allocator)
     }
     for key in ["one", "two", "three", "four", "five", "six", "seven", "eight"] {
-        let child = Value.string(allocator, "kept").unwrap()
+        let child = Value.string_in(allocator, "kept").unwrap()
         if object {
             &destination.insert(key, child).unwrap().release()
         } else {
@@ -477,9 +573,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn refused_mutations_return_the_complete_incoming_owner() {
-    let allocator = mem.system()
-    defer var scalar = Value.null(allocator)
-    let failure = match &scalar.append(Value.string(allocator, "kept").unwrap()) {
+    defer var scalar = Value.null()
+    let failure = match &scalar.append(Value.string("kept").unwrap()) {
         Err(failure) => failure,
         Ok(_) => panic("a scalar accepted an array child"),
     }
@@ -501,8 +596,8 @@ test fn refused_mutations_return_the_complete_incoming_owner() {
 test fn array_allocation_refusal_preserves_the_incoming_value() {
     defer let empty = mem.Arena.open(mem.system(), 0)
     defer let storage = mem.Arena.open(mem.system(), 1024)
-    defer var array = Value.array(empty.handle())
-    let incoming = Value.string(storage.handle(), "retained").unwrap()
+    defer var array = Value.array_in(empty.handle())
+    let incoming = Value.string_in(storage.handle(), "retained").unwrap()
     defer let failure = match &array.append(incoming) {
         Err(failure) => failure,
         Ok(_) => panic("array allocated through an exhausted handle"),
@@ -554,7 +649,7 @@ impl[A: Allocator] Value[A] {
             },
             _ => panic("object kind changed during member check"),
         }
-        let owned_key = key.to_owned(self.allocator) else |_| {
+        let owned_key = key.to_owned_in(self.allocator) else |_| {
             return .Err(.{ reason = .Allocation, value })
         }
         let next_height = value.height + 1
@@ -581,20 +676,18 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn insert_replaces_a_member_and_returns_the_previous_value() {
-    let allocator = mem.system()
-    defer var object = Value.object(allocator)
-    &object.insert("tea", Value.boolean(allocator, false)).unwrap().release()
-    defer let replaced = &object.insert("tea", Value.string(allocator, "green").unwrap()).unwrap().unwrap()
+    defer var object = Value.object()
+    &object.insert("tea", Value.boolean(false)).unwrap().release()
+    defer let replaced = &object.insert("tea", Value.string("green").unwrap()).unwrap().unwrap()
     testing.assert_eq(replaced.as_bool(), Option.Some(false), "replacement did not return the previous value")?
     testing.assert_eq(object.get("tea").unwrap().as_str().unwrap(), "green", "replacement lost the new value")?
 }
 
 test fn wrong_kind_insertion_returns_the_complete_subtree() {
-    let allocator = mem.system()
-    defer var array = Value.array(allocator)
-    &array.append(Value.boolean(allocator, true)).unwrap()
-    var incoming = Value.object(allocator)
-    &incoming.insert("tea", Value.string(allocator, "green").unwrap()).unwrap().release()
+    defer var array = Value.array()
+    &array.append(Value.boolean(true)).unwrap()
+    var incoming = Value.object()
+    &incoming.insert("tea", Value.string("green").unwrap()).unwrap().release()
     defer var failure = match &array.insert("rejected", incoming) {
         Err(failure) => failure,
         Ok(previous) => {
@@ -620,7 +713,7 @@ test fn attachment_enforces_depth_and_recomputes_height_after_removal() {
     let allocator = mem.system()
     defer let child = depth_test_value(allocator, hard_depth)
     testing.assert_eq(child.height, hard_depth, "maximum-depth construction lost its height")?
-    defer var parent = Value.object(allocator)
+    defer var parent = Value.object()
     let reason = match &parent.insert("deep", child).settled() {
         Err(reason) => reason,
         Ok(previous) => {
@@ -629,7 +722,7 @@ test fn attachment_enforces_depth_and_recomputes_height_after_removal() {
         },
     }
     testing.assert_eq(reason, MutationReason.DepthLimit, "over-depth insertion reported the wrong reason")?
-    &parent.insert("nested", Value.array(allocator)).unwrap().release()
+    &parent.insert("nested", Value.array()).unwrap().release()
     testing.assert_eq(parent.height, UInt64(2), "container child did not increase height")?
     &parent.remove_member("nested").unwrap().release()
     testing.assert_eq(parent.height, UInt64(1), "removing the tallest child kept a stale height")?
@@ -638,18 +731,18 @@ test fn attachment_enforces_depth_and_recomputes_height_after_removal() {
 test fn replacement_reuses_the_stored_key_with_an_exhausted_allocator() {
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let allocator = arena.handle()
-    defer var object = Value.object(allocator)
-    &object.insert("key", Value.boolean(allocator, false)).unwrap().release()
+    defer var object = Value.object_in(allocator)
+    &object.insert("key", Value.boolean_in(allocator, false)).unwrap().release()
     while true {
         match allocator.acquire(1) {
             Ok(buffer) => buffer.release(),
             Err(_) => break,
         }
     }
-    let previous = &object.insert("key", Value.boolean(allocator, true)).unwrap().unwrap()
+    let previous = &object.insert("key", Value.boolean_in(allocator, true)).unwrap().unwrap()
     previous.release()
     testing.assert_eq(object.get("key").unwrap().as_bool(), Option.Some(true), "replacement allocated after storage exhaustion")?
-    let reason = match &object.insert("new", Value.null(allocator)).settled() {
+    let reason = match &object.insert("new", Value.null_in(allocator)).settled() {
         Err(reason) => reason,
         Ok(previous) => {
             previous.release()
@@ -665,14 +758,14 @@ test fn replacement_reuses_the_stored_key_with_an_exhausted_allocator() {
 
 test fn member_limit_refuses_new_names_and_allows_replacement() {
     let allocator = mem.system()
-    defer var object = Value.object(allocator)
+    defer var object = Value.object()
     for index in UInt64(0)..hard_object_members {
         var key = String.new_in(allocator)
         "{index}".fmt(&key).unwrap()
-        &object.insert(key.view(), Value.boolean(allocator, false)).unwrap().release()
+        &object.insert(key.view(), Value.boolean(false)).unwrap().release()
         key.release()
     }
-    defer let refused = match &object.insert("extra", Value.string(allocator, "kept").unwrap()) {
+    defer let refused = match &object.insert("extra", Value.string("kept").unwrap()) {
         Err(failure) => failure,
         Ok(previous) => {
             previous.release()
@@ -681,24 +774,23 @@ test fn member_limit_refuses_new_names_and_allows_replacement() {
     }
     testing.assert_eq(refused.reason, MutationReason.MemberLimit, "member cap reported the wrong reason")?
     testing.assert_eq(refused.value.as_str().unwrap(), "kept", "member cap consumed the incoming owner")?
-    let previous = &object.insert("0", Value.boolean(allocator, true)).unwrap().unwrap()
+    let previous = &object.insert("0", Value.boolean(true)).unwrap().unwrap()
     previous.release()
     testing.assert_eq(object.get("0").unwrap().as_bool(), Option.Some(true), "member cap refused replacement")?
 }
 
 test fn height_tracks_repeated_maxima_and_replacement_of_the_last_tall_child() {
-    let allocator = mem.system()
-    defer var object = Value.object(allocator)
-    var first = Value.array(allocator)
-    &first.append(Value.array(allocator)).unwrap()
-    var second = Value.array(allocator)
-    &second.append(Value.array(allocator)).unwrap()
+    defer var object = Value.object()
+    var first = Value.array()
+    &first.append(Value.array()).unwrap()
+    var second = Value.array()
+    &second.append(Value.array()).unwrap()
     &object.insert("first", first).unwrap().release()
     &object.insert("second", second).unwrap().release()
     testing.assert_eq(object.height, UInt64(3), "nested containers lost their height")?
     defer let removed = &object.remove_member("first").unwrap().unwrap()
     testing.assert_eq(object.height, UInt64(3), "removing one maximum ignored another")?
-    defer let replaced = &object.insert("second", Value.null(allocator)).unwrap().unwrap()
+    defer let replaced = &object.insert("second", Value.null()).unwrap().unwrap()
     testing.assert_eq(replaced.height, UInt64(2), "replacement changed the removed subtree")?
     testing.assert_eq(object.height, UInt64(1), "replacing the last maximum left a stale height")?
 }
@@ -716,8 +808,8 @@ test fn json_mutation_allocation_refusals_preserve_destinations_and_return_subtr
             defer var log = mem.AllocationLog.open(mem.system(), 0).unwrap()
             let allocator = log.allocator()
             defer var destination = json_mutation_destination(allocator, object)
-            var incoming = Value.object(allocator)
-            &incoming.insert("child", Value.string(allocator, "returned").unwrap()).unwrap().release()
+            var incoming = Value.object_in(allocator)
+            &incoming.insert("child", Value.string_in(allocator, "returned").unwrap()).unwrap().release()
             let before = log.attempts()
             if refusal != 0 {
                 log.refuse_attempt(before + refusal)
@@ -782,7 +874,7 @@ test fn json_replacement_and_removal_transfer_owners_without_allocation() {
     defer var log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let allocator = log.allocator()
     defer var destination = json_mutation_destination(allocator, true)
-    let replacement = Value.string(allocator, "replacement").unwrap()
+    let replacement = Value.string_in(allocator, "replacement").unwrap()
     let before = log.attempts()
     log.refuse_attempt(before + 1)
     defer let previous = &destination.insert("one", replacement).unwrap().unwrap()
@@ -815,10 +907,9 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn arrays_transfer_children_and_preserve_order_after_removal() {
-    let allocator = mem.system()
-    defer var array = Value.array(allocator)
-    &array.append(Value.boolean(allocator, true)).unwrap()
-    &array.append(Value.string(allocator, "tea").unwrap()).unwrap()
+    defer var array = Value.array()
+    &array.append(Value.boolean(true)).unwrap()
+    &array.append(Value.string("tea").unwrap()).unwrap()
     testing.assert_eq(array.elements().unwrap().length(), UInt64(2), "append lost a child")?
     defer let removed = &array.remove_element(0).unwrap().unwrap()
     testing.assert_eq(removed.as_bool(), Option.Some(true), "removal changed the transferred child")?
@@ -832,10 +923,10 @@ test fn arrays_transfer_children_and_preserve_order_after_removal() {
 
 test fn array_height_tracks_repeated_maxima_and_absent_removal() {
     let allocator = mem.system()
-    defer var array = Value.array(allocator)
+    defer var array = Value.array()
     &array.append(depth_test_value(allocator, 2)).unwrap()
     &array.append(depth_test_value(allocator, 2)).unwrap()
-    &array.append(Value.boolean(allocator, true)).unwrap()
+    &array.append(Value.boolean(true)).unwrap()
     testing.assert_eq(array.height, UInt64(3), "array height ignored nested children")?
     &array.remove_element(0).unwrap().release()
     testing.assert_eq(array.height, UInt64(3), "removing one maximum ignored another")?
@@ -875,9 +966,8 @@ impl[A: Allocator] Value[A] {
 }
 
 test fn remove_member_returns_the_stored_value_and_forgets_its_name() {
-    let allocator = mem.system()
-    defer var object = Value.object(allocator)
-    &object.insert("tea", Value.string(allocator, "green").unwrap()).unwrap().release()
+    defer var object = Value.object()
+    &object.insert("tea", Value.string("green").unwrap()).unwrap().release()
     defer let removed = &object.remove_member("tea").unwrap().unwrap()
     let absent = &object.remove_member("tea").unwrap()
     let missing = absent.is_none()
@@ -905,9 +995,9 @@ impl[A: Allocator] Release for Value[A] {
 test fn releasing_a_recursive_document_settles_both_allocator_owners() {
     let first = mem.Arena.open(mem.system(), 4096)
     let second = mem.Arena.open(mem.system(), 4096)
-    var root = Value.array(first.handle())
-    var object = Value.object(second.handle())
-    &object.insert("tea", Value.string(first.handle(), "green").unwrap()).unwrap().release()
+    var root = Value.array_in(first.handle())
+    var object = Value.object_in(second.handle())
+    &object.insert("tea", Value.string_in(first.handle(), "green").unwrap()).unwrap().release()
     &root.append(object).unwrap()
     let found = root.at(0).unwrap().get("tea").unwrap().as_str().unwrap() == "green"
     root.release()

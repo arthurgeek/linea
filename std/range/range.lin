@@ -36,9 +36,8 @@ test fn derived_range_equality_compares_every_field() {
 
 test fn derived_range_debug_renders_every_field() {
     let range: Range[UInt8] = 1..4
-    let a = mem.system()
     // Sixty-four bytes leave room for the complete debug text checked below.
-    var writer = testing.Recorder.of(a, 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = range.debug(&writer).is_ok()
     let rendered = writer.holds(r"Range { lo: 1, hi: 4, inclusive: false }")
     writer.release()
@@ -75,7 +74,7 @@ test fn a_range_displays_its_source_notation() {
     let inclusive: Range[UInt8] = 0..=255
     let descending: Range[Int64] = 3..-2
     // The 64-byte recorder holds all three ranges and their separators.
-    var writer = testing.Recorder.of(mem.system(), 64).unwrap()
+    var writer = testing.Recorder.of(64).unwrap()
     let wrote = exclusive.fmt(&writer).is_ok() && &writer.write_str(", ").is_ok() && inclusive.fmt(&writer).is_ok() && &writer.write_str(", ").is_ok() && descending.fmt(&writer).is_ok()
     let rendered = writer.holds("1..4, 0..=255, 3..-2")
     writer.release()

@@ -30,7 +30,7 @@ impl[A: Allocator] helpers.FromField[A] for First[A] {
         if name != "first" || input.fail_at == 1 {
             return .Err(.Field)
         }
-        let value = match input.bytes.to_owned(allocator) { Ok(value) => value, Err(_) => return .Err(.Allocation) }
+        let value = match input.bytes.to_owned_in(allocator) { Ok(value) => value, Err(_) => return .Err(.Allocation) }
         return .Ok(.{ value })
     }
 }
@@ -40,7 +40,7 @@ impl[A: Allocator] helpers.FromField[A] for Second[A] {
         if name != "second" || input.fail_at == 2 {
             return .Err(.Field)
         }
-        let values: Result[Vec[UInt16, A], mem.Oom] = Vec.filled(allocator, count: 3, value: UInt16(7))
+        let values: Result[Vec[UInt16, A], mem.Oom] = Vec.filled_in(allocator, count: 3, value: UInt16(7))
         let value = match values { Ok(value) => value, Err(_) => return .Err(.Allocation) }
         return .Ok(.{ value })
     }

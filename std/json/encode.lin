@@ -264,7 +264,7 @@ fn encoded_write[E](inout encoder: Encoder, sink result: Result[(), E]) -> Resul
 
 impl Encoder {
     // Start an encoder that has written nothing.
-    fn open() -> Self {
+    fn new() -> Self {
         .{ frames = empty_encoder_frames, depth = 0, root = false, failed = false, value_floor = 0 }
     }
 
@@ -480,7 +480,7 @@ impl Encoder {
 
 test fn value_writes_one_value_through_its_own_codec() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.begin_array(&output).unwrap()
     let present: Option[UInt8] = .Some(7)
     &encoder.value(&output, present).unwrap()
@@ -509,9 +509,9 @@ test fn swallowed_child_and_writer_failures_poison_the_encoder() {
         defer var output = String.new()
         testing.assert(match encode(&output, invalid) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }, "swallowed child failure was accepted")?
     }
-    defer let message = "stopped".to_owned(mem.system()).unwrap()
+    defer let message = "stopped".to_owned().unwrap()
     var writer: RefusingJsonWriter = .{ remaining = 0, accepted = 0, error = message.view() }
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     let failure = &encoder.string(&writer, "tea")
     failure.release()
     let finished: Result[(), EncodeError[Str]] = &encoder.finish()
@@ -528,7 +528,7 @@ impl Encoder {
 
 test fn null_writes_one_null_value() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.null(&output).unwrap()
     let second = match &encoder.null(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
     testing.assert_eq(output.view(), "null", "null was not written")?
@@ -550,7 +550,7 @@ impl Encoder {
 
 test fn boolean_writes_true_or_false() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.begin_array(&output).unwrap()
     &encoder.boolean(&output, true).unwrap()
     &encoder.boolean(&output, false).unwrap()
@@ -568,13 +568,13 @@ impl Encoder {
 
 test fn string_writes_quoted_escaped_text() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.string(&output, "say \"hi\"\n").unwrap()
     testing.assert_eq(output.view(), r#""say \"hi\"\n""#, "text was not quoted and escaped")?
 }
 
 test fn typed_encoding_preserves_borrowed_writer_errors() {
-    defer let message = "stopped".to_owned(mem.system()).unwrap()
+    defer let message = "stopped".to_owned().unwrap()
     for budget in UInt64(0)..5 {
         var writer: RefusingJsonWriter = .{ remaining = budget, accepted = 0, error = message.view() }
         let refused = match encode(&writer, "tea") {
@@ -598,7 +598,7 @@ impl Encoder {
 
 test fn integer_writes_decimal_digits() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.integer(&output, Int64.min).unwrap()
     testing.assert_eq(output.view(), "-9223372036854775808", "an integer changed")?
 }
@@ -619,9 +619,9 @@ impl Encoder {
 
 test fn float64_writes_the_shortest_digits_and_refuses_nan() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.float64(&output, 0.1).unwrap()
-    var refused = Encoder.open()
+    var refused = Encoder.new()
     let nan = match &refused.float64(&output, 0.0 / 0.0) {
         Err(error) => match error { NonFiniteNumber => true, _ => false },
         Ok(_) => false,
@@ -639,7 +639,7 @@ impl Encoder {
 
 test fn encoder_bounds_nested_containers_at_128() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     for _depth in UInt64(0)..hard_depth {
         &encoder.begin_array(&output).unwrap()
     }
@@ -648,7 +648,7 @@ test fn encoder_bounds_nested_containers_at_128() {
     }
     let finished: Result[(), EncodeError[mem.Oom]] = &encoder.finish()
     testing.assert(finished.is_ok(), "encoder rejected its exact depth boundary")?
-    var excessive = Encoder.open()
+    var excessive = Encoder.new()
     for _depth in UInt64(0)..hard_depth {
         &excessive.begin_array(&output).unwrap()
     }
@@ -669,7 +669,7 @@ impl Encoder {
 
 test fn begin_object_opens_an_object_that_takes_members() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.begin_object(&output).unwrap()
     &encoder.key(&output, "units").unwrap()
     &encoder.integer(&output, 3).unwrap()
@@ -709,9 +709,9 @@ impl Encoder {
 
 test fn key_is_refused_outside_an_object() {
     defer var output = String.new()
-    var root = Encoder.open()
+    var root = Encoder.new()
     let at_root = match &root.key(&output, "a") { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
-    var array = Encoder.open()
+    var array = Encoder.new()
     &array.begin_array(&output).unwrap()
     let in_array = match &array.key(&output, "a") { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
     testing.assert(at_root, "a key was written outside every container")?
@@ -727,10 +727,10 @@ impl Encoder {
 
 test fn end_array_closes_only_an_array() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.begin_array(&output).unwrap()
     &encoder.end_array(&output).unwrap()
-    var mismatched = Encoder.open()
+    var mismatched = Encoder.new()
     &mismatched.begin_object(&output).unwrap()
     let refused = match &mismatched.end_array(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
     testing.assert_eq(output.view(), r"[]{", "an empty array was not closed")?
@@ -747,7 +747,7 @@ impl Encoder {
 
 test fn end_object_refuses_an_object_waiting_for_a_value() {
     defer var output = String.new()
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.begin_object(&output).unwrap()
     &encoder.key(&output, "a").unwrap()
     let refused = match &encoder.end_object(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
@@ -790,7 +790,7 @@ impl Encode for InvalidCodec {
 
 // Encode `value` as one JSON document to `writer`.
 pub fn encode[T: Encode, W: Writer](inout writer: W, value: T) -> Result[(), EncodeError[W.Error]] where carries(.Err: writer) {
-    var encoder = Encoder.open()
+    var encoder = Encoder.new()
     &encoder.value(&writer, value)?
     &encoder.finish()
 }
@@ -909,7 +909,7 @@ test fn typed_encoding_preserves_scalars_text_and_container_order() {
     encode(&output, UInt64.max).unwrap()
     testing.assert_eq(output.view(), "18446744073709551615", "unsigned encoding changed value")?
     let items: [Option[Str]; 3] = [.Some("tea"), .None, .Some("é\n")]
-    defer let values = Vec.from_fn(mem.system(), count: 3, initializer: [items] |index| copy(items[index])).unwrap()
+    defer let values = Vec.from_fn(count: 3, initializer: [items] |index| copy(items[index])).unwrap()
     defer var array = String.new()
     encode(&array, values).unwrap()
     testing.assert_eq(array.view(), r#"["tea",null,"é\n"]"#, "typed array encoding changed order or text")?
