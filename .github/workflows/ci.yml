@@ -1,30 +1,18 @@
 name: CI
 
 on:
+  # No `paths` filter: `merge-ready` is the required status, and a run that
+  # never starts never reports it. The `changes` job decides instead whether
+  # anything but documentation changed.
   push:
     branches: [main]
-    # A change to Markdown alone runs nothing, except the Markdown a gate reads:
-    # the guide compiles its programs, and the semantics, the decision index
-    # and the corpus are checked against the compiler.
-    paths:
-      - '**'
-      - '!**/*.md'
-      - 'docs/learn/**'
-      - 'docs/linea-semantics.md'
-      - 'docs/adr/**'
-      - 'tests/**'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
-    # The same paths as a push to main.
-    paths:
-      - '**'
-      - '!**/*.md'
-      - 'docs/learn/**'
-      - 'docs/linea-semantics.md'
-      - 'docs/adr/**'
-      - 'tests/**'
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
-  # Every lane, the sweep included, once a week on the default branch.
+  # Every lane, the sweep and `fuzz` included, once a week on the default
+  # branch.
   schedule:
     - cron: '17 4 * * 1'
 
@@ -32,22 +20,79 @@ env:
   ZIG_LOCAL_CACHE_DIR: /var/tmp/linea-zig-cache
   LINEA_SCRATCH: /var/tmp/linea-conformance
 
-# A pull request labelled with anything but `full-ci` starts a run that does
-# nothing, so it gets a group of its own: it must not cancel the run already
-# in progress for that pull request, nor be cancelled by it.
+# A push to a pull request cancels that pull request's earlier run, and a push
+# to main cancels the run it supersedes. A merge group's ref is its own
+# `refs/heads/gh-readonly-queue/...` branch and its event name differs, so no
+# pull request run shares its group, and a merge group run is never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}${{ (github.event.action == 'labeled' && github.event.label.name != 'full-ci') && format('-label-{0}', github.run_id) || '' }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
+  # Whether anything but documentation changed, against the pull request's
+  # base, the merge group's base, or the commit a push to main replaced. A
+  # change to Markdown alone runs no lane, except the Markdown a gate reads:
+  # the guide compiles its programs, and the semantics, the decision index and
+  # the corpus are checked against the compiler. A scheduled or manual run, or
+  # a diff that cannot be computed, runs every lane.
+  #
+  # `mir` says whether the change touches what `fuzz-mir` guards: lowering,
+  # ownership, checking and the type tables (`src/sema`), the loader that runs
+  # them in order, or the program generator.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      mir: ${{ steps.diff.outputs.mir }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: What the change touches
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) base=$PR_BASE ;;
+            merge_group) base=$GROUP_BASE ;;
+            push) base=$PUSH_BEFORE ;;
+            *) base= ;;
+          esac
+          list="$RUNNER_TEMP/changed"
+          # `--no-renames` lists a renamed file under both names, so moving
+          # code into a Markdown path still counts as changing code.
+          if [ -z "$base" ] || ! git -c core.quotePath=false diff --no-renames --name-only "$base...$GITHUB_SHA" > "$list"; then
+            echo "no base to compare against: every lane runs"
+            { echo "code=true"; echo "mir=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "files changed since $base:"
+          cat "$list"
+          if grep -qvE '\.md$' "$list" || grep -qE '^(docs/learn/|docs/adr/|tests/)|^docs/linea-semantics\.md$' "$list"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "only documentation changed: no lane runs"
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -qE '^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$' "$list"; then
+            echo "mir=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mir=false" >> "$GITHUB_OUTPUT"
+          fi
+
   check:
-    # A draft pull request runs nothing. A ready pull request and a push to main
-    # run `check`; the other lanes -- sweep, sanitize, optimised and fuzz --
-    # run only on a pull request labelled `full-ci`, on a manual run and on the
-    # weekly schedule, so a pull request runs them once, when it is about to
-    # merge. Adding any other label runs no lane, cancels nothing, and leaves
-    # `merge-ready` answering what the pull request's last run answered.
-    if: ${{ github.event_name != 'pull_request' || (!github.event.pull_request.draft && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    # A draft pull request runs nothing. A ready pull request runs `check`
+    # alone; a merge group runs it beside every other lane except the weekly
+    # `fuzz`, and a push to main, a manual run and the weekly schedule run it
+    # too. A change to documentation alone skips it.
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # A healthy warm run of this job takes a few minutes; a cold one does not.
     # A cold run on a two-vCPU hosted runner took 115 minutes.
@@ -132,9 +177,10 @@ jobs:
       # about 4.7 minutes in a Debug runner and 42 seconds in a ReleaseSafe
       # one. The compiler under test and the unit tests stay Debug.
       #
-      # On a pull request the guide, the library's own tests and the
-      # examples' own tests are left to the `optimised` lane, which runs
-      # before the pull request merges; a push to main runs them here.
+      # On a pull request and a merge group the guide, the library's own tests
+      # and the examples' own tests are left to the `optimised` lane, which the
+      # merge group runs before the pull request merges; a push to main runs
+      # them here.
       - name: Unit tests and conformance suite
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
@@ -219,9 +265,10 @@ jobs:
   # hangs before reaching `main`, on a C program that does nothing but return
   # a constant.
   sanitize:
-    # A pull request labelled `full-ci` runs this lane, and so do manual runs
-    # and the weekly schedule.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    # A merge group runs this lane, and so do manual runs and the weekly
+    # schedule. A change to documentation alone skips it.
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
@@ -287,9 +334,10 @@ jobs:
   # optimised build of both.
   # Linea results must remain defined and independent of compiler optimization.
   optimised:
-    # A pull request labelled `full-ci` runs this lane, and so do manual runs
-    # and the weekly schedule.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    # A merge group runs this lane, and so do manual runs and the weekly
+    # schedule. A change to documentation alone skips it.
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
     # Every case builds once, and the unit tests build a ReleaseFast compiler
     # that holds several gigabytes while it links. One step at a time, so the
@@ -360,7 +408,7 @@ jobs:
       # Sixteen more generated storage programs. On the weekly schedule and a
       # manual run the seeds move with the run number, so each searches a
       # window no earlier run has, and a finding fails that run, not a pull
-      # request it has nothing to do with. A pull request checks a fixed
+      # request it has nothing to do with. A merge group checks a fixed
       # second window, so a re-run answers the same and its outcomes stay
       # cached. The matrix does not depend on the seed and is left out. This
       # is what stands in for fuzzing the storage property, which a search on
@@ -375,7 +423,7 @@ jobs:
           echo "storage program seeds $seed..$(( seed + 15 ))"
           nice -n 10 nix develop --command zig build soundness --release=fast -j1 -Dsoundness-matrix=false -Dseed=$seed -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
-      # What `check` leaves to this lane on a pull request: the guide's
+      # What `check` leaves to this lane outside a push to main: the guide's
       # programs, the library's own tests and the examples' own tests. They
       # run with the Debug compiler, as they do in `check` on main, because a
       # trap in an optimised compiler is a silent miscompile instead.
@@ -454,10 +502,12 @@ jobs:
   # linear, about four is quadratic, and a slow runner divides out of both
   # sides. Nothing else runs in this job, and a failure names a dimension.
   sweep:
-    # No other lane waits for it and the merge gate does not read it: it times
-    # passes against a clock, and a slow shared runner can fail it without a
-    # regression. A failure stays visible on the run.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    # A merge group runs it beside the other lanes, and so do manual runs and
+    # the weekly schedule. No other lane waits for it and `merge-ready` does
+    # not read it: it times passes against a clock, and a slow shared runner
+    # can fail it without a regression. A failure stays visible on the run.
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -530,10 +580,10 @@ jobs:
   # them, any bytes parse to a tree, any span renders. A generator tests those
   # far better than written cases, which cover only programs someone thought of.
   fuzz:
-    # Weekly and on a manual run, not per pull request: six of the eight
+    # Weekly and on a manual run, not per merge group: six of the eight
     # targets have never recorded a finding, and the one that guards what a
-    # change to the middle of the compiler can break runs before merge in
-    # `fuzz-mir` below. The inputs a search reaches are kept between runs, so
+    # change to the middle of the compiler can break runs in the merge queue
+    # as `fuzz-mir` below. The inputs a search reaches are kept between runs, so
     # each week's search starts where the last one stopped.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
@@ -615,52 +665,34 @@ jobs:
           retention-days: 7
 
   # The one fuzz target that runs before a pull request merges: a module
-  # lowered from a program the compiler accepted must verify. A change to
-  # lowering, ownership, checking and the type tables (`src/sema`), to the
-  # loader that runs them in order, or to the program generator can break it,
-  # so it runs when a pull request touches one of those and otherwise passes
-  # without building anything.
+  # lowered from a program the compiler accepted must verify. A merge group
+  # runs it when its change touches what the target guards, as `changes`
+  # reports in `mir`. The weekly `fuzz` already runs this target among the
+  # others, so scheduled and manual runs do not repeat it here.
   fuzz-mir:
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'full-ci') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    needs: changes
+    if: ${{ github.event_name == 'merge_group' && needs.changes.outputs.mir == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Whether the change touches what the target guards
-        id: touched
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if git diff --name-only "$BASE"...HEAD | grep -qE '^src/(mir|ownership|sema)/|^src/driver/loader\.zig$|^src/conformance/(generate|storage)\.zig$'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "nothing the target guards changed"
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
-        if: ${{ steps.touched.outputs.run == 'true' }}
 
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
-        if: ${{ steps.touched.outputs.run == 'true' }}
         with:
           primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Fuzz the verifier over lowered programs
-        if: ${{ steps.touched.outputs.run == 'true' }}
         run: |
           nix develop --command zig build fuzz --release=safe --fuzz=20K "-Dfuzz-filter=fuzz: a module lowered"
 
       - name: No fuzz crash was recorded
-        if: ${{ steps.touched.outputs.run == 'true' }}
         run: test ! -e "$ZIG_LOCAL_CACHE_DIR/f/crash"
 
       - name: Keep the inputs that failed
-        if: ${{ failure() && steps.touched.outputs.run == 'true' }}
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-mir-failures
@@ -668,53 +700,78 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # One status for the whole pipeline. On a pull request it is green only when
-  # `check`, `sanitize`, `optimised` and `fuzz-mir` all ran and passed, so a
-  # pull request is ready to merge only after its `full-ci` run; on main,
-  # manual and scheduled runs, every lane that ran passed. `fuzz` runs weekly
-  # and on a manual run, so a pull request does not wait for it, and `sweep`
-  # runs beside the others and reports on its own.
+  # The one status the ruleset on main requires, so it runs on every event and
+  # always reports. It fails when any lane it reads failed or was cancelled,
+  # and when a lane the event requires did not pass:
+  #
+  # - a pull request requires `check`; a draft runs nothing and is not ready;
+  # - a merge group requires `check`, `sanitize` and `optimised`, and
+  #   `fuzz-mir` when the change touches what it guards;
+  # - a push to main requires `check`;
+  # - a manual or scheduled run requires `check`, `sanitize`, `optimised` and
+  #   `fuzz`.
+  #
+  # A change to documentation alone requires no lane, so its skipped lanes
+  # pass. `sweep` reads a clock, so it reports on its own and is not read here.
   merge-ready:
-    needs: [check, sanitize, optimised, fuzz, fuzz-mir]
+    needs: [changes, check, sanitize, optimised, fuzz, fuzz-mir]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions:
-      checks: read
+    permissions: {}
     steps:
-      # A label other than `full-ci` runs no lane, so this run has nothing to
-      # judge. It answers what the pull request's last run answered for this
-      # commit, rather than a skip that would read as a pass, and fails while
-      # that run is still deciding.
-      - name: The last run's answer, for a label that runs nothing
-        id: carried
-        if: ${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' }}
+      - name: Every lane the event requires passed
         env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # The latest other run's check, by when it started; one still
-          # running has no answer yet, and is not taken for its predecessor's.
-          answer=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs?check_name=merge-ready&filter=all&per_page=100" \
-            --jq "[.check_runs[] | select(.details_url | contains(\"/runs/$GITHUB_RUN_ID/\") | not)] | sort_by(.started_at) | last | if . == null then \"none\" elif .status != \"completed\" then \"pending\" else .conclusion end")
-          echo "the last run for $SHA answered: $answer"
-          [ "$answer" = success ]
-
-      - name: Every lane that ran passed
-        if: ${{ steps.carried.outcome == 'skipped' }}
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-          REQUIRED: ${{ needs.check.result }} ${{ needs.sanitize.result }} ${{ needs.optimised.result }} ${{ needs.fuzz-mir.result }}
           EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft || false }}
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          MIR: ${{ needs.changes.outputs.mir }}
+          CHECK: ${{ needs.check.result }}
+          SANITIZE: ${{ needs.sanitize.result }}
+          OPTIMISED: ${{ needs.optimised.result }}
+          FUZZ: ${{ needs.fuzz.result }}
+          FUZZ_MIR: ${{ needs.fuzz-mir.result }}
         run: |
-          echo "lane results: $RESULTS"
-          case " $RESULTS " in
-            *" failure "*|*" cancelled "*) exit 1 ;;
+          echo "changes: $CHANGES (code=$CODE, mir=$MIR)"
+          echo "check: $CHECK, sanitize: $SANITIZE, optimised: $OPTIMISED, fuzz: $FUZZ, fuzz-mir: $FUZZ_MIR"
+          if [ "$CHANGES" != success ]; then
+            echo "what the change touches is unknown, so no lane can be judged"
+            exit 1
+          fi
+          case " $CHECK $SANITIZE $OPTIMISED $FUZZ $FUZZ_MIR " in
+            *" failure "*|*" cancelled "*)
+              echo "a lane failed or was cancelled"
+              exit 1 ;;
           esac
-          if [ "$EVENT" = pull_request ]; then
-            case " $REQUIRED " in
-              *" skipped "*)
-                echo "a lane was skipped: label the pull request full-ci to run every lane before merging"
-                exit 1 ;;
+          if [ "$EVENT" = pull_request ] && [ "$DRAFT" = true ]; then
+            echo "a draft pull request runs no lane"
+            exit 1
+          fi
+          required=()
+          if [ "$CODE" = true ]; then
+            case "$EVENT" in
+              pull_request|push) required=(check) ;;
+              merge_group) required=(check sanitize optimised) ;;
+              *) required=(check sanitize optimised fuzz) ;;
             esac
           fi
+          if [ "$EVENT" = merge_group ] && [ "$MIR" = true ]; then
+            required+=(fuzz-mir)
+          fi
+          [ "${#required[@]}" -gt 0 ] || { echo "only documentation changed: no lane is required"; exit 0; }
+          status=0
+          for lane in "${required[@]}"; do
+            case "$lane" in
+              check) result=$CHECK ;;
+              sanitize) result=$SANITIZE ;;
+              optimised) result=$OPTIMISED ;;
+              fuzz) result=$FUZZ ;;
+              fuzz-mir) result=$FUZZ_MIR ;;
+            esac
+            if [ "$result" != success ]; then
+              echo "$lane is required on $EVENT and was $result"
+              status=1
+            fi
+          done
+          exit "$status"
