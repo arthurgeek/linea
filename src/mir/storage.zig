@@ -1817,11 +1817,6 @@ pub const Phase = struct {
         // destination's bytes by `retains`.
         var result_deps: SetId = empty_set;
         var result_marks: MarkId = empty_set;
-        // A result whose type holds no dependency carries none, whatever the
-        // signature promises: a generic signature's clause names what `T`
-        // might hold, and ownership reads an instance that cannot hold a view
-        // as independent.
-        const result_carries = self.mayCarry(s.result);
         for (s.contracts) |contract| {
             if (contract.source.root != .parameter or contract.source.fields.len != 0) continue;
             const p = contract.source.root.parameter;
@@ -1867,7 +1862,7 @@ pub const Phase = struct {
             }
             switch (contract.kind) {
                 .borrows, .carries => {
-                    if (!result_carries or !targetCarriesWhole(contract.target)) continue;
+                    if (!targetCarriesWhole(contract.target)) continue;
                     result_deps = try self.unionOf(result_deps, carried);
                     result_marks = try self.markUnion(result_marks, carried_marks);
                 },
