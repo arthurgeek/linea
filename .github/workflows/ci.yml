@@ -8,8 +8,6 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  merge_group:
-    types: [checks_requested]
   workflow_dispatch:
   # Every lane, the sweep and `fuzz` included, once a week on the default
   # branch.
@@ -21,19 +19,17 @@ env:
   LINEA_SCRATCH: /var/tmp/linea-conformance
 
 # A push to a pull request cancels that pull request's earlier run, and a push
-# to main cancels the run it supersedes. A merge group's ref is its own
-# `refs/heads/gh-readonly-queue/...` branch and its event name differs, so no
-# pull request run shares its group, and a merge group run is never cancelled.
+# to main cancels the run it supersedes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
+  cancel-in-progress: true
 
 jobs:
   # Whether anything but documentation changed, against the pull request's
-  # base, the merge group's base, or the commit a push to main replaced. A
-  # change to Markdown alone runs no lane, except the Markdown a gate reads:
-  # the guide compiles its programs, and the semantics, the decision index and
-  # the corpus are checked against the compiler. A scheduled or manual run, or
+  # base or the commit a push to main replaced. A change to Markdown alone
+  # runs no lane, except the Markdown a gate reads: the guide compiles its
+  # programs, and the semantics, the decision index and the corpus are
+  # checked against the compiler. A scheduled or manual run, or
   # a diff that cannot be computed, runs every lane.
   #
   # `mir` says whether the change touches what `fuzz-mir` guards: lowering,
@@ -55,12 +51,10 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
-          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           case "$EVENT" in
             pull_request) base=$PR_BASE ;;
-            merge_group) base=$GROUP_BASE ;;
             push) base=$PUSH_BEFORE ;;
             *) base= ;;
           esac
@@ -88,9 +82,9 @@ jobs:
 
   check:
     # A draft pull request runs nothing. A ready pull request runs `check`
-    # alone; a merge group runs it beside every other lane except the weekly
-    # `fuzz`, and a push to main, a manual run and the weekly schedule run it
-    # too. A change to documentation alone skips it.
+    # beside `sanitize`, `optimised` and, when it applies, `fuzz-mir`; a push
+    # to main runs `check` alone; a manual run and the weekly schedule run it
+    # beside every other lane. A change to documentation alone skips it.
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
@@ -177,10 +171,9 @@ jobs:
       # about 4.7 minutes in a Debug runner and 42 seconds in a ReleaseSafe
       # one. The compiler under test and the unit tests stay Debug.
       #
-      # On a pull request and a merge group the guide, the library's own tests
-      # and the examples' own tests are left to the `optimised` lane, which the
-      # merge group runs before the pull request merges; a push to main runs
-      # them here.
+      # On a pull request the guide, the library's own tests and the examples'
+      # own tests are left to the `optimised` lane, which runs beside this one;
+      # a push to main runs them here.
       - name: Unit tests and conformance suite
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
@@ -210,6 +203,7 @@ jobs:
       - name: The examples' own tests pass
         if: ${{ github.event_name == 'push' }}
         run: |
+          # shellcheck disable=SC2016 # the script expands inside nix develop's bash
           nix develop --command bash -c '
             set -e
             ran=0
@@ -265,10 +259,11 @@ jobs:
   # hangs before reaching `main`, on a C program that does nothing but return
   # a constant.
   sanitize:
-    # A merge group runs this lane, and so do manual runs and the weekly
-    # schedule. A change to documentation alone skips it.
+    # A ready pull request runs this lane, and so do manual runs and the
+    # weekly schedule. A push to main and a change to documentation alone
+    # skip it.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     strategy:
@@ -334,10 +329,11 @@ jobs:
   # optimised build of both.
   # Linea results must remain defined and independent of compiler optimization.
   optimised:
-    # A merge group runs this lane, and so do manual runs and the weekly
-    # schedule. A change to documentation alone skips it.
+    # A ready pull request runs this lane, and so do manual runs and the
+    # weekly schedule. A push to main and a change to documentation alone
+    # skip it.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name != 'push' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # Every case builds once, and the unit tests build a ReleaseFast compiler
     # that holds several gigabytes while it links. One step at a time, so the
@@ -408,7 +404,7 @@ jobs:
       # Sixteen more generated storage programs. On the weekly schedule and a
       # manual run the seeds move with the run number, so each searches a
       # window no earlier run has, and a finding fails that run, not a pull
-      # request it has nothing to do with. A merge group checks a fixed
+      # request it has nothing to do with. A pull request checks a fixed
       # second window, so a re-run answers the same and its outcomes stay
       # cached. The matrix does not depend on the seed and is left out. This
       # is what stands in for fuzzing the storage property, which a search on
@@ -451,6 +447,7 @@ jobs:
       # gaining a line here is one nothing runs, and nothing would say so.
       - name: The examples' own tests pass
         run: |
+          # shellcheck disable=SC2016 # the script expands inside nix develop's bash
           nix develop --command bash -c '
             set -e
             ran=0
@@ -502,12 +499,12 @@ jobs:
   # linear, about four is quadratic, and a slow runner divides out of both
   # sides. Nothing else runs in this job, and a failure names a dimension.
   sweep:
-    # A merge group runs it beside the other lanes, and so do manual runs and
-    # the weekly schedule. No other lane waits for it and `merge-ready` does
-    # not read it: it times passes against a clock, and a slow shared runner
-    # can fail it without a regression. A failure stays visible on the run.
+    # Manual runs and the weekly schedule run it beside the other lanes. No
+    # other lane waits for it and `merge-ready` does not read it: it times
+    # passes against a clock, and a slow shared runner can fail it without a
+    # regression. A failure stays visible on the run.
     needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -580,9 +577,9 @@ jobs:
   # them, any bytes parse to a tree, any span renders. A generator tests those
   # far better than written cases, which cover only programs someone thought of.
   fuzz:
-    # Weekly and on a manual run, not per merge group: six of the eight
+    # Weekly and on a manual run, not per pull request: six of the eight
     # targets have never recorded a finding, and the one that guards what a
-    # change to the middle of the compiler can break runs in the merge queue
+    # change to the middle of the compiler can break runs on a pull request
     # as `fuzz-mir` below. The inputs a search reaches are kept between runs, so
     # each week's search starts where the last one stopped.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
@@ -665,13 +662,13 @@ jobs:
           retention-days: 7
 
   # The one fuzz target that runs before a pull request merges: a module
-  # lowered from a program the compiler accepted must verify. A merge group
-  # runs it when its change touches what the target guards, as `changes`
-  # reports in `mir`. The weekly `fuzz` already runs this target among the
-  # others, so scheduled and manual runs do not repeat it here.
+  # lowered from a program the compiler accepted must verify. A ready pull
+  # request runs it when its change touches what the target guards, as
+  # `changes` reports in `mir`. The weekly `fuzz` already runs this target
+  # among the others, so scheduled and manual runs do not repeat it here.
   fuzz-mir:
     needs: changes
-    if: ${{ github.event_name == 'merge_group' && needs.changes.outputs.mir == 'true' }}
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft && needs.changes.outputs.mir == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -704,15 +701,16 @@ jobs:
   # always reports. It fails when any lane it reads failed or was cancelled,
   # and when a lane the event requires did not pass:
   #
-  # - a pull request requires `check`; a draft runs nothing and is not ready;
-  # - a merge group requires `check`, `sanitize` and `optimised`, and
-  #   `fuzz-mir` when the change touches what it guards;
+  # - a pull request requires `check`, `sanitize` and `optimised`, and
+  #   `fuzz-mir` when the change touches what it guards; a draft runs nothing
+  #   and is not ready;
   # - a push to main requires `check`;
   # - a manual or scheduled run requires `check`, `sanitize`, `optimised` and
   #   `fuzz`.
   #
-  # A change to documentation alone requires no lane, so its skipped lanes
-  # pass. `sweep` reads a clock, so it reports on its own and is not read here.
+  # A lane the event does not require, or that a change to documentation
+  # alone skipped, counts as passed; a skipped lane the event requires fails.
+  # `sweep` reads a clock, so it reports on its own and is not read here.
   merge-ready:
     needs: [changes, check, sanitize, optimised, fuzz, fuzz-mir]
     if: ${{ always() }}
@@ -751,12 +749,12 @@ jobs:
           required=()
           if [ "$CODE" = true ]; then
             case "$EVENT" in
-              pull_request|push) required=(check) ;;
-              merge_group) required=(check sanitize optimised) ;;
+              pull_request) required=(check sanitize optimised) ;;
+              push) required=(check) ;;
               *) required=(check sanitize optimised fuzz) ;;
             esac
           fi
-          if [ "$EVENT" = merge_group ] && [ "$MIR" = true ]; then
+          if [ "$EVENT" = pull_request ] && [ "$MIR" = true ]; then
             required+=(fuzz-mir)
           fi
           [ "${#required[@]}" -gt 0 ] || { echo "only documentation changed: no lane is required"; exit 0; }
