@@ -103,7 +103,26 @@ jobs:
     # it in well over half an hour, and the build runs one step at a time
     # (see below), so the bound sits well above that.
     timeout-minutes: 180
+    # Measurement: the same suite under three build schedules, each with its
+    # own outcome cache so none starts warmer than the others.
+    name: check (${{ matrix.schedule }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - schedule: j1-sequential
+            flags: -j1 -Dsequential
+          - schedule: j4-sequential
+            flags: -j4 -Dsequential
+          - schedule: j4-parallel
+            flags: -j4
     steps:
+      - name: Runner size
+        run: |
+          nproc
+          free -g
+          df -h
+
       - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
@@ -132,10 +151,10 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/examples/outcomes
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}/properties/outcomes
-          key: outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: outcomes-${{ github.job }}-${{ matrix.schedule }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
-            outcomes-${{ github.job }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+            outcomes-${{ github.job }}-${{ matrix.schedule }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
+            outcomes-${{ github.job }}-${{ matrix.schedule }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
 
       # A runner that stops answering the server takes its job log with it, so
       # the memory, disk and largest processes are sampled every 20 seconds
@@ -178,7 +197,20 @@ jobs:
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
-          nice -n 10 nix develop --command zig build test -j1 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+          nice -n 10 nix develop --command zig build test ${{ matrix.flags }} -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+
+      # A process the kernel killed for memory fails the build step only when
+      # the build notices. When the victim is anything else, such as the
+      # resource sampler or a process outside the build, this step fails the
+      # job instead.
+      - name: No process was killed for memory
+        if: ${{ !cancelled() }}
+        run: |
+          free -m
+          if sudo dmesg | grep -iE 'out of memory|oom-kill|killed process'; then
+            echo "::error::the kernel killed a process for memory"
+            exit 1
+          fi
 
       # The library's own tests, asserted by their exit status rather than by a
       # transcript. The suite already runs this command as a case, and that case
@@ -236,7 +268,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: resource-log-${{ github.job }}-${{ github.run_attempt }}
+          name: resource-log-${{ github.job }}-${{ matrix.schedule }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/resource.log
           if-no-files-found: ignore
           retention-days: 7
