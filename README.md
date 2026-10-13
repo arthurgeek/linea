@@ -1,9 +1,11 @@
 # Linea
 
-Linea is a systems programming language where resources are values the
-compiler tracks. A file, a socket or a buffer that is never closed or freed is
-a compile error, not a leak; no operation has undefined behaviour; and memory
-comes from an allocator the program names.
+Linea is a systems programming language with **mutable value semantics** and
+**linear types**. Functions take arguments by value, by `inout` to mutate them
+in place, or by `sink` to take ownership, and there are no aliased references.
+Resources such as files, sockets and heap memory are linear, so forgetting to
+close or free one is a compile error. Every heap allocation goes through an
+allocator you pass in, and no operation has undefined behaviour.
 
 ```linea
 import std.io

@@ -131,7 +131,7 @@ zig build fuzz --release=safe --fuzz=100 -Dfuzz-filter=fuzz-slow:
 
 CI runs the first weekly; the second runs locally when changing what the
 storage generator writes. The extra soundness seeds in `optimised` check the
-same property: a fixed window in the merge queue, and a window that moves with
+same property: a fixed window on a pull request, and a window that moves with
 the run number on the weekly and manual runs.
 
 `check` passes `-Dsafe-runner`, which builds the conformance runner ReleaseSafe
@@ -141,29 +141,30 @@ Name every test that calls `std.testing.fuzz` with the `fuzz:` prefix, or
 `fuzz-slow:` when one input compiles whole programs against the checked library
 and twenty thousand runs would take hours.
 
-CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`, and
-`main` merges through a merge queue whose one required status is
-`merge-ready`. A draft pull request runs nothing; a ready pull request runs
-`check` alone, and so does a push to `main`. A merge group runs every lane:
-`check`, `sanitize`, `optimised`, `sweep` and, when the change touches
-`src/mir`, `src/ownership`, `src/sema` (which holds the type tables),
+CI runs on GitHub's hosted runners, from `.github/workflows/ci.yml`. A pull
+request merges into `main` once `merge-ready`, the one required status, is
+green on its final commit. A draft pull request runs nothing. A ready pull
+request runs `check`, `sanitize`, `optimised`, `sweep` and, when the change
+touches `src/mir`, `src/ownership`, `src/sema` (which holds the type tables),
 `src/driver/loader.zig` or the program generator, `fuzz-mir`, which fuzzes
-the MIR verifier. A manual run and the weekly schedule run every lane and
-`fuzz`, which runs every `fuzz:` target and keeps the inputs each clean search
-reached for the next. `optimised` also runs soundness, over the default seeds
-and over sixteen more: a fixed window in a merge group, and one that moves
-with the run number on a weekly or manual run.
+the MIR verifier. A push to `main` runs `check`. A manual run and the weekly
+schedule run every lane and `fuzz`, which runs every `fuzz:` target and keeps
+the inputs each clean search reached for the next. `optimised` also
+runs soundness, over the default seeds and over sixteen more: a fixed window
+on a pull request, and one that moves with the run number on a weekly or
+manual run.
 
-A first job, `changes`, diffs the change against the pull request's base, the
-merge group's base or the commit a push replaced. A change to Markdown alone
-skips every lane, except Markdown a gate reads: `docs/learn/`,
-`docs/linea-semantics.md`, `docs/adr/` and `tests/`. The run still starts, so
-`merge-ready` always reports. `merge-ready` fails when a lane failed or was
-cancelled, and when a lane the event requires did not pass: `check` on a pull
-request and a push; `check`, `sanitize`, `optimised` and, when it applies,
-`fuzz-mir` in a merge group; those and `fuzz` on a weekly or manual run. A
-documentation-only change requires none. A draft pull request is never ready.
-`sweep` reads a clock, so its failure is visible but does not block.
+A first job, `changes`, diffs the change against the pull request's base or
+the commit a push replaced. A change to Markdown alone skips every lane,
+except Markdown a gate reads: `docs/learn/`, `docs/linea-semantics.md`,
+`docs/adr/` and `tests/`. The run still starts, so `merge-ready` always
+reports. `merge-ready` fails when a lane failed or was cancelled, and when a
+lane the event requires did not pass: `check`, `sanitize`, `optimised` and,
+when it applies, `fuzz-mir` on a pull request; `check` on a push; `check`,
+`sanitize`, `optimised` and `fuzz` on a weekly or manual run. A lane skipped
+because the change is documentation alone counts as passed. A draft pull
+request is never ready. `sweep` reads a clock, so its failure is visible but
+does not block.
 
 Outside a push to `main`, `check` passes `-Dguide=false` and leaves the guide,
 the library's own tests and the examples' own tests to `optimised`, which runs
@@ -174,9 +175,8 @@ one after another, unit tests first, through copies only that suite reaches;
 `check` passes it to `test`, and `optimised` runs `test-unit` and
 `conformance` as separate builds with it, so no two heavy steps share the
 runner's memory. A push to a pull request or to `main` cancels the run it
-supersedes; a merge group's run is never cancelled. Only the unfiltered `test`
-verifies the whole graph; a narrowed conformance directory is the development
-tool.
+supersedes. Only the unfiltered `test` verifies the whole graph; a narrowed
+conformance directory is the development tool.
 
 ### Soundness, sanitizers and optimisation levels
 
