@@ -1412,7 +1412,8 @@ decoding, and the quotes dropped if it sent any.
 attributes are named arguments, each left out unless given: `path` and `domain`,
 `max_age` in seconds, `expires` as a `time.Timestamp`, `secure`, `http_only`
 and `same_site` (`.Strict`, `.Lax` or `.Unrestricted`, which sends
-`SameSite=None`). `clear_cookie(name, path:)` asks the browser to delete one.
+`SameSite=None`). `clear_cookie(name, path:, domain:, secure:)` asks the
+browser to delete one, as the second program below shows.
 
 ```linea
 import std.http
@@ -1460,12 +1461,58 @@ refused: the cookie value holds a byte a cookie cannot carry
 with a `CookieError`: a name that is not an HTTP token, a value holding a space,
 `"`, `,`, `;`, `\`, a control byte or anything outside ASCII (encode such text,
 for example in hexadecimal), a path that does not start with `/` or holds a
-space or `;`, a domain that is not letters, digits, hyphens and dots, and
-`SameSite=None` without `secure`, which browsers discard. Because a handler's
-own mistake is not the client's, `?` answers 500 for it. Set `http_only` on a
-cookie scripts do not need to read, and `secure` on any cookie that matters
-over HTTPS. The [welcome-back server](../../examples/welcome_back.lin) counts a
-browser's visits in a cookie and shows the visitor's name with
+space, `;`, a control byte or anything outside ASCII (percent-encode it), and a
+domain that is not letters, digits, hyphens and dots. It also refuses what
+browsers would silently discard: `SameSite=None` without `secure`, an `expires`
+before 1601, a name starting with `__Secure-` without `secure`, and a name
+starting with `__Host-` without `secure`, with a `domain`, or with a `path`
+other than `/`. Because a handler's own mistake is not the client's, `?`
+answers 500 for it. Set `http_only` on a cookie scripts do not need to read,
+and `secure` on any cookie that matters over HTTPS.
+
+A browser deletes a cookie only when the clearing header names the same `path`
+and `domain` the cookie was set with, and it deletes a `__Secure-` or `__Host-`
+cookie only through a `secure` header. A `__Host-` name is the safest choice
+for a session: no other subdomain can set a cookie of that name for yours. A
+handler that signs a visitor out clears both of its cookies:
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let sent = http.new_request(arena.handle(), "POST", "/logout", "").unwrap()
+    let request = sent.request()
+
+    // The theme cookie was set with `path: "/app", domain: "example.com"`.
+    var forget_theme = http.text(request, "signed out").unwrap()
+    &forget_theme.clear_cookie("theme", path: "/app", domain: "example.com").unwrap()
+    io.println(forget_theme.header("Set-Cookie").unwrap())?
+
+    // A `__Host-` cookie is cleared only by a secure header with the path /.
+    var end_session = http.text(request, "signed out").unwrap()
+    match &end_session.clear_cookie("__Host-session", path: "/") {
+        Ok(_) => io.println("accepted")?,
+        Err(error) => io.println("refused: {error}")?,
+    }
+    &end_session.clear_cookie("__Host-session", path: "/", secure: true).unwrap()
+    io.println(end_session.header("Set-Cookie").unwrap())?
+    .Ok(0)
+}
+```
+
+```
+theme=; Path=/app; Domain=example.com; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT
+refused: a cookie named __Secure- must be secure, and one named __Host- must also have the path / and no domain
+__Host-session=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure
+```
+
+The [welcome-back server](../../examples/welcome_back.lin) counts a browser's
+visits in a cookie and shows the visitor's name with
 [`html.escaped`](08-text.md#escaping-text-for-html).
 
 ### Handlers over another allocator

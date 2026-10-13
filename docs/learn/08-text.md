@@ -695,8 +695,9 @@ fn main() -> Result[UInt8, io.IoError] {
 <a title="I &lt;3 &quot;Linea&quot; &amp; it&#39;s fast">link</a>
 ```
 
-The same five characters make text safe as an element's content and inside an
-attribute value in either kind of quote, so there is one function for both. Text
+The same five characters make text safe as an element's content and inside a
+quoted attribute whose value is plain text, such as `title`, `alt` or `value`,
+in either kind of quote, so there is one function for both. Text
 that already holds an entity is escaped again, `&amp;` becoming `&amp;amp;`,
 because escaping cannot tell an entity from text that happens to look like one.
 Escape each piece of untrusted text once, where it enters the markup, and write
@@ -732,11 +733,15 @@ fn main() -> Result[UInt8, io.IoError] {
 <ul><li>Ada</li><li>&lt;script&gt;</li><li>Tom &amp; Jerry</li></ul>
 ```
 
-`escaped` calls `escape`, so the two always agree. Neither is enough for a value
-placed in an unquoted attribute, a `<script>` or `<style>` block, or a URL; keep
+`escaped` calls `escape`, so the two always agree. Neither makes text safe in
+an attribute whose value is a URL (`href`, `src`, `action`), an event handler
+(`onclick` and the other `on…` attributes) or a style (`style`):
+`javascript:alert(1)` holds none of the five characters, and a browser decodes
+the entities in `onclick="..."` before it runs the script. Nor is either enough
+in an unquoted attribute or inside a `<script>` or `<style>` element. Keep
 untrusted text out of those places. An HTTP handler answers a page with
 `http.text` and `set_header("Content-Type", "text/html; charset=utf-8")`
-([Networking](09-networking.md#cookies)). The [welcome-back
+([Networking](09-networking.md#handlers-return-responses)). The [welcome-back
 server](../../examples/welcome_back.lin) escapes a name taken from the address.
 
 ## What you have seen

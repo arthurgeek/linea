@@ -1307,12 +1307,11 @@ may assign again and releases whatever it holds when the block ends.
 Write `defer let` when the value is never reassigned and never changed through
 `&name`, which is most of the time. Write `defer var` when the body changes it
 before it is released or returned, such as pushing into a `Vec` or appending to
-a `String`. The compiler tells them apart by the `&`, so a `defer var` that
-nothing mutates should be a `defer let`:
+a `String`. The compiler refuses `&name` on a `defer let`, but it does not
+flag a `defer var` that nothing changes, so choosing `let` is up to you:
 
 ```linea
 import std.io
-import std.mem
 
 fn main() -> Result[UInt8, io.IoError] {
     // Nothing changes `title` after it is built, so `defer let`.
