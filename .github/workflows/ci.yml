@@ -89,7 +89,7 @@ jobs:
     if: ${{ needs.changes.outputs.code == 'true' && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     # A healthy warm run of this job takes a few minutes; a cold one does not.
-    # A cold run on a two-vCPU hosted runner took 115 minutes.
+    # A cold run on the four-vCPU runner takes about 40 minutes.
     # The outcome cache is keyed on the emitted IR and a stamp of every tool,
     # so a change to the toolchain invocation re-records every case -- the
     # whole corpus builds and runs from nothing, which fits under this bound
@@ -99,9 +99,9 @@ jobs:
     #
     # The suite is about a hundred CPU-minutes of work on a fast laptop: the
     # corpus, the generated programs under every rewrite, the recompilation
-    # properties, and the Debug unit tests. Four vCPUs run
-    # it in well over half an hour, and the build runs one step at a time
-    # (see below), so the bound sits well above that.
+    # properties, and the Debug unit tests. Four vCPUs run it in about 40
+    # minutes, with the heavy steps one at a time (see below), so the bound
+    # sits well above that.
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
@@ -158,14 +158,15 @@ jobs:
       - name: Editor grammar
         run: nix develop --command zig build editor
 
-      # The runner has about seven gigabytes, and each heavy step of the suite
-      # holds three to four and a half: a compile of the compiler, of the
-      # conformance runner or of the unit tests, the unit tests running, and
-      # the corpus walk with the compilers it starts. `-Dsequential` makes
-      # each wait for the one before it. `-j1` alone did not: a compile runs
-      # in a child process, and the unit tests ran beside one until the runner
-      # stopped answering. The build runs at a lower priority so the runner's
-      # own agent keeps getting scheduled while every core is busy.
+      # Each heavy step of the suite holds three to four and a half gigabytes:
+      # a compile of the compiler, of the conformance runner or of the unit
+      # tests, the unit tests running, and the corpus walk with the compilers
+      # it starts. `-Dsequential` makes each wait for the one before it, and
+      # `-j4` runs the light steps beside them on the runner's four vCPUs.
+      # Measured cold on the 16 GB runner: 40 minutes this way, 56 with the
+      # heavy steps also in parallel, and 68 with `-j1`. The build runs at a
+      # lower priority so the runner's own agent keeps getting scheduled while
+      # every core is busy.
       # The conformance runner is built ReleaseSafe (`-Dsafe-runner`): it
       # compiles and rewrites the generated programs in process, which takes
       # about 4.7 minutes in a Debug runner and 42 seconds in a ReleaseSafe
@@ -178,7 +179,7 @@ jobs:
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
-          nice -n 10 nix develop --command zig build test -j1 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+          nice -n 10 nix develop --command zig build test -j4 -Dsequential -Dsafe-runner -Dguide=${{ github.event_name == 'push' }} -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
       # The library's own tests, asserted by their exit status rather than by a
       # transcript. The suite already runs this command as a case, and that case
@@ -380,13 +381,13 @@ jobs:
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
-          nice -n 10 nix develop --command zig build test-unit --release=fast -j1 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+          nice -n 10 nix develop --command zig build test-unit --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
       - name: Conformance suite, optimised
         run: |
           .github/scripts/resource-log.sh follow & follower=$!
           trap 'kill "$follower" 2>/dev/null || true' EXIT
-          nice -n 10 nix develop --command zig build conformance --release=fast -j1 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
+          nice -n 10 nix develop --command zig build conformance --release=fast -j4 -Dsequential -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB"
 
       # The language's memory promise held to generated programs: every
       # operation that can move, grow or free storage meets every live
