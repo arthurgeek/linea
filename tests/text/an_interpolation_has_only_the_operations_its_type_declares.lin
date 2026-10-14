@@ -1,12 +1,10 @@
 // An interpolated literal is a value of a type the compiler creates for it,
 // and that type implements `Display` and nothing else. Calling an operation it
 // does not declare is refused at the call, whatever form the call takes.
-import std.mem
-
 fn main() -> UInt8 {
     let name = "Ada"
     let count: UInt8 = 3
-    let _owned = "hi {name}".to_owned(mem.system())
+    let _owned = "hi {name}".to_owned()
     let _length = "hi {name}".length()
     let _view = "hi {name}".view()
     let _captures = "hi {name}".into_captures()
