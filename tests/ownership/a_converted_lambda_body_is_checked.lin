@@ -4,6 +4,6 @@ enum Key {
 }
 
 fn main() -> UInt8 {
-    let _drop: fn(sink _value: Key) -> () = |sink _value| {}
+    let _drop: fn(sink _value: Key) = |sink _value| {}
     0
 }

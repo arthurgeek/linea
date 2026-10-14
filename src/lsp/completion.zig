@@ -2400,7 +2400,7 @@ const counter_program =
     \\struct Counter { n: UInt8 }
     \\
     \\impl Counter {
-    \\    fn increment(inout self: Self) -> () {
+    \\    fn increment(inout self: Self) {
     \\        self.n += 1
     \\    }
     \\    fn value(self: Self) -> UInt8 {
@@ -2932,12 +2932,12 @@ test "transparent observation completion offers readonly mixed trait operations"
     const source =
         \\trait Counter {
         \\    fn count(self: Self) -> UInt8
-        \\    fn advance(inout self: Self) -> ()
+        \\    fn advance(inout self: Self)
         \\}
         \\struct State { number: UInt8 }
         \\impl Counter for State {
         \\    fn count(self: Self) -> UInt8 { self.number }
-        \\    fn advance(inout self: Self) -> () { self.number += 1 }
+        \\    fn advance(inout self: Self) { self.number += 1 }
         \\}
         \\fn main() -> UInt8 {
         \\    let state: State = .{ number = 7 }

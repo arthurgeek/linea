@@ -2,7 +2,7 @@
 // changing `x` leaves what they read good to use.
 struct Box { value: UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

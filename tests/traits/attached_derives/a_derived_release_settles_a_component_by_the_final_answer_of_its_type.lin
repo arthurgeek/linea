@@ -7,7 +7,7 @@ use io.print
 enum Noisy { Value }
 
 impl Release for Noisy {
-    fn release(sink self: Noisy) -> () {
+    fn release(sink self: Noisy) {
         match self { Value => match print("noisy\n") { Ok(_) => {}, Err(_) => {} } }
     }
 }

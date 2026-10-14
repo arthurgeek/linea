@@ -1236,7 +1236,7 @@ pub const Resolution = struct {
         const result = try resolveSource(arena.allocator(),
             \\struct Cell { v: UInt8 }
             \\alias Spot = Cell
-            \\fn _read(_a: Spot, _b: Cell) -> () {}
+            \\fn _read(_a: Spot, _b: Cell) {}
             \\fn main() -> UInt8 { 0 }
         );
         const ast = &result.ast;
@@ -3476,7 +3476,7 @@ test "bound arguments through an alias with parameters compare as the type it st
         \\    D: Give[Twice[UInt8]],
         \\    E: Give[Pair[UInt8, UInt8]],
         \\    F: Give[Twice[Bool]],
-        \\](_a: A, _b: B, _c: C, _d: D, _e: E, _f: F) -> () {}
+        \\](_a: A, _b: B, _c: C, _d: D, _e: E, _f: F) {}
         \\fn main() -> UInt8 { 0 }
     );
     const ast = &result.ast;
@@ -3506,7 +3506,7 @@ test "an alias that names itself is read as spelled and never expanded forever" 
         \\struct Vec[T] { v: T }
         \\alias Loop = Vec[Loop]
         \\trait Give[phantom T] {}
-        \\fn _probe[A: Give[Loop], B: Give[Loop]](_a: A, _b: B) -> () {}
+        \\fn _probe[A: Give[Loop], B: Give[Loop]](_a: A, _b: B) {}
         \\fn main() -> UInt8 { 0 }
     );
     const ast = &result.ast;
@@ -3528,7 +3528,7 @@ test "aliases nested deep and used twice at each level are read without expandin
     for (1..depth + 1) |i| try w.print("alias A{d}[T] = Pair[A{d}[T], A{d}[T]]\n", .{ i, i - 1, i - 1 });
     try w.writeAll("trait Give[phantom T] {}\nstruct _Holder {}\n");
     try w.print("impl Give[A{d}[UInt8]] for _Holder {{}}\nimpl Give[A{d}[UInt8]] for _Holder {{}}\n", .{ depth, depth });
-    try w.print("fn _probe[A: Give[A{d}[UInt8]], B: Give[A{d}[UInt8]], C: Give[A{d}[Bool]]](_a: A, _b: B, _c: C) -> () {{}}\n", .{ depth, depth, depth });
+    try w.print("fn _probe[A: Give[A{d}[UInt8]], B: Give[A{d}[UInt8]], C: Give[A{d}[Bool]]](_a: A, _b: B, _c: C) {{}}\n", .{ depth, depth, depth });
     try w.writeAll("fn main() -> UInt8 { 0 }\n");
     const result = try resolveSource(gpa, text.written());
     const ast = &result.ast;
@@ -4810,7 +4810,7 @@ test "a `&` lending a `let` is left to the checker, and an assignment is reporte
     defer arena.deinit();
     const result = try resolveSource(arena.allocator(),
         \\struct Counter { count: UInt8 }
-        \\fn add(inout counter: Counter) -> () { counter.count += 1 }
+        \\fn add(inout counter: Counter) { counter.count += 1 }
         \\fn fresh() -> Counter { Counter { count = 0 } }
         \\fn main() -> UInt8 {
         \\    let fixed = Counter { count = 1 }
@@ -15874,9 +15874,9 @@ test "structural reflection renders a component loop as one expression" {
     try testing.expect(std.mem.indexOf(u8, generated, "reflect") == null);
 
     const empty = try resolveSource(arena.allocator(),
-        \\trait Structural { fn visit(sink self: Self) -> () }
+        \\trait Structural { fn visit(sink self: Self) }
         \\template impl Structural {
-        \\    fn visit(sink _self: Self) -> () {
+        \\    fn visit(sink _self: Self) {
         \\        match _self { reflect.case => for component in reflect.components {
         \\            let _ = component.of(_self)
         \\        } }
@@ -16657,7 +16657,7 @@ test "writing to an inout parameter uses it" {
     // what observes it. Every corpus case for `inout` read the parameter as
     // well, so this shape was unwritable and nothing said so.
     const setter = try resolveSource(gpa,
-        \\fn set(inout n: UInt8) -> () {
+        \\fn set(inout n: UInt8) {
         \\    n = 1;
         \\}
         \\
@@ -16674,7 +16674,7 @@ test "writing to an inout parameter uses it" {
     const field = try resolveSource(gpa,
         \\struct Point { x: UInt8, y: UInt8 }
         \\
-        \\fn set(inout p: Point) -> () {
+        \\fn set(inout p: Point) {
         \\    p.x = 1;
         \\}
         \\
@@ -17763,7 +17763,7 @@ test "integer parameter namespaces stay local to template declarations" {
 test "namespace mutation diagnostics describe immutable type namespaces" {
     const cases = [_]struct { source: []const u8, message: []const u8, labels: usize }{
         .{ .source = "fn main() -> UInt8 { UInt8.max = 0; 0 }", .message = "type namespace `UInt8` cannot be mutated", .labels = 1 },
-        .{ .source = "fn _change[T: Integer](_value: T) -> () { T.max = T(0) }\nfn main() -> UInt8 { 0 }", .message = "type namespace `T` cannot be mutated", .labels = 1 },
+        .{ .source = "fn _change[T: Integer](_value: T) { T.max = T(0) }\nfn main() -> UInt8 { 0 }", .message = "type namespace `T` cannot be mutated", .labels = 1 },
         .{ .source = "fn main() -> UInt8 { let value: UInt8 = 1; value = 0; value }", .message = "`value` is declared with `let`", .labels = 2 },
     };
     for (cases) |case| {
@@ -17792,7 +17792,7 @@ test "dereferenced assignment places resolve their observation as a read" {
     const gpa = arena.allocator();
     const resolved = try resolveSource(gpa,
         \\struct Entry { value: UInt8 }
-        \\fn change(inout number: UInt8) -> () { number = 1 }
+        \\fn change(inout number: UInt8) { number = 1 }
         \\fn observe(entry: Entry) -> borrow Entry where borrows(entry) { borrow entry }
         \\fn main() -> UInt8 {
         \\    let entry: Entry = .{ value = 7 }

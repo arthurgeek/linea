@@ -9,7 +9,7 @@ struct Job {
 }
 
 impl Release for Job {
-    fn release(sink self: Job) -> () {
+    fn release(sink self: Job) {
         let Job { id: _ } = self
     }
 }

@@ -7,7 +7,7 @@ struct Crate {
 }
 
 impl Release for Crate {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Crate { kilograms: _ } = self
     }
 }
@@ -24,7 +24,7 @@ struct Pair[T] {
 }
 
 impl[T: Release] Pair[T] {
-    pub fn dispose(sink self: Self) -> () {
+    pub fn dispose(sink self: Self) {
         let Pair { first, second } = self
         first.release()
         second.release()

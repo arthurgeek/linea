@@ -2,7 +2,7 @@
 // settles a `net.Connection`, in the order they are declared.
 import std.net
 
-fn _welcome(sink connection: net.Connection) -> () {
+fn _welcome(sink connection: net.Connection) {
     var _visitor = connection
 }
 

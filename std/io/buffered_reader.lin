@@ -1642,7 +1642,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     }
 
     // Forget the record, so the next line starts fresh.
-    fn clear_record(inout self: Self) -> () {
+    fn clear_record(inout self: Self) {
         self.length = 0
         self.blocked = false
         self.complete = false
@@ -1651,7 +1651,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // Start a new record for a line read in `raw` mode. A record larger than
     // this read's bound is released first.
-    fn begin(inout self: Self, raw: Bool, max_bytes: UInt64) -> () {
+    fn begin(inout self: Self, raw: Bool, max_bytes: UInt64) {
         let bound = record_storage_bound(max_bytes, raw)
         let oversized = match read self.record {
             Some(bytes) => bytes.length() > bound,
@@ -1887,7 +1887,7 @@ fn replace_pending_buffer[A: Allocator](inout storage: Option[mem.Buffer[A]], si
 }
 
 // Store `byte` at `offset` in the record.
-fn store_pending_byte[A: Allocator](inout storage: Option[mem.Buffer[A]], offset: UInt64, byte: UInt8) -> () {
+fn store_pending_byte[A: Allocator](inout storage: Option[mem.Buffer[A]], offset: UInt64, byte: UInt8) {
     var bytes = storage.unwrap()
     &bytes.store_byte(offset, byte)
     storage = .Some(bytes)

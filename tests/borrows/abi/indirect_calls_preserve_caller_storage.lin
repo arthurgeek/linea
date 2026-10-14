@@ -13,15 +13,15 @@ fn invoke(
     action(value)
 }
 
-fn retain(inout holder: Holder, value: UInt8) -> () where retains(holder.view: borrow value) {
+fn retain(inout holder: Holder, value: UInt8) where retains(holder.view: borrow value) {
     holder.view = borrow value
 }
 
 fn invoke_retention(
-    action: fn(inout holder: Holder, read value: UInt8) -> () where retains(holder.view: borrow value),
+    action: fn(inout holder: Holder, read value: UInt8) where retains(holder.view: borrow value),
     inout holder: Holder,
     value: UInt8,
-) -> () where retains(holder.view: borrow value) {
+) where retains(holder.view: borrow value) {
     action(&holder, value)
 }
 

@@ -53,7 +53,7 @@ fn post[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Resp
     http.text(request, "{author.name} wrote {entry.title.view()}")
 }
 
-fn answer(inout router: http.Router[(), mem.SystemAllocator], method: Str, target: Str, author: Str, body: Str) -> () {
+fn answer(inout router: http.Router[(), mem.SystemAllocator], method: Str, target: Str, author: Str, body: Str) {
     let arena = mem.Arena.open(mem.system(), size: 65536)
     var sent = http.new_request(arena.handle(), method, target, body).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()

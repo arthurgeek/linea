@@ -24,7 +24,7 @@ impl Index[UInt64] for Outer {
     }
 }
 
-fn bump(inout x: UInt8) -> () {
+fn bump(inout x: UInt8) {
     x = x + 10
 }
 

@@ -1145,7 +1145,7 @@ impl[P: Allocator, S, H: http.Handler[S, P]] http.Handler[S, P] for Counted[H] {
 }
 
 impl[H: Observer] Observer for Counted[H] {
-    fn observe[P: Allocator](inout self: Self, event: http.Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: http.Event[P]) {
         &self.next.observe(event)
     }
 }

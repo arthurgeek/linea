@@ -11,7 +11,7 @@ impl[T] Box[T] {
         n
     }
 
-    fn put(inout _self: Self, _v: T) -> () {
+    fn put(inout _self: Self, _v: T) {
         panic("x")
     }
 }

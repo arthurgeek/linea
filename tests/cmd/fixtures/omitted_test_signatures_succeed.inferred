@@ -19,7 +19,7 @@ test fn deferred_cleanup_runs_before_success() {
     return
 }
 
-fn mark_cleanup() -> () {
+fn mark_cleanup() {
     io.eprintln[Str]("cleanup")
 }
 

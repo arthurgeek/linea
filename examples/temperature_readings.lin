@@ -44,7 +44,7 @@ test fn the_first_temperature_at_the_threshold_triggers_ventilation() {
 
 // `inout w` lets `calibrate` change the caller's week, and `for inout` lends
 // each reading to the loop, so `r += shift` changes it in place.
-fn calibrate(inout w: Week, shift: UInt64) -> () {
+fn calibrate(inout w: Week, shift: UInt64) {
     for inout r in w {
         r += shift
     }

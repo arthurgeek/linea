@@ -92,7 +92,7 @@ impl[P: Allocator, S, H: Handler[S, P]] Handler[(), P] for Stated[S, H] {
 
 // A `Stated` passes every event on to the handler it holds.
 impl[S, H: Observer] Observer for Stated[S, H] {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         &self.handler.observe(event)
     }
 }

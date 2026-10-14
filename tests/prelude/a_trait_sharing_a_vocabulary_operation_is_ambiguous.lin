@@ -30,7 +30,7 @@ impl Recycle for Bottle {
 }
 
 impl Release for Bottle {
-    fn release(sink self: Bottle) -> () {
+    fn release(sink self: Bottle) {
         let Bottle { deposit: _deposit } = self
     }
 }

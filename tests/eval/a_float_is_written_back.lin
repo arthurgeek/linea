@@ -1,4 +1,4 @@
-fn bump(inout v: Float64) -> () {
+fn bump(inout v: Float64) {
     v = v + 1.0
 }
 

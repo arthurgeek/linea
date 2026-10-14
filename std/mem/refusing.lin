@@ -142,7 +142,7 @@ test fn peak_bytes_remembers_the_most_bytes_live_at_once() {
 impl[H: Allocator] AllocationLog[H] {
     // Refuse a later acquisition, counting from the log's first attempt. It
     // writes the shared log words, as its handles do, so handles may be live.
-    pub fn refuse_attempt(self: Self, attempt: UInt64) -> () {
+    pub fn refuse_attempt(self: Self, attempt: UInt64) {
         linea_raw_store(self.buffer.at, self.buffer.len, log_refuse_at, attempt)
     }
 }
@@ -189,7 +189,7 @@ test fn all_disposed_is_false_while_an_allocation_is_live() {
 }
 
 impl[H: Allocator] Release for AllocationLog[H] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let AllocationLog { buffer, backing: _ } = self
         buffer.release()
     }
@@ -239,7 +239,7 @@ impl[H: Allocator] Allocator for RefusingAllocator[H] {
         }
     }
 
-    fn dispose(sink b: Buffer[Self]) -> () {
+    fn dispose(sink b: Buffer[Self]) {
         let Buffer { at, len, allocated, allocator, obligation } = b
         let RefusingAllocation { backing, index } = obligation
         let flag = log_flags + index * log_word_bytes

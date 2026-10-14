@@ -6,7 +6,7 @@ struct Session {
 }
 
 impl Release for Session {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Session { id: _ } = self
     }
 }

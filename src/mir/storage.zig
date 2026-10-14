@@ -3446,7 +3446,7 @@ pub fn viewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     try w.writeAll(
         "struct Box { value: UInt64, other: UInt64 }\n" ++
             "fn view(b: Box) -> borrow UInt64 where borrows(b) { borrow b.value }\n" ++
-            "fn bump(inout b: Box) -> () { b.other = b.other + 1 }\n" ++
+            "fn bump(inout b: Box) { b.other = b.other + 1 }\n" ++
             "fn main() -> UInt8 {\n    var box = Box { value = 1, other = 0 }\n    var total: UInt64 = 0\n",
     );
     for (0..n) |i| {
@@ -3472,7 +3472,7 @@ pub fn retainedViewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
         "struct Box { value: UInt64 }\n" ++
             "struct Holder { kept: borrow UInt64 }\n" ++
             "fn view(b: Box) -> borrow UInt64 where borrows(b) { borrow b.value }\n" ++
-            "fn keep(inout h: Holder, v: borrow UInt64) -> () where retains(h: v) { h.kept = copy(v) }\n" ++
+            "fn keep(inout h: Holder, v: borrow UInt64) where retains(h: v) { h.kept = copy(v) }\n" ++
             "fn first(h: Holder) -> borrow UInt64 where carries(h) { copy(h.kept) }\n" ++
             "fn main() -> UInt8 {\n",
     );
@@ -3499,7 +3499,7 @@ pub fn wideViewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
     try w.writeAll(
         "struct Box { value: UInt64 }\n" ++
-            "fn bump(inout b: Box) -> () { b.value = b.value + 1 }\n" ++
+            "fn bump(inout b: Box) { b.value = b.value + 1 }\n" ++
             "struct Wide {",
     );
     for (0..n) |i| try w.print(" f{d}: borrow UInt64,", .{i});
@@ -3526,7 +3526,7 @@ pub fn wideViewsEndedLastFirstProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
     try w.writeAll(
         "struct Box { value: UInt64 }\n" ++
-            "fn bump(inout b: Box) -> () { b.value = b.value + 1 }\n" ++
+            "fn bump(inout b: Box) { b.value = b.value + 1 }\n" ++
             "struct Wide {",
     );
     for (0..n) |i| try w.print(" f{d}: borrow UInt64,", .{i});
@@ -3562,7 +3562,7 @@ pub fn copiedWideViewsProgram(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
     try w.writeAll(
         "struct Box { value: UInt64 }\n" ++
-            "fn bump(inout b: Box) -> () { b.value = b.value + 1 }\n" ++
+            "fn bump(inout b: Box) { b.value = b.value + 1 }\n" ++
             "@copyable\n" ++
             "struct Wide {",
     );

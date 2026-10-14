@@ -6,7 +6,7 @@ struct Stamp {
 }
 
 impl Release for Stamp {
-    fn release(self: Self) -> () {
+    fn release(self: Self) {
         let _code = self.code
     }
 }

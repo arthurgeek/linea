@@ -1,15 +1,15 @@
 struct List { n: UInt8 }
 
 impl List {
-    fn push(inout self: Self, value: UInt8) -> () {
+    fn push(inout self: Self, value: UInt8) {
         self.n += value
     }
 
-    fn clear(inout self: Self) -> () {
+    fn clear(inout self: Self) {
         self.n = 0
     }
 
-    fn truncate(inout self: Self, count: UInt8) -> () {
+    fn truncate(inout self: Self, count: UInt8) {
         self.n = count
     }
 

@@ -14,7 +14,7 @@ struct Item {}
 
 derive Ordinal for Item
 
-fn _holds(_item: Item) -> () {}
+fn _holds(_item: Item) {}
 
 fn main() -> UInt8 {
     0

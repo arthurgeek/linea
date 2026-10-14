@@ -7,13 +7,13 @@ struct Ticket {
 }
 
 impl Ticket {
-    fn _print(sink self: Self) -> () {
+    fn _print(sink self: Self) {
         let Ticket { number: _ } = self
     }
 }
 
 impl Release for Ticket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Ticket { number: _ } = self
     }
 }

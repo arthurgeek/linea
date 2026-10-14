@@ -307,7 +307,7 @@ test fn each_allocation_failure_covers_every_growth_step_of_a_line() -> Result[(
 
 impl[S: Sink, A: Allocator] Logger[S, A] {
     // `debug` writes a line at `Level.Debug`, and drops it if it cannot.
-    pub fn debug[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+    pub fn debug[F: Fields](self: Self, message: Str, fields: F) where S.Error: Discardable {
         let _dropped = self.log(.Debug, message, fields)
     }
 }
@@ -320,7 +320,7 @@ test fn debug_writes_a_debug_line() {
 
 impl[S: Sink, A: Allocator] Logger[S, A] {
     // `info` writes a line at `Level.Info`, and drops it if it cannot.
-    pub fn info[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+    pub fn info[F: Fields](self: Self, message: Str, fields: F) where S.Error: Discardable {
         let _dropped = self.log(.Info, message, fields)
     }
 }
@@ -333,7 +333,7 @@ test fn info_writes_an_info_line() {
 
 impl[S: Sink, A: Allocator] Logger[S, A] {
     // `warn` writes a line at `Level.Warn`, and drops it if it cannot.
-    pub fn warn[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+    pub fn warn[F: Fields](self: Self, message: Str, fields: F) where S.Error: Discardable {
         let _dropped = self.log(.Warn, message, fields)
     }
 }
@@ -346,7 +346,7 @@ test fn warn_writes_a_warn_line() {
 
 impl[S: Sink, A: Allocator] Logger[S, A] {
     // `error` writes a line at `Level.Error`, and drops it if it cannot.
-    pub fn error[F: Fields](self: Self, message: Str, fields: F) -> () where S.Error: Discardable {
+    pub fn error[F: Fields](self: Self, message: Str, fields: F) where S.Error: Discardable {
         let _dropped = self.log(.Error, message, fields)
     }
 }

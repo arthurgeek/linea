@@ -1,4 +1,4 @@
-fn take(a: UInt8, b: UInt8, inout c: UInt8) -> () {
+fn take(a: UInt8, b: UInt8, inout c: UInt8) {
     c = a
     c = b
 }

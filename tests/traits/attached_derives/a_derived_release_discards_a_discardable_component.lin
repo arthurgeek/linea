@@ -22,7 +22,7 @@ fn open[A: Allocator](allocator: A) -> Pool[A] where carries(allocator) {
 
 // A generic body releases `Pool[A]` for any allocator, because the discard is
 // decided at the derive rather than for each allocator.
-fn close[A: Allocator](sink pool: Pool[A]) -> () {
+fn close[A: Allocator](sink pool: Pool[A]) {
     pool.release()
 }
 

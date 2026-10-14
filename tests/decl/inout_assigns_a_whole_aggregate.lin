@@ -8,7 +8,7 @@ struct P {
     y: UInt8,
 }
 
-fn set(inout p: P) -> () {
+fn set(inout p: P) {
     p = .{ x = 3, y = 4 }
 }
 

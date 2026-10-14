@@ -6,12 +6,12 @@ struct Transaction {
     number: UInt64,
 }
 
-fn commit(sink transaction: Transaction) -> () {
+fn commit(sink transaction: Transaction) {
     let Transaction { number: number } = transaction
     match io.print("commit {number}\n") { Ok(_) => {}, Err(_) => {} }
 }
 
-fn rollback(sink transaction: Transaction) -> () {
+fn rollback(sink transaction: Transaction) {
     let Transaction { number: number } = transaction
     match io.print("rollback {number}\n") { Ok(_) => {}, Err(_) => {} }
 }

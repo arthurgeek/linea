@@ -4,7 +4,7 @@ struct Point { x: UInt8, y: UInt8 }
 // whatever its type. It is a different question from whether the type is held
 // in memory: answering one with the other hands the slot the bytes of a value
 // and then reads them as a pointer.
-fn bump(inout p: Point) -> () {
+fn bump(inout p: Point) {
     p.x = p.x + 1
 }
 

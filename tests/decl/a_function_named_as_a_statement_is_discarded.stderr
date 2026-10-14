@@ -1,4 +1,4 @@
-error[T-Discard]: this expression produces a `fn() -> ()` that is discarded
+error[T-Discard]: this expression produces a `fn()` that is discarded
   --> tests/decl/a_function_named_as_a_statement_is_discarded.lin:11:5
    |
 11 |     nothing

@@ -1,4 +1,4 @@
-fn receive(_text: Str) -> () {}
+fn receive(_text: Str) {}
 
 fn message() -> Str {
     "hello {1}"

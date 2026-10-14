@@ -27,7 +27,7 @@ impl[T, A: Allocator] Storage[T, A] {
 
     // Dispose the backing buffer. Disposal settles no slot, so every live
     // element must already have been taken or released.
-    fn dispose(sink self: Self) -> () {
+    fn dispose(sink self: Self) {
         let Storage { buffer, allocator: _, at: _, len: _ } = self
         buffer.release()
     }
@@ -40,7 +40,7 @@ extern fn slot_stride[T](shape: SlotType[T]) -> UInt64
 
 extern fn slot_take[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len: UInt64, i: UInt64) -> T where carries(owner)
 
-extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len: UInt64, i: UInt64, sink v: T) -> () where retains(owner: v)
+extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len: UInt64, i: UInt64, sink v: T) where retains(owner: v)
 
 // Borrow an occupied slot through its owner, checking bounds and alignment.
 extern fn slot_place[T, A: Allocator](owner: Storage[T, A], at: UInt64, len: UInt64, live: UInt64, i: UInt64) -> T

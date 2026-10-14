@@ -1,7 +1,7 @@
 error[T-Mismatch]: expected `fn(read Str) -> Str where carries()`, found `fn(read Str) -> Str where carries(#1)`
   --> tests/borrows/contracts/an_explicitly_independent_callable_type_spells_its_clause.lin:11:10
    |
-8  | fn take(_f: fn(text: Str) -> Str where carries()) -> () {}
+8  | fn take(_f: fn(text: Str) -> Str where carries()) {}
    |         -- expected because of this parameter
 11 |     take(keep)
    |          ^^^^ expected `fn(read Str) -> Str where carries()`, found `fn(read Str) -> Str where carries(#1)`

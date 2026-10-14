@@ -854,7 +854,7 @@ test "borrow contract roots retain their own callable declaration identity" {
         \\enum Outcome { Item(Holder), Empty }
         \\fn observe(value: UInt8) -> borrow UInt8 where borrows(value) { borrow value }
         \\fn wrap(source: UInt8) -> Outcome where borrows(.Item.view: source) { .Item(.{ view = borrow source }) }
-        \\fn retain(inout holder: Holder, source: UInt8) -> () where retains(holder.view: borrow source) { holder.view = borrow source }
+        \\fn retain(inout holder: Holder, source: UInt8) where retains(holder.view: borrow source) { holder.view = borrow source }
         \\fn main() -> UInt8 {
         \\    let number: UInt8 = 7
         \\    var holder: Holder = .{ view = borrow number }

@@ -161,14 +161,14 @@ test fn an_arena_too_small_for_the_limits_is_refused_with_a_parent() {
 // flushed: standard output's buffer is dropped with the arena, and a test
 // keeps the text it recorded.
 trait CgiOutput {
-    fn settle[P: Allocator](inout self: Self, sink output: Output[P]) -> ()
+    fn settle[P: Allocator](inout self: Self, sink output: Output[P])
 }
 
 // `StandardOutput` is where a CGI program's answer goes.
 struct StandardOutput {}
 
 impl CgiOutput for StandardOutput {
-    fn settle[P: Allocator](inout _self: Self, sink output: Output[P]) -> () {
+    fn settle[P: Allocator](inout _self: Self, sink output: Output[P]) {
         match output {
             Standard(buffered) => {
                 let _standard = buffered.abort()
@@ -617,7 +617,7 @@ fn settle_cgi[P: Allocator, D: CgiOutput](sink body: BodyWriter[P], sink written
 // Answer a request that was not read with the status `error` names, and tell
 // `handler`. A web server is always there to read the answer, so a failure
 // that names no status, such as standard input failing, answers 500.
-fn refuse_unread[H: Observer, P: Allocator](inout output: Output[P], sink error: RequestError, memory: mem.Handle[P], inout handler: H) -> () {
+fn refuse_unread[H: Observer, P: Allocator](inout output: Output[P], sink error: RequestError, memory: mem.Handle[P], inout handler: H) {
     let status = error.status().unwrap_or(.InternalServerError)
     let wrote = refuse_cgi(&output, status, memory)
     observe_unanswered(&handler, status, wrote, .Unread(error))
@@ -635,7 +635,7 @@ fn refuse_cgi[P: Allocator](inout output: Output[P], status: Status, memory: mem
 
 // Tell `handler` that a request was answered `status` without it, because of
 // `cause`, unless writing the answer failed, which is then the failure.
-fn observe_unanswered[H: Observer](inout handler: H, status: Status, sink wrote: Result[UInt64, io.WriteFailure[io.IoError]], sink cause: Failure) -> () {
+fn observe_unanswered[H: Observer](inout handler: H, status: Status, sink wrote: Result[UInt64, io.WriteFailure[io.IoError]], sink cause: Failure) {
     let failure: Failure = match wrote {
         Ok(_) => cause,
         Err(reason) => .Write(io.IoError.from(reason)),
@@ -651,7 +651,7 @@ struct CgiAnswer {
 }
 
 impl Release for CgiAnswer {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let CgiAnswer { outcome: _, written } = self
         written.release()
     }
@@ -663,7 +663,7 @@ struct Recording {
 }
 
 impl CgiOutput for Recording {
-    fn settle[P: Allocator](inout self: Self, sink output: Output[P]) -> () {
+    fn settle[P: Allocator](inout self: Self, sink output: Output[P]) {
         match output {
             Recorded(bytes) => &self.text.append(Str.from_bytes(bytes.as_slice()).unwrap()).unwrap(),
             Connection(buffered) => {

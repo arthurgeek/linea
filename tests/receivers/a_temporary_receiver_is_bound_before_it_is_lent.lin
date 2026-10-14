@@ -5,7 +5,7 @@ struct Counter {
 }
 
 impl Counter {
-    fn bump(inout self: Self) -> () {
+    fn bump(inout self: Self) {
         self.count += 1
     }
 }

@@ -4,7 +4,7 @@ struct Plain {
     value: UInt8,
 }
 
-fn discard[T: Release](sink value: T) -> () {
+fn discard[T: Release](sink value: T) {
     value.release()
 }
 

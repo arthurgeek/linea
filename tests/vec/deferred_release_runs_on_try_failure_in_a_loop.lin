@@ -5,7 +5,7 @@ import std.io
 struct Token { number: UInt64 }
 
 impl Release for Token {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Token { number: number } = self
         match io.println("released {number}") { Ok(_) => {}, Err(_) => {} }
     }

@@ -155,12 +155,12 @@ pub fn std.io.core;line[Point,std.io.core.Descriptor](x: Point, inout w: std.io.
     std.io.core.Descriptor;std.io.core;Writer.write_str(&w, "\n")
 }
 
-pub fn std.io.core;eprint[std.text.Str](x: std.text.Str) -> () {
+pub fn std.io.core;eprint[std.text.Str](x: std.text.Str) {
     var w = std.io.core;stderr()
     std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x, &w)
 }
 
-pub fn std.io.core;eprintln[std.io.core.IoError](x: std.io.core.IoError) -> () {
+pub fn std.io.core;eprintln[std.io.core.IoError](x: std.io.core.IoError) {
     var w = std.io.core;stderr()
     std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x, &w)
 }
@@ -182,13 +182,13 @@ pub fn std.io.core;stderr() -> std.io.core.Descriptor {
     std.io.core;descriptor(2)
 }
 
-fn std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x: std.text.Str, inout w: std.io.core.Descriptor) -> () where std.io.core.IoError: Discardable {
+fn std.io.core;eprint_to[std.text.Str,std.io.core.Descriptor](x: std.text.Str, inout w: std.io.core.Descriptor) where std.io.core.IoError: Discardable {
     match std.text.Str;std.fmt;Display.fmt[std.io.core.Descriptor](x, &w) {
         _ => {},
     }
 }
 
-fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) -> () where std.io.core.IoError: Discardable {
+fn std.io.core;eprintln_to[std.io.core.IoError,std.io.core.Descriptor](x: std.io.core.IoError, inout w: std.io.core.Descriptor) where std.io.core.IoError: Discardable {
     match std.io.core;line[std.io.core.IoError,std.io.core.Descriptor](x, &w) {
         _ => {},
     }

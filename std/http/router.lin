@@ -47,7 +47,7 @@ impl MethodTable {
     }
 
     // Register `index` for `method`, or for no method when `method` is `None`.
-    fn register(inout self: Self, method: Option[Method], index: UInt64) -> () {
+    fn register(inout self: Self, method: Option[Method], index: UInt64) {
         let named = copy(method) else {
             self.any = .Some(index)
             return

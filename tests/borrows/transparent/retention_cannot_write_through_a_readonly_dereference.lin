@@ -1,6 +1,6 @@
 struct Holder { item: borrow UInt8 }
 
-fn rejected(inout _holder: borrow Holder, _value: borrow UInt8) -> () where retains(*_holder: _value) {}
+fn rejected(inout _holder: borrow Holder, _value: borrow UInt8) where retains(*_holder: _value) {}
 
 fn main() -> UInt8 {
     let number: UInt8 = 7

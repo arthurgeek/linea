@@ -33,7 +33,7 @@ impl Histogram {
     // `inout self` permits updating the owned counts while preserving the
     // histogram for later calls. Callers mark the call with `&`, as in
     // `&h.record(1)`, to show that it changes `h`.
-    pub fn record(inout self: Self, bucket: UInt64) -> () {
+    pub fn record(inout self: Self, bucket: UInt64) {
         self.counts[bucket] += 1
     }
 
@@ -43,7 +43,7 @@ impl Histogram {
 
     // `sink self` transfers ownership to `close`. The pattern extracts the
     // vector as `counts`, then `release` consumes it and frees its storage.
-    pub fn close(sink self: Self) -> () {
+    pub fn close(sink self: Self) {
         let Histogram { counts } = self
         counts.release()
     }

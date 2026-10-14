@@ -1,20 +1,20 @@
 import std.io
 
-pub fn print_str(value: Str) -> () {
+pub fn print_str(value: Str) {
     match io.println(value) {
         Ok(_) => {},
         Err(_) => {},
     }
 }
 
-pub fn print_u64(value: UInt64) -> () {
+pub fn print_u64(value: UInt64) {
     match io.println(value) {
         Ok(_) => {},
         Err(_) => {},
     }
 }
 
-pub fn print_bool(value: Bool) -> () {
+pub fn print_bool(value: Bool) {
     match io.println(value) {
         Ok(_) => {},
         Err(_) => {},
@@ -22,11 +22,11 @@ pub fn print_bool(value: Bool) -> () {
 }
 
 trait Metadata {
-    fn write(value: Self) -> ()
+    fn write(value: Self)
 }
 
 template impl Metadata {
-    fn write(value: Self) -> () {
+    fn write(value: Self) {
         match read value {
             reflect.case => {
                 print_str(reflect.case.name)

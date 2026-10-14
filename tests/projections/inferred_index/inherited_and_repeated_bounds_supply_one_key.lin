@@ -6,7 +6,7 @@ impl[I: Integer] Index[I] for Board[I] via values
 
 impl[I: Integer] Indexed[I] for Board[I] {}
 
-fn inspect_first[I: Integer, C: Indexed[I]](container: C, _key: I) -> () {
+fn inspect_first[I: Integer, C: Indexed[I]](container: C, _key: I) {
     let _first = borrow container[0]
 }
 

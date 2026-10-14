@@ -9,7 +9,7 @@ struct Key {
     n: UInt8,
 }
 
-fn take(sink k: Key) -> () {
+fn take(sink k: Key) {
     let Key { n: _n } = k
 }
 

@@ -1,7 +1,7 @@
 @copyable
 struct Box[T] { value: T }
 
-fn _take[T: Copyable](_box: Box[T] = .{ value = 1 }) -> () {}
+fn _take[T: Copyable](_box: Box[T] = .{ value = 1 }) {}
 
 fn main() -> UInt8 {
     0

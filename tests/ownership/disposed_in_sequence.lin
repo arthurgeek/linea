@@ -15,7 +15,7 @@ fn tag(k: Key) -> UInt8 {
     }
 }
 
-fn release(sink k: Key) -> () {
+fn release(sink k: Key) {
     match k {
         Forged(_) => {},
     }

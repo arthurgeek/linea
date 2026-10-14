@@ -1,8 +1,8 @@
 struct Entry { number: UInt8 }
 
-fn accepts_discardable[T: Discardable](_value: T) -> () {}
+fn accepts_discardable[T: Discardable](_value: T) {}
 
-fn settle[F: Release](sink callback: F) -> () {
+fn settle[F: Release](sink callback: F) {
     Release.release(callback)
 }
 

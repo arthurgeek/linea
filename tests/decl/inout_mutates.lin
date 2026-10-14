@@ -1,4 +1,4 @@
-fn bump(inout n: UInt8, by: UInt8) -> () {
+fn bump(inout n: UInt8, by: UInt8) {
     n = n + by
 }
 

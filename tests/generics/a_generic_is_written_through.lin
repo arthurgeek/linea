@@ -2,7 +2,7 @@
 // it, then substitutes the arguments supplied by the call.
 struct Cell[T] { v: T }
 
-fn bump[T: Copyable](inout c: Cell[T], x: T) -> () where retains(c.v: x) {
+fn bump[T: Copyable](inout c: Cell[T], x: T) where retains(c.v: x) {
     c.v = copy(x)
 }
 

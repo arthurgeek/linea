@@ -3,7 +3,7 @@ struct Counter {
 }
 
 impl Counter {
-    fn add(inout self: Self, amount: UInt8) -> () {
+    fn add(inout self: Self, amount: UInt8) {
         self.count += amount
     }
 }

@@ -9,7 +9,7 @@ struct Ticket {
 }
 
 impl Release for Ticket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Ticket { number } = self
         match io.println("released ticket {number}") {
             Ok(_) => {},

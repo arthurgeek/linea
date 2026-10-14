@@ -248,7 +248,7 @@ import std.net
 use mem.Owner
 
 // Print everything the server sent, then close the connection.
-fn print_greeting(label: Str, sink client: net.Connection) -> () {
+fn print_greeting(label: Str, sink client: net.Connection) {
     var visitor = client
     let arena = mem.Arena.open(mem.system(), size: 4096)
     defer arena.release()
@@ -268,7 +268,7 @@ fn print_greeting(label: Str, sink client: net.Connection) -> () {
 }
 
 // The handler owns the connection: it greets the visitor and closes it.
-fn welcome(sink connection: net.Connection, peer: net.Address) -> () {
+fn welcome(sink connection: net.Connection, peer: net.Address) {
     var visitor = connection
     if &visitor.write_str("welcome\n").is_err() {
         io.eprintln("cannot greet {peer}")
@@ -366,7 +366,7 @@ import std.net
 import std.testing
 
 // Closes whatever connection it is handed.
-fn hang_up(sink connection: net.Connection, _peer: net.Address) -> () {
+fn hang_up(sink connection: net.Connection, _peer: net.Address) {
     let _closed = connection.close()
 }
 
@@ -544,7 +544,7 @@ fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
 
 // Send everything the client sent back to it. A client shuts down its side
 // when it has sent everything, which is what ends `read_all`.
-fn echo(inout connection: net.Connection, client: net.Address) -> () {
+fn echo(inout connection: net.Connection, client: net.Address) {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read from {client}: {failure}")
@@ -1772,7 +1772,7 @@ impl[P: Allocator, S, H: http.Handler[S, P]] http.Handler[S, P] for Counted[H] {
 }
 
 impl[H: Observer] Observer for Counted[H] {
-    fn observe[P: Allocator](inout self: Self, event: http.Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: http.Event[P]) {
         &self.next.observe(event)
     }
 }

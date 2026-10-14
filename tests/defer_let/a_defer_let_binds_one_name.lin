@@ -7,7 +7,7 @@ struct Pair {
 }
 
 impl Release for Pair {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Pair { left: _, right: _ } = self
     }
 }

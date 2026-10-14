@@ -1,6 +1,6 @@
 struct Pair { value: UInt8 }
 
-fn same[T: Discardable](sink _a: T, sink _b: T) -> () {}
+fn same[T: Discardable](sink _a: T, sink _b: T) {}
 
 fn main() -> UInt8 {
     let pair: Pair = .{ value = 1 }

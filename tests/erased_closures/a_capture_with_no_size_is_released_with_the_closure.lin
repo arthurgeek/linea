@@ -7,7 +7,7 @@ import std.mem
 struct Ticket {}
 
 impl Release for Ticket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Ticket {} = self
         match io.println("ticket released") {
             Ok(_) => {},

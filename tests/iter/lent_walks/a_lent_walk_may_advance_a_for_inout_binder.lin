@@ -31,7 +31,7 @@ fn start() -> Grower {
     Grower { values = values, left = 4 }
 }
 
-fn stop(sink g: Grower) -> () {
+fn stop(sink g: Grower) {
     let Grower { values: rest, left: _ } = g
     rest.release()
 }

@@ -1,9 +1,9 @@
-fn replace[T: Copyable](inout target: T, value: T) -> () where retains(target: value) {
+fn replace[T: Copyable](inout target: T, value: T) where retains(target: value) {
     target = copy(value)
 }
 
 fn main() -> UInt8 {
-    let update: fn(inout target: borrow UInt64, read value: borrow UInt64) -> () where retains(target: value) = replace
+    let update: fn(inout target: borrow UInt64, read value: borrow UInt64) where retains(target: value) = replace
     var owner: UInt64 = 7
     let other: UInt64 = 1
     var target = borrow other

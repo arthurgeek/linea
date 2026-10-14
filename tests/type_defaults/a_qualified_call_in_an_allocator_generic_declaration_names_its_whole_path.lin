@@ -4,7 +4,7 @@ import std.net
 
 use mem.Allocator
 
-fn _serve[B: Allocator](router: http.Router[(), mem.SystemAllocator], _allocator: B) -> () {
+fn _serve[B: Allocator](router: http.Router[(), mem.SystemAllocator], _allocator: B) {
     match http.listen_and_serve(net.loopback(0), router) {
         Ok(_) => {},
         Err(_) => {},

@@ -1,4 +1,4 @@
-fn add_into(inout a: UInt8, b: UInt8) -> () {
+fn add_into(inout a: UInt8, b: UInt8) {
     a = a + b
 }
 

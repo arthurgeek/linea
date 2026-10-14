@@ -1,8 +1,8 @@
-fn consume[T](_value: T) -> () {}
+fn consume[T](_value: T) {}
 
-fn empty() -> () {}
+fn empty() {}
 
-fn bare() -> () {
+fn bare() {
     return
 }
 

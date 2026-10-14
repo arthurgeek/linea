@@ -4,7 +4,7 @@ trait Give[phantom T] {
 
 fn _ambiguous[
     T: Give[fn(read value: UInt8 = 1) -> UInt8] + Give[fn(read value: UInt8 = 2) -> UInt8],
-](_value: T.Item) -> () {}
+](_value: T.Item) {}
 
 fn main() -> UInt8 {
     0

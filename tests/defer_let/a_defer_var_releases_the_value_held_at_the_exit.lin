@@ -9,7 +9,7 @@ struct Meter {
 }
 
 impl Release for Meter {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Meter { reading } = self
         match print("{reading}") {
             Ok(_) => {},

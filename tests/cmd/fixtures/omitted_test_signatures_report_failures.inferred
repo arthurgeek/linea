@@ -5,7 +5,7 @@ fn main() -> UInt8 {
     0
 }
 
-fn mark_cleanup() -> () {
+fn mark_cleanup() {
     io.eprintln[Str]("cleanup")
 }
 

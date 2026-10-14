@@ -894,7 +894,7 @@ test "a defer let and the pair it is written out as reach one verdict" {
         \\}
         \\
         \\impl Release for Lamp {
-        \\    fn release(sink self: Self) -> () {
+        \\    fn release(sink self: Self) {
         \\        let Lamp { id: _ } = self
         \\    }
         \\}

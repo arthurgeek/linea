@@ -1,2 +1,2 @@
-fn take(a:UInt8,b:UInt8,inout c:UInt8)->() { c = a; c = b; }
+fn take(a:UInt8,b:UInt8,inout c:UInt8) { c = a; c = b; }
 fn main() -> UInt8 { var z: UInt8 = 0; take(1, 2, &z); z }

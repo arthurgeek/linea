@@ -399,7 +399,7 @@ test fn a_duration_is_made_from_seconds() {
 // the monotonic clock. A signal that wakes it early does not cut the pause
 // short: it sleeps again for what remains. A clock or sleep the system cannot
 // provide is a fault of the machine, so it panics, as `now` does.
-pub fn sleep(duration: Duration) -> () {
+pub fn sleep(duration: Duration) {
     if linea_clock_sleep(duration.nanoseconds) != 0 {
         panic("the system cannot sleep on the monotonic clock")
     }

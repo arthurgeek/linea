@@ -1,4 +1,4 @@
-fn replace[T: Copyable](inout target: T, value: T) -> () {
+fn replace[T: Copyable](inout target: T, value: T) {
     target = copy(value)
 }
 

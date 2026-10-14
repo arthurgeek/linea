@@ -10,7 +10,7 @@ fn reseal(sink secret: Str) -> vault.Vault where carries(.secret: secret) {
     vault.open(secret)
 }
 
-fn keep(inout held: vault.Vault, note: Str) -> () where retains(held.secret: note) {
+fn keep(inout held: vault.Vault, note: Str) where retains(held.secret: note) {
     let _unchanged = vault.reveal(held)
     let _length = note.length()
 }

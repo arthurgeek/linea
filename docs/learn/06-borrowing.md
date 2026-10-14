@@ -487,12 +487,12 @@ struct Dashboard {
 
 // The dashboard takes over a view the caller already holds, so it shows
 // whatever `room` points at.
-fn show(inout dashboard: Dashboard, sink room: borrow Room) -> () where retains(dashboard.shown: room) {
+fn show(inout dashboard: Dashboard, sink room: borrow Room) where retains(dashboard.shown: room) {
     dashboard.shown = room
 }
 
 // The dashboard watches the caller's own `room` variable.
-fn watch(inout dashboard: Dashboard, room: Room) -> () where retains(dashboard.shown: borrow room) {
+fn watch(inout dashboard: Dashboard, room: Room) where retains(dashboard.shown: borrow room) {
     dashboard.shown = borrow room
 }
 

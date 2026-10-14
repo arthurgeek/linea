@@ -2,12 +2,12 @@ trait HasCallable {
     type Item: fn(read value: UInt8) -> UInt8
 }
 
-fn _needs_callable[F: fn(read value: UInt8) -> UInt8](_value: F) -> () {}
+fn _needs_callable[F: fn(read value: UInt8) -> UInt8](_value: F) {}
 
 fn _forwards[
     H: HasCallable,
     F: fn(read callback: H.Item) -> UInt8,
-](value: H.Item, _callback: F) -> () {
+](value: H.Item, _callback: F) {
     _needs_callable(value)
 }
 

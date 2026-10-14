@@ -12,7 +12,7 @@ impl Handler for Echo {
     }
 }
 
-fn run[H: Handler](h: H) -> () {
+fn run[H: Handler](h: H) {
     let _a = Handler.handle(h, [1, 2, 3])
     let _b = Handler.handle(h, [1, 2, 3])
 }

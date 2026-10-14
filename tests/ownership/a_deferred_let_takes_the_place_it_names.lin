@@ -4,7 +4,7 @@ struct Key {
     n: UInt8,
 }
 
-fn spend(sink key: Key, inout total: UInt8) -> () {
+fn spend(sink key: Key, inout total: UInt8) {
     let Key { n } = key
     total = total + n
 }

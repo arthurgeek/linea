@@ -4,7 +4,7 @@ struct S[T] {
     f: fn(read x: S[S[T]]) -> UInt8,
 }
 
-fn _use(_s: S[UInt8]) -> () {}
+fn _use(_s: S[UInt8]) {}
 
 fn main() -> UInt8 {
     0

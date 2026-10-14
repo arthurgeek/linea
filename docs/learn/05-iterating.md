@@ -352,7 +352,7 @@ struct Payment {
 
 impl Payment {
     // Committing puts the money in the till.
-    fn commit(sink self: Self, inout takings: UInt64) -> () {
+    fn commit(sink self: Self, inout takings: UInt64) {
         let Payment { cents } = self
         takings += cents
     }
@@ -606,7 +606,7 @@ struct Payment {
 
 impl Payment {
     // Committing puts the money in the till.
-    fn commit(sink self: Self, inout takings: UInt64) -> () {
+    fn commit(sink self: Self, inout takings: UInt64) {
         let Payment { cents } = self
         takings += cents
     }
@@ -662,7 +662,7 @@ struct Payment {
 
 impl Payment {
     // Committing puts the money in the till.
-    fn commit(sink self: Self, inout takings: UInt64) -> () {
+    fn commit(sink self: Self, inout takings: UInt64) {
         let Payment { cents } = self
         takings += cents
     }
@@ -1142,7 +1142,7 @@ struct Payment {
 
 impl Payment {
     // Committing puts the money in the till.
-    fn commit(sink self: Self, inout takings: UInt64) -> () {
+    fn commit(sink self: Self, inout takings: UInt64) {
         let Payment { cents } = self
         takings += cents
     }
@@ -1199,7 +1199,7 @@ struct Payment {
 
 impl Payment {
     // Committing puts the money in the till.
-    fn commit(sink self: Self, inout takings: UInt64) -> () {
+    fn commit(sink self: Self, inout takings: UInt64) {
         let Payment { cents } = self
         takings += cents
     }

@@ -545,7 +545,7 @@ import std.io
 
 // `inout` lets `add_tip` change the caller's bill. The caller writes `&` to
 // show that the bill may change.
-fn add_tip(inout bill: UInt64, percent: UInt64) -> () {
+fn add_tip(inout bill: UInt64, percent: UInt64) {
     bill += bill * percent / 100
 }
 
@@ -1297,7 +1297,7 @@ struct Payment {
 
 impl Payment {
     // `sink self` takes the payment, and the pattern takes it apart.
-    fn commit(sink self: Self, inout till: UInt64) -> () {
+    fn commit(sink self: Self, inout till: UInt64) {
         let Payment { cents } = self
         till += cents
     }

@@ -251,7 +251,7 @@ test fn add_header_keeps_the_values_a_name_already_has() {
 
 impl[P: Allocator] Response[P] {
     // Drop every value of `name`, compared under ASCII case folding.
-    pub fn remove_header(inout self: Self, name: Str) -> () {
+    pub fn remove_header(inout self: Self, name: Str) {
         &self.headers.remove(name)
     }
 }
@@ -406,7 +406,7 @@ enum Output[P: Allocator] {
 // `put_output` puts `next` back in `slot`, which must hold `Taken`. Nothing
 // else can be there, since every write takes the output out and puts it back
 // before returning, and a panic says so if that is ever broken.
-fn put_output[P: Allocator](inout slot: Output[P], sink next: Output[P]) -> () where retains(slot: next) {
+fn put_output[P: Allocator](inout slot: Output[P], sink next: Output[P]) where retains(slot: next) {
     match mem.exchange(&slot, next) {
         Taken => {},
         Connection(writer) => {
@@ -526,7 +526,7 @@ impl[P: Allocator] BodyWriter[P] {
     }
 
     // Record a failed write; every later write reports the same error.
-    fn fail(inout self: Self, failure: WriteFailure[io.IoError]) -> () {
+    fn fail(inout self: Self, failure: WriteFailure[io.IoError]) {
         self.failure = .Some(io.IoError.from(copy(failure)))
     }
 }

@@ -1,7 +1,7 @@
 @linear
 struct Owner { value: UInt8 }
 
-fn close(sink owner: Owner) -> () {
+fn close(sink owner: Owner) {
     let Owner { value: _ } = owner
 }
 

@@ -10,7 +10,7 @@ struct First[A: Allocator] { value: String[A] }
 struct Second[A: Allocator] { value: Vec[UInt16, A] }
 
 impl[A: Allocator] Release for First[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let First { value } = self
         value.release()
         io.println("release first").unwrap()
@@ -18,7 +18,7 @@ impl[A: Allocator] Release for First[A] {
 }
 
 impl[A: Allocator] Release for Second[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Second { value } = self
         value.release()
         io.println("release second").unwrap()

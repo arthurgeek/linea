@@ -979,7 +979,7 @@ test fn remove_member_returns_the_stored_value_and_forgets_its_name() {
 }
 
 impl[A: Allocator] Release for Value[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Value { node, height: _, allocator: _ } = self
         match node {
             Null => {},

@@ -497,7 +497,7 @@ test "a qualified trait is renamed at every final component" {
         \\
         \\struct Item {}
         \\impl protocol.Marker for Item {}
-        \\fn accepts[T: protocol.Marker](_value: T) -> () {}
+        \\fn accepts[T: protocol.Marker](_value: T) {}
         \\
         \\fn main() -> UInt8 {
         \\    let item: Item = .{}
@@ -2416,7 +2416,7 @@ test "an exported declaration rename follows use bindings through attached deriv
         \\@derive(origin.Marker)
         \\struct Item {}
         \\
-        \\fn _accepts[T: Marker](_value: T) -> () {}
+        \\fn _accepts[T: Marker](_value: T) {}
         \\fn main() -> UInt8 { Marker.score(Item {}) }
     ;
     const origin_text =

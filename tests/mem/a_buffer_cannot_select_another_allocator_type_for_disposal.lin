@@ -15,13 +15,13 @@ impl Allocator for Elsewhere {
         .Err(Oom.Exhausted)
     }
 
-    fn dispose(sink b: Buffer[Elsewhere]) -> () {
+    fn dispose(sink b: Buffer[Elsewhere]) {
         let _length = b.length()
         panic("this allocator never hands out buffers")
     }
 }
 
-fn dispose_elsewhere(sink buffer: Buffer[Elsewhere]) -> () {
+fn dispose_elsewhere(sink buffer: Buffer[Elsewhere]) {
     Allocator.dispose(buffer)
 }
 

@@ -1,5 +1,5 @@
 error[T-Impl]: `Apply` bounds `run`'s `F` by `fn(read value: UInt8) -> UInt8`, and this does not
   --> tests/traits/an_impl_does_not_drop_a_callable_bound.lin:10:8
    |
-10 |     fn run[F](_self: Tag, _f: F) -> () {}
+10 |     fn run[F](_self: Tag, _f: F) {}
    |        ^^^ bound it the way the signature bounds it

@@ -4,13 +4,13 @@ import std.io
 struct Token { number: UInt8 }
 
 impl Release for Token {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let { number } = self
         match io.print("{number}") { Ok(_) => {}, Err(_) => {} }
     }
 }
 
-fn settle[F: Release](sink callback: F) -> () {
+fn settle[F: Release](sink callback: F) {
     callback.release()
 }
 

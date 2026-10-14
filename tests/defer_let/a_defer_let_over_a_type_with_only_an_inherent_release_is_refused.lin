@@ -6,7 +6,7 @@ struct Socket {
 }
 
 impl Socket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Socket { fd: _ } = self
     }
 }

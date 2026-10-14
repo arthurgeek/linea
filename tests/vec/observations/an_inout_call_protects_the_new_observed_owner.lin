@@ -1,4 +1,4 @@
-fn replace[T: Copyable](inout target: T, value: T) -> () where retains(target: value) {
+fn replace[T: Copyable](inout target: T, value: T) where retains(target: value) {
     target = copy(value)
 }
 

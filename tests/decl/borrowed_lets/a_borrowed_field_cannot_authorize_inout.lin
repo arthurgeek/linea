@@ -1,6 +1,6 @@
 struct Point { x: UInt8 }
 
-fn bump(inout number: UInt8) -> () {
+fn bump(inout number: UInt8) {
     number = number + 1
 }
 

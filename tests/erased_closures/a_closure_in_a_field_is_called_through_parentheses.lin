@@ -9,7 +9,7 @@ struct Reminder {
 }
 
 impl Release for Reminder {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Reminder { minutes: _, fire } = self
         fire.release()
     }

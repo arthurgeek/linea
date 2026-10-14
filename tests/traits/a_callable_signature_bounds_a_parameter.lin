@@ -2,7 +2,7 @@
 // body may rely on.
 fn _accepts[
     F: fn(read lhs: UInt8, read rhs: UInt8 = 2) -> UInt8,
-](_combine: F) -> () {}
+](_combine: F) {}
 
 fn main() -> UInt8 {
     0

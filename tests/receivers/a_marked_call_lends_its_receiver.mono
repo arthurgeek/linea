@@ -21,24 +21,24 @@ fn ;main() -> UInt8 {
     counters[1].count
 }
 
-fn ;Counter.bump(inout self: Counter) -> () {
+fn ;Counter.bump(inout self: Counter) {
     self.count += 1
 }
 
-fn ;Counter.add(inout self: Counter, amount: UInt8) -> () {
+fn ;Counter.add(inout self: Counter, amount: UInt8) {
     self.count += amount
 }
 
-fn ;Counter.bump_twice(inout self: Counter) -> () {
+fn ;Counter.bump_twice(inout self: Counter) {
     ;Counter.bump(&self)
     ;Counter.bump(&self)
 }
 
-fn ;press_twice[Counter](inout button: Counter) -> () {
+fn ;press_twice[Counter](inout button: Counter) {
     Counter;;Press.press(&button)
     Counter;;Press.press(&button)
 }
 
-fn Counter;;Press.press(inout self: Counter) -> () {
+fn Counter;;Press.press(inout self: Counter) {
     ;Counter.add(&self, 3)
 }

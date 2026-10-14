@@ -15,9 +15,9 @@ enum Plain {
 }
 
 trait Watch[P] {
-    fn observe(inout self: Self, event: Event[P]) -> ()
+    fn observe(inout self: Self, event: Event[P])
 
-    fn tally(inout self: Self, plain: Plain) -> ()
+    fn tally(inout self: Self, plain: Plain)
 }
 
 struct Counter {
@@ -25,14 +25,14 @@ struct Counter {
 }
 
 impl[P] Watch[P] for Counter {
-    fn observe(inout self: Self, event: Event[P]) -> () {
+    fn observe(inout self: Self, event: Event[P]) {
         match read event {
             Happened(_) => self.seen += 100,
             Retried(times) => self.seen += UInt64(times),
         }
     }
 
-    fn tally(inout self: Self, plain: Plain) -> () {
+    fn tally(inout self: Self, plain: Plain) {
         match read plain {
             Once => self.seen += 10,
             Twice => self.seen += 20,
@@ -40,7 +40,7 @@ impl[P] Watch[P] for Counter {
     }
 }
 
-fn report[H: Watch[P], P: Discardable](inout watcher: H, sink value: P) -> () {
+fn report[H: Watch[P], P: Discardable](inout watcher: H, sink value: P) {
     &watcher.observe(.Retried(3))
     &watcher.tally(.Twice)
     &watcher.observe(.Happened(value))

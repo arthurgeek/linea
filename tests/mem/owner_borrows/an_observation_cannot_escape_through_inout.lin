@@ -1,4 +1,4 @@
-fn fill(inout target: Option[borrow UInt64]) -> () where retains(target: target) {
+fn fill(inout target: Option[borrow UInt64]) where retains(target: target) {
     let local: UInt64 = 7
     target = .Some(borrow local)
 }

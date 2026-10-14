@@ -4,7 +4,7 @@
 // passes the value.
 let nothing: () = ()
 
-fn keep[T](_value: T) -> () {}
+fn keep[T](_value: T) {}
 
 fn finished(early: Bool) -> Result[(), Int64] {
     if early {

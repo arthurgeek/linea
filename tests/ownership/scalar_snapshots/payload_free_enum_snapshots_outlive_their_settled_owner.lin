@@ -4,7 +4,7 @@ enum State { Open, Closed }
 @linear
 struct Owner { state: State }
 
-fn close(sink owner: Owner) -> () {
+fn close(sink owner: Owner) {
     let Owner { state: _state } = owner
 }
 

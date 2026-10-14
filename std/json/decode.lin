@@ -668,7 +668,7 @@ struct JsonDecodedRecord {
 }
 
 impl Release for JsonDecodedRecord {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let JsonDecodedRecord { name, labels, retries: _ } = self
         name.release()
         labels.release()
@@ -766,7 +766,7 @@ test fn json_typed_decode_disposes_records_and_error_paths_on_each_refusal() {
 struct JsonOwnedDecodeKey { name: String[mem.RefusingAllocator[mem.SystemAllocator]] }
 
 impl Release for JsonOwnedDecodeKey {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let JsonOwnedDecodeKey { name } = self
         name.release()
     }

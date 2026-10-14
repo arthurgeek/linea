@@ -20,7 +20,7 @@ struct Coffee {
 }
 
 impl Coffee {
-    fn add_shot(inout self: Coffee) -> () {
+    fn add_shot(inout self: Coffee) {
         self.shots += 1
     }
 }
@@ -37,7 +37,7 @@ fn apply(step: fn(read x: UInt8) -> UInt8, x: UInt8) -> UInt8 {
     step(x: x)
 }
 
-fn serve(prepare: fn(inout cup: Coffee) -> (), sink cup: Coffee) -> UInt8 {
+fn serve(prepare: fn(inout cup: Coffee), sink cup: Coffee) -> UInt8 {
     var served = cup
     prepare(cup: &served)
     served.shots

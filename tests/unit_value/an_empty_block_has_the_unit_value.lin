@@ -2,7 +2,7 @@
 // or a function body that does nothing is written as one.
 enum Signal { Stop, Go(UInt8) }
 
-fn ignore(sink _signal: Signal) -> () {}
+fn ignore(sink _signal: Signal) {}
 
 fn react(sink signal: Signal) -> UInt8 {
     var seen: UInt8 = 0

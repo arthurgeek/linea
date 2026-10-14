@@ -11,13 +11,13 @@ enum Left { Value }
 enum Right { Value }
 
 impl Release for Left {
-    fn release(sink self: Left) -> () {
+    fn release(sink self: Left) {
         match self { Value => match print("L") { Ok(_) => {}, Err(_) => {} } }
     }
 }
 
 impl Release for Right {
-    fn release(sink self: Right) -> () {
+    fn release(sink self: Right) {
         match self { Value => match print("R") { Ok(_) => {}, Err(_) => {} } }
     }
 }

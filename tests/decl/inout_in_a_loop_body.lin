@@ -1,6 +1,6 @@
 // A local read before an inout call observes the write on the next iteration.
 // Local and indirect accesses use the same storage width across the back edge.
-fn set(inout x: Int8) -> () {
+fn set(inout x: Int8) {
     x = 0 - 1
 }
 

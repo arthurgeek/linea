@@ -1324,7 +1324,7 @@ const Parser = struct {
         defer arena.deinit();
         const gpa = arena.allocator();
 
-        try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, "trait Show {}\nimpl Show for fn(a: UInt8) -> UInt8 {}\nimpl Show for inout fn(inout a: UInt8) -> () where carries() {}\nfn main() -> UInt8 { 0 }\n"));
+        try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, "trait Show {}\nimpl Show for fn(a: UInt8) -> UInt8 {}\nimpl Show for inout fn(inout a: UInt8) where carries() {}\nfn main() -> UInt8 { 0 }\n"));
         // An inherent block names a type and a derive names one the compiler
         // generates for, so neither takes a callable type.
         try testing.expect((try codesOf(gpa, "impl fn(a: UInt8) -> UInt8 {}\nfn main() -> UInt8 { 0 }\n")).len != 0);
@@ -8010,7 +8010,7 @@ test "`internal` is refused where a declaration has no independent visibility" {
     try testing.expect(derived.errors > 0);
 
     const tested = try parseProgramText(gpa,
-        \\internal test fn token_works() -> () {}
+        \\internal test fn token_works() {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expect(tested.errors > 0);
@@ -8060,7 +8060,7 @@ test "an empty arm body is a block with nothing in it" {
 
     const got = try parseProgramText(gpa,
         \\enum Colour { Red, Green }
-        \\fn ignore(c: Colour) -> () {
+        \\fn ignore(c: Colour) {
         \\    match c {
         \\        Red => {},
         \\        Green => {},
@@ -8169,7 +8169,7 @@ test "`sink` is a convention beside `read` and `inout`" {
     const gpa = arena.allocator();
 
     const got = try parseProgramText(gpa,
-        \\fn release(sink n: UInt8) -> () {}
+        \\fn release(sink n: UInt8) {}
         \\fn main() -> UInt8 { release(1); 2 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -8353,7 +8353,7 @@ test "qualified trait references parse in every trait position" {
         \\struct Item {}
         \\derive protocol.Marker for Item
         \\impl protocol.Parent for Item {}
-        \\fn accepts[T: protocol.Parent](_value: T) -> () where T: protocol.Parent {}
+        \\fn accepts[T: protocol.Parent](_value: T) where T: protocol.Parent {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -8915,7 +8915,7 @@ test "borrow and grouped types are valid nested arguments" {
     defer arena.deinit();
     const codes = try codesOf(arena.allocator(),
         \\struct Pair[A, B] { first: A, second: B }
-        \\fn accept(a: Pair[(), borrow UInt8], b: Pair[(UInt8), ()]) -> () {}
+        \\fn accept(a: Pair[(), borrow UInt8], b: Pair[(UInt8), ()]) {}
     );
     try testing.expectEqual(@as(usize, 0), codes.len);
 }
@@ -8941,7 +8941,7 @@ test "a structural callable is a written type and a bound" {
 
     const got = try parseProgramText(gpa,
         \\fn apply[F: fn(read value: UInt8 = 2) -> UInt8](f: F) -> UInt8 { f() }
-        \\fn keep(f: fn(read value: UInt8 = 2) -> UInt8) -> () {}
+        \\fn keep(f: fn(read value: UInt8 = 2) -> UInt8) {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -9096,7 +9096,7 @@ test "written selections follow applied grouped and chained bases" {
     const got = try parseProgramText(arena.allocator(),
         \\fn first[T](_value: Box[T].Item) -> module.Box[T].Item { panic("unused") }
         \\fn second[T](_value: (Box[T]).Item.Next) -> [UInt8; 2].Item { panic("unused") }
-        \\fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
+        \\fn third[T](_value: (fn(read value: T) -> T).Item) {}
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
     try testing.expect(std.mem.indexOf(u8, got.dump, "module.Box[T].Item") != null);
@@ -9109,7 +9109,7 @@ test "written selection missing member preserves following declarations" {
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "t.lin", .text =
-        \\fn broken[T](_value: Box[T].) -> () {}
+        \\fn broken[T](_value: Box[T].) {}
         \\fn main() -> UInt8 { 0 }
     };
     var sink = Sink.init(gpa);
@@ -9137,7 +9137,7 @@ test "written selection height includes its completed base" {
     try source.appendSlice(gpa, "UInt8");
     for (0..max_nesting / 2) |_| try source.append(gpa, ']');
     for (0..max_nesting / 2 + 1) |_| try source.appendSlice(gpa, ".Item");
-    try source.appendSlice(gpa, ") -> () {}\nfn main() -> UInt8 { 0 }");
+    try source.appendSlice(gpa, ") {}\nfn main() -> UInt8 { 0 }");
     const codes = try codesOf(gpa, source.items);
     const found = for (codes) |code| {
         if (code == .s_nesting) break true;
@@ -9549,7 +9549,7 @@ test "transparent observation contract paths settle projection order" {
     const gpa = arena.allocator();
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
-    const source: Source = .{ .path = "t.lin", .text = "fn inspect(view: borrow Holder) -> () where carries(*view.item, (*view).item, **view) {}" };
+    const source: Source = .{ .path = "t.lin", .text = "fn inspect(view: borrow Holder) where carries(*view.item, (*view).item, **view) {}" };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
     var ast = try parse(gpa, &source, .from(0), tokens, &sink);
     try testing.expectEqual(@as(u32, 0), sink.error_count);
@@ -9570,7 +9570,7 @@ test "transparent observation contract paths settle projection order" {
 test "transparent observation malformed contract paths recover" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const parsed = try parseProgramText(arena.allocator(), "fn broken(view: borrow UInt8) -> () where carries(*) {}\nfn next() -> UInt8 { 0 }");
+    const parsed = try parseProgramText(arena.allocator(), "fn broken(view: borrow UInt8) where carries(*) {}\nfn next() -> UInt8 { 0 }");
     try testing.expect(parsed.errors > 0);
     try testing.expect(std.mem.indexOf(u8, parsed.dump, "next") != null);
 }
@@ -9806,7 +9806,7 @@ test "where contract lists attach to the nearest callable and reject bare clause
         .{ .text = "fn make[T]() -> fn(value: T) -> T where carries(value) {}", .valid = true },
         .{ .text = "fn get(value: UInt8) -> UInt8 carries(value) { value }", .valid = false },
         .{ .text = "fn get(value: UInt8) -> UInt8 where carries(value) borrows(value) { value }", .valid = false },
-        .{ .text = "fn get(cb: fn(value: UInt8) -> UInt8 carries(value)) -> () {}", .valid = false },
+        .{ .text = "fn get(cb: fn(value: UInt8) -> UInt8 carries(value)) {}", .valid = false },
     };
     for (cases) |case| {
         const parsed = try parseProgramText(arena.allocator(), case.text);
@@ -9880,8 +9880,8 @@ test "bare match arm jumps end at the arm comma" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const cases = [_][]const u8{
-        "fn main() -> () { loop { match item { None => break, Some(_) => continue, } } }",
-        "fn main() -> () { match item { None => return, Some(_) => {}, } }",
+        "fn main() { loop { match item { None => break, Some(_) => continue, } } }",
+        "fn main() { match item { None => return, Some(_) => {}, } }",
         "fn main() -> UInt8 { loop { match item { None => break 7, Some(_) => continue, } } }",
     };
     for (cases) |source| {
@@ -9910,7 +9910,7 @@ test "generated suffix relocation matches parsing after application source" {
             "fn text(x: UInt8) -> Str { \"{x} {x:?}\" }\n" ++
             "fn range() -> UInt8 { let _r = 1..=3; 0 }\n" ++
             "impl Index[UInt64] for Board via scores\nimpl Board { trav positions via scores }\n" ++
-            "fn selected[T](sink value: (Box[T]).Item.Next) -> () { let _ = value }\n",
+            "fn selected[T](sink value: (Box[T]).Item.Next) { let _ = value }\n",
     };
     var cached = try Modules.initPrefix(gpa, &sink, &interner, &source);
     defer cached.deinit();

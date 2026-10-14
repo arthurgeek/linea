@@ -4448,7 +4448,7 @@ An arm's body may be an expression or a block, as in an `if`. An empty block
 computes nothing and has the value `()`, allowing an arm to do nothing:
 
 ```
-fn release(sink k: Key) -> () {
+fn release(sink k: Key) {
     match k { Forged(_) => {} }
 }
 ```

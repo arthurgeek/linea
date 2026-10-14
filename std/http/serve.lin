@@ -1348,7 +1348,7 @@ fn refuse[A: Allocator](inout connection: net.Connection, status: Status, alloca
 // Stop writing to `connection` and discard what the client still sends into
 // `discarded`, so closing it does not reset the connection before the client
 // reads the answer.
-fn linger[A: Allocator](inout connection: net.Connection, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) -> () {
+fn linger[A: Allocator](inout connection: net.Connection, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) {
     let stopped = &connection.shutdown_write().is_ok() && &connection.set_timeouts(linger_wait(read_timeout_ms), 0).is_ok()
     if !stopped {
         return
@@ -1384,13 +1384,13 @@ test fn a_linger_read_waits_no_longer_than_the_read_timeout() {
 // Close `connection` and ignore a failure: the descriptor is released either
 // way, and the response has already been delivered or lost, so a server has
 // nothing to do about it.
-fn close_connection(sink connection: net.Connection) -> () {
+fn close_connection(sink connection: net.Connection) {
     let _closed = connection.close()
 }
 
 // Reset `connection`, so the client reads an error rather than the end of a
 // response, and ignore a failure: the descriptor is released either way.
-fn reset_connection(sink connection: net.Connection) -> () {
+fn reset_connection(sink connection: net.Connection) {
     let _reset = connection.reset()
 }
 
@@ -1494,7 +1494,7 @@ impl[P: Allocator] Handler[(), P] for Recorded {
 }
 
 impl Observer for Recorded {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
             Exchanged(exchange) => {
                 self.exchanges += 1
@@ -1535,7 +1535,7 @@ impl[P: Allocator] Handler[(), P] for Announcer {
 }
 
 impl Observer for Announcer {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
             Listening(address) => self.report.info("announced", log.field("bound", address.port != 0)),
             Exchanged(_) => self.report.info("exchanged", ()),

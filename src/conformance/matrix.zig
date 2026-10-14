@@ -502,7 +502,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         .field => {
             try w.raw("import std.mem\n\nstruct Holder { items: Vec[UInt64, mem.SystemAllocator] }\n\n");
             if (operation == .reset_holder) try w.raw(
-                \\fn reset(inout holder: Holder) -> () {
+                \\fn reset(inout holder: Holder) {
                 \\    &holder.items.clear()
                 \\}
                 \\
@@ -512,7 +512,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         .scalar, .array => {},
     }
     if (cell.meeting == .deferred) try w.raw(
-        \\fn add(inout total: UInt64, amount: UInt64) -> () {
+        \\fn add(inout total: UInt64, amount: UInt64) {
         \\    total += amount
         \\}
         \\

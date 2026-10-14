@@ -3314,7 +3314,7 @@ fn smallOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
     try w.writeAll(
         "@linear enum Key { Forged(UInt8) }\n\n" ++
-            "fn release(sink key: Key) -> () {\n" ++
+            "fn release(sink key: Key) {\n" ++
             "    match key { Forged(_) => {} }\n" ++
             "}\n\n" ++
             "fn main() -> UInt8 {\n" ++
@@ -3343,7 +3343,7 @@ fn heavyOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
     try w.writeAll(
         "@linear enum Key { Forged(UInt8) }\n\n" ++
-            "fn release(sink key: Key) -> () {\n" ++
+            "fn release(sink key: Key) {\n" ++
             "    match key { Forged(_) => {} }\n" ++
             "}\n\n" ++
             "fn main() -> UInt8 {\n" ++
@@ -3708,9 +3708,9 @@ fn reflectionComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
 
     try w.writeAll(
-        "trait Visit { fn visit(sink self: Self) -> () }\n\n" ++
+        "trait Visit { fn visit(sink self: Self) }\n\n" ++
             "template impl Visit {\n" ++
-            "    fn visit(sink _self: Self) -> () {\n" ++
+            "    fn visit(sink _self: Self) {\n" ++
             "        match _self { reflect.case => {\n" ++
             "            for component in reflect.components {\n" ++
             "                let _ = component.of(_self)\n" ++
@@ -3842,9 +3842,9 @@ fn reflectedEnumPayloadsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
 
     try w.writeAll(
-        "trait VisitPayloads { fn visit(sink self: Self) -> () }\n\n" ++
+        "trait VisitPayloads { fn visit(sink self: Self) }\n\n" ++
             "template impl VisitPayloads {\n" ++
-            "    fn visit(sink self: Self) -> () {\n" ++
+            "    fn visit(sink self: Self) {\n" ++
             "        match self { reflect.case => {\n" ++
             "            for component in reflect.components {\n" ++
             "                let _ordinal: UInt64 = component.ordinal\n" ++
@@ -3979,7 +3979,7 @@ fn genericDerivePredicatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     );
     for (0..n) |_| try w.writeAll("    T: Predicate,\n");
     try w.writeAll(
-        "\nfn _hold[T](_value: GenericTarget[T]) -> () {}\n\n" ++
+        "\nfn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
             "fn main() -> UInt8 { 0 }\n",
     );
     return out.toOwnedSlice();
@@ -13015,7 +13015,7 @@ test "source bound identity folds callable defaults" {
         \\    A: Give[fn(read value: UInt8 = 1 + 1) -> UInt8],
         \\    B: Give[fn(read value: UInt8 = 2) -> UInt8],
         \\    C: Give[fn(read value: UInt8 = 3) -> UInt8],
-        \\](_a: A, _b: B, _c: C) -> () {}
+        \\](_a: A, _b: B, _c: C) {}
         ,
     };
     var sink = Sink.init(gpa);
@@ -20283,7 +20283,7 @@ test "body type annotations receive every settled-reference oracle visit" {
     var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
         \\trait Has { type Item: Copyable }
         \\struct Cell[X] { value: X }
-        \\fn _invoke[T: Has](value: T.Item) -> () {
+        \\fn _invoke[T: Has](value: T.Item) {
         \\    let _direct = [value] || -> T.Item where carries(value) copy(value)
         \\    let _grouped = [value] || -> (T.Item) where carries(value) copy(value)
         \\    let _array = [value] || -> [T.Item; 1] where carries(value) [copy(value)]

@@ -6,7 +6,7 @@
 // return type, and the caller is what observes it. Reporting the parameter
 // unused would make this function unwritable except as `_n`, which claims the
 // value is not wanted when it is the only thing wanted.
-fn set(inout n: UInt8) -> () {
+fn set(inout n: UInt8) {
     n = 7
 }
 
@@ -14,7 +14,7 @@ struct Point { x: UInt8, y: UInt8 }
 
 // Through a field, where the binding is named to reach a part of it. The part
 // is what the caller reads back, so naming it is a use for the same reason.
-fn shift(inout p: Point) -> () {
+fn shift(inout p: Point) {
     p.x = 3
 }
 

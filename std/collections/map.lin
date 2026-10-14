@@ -122,7 +122,7 @@ impl[K: Release, V: Release] release.Settle for InsertFailure[K, V] {
 struct MapBadge { id: UInt64 }
 
 impl Release for MapBadge {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let MapBadge { id: _ } = self
     }
 }
@@ -246,7 +246,7 @@ struct Map[K, V, A: Allocator = mem.SystemAllocator] {
 
 // Discard a bucket that holds no entry. An occupied bucket panics, because
 // discarding it would lose its entry.
-fn empty_bucket[K, V](sink slot: Bucket[K, V]) -> () {
+fn empty_bucket[K, V](sink slot: Bucket[K, V]) {
     match slot {
         Empty => {},
         Tombstone => {},
@@ -259,7 +259,7 @@ fn empty_bucket[K, V](sink slot: Bucket[K, V]) -> () {
 // each bucket from the end so none is shifted, and panics on an entry, which
 // would be lost. `Map.finish` and `Drain.finish` call it once their entries
 // are gone.
-fn finish_empty_buckets[K, V, A: Allocator](sink slots: Vec[Bucket[K, V], A]) -> () {
+fn finish_empty_buckets[K, V, A: Allocator](sink slots: Vec[Bucket[K, V], A]) {
     var empty = slots
     loop {
         let bucket = &empty.pop() else {
@@ -484,12 +484,12 @@ impl[K, V, A: Allocator] Map[K, V, A] {
         }
     }
 
-    fn restore_at(inout self: Self, index: UInt64, code: UInt64, sink entry: Entry[K, V]) -> () where retains(self: entry) {
+    fn restore_at(inout self: Self, index: UInt64, code: UInt64, sink entry: Entry[K, V]) where retains(self: entry) {
         let incoming: Bucket[K, V] = .Full(code, entry)
         empty_bucket(mem.exchange(&self.slots[index], incoming))
     }
 
-    fn transform_at[F: inout fn(sink value: V) -> V](inout self: Self, index: UInt64, inout transform: F) -> () where retains(self: transform) {
+    fn transform_at[F: inout fn(sink value: V) -> V](inout self: Self, index: UInt64, inout transform: F) where retains(self: transform) {
         let Resident { code, entry } = &self.take_at(index)
         let Entry { key: stored, value } = entry
         &self.restore_at(index, code, .{ key = stored, value = &transform(value) })
@@ -512,7 +512,7 @@ impl[K, V, A: Allocator] Map[K, V, A] {
 
     // Fill the bucket at `index` and count the entry. Filling an empty bucket,
     // rather than a tombstone, also counts one more used bucket.
-    fn install(inout self: Self, index: UInt64, code: UInt64, sink entry: Entry[K, V]) -> () where retains(self: entry) {
+    fn install(inout self: Self, index: UInt64, code: UInt64, sink entry: Entry[K, V]) where retains(self: entry) {
         let incoming: Bucket[K, V] = .Full(code, entry)
         match mem.exchange(&self.slots[index], incoming) {
             Empty => self.used += 1,
@@ -1528,7 +1528,7 @@ test fn finish_returns_a_map_that_still_holds_entries() {
 // be used for that type held in a `Vec` in generic code: releasing a
 // `Vec[Map[K, V, A], A]` there would be refused.
 impl[K: Release, V: Release, A: Allocator] Release for Map[K, V, A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Map { slots, allocator: _, len: _, used: _ } = self
         slots.release()
     }
@@ -1537,13 +1537,13 @@ impl[K: Release, V: Release, A: Allocator] Release for Map[K, V, A] {
 // Releasing a drain releases the entries it has not handed out. It is written
 // out for the reason `Map`'s release is.
 impl[K: Release, V: Release, A: Allocator] Release for Drain[K, V, A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Drain { slots, remaining: _ } = self
         slots.release()
     }
 }
 
-fn release_maps[K: Release, V: Release, A: Allocator](sink maps: Vec[Map[K, V, A], A]) -> () {
+fn release_maps[K: Release, V: Release, A: Allocator](sink maps: Vec[Map[K, V, A], A]) {
     maps.release()
 }
 
@@ -1555,7 +1555,7 @@ test fn maps_held_in_a_vector_release_in_generic_code() {
     release_maps(maps)
 }
 
-fn release_drains[K: Release, V: Release, A: Allocator](sink drains: Vec[Drain[K, V, A], A]) -> () {
+fn release_drains[K: Release, V: Release, A: Allocator](sink drains: Vec[Drain[K, V, A], A]) {
     drains.release()
 }
 

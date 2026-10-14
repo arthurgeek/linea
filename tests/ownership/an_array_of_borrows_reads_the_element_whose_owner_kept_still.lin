@@ -2,7 +2,7 @@
 // one element, and the other element is still read.
 struct Box { value: UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

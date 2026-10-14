@@ -1,4 +1,4 @@
-fn discard[T](sink _value: T) -> ()
+fn discard[T](sink _value: T)
 where T: Discardable {}
 
 fn main() -> UInt8 {

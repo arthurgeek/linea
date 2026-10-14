@@ -7,7 +7,7 @@ struct Pair { left: borrow UInt64, right: borrow UInt64 }
 
 struct Holder { cells: [Pair; 2], tail: borrow UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

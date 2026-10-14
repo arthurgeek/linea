@@ -128,11 +128,11 @@ test "observation forwarding examines the entire trait surface" {
         \\pub struct Box[T] { value: T }
         \\pub trait Readable { fn read_it(self: Self) -> UInt8 }
         \\pub trait Grouped { fn inspect(self: (Self)) -> UInt8 }
-        \\pub trait Mixed { fn read_it(self: Self) -> UInt8; fn change(inout self: Self) -> () }
-        \\pub trait Consuming { fn take(sink self: Self) -> () }
+        \\pub trait Mixed { fn read_it(self: Self) -> UInt8; fn change(inout self: Self) }
+        \\pub trait Consuming { fn take(sink self: Self) }
         \\pub trait Returning { fn make() -> Self }
-        \\pub trait Nested { fn nested(self: Box[Self]) -> () }
-        \\pub trait Callback { fn callback(self: Self, call: fn(read x: Self) -> ()) -> () }
+        \\pub trait Nested { fn nested(self: Box[Self]) }
+        \\pub trait Callback { fn callback(self: Self, call: fn(read x: Self)) }
         \\pub trait Projection { type Item; fn get(self: Self) -> Self.Item }
         \\pub trait Independent[T] { fn inspect(self: Self, other: T) -> UInt8 }
     ,
@@ -145,7 +145,7 @@ test "observation forwarding includes transitive supertraits and their arguments
         \\pub trait Readable { fn read_it(self: Self) -> UInt8 }
         \\pub trait Parent: Readable {}
         \\pub trait Child: Parent {}
-        \\pub trait Mutable { fn change(inout self: Self) -> () }
+        \\pub trait Mutable { fn change(inout self: Self) }
         \\pub trait Middle: Mutable {}
         \\pub trait Leaf: Middle {}
         \\pub trait Generic[T] { fn inspect(self: Self, other: T) -> UInt8 }

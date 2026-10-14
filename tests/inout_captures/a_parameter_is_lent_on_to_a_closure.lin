@@ -1,6 +1,6 @@
 // `restock` lends its `inout` parameter on to a closure. The caller sees
 // every change the closure made.
-fn restock(inout shelf: UInt8, crates: UInt8) -> () {
+fn restock(inout shelf: UInt8, crates: UInt8) {
     var unload = inout [inout shelf] |crate: UInt8| {
         shelf += crate
     }

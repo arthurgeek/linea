@@ -2,7 +2,7 @@ trait Source {
     type Item
 }
 
-fn _release[I: Source]() -> fn(sink _item: I.Item) -> ()
+fn _release[I: Source]() -> fn(sink _item: I.Item)
 where I.Item: Discardable {
     |sink _item| {}
 }

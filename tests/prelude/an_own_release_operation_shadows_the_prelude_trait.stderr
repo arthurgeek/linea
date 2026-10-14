@@ -1,5 +1,5 @@
 warning[N-Shadowed]: `Ticket` declares `release` itself, so a postfix call in this module reaches that one rather than this; a call elsewhere reaches this one
   --> tests/prelude/an_own_release_operation_shadows_the_prelude_trait.lin:15:8
    |
-15 |     fn release(sink self: Ticket) -> () {
+15 |     fn release(sink self: Ticket) {
    |        ^^^^^^^ reach it as `Release.release(self)`

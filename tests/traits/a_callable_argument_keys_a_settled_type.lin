@@ -12,7 +12,7 @@ impl Holds[fn(read value: UInt8 = 1 + 1) -> UInt8] for Holder {
 
 fn _reads[
     H: Holds[fn(read value: UInt8 = 2) -> UInt8],
-](_holder: H, _item: H.Item) -> () {}
+](_holder: H, _item: H.Item) {}
 
 fn main() -> UInt8 {
     let _holder: Holder = .{ value = 0 }

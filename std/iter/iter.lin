@@ -181,7 +181,7 @@ pub trait Sequence {
     }
 
     // Hand every item to `visit`, in order. `visit` is dropped at the end.
-    fn for_each[F: inout fn(sink item: Self.Iter.Item) -> ()](sink self: Self, sink visit: F) -> () where
+    fn for_each[F: inout fn(sink item: Self.Iter.Item)](sink self: Self, sink visit: F) where
         Self.Iter: Discardable,
         F: Discardable
     {
@@ -191,7 +191,7 @@ pub trait Sequence {
 
     // Visit every item as `for_each` does, with a visitor whose state the
     // caller keeps.
-    fn for_each_inout[F: inout fn(sink item: Self.Iter.Item) -> ()](sink self: Self, inout visit: F) -> () where Self.Iter: Discardable {
+    fn for_each_inout[F: inout fn(sink item: Self.Iter.Item)](sink self: Self, inout visit: F) where Self.Iter: Discardable {
         var walking = self.iterate()
         loop {
             match &walking.next() {
@@ -392,7 +392,7 @@ impl Iterator for TicketCounter {
 }
 
 impl Release for TicketCounter {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let TicketCounter { at: _, stop: _ } = self
     }
 }
@@ -418,7 +418,7 @@ impl Iterator for TransactionCursor {
     }
 }
 
-fn rollback_cursor(sink cursor: TransactionCursor) -> () {
+fn rollback_cursor(sink cursor: TransactionCursor) {
     let TransactionCursor { at: _, stop: _ } = cursor
 }
 
@@ -449,7 +449,7 @@ impl Iterator for TokenCounter {
 }
 
 // Settle a token.
-fn consume_token(sink item: Token) -> () {
+fn consume_token(sink item: Token) {
     match item {
         Number(_) => {},
     }
@@ -490,7 +490,7 @@ impl Iterator for LoggedCursor {
 }
 
 impl Release for LoggedCursor {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let LoggedCursor { tag, visited: _ } = self
         tag.release()
     }
@@ -717,7 +717,7 @@ impl[
     U,
     F: inout fn(sink item: I.Item) -> U + Discardable,
 ] Release for Map[I, U, F] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Map { iterator, transform: _ } = self
         iterator.release()
     }
@@ -962,7 +962,7 @@ impl[
     U,
     F: inout fn(sink item: I.Item) -> Option[U] + Discardable,
 ] Release for FilterMap[I, U, F] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let FilterMap { iterator, transform: _ } = self
         iterator.release()
     }
@@ -1112,7 +1112,7 @@ impl[
     I: Iterator + Release,
     F: inout fn(read item: I.Item) -> Bool + Discardable,
 ] Release for Filter[I, F] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Filter { iterator, predicate: _ } = self
         iterator.release()
     }
@@ -1247,7 +1247,7 @@ test fn enumerate_into_inner_returns_the_advanced_iterator() {
 }
 
 impl[I: Iterator + Release] Release for Enumerate[I] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Enumerate { iterator, position: _ } = self
         iterator.release()
     }
@@ -1323,7 +1323,7 @@ test fn zip_recovers_both_sources_as_far_as_each_advanced() {
 // Releasing a zip settles the second source and then the first, last component
 // first as a tuple's derived Release does.
 impl[A: Iterator + Release, B: Iterator + Release] Release for Zip[A, B] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Zip { first, second } = self
         second.release()
         first.release()
@@ -1384,7 +1384,7 @@ test fn take_into_inner_returns_the_advanced_iterator() {
 }
 
 impl[I: Iterator + Release] Release for Take[I] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Take { iterator, remaining: _ } = self
         iterator.release()
     }
@@ -1449,7 +1449,7 @@ test fn skip_into_inner_returns_the_advanced_iterator() {
 }
 
 impl[I: Iterator + Release] Release for Skip[I] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Skip { iterator, remaining: _ } = self
         iterator.release()
     }
@@ -1503,7 +1503,7 @@ fn fold_one_inout[
     A,
     T,
     F: inout fn(sink accumulator: A, sink item: T) -> A where carries(accumulator, item),
-](inout accumulator: A, sink item: T, inout combine: F) -> () where retains(accumulator: item, combine) {
+](inout accumulator: A, sink item: T, inout combine: F) where retains(accumulator: item, combine) {
     accumulator = &combine(accumulator, item)
 }
 

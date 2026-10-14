@@ -6,7 +6,7 @@ fn finish(sink transaction: Transaction) -> UInt8 {
     number
 }
 
-fn settle[F: Release](sink callback: F) -> () {
+fn settle[F: Release](sink callback: F) {
     callback.release()
 }
 

@@ -3,20 +3,18 @@ program decls=5
     in HasCallable
     requires fn(read value: UInt8) -> UInt8
   decl trait_ "HasCallable" tokens 0..16
-  decl function "_needs_callable" tokens 16..41
+  decl function "_needs_callable" tokens 16..38
     type param "F" : fn(read value: UInt8) -> UInt8
     param read "_value" : F
-    returns (
-    expr %0 block tokens 39..41
-  decl function "_forwards" tokens 41..64
+    expr %0 block tokens 36..38
+  decl function "_forwards" tokens 38..58
     type param "H" : HasCallable
     param read "value" : H.Item
-    returns (
-    expr %4 block tokens 58..64
-      expr %3 call tokens 59..63
-        expr %1 name_ref tokens 59..60 "_needs_callable"
-        expr %2 name_ref tokens 61..62 "value"
-  decl function "main" tokens 64..73
+    expr %4 block tokens 52..58
+      expr %3 call tokens 53..57
+        expr %1 name_ref tokens 53..54 "_needs_callable"
+        expr %2 name_ref tokens 55..56 "value"
+  decl function "main" tokens 58..67
     returns UInt8
-    expr %6 block tokens 70..73
-      expr %5 int_literal tokens 71..72 "0"
+    expr %6 block tokens 64..67
+      expr %5 int_literal tokens 65..66 "0"

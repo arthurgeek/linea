@@ -1,6 +1,6 @@
 struct Point { x: UInt8 }
 
-fn shift(inout point: Point, by: UInt8) -> () {
+fn shift(inout point: Point, by: UInt8) {
     point.x = point.x + by
 }
 

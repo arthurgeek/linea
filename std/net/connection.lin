@@ -128,7 +128,7 @@ impl Connection {
     // a byte at a time therefore cannot keep a reader waiting beyond the
     // deadline, as it can with per-read timeouts alone. Zero sets no deadline.
     // `set_timeouts` ends the deadline.
-    pub fn set_deadline(inout self: Self, started: time.Instant, within_ms: UInt64) -> () {
+    pub fn set_deadline(inout self: Self, started: time.Instant, within_ms: UInt64) {
         if within_ms == 0 {
             self.deadline = .None
         } else {
@@ -315,7 +315,7 @@ test fn a_reset_connection_is_reset_at_its_peer() {
 }
 
 impl Release for Connection {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
         let _closed = close_descriptor(fd)
     }

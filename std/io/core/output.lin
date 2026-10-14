@@ -56,7 +56,7 @@ test fn println_ends_the_value_with_a_line_on_standard_output() {
 
 // Render `x` to `w` and ignore a failed write. `eprint` writes to standard
 // error this way.
-fn eprint_to[T: Display, W: Writer](x: T, inout w: W) -> () where W.Error: Discardable {
+fn eprint_to[T: Display, W: Writer](x: T, inout w: W) where W.Error: Discardable {
     match x.fmt(&w) {
         _ => {},
     }
@@ -64,7 +64,7 @@ fn eprint_to[T: Display, W: Writer](x: T, inout w: W) -> () where W.Error: Disca
 
 // Render `x` to standard error and ignore a failed write: standard-error
 // output is best-effort debugging output.
-pub fn eprint[T: Display](x: T) -> () {
+pub fn eprint[T: Display](x: T) {
     var w = stderr()
     eprint_to(x, &w)
 }
@@ -86,14 +86,14 @@ test fn eprint_renders_a_value_and_ignores_a_refused_write() {
 
 // Render `x` and a line ending to `w`, and ignore a failed write. `eprintln`
 // writes to standard error this way.
-fn eprintln_to[T: Display, W: Writer](x: T, inout w: W) -> () where W.Error: Discardable {
+fn eprintln_to[T: Display, W: Writer](x: T, inout w: W) where W.Error: Discardable {
     match line(x, &w) {
         _ => {},
     }
 }
 
 // Render `x` and a line ending to standard error, and ignore a failed write.
-pub fn eprintln[T: Display](x: T) -> () {
+pub fn eprintln[T: Display](x: T) {
     var w = stderr()
     eprintln_to(x, &w)
 }

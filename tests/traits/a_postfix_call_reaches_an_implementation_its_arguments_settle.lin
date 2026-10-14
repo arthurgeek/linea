@@ -4,7 +4,7 @@
 // `Watch[Bool]`, settled by its argument exactly as `Watch.observe(&tally,
 // true)` is.
 trait Watch[P] {
-    fn observe(inout self: Self, event: P) -> ()
+    fn observe(inout self: Self, event: P)
 }
 
 struct Tally {
@@ -12,7 +12,7 @@ struct Tally {
 }
 
 impl[P] Watch[P] for Tally {
-    fn observe(inout self: Self, _event: P) -> () {
+    fn observe(inout self: Self, _event: P) {
         self.count += 1
     }
 }
@@ -24,7 +24,7 @@ struct Layer[W] {
 }
 
 impl[P, W: Watch[P]] Watch[P] for Layer[W] {
-    fn observe(inout self: Self, event: P) -> () {
+    fn observe(inout self: Self, event: P) {
         &self.inner.observe(event)
     }
 }

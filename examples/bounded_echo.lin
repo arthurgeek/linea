@@ -151,7 +151,7 @@ fn run_serve(options: ServeOptions) -> UInt8 {
 // writing any of it back: once a `BufferedReader` owns the connection, only
 // it can read from that connection until reading finishes. Each connection
 // logs one line: how many lines it echoed to `peer`, or why it failed.
-fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: log.Logger[io.Descriptor], bounds: Bounds) -> () {
+fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: log.Logger[io.Descriptor], bounds: Bounds) {
     // `set_timeouts` bounds each read and each write, and `set_deadline` bounds
     // all the reads together, so a client that stays silent, or sends a
     // byte at a time, cannot hold the server past `session_ms`.

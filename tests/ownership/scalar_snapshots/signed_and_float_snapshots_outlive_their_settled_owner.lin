@@ -1,7 +1,7 @@
 @linear
 struct Owner { signed: Int64, fraction: Float64 }
 
-fn close(sink owner: Owner) -> () {
+fn close(sink owner: Owner) {
     let Owner { signed: _signed, fraction: _fraction } = owner
 }
 

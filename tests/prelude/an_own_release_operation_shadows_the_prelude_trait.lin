@@ -12,7 +12,7 @@ impl Ticket {
 }
 
 impl Release for Ticket {
-    fn release(sink self: Ticket) -> () {
+    fn release(sink self: Ticket) {
         let Ticket { seat: _seat } = self
     }
 }

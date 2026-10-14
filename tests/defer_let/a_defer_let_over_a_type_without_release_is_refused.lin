@@ -11,7 +11,7 @@ impl Transfer {
         cents
     }
 
-    fn rollback(sink self: Self) -> () {
+    fn rollback(sink self: Self) {
         let Transfer { cents: _ } = self
     }
 }

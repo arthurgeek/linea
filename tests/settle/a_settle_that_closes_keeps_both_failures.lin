@@ -27,7 +27,7 @@ impl Door {
 }
 
 impl Release for Door {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         match self.close() {
             _ => {},
         }

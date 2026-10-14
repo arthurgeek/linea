@@ -11,7 +11,7 @@ import std.testing
 // log of its own: `http.logged` turns events into log lines. `listen_and_serve`
 // also calls `observe` once with `Listening` when serving can begin.
 pub trait Observer {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> ()
+    fn observe[P: Allocator](inout self: Self, event: Event[P])
 }
 
 // Every type ignores events unless it implements `Observer` itself, so a
@@ -19,7 +19,7 @@ pub trait Observer {
 // implements `Observer` and passes each event on to the handler it holds, or
 // that handler and anything around it never sees them.
 default impl[T] Observer for T {
-    fn observe[P: Allocator](inout _self: Self, _event: Event[P]) -> () {}
+    fn observe[P: Allocator](inout _self: Self, _event: Event[P]) {}
 }
 
 // An `Event` is what `serve` tells its handler through `Observer.observe`: an

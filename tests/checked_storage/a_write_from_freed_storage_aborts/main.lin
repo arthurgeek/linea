@@ -2,7 +2,7 @@
 // I/O error or writing whatever the storage holds.
 extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
 
-extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
 
 extern fn linea_write_some(fd: Int32, at: UInt64, len: UInt64) -> Int64
 

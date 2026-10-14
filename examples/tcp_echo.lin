@@ -115,7 +115,7 @@ fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
 
 // Send everything the client sent back to it. A client shuts down its side
 // when it has sent everything, which is what ends `read_all`.
-fn echo(inout connection: net.Connection, client: net.Address) -> () {
+fn echo(inout connection: net.Connection, client: net.Address) {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let received = io.read_all_in(arena.handle(), &connection, max_bytes: 4096) else |failure| {
         io.eprintln("cannot read from {client}: {failure}")
