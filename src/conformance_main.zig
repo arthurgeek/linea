@@ -9455,8 +9455,8 @@ const Recovery = struct {
 /// **The statement skip** in `endStatement` -- a statement no separator ended,
 /// skipped forward to the next thing that may begin one.
 ///
-/// **The declaration recoveries** -- a function with no body, a function with
-/// no return type, `stepOverTypeIntruders` for a type whose braces held a
+/// **The declaration recoveries** -- a function with no body, a function
+/// writing `-> ()`, `stepOverTypeIntruders` for a type whose braces held a
 /// member, and the skip to the next declaration for a token that begins none.
 ///
 /// The sites reached only by a trailing dot are not here. After a dot the
@@ -9480,9 +9480,9 @@ const recovery_shapes = [_]Recovery{
     .{ .where = .at_a_statement, .reports = "S-Equals", .written = "let _next" },
     // Two statements on one line, which `endStatement` skips out of.
     .{ .where = .at_a_statement, .reports = "S-Separator", .written = "_held 1" },
-    // A function with no body, and one that says nothing about what it returns.
+    // A function with no body, and one writing the `-> ()` it should leave out.
     .{ .where = .before_a_function, .reports = "S-Brace", .written = "fn _headless() -> UInt8\n\n" },
-    .{ .where = .before_a_function, .reports = "S-Type", .written = "fn _returnless() {\n    0\n}\n\n" },
+    .{ .where = .before_a_function, .reports = "S-UnitResult", .written = "fn _unit() -> () {}\n\n" },
     // A type whose braces held what an `impl` holds, which
     // `stepOverTypeIntruders` skips through the member's own braces.
     .{
