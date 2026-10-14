@@ -1,0 +1,15 @@
+// A test calling an operation whose trait is declared in `my-lib/ledger`. No
+// import can name that directory, so no import brings the trait into scope.
+import shapes
+
+fn main() -> UInt8 {
+    0
+}
+
+test fn a_box_counts_its_size() -> Result[(), UInt8] {
+    let b = shapes.Box { size = 3 }
+    if b.count() == 3 {
+        return .Ok(())
+    }
+    return .Err(1)
+}

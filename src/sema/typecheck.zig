@@ -2820,6 +2820,15 @@ pub const Reach = struct {
         }
     }
 
+    /// Whether a `use` could bring `trait` into scope: its module is one an
+    /// import can name. A trait declared beneath a directory such as `my-lib`
+    /// is reached by no import, so it is not offered as missing a `use`.
+    fn usable(self: Reach, trait: node.DeclId) bool {
+        const m = self.moduleOf(trait);
+        if (m == .none or m.index() >= self.source_program.modules.len) return true;
+        return self.source_program.get(m).importable;
+    }
+
     fn memberTakes(self: Reach, member: node.DeclId, kind: MemberSought) bool {
         return memberSought(self.ast, member, kind);
     }
@@ -2989,6 +2998,7 @@ pub const Reach = struct {
                 }
                 if (self.res.seesTrait(self.from, trait) or !self.memberTakes(row.member, kind)) continue;
                 if (std.mem.indexOfScalar(node.DeclId, bounded.items, trait) != null) continue;
+                if (!self.usable(trait)) continue;
                 if (applicable == null) applicable = try self.answersDirectly(gpa, held, trait);
                 if (!applicable.?) continue;
                 try out.append(gpa, .{ .sig = row.member, .trait = trait });
@@ -3001,6 +3011,7 @@ pub const Reach = struct {
         for (self.res.traits) |trait| {
             if (self.res.seesTrait(self.from, trait)) continue;
             if (std.mem.indexOfScalar(node.DeclId, bounded.items, trait) != null) continue;
+            if (!self.usable(trait)) continue;
             if (!try self.answersDirectly(gpa, held, trait)) continue;
 
             var declared = self.res.signatures.of(self.ast, trait);

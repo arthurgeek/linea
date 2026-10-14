@@ -1,0 +1,4 @@
+// A type that a module no import can name implements a trait for.
+pub struct Box {
+    size: UInt8,
+}

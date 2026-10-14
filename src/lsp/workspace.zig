@@ -4,7 +4,6 @@ const testing = std.testing;
 const loader = @import("../driver/loader.zig");
 const source_mod = @import("../support/source.zig");
 const exports = @import("exports.zig");
-const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
 const RootId = @import("../syntax/program.zig").RootId;
 const Reach = @import("../sema/resolve.zig").Reach;
 
@@ -167,14 +166,7 @@ pub fn importOf(gpa: std.mem.Allocator, root: []const u8, dir: []const u8) !?[]c
     if (!std.mem.startsWith(u8, to, from)) return null;
     if (from.len > 0 and to[from.len] != '/') return null;
     const under = if (from.len > 0) to[from.len + 1 ..] else to;
-
-    var elements = std.mem.splitScalar(u8, under, '/');
-    var first = true;
-    while (elements.next()) |element| {
-        if (!try isIdentifier(gpa, element)) return null;
-        if (first and std.mem.eql(u8, element, loader.standard_dependency)) return null;
-        first = false;
-    }
+    if (!try loader.importable(gpa, under)) return null;
 
     const written = try gpa.dupe(u8, under);
     for (written) |*byte| {

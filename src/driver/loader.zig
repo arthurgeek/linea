@@ -1,6 +1,7 @@
 const std = @import("std");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
+const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
 const testing = std.testing;
 const library = @import("library.zig");
 
@@ -611,6 +612,37 @@ test "disk loading reads source bytes only for reached modules" {
 /// string, which `rootOfEntry` reads as "no directory given" and resolves to
 /// the working one, so naming the root would silently compile something else
 /// entirely.
+/// Whether an import can name the directory at `relative`, a `/`-separated
+/// path beneath a program's root.
+///
+/// The loader follows the identifiers an import path was lexed into, so every
+/// directory name on the path has to be one: a name the lexer reads as
+/// anything else, such as `my-lib` or `a.b`, has no import that spells it. A
+/// path whose first element is `std` names the standard library wherever it
+/// appears, so a program's own directory of that name is one no import
+/// reaches either.
+pub fn importable(gpa: std.mem.Allocator, relative: []const u8) std.mem.Allocator.Error!bool {
+    var elements = std.mem.splitScalar(u8, relative, '/');
+    if (std.mem.eql(u8, elements.first(), standard_dependency)) return false;
+    return elementsAreIdentifiers(gpa, relative);
+}
+
+fn elementsAreIdentifiers(gpa: std.mem.Allocator, relative: []const u8) std.mem.Allocator.Error!bool {
+    var elements = std.mem.splitScalar(u8, relative, '/');
+    while (elements.next()) |element| {
+        if (!try isIdentifier(gpa, element)) return false;
+    }
+    return true;
+}
+
+test "an import names a directory whose every name is an identifier, outside `std`" {
+    try testing.expect(try importable(testing.allocator, "app/util"));
+    try testing.expect(!try importable(testing.allocator, "my-lib/ledger"));
+    try testing.expect(!try importable(testing.allocator, "a.b"));
+    try testing.expect(!try importable(testing.allocator, "std/mem"));
+    try testing.expect(try importable(testing.allocator, "tools/std"));
+}
+
 pub fn trimmedEntry(entry: []const u8) []const u8 {
     if (entry.len > 1 and entry[entry.len - 1] == '/') return entry[0 .. entry.len - 1];
     return entry;
@@ -1422,6 +1454,7 @@ const Loader = struct {
             .imports = &.{},
         });
         transferred = true;
+        self.modules.items[id.index()].importable = try self.importableDir(owned_dir);
         const route = try self.routeTo(owned_dir);
         self.routes.append(self.gpa, route) catch |err| {
             self.gpa.free(route);
@@ -1451,6 +1484,19 @@ const Loader = struct {
         self.modules.items[id.index()].imports = try imports.toOwnedSlice(self.gpa);
 
         return id;
+    }
+
+    /// Whether an import can name the loaded directory `dir`. The embedded
+    /// library's directories are named by imports through `std`, and the
+    /// root's own module is reached by no import, which `Program.importRoute`
+    /// answers by its empty route.
+    fn importableDir(self: *Loader, dir: []const u8) std.mem.Allocator.Error!bool {
+        if (self.in_library or std.mem.eql(u8, dir, self.primary_dir)) return true;
+        const start = self.primary_dir.len + @intFromBool(self.primary_dir.len > 0);
+        // The library compiled as itself names its modules through `std`, so
+        // only what lies beneath its root has to be spelled by identifiers.
+        if (self.program_is_library) return elementsAreIdentifiers(self.gpa, dir[start..]);
+        return importable(self.gpa, dir[start..]);
     }
 
     /// Retains the canonical import spelling for one loaded directory.
