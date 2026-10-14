@@ -249,6 +249,14 @@ The library tests itself.
   ok    hash.structural_hashing_preserves_field_order_and_variant_identity
   ok    hash.unit_hashes_are_deterministic
   ok    hash.unit_queries_match
+  ok    html.an_attribute_value_cannot_end_its_quotes
+  ok    html.escape_writes_into_any_writer_and_appends
+  ok    html.escaped_text_reads_in_an_interpolation
+  ok    html.every_special_character_in_a_row_is_replaced
+  ok    html.special_characters_are_written_as_entities
+  ok    html.special_characters_beside_multi_byte_text_keep_the_text_whole
+  ok    html.text_that_is_already_escaped_is_escaped_again
+  ok    html.text_without_special_characters_is_written_unchanged
   ok    http.a_bare_lf_ends_a_line
   ok    http.a_body_holds_exactly_its_length
   ok    http.a_body_is_text_only_when_it_is_utf8
@@ -262,6 +270,10 @@ The library tests itself.
   ok    http.a_cgi_request_answers_each_limits_status_one_past_the_bound
   ok    http.a_client_reset_before_accept_never_stops_serving_and_the_next_is_served
   ok    http.a_client_sent_number_is_never_logged
+  ok    http.a_cookie_error_displays_its_reason
+  ok    http.a_cookie_is_cleared_with_an_empty_expired_value
+  ok    http.a_cookie_is_set_with_the_attributes_given
+  ok    http.a_cookie_refused_for_memory_leaves_no_header
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
   ok    http.a_decode_error_answers_by_whose_mistake_it_is
   ok    http.a_decoded_path_is_encoded_again_into_the_target
@@ -299,6 +311,7 @@ The library tests itself.
   ok    http.a_literal_beats_a_parameter_at_the_same_position
   ok    http.a_logged_router_logs_each_exchange_it_serves
   ok    http.a_malformed_header_is_refused
+  ok    http.a_malformed_pair_is_skipped_and_the_others_survive
   ok    http.a_malformed_pattern_is_refused
   ok    http.a_malformed_request_is_answered_and_serving_continues
   ok    http.a_malformed_request_is_refused_before_the_handler
@@ -310,6 +323,7 @@ The library tests itself.
   ok    http.a_method_pattern_beats_a_methodless_one
   ok    http.a_method_token_names_its_method_exactly
   ok    http.a_missing_request_method_answers_nothing
+  ok    http.a_name_that_is_not_a_token_is_refused
   ok    http.a_named_code_finds_its_variant
   ok    http.a_new_error_has_its_status_and_no_message
   ok    http.a_new_header_list_is_empty
@@ -324,6 +338,7 @@ The library tests itself.
   ok    http.a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting
   ok    http.a_path_ends_at_the_query
   ok    http.a_path_is_refused_when_no_router_matched
+  ok    http.a_path_or_domain_that_could_end_the_cookie_is_refused
   ok    http.a_path_reads_a_struct_by_name_or_its_only_value
   ok    http.a_path_reads_its_fields_from_the_path_values
   ok    http.a_path_value_decodes_escapes_after_matching
@@ -331,6 +346,8 @@ The library tests itself.
   ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
+  ok    http.a_prefixed_cookie_is_cleared_with_secure
+  ok    http.a_prefixed_cookie_keeps_the_rules_its_prefix_names
   ok    http.a_query_answers_a_refusal_of_a_params_of_its_own
   ok    http.a_query_decodes_into_its_pairs
   ok    http.a_query_follows_the_first_question_mark
@@ -343,6 +360,7 @@ The library tests itself.
   ok    http.a_refused_arena_is_answered_503
   ok    http.a_refused_body_left_unread_does_not_lose_the_answer
   ok    http.a_refused_buffer_answers_500_before_the_handler
+  ok    http.a_refused_cookie_answers_500
   ok    http.a_refused_document_change_answers_500
   ok    http.a_refused_header_answers_500
   ok    http.a_replacement_refused_for_memory_keeps_the_old_value
@@ -365,6 +383,7 @@ The library tests itself.
   ok    http.a_request_that_leaves_no_room_for_the_response_is_answered_500
   ok    http.a_request_the_handler_never_saw_is_logged_without_a_number
   ok    http.a_request_with_a_body_parses
+  ok    http.a_request_without_a_cookie_header_has_no_cookies
   ok    http.a_response_reads_its_held_body_and_no_streamed_one
   ok    http.a_response_reads_its_status
   ok    http.a_response_takes_another_status
@@ -403,6 +422,8 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
+  ok    http.a_value_a_cookie_cannot_carry_is_refused
+  ok    http.a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped
   ok    http.a_variable_that_is_not_utf8_is_read_as_its_bytes
   ok    http.a_walk_of_the_headers_shows_one_number
   ok    http.a_wrong_method_is_405_with_allow
@@ -422,6 +443,7 @@ The library tests itself.
   ok    http.an_error_whose_message_does_not_fit_keeps_its_status
   ok    http.an_escape_is_two_hexadecimal_digits_in_either_case
   ok    http.an_exchange_is_logged_at_the_level_its_status_calls_for
+  ok    http.an_expiry_before_1601_is_refused
   ok    http.an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_read
   ok    http.an_http_variable_is_a_header
   ok    http.an_io_error_answers_500
@@ -430,7 +452,10 @@ The library tests itself.
   ok    http.arena_arithmetic_stops_at_the_largest_integer
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
+  ok    http.cookie_finds_a_cookie_by_name
+  ok    http.cookies_walk_the_pairs_of_a_cookie_header_in_order
   ok    http.count_includes_every_value_a_repeated_name_holds
+  ok    http.cross_site_use_requires_secure
   ok    http.decoding_appends_the_bytes_escapes_spell
   ok    http.each_accept_retry_is_observed_with_its_pause
   ok    http.each_allocation_failure_covers_every_acquisition_from_the_parent
@@ -455,6 +480,7 @@ The library tests itself.
   ok    http.json_refuses_a_body_that_is_not_utf8
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
   ok    http.no_match_is_404
+  ok    http.non_ascii_values_are_returned_as_sent
   ok    http.one_connection_is_served_and_serve_returns
   ok    http.only_reads_the_single_value_whatever_its_name
   ok    http.path_values_belong_to_the_request_answered
@@ -469,6 +495,7 @@ The library tests itself.
   ok    http.the_bound_address_is_logged_as_listening
   ok    http.the_default_arena_holds_every_request_the_default_limits_admit
   ok    http.the_default_limits_bound_lines_headers_and_bodies
+  ok    http.the_first_cookie_of_a_repeated_name_wins_across_headers
   ok    http.the_first_of_a_repeated_variable_is_read
   ok    http.the_first_refusing_extractor_answers_the_request
   ok    http.the_library_extractors_and_a_type_that_reads_itself_are_arguments
@@ -477,6 +504,7 @@ The library tests itself.
   ok    http.the_state_is_returned_when_serving_ends
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
+  ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
   ok    index.a_from_end_index_displays_its_source_notation
   ok    index.derived_from_end_debug_renders_the_offset
@@ -1206,6 +1234,7 @@ The library tests itself.
   ok    time.a_sleep_lasts_at_least_its_duration
   ok    time.a_timestamp_displays_as_rfc_3339
   ok    time.a_timestamp_is_made_only_inside_the_years_rfc_3339_writes
+  ok    time.an_http_date_displays_in_the_form_header_fields_use
   ok    time.an_instant_measures_the_time_since_another
   ok    time.an_instant_measures_the_time_since_it_was_read
   ok    time.from_nanoseconds_makes_a_duration_that_long
@@ -1231,4 +1260,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1228 passed, 0 failed
+  1257 passed, 0 failed

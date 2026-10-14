@@ -119,7 +119,8 @@ impl[A: Allocator] ResponseHeaders[A] {
     fn set(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: self) {
         let header = pending_header(self.allocator, name, value)?
         &self.remove(name)
-        &self.push(header)
+        &self.push(header)?
+        .Ok(())
     }
 }
 
@@ -155,11 +156,13 @@ impl[A: Allocator] ResponseHeaders[A] {
     // Append a value, keeping any the name already has.
     fn add(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: self) {
         let header = pending_header(self.allocator, name, value)?
-        &self.push(header)
+        &self.push(header)?
+        .Ok(())
     }
 
-    // Append a header that has already been validated and copied.
-    fn push(inout self: Self, sink header: PendingHeader[A]) -> Result[(), HeaderError] where carries(), retains(self: header) {
+    // Append a header that has already been validated and copied. Only
+    // growing the list can fail.
+    fn push(inout self: Self, sink header: PendingHeader[A]) -> Result[(), mem.Oom] where carries(), retains(self: header) {
         &self.fields.push(header).settled()?
         .Ok(())
     }

@@ -1,0 +1,127 @@
+import std.fmt
+import std.testing
+
+// The entity that stands for `byte` in HTML text and in a quoted attribute
+// value, or `None` when the byte is written as it is. The five bytes are the
+// ones that can end a text or an attribute value early or start a tag or an
+// entity. Every one is ASCII, so no entity splits a multi-byte scalar.
+fn entity(byte: UInt8) -> Option[Str] {
+    match read byte {
+        38 => .Some("&amp;"),
+        60 => .Some("&lt;"),
+        62 => .Some("&gt;"),
+        34 => .Some("&quot;"),
+        39 => .Some("&#39;"),
+        _ => .None,
+    }
+}
+
+// `escape` writes `text` with `&`, `<`, `>`, `"` and `'` replaced by
+// entities, so the result is safe as the content of an element and inside a
+// quoted attribute whose value is plain text, such as `title`, `alt` or
+// `value`. It is not safe in an attribute whose value is a URL (`href`, `src`,
+// `action`), an event handler (`onclick` and the other `on…` attributes) or a
+// style (`style`): `javascript:alert(1)` holds none of the five characters, and
+// the browser decodes the entities before it runs a handler. Nor is it safe in
+// an unquoted attribute or inside a `<script>` or `<style>` element. The same
+// five characters serve element content and an attribute value in either
+// quote, so there is one escaping and no separate attribute form. Text that
+// holds an entity already is escaped again: `&amp;` becomes `&amp;amp;`, which
+// displays as `&amp;`. The runs between replacements are written whole, and
+// nothing is allocated.
+pub fn escape[W: Writer](inout w: W, text: Str) -> Result[(), W.Error] where carries(.Err: w) {
+    var run_start: UInt64 = 0
+    for index in 0..text.length() {
+        let replacement = entity(text.byte(index).unwrap())
+        match replacement {
+            Some(entity_text) => {
+                &w.write_str(text.slice(run_start, index).unwrap())?
+                &w.write_str(entity_text)?
+                run_start = index + 1
+            },
+            None => {},
+        }
+    }
+    &w.write_str(text.slice(run_start, text.length()).unwrap())
+}
+
+test fn escape_writes_into_any_writer_and_appends() {
+    defer var out = String.new()
+    &out.append("<b>").unwrap()
+    escape(&out, "a < b & c").unwrap()
+    escape(&out, "").unwrap()
+    testing.assert_eq(out.view(), "<b>a &lt; b &amp; c", "the writer form changed what it appended to")?
+    .Ok(())
+}
+
+// `Escaped` is text waiting to be written as HTML: it displays as `text` with
+// the characters `escape` replaces, so an interpolation can escape what
+// it holds, as in `"<p>{html.escaped(name)}</p>"`. It is safe exactly where
+// `escape`'s output is, so not in `href`, `src`, `action`, an `on…` attribute
+// or `style`. It borrows the text.
+@(opaque, copyable)
+struct Escaped {
+    text: Str,
+}
+
+impl Display for Escaped {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        escape(&w, self.text)
+    }
+}
+
+// `escaped` makes the `Escaped` form of `text`.
+pub fn escaped(text: Str) -> Escaped where carries(text) {
+    .{ text = copy(text) }
+}
+
+test fn special_characters_are_written_as_entities() {
+    defer let rendered = fmt.render_owned(escaped("<a href=\"x\">Tom & 'Jerry'</a>")).unwrap()
+    testing.assert_eq(rendered.view(), "&lt;a href=&quot;x&quot;&gt;Tom &amp; &#39;Jerry&#39;&lt;/a&gt;", "a special character was left bare")?
+    .Ok(())
+}
+
+test fn escaped_text_reads_in_an_interpolation() {
+    let name = "<script>alert('x')</script>"
+    defer let page = fmt.render_owned("<p>Hello, {escaped(name)}!</p>").unwrap()
+    testing.assert_eq(page.view(), "<p>Hello, &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;!</p>", "the name was not escaped")?
+    .Ok(())
+}
+
+test fn text_without_special_characters_is_written_unchanged() {
+    defer let plain = fmt.render_owned(escaped("café 🚀 plain, text; = ok")).unwrap()
+    defer let empty = fmt.render_owned(escaped("")).unwrap()
+    testing.assert_eq(plain.view(), "café 🚀 plain, text; = ok", "plain text changed")?
+    testing.assert_eq(empty.view(), "", "empty text gained characters")?
+    .Ok(())
+}
+
+test fn text_that_is_already_escaped_is_escaped_again() {
+    defer let rendered = fmt.render_owned(escaped("&amp; &lt;b&gt; &#39;")).unwrap()
+    testing.assert_eq(rendered.view(), "&amp;amp; &amp;lt;b&amp;gt; &amp;#39;", "an entity was taken for markup")?
+    .Ok(())
+}
+
+test fn every_special_character_in_a_row_is_replaced() {
+    defer let rendered = fmt.render_owned(escaped("&&<<>>\"\"''")).unwrap()
+    testing.assert_eq(rendered.view(), "&amp;&amp;&lt;&lt;&gt;&gt;&quot;&quot;&#39;&#39;", "a repeated character was missed")?
+    .Ok(())
+}
+
+test fn special_characters_beside_multi_byte_text_keep_the_text_whole() {
+    defer let rendered = fmt.render_owned(escaped("é<ü>🚀&")).unwrap()
+    testing.assert_eq(rendered.view(), "é&lt;ü&gt;🚀&amp;", "a multi-byte scalar was split")?
+    .Ok(())
+}
+
+test fn an_attribute_value_cannot_end_its_quotes() {
+    let hostile = "\" onmouseover=\"alert(1)"
+    defer let double = fmt.render_owned("<a title=\"{escaped(hostile)}\">").unwrap()
+    defer let single = fmt.render_owned("<a title='{escaped(hostile)}'>").unwrap()
+    testing.assert_eq(double.view(), "<a title=\"&quot; onmouseover=&quot;alert(1)\">", "a double quote ended the attribute")?
+    testing.assert_eq(single.view(), "<a title='&quot; onmouseover=&quot;alert(1)'>", "a quote ended the single-quoted attribute")?
+    let apostrophe = "' onmouseover='alert(1)"
+    defer let quoted = fmt.render_owned("<a title='{escaped(apostrophe)}'>").unwrap()
+    testing.assert_eq(quoted.view(), "<a title='&#39; onmouseover=&#39;alert(1)'>", "an apostrophe ended the attribute")?
+    .Ok(())
+}
