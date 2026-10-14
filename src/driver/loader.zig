@@ -601,17 +601,6 @@ test "disk loading reads source bytes only for reached modules" {
     try testing.expectError(error.SourceTooLarge, loadFromDisk(gpa, testing.io, &table, &sink, &interner, root, .tests, false));
 }
 
-/// An entry as every comparison against it is written.
-///
-/// A trailing slash is what a shell's completion writes, and every path this
-/// compares against is written without one -- so `dir/` matched no file, the
-/// module loaded empty, and the compiler reported a program with no `main`
-/// about source it never read.
-///
-/// One slash, not every trailing one: `trimEnd` turns `/` into the empty
-/// string, which `rootOfEntry` reads as "no directory given" and resolves to
-/// the working one, so naming the root would silently compile something else
-/// entirely.
 /// Whether an import can name the directory at `relative`, a `/`-separated
 /// path beneath a program's root.
 ///
@@ -643,6 +632,17 @@ test "an import names a directory whose every name is an identifier, outside `st
     try testing.expect(try importable(testing.allocator, "tools/std"));
 }
 
+/// An entry as every comparison against it is written.
+///
+/// A trailing slash is what a shell's completion writes, and every path this
+/// compares against is written without one -- so `dir/` matched no file, the
+/// module loaded empty, and the compiler reported a program with no `main`
+/// about source it never read.
+///
+/// One slash, not every trailing one: `trimEnd` turns `/` into the empty
+/// string, which `rootOfEntry` reads as "no directory given" and resolves to
+/// the working one, so naming the root would silently compile something else
+/// entirely.
 pub fn trimmedEntry(entry: []const u8) []const u8 {
     if (entry.len > 1 and entry[entry.len - 1] == '/') return entry[0 .. entry.len - 1];
     return entry;
