@@ -142,6 +142,10 @@ pub fn appendByteEscape(gpa: std.mem.Allocator, out: *std.ArrayList(u8), c: u8) 
 /// other such byte, so `a.b` is `a$2eb` and stays apart from the two
 /// directories `a/b`, which are `a.b`. `$` is escaped as well, for the reason
 /// `appendEscaped` escapes it, so the route is one spelling of one path.
+///
+/// A symbol written into MLIR passes through `appendEscaped` too, which
+/// escapes each `$` of the route a second time: `a.b`'s function `size` is
+/// `lin.a$242eb;size` in the emitted module and an object's symbol table.
 pub fn appendRoute(
     gpa: std.mem.Allocator,
     out: *std.ArrayList(u8),

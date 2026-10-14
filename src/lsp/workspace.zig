@@ -3,6 +3,7 @@ const testing = std.testing;
 
 const loader = @import("../driver/loader.zig");
 const source_mod = @import("../support/source.zig");
+const symbol_names = @import("../support/symbol.zig");
 const exports = @import("exports.zig");
 const RootId = @import("../syntax/program.zig").RootId;
 const Reach = @import("../sema/resolve.zig").Reach;
@@ -168,11 +169,12 @@ pub fn importOf(gpa: std.mem.Allocator, root: []const u8, dir: []const u8) !?[]c
     const under = if (from.len > 0) to[from.len + 1 ..] else to;
     if (!try loader.importable(gpa, under)) return null;
 
-    const written = try gpa.dupe(u8, under);
-    for (written) |*byte| {
-        if (byte.* == '/') byte.* = '.';
-    }
-    return written;
+    // Every name is an identifier here, so the route `appendRoute` spells is
+    // the dotted text an import writes.
+    var written: std.ArrayList(u8) = .empty;
+    errdefer written.deinit(gpa);
+    try symbol_names.appendRoute(gpa, &written, under);
+    return try written.toOwnedSlice(gpa);
 }
 
 /// Whether the program whose files begin at `entry` reaches the module the
