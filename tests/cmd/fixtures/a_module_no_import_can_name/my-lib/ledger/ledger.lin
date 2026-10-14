@@ -1,0 +1,16 @@
+// A module no import can name, because `my-lib` is not an identifier. Its test
+// runs with the program's tests, named by the directories that hold it.
+import std.io
+
+use io.IoError
+
+pub fn size() -> UInt8 {
+    7
+}
+
+test fn a_ledger_holds_seven_entries() -> Result[(), IoError] {
+    if size() != 7 {
+        return .Err(IoError.from_os(.Write, 1))
+    }
+    return .Ok({})
+}

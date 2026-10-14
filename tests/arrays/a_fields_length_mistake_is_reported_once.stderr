@@ -1,0 +1,15 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/arrays/a_fields_length_mistake_is_reported_once.lin:7:20
+  |
+7 |     truth: [UInt8; true],
+  |                    ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/arrays/a_fields_length_mistake_is_reported_once.lin:8:20
+  |
+8 |     text: ([UInt8; "x{count}"], UInt8),
+  |                    ^^^^^^^^^^ this is not a number
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/a_fields_length_mistake_is_reported_once.lin:9:21
+  |
+9 |     called: [UInt8; count.min(2)],
+  |                     ^^^^^^^^^^^^ this is not a constant

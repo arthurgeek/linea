@@ -117,17 +117,65 @@ pub fn appendEscaped(
     text: []const u8,
 ) std.mem.Allocator.Error!void {
     for (text) |c| {
-        if (isPlain(c)) {
-            try out.append(gpa, c);
-        } else {
-            // Written out rather than formatted into a buffer. A byte is
-            // two digits and the escape is three bytes, so there is no
-            // width to get wrong and no failure to dismiss -- and no
-            // dismissal that the distributed build, compiled with safety
-            // off, would turn into an append from an undefined slice.
-            try out.appendSlice(gpa, &.{ '$', hex_digits[c >> 4], hex_digits[c & 0xf] });
-        }
+        if (isPlain(c)) try out.append(gpa, c) else try appendByteEscape(gpa, out, c);
     }
+}
+
+/// Appends `$` and the two hexadecimal digits of `c`.
+pub fn appendByteEscape(gpa: std.mem.Allocator, out: *std.ArrayList(u8), c: u8) std.mem.Allocator.Error!void {
+    // Written out rather than formatted into a buffer. A byte is two digits
+    // and the escape is three bytes, so there is no width to get wrong and no
+    // failure to dismiss -- and no dismissal that the distributed build,
+    // compiled with safety off, would turn into an append from an undefined
+    // slice.
+    try out.appendSlice(gpa, &.{ '$', hex_digits[c >> 4], hex_digits[c & 0xf] });
+}
+
+/// Appends a module's route: the path from the root to the module's
+/// directory, `/`-separated, written with a `.` between directory names and
+/// every byte of a name that an identifier does not hold written as `$` and
+/// its two hexadecimal digits.
+///
+/// A directory whose name is not an identifier, such as `my-lib` or `a.b`, is
+/// a module no import can name, and it is still part of its program: its tests
+/// run and its functions need symbols. A `.` inside a name is escaped like any
+/// other such byte, so `a.b` is `a$2eb` and stays apart from the two
+/// directories `a/b`, which are `a.b`. `$` is escaped as well, for the reason
+/// `appendEscaped` escapes it, so the route is one spelling of one path.
+///
+/// A symbol written into MLIR passes through `appendEscaped` too, which
+/// escapes each `$` of the route a second time: `a.b`'s function `size` is
+/// `lin.a$242eb;size` in the emitted module and an object's symbol table.
+pub fn appendRoute(
+    gpa: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    relative_dir: []const u8,
+) std.mem.Allocator.Error!void {
+    for (relative_dir) |c| switch (c) {
+        'A'...'Z', 'a'...'z', '0'...'9', '_' => try out.append(gpa, c),
+        '/' => try out.append(gpa, '.'),
+        else => try appendByteEscape(gpa, out, c),
+    };
+}
+
+test "a route keeps a directory an identifier names, and escapes one it does not" {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(testing.allocator);
+
+    try symbol.appendRoute(testing.allocator, &out, "app/util_2");
+    try testing.expectEqualStrings("app.util_2", out.items);
+
+    out.clearRetainingCapacity();
+    try symbol.appendRoute(testing.allocator, &out, "my-lib/led;ger$");
+    try testing.expectEqualStrings("my$2dlib.led$3bger$24", out.items);
+
+    // One directory with a dot in its name, and two directories.
+    out.clearRetainingCapacity();
+    try symbol.appendRoute(testing.allocator, &out, "a.b");
+    try testing.expectEqualStrings("a$2eb", out.items);
+    out.clearRetainingCapacity();
+    try symbol.appendRoute(testing.allocator, &out, "a/b");
+    try testing.expectEqualStrings("a.b", out.items);
 }
 
 /// How long the escaped form of a spelling is, without writing it.

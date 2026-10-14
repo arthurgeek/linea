@@ -1,0 +1,30 @@
+error[T-Bound]: `T` is written into text, so it implements `Display`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:15:24
+   |
+15 |     let _labelled = "x{value}".trim()
+   |                        ^^^^^ it does not
+error[T-UnknownOperation]: `{interpolation <unknown>}` has no operation `trim`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:15:21
+   |
+15 |     let _labelled = "x{value}".trim()
+   |                     ^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `trim`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:21:18
+   |
+21 |     let _shown = show("x{count}").trim()
+   |                  ^^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `length`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:22:21
+   |
+22 |     let _measured = show("x{count}").length()
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-Bound]: `Plain` is written into text, so it implements `Display`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:24:26
+   |
+24 |     let _unwritable = "x{plain}".trim()
+   |                          ^^^^^ it does not
+error[T-UnknownOperation]: `{interpolation <unknown>}` has no operation `trim`
+  --> tests/text/a_receiver_holding_an_interpolation_reports_each_mistake_once.lin:24:23
+   |
+24 |     let _unwritable = "x{plain}".trim()
+   |                       ^^^^^^^^^^^^^^^ no operation of this name is declared for this type

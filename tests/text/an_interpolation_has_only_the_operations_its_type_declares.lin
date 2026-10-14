@@ -1,0 +1,23 @@
+// An interpolated literal is a value of a type the compiler creates for it,
+// and that type implements `Display` and nothing else. Calling an operation it
+// does not declare is refused at the call, whatever form the call takes.
+fn main() -> UInt8 {
+    let name = "Ada"
+    let count: UInt8 = 3
+    let _owned = "hi {name}".to_owned()
+    let _length = "hi {name}".length()
+    let _view = "hi {name}".view()
+    let _captures = "hi {name}".into_captures()
+    let _padded = "[{count:>4}]".pad()
+    let _grouped = ("hi {name}").trim()
+    let _nested = "[{"x={count}"}]".trim()
+    let _chained = "hi {name}".trim().length()
+    let _typed = "hi {name}".parse[UInt8]()
+    let _indexed = "hi {name}".parse[0]()
+    let _picked = match count {
+        3 => "three {count}".trim(),
+        _ => "other {count}".trim(),
+    }
+    let _later = [name] || "later {name}".trim()
+    return 0
+}

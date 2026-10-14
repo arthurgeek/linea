@@ -1,0 +1,29 @@
+// A variant's payload settles a generic enum's parameters and is then held to
+// them, and each mistake inside the payload is reported once: an operation its
+// receiver's type does not have, one an interpolated literal's type does not
+// have, and a generic structure built without the arguments it declares. A
+// parameter no payload mentions is reported as well, since it is a mistake of
+// its own: nothing in `Result.Ok(nope)` says what `E` is, whichever order the
+// enum declares its parameters in.
+enum Flipped[E, T] {
+    Good(T),
+    Bad(E),
+}
+
+struct Box[T] {
+    v: T,
+}
+
+fn ident[T](sink v: T) -> T {
+    v
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 3
+    let _missing = Option.Some(n.bogus())
+    let _rendered = Option.Some(ident("x{n}".fmt_text()))
+    let _boxed = Option.Some(Box { v = "x{n}" })
+    let _result = Result.Ok(nope)
+    let _flipped = Flipped.Good(nope)
+    return 0
+}

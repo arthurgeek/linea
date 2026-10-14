@@ -1,0 +1,35 @@
+error[N-Undefined]: undefined name `nope`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:26:29
+   |
+26 |     let _result = Result.Ok(nope)
+   |                             ^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `nope`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:27:33
+   |
+27 |     let _flipped = Flipped.Good(nope)
+   |                                 ^^^^ no binding with this name is in scope
+error[T-UnknownOperation]: `UInt8` has no operation `bogus`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:23:32
+   |
+23 |     let _missing = Option.Some(n.bogus())
+   |                                ^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `fmt_text`
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:24:39
+   |
+24 |     let _rendered = Option.Some(ident("x{n}".fmt_text()))
+   |                                       ^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-Bound]: `Box` takes 1 type argument(s), and was given 0
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:25:30
+   |
+25 |     let _boxed = Option.Some(Box { v = "x{n}" })
+   |                              ^^^ give it the arguments it declares
+error[T-Infer]: nothing here says what `E` is
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:26:19
+   |
+26 |     let _result = Result.Ok(nope)
+   |                   ^^^^^^^^^^^^^^^ no argument of this variant determines it
+error[T-Infer]: nothing here says what `E` is
+  --> tests/text/a_mistake_in_a_variant_payload_is_reported_once.lin:27:20
+   |
+27 |     let _flipped = Flipped.Good(nope)
+   |                    ^^^^^^^^^^^^^^^^^^ no argument of this variant determines it

@@ -1,0 +1,15 @@
+// A trait declared where no import can name it, implemented for a type from a
+// module that can be imported.
+import shapes
+
+use shapes.Box
+
+pub trait Counted {
+    fn count(self: Self) -> UInt8
+}
+
+impl Counted for Box {
+    fn count(self: Self) -> UInt8 {
+        self.size
+    }
+}

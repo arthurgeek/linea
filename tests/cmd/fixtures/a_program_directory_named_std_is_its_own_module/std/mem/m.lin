@@ -1,0 +1,15 @@
+// A module whose path matches the library's `std.mem`. Its `system` and the
+// library's `mem.system` are two functions.
+import std.mem
+
+pub fn system() -> UInt8 {
+    7
+}
+
+test fn its_own_system_answers_seven() -> Result[(), UInt8] {
+    let _allocator = mem.system()
+    if system() != 7 {
+        return .Err(1)
+    }
+    return .Ok(())
+}

@@ -89,6 +89,12 @@ pub const Module = struct {
     /// manifest grants ([M-Extern]). Recorded by the loader, which read the
     /// manifest.
     externs: bool = false,
+    /// Whether an `import` can name this module: every directory name on the
+    /// path from its root is an identifier, and the first is not `std`, which
+    /// names the standard library wherever it appears. A module beneath a
+    /// directory such as `my-lib` is part of its program, but no import
+    /// reaches it. Recorded by the loader, which read the path.
+    importable: bool = true,
 
     /// Which module an import declaration named, or `.none` where the path
     /// named nothing that could be loaded.
@@ -266,6 +272,7 @@ pub const Program = struct {
         const source = self.get(from);
         const target = self.get(to);
         if (source.root != target.root and !target.library) return null;
+        if (!target.importable) return null;
         const syntax = self.import_routes[to.index()];
         if (syntax.len == 0) return null;
         return .{ .target = to, .syntax = syntax };

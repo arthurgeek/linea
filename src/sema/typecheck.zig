@@ -475,6 +475,8 @@ fn typecheckInternal(
     defer c.carried_places.deinit(gpa);
     defer c.borrowed_temporaries.deinit(gpa);
     defer c.interpolation_positions.deinit(gpa);
+    defer c.receivers_checked.deinit(gpa);
+    defer c.array_lengths.deinit(gpa);
     defer c.refused.deinit(gpa);
     defer c.folded_indices.deinit(gpa);
     defer c.constant_values.deinit(gpa);
@@ -2818,6 +2820,17 @@ pub const Reach = struct {
         }
     }
 
+    /// Whether a `use` could bring `trait` into scope: this module has an
+    /// import route to the trait's, the question `Program.importRoute`
+    /// answers. The root module and a module beneath a directory such as
+    /// `my-lib` are reached by no import, so a trait either declares is not
+    /// offered as missing a `use`.
+    fn usable(self: Reach, trait: node.DeclId) bool {
+        const m = self.moduleOf(trait);
+        if (m == .none or m.index() >= self.source_program.modules.len) return true;
+        return self.source_program.importRoute(self.from, m) != null;
+    }
+
     fn memberTakes(self: Reach, member: node.DeclId, kind: MemberSought) bool {
         return memberSought(self.ast, member, kind);
     }
@@ -2987,6 +3000,7 @@ pub const Reach = struct {
                 }
                 if (self.res.seesTrait(self.from, trait) or !self.memberTakes(row.member, kind)) continue;
                 if (std.mem.indexOfScalar(node.DeclId, bounded.items, trait) != null) continue;
+                if (!self.usable(trait)) continue;
                 if (applicable == null) applicable = try self.answersDirectly(gpa, held, trait);
                 if (!applicable.?) continue;
                 try out.append(gpa, .{ .sig = row.member, .trait = trait });
@@ -2999,6 +3013,7 @@ pub const Reach = struct {
         for (self.res.traits) |trait| {
             if (self.res.seesTrait(self.from, trait)) continue;
             if (std.mem.indexOfScalar(node.DeclId, bounded.items, trait) != null) continue;
+            if (!self.usable(trait)) continue;
             if (!try self.answersDirectly(gpa, held, trait)) continue;
 
             var declared = self.res.signatures.of(self.ast, trait);
@@ -5242,6 +5257,16 @@ const Checker = struct {
     carried_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     borrowed_temporaries: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     interpolation_positions: std.AutoHashMapUnmanaged(ExprId, types_mod.PiecePosition) = .empty,
+    /// The receivers of `receiver.name` whose type `checkReceiver` has
+    /// recorded, one entry per receiver expression. A call is tried as several
+    /// forms -- a built-in operation, a declared or trait operation, then the
+    /// selection that reports what is missing -- and each reads the type the
+    /// first recorded instead of checking the receiver again, which would
+    /// report its mistakes twice and record its pieces twice.
+    receivers_checked: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// What each array type's written length counts, keyed by the length
+    /// expression; null where it was refused. `arrayLength` fills it.
+    array_lengths: std.AutoHashMapUnmanaged(ExprId, ?u32) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The expression the last mismatch report poisoned. That poison is a
@@ -8585,7 +8610,29 @@ const Checker = struct {
     fn arrayTypeWithElement(self: *Checker, ref: node.TypeRef, element: TypeId) std.mem.Allocator.Error!TypeId {
         if (ref.inferred_length != .none) return self.refuseArrayInference(ref, false);
         if (ref.length == ExprId.none) return .poison;
-        const written_as = try self.check(ref.length, null);
+        const length = try self.arrayLength(ref.length) orelse return .poison;
+        return self.builder.arrayOf(element, length);
+    }
+
+    /// What the length written in an array type counts, or null where it was
+    /// refused.
+    ///
+    /// Checked once per written length. A written type is read again wherever
+    /// it is named -- a structure's field types are read each time it is laid
+    /// out -- and checking the length again would report each mistake in it
+    /// again and record each value of an interpolated literal again.
+    fn arrayLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+        if (self.array_lengths.get(length)) |counted| return counted;
+        // Null until counted, so a length whose own check reads it again
+        // reads a refusal rather than counting itself.
+        try self.array_lengths.put(self.gpa, length, null);
+        const counted = try self.countLength(length);
+        try self.array_lengths.put(self.gpa, length, counted);
+        return counted;
+    }
+
+    fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+        const written_as = try self.check(length, null);
 
         // The routine that folds a constant expression wherever one is read,
         // and not this pass's own table of what it has folded so far: which
@@ -8598,42 +8645,53 @@ const Checker = struct {
         // text constants are different domains. A length that is not a
         // constant at all is told which of the two it failed, since a form the
         // definition does not admit may be no number either.
-        const folded = switch (try self.worth(ref.length)) {
+        const folded = switch (try self.worth(length)) {
             // A newtype's constant folds to the integer it holds, and is still
             // its own type rather than a number.
-            .integer => |v| if (written_as != .poison and self.builder.get(written_as) == .newtype)
-                return self.refuseUncountedLength(ref.length)
-            else
-                v,
-            .truth, .string, .aggregate => return self.refuseUncountedLength(ref.length),
-            .not_constant, .absent => return if (written_as != .poison and written_as.integerInfo() == null)
-                self.refuseUncountedLength(ref.length)
-            else
-                self.report(
+            .integer => |v| if (written_as != .poison and self.builder.get(written_as) == .newtype) {
+                _ = self.refuseUncountedLength(length);
+                return null;
+            } else v,
+            .truth, .string, .aggregate => {
+                _ = self.refuseUncountedLength(length);
+                return null;
+            },
+            .not_constant, .absent => {
+                if (written_as != .poison and written_as.integerInfo() == null) {
+                    _ = self.refuseUncountedLength(length);
+                } else _ = self.report(
                     .t_array_size,
-                    ref.length,
+                    length,
                     "an array's length is part of its type, so it is settled where the type is written",
                     .{},
                     "this is not a constant",
-                ),
+                );
+                return null;
+            },
         };
-        if (folded < 0) return self.report(
-            .t_array_size,
-            ref.length,
-            "an array's length is a count, and a count is not negative",
-            .{},
-            "this is negative",
-        );
+        if (folded < 0) {
+            _ = self.report(
+                .t_array_size,
+                length,
+                "an array's length is a count, and a count is not negative",
+                .{},
+                "this is negative",
+            );
+            return null;
+        }
 
-        if (folded > std.math.maxInt(u32)) return self.report(
-            .t_array_size,
-            ref.length,
-            "an array's length is part of its type, and this one is too wide to be",
-            .{},
-            "no array holds this many elements",
-        );
+        if (folded > std.math.maxInt(u32)) {
+            _ = self.report(
+                .t_array_size,
+                length,
+                "an array's length is part of its type, and this one is too wide to be",
+                .{},
+                "no array holds this many elements",
+            );
+            return null;
+        }
 
-        return self.builder.arrayOf(element, @intCast(folded));
+        return @intCast(folded);
     }
 
     /// A written type, resolved with `owner`'s parameters in scope.
@@ -17092,25 +17150,22 @@ const Checker = struct {
             const postfix = isPostfixCallee(self.ast, self.res, c.callee);
             if (postfix) {
                 const field = c.callee;
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), types_mod.array_view_name)) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
+                const receiver = self.ast.unaryOperand(field);
+                const name = self.ast.tokenText(self.ast.exprMain(field));
+                // Checked once here; `postfixCall` and the selection below
+                // read what this recorded.
+                const receiver_type = try self.checkReceiver(id, receiver, self.ast.tokenName(self.ast.exprMain(field)), expected);
+                if (std.mem.eql(u8, name, types_mod.array_view_name)) {
                     if (self.builder.view().arrayViewReceiver(receiver_type)) |adjustment|
                         return self.checkArrayView(id, receiver, adjustment, expected, invocation_marked);
                 }
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), types_mod.array_length_name)) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
+                if (std.mem.eql(u8, name, types_mod.array_length_name)) {
                     const adjustment = self.builder.view().observedReceiver(receiver_type);
                     if (self.builder.get(adjustment.receiver) == .array)
                         return self.checkArrayLength(id, receiver, adjustment, expected, invocation_marked);
                 }
-                if (std.mem.eql(u8, self.ast.tokenText(self.ast.exprMain(field)), "into_captures")) {
-                    const receiver = self.ast.unaryOperand(field);
-                    const receiver_type = try self.check(receiver, null);
-                    if (self.builder.get(receiver_type) == .closure)
-                        return self.checkClosureRecovery(id, receiver, receiver_type, expected, invocation_marked);
-                }
+                if (std.mem.eql(u8, name, "into_captures") and self.builder.get(receiver_type) == .closure)
+                    return self.checkClosureRecovery(id, receiver, receiver_type, expected, invocation_marked);
                 switch (try self.postfixCall(id, c.callee, c.args, expected)) {
                     .settled => |settled| return self.checkCallOf(id, settled.sig, settled.args, .postfix, expected, &.{}),
                     .absent => {},
@@ -18069,22 +18124,9 @@ const Checker = struct {
         given: []const ExprId,
         expected: ?Expected,
     ) std.mem.Allocator.Error!Postfixed {
-        const base = self.ast.withoutGroups(receiver);
-
         // The receiver decides which implementations are in play, so it is
-        // checked before anything is looked for. What this call is expected to produce
-        // reaches the receiver through the operation's result, so a generic
-        // call as the receiver can settle what its arguments left open.
-        const held = blk: {
-            const previous = self.method_expected;
-            defer self.method_expected = previous;
-            const success = self.successExpectationAt(id);
-            self.method_expected = if (expected != null or success != null)
-                .{ .target = base, .name = wanted, .expected = expected, .success = success }
-            else
-                null;
-            break :blk self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
-        };
+        // checked before anything is looked for.
+        const held = try self.checkReceiver(id, receiver, wanted, expected);
         if (held == .poison) {
             // Whether the call reaches an operation cannot be decided, so a
             // free function its name reaches counts as named rather than as
@@ -18122,25 +18164,55 @@ const Checker = struct {
             return .refused;
         };
 
-        // The parentheses a reader wrote around the receiver are nodes of their
-        // own, and this is the one path that reaches a receiver without walking
-        // them: the argument the call takes is the expression inside them. A
-        // group is worth what is inside it here as everywhere else, and a node
-        // left with no type at all is a poisoned one nothing reported.
-        var group = receiver;
-        while (self.ast.exprTag(group) == .grouped) : (group = self.ast.unaryOperand(group)) {
-            _ = self.record(group, held);
-        }
-
         const args = try self.gpa.alloc(ExprId, given.len + 1);
         errdefer self.gpa.free(args);
-        args[0] = base;
+        args[0] = self.ast.withoutGroups(receiver);
         @memcpy(args[1..], given);
         try self.postfix.append(self.gpa, .{
             .call = @intCast(id.index()),
             .args = args,
         });
         return .{ .settled = .{ .sig = sig, .args = args } };
+    }
+
+    /// The type of `receiver` where `receiver.wanted` is written, checked
+    /// once.
+    ///
+    /// A postfix call is tried as several forms -- an array's or a closure's
+    /// built-in operation, a declared or trait operation, then the selection
+    /// that reports a name the type lacks -- and every one reads its receiver
+    /// through here. The first records the type and the rest read it: a
+    /// receiver checked again would report its mistakes again and record each
+    /// value of an interpolated literal again.
+    ///
+    /// What the call `id` is expected to produce reaches the receiver through
+    /// the operation's result, so a generic call as the receiver can settle
+    /// what its arguments left open. A selection that is not called passes
+    /// `.none` and expects nothing.
+    ///
+    /// The parentheses a reader wrote around the receiver are nodes of their
+    /// own, and the receiver is checked inside them: the argument a call takes
+    /// is the expression the parentheses hold. A group is worth what is inside
+    /// it here as everywhere else, so each records the receiver's type.
+    fn checkReceiver(self: *Checker, id: ExprId, receiver: ExprId, wanted: StringId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+        const base = self.ast.withoutGroups(receiver);
+        if ((try self.receivers_checked.getOrPut(self.gpa, base)).found_existing) return self.builder.exprType(base);
+
+        const held = blk: {
+            const previous = self.method_expected;
+            defer self.method_expected = previous;
+            const success = if (id == ExprId.none) null else self.successExpectationAt(id);
+            self.method_expected = if (id != ExprId.none and (expected != null or success != null))
+                .{ .target = base, .name = wanted, .expected = expected, .success = success }
+            else
+                null;
+            break :blk self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
+        };
+        var group = receiver;
+        while (self.ast.exprTag(group) == .grouped) : (group = self.ast.unaryOperand(group)) {
+            _ = self.record(group, held);
+        }
+        return held;
     }
 
     /// One key for a declaration and a name, so one table serves the program.
@@ -20389,7 +20461,7 @@ const Checker = struct {
             }
         }
 
-        var of = self.record(base, try self.receiverType(try self.check(base, null), self.literalSite(base)));
+        var of = try self.checkReceiver(ExprId.none, base, self.ast.tokenName(self.ast.exprMain(id)), null);
         if (of == .poison) {
             // Whether a call on a value of no known type reaches an
             // operation cannot be decided, so a free function its name
@@ -23359,9 +23431,18 @@ const Checker = struct {
         // is not a type. Where nothing expects one, the payload says what the
         // arguments are -- so the expectation is manufactured here and the
         // ordinary path runs against a real instantiation.
-        const inferred = try self.inferConstruct(id, expected);
+        //
+        // The values inference checked are read as it checked them on every
+        // path below. Checking one again would report its mistakes again and
+        // record each value of an interpolated literal again.
+        const walked = try self.gpa.alloc(bool, c.args.len);
+        defer self.gpa.free(walked);
+        @memset(walked, false);
+        const inferred = try self.inferConstruct(id, expected, walked);
         if (inferred == .reported) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.record(id, .poison);
         }
 
@@ -23383,12 +23464,16 @@ const Checker = struct {
         });
         self.construction_callee = previous_callee;
         if (t == .poison) {
-            for (c.args) |a| _ = try self.check(a, if (unknown) expected else null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, if (unknown) expected else null);
+            };
             return self.record(id, .poison);
         }
 
         if (self.sealedHere(t)) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.reportSealed(id, t, "only its own module can build one");
         }
 
@@ -23396,7 +23481,9 @@ const Checker = struct {
         const k = shape.ordinal;
         const carries: usize = shape.payloads;
         if (c.args.len != carries) {
-            for (c.args) |a| _ = try self.check(a, null);
+            for (c.args, walked) |a, w| if (!w) {
+                _ = try self.check(a, null);
+            };
             return self.report(
                 .t_arity,
                 id,
@@ -23409,13 +23496,17 @@ const Checker = struct {
         // Each value's type flows into its argument, so a literal takes it the
         // way an argument to a function takes its parameter's type.
         var argument_diverges = false;
-        for (c.args, 0..) |a, j| {
-            const found = try self.check(a, .{
+        for (c.args, walked, 0..) |a, w, j| {
+            const want: Expected = .{
                 .ty = self.builder.variantFieldType(t, k, @intCast(j)),
                 .at = .{ .file = self.ast.fileOfExpr(c.callee), .span = self.ast.exprSpan(c.callee) },
                 .reason = .payload,
-                .inference = if (expected) |want| want.inference else null,
-            });
+                .inference = if (expected) |e| e.inference else null,
+            };
+            const found = if (w)
+                try self.expect(a, self.builder.exprType(a), want)
+            else
+                try self.check(a, want);
             if (found == .never) argument_diverges = true;
         }
 
@@ -29431,11 +29522,14 @@ const Checker = struct {
     ///
     /// The payload's *checked* type is what settles it, so
     /// `Option.Some(copy(x))` reads `x`'s type rather than the shape of the
-    /// expression that produced it.
+    /// expression that produced it. Each value checked here is marked in
+    /// `walked`, and the caller reads its recorded type rather than checking
+    /// it again.
     fn inferConstruct(
         self: *Checker,
         id: ExprId,
         expected: ?Expected,
+        walked: []bool,
     ) std.mem.Allocator.Error!Inferred {
         if (Expected.typeOf(expected) != null) return .nothing;
 
@@ -29470,6 +29564,11 @@ const Checker = struct {
             };
         };
 
+        // Which parameters a payload was checked to settle. One whose payload
+        // has no type was reported where that payload is written.
+        const tried = try self.gpa.alloc(bool, params.len);
+        defer self.gpa.free(tried);
+        @memset(tried, false);
         for (c.args, 0..) |a, j| {
             const carried = self.builder.variantFieldType(template, k, @intCast(j));
             const p = switch (self.builder.get(carried)) {
@@ -29482,6 +29581,8 @@ const Checker = struct {
             if (p.owner != d.index() or p.index >= found.len) continue;
             if (found[p.index] != .poison) continue;
             found[p.index] = try self.check(a, null);
+            walked[j] = true;
+            tried[p.index] = true;
         }
 
         if (heading) |h| try self.closeAliasHeading(h, found);
@@ -29490,8 +29591,16 @@ const Checker = struct {
         // variant carrying one of two says which is missing. Reporting it here
         // is what keeps that knowledge: the caller sees only that no type was
         // determined, and would have to say so about the whole declaration.
-        for (found, self.ast.declTypeParams(d)) |f, g| {
+        // A payload with no type was reported where it is written, and the
+        // parameter it would have settled is that mistake's consequence. A
+        // parameter no payload mentions is a mistake of its own, reported
+        // whichever order the parameters are declared in.
+        var unsettled = false;
+        var reported = false;
+        for (found, tried, self.ast.declTypeParams(d)) |f, t, g| {
             if (f != .poison) continue;
+            unsettled = true;
+            if (t or reported) continue;
             _ = self.report(
                 .t_infer,
                 id,
@@ -29499,8 +29608,9 @@ const Checker = struct {
                 .{self.ast.tokenText(g.name)},
                 "no argument of this variant determines it",
             );
-            return .reported;
+            reported = true;
         }
+        if (unsettled) return .reported;
 
         // A bound is a claim about every instantiation, so it is asked wherever
         // one is made. Asked only where a type was written down and where a

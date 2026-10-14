@@ -1,0 +1,6 @@
+// A program beside a directory whose name is not an identifier. No import can
+// name `my-lib`, but its module is part of the program: its tests run and its
+// files compile.
+fn main() -> UInt8 {
+    0
+}

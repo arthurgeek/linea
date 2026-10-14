@@ -1,0 +1,65 @@
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `to_owned`
+ --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:7:18
+  |
+7 |     let _owned = "hi {name}".to_owned()
+  |                  ^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `length`
+ --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:8:19
+  |
+8 |     let _length = "hi {name}".length()
+  |                   ^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `view`
+ --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:9:17
+  |
+9 |     let _view = "hi {name}".view()
+  |                 ^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `into_captures`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:10:21
+   |
+10 |     let _captures = "hi {name}".into_captures()
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8:>4}` has no operation `pad`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:11:19
+   |
+11 |     let _padded = "[{count:>4}]".pad()
+   |                   ^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:12:20
+   |
+12 |     let _grouped = ("hi {name}").trim()
+   |                    ^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation {interpolation UInt8}}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:13:19
+   |
+13 |     let _nested = "[{"x={count}"}]".trim()
+   |                   ^^^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:14:20
+   |
+14 |     let _chained = "hi {name}".trim().length()
+   |                    ^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `parse`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:15:18
+   |
+15 |     let _typed = "hi {name}".parse[UInt8]()
+   |                  ^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownField]: `{interpolation Str}` has no field `parse`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:16:20
+   |
+16 |     let _indexed = "hi {name}".parse[0]()
+   |                    ^^^^^^^^^^^^^^^^^ not a field of this value
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:18:14
+   |
+18 |         3 => "three {count}".trim(),
+   |              ^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:19:14
+   |
+19 |         _ => "other {count}".trim(),
+   |              ^^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `trim`
+  --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:21:28
+   |
+21 |     let _later = [name] || "later {name}".trim()
+   |                            ^^^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type

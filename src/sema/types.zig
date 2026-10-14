@@ -5302,12 +5302,16 @@ pub const Typing = struct {
     template_of: []const u32 = &.{},
     /// What each module is called where a symbol carries it, by module id.
     ///
-    /// The path a reader writes, dotted: `std.text`. Filled by the pass that
-    /// holds the program, because a type pool does not -- and a path rather
-    /// than the module's index, because an index says which module was loaded
-    /// first. Adding an import renumbered every symbol below it, which is a
-    /// name nobody can predict and an emitted module the outcome cache had
-    /// never seen.
+    /// The path a reader writes, dotted: `std.text`, with each byte of a
+    /// directory name that no identifier holds escaped as `$` and two hex
+    /// digits, so `my-lib` is `my$2dlib` and the one directory `a.b` is
+    /// `a$2eb`, apart from the two directories `a/b`. A program's own
+    /// directory `std/mem` is `$73td.mem`, apart from the library's
+    /// `std.mem`. Filled by the pass that holds the program, because a type
+    /// pool does not -- and a path rather than the module's index, because an
+    /// index says which module was loaded first. Adding an import renumbered
+    /// every symbol below it, which is a name nobody can predict and an
+    /// emitted module the outcome cache had never seen.
     module_paths: []const []const u8 = &.{},
     instances: []const Instance = &.{},
     instance_args: []const TypeId = &.{},

@@ -46,12 +46,12 @@ const symbol_names = @import("../support/symbol.zig");
 /// implementation's member, `Head;route;Trait[supplied].name[args]`; a
 /// generated body's is `kind.N[args]`. It reads back in three steps:
 ///
-/// - A route is dotted identifiers, so it holds only letters, digits, `_` and
-///   `.`. The longest prefix in that alphabet is followed by `;` exactly when
-///   the symbol is a declaration's and either has the first shape or a head
-///   that is a named type with no arguments. Any other head opens a bracket or
-///   a parenthesis first, and a generated body's `kind.N` is followed by `[` or
-///   by nothing.
+/// - A route is dotted directory names, each an identifier or escaped as one
+///   with `$`, so it holds only letters, digits, `_`, `.` and `$`. The longest
+///   prefix in that alphabet is followed by `;` exactly when the symbol is a
+///   declaration's and either has the first shape or a head that is a named
+///   type with no arguments. Any other head opens a bracket or a parenthesis
+///   first, and a generated body's `kind.N` is followed by `[` or by nothing.
 /// - After that `;`, the longest prefix in the same alphabet is followed by
 ///   `;` only in the second shape. In the first it is `name`, `Owner` or
 ///   `Owner.name`, and is followed by `[` or by the end.
@@ -140,8 +140,9 @@ fn symbolFor(
 /// in a symbol: a character no route holds.
 const route_end = ';';
 
-/// The characters a module route is spelled with: dotted identifiers.
-const route_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.";
+/// The characters a module route is spelled with: dotted identifiers, and the
+/// `$` that escapes a byte of a directory name no identifier holds.
+const route_alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.$";
 
 /// Appends a declaration's module route, dotted, and the `;` that ends it. The
 /// root's route is empty and is ended all the same: omitting it left the root's

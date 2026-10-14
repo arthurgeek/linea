@@ -1,0 +1,6 @@
+// A program with two modules whose directory paths read alike once their
+// separators are dots: `a.b` is one directory, and `a/b` is two. Each is its
+// own module, and each test is named by the path that holds it.
+fn main() -> UInt8 {
+    0
+}
