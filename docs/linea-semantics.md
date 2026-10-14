@@ -391,6 +391,17 @@ result type. Assertions still propagate with `?`, and explicit deferred cleanup
 runs on both success and failure. A written return annotation keeps its
 ordinary meaning. Ordinary functions must declare their return type.
 
+A test is known outside the compiler by its qualified name: the path of its
+module's directory beneath the program root, each directory name followed by
+`.`, then the test's own name. A test in the root module is known by its bare
+name, and one in `text/str` as `text.str.a_thing_holds`. A directory name made
+of identifiers is written as it is. Within a directory name, a `.` is written
+`\.` and a `\` is written `\\`, so the one directory `a.b` names its test
+`a\.b.holds` and the two directories `a/b` name theirs `a.b.holds`. Every other
+byte is written as the directory name holds it, so `my-lib/ledger` names its
+test `my-lib.ledger.holds`. The test runner reports each test by this name,
+and a test binary runs the test whose name it is given.
+
 A failing test's exit status is fixed and does not encode the failure's
 contents; standard error carries the description.
 
