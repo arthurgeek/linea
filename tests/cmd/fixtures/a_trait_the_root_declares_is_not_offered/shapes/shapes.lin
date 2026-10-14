@@ -1,0 +1,12 @@
+// A test calling an operation whose trait only the root module declares.
+pub struct Box {
+    size: UInt8,
+}
+
+test fn a_box_counts() -> Result[(), UInt8] {
+    let b = Box { size = 3 }
+    if b.count() == 3 {
+        return .Ok(())
+    }
+    return .Err(1)
+}

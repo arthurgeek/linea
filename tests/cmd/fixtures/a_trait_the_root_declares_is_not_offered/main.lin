@@ -1,0 +1,20 @@
+// The root module declares `Counted` and implements it for `shapes.Box`. No
+// import names the root module, so `shapes` cannot bring `Counted` into scope.
+import shapes
+
+use shapes.Box
+
+pub trait Counted {
+    fn count(self: Self) -> UInt8
+}
+
+impl Counted for Box {
+    fn count(self: Self) -> UInt8 {
+        self.size
+    }
+}
+
+fn main() -> UInt8 {
+    let b = Box { size = 3 }
+    b.count()
+}
