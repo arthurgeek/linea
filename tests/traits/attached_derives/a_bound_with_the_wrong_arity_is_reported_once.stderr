@@ -7,4 +7,4 @@ error[T-Bound]: `T` requires `Equatable[UInt8]`, and `UInt8` does not implement 
  --> tests/traits/attached_derives/a_bound_with_the_wrong_arity_is_reported_once.lin:7:16
   |
 7 |     let cell = Cell[UInt8] { value = 1 }
-  |                ^^^^ `UInt8` and `Equatable` are both declared outside this program; wrap `UInt8` in a type that implements it, or drop the bound
+  |                ^^^^ `UInt8` and `Equatable` are both declared outside this program; wrap it in a type that implements `Equatable`, or drop the bound

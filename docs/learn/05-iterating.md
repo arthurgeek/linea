@@ -845,7 +845,7 @@ error[T-Bound]: `T` requires `Ordered`, and `Float64` does not implement it
  --> sort_floats.lin:9:13
   |
 9 |     &sorted.sort()
-  |             ^^^^ `Float64` and `Ordered` are both declared outside this program; wrap `Float64` in a type that implements it
+  |             ^^^^ `Float64` and `Ordered` are both declared outside this program; wrap it in a type that implements `Ordered`
 ```
 
 The library declares both `Float64` and `Ordered`, so a program cannot add

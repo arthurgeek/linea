@@ -2905,6 +2905,13 @@ outside the program, the help says so and offers passing a value of a type that
 implements the trait. It offers dropping the bound only where the program wrote
 the bound, not where the library did.
 
+Where an implementation matches the type but one of its own requirements is
+unmet, a note names that requirement, following it down to the last one unmet,
+and implementing the trait again would overlap that implementation. The help
+then offers meeting that last requirement, under the same rule: where the
+program may not write its implementation either, as with `Iterator` for
+`UInt64`, the help says so and offers a wrapper instead.
+
 The closed `Integer` bound admits exactly Int8, Int16, Int32, Int64, UInt8,
 UInt16, UInt32 and UInt64. It excludes Bool, Float64, nominal newtypes and
 user-defined types. It takes no arguments and cannot be implemented by a user. A

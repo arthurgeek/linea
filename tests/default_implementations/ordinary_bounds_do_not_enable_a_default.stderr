@@ -2,6 +2,6 @@ error[T-Bound]: `Selected` requires `Self` to implement it, and `Box[Bool]` does
   --> tests/default_implementations/ordinary_bounds_do_not_enable_a_default.lin:23:23
    |
 23 |     Selected.selected(value)
-   |                       ^^^^^ implement it for that type, or reach the operation on one that does
+   |                       ^^^^^ meet what the implementation below requires, or reach the operation on one that does
    |
    = help: `Box[T]` implements `Selected` when `T` implements `Permitted`, and `Bool` does not

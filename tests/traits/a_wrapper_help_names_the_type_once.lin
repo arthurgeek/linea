@@ -1,0 +1,8 @@
+// The library declares both `Vec` and `Ordered`, so the help offers a wrapper,
+// naming the long element type once.
+fn main() -> UInt8 {
+    var rows: Vec[Vec[Float64]] = Vec.new()
+    &rows.sort()
+    rows.release()
+    0
+}

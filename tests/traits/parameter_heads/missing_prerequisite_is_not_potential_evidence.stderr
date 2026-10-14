@@ -2,6 +2,6 @@ error[T-Bound]: `T` requires `Deliver[Output]`, and `UInt8` does not implement i
   --> tests/traits/parameter_heads/missing_prerequisite_is_not_potential_evidence.lin:22:5
    |
 22 |     require(UInt8(0))
-   |     ^^^^^^^ implement it for that type, or drop the bound
+   |     ^^^^^^^ meet what the implementation below requires, or drop the bound
    |
    = help: `T` implements `Deliver[Output]` when `U` implements `Build[UInt8]`, and `Output` does not
