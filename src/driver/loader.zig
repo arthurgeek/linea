@@ -1522,6 +1522,19 @@ const Loader = struct {
             defer self.gpa.free(named);
             return self.spelledRoute(named);
         }
+        // A program's own directory named `std` is part of the program, and
+        // spelled plainly its route would be the library module's: `std/mem`
+        // and the library's `std.mem` would give their functions one symbol.
+        // Its first byte is escaped, which `appendRoute` never does to a
+        // letter, so `std/mem` is `$73td.mem` and no other path spells that.
+        var first = std.mem.splitScalar(u8, relative, '/');
+        if (std.mem.eql(u8, first.first(), standard_dependency)) {
+            var route: std.ArrayList(u8) = .empty;
+            errdefer route.deinit(self.gpa);
+            try symbol_names.appendByteEscape(self.gpa, &route, relative[0]);
+            try symbol_names.appendRoute(self.gpa, &route, relative[1..]);
+            return route.toOwnedSlice(self.gpa);
+        }
         return self.spelledRoute(relative);
     }
 

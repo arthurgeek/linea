@@ -1,0 +1,6 @@
+// A program with its own directory `std/mem`. No import reaches it, because
+// `std` names the standard library, but it is part of the program: its test
+// runs beside the library module `std.mem` its file imports.
+fn main() -> UInt8 {
+    0
+}

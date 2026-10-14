@@ -117,12 +117,12 @@ pub fn appendEscaped(
     text: []const u8,
 ) std.mem.Allocator.Error!void {
     for (text) |c| {
-        if (isPlain(c)) try out.append(gpa, c) else try appendEscape(gpa, out, c);
+        if (isPlain(c)) try out.append(gpa, c) else try appendByteEscape(gpa, out, c);
     }
 }
 
 /// Appends `$` and the two hexadecimal digits of `c`.
-fn appendEscape(gpa: std.mem.Allocator, out: *std.ArrayList(u8), c: u8) std.mem.Allocator.Error!void {
+pub fn appendByteEscape(gpa: std.mem.Allocator, out: *std.ArrayList(u8), c: u8) std.mem.Allocator.Error!void {
     // Written out rather than formatted into a buffer. A byte is two digits
     // and the escape is three bytes, so there is no width to get wrong and no
     // failure to dismiss -- and no dismissal that the distributed build,
@@ -150,7 +150,7 @@ pub fn appendRoute(
     for (relative_dir) |c| switch (c) {
         'A'...'Z', 'a'...'z', '0'...'9', '_' => try out.append(gpa, c),
         '/' => try out.append(gpa, '.'),
-        else => try appendEscape(gpa, out, c),
+        else => try appendByteEscape(gpa, out, c),
     };
 }
 
