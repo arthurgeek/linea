@@ -1,0 +1,42 @@
+error[S-UnitResult]: a function that returns nothing writes no result type
+ --> tests/decl/a_unit_result_is_not_written/main.lin:3:63
+  |
+3 | extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+  |                                                               ^^^^^ a function writing no result returns `()`
+  |
+  = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+  --> tests/decl/a_unit_result_is_not_written/main.lin:10:31
+   |
+10 |     fn bump(inout self: Self) -> ()
+   |                               ^^^^^ a function writing no result returns `()`
+   |
+   = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+  --> tests/decl/a_unit_result_is_not_written/main.lin:14:31
+   |
+14 |     fn bump(inout self: Self) -> () {
+   |                               ^^^^^ a function writing no result returns `()`
+   |
+   = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+  --> tests/decl/a_unit_result_is_not_written/main.lin:19:31
+   |
+19 | fn add_tip(inout bill: UInt8) -> () where carries() {
+   |                               ^^^^^ a function writing no result returns `()`
+   |
+   = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+  --> tests/decl/a_unit_result_is_not_written/main.lin:23:59
+   |
+23 | fn twice(inout value: UInt8, step: fn(inout value: UInt8) -> ()) {
+   |                                                           ^^^^^ a function writing no result returns `()`
+   |
+   = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+  --> tests/decl/a_unit_result_is_not_written/main.lin:39:38
+   |
+39 |     let reset = |inout value: UInt8| -> () { value = 0 }
+   |                                      ^^^^^ a function writing no result returns `()`
+   |
+   = help: remove `-> ()`

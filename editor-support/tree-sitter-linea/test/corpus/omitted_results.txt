@@ -1,0 +1,170 @@
+==================
+An operation returning nothing omits its result
+==================
+
+extern fn linea_free(at: UInt64)
+
+trait Bump {
+    fn bump(inout self: Self)
+    fn twice(inout self: Self) {
+        self.bump()
+    }
+}
+
+fn add_tip(inout bill: UInt8) where carries() {
+    bill += bill / 10
+}
+
+fn apply(step: fn(inout value: UInt8), check: fn(value: UInt8) where carries()) {}
+
+---
+
+(source_file
+  (extern_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier))))
+  (trait_declaration
+    (type_identifier)
+    (signature
+      (identifier)
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (self_type))))
+    (provided_operation
+      (identifier)
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (self_type)))
+      (block
+        (expression_statement
+          (call_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (argument_list))))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (convention)
+        (identifier)
+        (type_identifier)))
+    (where_clause
+      (source_contract))
+    (block
+      (expression_statement
+        (assignment_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (integer_literal))))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (callable_type
+          (parameter_list
+            (parameter
+              (convention)
+              (identifier)
+              (type_identifier)))))
+      (parameter
+        (identifier)
+        (callable_type
+          (parameter_list
+            (parameter
+              (identifier)
+              (type_identifier)))
+          (contract_clause
+            (source_contract)))))
+    (block)))
+
+==================
+A selection after a callable type's result selects from the result
+==================
+
+fn choose[I: Source]() -> fn(sink item: I) -> I.Item {
+    |sink item| item.first()
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (bound
+          (trait_reference
+            (type_identifier)))))
+    (parameter_list)
+    (callable_type
+      (parameter_list
+        (parameter
+          (convention)
+          (identifier)
+          (type_identifier)))
+      (settled_ref_type
+        (type_identifier)
+        (type_identifier)))
+    (block
+      (expression_statement
+        (lambda_expression
+          (parameter
+            (identifier))
+          (call_expression
+            (field_expression
+              (identifier)
+              (identifier))
+            (argument_list)))))))
+
+==================
+A unit result is not written on a function
+:error
+==================
+
+fn reset(inout value: UInt8) -> () {
+    value = 0
+}
+
+==================
+A unit result is not written on a signature
+:error
+==================
+
+trait Bump {
+    fn bump(inout self: Self) -> ()
+}
+
+==================
+A unit result is not written on an extern
+:error
+==================
+
+extern fn linea_free(at: UInt64) -> ()
+
+==================
+A unit result is not written on a callable type
+:error
+==================
+
+fn twice(step: fn(inout value: UInt8) -> ()) {}
+
+==================
+A unit result is not written on a lambda
+:error
+==================
+
+fn main() -> UInt8 {
+    let reset = |inout value: UInt8| -> () { value = 0 }
+    0
+}

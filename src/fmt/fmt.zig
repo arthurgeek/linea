@@ -610,7 +610,8 @@ pub fn formatClosure(
         try w.print("{s} {s}: {s}", .{ @tagName(param.convention), param_names[i], param_types[i] });
         if (param_defaults[i]) |default| try w.print(" = {s}", .{default});
     }
-    try w.print(") -> {s} ", .{result});
+    // A closure returning `()` is written without a result.
+    if (std.mem.eql(u8, result, "()")) try w.writeAll(") ") else try w.print(") -> {s} ", .{result});
 
     const part = ast.partOf(ast.exprTokens(body).start);
     var p: Printer = .{
@@ -2085,8 +2086,10 @@ const Printer = struct {
                     });
                 }
                 try self.closeList(l, params.len);
-                try self.write(" -> ");
-                try self.writeWrittenType(callable.result);
+                if (callable.result.wasWritten()) {
+                    try self.write(" -> ");
+                    try self.writeWrittenType(callable.result);
+                }
                 try self.writeContracts(self.ast.contracts[callable.contracts.start..callable.contracts.end]);
             },
         }

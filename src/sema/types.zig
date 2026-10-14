@@ -1828,8 +1828,13 @@ fn renderCallable(
             },
         }
     }
-    try rendered.appendSlice(gpa, ") -> ");
-    try rendered.appendSlice(gpa, pool.nameOf(result));
+    try rendered.append(gpa, ')');
+    // A callable returning `()` is written without a result, so it is shown
+    // without one.
+    if (result != .unit) {
+        try rendered.appendSlice(gpa, " -> ");
+        try rendered.appendSlice(gpa, pool.nameOf(result));
+    }
     try appendContractText(gpa, rendered, contracts, names, false);
     if (independent) try rendered.appendSlice(gpa, " where carries()");
 }

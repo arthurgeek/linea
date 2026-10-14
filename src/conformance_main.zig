@@ -11796,7 +11796,11 @@ fn writtenTypeName(
                 try out.appendSlice(gpa, text);
             }
         }
-        try out.appendSlice(gpa, ") -> ");
+        try out.append(gpa, ')');
+        // A callable type writing no result returns `()`, and is named
+        // without one as the checker names it.
+        if (!callable.result.wasWritten()) return try out.toOwnedSlice(gpa);
+        try out.appendSlice(gpa, " -> ");
         const result = try writtenTypeName(gpa, ast, res, memo, callable.result, self_is, purpose) orelse {
             out.deinit(gpa);
             return null;

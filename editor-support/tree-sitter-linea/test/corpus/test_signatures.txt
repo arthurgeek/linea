@@ -6,7 +6,7 @@ test fn succeeds() {}
 test fn returns() { return }
 test fn custom() -> Result[(), Failure] { return .Ok({}) }
 test trap fn traps() { panic("expected") }
-fn ordinary() -> () {}
+fn ordinary() {}
 
 ---
 
@@ -47,7 +47,6 @@ fn ordinary() -> () {}
   (function_declaration
     (identifier)
     (parameter_list)
-    (unit_type)
     (block)))
 
 ==================

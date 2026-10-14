@@ -7601,13 +7601,19 @@ const Resolver = struct {
             );
         }
 
-        // A missing `->` is [S-Type], reported by the parser against the same
-        // declaration, so silence here leaves one diagnostic rather than two
-        // for one mistake.
-        // A type with no name is still a type: an array `main` returns is not
-        // a `main` with no return type, and reading it as one let [S-Entry] be
-        // bypassed by writing `-> [UInt8; 3]`.
+        // A `main` that writes no result returns `()`, which has no exit
+        // status to give. A type with no name is still a type: an array
+        // `main` returns is not a `main` with no return type, and reading it
+        // as one let [S-Entry] be bypassed by writing `-> [UInt8; 3]`.
         const written = self.ast.declReturnRef(d);
+        if (written.isOmitted()) return self.sink.addError(
+            .s_entry,
+            self.ast.fileOfDecl(d),
+            self.ast.declNameSpan(d),
+            "the entry point answers with `UInt8`, which is the exit status",
+            "this returns nothing; write `-> UInt8`",
+        );
+        // A result the parser refused was reported there.
         if (!written.wasWritten()) return;
         const tok = written.name;
         if (tok == TokenId.none) return self.sink.addError(

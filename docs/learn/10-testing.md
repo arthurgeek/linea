@@ -23,7 +23,9 @@ fails:
 `@derive(Equatable, Debug)` gives your own types; it compares whole values, enum
 payloads included. For a shape check, write
 `testing.assert(match read value { … }, message)`. A test's return type may be
-left out; written in full, it is `-> Result[(), testing.Failure]`.
+left out; written in full, it is `-> Result[(), testing.Failure]`. That is the
+one place a missing result means something other than `()`: an ordinary
+function that writes none returns `()`.
 
 Here the three kinds of check test a function that reads the port out of an
 address. Save it as `ports.lin` and run `linea test ports.lin`:

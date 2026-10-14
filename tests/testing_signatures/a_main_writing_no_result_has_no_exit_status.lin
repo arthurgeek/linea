@@ -1,0 +1,2 @@
+// A `main` that writes no result returns `()`, which is no exit status.
+fn main() {}

@@ -1381,6 +1381,10 @@ fn typecheckInternal(
                 .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
                 .reason = .return_type,
                 .unit_test_success = true,
+            } else if (ast.declTag(d) == .function and written_return.isOmitted()) .{
+                .ty = try c.declaredResultType(d),
+                .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
+                .reason = .omitted_result,
             } else null;
 
             // Recorded from the same call the body is checked against, so
@@ -1881,8 +1885,11 @@ fn spellWritten(
                     try out.appendSlice(gpa, ast.exprText(param.default));
                 }
             }
-            try out.appendSlice(gpa, ") -> ");
-            try spellWritten(gpa, ast, out, callable.result);
+            try out.append(gpa, ')');
+            if (callable.result.wasWritten()) {
+                try out.appendSlice(gpa, " -> ");
+                try spellWritten(gpa, ast, out, callable.result);
+            }
             return;
         },
     }
@@ -4630,7 +4637,7 @@ fn returnType(c: *Checker, d: node.DeclId) !TypeId {
     // and its projections stand for the call's receiver. Every other
     // declaration keeps the one result type it was declared with.
     if (c.ast.declIsSignature(d))
-        return c.typeOfRefOf(c.program.moduleOf(d), d, c.ast.declReturnRef(d));
+        return c.declResultOf(c.program.moduleOf(d), d);
     if (c.ast.declIsTest(d) and !c.ast.declReturnRef(d).wasWritten()) {
         if (c.default_test_result) |settled| return settled;
         const failure = c.program.libraryDeclIn("testing", "Failure") orelse return .poison;
@@ -4702,6 +4709,8 @@ const Expected = struct {
 
     const Reason = enum {
         return_type,
+        /// A function that writes no result, which therefore returns `()`.
+        omitted_result,
         annotation,
         conversion,
         /// The other arm of a conditional, which settled the type first.
@@ -4755,6 +4764,7 @@ const Expected = struct {
         fn describe(self: Reason) []const u8 {
             return switch (self) {
                 .return_type => "expected because of this return type",
+                .omitted_result => "this function writes no result type, so it returns `()`",
                 .annotation => "expected because of this annotation",
                 .conversion => "expected because of this conversion",
                 .arm => "expected because of this arm",
@@ -5861,6 +5871,22 @@ const Checker = struct {
     /// admits.
     fn typeOfRef(self: *Checker, ref: node.TypeRef) !TypeId {
         return self.typeOfRefOf(self.current, self.generic, ref);
+    }
+
+    /// The type a callable's written result names. One that writes none
+    /// returns `()`; one the parser began and refused names nothing.
+    fn resultOfRef(self: *Checker, m: ModuleId, owner: node.DeclId, ref: node.TypeRef) !TypeId {
+        if (ref.wasWritten()) return self.typeOfRefOf(m, owner, ref);
+        return if (ref.isOmitted()) .unit else .poison;
+    }
+
+    /// What a declaration's written result names. Only a function, a trait's
+    /// signature and an `extern` return `()` by writing nothing; a
+    /// projection, and a declaration that is not a callable, name nothing.
+    fn declResultOf(self: *Checker, m: ModuleId, d: node.DeclId) !TypeId {
+        const ref = self.ast.declReturnRef(d);
+        if (self.ast.declTag(d) != .function) return self.typeOfRefOf(m, d, ref);
+        return self.resultOfRef(m, d, ref);
     }
 
     /// Resolves representation through the ordinary type reader. The first
@@ -7146,7 +7172,7 @@ const Checker = struct {
             });
         }
 
-        const result = try self.typeOfRefOf(m, owner, written.result);
+        const result = try self.resultOfRef(m, owner, written.result);
         if (invalid or result == .poison) {
             try self.noteContractRoots(self.ast.params[written.params.start..written.params.end], self.ast.contracts[written.contracts.start..written.contracts.end]);
             return .poison;
@@ -7659,7 +7685,9 @@ const Checker = struct {
             self.symbolic_self_owner = .none;
             self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
         }
-        const resolved = try self.typeOfRef(self.ast.declReturnRef(d));
+        // A test that writes no result answers its default `Result`, which
+        // `returnType` settles before asking here.
+        const resolved = try self.declResultOf(self.current, d);
         self.declared_results[d.index()] = resolved;
         return resolved;
     }
@@ -16641,8 +16669,11 @@ const Checker = struct {
             if (parameter.passing == .inout) try spelled.appendSlice(self.gpa, "inout ");
             try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
         }
-        try spelled.appendSlice(self.gpa, ") -> ");
-        try spelled.appendSlice(self.gpa, runtimeScalarName(expected.result));
+        try spelled.append(self.gpa, ')');
+        if (expected.result != .unit) {
+            try spelled.appendSlice(self.gpa, " -> ");
+            try spelled.appendSlice(self.gpa, runtimeScalarName(expected.result));
+        }
         try self.sink.addErrorFmt(
             .t_extern_runtime,
             file,
@@ -27218,27 +27249,9 @@ const Checker = struct {
             );
         }
 
-        // A missing return type is not a type, so the two are compared by
-        // whether each was written before they are compared as types.
-        // Whether one was written, not whether it has a name. An array has
-        // none, so both sides read absent, the comparison below never ran, and
-        // an implementation returning `[UInt8; 1]` satisfied a signature
-        // declaring `[UInt8; 3]` -- with the caller's index folded as in-range
-        // against the length the signature promised.
-        const declared_return = self.ast.declReturnRef(sig).wasWritten();
-        const supplied_return = self.ast.declReturnRef(member).wasWritten();
-        if (declared_return != supplied_return) {
-            return self.sink.addErrorFmt(
-                mismatch_code,
-                file,
-                span,
-                "return what the signature returns",
-                "`{s}` declares what `{s}` returns, and this does not",
-                .{ trait, name },
-            );
-        }
-        if (!declared_return) return;
-
+        // Compared as types, an omitted result included: it is `()`, so a
+        // signature that writes none and a member that writes `UInt8` differ
+        // the way any two results do.
         const wanted = try self.throughTrait(try returnType(self, sig), trait_decl, trait_args);
         const supplied = try self.builder.substitute(
             try returnType(self, member),

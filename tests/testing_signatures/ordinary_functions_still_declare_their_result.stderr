@@ -1,5 +1,0 @@
-error[S-Type]: expected `->`
- --> tests/testing_signatures/ordinary_functions_still_declare_their_result.lin:1:11
-  |
-1 | fn main() { 0 }
-  |           ^ a function declares what it returns

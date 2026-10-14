@@ -2283,6 +2283,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/structs/a_field_pattern_read_binds_a_name.lin",
     "tests/structs/a_destructure_binds_a_name_for_each_field.lin",
     "tests/structs/a_field_pattern_is_no_range.lin",
+    "tests/decl/a_unit_result_is_not_written/main.lin",
 };
 
 /// Every corpus file the grammar is asked to derive.

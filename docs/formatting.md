@@ -35,6 +35,11 @@ A file that does not *parse* is refused, and reported. The parser recovers by
 planting an error node, and an error node has no faithful printing; writing one
 anyway would destroy source. Other files in the same invocation still format.
 
+A function that returns nothing writes no result type, and the parser refuses
+`-> ()` ([S-UnitResult]). `fmt` therefore never prints `-> ()`, and it does not
+remove one either: a file writing it is refused like any other parse error, with
+the help to remove it.
+
 ## How layout is decided
 
 ### The trailing comma

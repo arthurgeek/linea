@@ -35,6 +35,7 @@ const StmtId = node.StmtId;
 /// a trailing comma, and the one for a tuple holding too many of either.
 const one_component_help = "`(x)` groups `x`; drop the comma, or add a second component";
 const too_many_help = "give a struct names past eight parts";
+const remove_written_unit = "remove `-> ()`";
 
 const delimiter_unknown = std.math.maxInt(u32);
 const delimiter_invalid = delimiter_unknown - 1;
@@ -670,7 +671,7 @@ const Parser = struct {
             const at_function = self.cursor.at(.keyword_fn);
 
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(is_test)
+                try self.parseFunction()
             else if (self.cursor.at(.keyword_extern))
                 try self.parseExtern()
             else if (self.cursor.at(.keyword_trait))
@@ -1139,7 +1140,7 @@ const Parser = struct {
             const declares_a_traversal = self.atTraversal();
 
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(false)
+                try self.parseFunction()
             else if (self.atProjection())
                 try self.parseProjection(.required)
             else if (self.atTraversal())
@@ -2492,16 +2493,16 @@ const Parser = struct {
         });
     }
 
-    /// `fn name(params) -> Type { body }`.
-    /// A function with a body, which is every one outside a trait.
-    fn parseFunction(self: *Parser, is_test: bool) !node.DeclId {
-        return self.parseCallable(.required, .function, is_test);
+    /// `fn name(params) -> Type { body }`, or `fn name(params) { body }` for
+    /// one that returns nothing. A function with a body, which is every one outside a trait.
+    fn parseFunction(self: *Parser) !node.DeclId {
+        return self.parseCallable(.required, .function);
     }
 
     /// A signature: the same header, ended by a newline rather than a body.
     /// The one declaration form that carries no code.
     fn parseSignature(self: *Parser) !node.DeclId {
-        return self.parseCallable(.signature, .function, false);
+        return self.parseCallable(.signature, .function);
     }
 
     /// An `extern fn`, which names a symbol and declares no body.
@@ -2509,7 +2510,7 @@ const Parser = struct {
         // Past `extern`, so that what follows is the `fn` every other callable
         // starts at and one reader of a signature serves all three.
         _ = self.cursor.advance();
-        return self.parseCallable(.external, .function, false);
+        return self.parseCallable(.external, .function);
     }
 
     /// `proj at(inout self: Self, i: I) -> Elem`, with a body where an
@@ -2519,7 +2520,7 @@ const Parser = struct {
     /// projection differs in is what its braces mean, and that is settled where
     /// the body is judged rather than where it is read.
     fn parseProjection(self: *Parser, body_rule: Body) !node.DeclId {
-        return self.parseCallable(body_rule, .projection, false);
+        return self.parseCallable(body_rule, .projection);
     }
 
     /// What a callable does about a body.
@@ -2551,13 +2552,6 @@ const Parser = struct {
             };
         }
 
-        fn declaresAResult(self: Callable) []const u8 {
-            return switch (self) {
-                .function => "a function declares what it returns",
-                .projection => "a projection declares the type of the place it names",
-            };
-        }
-
         fn needsABody(self: Callable) []const u8 {
             return switch (self) {
                 .function => "a function needs a body",
@@ -2566,7 +2560,83 @@ const Parser = struct {
         }
     };
 
-    fn parseCallable(self: *Parser, body_rule: Body, kind: Callable, is_test: bool) !node.DeclId {
+    /// `-> ()` after a callable's parameters, refused by [S-UnitResult]: a
+    /// callable that returns nothing writes no result type, so `()` there is
+    /// a second spelling of the omitted one. Consumes the `()` and answers
+    /// whether it was there, leaving the result unwritten either way.
+    ///
+    /// Only the unit type written whole. `-> ((), ())` and
+    /// `-> Result[(), E]` are results that hold a unit, not unit itself.
+    fn refuseWrittenUnit(self: *Parser, arrow: TokenId, help: []const u8) !bool {
+        if (!self.cursor.at(.l_paren) or self.cursor.peekAt(1) != .r_paren) return false;
+        _ = self.cursor.advance();
+        const close = self.cursor.advance();
+        const labels = try self.sink.arena.alloc(Label, 1);
+        labels[0] = .{
+            .file = self.file,
+            .span = Span.merge(self.cursor.spanAt(arrow), self.cursor.spanAt(close)),
+            .message = "a function writing no result returns `()`",
+            .style = .primary,
+        };
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .s_unit_result,
+            .message = "a function that returns nothing writes no result type",
+            .labels = labels,
+            .notes = try self.sink.arena.dupe([]const u8, &.{help}),
+        });
+        return true;
+    }
+
+    test "a written unit result is refused wherever a result is written, and nothing holding a unit is" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+
+        const refused = [_][]const u8{
+            "fn f() -> () {}\n",
+            "fn f() -> () where carries() {}\n",
+            "trait T { fn f(self: Self) -> () }\n",
+            "extern fn f(at: UInt64) -> ()\n",
+            "fn f(_g: fn(x: UInt8) -> ()) {}\n",
+            "fn f() { let _g = |x: UInt8| -> () { x } }\n",
+            "test fn f() -> () {}\n",
+        };
+        for (refused) |text| {
+            try testing.expectEqualSlices(?Code, &.{.s_unit_result}, try codesOf(gpa, text));
+        }
+
+        const accepted = [_][]const u8{
+            "fn f() {}\n",
+            "fn f() where carries() {}\n",
+            "trait T { fn f(self: Self) }\n",
+            "extern fn f(at: UInt64)\n",
+            "fn f(_g: fn(x: UInt8), _h: inout fn(inout x: UInt8) where carries()) {}\n",
+            "fn f() -> ((), ()) { ((), ()) }\n",
+            "fn f() -> Result[(), UInt8] { .Ok(()) }\n",
+            "fn f() { let _g = |x: UInt8| -> where carries() { x } }\n",
+        };
+        for (accepted) |text| {
+            try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, text));
+        }
+
+        // A lambda writing contracts keeps its arrow, so only `()` goes.
+        const source: Source = .{ .path = "t.lin", .text = "fn f() { let _g = |x: UInt8| -> () where carries() { x } }\n" };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        _ = try parse(gpa, &source, .from(0), tokens, &sink);
+        try testing.expectEqual(@as(usize, 1), sink.items().len);
+        try testing.expectEqualStrings("remove `()`; the `->` stays before `where`", sink.items()[0].notes[0]);
+    }
+
+    test "a projection still writes the type of the place it names" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        try testing.expectEqualSlices(?Code, &.{.s_type}, try codesOf(arena.allocator(), "trait T { proj at(inout self: Self) }\n"));
+    }
+
+    fn parseCallable(self: *Parser, body_rule: Body, kind: Callable) !node.DeclId {
         const wants_body = body_rule == .required;
         const start = self.cursor.current();
         _ = self.cursor.advance(); // fn, or proj
@@ -2579,9 +2649,12 @@ const Parser = struct {
 
         var returns: node.TypeRef = .{ .name = .none };
         var return_type: TokenId = .none;
-        if (self.cursor.eat(.arrow) != null) {
+        if (self.cursor.eat(.arrow)) |arrow| {
             return_type = self.cursor.current();
-            if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
+            if (kind == .function and try self.refuseWrittenUnit(arrow, remove_written_unit)) {
+                // Read as the omitted form it should have been, so the rest of
+                // the declaration is checked as a function returning `()`.
+            } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
                 self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
             {
                 // Which type the name reaches is a question about names, so the
@@ -2592,10 +2665,13 @@ const Parser = struct {
                 returns = try self.parseWrittenType();
             } else {
                 try self.reportAt(.s_type, return_type, "expected a type", "a `->` introduces the return type");
-                returns = .{ .name = .none };
+                returns = .{ .at = return_type, .name = .none };
             }
-        } else if (!is_test) {
-            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", kind.declaresAResult());
+        } else if (kind == .projection) {
+            // A function that writes no result returns `()`, and a test
+            // answers its default `Result`. A projection names a place, and a
+            // place has a type that has to be written.
+            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", "a projection declares the type of the place it names");
         }
 
         const where_clause = try self.parseFunctionWhere();
@@ -3063,10 +3139,11 @@ const Parser = struct {
         };
         _ = self.cursor.advance();
         const params = try self.parseParams();
-        if (self.cursor.eat(.arrow) == null) {
-            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", "a callable type names its result");
+        // No `->` is a callable type returning `()`, as it is for a function.
+        var result: node.TypeRef = .{ .name = .none };
+        if (self.cursor.eat(.arrow)) |arrow| {
+            if (!try self.refuseWrittenUnit(arrow, remove_written_unit)) result = try self.parseWrittenType();
         }
-        const result = try self.parseWrittenType();
         const contracts = try self.parseContracts();
         const callable = try self.builder.addCallableType(.{ .at = at, .invocation = invocation, .invocation_token = invocation_token, .params = params, .result = result, .contracts = contracts });
         return .{ .kind = .callable, .at = at, .name = .none, .callable = callable };
@@ -3764,10 +3841,13 @@ const Parser = struct {
         var result: node.TypeRef = .{ .name = .none };
         var contracts: node.ContractRange = .{};
         if (result_arrow != .none) {
-            switch (self.cursor.peek()) {
+            // Without `where` after it, removing `-> ()` leaves the lambda's
+            // result to its body; with one, the `->` stays to introduce it.
+            const unit_help = if (self.cursor.peekAt(2) == .keyword_where) "remove `()`; the `->` stays before `where`" else remove_written_unit;
+            if (!try self.refuseWrittenUnit(result_arrow, unit_help)) switch (self.cursor.peek()) {
                 .keyword_where => {},
                 else => result = try self.parseWrittenType(),
-            }
+            };
             contracts = try self.parseContracts();
             // The body has not started, so this comma ends the lambda's
             // contract list rather than an enclosing argument or parameter.
@@ -9627,7 +9707,7 @@ test "lambda result annotations parse types and contracts after an arrow" {
     const source: Source = .{ .path = "contracts.lin", .text =
         \\fn main() -> UInt8 {
         \\    let inspect = [owner] |value: borrow UInt8| -> where carries(value), borrows(owner) value
-        \\    let store = inout [sink held] |input: borrow UInt8| -> () where retains(held: input) { held = copy(input) }
+        \\    let store = inout [sink held] |input: borrow UInt8| -> UInt8 where retains(held: input) { held = copy(input); 0 }
         \\    0
         \\}
     };

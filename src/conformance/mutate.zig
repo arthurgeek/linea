@@ -1010,8 +1010,9 @@ fn abruptAfterATransfer(
         fresh,
         "(sink _a: ",
         takes,
-        ", _b: UInt8) -> ",
-        answers,
+        // A callee returning `()` writes no result, and so does its wrapper.
+        if (types_of.declReturn(d.callee) == .unit) ", _b: UInt8)" else ", _b: UInt8) -> ",
+        if (types_of.declReturn(d.callee) == .unit) "" else answers,
         " { ",
         ast.exprText(callee),
         "(_a) }\n",

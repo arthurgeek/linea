@@ -40,7 +40,7 @@ fn show(value: Pair) -> Str {
 ==================
 Two slashes inside a string are text, not a comment
 ==================
-fn paths() -> () {
+fn paths() {
     let root = "//"
     let url = "http://example.com" // a comment after it
 }
@@ -51,7 +51,6 @@ fn paths() -> () {
   (function_declaration
     name: (identifier)
     (parameter_list)
-    return_type: (unit_type)
     body: (block
       (let_statement
         name: (identifier)

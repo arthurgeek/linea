@@ -1,0 +1,55 @@
+// A function that returns nothing writes no `->`. Its result is `()`, so a
+// method, a trait's operation, an `extern`, a function type and a lambda
+// leave it out the same way.
+extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
+
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
+
+struct Tally {
+    count: UInt8,
+}
+
+trait Bump {
+    fn bump(inout self: Self)
+}
+
+impl Bump for Tally {
+    fn bump(inout self: Self) {
+        self.count += 1
+    }
+}
+
+impl Tally {
+    fn add(inout self: Self, by: UInt8) {
+        self.count += by
+    }
+}
+
+fn add_tip(inout bill: UInt8) {
+    bill += bill / 10
+}
+
+fn twice(inout value: UInt8, step: fn(inout value: UInt8)) {
+    step(&value)
+    step(&value)
+}
+
+fn main() -> UInt8 {
+    let at = linea_alloc(8, 8)
+    linea_free(at, 8, 8)
+
+    var bill: UInt8 = 40
+    add_tip(&bill)
+
+    var tally = Tally { count = 0 }
+    &tally.bump()
+    &tally.add(by: 2)
+
+    twice(&bill, add_tip)
+    let reset = |inout value: UInt8| {
+        value = 0
+    }
+    var spare: UInt8 = 9
+    reset(&spare)
+    bill + tally.count + spare
+}

@@ -1,7 +1,7 @@
 ==================
 Callable contracts leave enclosing separators
 ==================
-fn choose[I: Source]() -> fn(sink item: I.Item) -> () where I.Item: Discardable {
+fn choose[I: Source]() -> fn(sink item: I.Item) where I.Item: Discardable {
     |sink item| {}
 }
 fn invoke(callback: fn(value: UInt8) -> borrow UInt8 where borrows(value), value: UInt8) -> borrow UInt8 where borrows(value) {
@@ -27,8 +27,7 @@ fn invoke(callback: fn(value: UInt8) -> borrow UInt8 where borrows(value), value
           (identifier)
           (settled_ref_type
             (type_identifier)
-            (type_identifier))))
-      (unit_type))
+            (type_identifier)))))
     (where_clause
       (where_predicate
         (settled_ref_type

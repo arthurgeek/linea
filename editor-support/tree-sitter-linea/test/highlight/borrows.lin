@@ -15,7 +15,7 @@ fn forward(sink value: borrow UInt64) -> Result[borrow UInt64, UInt8] where carr
     .Ok(value)
 }
 
-fn replace(inout value: borrow UInt64, sink next: borrow UInt64) -> () where retains(value: next) {
-//                                                                           ^ keyword.storage.modifier
+fn replace(inout value: borrow UInt64, sink next: borrow UInt64) where retains(value: next) {
+//                                                                     ^ keyword.storage.modifier
     value = next
 }
