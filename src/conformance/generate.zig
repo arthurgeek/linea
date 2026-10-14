@@ -747,10 +747,9 @@ const Gen = struct {
         // A function answering the unit type, which is the only way a program
         // can reach a value of no width.
         //
-        // `()` is written as a return type and nowhere else: an annotation, a
-        // field, a payload and a type argument all refuse it, so no choice
-        // this generator makes over types can produce one and inference is the
-        // only route. That is why nothing in the corpus instantiated a generic
+        // No choice this generator makes over types produces `()`, so a
+        // function that returns it, writing no result, is the only route.
+        // That is why nothing in the corpus instantiated a generic
         // at a type of no width, and why the layout, the store and the load of
         // a part occupying no bytes were reached by nothing.
         //

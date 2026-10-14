@@ -1934,7 +1934,8 @@ const Printer = struct {
     }
 
     fn writeReturnType(self: *Printer, d: DeclId) Error!void {
-        // Array and unit types are written even though neither has a name.
+        // An array type is written even though it has no name. A function
+        // returning `()` writes no result, so there is nothing to print.
         const ref = self.ast.declReturnRef(d);
         if (!ref.wasWritten()) return;
         // Between the arrow and the type, which is where it was written. It

@@ -12919,7 +12919,8 @@ fn writeSourceType(
                 }
             }
             try out.appendSlice(gpa, "->");
-            try writeSourceType(gpa, ast, res, memo, out, callable.result, reading, depth + 1);
+            // An omitted result is `()`, which no other result is written as.
+            if (callable.result.wasWritten()) try writeSourceType(gpa, ast, res, memo, out, callable.result, reading, depth + 1) else try out.appendSlice(gpa, "()");
             for (ast.contracts[callable.contracts.start..callable.contracts.end]) |contract| {
                 try out.print(gpa, "+contract{d}{}", .{ @intFromEnum(contract.kind), contract.borrows_source });
                 for ([_]node_mod.ContractPath{ contract.source, contract.destination, contract.target }) |path| {

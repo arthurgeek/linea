@@ -891,6 +891,25 @@ pub const Ast = struct {
         return self.type_refs[ref.base.index()];
     }
 
+    /// From `start` through the bracket closing the first one opened at or
+    /// after it. Bound: the written type's own tokens.
+    fn firstBracketsSpan(self: *const Ast, start: TokenId) Span {
+        const open = self.tokenSpan(start);
+        var depth: u32 = 0;
+        var at = start.index();
+        while (at < self.tokenCount()) : (at += 1) {
+            switch (self.tokenTag(TokenId.at(at)).nesting()) {
+                1 => depth += 1,
+                -1 => {
+                    depth -|= 1;
+                    if (depth == 0) return .{ .start = open.start, .end = self.tokenSpan(TokenId.at(at)).end };
+                },
+                else => {},
+            }
+        }
+        return open;
+    }
+
     /// The written form's extent through its last named component.
     pub fn writtenSpan(self: *const Ast, ref: node.TypeRef) Span {
         if (ref.kind == .grouped) return .{ .start = self.tokenSpan(ref.at).start, .end = self.tokenSpan(ref.name).end };
@@ -903,7 +922,8 @@ pub const Ast = struct {
         if (ref.kind == .callable) {
             const head = self.tokenSpan(ref.at);
             const result = self.callableType(ref).result;
-            if (!result.wasWritten()) return head;
+            // Without a result it ends at the `)` closing its parameters.
+            if (!result.wasWritten()) return self.firstBracketsSpan(ref.at);
             return .{ .start = head.start, .end = self.writtenSpan(result).end };
         }
         if (ref.kind == .selection) return .{
@@ -911,23 +931,7 @@ pub const Ast = struct {
             .end = self.tokenSpan(if (ref.name == .none) ref.dot else ref.name).end,
         };
         // `[T; N]` and `(A, B)` name no token, so each spans its brackets.
-        // Bound: the written type's own tokens.
-        if (ref.kind == .array or ref.kind == .tuple) {
-            const open = self.tokenSpan(ref.at);
-            var depth: u32 = 0;
-            var at = ref.at.index();
-            while (at < self.tokenCount()) : (at += 1) {
-                switch (self.tokenTag(TokenId.at(at)).nesting()) {
-                    1 => depth += 1,
-                    -1 => {
-                        depth -|= 1;
-                        if (depth == 0) return .{ .start = open.start, .end = self.tokenSpan(TokenId.at(at)).end };
-                    },
-                    else => {},
-                }
-            }
-            return open;
-        }
+        if (ref.kind == .array or ref.kind == .tuple) return self.firstBracketsSpan(ref.at);
         if (ref.name == TokenId.none) return self.tokenSpan(ref.at);
         const head = self.tokenSpan(ref.name);
         if (ref.kind == .named and ref.name != TokenId.none and self.tokenTag(ref.name) == .l_paren) {

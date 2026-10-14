@@ -1,0 +1,5 @@
+// A written `-> ()` is refused on a test and on `main` too, and each refusal
+// says what that declaration answers when it writes the right result.
+test fn a_tally_starts_at_zero() -> () {}
+
+fn main() -> () {}

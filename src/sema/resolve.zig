@@ -2964,7 +2964,7 @@ const ParameterReading = struct { written: node.TypeRef, reading: Reading };
 fn parameterReading(ast: *const Ast, read: Reading, x: node.TypeRef) ?ParameterReading {
     if (read.family == DeclId.none) return null;
     if (x.kind != .named or x.args.len() != 0) return null;
-    if (ast.tokenTag(x.name) != .identifier) return null;
+    if (x.name == TokenId.none or ast.tokenTag(x.name) != .identifier) return null;
     const name = ast.tokenName(x.name);
     for (ast.declTypeParams(read.family), 0..) |p, i| {
         if (ast.tokenName(p.name) != name) continue;
@@ -3266,7 +3266,11 @@ fn sameWrittenCallable(
         if ((p.default == ExprId.none) != (q.default == ExprId.none)) return false;
         if (p.default != ExprId.none and !try ctx.sameValue(p.default, q.default)) return false;
     }
-    return try sameType(ast, ctx, x.result, ra, y.result, rb, left) and sameWrittenContracts(ast, x.contracts, y.contracts);
+    // A result written by neither is `()` in both; one written by only one is
+    // a different result, as `()` is never written.
+    if (x.result.wasWritten() != y.result.wasWritten()) return false;
+    if (x.result.wasWritten() and !try sameType(ast, ctx, x.result, ra, y.result, rb, left)) return false;
+    return sameWrittenContracts(ast, x.contracts, y.contracts);
 }
 
 /// Hashes what `sameWrittenArgs` compares, reading the text as it does: two
@@ -3363,7 +3367,8 @@ fn hashType(
                     h.update(std.mem.asBytes(&key));
                 }
             }
-            try hashType(ast, ctx, h, callable.result, read, left);
+            // As `sameWrittenCallable` reads it: an omitted result is `()`.
+            if (callable.result.wasWritten()) try hashType(ast, ctx, h, callable.result, read, left) else h.update("()");
             hashWrittenContracts(ast, h, callable.contracts);
         },
     }

@@ -1,0 +1,9 @@
+// A callable type written without a result ends at its parameters' `)`, so
+// a report quoting it quotes all of it.
+alias Step = fn(inout total: UInt8)
+
+fn main() -> UInt8 {
+    let _step: fn(inout total: UInt8) = 5
+    Step.call()
+    0
+}

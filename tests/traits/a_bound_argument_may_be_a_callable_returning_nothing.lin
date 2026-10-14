@@ -1,0 +1,23 @@
+// A trait's argument may be a callable type that returns nothing, written
+// without a result, in an implementation's head and in a bound alike.
+trait Give[phantom T] {
+    fn give(self: Self) -> UInt8
+}
+
+struct Purse {
+    coins: UInt8,
+}
+
+impl Give[fn(inout total: UInt8)] for Purse {
+    fn give(self: Self) -> UInt8 {
+        self.coins
+    }
+}
+
+fn take[T: Give[fn(inout total: UInt8)]](giver: T) -> UInt8 {
+    giver.give()
+}
+
+fn main() -> UInt8 {
+    take(Purse { coins = 3 })
+}

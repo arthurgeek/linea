@@ -1,0 +1,28 @@
+// An alias of a callable type that returns nothing is the type it names, so
+// an implementation written through the alias overlaps one written out.
+trait Give[phantom T] {
+    fn give(self: Self) -> UInt8
+}
+
+alias Step[T] = fn(inout total: T)
+
+struct Purse[T] {
+    coins: UInt8,
+    _unit: Option[T],
+}
+
+impl[T] Give[Step[T]] for Purse[T] {
+    fn give(self: Self) -> UInt8 {
+        self.coins
+    }
+}
+
+impl Give[fn(inout total: UInt8)] for Purse[UInt8] {
+    fn give(self: Self) -> UInt8 {
+        self.coins + 1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

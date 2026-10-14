@@ -37,11 +37,15 @@ one rule for every place a result is written:
   lambda is refused like any other. A lambda writing contracts and no result
   keeps the arrow: `|x| -> where carries() { ... }`.
 
-Writing `-> ()` in any of these places is [S-UnitResult]. The parser reports
-it at the `-> ()` with help to remove it, and reads the declaration as the
-omitted form, so the rest of the file is checked as if it had been written
-correctly. Only the unit type written whole is refused: `-> Result[(), E]`,
-`-> ((), T)` and `-> Option[()]` hold a unit and are unchanged.
+Writing `-> ()` in any of these places is [S-UnitResult], and so is `()` in
+grouping parentheses, `-> (())`. The parser reports it at the `-> ()` with help
+to remove it, and reads the declaration as the omitted form, so the rest of the
+file is checked as if it had been written correctly. On a top-level `main` the
+help is to write `-> UInt8`, since removing the result would leave an entry
+point with no exit status. Only the unit type written as such is refused:
+`-> Result[(), E]`, `-> ((), T)` and `-> Option[()]` hold a unit and are
+unchanged. The parser reads spelling, not names, so an alias of `()` written as
+a result is not refused; nothing in the library or the guide declares one.
 
 A `test fn` keeps its own default: no result means
 `Result[(), testing.Failure]`. A projection names a place, so it still writes

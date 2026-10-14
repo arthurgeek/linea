@@ -597,12 +597,14 @@ symbol.
 **[S-UnitResult]** A callable that returns Unit writes no result type:
 `fn add_tip(inout bill: UInt64) { ... }`. Leaving out `-> T` means the result
 is `()`, for a function, a method, a trait's signature, an `extern` and a
-callable type `fn(inout value: UInt8)` alike, so `fn add_tip(inout bill:
-UInt64)` and `fn(inout value: UInt8)` name the same callable shape. Writing
-`-> ()` is refused where it is written, with help to remove it
+callable type alike, so `add_tip` is a value of type
+`fn(inout bill: UInt64)`. Writing `-> ()`, or `()` in grouping parentheses, is
+refused where it is written, with help to remove it; on a top-level `main` the
+help is to write `-> UInt8` instead
 ([ADR 0223](adr/0223-a-function-returning-nothing-writes-no-result.md)). Only
-the unit type written whole is refused: `-> Result[(), E]` and `-> ((), T)`
-are results that hold a Unit. A lambda that writes no result takes its body's
+the unit type written as such is refused: `-> Result[(), E]` and `-> ((), T)`
+are results that hold a Unit, and a name standing for `()`, such as an alias, is
+not looked through. A lambda that writes no result takes its body's
 type, Unit included, so `-> ()` is refused on a lambda too; one that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
 A `test fn` that writes no result answers `Result[(), testing.Failure]`
