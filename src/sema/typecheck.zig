@@ -29592,10 +29592,15 @@ const Checker = struct {
         // is what keeps that knowledge: the caller sees only that no type was
         // determined, and would have to say so about the whole declaration.
         // A payload with no type was reported where it is written, and the
-        // parameter it would have settled is that mistake's consequence.
+        // parameter it would have settled is that mistake's consequence. A
+        // parameter no payload mentions is a mistake of its own, reported
+        // whichever order the parameters are declared in.
+        var unsettled = false;
+        var reported = false;
         for (found, tried, self.ast.declTypeParams(d)) |f, t, g| {
             if (f != .poison) continue;
-            if (t) return .reported;
+            unsettled = true;
+            if (t or reported) continue;
             _ = self.report(
                 .t_infer,
                 id,
@@ -29603,8 +29608,9 @@ const Checker = struct {
                 .{self.ast.tokenText(g.name)},
                 "no argument of this variant determines it",
             );
-            return .reported;
+            reported = true;
         }
+        if (unsettled) return .reported;
 
         // A bound is a claim about every instantiation, so it is asked wherever
         // one is made. Asked only where a type was written down and where a
