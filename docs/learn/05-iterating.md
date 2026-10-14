@@ -766,7 +766,9 @@ the name, not its text.
 `sort` puts a vector's elements in ascending order, in place. `sort_by` orders
 them by a comparison you write, which answers whether `left` belongs before
 `right`. An array's view and a map cannot be reordered, so collect what you
-want sorted into a `Vec` first:
+want sorted into a `Vec` first. A fixed array has no `sort` either: copy its
+elements into a `Vec`, as the programs below do with `collect`, or build one
+with `Vec.from_fn`:
 
 ```linea
 import std.io
@@ -868,10 +870,37 @@ fn main() -> Result[UInt8, io.IoError] {
 [-1.0, 0.5, 2.5, NaN]
 ```
 
-A comparison must be consistent: never true for a value against itself, and
-transitive. Plain `<` on floats is not once NaN is among them. Given an
-inconsistent comparison, a sort still finishes and the vector still holds
-every element it held, in an order nobody promises.
+A comparison must be consistent. It is never true for a value against itself.
+It is transitive: if `a` comes before `b` and `b` before `c`, then `a` comes
+before `c`. And when it puts neither of two values first, those two must sort
+alike against every other value. Plain `<` on floats breaks the last rule once
+NaN is among them: it puts neither 1.0 nor 2.0 before NaN, nor NaN before
+either, yet 1.0 comes before 2.0. Here the sort compares each number only
+with NaN, finds neither one first, and leaves all three where they were:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let readings = [Float64(2.0), 0.0 / 0.0, 1.0]
+    let { values, iterator: _ } = readings.as_slice().map(|sink reading| *reading).collect().settled() else |_| {
+        return .Ok(1)
+    }
+    defer var sorted = values
+    // `<` is false both ways between NaN and each number, so the sort keeps
+    // 2.0 and 1.0 on either side of NaN.
+    &sorted.sort_by(|left, right| left < right)
+    io.println("{sorted.as_slice():?}")?
+    .Ok(0)
+}
+```
+
+```
+[2.0, NaN, 1.0]
+```
+
+Given an inconsistent comparison, a sort still finishes and the vector still
+holds every element it held, in an order nobody promises.
 
 ## Callbacks and searches that keep their state
 

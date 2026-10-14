@@ -18,10 +18,12 @@ impl Index[UInt64] for Board via scores
 
 impl Index[FromEnd] for Board via scores
 
-// List the team indexes from the highest score down. `sort_by` reorders a
-// vector in place with a comparison that says whether `left` belongs before
-// `right`, and `[board]` lets that comparison read the scores. The sort is
-// stable, so tied teams keep their registration order.
+// List the team indexes from the highest score down. A fixed array has no
+// `sort`, so `Vec.from_fn` builds a vector of the indexes to sort, and the
+// vector's allocation can fail. `sort_by` reorders the vector in place with a
+// comparison that says whether `left` belongs before `right`, and `[board]`
+// lets that comparison read the scores. The sort is stable, so tied teams keep
+// their registration order.
 fn standings(board: Board) -> Result[Vec[UInt64], mem.Oom] {
     var order = Vec.from_fn(count: board.scores.length(), initializer: |team| team)?
     &order.sort_by([board] |left, right| board[left] > board[right])
