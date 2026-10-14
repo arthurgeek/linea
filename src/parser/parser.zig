@@ -2511,7 +2511,7 @@ const Parser = struct {
         // Past `extern`, so that what follows is the `fn` every other callable
         // starts at and one reader of a signature serves all three.
         _ = self.cursor.advance();
-        return self.parseCallable(.external, .function, .top_level);
+        return self.parseCallable(.external, .function, .member);
     }
 
     /// `proj at(inout self: Self, i: I) -> Elem`, with a body where an
@@ -2533,7 +2533,7 @@ const Parser = struct {
 
     /// Where a callable is declared, which decides what an omitted result
     /// means and so what a refused `-> ()` should become: a test answers its
-    /// default `Result`, and a top-level `main` is the entry point, which
+    /// default `Result`, and a top-level `main` may be the entry point, which
     /// answers its exit status.
     const Site = enum { member, top_level, test_ };
 
@@ -2574,13 +2574,15 @@ const Parser = struct {
     ///
     /// Only the unit type written whole. `-> ((), ())` and
     /// `-> Result[(), E]` are results that hold a unit, not unit itself.
-    fn refuseWrittenUnit(self: *Parser, arrow: TokenId, label: []const u8, help: []const u8) !bool {
+    fn refuseWrittenUnit(self: *Parser, arrow: TokenId, label: []const u8, help: []const u8, before_where: ?[]const u8) !bool {
         // `()` inside any number of grouping parentheses, `(())` included:
         // every `(` before the first `)`, then as many `)`.
         var opens: u32 = 0;
         while (self.cursor.peekAt(opens) == .l_paren) opens += 1;
         if (opens == 0) return false;
         for (0..opens) |i| if (self.cursor.peekAt(opens + @as(u32, @intCast(i))) != .r_paren) return false;
+        // A lambda writing contracts keeps its arrow before `where`.
+        const said = if (before_where != null and self.cursor.peekAt(2 * opens) == .keyword_where) before_where.? else help;
         for (0..2 * opens - 1) |_| _ = self.cursor.advance();
         const close = self.cursor.advance();
         const labels = try self.sink.arena.alloc(Label, 1);
@@ -2595,7 +2597,7 @@ const Parser = struct {
             .code = .s_unit_result,
             .message = "a function that returns nothing writes no result type",
             .labels = labels,
-            .notes = try self.sink.arena.dupe([]const u8, &.{help}),
+            .notes = try self.sink.arena.dupe([]const u8, &.{said}),
         });
         return true;
     }
@@ -2633,14 +2635,18 @@ const Parser = struct {
             try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, text));
         }
 
-        // A lambda writing contracts keeps its arrow, so only `()` goes.
-        const source: Source = .{ .path = "t.lin", .text = "fn f() { let _g = |x: UInt8| -> () where carries() { x } }\n" };
-        var sink = Sink.init(gpa);
-        var interner: Interner = .empty;
-        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
-        _ = try parse(gpa, &source, .from(0), tokens, &sink);
-        try testing.expectEqual(@as(usize, 1), sink.items().len);
-        try testing.expectEqualStrings("remove `()`; the `->` stays before `where`", sink.items()[0].notes[0]);
+        // A lambda writing contracts keeps its arrow, so only `()` goes,
+        // however many parentheses group it.
+        for ([_][]const u8{ "()", "(())" }) |unit| {
+            const text = try std.fmt.allocPrint(gpa, "fn f() {{ let _g = |x: UInt8| -> {s} where carries() {{ x }} }}\n", .{unit});
+            const source: Source = .{ .path = "t.lin", .text = text };
+            var sink = Sink.init(gpa);
+            var interner: Interner = .empty;
+            const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+            _ = try parse(gpa, &source, .from(0), tokens, &sink);
+            try testing.expectEqual(@as(usize, 1), sink.items().len);
+            try testing.expectEqualStrings("remove `()`; the `->` stays before `where`", sink.items()[0].notes[0]);
+        }
     }
 
     test "a projection still writes the type of the place it names" {
@@ -2664,19 +2670,20 @@ const Parser = struct {
         var return_type: TokenId = .none;
         if (self.cursor.eat(.arrow)) |arrow| {
             return_type = self.cursor.current();
-            // `main` at the top of a file is the entry point, whose result is
-            // its exit status, so removing `-> ()` would only trade this
-            // refusal for [S-Entry]'s.
-            const entry = site == .top_level and self.cursor.tags[name.index()] == .identifier and
+            // A `main` at the top of a file may be the entry point, whose
+            // result is its exit status, so the help says both what removing
+            // `-> ()` gives and what an entry point writes. Which file is the
+            // root is not known here.
+            const main = site == .top_level and self.cursor.tags[name.index()] == .identifier and
                 std.mem.eql(u8, self.cursor.textOf(name), "main");
             const label = if (site == .test_) "a test writing no result answers `Result[(), testing.Failure]`" else omitted_unit_label;
-            const help = if (entry) "write `-> UInt8`: `main` answers with the exit status" else remove_written_unit;
-            if (kind == .function and try self.refuseWrittenUnit(arrow, label, help)) {
+            const help = if (main) "remove `-> ()`, or write `-> UInt8` if this `main` is the program's entry point" else remove_written_unit;
+            if (kind == .function and try self.refuseWrittenUnit(arrow, label, help, null)) {
                 // Read as the omitted form it should have been, so the rest of
-                // the declaration is checked as a function returning `()`. An
-                // entry point's is read as a refused result instead, which
-                // [S-Entry] does not report a second time.
-                if (entry) returns = .{ .at = arrow, .name = .none };
+                // the declaration is checked as a function returning `()`. A
+                // `main`'s is read as a refused result instead, so an entry
+                // point is not refused a second time by [S-Entry].
+                if (main) returns = .{ .at = arrow, .name = .none };
             } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
                 self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
             {
@@ -3165,7 +3172,7 @@ const Parser = struct {
         // No `->` is a callable type returning `()`, as it is for a function.
         var result: node.TypeRef = .{ .name = .none };
         if (self.cursor.eat(.arrow)) |arrow| {
-            if (!try self.refuseWrittenUnit(arrow, omitted_unit_label, remove_written_unit)) result = try self.parseWrittenType();
+            if (!try self.refuseWrittenUnit(arrow, omitted_unit_label, remove_written_unit, null)) result = try self.parseWrittenType();
         }
         const contracts = try self.parseContracts();
         const callable = try self.builder.addCallableType(.{ .at = at, .invocation = invocation, .invocation_token = invocation_token, .params = params, .result = result, .contracts = contracts });
@@ -3866,8 +3873,7 @@ const Parser = struct {
         if (result_arrow != .none) {
             // Without `where` after it, removing `-> ()` leaves the lambda's
             // result to its body; with one, the `->` stays to introduce it.
-            const unit_help = if (self.cursor.peekAt(2) == .keyword_where) "remove `()`; the `->` stays before `where`" else remove_written_unit;
-            if (!try self.refuseWrittenUnit(result_arrow, omitted_unit_label, unit_help)) switch (self.cursor.peek()) {
+            if (!try self.refuseWrittenUnit(result_arrow, omitted_unit_label, remove_written_unit, "remove `()`; the `->` stays before `where`")) switch (self.cursor.peek()) {
                 .keyword_where => {},
                 else => result = try self.parseWrittenType(),
             };

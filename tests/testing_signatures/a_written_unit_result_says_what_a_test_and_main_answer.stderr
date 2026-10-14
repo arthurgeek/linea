@@ -11,4 +11,4 @@ error[S-UnitResult]: a function that returns nothing writes no result type
 5 | fn main() -> () {}
   |           ^^^^^ a function writing no result returns `()`
   |
-  = help: write `-> UInt8`: `main` answers with the exit status
+  = help: remove `-> ()`, or write `-> UInt8` if this `main` is the program's entry point

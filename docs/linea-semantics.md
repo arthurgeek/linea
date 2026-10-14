@@ -600,7 +600,7 @@ is `()`, for a function, a method, a trait's signature, an `extern` and a
 callable type alike, so `add_tip` is a value of type
 `fn(inout bill: UInt64)`. Writing `-> ()`, or `()` in grouping parentheses, is
 refused where it is written, with help to remove it; on a top-level `main` the
-help is to write `-> UInt8` instead
+help also says that an entry point writes `-> UInt8`
 ([ADR 0223](adr/0223-a-function-returning-nothing-writes-no-result.md)). Only
 the unit type written as such is refused: `-> Result[(), E]` and `-> ((), T)`
 are results that hold a Unit, and a name standing for `()`, such as an alias, is
