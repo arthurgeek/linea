@@ -1,0 +1,15 @@
+// `sort` requires `Ordered`, and `Reading` does not implement it. This program
+// declares `Reading`, so it may implement `Ordered` for it; the bound is the
+// library's, so dropping it is not an edit this program can make.
+@derive(Release)
+struct Reading {
+    celsius: Int64,
+}
+
+fn main() -> UInt8 {
+    var readings: Vec[Reading] = Vec.new()
+    &readings.push(.{ celsius = 21 }).unwrap()
+    &readings.sort()
+    readings.release()
+    0
+}

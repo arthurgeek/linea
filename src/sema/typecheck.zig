@@ -10139,7 +10139,7 @@ const Checker = struct {
             try self.reportUnimplemented(
                 self.ast.fileOf(at),
                 span,
-                "implement it for that type, or drop the bound",
+                try self.unmetBoundHelp(traitAt(self.ast, self.res, bound.named.name) orelse .none, args, held, bound.named.name),
                 "`{s}` requires `{s}`, and `{s}` does not implement it",
                 .{ subject, asks, (try self.heldName(held)) },
                 traitAt(self.ast, self.res, bound.named.name) orelse .none,
@@ -10828,13 +10828,14 @@ const Checker = struct {
 
     /// A trait operation reached at a `Self` that does not implement its trait.
     fn reportSelfUnimplemented(self: *Checker, at: Loc, trait: TokenId, held: TypeId) std.mem.Allocator.Error!void {
+        const trait_decl = traitAt(self.ast, self.res, trait) orelse .none;
         try self.reportUnimplemented(
             at.file,
             at.span,
-            "implement it for that type, or reach the operation on one that does",
+            try self.unmetSelfHelp(trait_decl, held),
             "`{s}` requires `Self` to implement it, and `{s}` does not",
             .{ self.ast.tokenText(trait), (try self.typeName(held)) },
-            traitAt(self.ast, self.res, trait) orelse .none,
+            trait_decl,
             &.{},
             held,
         );
@@ -11794,6 +11795,76 @@ const Checker = struct {
         const span = self.ast.tokenSpan(self.ast.exprMain(id));
         self.sink.addErrorFmt(code, self.ast.fileOfExpr(id), span, label, fmt, args) catch {};
         return self.record(id, .poison);
+    }
+
+    /// The help a refused bound gives, naming only edits this program can
+    /// make: implementing the trait where a module of the program may write
+    /// that implementation, and otherwise what to give the bound instead; and
+    /// dropping the bound only where the program wrote it.
+    fn unmetBoundHelp(self: *Checker, trait: node.DeclId, trait_args: []const TypeId, held: TypeId, bound_name: TokenId) std.mem.Allocator.Error![]const u8 {
+        const bound_module = self.res.moduleOfFile(self.ast.fileOf(bound_name));
+        const droppable = bound_module == .none or !self.program.get(bound_module).library;
+        const drop: []const u8 = if (droppable) ", or drop the bound" else "";
+        const refusal = try self.programCannotImplement(trait, trait_args, held) orelse
+            return std.fmt.allocPrint(self.sink.arena, "implement it for that type{s}", .{drop});
+        return std.fmt.allocPrint(self.sink.arena, "{s}; {s}{s}", .{ refusal.reason, refusal.instead orelse "pass a value whose type implements it", drop });
+    }
+
+    /// The help a trait operation reached at a `Self` that does not implement
+    /// the trait gives, naming only edits this program can make.
+    fn unmetSelfHelp(self: *Checker, trait: node.DeclId, held: TypeId) std.mem.Allocator.Error![]const u8 {
+        const refusal = try self.programCannotImplement(trait, &.{}, held) orelse
+            return "implement it for that type, or reach the operation on one that does";
+        const instead = refusal.instead orelse return std.fmt.allocPrint(self.sink.arena, "{s}; reach the operation on one that does", .{refusal.reason});
+        return std.fmt.allocPrint(self.sink.arena, "{s}; {s}, or reach the operation on one that does", .{ refusal.reason, instead });
+    }
+
+    /// Why no module of this program may implement a trait for a type, and
+    /// what the program can write instead.
+    const ImplementRefusal = struct {
+        reason: []const u8,
+        /// A wrapper type the program can declare, where the type has a
+        /// declaration to wrap; null for one such as a closure, where the
+        /// program can only pass a value of another type.
+        instead: ?[]const u8,
+    };
+
+    /// Why no module of this program may implement `trait` for `held`, or
+    /// null where one may. Also null where the answer is not an
+    /// implementation for `held` itself: a parameter, which whatever settles
+    /// it answers for, and a type with an implementation whose own
+    /// requirements are unmet, which a note explains. The only modules that
+    /// can own a side of the implementation are the trait's and the type's,
+    /// so the ownership rule is asked of each that the program wrote.
+    fn programCannotImplement(self: *Checker, trait: node.DeclId, trait_args: []const TypeId, held: TypeId) std.mem.Allocator.Error!?ImplementRefusal {
+        if (trait == .none or held == .poison) return null;
+        const side: resolve_mod.ImplTypeSide = if (self.declaringType(held)) |d|
+            .{ .declared = self.program.moduleOf(d) }
+        else switch (self.builder.get(held)) {
+            .integer, .boolean, .float, .never => .primitive,
+            .parameter, .open_integer, .open_type, .poison => return null,
+            else => .unowned,
+        };
+        if (try self.builder.unmetRequirement(trait, trait_args, held)) |conditional| {
+            self.gpa.free(conditional.args);
+            return null;
+        }
+        const trait_module = self.program.moduleOf(trait);
+        const candidates = [_]ModuleId{ trait_module, if (side == .declared) side.declared else .none };
+        for (candidates) |writer| {
+            if (writer == .none or self.program.get(writer).library) continue;
+            if (resolve_mod.ownsAnImplSide(writer, false, side, trait_module)) return null;
+        }
+        const trait_name = self.ast.tokenText(self.ast.declName(trait));
+        const type_name = try self.typeName(held);
+        if (side == .unowned) return .{
+            .reason = try std.fmt.allocPrint(self.sink.arena, "only the module declaring `{s}` can implement it for this type, and it is outside this program", .{trait_name}),
+            .instead = null,
+        };
+        return .{
+            .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` and `{s}` are both declared outside this program", .{ type_name, trait_name }),
+            .instead = try std.fmt.allocPrint(self.sink.arena, "wrap `{s}` in a type that implements it", .{type_name}),
+        };
     }
 
     /// Reports that `held` does not implement `trait`, with a note naming the

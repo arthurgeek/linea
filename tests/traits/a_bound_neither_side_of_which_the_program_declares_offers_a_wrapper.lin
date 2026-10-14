@@ -1,0 +1,10 @@
+// `sort` requires `Ordered`, and `Float64` does not implement it. The library
+// declares both, so no module of this program may write that implementation;
+// the help offers a type this program declares instead.
+fn main() -> UInt8 {
+    var readings: Vec[Float64] = Vec.new()
+    &readings.push(2.5).unwrap()
+    &readings.sort()
+    readings.release()
+    0
+}

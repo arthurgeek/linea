@@ -845,10 +845,13 @@ error[T-Bound]: `T` requires `Ordered`, and `Float64` does not implement it
  --> sort_floats.lin:9:13
   |
 9 |     &sorted.sort()
-  |             ^^^^ implement it for that type, or drop the bound
+  |             ^^^^ `Float64` and `Ordered` are both declared outside this program; wrap `Float64` in a type that implements it
 ```
 
-Sort floats with `sort_by` and a comparison that decides where NaN goes:
+The library declares both `Float64` and `Ordered`, so a program cannot add
+that implementation. Wrapping each float in a type of your own that implements
+`Ordered` works, but it is simpler to sort floats with `sort_by` and a
+comparison that decides where NaN goes:
 
 ```linea
 import std.io

@@ -2,4 +2,4 @@ error[T-Bound]: `Ordered` requires `Comparable`, and `Point` does not implement 
   --> tests/traits/ordered_needs_comparable.lin:16:6
    |
 16 | impl Ordered for Point {}
-   |      ^^^^^^^ implement it for that type, or drop the bound
+   |      ^^^^^^^ implement it for that type

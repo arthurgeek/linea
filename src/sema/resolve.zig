@@ -307,6 +307,46 @@ pub fn reachableFrom(program: *const Program, reach: Reach, holding: ModuleId, w
     };
 }
 
+/// Who owns the type side of an implementation's head.
+pub const ImplTypeSide = union(enum) {
+    /// A type a module declares, owned by that module.
+    declared: ModuleId,
+    /// A primitive. No module declares one, so the library, which is what
+    /// the language ships, owns its type side.
+    primitive,
+    /// Unit, a callable type, a parameter or an observation constructor: no
+    /// module owns its type side, so only the trait's module may implement
+    /// for it.
+    unowned,
+};
+
+/// Whether `writer` may write an implementation of the trait declared in
+/// `trait_module` (`.none` for an inherent `impl`) for a head whose type side
+/// is `side`. A module owning one side of what the `impl` declares may write
+/// it. The resolver asks this of every `impl` it admits, and the checker asks
+/// it when a refused bound decides whether to offer an implementation.
+pub fn ownsAnImplSide(writer: ModuleId, writer_is_library: bool, side: ImplTypeSide, trait_module: ModuleId) bool {
+    if (trait_module != .none and trait_module == writer) return true;
+    return switch (side) {
+        .declared => |declaring| declaring == writer,
+        .primitive => writer_is_library,
+        .unowned => false,
+    };
+}
+
+test "a module owning either side of an implementation may write it" {
+    const trait_home = ModuleId.from(1);
+    const type_home = ModuleId.from(2);
+    const other = ModuleId.from(3);
+    try testing.expect(ownsAnImplSide(trait_home, false, .{ .declared = type_home }, trait_home));
+    try testing.expect(ownsAnImplSide(type_home, false, .{ .declared = type_home }, trait_home));
+    try testing.expect(!ownsAnImplSide(other, false, .{ .declared = type_home }, trait_home));
+    try testing.expect(ownsAnImplSide(other, true, .primitive, trait_home));
+    try testing.expect(!ownsAnImplSide(other, false, .primitive, trait_home));
+    try testing.expect(!ownsAnImplSide(other, true, .unowned, trait_home));
+    try testing.expect(!ownsAnImplSide(other, false, .{ .declared = type_home }, .none));
+}
+
 /// Whether a closure body may change a capture binding: an owned capture
 /// under `inout` invocation, and a place lent `inout`. A closure called for
 /// reading cannot hold an `inout` capture at all, which the checker reports
@@ -7636,7 +7676,7 @@ const Resolver = struct {
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .default_, .decl = d });
         }
         if (written_head.kind == .borrow) {
-            if (trait_decl == .none or self.moduleOf(trait_decl) != self.current) {
+            if (!self.mayImplement(.unowned, trait_decl)) {
                 try self.refused_impls.put(self.gpa, d, {});
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "an observation constructor has no declaring module", .{});
                 return;
@@ -7644,7 +7684,7 @@ const Resolver = struct {
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .borrow_, .decl = d });
         }
         if (written_head.kind == .callable) {
-            if (trait_decl == .none or self.moduleOf(trait_decl) != self.current) {
+            if (!self.mayImplement(.unowned, trait_decl)) {
                 try self.refused_impls.put(self.gpa, d, {});
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a callable type has no declaring module", .{});
                 return;
@@ -7656,7 +7696,7 @@ const Resolver = struct {
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .{ .callable_ = shape }, .decl = d });
         }
         if (self.ast.declHasParameterHead(d)) {
-            if (trait_decl == .none or self.moduleOf(trait_decl) != self.current) {
+            if (!self.mayImplement(.unowned, trait_decl)) {
                 try self.refused_impls.put(self.gpa, d, {});
                 return self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a parameter head has no declaring module", .{});
             }
@@ -7685,10 +7725,7 @@ const Resolver = struct {
             // Unit has no declaring module and grants no standard-library type
             // side. A trait implementation therefore belongs only with the
             // trait, while named primitives retain library ownership.
-            const owns_type = !unit_head and self.program.get(self.current).library;
-            const owns_trait = trait_decl != DeclId.none and
-                self.moduleOf(trait_decl) == self.current;
-            if (!owns_type and !owns_trait) {
+            if (!self.mayImplement(if (unit_head) .unowned else .primitive, trait_decl)) {
                 try self.refused_impls.put(self.gpa, d, {});
                 return self.sink.addErrorFmt(
                     .m_impl,
@@ -7773,10 +7810,7 @@ const Resolver = struct {
         // An inherent `impl` names only a type, so the module declaring that
         // type is the only one owning a side.
         const from = self.moduleOf(declared);
-        const owns_a_side = from == self.current or
-            (trait_decl != DeclId.none and self.moduleOf(trait_decl) == self.current);
-
-        if (!is_derive and !owns_a_side) {
+        if (!is_derive and !self.mayImplement(.{ .declared = from }, trait_decl)) {
             try self.refused_impls.put(self.gpa, d, {});
             // What the writer can do differs by what was written. An inherent
             // `impl` has one side, so there is one place it can go; naming the
@@ -7817,6 +7851,14 @@ const Resolver = struct {
         // declaration its head names is kept for chaining its members under
         // that declaration: settled here, once, where the head was resolved.
         if (trait_decl == DeclId.none and !is_derive) try self.inherent_heads.append(self.gpa, .{ .impl = d, .names = declared });
+    }
+
+    /// Whether the module being resolved may write an implementation of
+    /// `trait_decl` (`.none` for an inherent one) for a head whose type side
+    /// is `side`.
+    fn mayImplement(self: *const Resolver, side: ImplTypeSide, trait_decl: DeclId) bool {
+        const trait_module: ModuleId = if (trait_decl == DeclId.none) .none else self.moduleOf(trait_decl);
+        return ownsAnImplSide(self.current, self.program.get(self.current).library, side, trait_module);
     }
 
     /// How a report quotes an implementation's head: a tuple by the
