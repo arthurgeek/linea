@@ -1,0 +1,21 @@
+// An annotation whose argument misses its parameter's bound is the mistake, and
+// the call it gives a type to is not reported for the same argument again.
+trait Protocol {}
+
+struct End {}
+
+impl Protocol for End {}
+
+struct Chan[phantom P: Protocol] {
+    endpoint: UInt64,
+}
+
+fn open[P: Protocol]() -> Chan[P] {
+    .{ endpoint = 7 }
+}
+
+fn main() -> UInt8 {
+    let ended: Chan[End] = open()
+    let _wrong: Chan[UInt8] = open()
+    UInt8(ended.endpoint)
+}

@@ -9920,6 +9920,20 @@ const Checker = struct {
         _ = try self.argumentBoundsUnmet(d, args, enclosing, at, &.{}, .report);
     }
 
+    /// Whether `expected` is a written annotation or result whose own type
+    /// arguments miss their parameters' bounds. That type is refused where it
+    /// is written, and a call it settled the parameters of would only repeat
+    /// the refusal at the call.
+    fn writtenExpectationRefused(self: *Checker, expected: ?Expected) std.mem.Allocator.Error!bool {
+        const want = expected orelse return false;
+        switch (want.reason) {
+            .annotation, .return_type => {},
+            else => return false,
+        }
+        const inst = self.builder.instanceOf(want.ty) orelse return false;
+        return !try self.argumentsMeetBounds(inst.decl, self.builder.argsOf(inst));
+    }
+
     /// Whether `args` meet every bound `d` declares on its parameters, asked
     /// without reporting: the question `checkArgumentBounds` refuses a call
     /// by, for a report that suggests a call and must suggest one that is
@@ -20090,7 +20104,7 @@ const Checker = struct {
                 // where it was written.
                 if (!self.refusedBefore(named))
                     _ = try self.argumentBoundsUnmet(d, bounded, enclosing, named, self.ast.typeArgs(self.ast.bracketTypes(c.callee).?), .report);
-            } else try self.checkArgumentBounds(d, bounded, enclosing, named);
+            } else if (!try self.writtenExpectationRefused(expected)) try self.checkArgumentBounds(d, bounded, enclosing, named);
         }
         if (settled.head.len > 0) {
             // The bounds an implementation writes on its own parameters say

@@ -1,0 +1,5 @@
+error[T-Bound]: `P` requires `Protocol`, and `UInt8` does not implement it
+  --> tests/traits/an_unmet_bound_in_an_annotation_is_reported_once.lin:19:17
+   |
+19 |     let _wrong: Chan[UInt8] = open()
+   |                 ^^^^ implement it for that type, or drop the bound
