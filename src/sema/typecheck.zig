@@ -5433,6 +5433,9 @@ const Checker = struct {
     /// What the function being checked declares it returns, so a `return`
     /// answers to that rather than to its surroundings.
     current_return: ?Expected = null,
+    /// The unannotated `let` or `var` whose initialiser is being checked, so a
+    /// call that leaves its type open can show the annotation that settles it.
+    initialising: ?StmtId = null,
     default_test_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
@@ -13864,6 +13867,9 @@ const Checker = struct {
             };
         };
 
+        const previous_initialising = self.initialising;
+        defer self.initialising = previous_initialising;
+        self.initialising = if (!d.annotation.wasWritten() and d.pattern == ExprId.none) s else null;
         const t = if (d.init == ExprId.none)
             TypeId.poison
         else
@@ -29301,6 +29307,37 @@ const Checker = struct {
     /// walk rather than by a walk each -- two walks would check an argument
     /// mentioning both a second time, and report whatever is wrong inside it
     /// twice.
+    /// The help for a constructor call `Head.op(…)` that leaves a parameter of
+    /// `Head` open and is the whole initialiser of an unannotated binding: the
+    /// annotation that says what the parameter is, with the parameters the
+    /// type declares without a default named in its brackets. Null anywhere
+    /// else.
+    fn annotationSettling(self: *Checker, call: ExprId, generics: []const node.TypeParam, open: []const u8) std.mem.Allocator.Error!?[]const u8 {
+        const stmt = self.initialising orelse return null;
+        const init = self.ast.stmtData(stmt).init;
+        if (self.ast.withoutGroups(init) != call) return null;
+        const callee = self.ast.withoutGroups(self.ast.call(call).callee);
+        if (self.ast.exprTag(callee) != .field) return null;
+        const head = self.ast.exprText(self.ast.unaryOperand(callee));
+        const written = self.ast.exprText(init);
+        if (written.len > 40 or std.mem.indexOfScalar(u8, written, '\n') != null) return null;
+        var parameters: std.ArrayList(u8) = .empty;
+        for (generics) |g| {
+            if (g.default.wasWritten()) continue;
+            try parameters.print(self.sink.arena, "{s}{s}", .{ if (parameters.items.len == 0) "" else ", ", self.ast.tokenText(g.name) });
+        }
+        return try std.fmt.allocPrint(self.sink.arena, "say what `{s}` is where `{s}` is declared: `{s} {s}: {s}[{s}] = {s}`, with a type in place of `{s}`", .{
+            open,
+            self.ast.tokenText(self.ast.stmtData(stmt).name),
+            if (self.ast.stmtIsMutable(stmt)) "var" else "let",
+            self.ast.tokenText(self.ast.stmtData(stmt).name),
+            head,
+            parameters.items,
+            written,
+            open,
+        });
+    }
+
     /// Reports, where a call leaves a type parameter open, an argument whose
     /// type is built by another constructor than the one its parameter writes
     /// around that parameter: `Chan[Recv[UInt64, End]]` for `Chan[Send[T, N]]`
@@ -29806,13 +29843,17 @@ const Checker = struct {
                 } else false;
                 if (refused) continue;
                 const through_alias = if (through) |h| if (s.owner == over) self.aliasParameterAt(h, k) else null else null;
+                const named = self.ast.tokenText(through_alias orelse g.name);
+                const reported_at = self.sink.items().len;
                 _ = self.report(
                     .t_infer,
                     id,
                     "nothing here says what `{s}` is",
-                    .{self.ast.tokenText(through_alias orelse g.name)},
+                    .{named},
                     "no argument determines it, and nothing expects a type of it",
                 );
+                if (through_alias == null and s.owner == over and self.sink.items().len > reported_at) if (try self.annotationSettling(id, s.generics, named)) |help|
+                    try self.addNote(reported_at, help);
                 return null;
             }
         }
