@@ -1,0 +1,14 @@
+error[T-Bound]: `S` requires `Show`, and `Holder[Vec[Int64, mem.SystemAllocator]]` does not implement it
+  --> tests/traits/a_capability_only_the_program_can_grant_is_offered.lin:22:13
+   |
+22 |     let a = shown(listed)
+   |             ^^^^^ `Vec[Int64, mem.SystemAllocator]` is not `Copyable`; pass a value whose type implements it, or drop the bound
+   |
+   = help: `Holder[T]` implements `Show` when `T` is `Copyable`, and `Vec[Int64, mem.SystemAllocator]` is not
+error[T-Bound]: `S` requires `Show`, and `Holder[Key]` does not implement it
+  --> tests/traits/a_capability_only_the_program_can_grant_is_offered.lin:26:13
+   |
+26 |     let b = shown(keyed)
+   |             ^^^^^ mark `Key` `@copyable`, or drop the bound
+   |
+   = help: `Holder[T]` implements `Show` when `T` is `Copyable`, and `Key` is not

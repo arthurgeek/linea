@@ -2,4 +2,4 @@ error[N-Undefined]: `Gate` declares no `default`, and implements no trait in sco
  --> tests/traits/a_type_reaches_no_operation_of_a_trait_it_does_not_implement.lin:8:16
   |
 8 |     let gate = Gate.default()
-  |                ^^^^^^^^^^^^ `Default` declares `default`; implement it for `Gate` to reach it here
+  |                ^^^^^^^^^^^^ `Default` declares `default`; implement `Default` for `Gate` to reach it here

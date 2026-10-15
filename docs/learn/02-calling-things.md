@@ -675,7 +675,7 @@ error[T-Bound]: `Labelled[Sensor]` does not implement `Equatable`
   --> gen_derive_bad.lin:14:14
    |
 14 |     if first == second { 0 } else { 1 }
-   |              ^^ the operator is a call on that trait, so implement it for this type
+   |              ^^ implement `Equatable` for `Sensor`
    |
    = help: `Labelled[T]` implements `Equatable` when `T` implements `Equatable`, and `Sensor` does not
 ```

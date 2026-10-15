@@ -1,0 +1,23 @@
+// `Pair[T]` implements `Show` when `T` implements `Weigh`. The help names that
+// edit, `Weigh` for `Token`, rather than the implementation it comes from.
+trait Show {}
+
+trait Weigh {}
+
+struct Pair[T] {
+    left: T,
+    right: T,
+}
+
+impl[T: Weigh] Show for Pair[T] {}
+
+struct Token {}
+
+fn shown[S: Show](_s: S) -> UInt8 {
+    5
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[Token] = .{ left = .{}, right = .{} }
+    shown(pair)
+}

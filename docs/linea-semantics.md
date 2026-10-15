@@ -2905,23 +2905,38 @@ type to be Discardable, and the fix is to give the value to an operation that
 keeps it or to settle it before. A bound written on a type parameter,
 `[T: Discardable]`, states what the parameter must be and keeps the general help.
 
-Where the unmet requirement is a trait, the help offers only edits the program
-can make. It offers implementing the trait for the type when a module of the
-program owns a side of that implementation under [M-Impl]. When neither side is
-the program's, as with `Ordered` and `Float64`, which the library declares, the
-help says so and offers a type the program declares that wraps the type and
-implements the trait. For a type no module declares, such as a closure or a
-function type, only the trait's module may implement it; when that module is
-outside the program, the help says so and offers passing a value of a type that
-implements the trait. It offers dropping the bound only where the program wrote
-the bound, not where the library did.
+Where the unmet requirement is a trait, whether at a bound, at an operation
+reached through `Self`, or at an operator, the help offers only edits the
+program can make:
+
+- For a type parameter inside a generic body, which implements only what its
+  bounds promise, it offers adding the trait to the parameter's bounds.
+- For a closure and `Release`, which a closure implements when every capture it
+  owns does, it names the first capture that does not and offers the edit that
+  capture's type needs.
+- No `impl` head can name a closure's type or an array's type, so for those it
+  says so and offers passing another value.
+- When a module of the program owns a side of the implementation under
+  [M-Impl], it offers implementing the trait, naming the modules that may write
+  it when the module reporting the error may not.
+- When neither side is the program's, as with `Ordered` and `Float64`, which
+  the library declares, it says so and offers a type the program declares that
+  wraps the type and implements the trait; [M-Impl] gives the same help where
+  such an `impl` is written. For unit, a callable type or an observation, whose
+  only implementations are the trait module's, it says that only the library
+  may write one.
+
+It offers dropping the bound only where the program wrote the bound, not where
+the library or a derive did.
 
 Where an implementation matches the type but one of its own requirements is
 unmet, a note names that requirement, following it down to the last one unmet,
 and implementing the trait again would overlap that implementation. The help
-then offers meeting that last requirement, under the same rule: where the
-program may not write its implementation either, as with `Iterator` for
-`UInt64`, the help says so and offers a wrapper instead.
+then names the edit that last requirement needs, under the same rules: a trait
+to implement for a type, a bound to add, or `@copyable` to mark on a type the
+program declares. A capability the library's type lacks cannot be added, and
+neither can an implementation that would overlap one already matching the type,
+as when the requirements never end; the help then offers another value.
 
 The closed `Integer` bound admits exactly Int8, Int16, Int32, Int64, UInt8,
 UInt16, UInt32 and UInt64. It excludes Bool, Float64, nominal newtypes and

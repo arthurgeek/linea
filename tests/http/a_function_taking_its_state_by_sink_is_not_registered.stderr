@@ -2,6 +2,6 @@ error[T-Bound]: `H` requires `Endpoint[Counter, SystemAllocator]`, and `fn(sink 
   --> tests/http/a_function_taking_its_state_by_sink_is_not_registered.lin:16:26
    |
 16 |     let routed = &router.route("GET /", consume)
-   |                          ^^^^^ only the module declaring `Endpoint` can implement it for this type, and it is outside this program; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[Counter, SystemAllocator]`, may implement it for `fn(sink Counter, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`; pass a value whose type implements it
    |
    = help: this function's parameters are `(sink, read)`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)

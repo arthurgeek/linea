@@ -2,6 +2,6 @@ error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read a: Wo
   --> tests/http/a_function_with_more_than_six_extractors_is_not_registered.lin:23:26
    |
 23 |     let routed = &router.route("GET /", crowded)
-   |                          ^^^^^ only the module declaring `Endpoint` can implement it for this type, and it is outside this program; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[(), SystemAllocator]`, may implement it for `fn(read Word, read Word, read Word, read Word, read Word, read Word, read Word, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#8)`; pass a value whose type implements it
    |
    = help: this function's parameters are `(read×8)`, and `Endpoint` is implemented only for callable types whose parameters are `(read×1..7)`, `(inout, read×1..7)` (`read×N` is N parameters taken by `read`)

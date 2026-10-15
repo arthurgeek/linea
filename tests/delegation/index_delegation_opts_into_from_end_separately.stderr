@@ -2,4 +2,4 @@ error[T-Bound]: `Board` does not implement `Index[FromEnd]`
  --> tests/delegation/index_delegation_opts_into_from_end_separately.lin:7:12
   |
 7 |     return board[^1]
-  |            ^^^^^ implement it for those arguments, or settle them to ones that are
+  |            ^^^^^ implement `Index[FromEnd]` for `Board`

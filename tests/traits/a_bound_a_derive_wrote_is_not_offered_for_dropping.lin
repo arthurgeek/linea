@@ -1,0 +1,14 @@
+// `@derive(Display)` writes `fmt[W: Writer]` for `Point`. A `UInt8` is not a
+// `Writer`, and the bound is the derive's, so the help does not offer dropping
+// it.
+@derive(Display)
+struct Point {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    let point: Point = .{ x = 1 }
+    var out: UInt8 = 0
+    let _written = point.fmt(&out)
+    out
+}

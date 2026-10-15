@@ -1,0 +1,17 @@
+error[T-Bound]: `Vec[Int64, mem.SystemAllocator]` does not implement `Equatable`
+  --> tests/traits/an_operator_offers_only_edits_the_program_can_make.lin:14:18
+   |
+14 |     let same = a == b
+   |                  ^^ the library declares both `Vec[Int64, mem.SystemAllocator]` and `Equatable`; wrap it in a type this program declares that implements `Equatable`
+error[T-Bound]: `Bool` does not implement `Comparable`
+  --> tests/traits/an_operator_offers_only_edits_the_program_can_make.lin:17:24
+   |
+17 |     let ordered = true < false
+   |                        ^ the library declares both `Bool` and `Comparable`; wrap it in a type this program declares that implements `Comparable`
+error[T-Bound]: `Labelled[Token]` does not implement `Equatable`
+  --> tests/traits/an_operator_offers_only_edits_the_program_can_make.lin:20:26
+   |
+20 |     let labelled = first == second
+   |                          ^^ implement `Equatable` for `Token`
+   |
+   = help: `Labelled[T]` implements `Equatable` when `T` implements `Equatable`, and `Token` does not

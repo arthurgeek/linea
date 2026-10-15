@@ -1,0 +1,11 @@
+// `Ticket` is declared in `box_office`, so only that module may implement
+// `Release` for it, and the help says where.
+import box_office
+
+use box_office.Ticket
+
+fn main() -> UInt8 {
+    let ticket = Ticket.sell(14)
+    Release.release(ticket)
+    0
+}

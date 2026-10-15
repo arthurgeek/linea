@@ -2,7 +2,7 @@ error[T-Bound]: `Route` requires `Self` to implement it, and `Box[UInt8]` does n
   --> tests/traits/parameter_heads/growing_constructor_prerequisites_are_rejected.lin:15:17
    |
 15 |     Route.route(value)
-   |                 ^^^^^ meet what the implementation below requires, or reach the operation on one that does
+   |                 ^^^^^ another implementation of `Route` for `Box[Box[Box[Box[Box[UInt8]]]]]` would overlap the one that matches it; reach the operation on one that does
    |
    = help: `Box[T]` implements `Route` when `Box[Box[T]]` implements `Route`, and `Box[Box[UInt8]]` does not
    = help: `Box[T]` implements `Route` when `Box[Box[T]]` implements `Route`, and `Box[Box[Box[UInt8]]]` does not

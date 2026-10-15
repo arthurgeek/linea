@@ -2,6 +2,6 @@ error[T-Bound]: `H` requires `Handle`, and `<closure>` does not implement it
   --> tests/traits/callable_heads/a_closure_does_not_implement_a_trait_a_callable_type_does.lin:19:19
    |
 19 |     let _answer = run(|input: UInt64| input + 1, 1)
-   |                   ^^^ implement it for that type, or drop the bound
+   |                   ^^^ no `impl` can name `<closure>`; pass a value whose type implements it, or drop the bound
    |
    = help: a closure's type is its own, so it matches none of the callable types `Handle` is implemented for; pass a named function

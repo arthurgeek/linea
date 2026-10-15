@@ -2,6 +2,6 @@ error[T-Bound]: `S` requires `Show`, and `Holder[Plain]` does not implement it
   --> tests/traits/a_member_whose_bound_fails_is_not_implemented.lin:25:5
    |
 25 |     shown(h)
-   |     ^^^^^ meet what the implementation below requires, or drop the bound
+   |     ^^^^^ implement `Show` for `Plain`, or drop the bound
    |
    = help: `Holder[T]` implements `Show` when `T` implements `Show`, and `Plain` does not

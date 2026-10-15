@@ -1,0 +1,5 @@
+error[T-Bound]: `S` requires `Show`, and `shapes.Square` does not implement it
+ --> tests/traits/an_implementation_help_names_the_module_that_may_write_it/main.lin:8:10
+  |
+8 |     show.shown(square)
+  |          ^^^^^ implement it for that type in `show` or `shapes`, or drop the bound

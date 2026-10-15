@@ -2,6 +2,6 @@ error[T-Bound]: `R` requires `Ready`, and `Selected[Bool]` does not implement it
   --> tests/generics/an_unsatisfied_structured_impl_predicate_is_refused.lin:22:5
    |
 22 |     accept(selected)
-   |     ^^^^^^ meet what the implementation below requires, or drop the bound
+   |     ^^^^^^ implement `Mark` for `Wrapper[Bool]`, or drop the bound
    |
    = help: `Selected[T]` implements `Ready` when `Wrapper[T]` implements `Mark`, and `Wrapper[Bool]` does not

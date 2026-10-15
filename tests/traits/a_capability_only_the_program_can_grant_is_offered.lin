@@ -1,0 +1,28 @@
+// `Holder[T]` implements `Show` when `T` is `Copyable`. The program can mark
+// its own `Key` `@copyable`, and cannot make the library's `Vec` copyable.
+trait Show {}
+
+struct Holder[T] {
+    value: T,
+}
+
+impl[T: Copyable] Show for Holder[T] {}
+
+struct Key {
+    id: UInt8,
+}
+
+fn shown[S: Show](_s: S) -> UInt8 {
+    5
+}
+
+fn main() -> UInt8 {
+    let items: Vec[Int64] = Vec.new()
+    let listed: Holder[Vec[Int64]] = .{ value = items }
+    let a = shown(listed)
+    let Holder { value } = listed
+    value.release()
+    let keyed: Holder[Key] = .{ value = .{ id = 1 } }
+    let b = shown(keyed)
+    a + b
+}

@@ -7,4 +7,4 @@ error[T-Bound]: `UInt8` does not implement `Selected[Bool]`
   --> tests/default_implementations/a_default_trait_takes_no_type_arguments.lin:12:5
    |
 12 |     Selected.selected(UInt8(1), false)
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement `Selected[Bool]` for `UInt8`
