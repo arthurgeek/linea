@@ -35,6 +35,42 @@ pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result
     read_file_in(mem.system(), path, limits: limits)
 }
 
+test fn a_file_is_read_and_parsed_into_a_document() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","ports":[1,2]}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    defer let document = read_file(path).unwrap()
+    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "the parsed document changed")?
+}
+
+test fn a_file_that_is_missing_or_malformed_names_the_step_that_failed() {
+    defer let owned = scratch_file_with(r"{")
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    testing.assert(failed_at_parse(read_file(path)), "a malformed document was not a parse failure")?
+    fs.remove_scratch(path)
+    testing.assert(failed_at_read(read_file(path)), "a missing file was not a read failure")?
+}
+
+test fn a_file_larger_than_the_parse_limits_is_refused_at_the_read() {
+    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    let limits = ParseLimits { max_input_bytes = 4, ..ParseLimits.default() }
+    testing.assert(failed_at_read(read_file(path, limits: limits)), "a file past the input limit was read")?
+}
+
+test fn a_file_is_read_into_an_arena() {
+    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    // The arena holds the text while it is parsed, and then the document. A
+    // file read starts with a 4096-byte buffer, so the arena is larger.
+    defer let arena = mem.Arena.open(mem.system(), 65536)
+    defer let document = read_file_in(arena.handle(), path).unwrap()
+    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "a document read into an arena changed")?
+}
+
 // DecodeFileError says whether loading a typed value from a file failed to read
 // the file or to decode its text. `Decode` keeps the release obligation of
 // `DecodeError`, which can hold the path of the failing field.
@@ -71,77 +107,6 @@ pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, l
 // `decode_file_in`.
 pub fn decode_file[T: Decode[mem.SystemAllocator]](path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError] where carries() {
     decode_file_in(mem.system(), path, limits: limits)
-}
-
-// FileSettings derives Decode for the file tests.
-struct FileSettings[A: Allocator] {
-    name: String[A],
-    port: UInt16,
-}
-
-derive[A: Allocator] Release for FileSettings[A]
-
-derive[A: Allocator] Decode[A] for FileSettings[A]
-
-// Write `text` to a new scratch file and return its path owner.
-fn scratch_file_with(text: Str) -> String {
-    let owned = fs.scratch_path()
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    let _written = fs.write_file(path, text.as_bytes(), policy: .CreateNew).unwrap()
-    owned
-}
-
-// Return whether a load failed at reading the file rather than parsing it.
-fn failed_at_read(sink result: Result[Value, ParseFileError]) -> Bool {
-    match result {
-        Ok(document) => {
-            document.release()
-            false
-        },
-        Err(reason) => match read reason {
-            Read(_) => true,
-            Parse(_) => false,
-        },
-    }
-}
-
-// Return whether a load failed at parsing the text rather than reading it.
-fn failed_at_parse(sink result: Result[Value, ParseFileError]) -> Bool {
-    match result {
-        Ok(document) => {
-            document.release()
-            false
-        },
-        Err(reason) => match read reason {
-            Parse(_) => true,
-            Read(_) => false,
-        },
-    }
-}
-
-test fn a_file_is_read_and_parsed_into_a_document() {
-    defer let owned = scratch_file_with(r#"{"name":"tea","ports":[1,2]}"#)
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    defer fs.remove_scratch(path)
-    defer let document = read_file(path).unwrap()
-    testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "the parsed document changed")?
-}
-
-test fn a_file_that_is_missing_or_malformed_names_the_step_that_failed() {
-    defer let owned = scratch_file_with(r"{")
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    defer fs.remove_scratch(path)
-    testing.assert(failed_at_parse(read_file(path)), "a malformed document was not a parse failure")?
-    fs.remove_scratch(path)
-    testing.assert(failed_at_read(read_file(path)), "a missing file was not a read failure")?
-}
-
-test fn a_file_larger_than_the_parse_limits_is_refused_at_the_read() {
-    defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
-    let path = fs.Path.from_str(owned.view()).unwrap()
-    defer fs.remove_scratch(path)
-    let limits = ParseLimits { max_input_bytes = 4, ..ParseLimits.default() }
-    testing.assert(failed_at_read(read_file(path, limits: limits)), "a file past the input limit was read")?
 }
 
 test fn a_file_is_decoded_into_a_typed_value() {
@@ -188,4 +153,61 @@ test fn decoding_a_file_keeps_read_and_decode_failures_distinct() {
         },
     }
     testing.assert(read_failed, "a missing file was not a read failure")?
+}
+
+test fn a_file_is_decoded_into_an_arena() {
+    defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    defer fs.remove_scratch(path)
+    defer let arena = mem.Arena.open(mem.system(), 65536)
+    let decoded: Result[FileSettings[mem.Handle], DecodeFileError[mem.Handle]] = decode_file_in(arena.handle(), path)
+    defer let settings = decoded.unwrap()
+    testing.assert_eq(settings.name.view(), "tea", "a value decoded into an arena lost its text")?
+    testing.assert_eq(settings.port, 8080, "a value decoded into an arena changed its port")?
+}
+
+// FileSettings derives Decode for the file tests.
+struct FileSettings[A: Allocator] {
+    name: String[A],
+    port: UInt16,
+}
+
+derive[A: Allocator] Release for FileSettings[A]
+
+derive[A: Allocator] Decode[A] for FileSettings[A]
+
+// Write `text` to a new scratch file and return its path owner.
+fn scratch_file_with(text: Str) -> String {
+    let owned = fs.scratch_path()
+    let path = fs.Path.from_str(owned.view()).unwrap()
+    let _written = fs.write_file(path, text.as_bytes(), policy: .CreateNew).unwrap()
+    owned
+}
+
+// Return whether a load failed at reading the file rather than parsing it.
+fn failed_at_read(sink result: Result[Value, ParseFileError]) -> Bool {
+    match result {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(reason) => match read reason {
+            Read(_) => true,
+            Parse(_) => false,
+        },
+    }
+}
+
+// Return whether a load failed at parsing the text rather than reading it.
+fn failed_at_parse(sink result: Result[Value, ParseFileError]) -> Bool {
+    match result {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(reason) => match read reason {
+            Parse(_) => true,
+            Read(_) => false,
+        },
+    }
 }

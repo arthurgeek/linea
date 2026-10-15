@@ -217,6 +217,7 @@ The library tests itself.
   ok    fs.each_allocation_failure_covers_creating_a_file
   ok    fs.each_allocation_failure_covers_every_growth_step_of_a_file_read
   ok    fs.file_close_consumes_a_failed_descriptor
+  ok    fs.from_arg_takes_an_argument_as_a_path_and_refuses_a_missing_one
   ok    fs.from_str_accepts_text_and_refuses_an_embedded_nul
   ok    fs.opening_a_file_reads_what_was_written
   ok    fs.opening_a_file_takes_its_path_scratch_from_an_arena
@@ -384,6 +385,7 @@ The library tests itself.
   ok    http.a_request_the_handler_never_saw_is_logged_without_a_number
   ok    http.a_request_with_a_body_parses
   ok    http.a_request_without_a_cookie_header_has_no_cookies
+  ok    http.a_response_body_is_text_only_when_it_is_held_utf8
   ok    http.a_response_reads_its_held_body_and_no_streamed_one
   ok    http.a_response_reads_its_status
   ok    http.a_response_takes_another_status
@@ -706,6 +708,12 @@ The library tests itself.
   ok    json.a_decode_error_runs_out_of_memory_only_when_an_allocation_failed
   ok    json.a_decode_error_written_without_an_allocator_is_the_system_error
   ok    json.a_document_renders_into_an_arena
+  ok    json.a_file_is_decoded_into_a_typed_value
+  ok    json.a_file_is_decoded_into_an_arena
+  ok    json.a_file_is_read_and_parsed_into_a_document
+  ok    json.a_file_is_read_into_an_arena
+  ok    json.a_file_larger_than_the_parse_limits_is_refused_at_the_read
+  ok    json.a_file_that_is_missing_or_malformed_names_the_step_that_failed
   ok    json.a_max_depth_holds_at_most_the_hard_depth
   ok    json.a_max_members_holds_at_most_the_hard_member_count
   ok    json.a_max_number_bytes_holds_at_most_the_hard_token_length
@@ -743,6 +751,7 @@ The library tests itself.
   ok    json.decode_errors_held_in_a_vector_release_in_generic_code
   ok    json.decode_parses_then_decodes_and_reports_a_parse_error
   ok    json.decoded_string_owns_storage_and_settles_allocation_failure
+  ok    json.decoding_a_file_keeps_read_and_decode_failures_distinct
   ok    json.derived_record_encoding_uses_field_order_and_null_option_values
   ok    json.derived_records_own_text_and_apply_optional_field_policy
   ok    json.document_output_escapes_every_control_byte
@@ -1158,7 +1167,7 @@ The library tests itself.
   ok    text.a_slice_refuses_what_is_not_text
   ok    text.a_string_is_a_text_writer
   ok    text.a_string_written_without_an_allocator_is_the_system_string
-  ok    text.a_user_type_implements_parse_by_combining_it_with_split_and_find
+  ok    text.a_user_type_implements_parse_by_splitting_once
   ok    text.an_argument_past_the_count_is_nothing
   ok    text.an_empty_allocator_refuses_owned_text
   ok    text.an_empty_str_has_no_bytes
@@ -1191,6 +1200,8 @@ The library tests itself.
   ok    text.invalid_owned_bytes_are_returned_with_the_sequence_offset
   ok    text.length_counts_encoded_bytes
   ok    text.length_counts_the_encoded_bytes_of_owned_text
+  ok    text.lines_have_no_empty_final_line
+  ok    text.lines_split_at_newlines_and_drop_the_terminator
   ok    text.new_owned_text_is_empty_system_text
   ok    text.owned_text_accepts_unallocated_queries
   ok    text.owned_text_append_failure_preserves_complete_text
@@ -1203,11 +1214,13 @@ The library tests itself.
   ok    text.owned_text_copies_into_the_system_allocator_from_an_arena
   ok    text.owned_text_equality_compares_utf8_contents
   ok    text.owned_text_finds_a_needle
+  ok    text.owned_text_iterates_its_lines
   ok    text.owned_text_iterates_its_scalars
   ok    text.owned_text_parses_a_value
   ok    text.owned_text_reads_a_byte_by_offset
   ok    text.owned_text_slices_on_character_boundaries
   ok    text.owned_text_splits_at_a_separator
+  ok    text.owned_text_splits_once_at_a_separator
   ok    text.owned_text_trims_ascii_whitespace
   ok    text.owned_text_trims_unicode_whitespace
   ok    text.owned_text_views_its_encoded_bytes
@@ -1221,6 +1234,7 @@ The library tests itself.
   ok    text.search_errors_can_be_released_explicitly
   ok    text.settling_invalid_bytes_keeps_the_offset_of_the_bad_sequence
   ok    text.split_handles_empty_input_and_multibyte_delimiters
+  ok    text.split_once_cuts_at_the_first_separator_of_any_width
   ok    text.split_preserves_empty_fields_and_stays_finished
   ok    text.starts_with_compares_the_leading_bytes
   ok    text.text_equality_and_order_are_total_by_bytes
@@ -1271,4 +1285,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1268 passed, 0 failed
+  1282 passed, 0 failed
