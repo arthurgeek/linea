@@ -129,9 +129,9 @@ test fn the_invitation_is_an_html_form() {
     var nothing = ()
     let page = &router.serve_http(&nothing, sent.request()).unwrap()
     testing.assert_eq(page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the page is not HTML")?
-    testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find("<form").is_some(), "the page holds no form")?
+    testing.assert(page.text().unwrap().find("<form").is_some(), "the page holds no form")?
     // The test process has no `SCRIPT_NAME`, so the form posts to `/reply`.
-    testing.assert(Str.from_bytes(page.body().unwrap()).unwrap().find(r#"action="/reply""#).is_some(), "the form posts elsewhere")?
+    testing.assert(page.text().unwrap().find(r#"action="/reply""#).is_some(), "the form posts elsewhere")?
 }
 
 test fn a_reply_is_confirmed_as_json() {
@@ -141,7 +141,7 @@ test fn a_reply_is_confirmed_as_json() {
     let sent = http.new_request(arena.handle(), "POST", "/reply", body: "name=+Ada+&guests=2", content_type: "application/x-www-form-urlencoded").unwrap()
     var nothing = ()
     let confirmed = &router.serve_http(&nothing, sent.request()).unwrap()
-    let body = Str.from_bytes(confirmed.body().unwrap()).unwrap()
+    let body = confirmed.text().unwrap()
     testing.assert(body.starts_with(r#"{"name":"Ada","guests":2,"message":"see you "#), "the confirmation changed")?
 }
 

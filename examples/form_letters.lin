@@ -78,19 +78,22 @@ fn fill[A: Allocator](form: Str, order: Order[A]) -> Result[String[mem.SystemAll
     // Returning the finished letter hands it to the caller, so it is not freed
     // then.
     defer var letter: String[mem.SystemAllocator] = String.new()
-    var at: UInt64 = 0
+    // `split_once` cuts the rest of the form at its next `{`, and then that
+    // placeholder at its `}`, so each pass copies the text before a
+    // placeholder and fills it in.
+    var rest = copy(form)
     loop {
-        let opens = form.find(r"{", start: at) else {
+        let (before, opened) = rest.split_once(r"{") else {
             break
         }
-        let closes = form.find(r"}", start: opens) else {
+        let (field, after) = opened.split_once(r"}") else {
             return .Err(.Unclosed)
         }
-        &letter.append(form.slice(at, opens).unwrap())?
-        write_field(&letter, order, form.slice(opens + 1, closes).unwrap())?
-        at = closes + 1
+        &letter.append(before)?
+        write_field(&letter, order, field)?
+        rest = after
     }
-    &letter.append(form.slice(at, form.length()).unwrap())?
+    &letter.append(rest)?
     .Ok(letter)
 }
 

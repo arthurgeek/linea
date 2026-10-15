@@ -1355,21 +1355,114 @@ read 0 bytes
 could not read the missing file: file read failed: file operation failed after 0 bytes: Open failed (NotFound) after 0 bytes; errno 2
 ```
 
-A path named on the command line is made with `fs.Path.from_arg(args, 1)`. It
-reads the argument's exact bytes, so a file name that is not valid UTF-8 still
-works, and it answers `None` when there is no such argument and an error when
-the argument holds a NUL byte.
-
 `read_text` uses the system allocator; `fs.read_text_in(allocator, path,
 max_bytes)` takes one, as `new_in` does.
-
-To load a JSON document or a typed value from a file, `json.read_file(path)`
-and `json.decode_file(path)` read the text, parse or decode it, and release it
-in one call; their errors say whether reading or parsing failed.
 
 `fs.read_file` and `String.from_bytes` remain for a program that wants the
 bytes, or that wants them back when decoding fails. `io.read_text` and
 `io.read_text_in` do the same for any reader, such as standard input.
+
+### A path from the command line
+
+A file named on the command line arrives as an argument.
+`fs.Path.from_arg(args, i)` makes a path from argument `i`. It answers `.None`
+when there is no argument `i`, and otherwise a `Result`: the path, or a
+`fs.PathError` when the argument holds a NUL byte, which no path can. The two
+`let ... else` steps report the two cases differently:
+
+```linea
+import std.env
+import std.fs
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `from_arg` answers `.None` when the program was given no argument 1.
+    let named = fs.Path.from_arg(env.args(), 1) else {
+        io.println("usage: show FILE")?
+        return .Ok(2)
+    }
+    // An argument holding a NUL byte names no file.
+    let path = named else |error| {
+        io.println("not a path: {error}")?
+        return .Ok(2)
+    }
+    defer let text = fs.read_text(path, max_bytes: 4096) else |error| {
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    io.print(text.view())?
+    .Ok(0)
+}
+```
+
+Run without an argument, it prints its usage:
+
+```
+usage: show FILE
+```
+
+`from_arg` keeps the argument's exact bytes, so a file name that is not valid
+UTF-8 still opens the file; `args.at(i)` would answer `.None` for it, as if
+the argument were missing.
+
+### Loading JSON from a file
+
+`json.read_file(path)` reads a file, parses it into a `json.Value` document and
+releases the text in one call. `json.decode_file(path)` does the same and
+decodes the document into a type that derives `json.Decode`. Both cap the
+read at the most the parser accepts, and their errors say whether reading the
+file or the document failed:
+
+```linea
+import std.fs
+import std.io
+import std.json
+import std.mem
+
+// `json.Decode[A]` lets `decode_file` build a `Station` from a document.
+@derive(Release, json.Decode[A])
+struct Station[A: Allocator = mem.SystemAllocator] {
+    name: String[A],
+    port: UInt16,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let path = fs.Path.from_str("station.json").unwrap()
+    let _ = fs.write_file(path, r#"{"name":"harbour","port":8080}"#.as_bytes(), policy: .Replace) else |error| {
+        io.println("could not write the file: {error}")?
+        return .Ok(1)
+    }
+    // `decode_file` reads the file, decodes a `Station` from it and releases
+    // the text. The annotation names the type to build.
+    let loaded: Result[Station, json.DecodeFileError] = json.decode_file(path)
+    defer let station = loaded else |error| {
+        defer error.release()
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    io.println("{station.name.view()} listens on port {station.port}")?
+    // `read_file` parses a file into a `json.Value` document. Its error says
+    // whether reading the file or parsing it failed.
+    let missing = fs.Path.from_str("missing.json").unwrap()
+    match json.read_file(missing) {
+        Ok(document) => document.release(),
+        Err(error) => io.println("{error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+harbour listens on port 8080
+file read failed: file operation failed after 0 bytes: Open failed (NotFound) after 0 bytes; errno 2
+```
+
+A `json.DecodeFileError` can hold the path of the field that failed to
+decode, which the decoder allocated, so the `else` releases it with
+`defer error.release()`. A `json.ParseFileError` owns nothing. Each has an
+`_in` form, `json.read_file_in(allocator, path)` and
+`json.decode_file_in(allocator, path)`, for a document built in another
+allocator.
 
 ## What you have seen
 
@@ -1394,6 +1487,8 @@ bytes, or that wants them back when decoding fails. `io.read_text` and
 | a `main` that chooses its exit statuses | `-> UInt8`, with `let x = f() else \|error\| { … }` printing with `io.eprintln` and returning a status |
 | to drop what a failure hands back and keep its reason | `result.settled()`, then `?` or `match` |
 | a file's text | `fs.read_text(path, max_bytes)`, or `fs.read_text_in(allocator, path, max_bytes)` |
+| a path from a command-line argument | `fs.Path.from_arg(env.args(), 1)`: `.None` when it is missing |
+| a JSON document or a typed value from a file | `json.read_file(path)`, or `let value: T = json.decode_file(path)?` |
 | both outcomes to carry on | `match` |
 | a value you know is there | `.unwrap()`, which stops the program if it is not |
 
