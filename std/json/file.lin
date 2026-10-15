@@ -1,3 +1,4 @@
+import std.fmt
 import std.fs
 import std.mem
 import std.testing
@@ -107,7 +108,7 @@ test fn a_file_is_read_into_an_arena() {
 // the file or to decode its bytes; bytes that are not UTF-8 fail to decode as a
 // parse error of kind `InvalidUtf8`. `Decode` keeps the release obligation of
 // `DecodeError`, which can hold the path of the failing field.
-@derive(Release)
+@derive(Debug, Release, From[fs.ReadFileReason], From[DecodeError[A]])
 pub enum DecodeFileError[A: Allocator = mem.SystemAllocator] {
     Read(fs.ReadFileReason),
     Decode(DecodeError[A]),
@@ -126,18 +127,11 @@ impl[A: Allocator] Display for DecodeFileError[A] {
 // text, with the read capped at `limits.max_input_bytes`. The bytes are
 // released before the value is returned.
 pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
-    defer let bytes = match fs.read_file_in(allocator, path, max_bytes: limits.max_input_bytes).settled() {
-        Ok(owned) => owned,
-        Err(reason) => return .Err(.Read(reason)),
-    }
-    defer let document = match parse_bytes_in(allocator, bytes.as_slice(), limits: limits) {
-        Ok(parsed) => parsed,
-        Err(error) => return .Err(.Decode(.Parse(error))),
-    }
-    match T.decode(document, allocator) {
-        Ok(value) => .Ok(value),
-        Err(error) => .Err(.Decode(error)),
-    }
+    defer let bytes = fs.read_file_in(allocator, path, max_bytes: limits.max_input_bytes).settled()?
+    // A parse error is a `DecodeError.Parse`, as `decode_in` reports it.
+    let parsed: Result[Value[A], DecodeError[A]] = parse_bytes_in(allocator, bytes.as_slice(), limits: limits).map_err(.Parse)
+    defer let document = parsed?
+    .Ok(T.decode(document, allocator)?)
 }
 
 // Read and decode the file at `path` into a T in the system allocator. See
@@ -218,6 +212,43 @@ test fn decoding_a_file_that_is_not_utf8_fails_to_parse() {
         },
     }
     testing.assert(invalid_utf8, "a file that is not UTF-8 was not an invalid-UTF-8 decode failure")?
+}
+
+test fn a_decode_file_error_shows_its_variant_and_converts_through_question_mark() {
+    let missing = fs.Path.from_str("/no/such/settings.json").unwrap()
+    let loaded: Result[FileSettings[mem.SystemAllocator], DecodeFileError] = decode_file(missing)
+    let shown = match loaded {
+        Ok(settings) => {
+            settings.release()
+            return testing.assert(false, "a missing file was decoded")
+        },
+        Err(error) => {
+            defer error.release()
+            fmt.render_owned("{error:?}").unwrap()
+        },
+    }
+    defer let text = shown
+    testing.assert(text.view().starts_with(r"Read(ReadFileReason {"), "a read failure did not show as Read")?
+    let refused: Result[FileSettings[mem.SystemAllocator], DecodeFileError] = decode_text_through_question_mark("[")
+    let parse_failed = match refused {
+        Ok(settings) => {
+            settings.release()
+            false
+        },
+        Err(error) => {
+            defer error.release()
+            match read error {
+                Decode(_) => true,
+                Read(_) => false,
+            }
+        },
+    }
+    testing.assert(parse_failed, "`?` did not convert a decode error into Decode")?
+}
+
+// Decode `text` as `FileSettings`, converting the `DecodeError` with `?`.
+fn decode_text_through_question_mark(text: Str) -> Result[FileSettings[mem.SystemAllocator], DecodeFileError] {
+    .Ok(decode(text)?)
 }
 
 test fn a_file_is_decoded_into_an_arena() {
