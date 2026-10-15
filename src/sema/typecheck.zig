@@ -1883,7 +1883,9 @@ fn spellWritten(
             try out.append(gpa, ')');
             return;
         },
-        .named => try out.appendSlice(gpa, ast.tokenText(ref.name)),
+        // Unit is recorded by its opening parenthesis, the one token it has
+        // that names it.
+        .named => try out.appendSlice(gpa, if (std.mem.eql(u8, ast.tokenText(ref.name), "(")) "()" else ast.tokenText(ref.name)),
         .selection => {
             try spellWritten(gpa, ast, out, ast.selectionBase(ref));
             try out.append(gpa, '.');

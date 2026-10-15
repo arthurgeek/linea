@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `inout fn(read n: UInt8, read done: ()) -> Result[(), UInt8]`, and `<closure>` is not that callable type
+  --> tests/traits/a_callable_bound_is_spelled_as_written.lin:12:5
+   |
+12 |     run(&count)
+   |     ^^^ give it the exact callable type the bound names
