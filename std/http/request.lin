@@ -94,10 +94,8 @@ test fn a_header_value_is_found_by_its_folded_name() {
 // without the header names none.
 fn media_type(content_type: Option[Str]) -> Option[Str] {
     let named = copy(content_type)?
-    match named.find(";") {
-        Some(at) => .Some(named.slice(0, at).unwrap().trim_ascii()),
-        None => .Some(named.trim_ascii()),
-    }
+    let (media, _) = named.split_once(";") else { (named, "") }
+    .Some(media.trim_ascii())
 }
 
 test fn a_media_type_is_the_value_without_its_parameters() {
@@ -184,13 +182,7 @@ test fn a_new_request_holds_its_method_target_and_body() {
 // pairs is refused with 414, as a target longer than the server reads, before
 // anything is decoded. Running out of memory answers 500.
 fn query_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], target: Str, memory: mem.Handle[P], max_pairs: UInt64) -> Result[Option[Vec[Field, mem.Handle[P]]], RequestError] where carries(.Ok: memory) {
-    let query = match target.split_once("?") {
-        Some(halves) => {
-            let (_, after) = halves
-            after
-        },
-        None => "",
-    }
+    let (_, query) = target.split_once("?") else { ("", "") }
     if pair_count(query) > max_pairs {
         return .Err(.Status(.UriTooLong))
     }
@@ -302,10 +294,7 @@ fn pair_count(source: Str) -> UInt64 {
 // `decode_pair` decodes one `name=value` pair into `stored` and records its
 // ranges in `fields`.
 fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
-    let (raw_name, raw_value) = match pair.split_once("=") {
-        Some(halves) => halves,
-        None => (copy(pair), ""),
-    }
+    let (raw_name, raw_value) = pair.split_once("=") else { (copy(pair), "") }
     let name = append_decoded(&stored, raw_name, plus_is_space: true)?
     let value = append_decoded(&stored, raw_value, plus_is_space: true)?
     match &fields.push(.{ name, value }) {
@@ -526,10 +515,8 @@ impl[P: Allocator] Request[P] {
     // `path` returns the target up to its `?`, not percent-decoded.
     pub fn path(self: Self) -> Str where carries(self) {
         let target = stored_part(self.head, self.target)
-        match target.find("?") {
-            Some(at) => target.slice(0, at).unwrap(),
-            None => target,
-        }
+        let (path, _) = target.split_once("?") else { (target, "") }
+        path
     }
 }
 

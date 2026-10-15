@@ -113,16 +113,12 @@ fn take_pair(text: Str) -> Taken where carries(.cookie.Some: text) {
         } else {
             end
         }
-        match segment.split_once("=") {
-            Some(halves) => {
-                let (raw_name, raw_value) = halves
-                let name = raw_name.trim_ascii()
-                let value = unquoted(raw_value.trim_ascii())
-                if is_token(name) {
-                    return .{ cookie = .Some(.{ name, value }), consumed = at }
-                }
-            },
-            None => {},
+        let (raw_name, raw_value) = segment.split_once("=") else {
+            continue
+        }
+        let name = raw_name.trim_ascii()
+        if is_token(name) {
+            return .{ cookie = .Some(.{ name, value = unquoted(raw_value.trim_ascii()) }), consumed = at }
         }
     }
     .{ cookie = .None, consumed = text.length() }
