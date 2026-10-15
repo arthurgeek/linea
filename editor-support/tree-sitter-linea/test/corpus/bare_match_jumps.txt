@@ -2,7 +2,7 @@
 Bare jumps terminate at match arm commas
 ==================
 
-fn walk() -> () {
+fn walk() {
     loop {
         match item {
             None => break,
@@ -21,7 +21,6 @@ fn walk() -> () {
   (function_declaration
     (identifier)
     (parameter_list)
-    (unit_type)
     (block
       (block_statement
         (loop_expression

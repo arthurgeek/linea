@@ -6,7 +6,7 @@ struct Inner { left: borrow UInt64 }
 
 struct Outer { inner: Inner, right: borrow UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

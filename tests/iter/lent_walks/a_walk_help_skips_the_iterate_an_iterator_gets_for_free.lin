@@ -5,7 +5,7 @@
 struct Countdown { left: UInt64 }
 
 impl Release for Countdown {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Countdown { left: _ } = self
     }
 }

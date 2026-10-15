@@ -1,20 +1,18 @@
 program decls=4
   decl trait_ "Invokable" tokens 0..14
     requires fn(read value: UInt8) -> UInt8
-  decl function "_needs_callable" tokens 14..39
+  decl function "_needs_callable" tokens 14..36
     type param "F" : fn(read value: UInt8) -> UInt8
     param read "_value" : F
-    returns (
-    expr %0 block tokens 37..39
-  decl function "_forwards" tokens 39..60
+    expr %0 block tokens 34..36
+  decl function "_forwards" tokens 36..54
     type param "F" : Invokable
     param read "value" : F
-    returns (
-    expr %4 block tokens 54..60
-      expr %3 call tokens 55..59
-        expr %1 name_ref tokens 55..56 "_needs_callable"
-        expr %2 name_ref tokens 57..58 "value"
-  decl function "main" tokens 60..69
+    expr %4 block tokens 48..54
+      expr %3 call tokens 49..53
+        expr %1 name_ref tokens 49..50 "_needs_callable"
+        expr %2 name_ref tokens 51..52 "value"
+  decl function "main" tokens 54..63
     returns UInt8
-    expr %6 block tokens 66..69
-      expr %5 int_literal tokens 67..68 "0"
+    expr %6 block tokens 60..63
+      expr %5 int_literal tokens 61..62 "0"

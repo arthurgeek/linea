@@ -3,7 +3,7 @@ import std.testing
 // Release consumes a value without extra arguments or a policy choice. Linear
 // types must be consumed, but need not provide this operation.
 pub trait Release {
-    fn release(sink self: Self) -> ()
+    fn release(sink self: Self)
 }
 
 // Settle applies to a failure that hands back an owned value: settling it
@@ -29,51 +29,51 @@ pub trait Settle: Release {
 // Unit, the integers, Bool, Float64 and Str own no resource, so releasing one
 // runs nothing.
 impl Release for () {
-    fn release(sink _self: ()) -> () {}
+    fn release(sink _self: ()) {}
 }
 
 impl Release for Int8 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Int16 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Int32 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Int64 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for UInt8 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for UInt16 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for UInt32 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for UInt64 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Bool {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Float64 {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 impl Release for Str {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 test fn str_release_preserves_shared_literal_storage() {
@@ -86,7 +86,7 @@ test fn str_release_preserves_shared_literal_storage() {
 
 // Never has no values, so its release can never run.
 impl Release for Never {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         match self {}
     }
 }
@@ -100,7 +100,7 @@ test fn never_release_is_available_to_an_uninhabited_payload() {
 // Drop a value that may be dropped, running nothing. A derived `Release`
 // settles a component this way when the component is discardable and does not
 // implement `Release`.
-pub fn discard[T: Discardable](sink _value: T) -> () {}
+pub fn discard[T: Discardable](sink _value: T) {}
 
 test fn discarding_a_copyable_value_runs_nothing() {
     let octets = [UInt8(10), 0, 0, 1]
@@ -113,7 +113,7 @@ test fn discarding_a_copyable_value_runs_nothing() {
 // implements `Release` is released; one that is discardable without it is
 // discarded; any other one must implement `Release` for the derive to apply.
 template impl Release where reflect.components: Release {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         match self {
             reflect.case => {
                 for component in reflect.components.reversed {
@@ -134,7 +134,7 @@ struct ObservedWithoutRelease {
 // Releasing an observation discards only the observation; the observed value
 // stays with its owner.
 impl[T] Release for borrow T {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 test fn releasing_an_observation_leaves_its_owner_available() {

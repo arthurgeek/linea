@@ -4,7 +4,7 @@ import std.mem
 struct Token { number: UInt64 }
 
 impl Release for Token {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Token { number: _ } = self
     }
 }

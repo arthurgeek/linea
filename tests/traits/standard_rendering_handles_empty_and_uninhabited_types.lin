@@ -13,7 +13,7 @@ derive (Display, Debug) for Empty
 
 derive (Display, Debug) for Uninhabited
 
-fn _render_uninhabited(value: Uninhabited) -> () {
+fn _render_uninhabited(value: Uninhabited) {
     let _display = "{value}"
     let _debug = "{value:?}"
 }

@@ -37,7 +37,7 @@ impl[A: Allocator] Fields[A] {
 }
 
 impl[A: Allocator] Release for Fields[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Fields { input: _, allocator: _, next: _ } = self
     }
 }

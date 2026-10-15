@@ -47,6 +47,9 @@ pub const Code = enum {
     s_expr,
     s_name,
     s_type,
+    /// `-> ()` written as a result: a callable that returns nothing writes no
+    /// result type.
+    s_unit_result,
     s_bracket,
     s_equals,
     s_destructure,
@@ -361,6 +364,7 @@ pub const Code = enum {
             .s_expr => "S-Expr",
             .s_name => "S-Name",
             .s_type => "S-Type",
+            .s_unit_result => "S-UnitResult",
             .s_bracket => "S-Bracket",
             .s_equals => "S-Equals",
             .s_destructure => "S-Destructure",

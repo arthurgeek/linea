@@ -1,5 +1,5 @@
 error[T-Where]: a `where` predicate constrains an open type
- --> tests/generics/a_where_subject_depends_on_an_open_parameter.lin:3:29
+ --> tests/generics/a_where_subject_depends_on_an_open_parameter.lin:3:23
   |
-3 | fn _assertion() -> () where UInt8: Copyable {}
-  |                             ^^^^^ this subject depends on no type parameter in scope
+3 | fn _assertion() where UInt8: Copyable {}
+  |                       ^^^^^ this subject depends on no type parameter in scope

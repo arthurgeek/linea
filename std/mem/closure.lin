@@ -39,7 +39,7 @@ struct Closure[S, A: Allocator = SystemAllocator] {
     /// Runs the stored callable: `S`'s arguments, then `at` and `len`.
     entry: ClosureEntry[S],
     /// Releases the stored callable in place.
-    settle: fn(at: UInt64, len: UInt64) -> (),
+    settle: fn(at: UInt64, len: UInt64),
     /// The stored callable's bytes. Both are zero when it has no size.
     at: UInt64,
     len: UInt64,
@@ -56,7 +56,7 @@ struct ClosureEntry[phantom S] {}
 // addresses it generates for the callable type `F`, and with its size.
 extern fn closure_entry[S, F](shape: SlotType[F]) -> ClosureEntry[S]
 
-extern fn closure_settle[F](shape: SlotType[F]) -> fn(at: UInt64, len: UInt64) -> ()
+extern fn closure_settle[F](shape: SlotType[F]) -> fn(at: UInt64, len: UInt64)
 
 extern fn closure_size[F](shape: SlotType[F]) -> UInt64
 
@@ -194,7 +194,7 @@ test fn a_lambda_that_captures_nothing_allocates_nothing() {
 
 impl[S, A: Allocator] Release for Closure[S, A] {
     // Release the stored callable in place, then return its bytes.
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Closure { entry: _, settle, at, len, storage } = self
         settle(at, len)
         storage.release()

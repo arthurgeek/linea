@@ -3,13 +3,12 @@ program decls=4
     in Give
   decl trait_ "Give" tokens 0..10
     phantom type param "U"
-  decl function "_take" tokens 10..64
+  decl function "_take" tokens 10..61
     type param "F" : Give[fn(read value: UInt8 = 1 + 1) -> UInt8] + Give[fn(read value: UInt8 = 2) -> UInt8]
     param read "_value" : F
     param read "_item" : F.Item
-    returns (
-    expr %4 block tokens 62..64
-  decl function "main" tokens 64..73
+    expr %4 block tokens 59..61
+  decl function "main" tokens 61..70
     returns UInt8
-    expr %6 block tokens 70..73
-      expr %5 int_literal tokens 71..72 "0"
+    expr %6 block tokens 67..70
+      expr %5 int_literal tokens 68..69 "0"

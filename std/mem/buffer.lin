@@ -15,7 +15,7 @@ struct Buffer[A: Allocator] {
 }
 
 impl[A: Allocator] Release for Buffer[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         Allocator.dispose(self)
     }
 }
@@ -35,16 +35,16 @@ extern fn buffer_span[A: Allocator](owner: Buffer[A], start: UInt64, count: UInt
 extern fn linea_alloc(size: UInt64, align: UInt64) -> UInt64
 
 // Return `size` bytes at `at`, allocated with `align`, to the runtime.
-extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64)
 
 // The compiler replaces these declarations with checked memory accesses.
 // They have no runtime definitions, so an unlowered call fails to link.
-extern fn linea_raw_store(at: UInt64, len: UInt64, i: UInt64, v: UInt64) -> ()
+extern fn linea_raw_store(at: UInt64, len: UInt64, i: UInt64, v: UInt64)
 
 extern fn linea_raw_load(at: UInt64, len: UInt64, i: UInt64) -> UInt64
 
 // Byte accesses check bounds; every byte offset satisfies their alignment.
-extern fn linea_raw_store8(at: UInt64, len: UInt64, i: UInt64, v: UInt8) -> ()
+extern fn linea_raw_store8(at: UInt64, len: UInt64, i: UInt64, v: UInt8)
 
 extern fn linea_raw_load8(at: UInt64, len: UInt64, i: UInt64) -> UInt8
 
@@ -135,7 +135,7 @@ test fn a_buffer_byte_view_covers_the_requested_extent() {
 impl[A: Allocator] Buffer[A] {
     // Store eight bytes at a byte offset. The offset must be eight-byte aligned
     // and the complete value must fit in the buffer; otherwise the access traps.
-    pub fn store(inout self: Self, i: UInt64, v: UInt64) -> () {
+    pub fn store(inout self: Self, i: UInt64, v: UInt64) {
         linea_raw_store(self.at, self.len, i, v)
     }
 }
@@ -225,7 +225,7 @@ test trap fn load_traps_at_a_misaligned_offset() -> Result[(), testing.Failure] 
 
 impl[A: Allocator] Buffer[A] {
     // Store one byte; an offset past the end traps.
-    pub fn store_byte(inout self: Self, i: UInt64, v: UInt8) -> () {
+    pub fn store_byte(inout self: Self, i: UInt64, v: UInt8) {
         linea_raw_store8(self.at, self.len, i, v)
     }
 }

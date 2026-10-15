@@ -7,7 +7,7 @@ impl Counter {
         self.count
     }
 
-    fn add(inout self: Self, amount: UInt8) -> () {
+    fn add(inout self: Self, amount: UInt8) {
         self.count += amount
     }
 
@@ -16,7 +16,7 @@ impl Counter {
         self.count
     }
 
-    fn absorb(inout self: Self, inout other: Counter) -> () {
+    fn absorb(inout self: Self, inout other: Counter) {
         self.count += other.count
         other.count = 0
     }

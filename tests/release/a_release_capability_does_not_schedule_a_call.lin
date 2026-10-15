@@ -7,7 +7,7 @@ struct Ticket {
 }
 
 impl Release for Ticket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Ticket { code: _code } = self
     }
 }

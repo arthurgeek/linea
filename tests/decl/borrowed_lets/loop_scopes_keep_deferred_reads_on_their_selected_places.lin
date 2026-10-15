@@ -1,6 +1,6 @@
 struct Point { x: UInt8 }
 
-fn add(inout total: UInt8, value: UInt8) -> () {
+fn add(inout total: UInt8, value: UInt8) {
     total = total + value
 }
 

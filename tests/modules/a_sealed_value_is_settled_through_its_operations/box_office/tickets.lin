@@ -21,12 +21,12 @@ impl Ticket {
         cents
     }
 
-    fn void(sink self: Ticket) -> () {
+    fn void(sink self: Ticket) {
         let Ticket { seat: _, cents: _ } = self
     }
 }
 
-pub fn cancel_all(sink ticket: Ticket) -> () {
+pub fn cancel_all(sink ticket: Ticket) {
     ticket.void()
 }
 

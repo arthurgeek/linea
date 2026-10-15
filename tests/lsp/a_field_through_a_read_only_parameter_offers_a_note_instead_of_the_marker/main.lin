@@ -1,7 +1,7 @@
 struct List { n: UInt8 }
 
 impl List {
-    fn push(inout self: Self, value: UInt8) -> () {
+    fn push(inout self: Self, value: UInt8) {
         self.n += value
     }
 

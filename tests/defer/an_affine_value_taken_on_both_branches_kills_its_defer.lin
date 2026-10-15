@@ -9,7 +9,7 @@ fn open(sink k: Key) -> UInt8 {
     n
 }
 
-fn lock(sink k: Key) -> () {
+fn lock(sink k: Key) {
     let Key { n: _n } = k
 }
 

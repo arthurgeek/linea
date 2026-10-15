@@ -10,7 +10,7 @@ impl Iterator for Counter {
     }
 }
 
-fn discard_item[I: Iterator](_iterator: I, sink _item: I.Item) -> ()
+fn discard_item[I: Iterator](_iterator: I, sink _item: I.Item)
 where I.Item: Discardable {}
 
 fn main() -> UInt8 {

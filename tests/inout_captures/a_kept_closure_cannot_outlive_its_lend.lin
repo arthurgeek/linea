@@ -1,6 +1,6 @@
 import std.mem
 
-fn ticker(inout count: UInt8) -> Result[mem.Closure[inout fn() -> (), mem.SystemAllocator], mem.Oom] {
+fn ticker(inout count: UInt8) -> Result[mem.Closure[inout fn(), mem.SystemAllocator], mem.Oom] {
     mem.Closure.open(
         inout [inout count] || {
             count += 1

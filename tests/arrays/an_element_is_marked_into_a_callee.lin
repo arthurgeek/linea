@@ -1,7 +1,7 @@
 // An element is handed to an `inout` parameter the way a field is, and the call
 // site marks it. `&` is not address-of -- there are no references to take -- it
 // says which argument the call can change.
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n = n + 1
 }
 

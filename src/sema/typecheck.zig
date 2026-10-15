@@ -1381,6 +1381,10 @@ fn typecheckInternal(
                 .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
                 .reason = .return_type,
                 .unit_test_success = true,
+            } else if (ast.declTag(d) == .function and written_return.isOmitted()) .{
+                .ty = try c.declaredResultType(d),
+                .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
+                .reason = .omitted_result,
             } else null;
 
             // Recorded from the same call the body is checked against, so
@@ -1881,8 +1885,11 @@ fn spellWritten(
                     try out.appendSlice(gpa, ast.exprText(param.default));
                 }
             }
-            try out.appendSlice(gpa, ") -> ");
-            try spellWritten(gpa, ast, out, callable.result);
+            try out.append(gpa, ')');
+            if (callable.result.wasWritten()) {
+                try out.appendSlice(gpa, " -> ");
+                try spellWritten(gpa, ast, out, callable.result);
+            }
             return;
         },
     }
@@ -4472,11 +4479,11 @@ test "lentReceiver is the receiver of a marked postfix call" {
         \\}
         \\
         \\impl Door {
-        \\    fn widen(inout self: Self) -> () {
+        \\    fn widen(inout self: Self) {
         \\        self.width += 1
         \\    }
         \\
-        \\    fn stretch[T](inout self: Self, _by: T) -> () {
+        \\    fn stretch[T](inout self: Self, _by: T) {
         \\        self.width += 1
         \\    }
         \\}
@@ -4630,7 +4637,7 @@ fn returnType(c: *Checker, d: node.DeclId) !TypeId {
     // and its projections stand for the call's receiver. Every other
     // declaration keeps the one result type it was declared with.
     if (c.ast.declIsSignature(d))
-        return c.typeOfRefOf(c.program.moduleOf(d), d, c.ast.declReturnRef(d));
+        return c.declResultOf(c.program.moduleOf(d), d);
     if (c.ast.declIsTest(d) and !c.ast.declReturnRef(d).wasWritten()) {
         if (c.default_test_result) |settled| return settled;
         const failure = c.program.libraryDeclIn("testing", "Failure") orelse return .poison;
@@ -4702,6 +4709,8 @@ const Expected = struct {
 
     const Reason = enum {
         return_type,
+        /// A function that writes no result, which therefore returns `()`.
+        omitted_result,
         annotation,
         conversion,
         /// The other arm of a conditional, which settled the type first.
@@ -4755,6 +4764,7 @@ const Expected = struct {
         fn describe(self: Reason) []const u8 {
             return switch (self) {
                 .return_type => "expected because of this return type",
+                .omitted_result => "this function writes no result type, so it returns `()`",
                 .annotation => "expected because of this annotation",
                 .conversion => "expected because of this conversion",
                 .arm => "expected because of this arm",
@@ -5861,6 +5871,22 @@ const Checker = struct {
     /// admits.
     fn typeOfRef(self: *Checker, ref: node.TypeRef) !TypeId {
         return self.typeOfRefOf(self.current, self.generic, ref);
+    }
+
+    /// The type a callable's written result names. One that writes none
+    /// returns `()`; one the parser began and refused names nothing.
+    fn resultOfRef(self: *Checker, m: ModuleId, owner: node.DeclId, ref: node.TypeRef) !TypeId {
+        if (ref.wasWritten()) return self.typeOfRefOf(m, owner, ref);
+        return if (ref.isOmitted()) .unit else .poison;
+    }
+
+    /// What a declaration's written result names. Only a function, a trait's
+    /// signature and an `extern` return `()` by writing nothing; a
+    /// projection, and a declaration that is not a callable, name nothing.
+    fn declResultOf(self: *Checker, m: ModuleId, d: node.DeclId) !TypeId {
+        const ref = self.ast.declReturnRef(d);
+        if (self.ast.declTag(d) != .function) return self.typeOfRefOf(m, d, ref);
+        return self.resultOfRef(m, d, ref);
     }
 
     /// Resolves representation through the ordinary type reader. The first
@@ -7146,7 +7172,7 @@ const Checker = struct {
             });
         }
 
-        const result = try self.typeOfRefOf(m, owner, written.result);
+        const result = try self.resultOfRef(m, owner, written.result);
         if (invalid or result == .poison) {
             try self.noteContractRoots(self.ast.params[written.params.start..written.params.end], self.ast.contracts[written.contracts.start..written.contracts.end]);
             return .poison;
@@ -7659,7 +7685,9 @@ const Checker = struct {
             self.symbolic_self_owner = .none;
             self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
         }
-        const resolved = try self.typeOfRef(self.ast.declReturnRef(d));
+        // A test that writes no result answers its default `Result`, which
+        // `returnType` settles before asking here.
+        const resolved = try self.declResultOf(self.current, d);
         self.declared_results[d.index()] = resolved;
         return resolved;
     }
@@ -9798,11 +9826,11 @@ const Checker = struct {
             \\trait Source { type Item }
             \\trait Pipe {
             \\    type Out
-            \\    fn drain(_self: Self) -> () where Self.Out: Discardable {}
+            \\    fn drain(_self: Self) where Self.Out: Discardable {}
             \\}
             \\struct Wrap[I] { inner: I }
             \\impl[I: Source] Pipe for Wrap[I] where I.Item: Discardable { type Out = I }
-            \\fn _run[S: Source](wrap: Wrap[S]) -> () where S.Item: Discardable { wrap.drain() }
+            \\fn _run[S: Source](wrap: Wrap[S]) where S.Item: Discardable { wrap.drain() }
             \\fn main() -> UInt8 { 0 }
         ;
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -9824,14 +9852,14 @@ const Checker = struct {
             \\trait Source { type Item }
             \\trait Pipe {
             \\    type Out
-            \\    fn eat(sink self: Self) -> () where Self.Out: Discardable
+            \\    fn eat(sink self: Self) where Self.Out: Discardable
             \\}
             \\@linear
             \\struct Ingot { id: UInt8 }
             \\struct Belt {}
             \\impl Pipe for Belt {
             \\    type Out = Ingot
-            \\    fn eat(sink self: Belt) -> () { let Belt {} = self }
+            \\    fn eat(sink self: Belt) { let Belt {} = self }
             \\}
             \\fn main() -> UInt8 {
             \\    Belt {}.eat()
@@ -16641,8 +16669,11 @@ const Checker = struct {
             if (parameter.passing == .inout) try spelled.appendSlice(self.gpa, "inout ");
             try spelled.appendSlice(self.gpa, runtimeScalarName(parameter.scalar));
         }
-        try spelled.appendSlice(self.gpa, ") -> ");
-        try spelled.appendSlice(self.gpa, runtimeScalarName(expected.result));
+        try spelled.append(self.gpa, ')');
+        if (expected.result != .unit) {
+            try spelled.appendSlice(self.gpa, " -> ");
+            try spelled.appendSlice(self.gpa, runtimeScalarName(expected.result));
+        }
         try self.sink.addErrorFmt(
             .t_extern_runtime,
             file,
@@ -16759,7 +16790,7 @@ const Checker = struct {
         }
         if (raw.closure != .none) {
             const d = raw.closure;
-            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque affine entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64) -> (), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
+            if (!self.certifiedClosure(declarations, d)) self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Closure certificate requires an opaque affine entry, release, address, length and buffer", "declare Closure[S, A] with entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, and storage: Option[Buffer[A]] fields", null);
         }
     }
 
@@ -16865,7 +16896,7 @@ const Checker = struct {
     }
 
     /// `closure_size[F]` answers a `UInt64`, `closure_settle[F]` the release
-    /// `fn(at: UInt64, len: UInt64) -> ()`, and `closure_entry[S, F]` a
+    /// `fn(at: UInt64, len: UInt64)`, and `closure_entry[S, F]` a
     /// `ClosureEntry[S]`. Each reads its callable type `F` off a `SlotType[F]`
     /// and promises nothing about dependencies.
     fn validErasureSignature(self: *Checker, d: DeclId) !bool {
@@ -27218,27 +27249,9 @@ const Checker = struct {
             );
         }
 
-        // A missing return type is not a type, so the two are compared by
-        // whether each was written before they are compared as types.
-        // Whether one was written, not whether it has a name. An array has
-        // none, so both sides read absent, the comparison below never ran, and
-        // an implementation returning `[UInt8; 1]` satisfied a signature
-        // declaring `[UInt8; 3]` -- with the caller's index folded as in-range
-        // against the length the signature promised.
-        const declared_return = self.ast.declReturnRef(sig).wasWritten();
-        const supplied_return = self.ast.declReturnRef(member).wasWritten();
-        if (declared_return != supplied_return) {
-            return self.sink.addErrorFmt(
-                mismatch_code,
-                file,
-                span,
-                "return what the signature returns",
-                "`{s}` declares what `{s}` returns, and this does not",
-                .{ trait, name },
-            );
-        }
-        if (!declared_return) return;
-
+        // Compared as types, an omitted result included: it is `()`, so a
+        // signature that writes none and a member that writes `UInt8` differ
+        // the way any two results do.
         const wanted = try self.throughTrait(try returnType(self, sig), trait_decl, trait_args);
         const supplied = try self.builder.substitute(
             try returnType(self, member),
@@ -30964,7 +30977,7 @@ test "affine capabilities separate copying from settlement" {
         },
         .{ .source =
         \\struct Point { x: UInt8 }
-        \\fn discard[T: Discardable](sink _value: T) -> () {}
+        \\fn discard[T: Discardable](sink _value: T) {}
         \\fn main() -> UInt8 { let point: Point = .{ x = 1 }; discard(point); 0 }
         },
         .{ .source =
@@ -31073,8 +31086,8 @@ test "affine contextual capabilities compose owned parts" {
     const cases = [_][]const u8{
         \\trait Allocator { type Obligation }
         \\struct Buffer[A: Allocator] { allocator: A, obligation: A.Obligation }
-        \\fn discard[T: Discardable](sink _value: T) -> () {}
-        \\fn _settle[A: Allocator + Discardable](sink buffer: Buffer[A]) -> () where A.Obligation: Discardable {
+        \\fn discard[T: Discardable](sink _value: T) {}
+        \\fn _settle[A: Allocator + Discardable](sink buffer: Buffer[A]) where A.Obligation: Discardable {
         \\    discard(buffer)
         \\}
         \\fn main() -> UInt8 { 0 }
@@ -31205,8 +31218,8 @@ test "affine contextual capabilities preserve independent settlement obligations
         \\@linear
         \\struct Ticket {}
         \\struct Holder[T] { value: T, ticket: Ticket }
-        \\fn discard[T: Discardable](sink _value: T) -> () {}
-        \\fn _settle[S: Source](sink value: Holder[S.Item]) -> () where S.Item: Discardable {
+        \\fn discard[T: Discardable](sink _value: T) {}
+        \\fn _settle[S: Source](sink value: Holder[S.Item]) where S.Item: Discardable {
         \\    discard(value)
         \\}
         \\fn main() -> UInt8 { 0 }
@@ -31240,7 +31253,7 @@ test "trait signature Self carries its declaring trait requirements" {
     _ = try checkSourceInto(arena.allocator(),
         \\trait Factory {
         \\    fn wrap(sink self: Self) -> Box[Self] where carries(self)
-        \\    fn dispose(sink boxed: Box[Self]) -> ()
+        \\    fn dispose(sink boxed: Box[Self])
         \\}
         \\struct Box[T: Factory] { value: T }
         \\fn main() -> UInt8 { 0 }
@@ -31257,7 +31270,7 @@ test "trait signature Self inherits generic trait and capability evidence" {
         \\trait Readable[T] { fn value(self: Self) -> T }
         \\trait _Factory[T: Copyable]: Readable[T] + Copyable {
         \\    fn wrap(sink self: Self) -> Box[T, Self] where carries(self)
-        \\    fn dispose(sink boxed: Box[T, Self]) -> ()
+        \\    fn dispose(sink boxed: Box[T, Self])
         \\}
         \\@copyable
         \\struct Box[T: Copyable, F: Readable[T] + Copyable] { value: T, reader: F }
@@ -31311,9 +31324,9 @@ test "generic projection and traversal receivers retain parameter types" {
 test "call recovery preserves mutation markers after an invalid receiver" {
     const prefix =
         \\struct Box { value: UInt8 }
-        \\trait Inspect { fn inspect(self: Self, inout count: UInt8) -> () }
+        \\trait Inspect { fn inspect(self: Self, inout count: UInt8) }
         \\impl Inspect for UInt8 {
-        \\    fn inspect(_self: UInt8, inout count: UInt8) -> () { count += 1 }
+        \\    fn inspect(_self: UInt8, inout count: UInt8) { count += 1 }
         \\}
         \\fn main() -> UInt8 {
         \\    var box: Box = .{ value = 1 }
@@ -32229,12 +32242,12 @@ test "borrow static trait calls infer Self through owned arguments" {
     const text =
         \\@linear
         \\struct Packet[A] { allocator: A }
-        \\trait Dispose { fn dispose(sink value: Packet[Self]) -> () }
+        \\trait Dispose { fn dispose(sink value: Packet[Self]) }
         \\struct Heap {}
         \\impl Dispose for Heap {
-        \\    fn dispose(sink value: Packet[Heap]) -> () { let Packet { allocator: _allocator } = value }
+        \\    fn dispose(sink value: Packet[Heap]) { let Packet { allocator: _allocator } = value }
         \\}
-        \\fn release[A: Dispose](sink packet: Packet[A]) -> () { Dispose.dispose(packet) }
+        \\fn release[A: Dispose](sink packet: Packet[A]) { Dispose.dispose(packet) }
         \\fn main() -> UInt8 {
         \\    let heap: Heap = .{}
         \\    let packet: Packet[Heap] = .{ allocator = heap }
@@ -32253,10 +32266,10 @@ test "static trait Self reuses argument types for method generics" {
     const text =
         \\@linear
         \\struct Packet[T, A] { value: T, allocator: A }
-        \\trait Dispose { fn dispose[T: Copyable](sink value: Packet[T, Self]) -> () }
+        \\trait Dispose { fn dispose[T: Copyable](sink value: Packet[T, Self]) }
         \\struct Heap {}
         \\impl Dispose for Heap {
-        \\    fn dispose[T: Copyable](sink value: Packet[T, Heap]) -> () {
+        \\    fn dispose[T: Copyable](sink value: Packet[T, Heap]) {
         \\        let Packet { value: item, allocator: _allocator } = value
         \\        let _taken = item
         \\    }
@@ -32937,8 +32950,8 @@ test "rejected calls are not normalised" {
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "rejected-calls.lin", .text =
-        \\fn mutate(inout value: UInt8) -> () { value = value + 1; }
-        \\fn takes(_value: UInt8) -> () {}
+        \\fn mutate(inout value: UInt8) { value = value + 1; }
+        \\fn takes(_value: UInt8) {}
         \\fn main() -> UInt8 {
         \\    var value: UInt8 = 1
         \\    mutate(value)
@@ -33060,7 +33073,7 @@ test "rejected calls retain their matched argument prefix" {
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "rejected-call-prefix.lin", .text =
-        \\fn take(sink value: UInt8) -> () {}
+        \\fn take(sink value: UInt8) {}
         \\fn main() -> UInt8 {
         \\    let a: UInt8 = 1
         \\    let b: UInt8 = 2
@@ -33530,13 +33543,13 @@ test "an inout argument is marked, and a read argument is not" {
     const gpa = arena.allocator();
 
     try testing.expectEqual(@as(u32, 0), try checkSourceTotal(gpa,
-        \\fn bump(inout n: UInt8, by: UInt8) -> () { n = n + by; }
+        \\fn bump(inout n: UInt8, by: UInt8) { n = n + by; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; bump(&x, 2); x }
     ));
 
     // Missing on an `inout` parameter.
     try testing.expect(0 < try checkSourceTotal(gpa,
-        \\fn bump(inout n: UInt8) -> () { n = n + 1; }
+        \\fn bump(inout n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; bump(x); x }
     ));
 
@@ -33553,12 +33566,12 @@ test "an inout parameter is mutable and a read parameter is not" {
     const gpa = arena.allocator();
 
     try testing.expectEqual(@as(u32, 0), try checkSourceTotal(gpa,
-        \\fn bump(inout n: UInt8) -> () { n = n + 1; }
+        \\fn bump(inout n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; bump(&x); x }
     ));
 
     try testing.expect(0 < try checkSourceTotal(gpa,
-        \\fn bump(n: UInt8) -> () { n = n + 1; }
+        \\fn bump(n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; bump(&x); x }
     ));
 }
@@ -33570,7 +33583,7 @@ test "only a mutable binding may be passed inout" {
     // A `let` cannot be assigned, so it cannot be handed to something that
     // assigns it either.
     try testing.expect(0 < try checkSourceTotal(arena.allocator(),
-        \\fn bump(inout n: UInt8) -> () { n = n + 1; }
+        \\fn bump(inout n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 { let x: UInt8 = 1; bump(&x); x }
     ));
 }
@@ -33582,20 +33595,20 @@ test "a marked argument may not overlap another argument" {
 
     // Two marked arguments naming one place.
     try testing.expect(0 < try checkSourceTotal(gpa,
-        \\fn swap2(inout a: UInt8, inout b: UInt8) -> () { a = b; }
+        \\fn swap2(inout a: UInt8, inout b: UInt8) { a = b; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; swap2(&x, &x); x }
     ));
 
     // And a marked argument overlapping one that is merely read: the callee
     // would observe its storage changing through an argument nobody marked.
     try testing.expect(0 < try checkSourceTotal(gpa,
-        \\fn bump(inout a: UInt8, b: UInt8) -> () { a = a + b; }
+        \\fn bump(inout a: UInt8, b: UInt8) { a = a + b; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; bump(&x, x); x }
     ));
 
     // Distinct places are fine.
     try testing.expectEqual(@as(u32, 0), try checkSourceTotal(gpa,
-        \\fn bump(inout a: UInt8, b: UInt8) -> () { a = a + b; }
+        \\fn bump(inout a: UInt8, b: UInt8) { a = a + b; }
         \\fn main() -> UInt8 { var x: UInt8 = 1; var y: UInt8 = 2; bump(&x, y); x }
     ));
 }
@@ -33725,7 +33738,7 @@ test "a marked argument may be a path into a binding" {
     try testing.expectEqual(@as(u32, 0), try checkSourceTotal(gpa,
         \\struct Inner { y: UInt8 }
         \\struct Outer { inner: Inner, z: UInt8 }
-        \\fn bump(inout n: UInt8) -> () { n = n + 1; }
+        \\fn bump(inout n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 {
         \\    var o: Outer = .{ inner = .{ y = 1 }, z = 2 };
         \\    bump(&o.inner.y);
@@ -33738,7 +33751,7 @@ test "a marked argument may be a path into a binding" {
     try testing.expect(0 < try checkSourceTotal(gpa,
         \\struct Inner { y: UInt8 }
         \\struct Outer { inner: Inner, z: UInt8 }
-        \\fn bump(inout n: UInt8) -> () { n = n + 1; }
+        \\fn bump(inout n: UInt8) { n = n + 1; }
         \\fn main() -> UInt8 {
         \\    let o: Outer = .{ inner = .{ y = 1 }, z = 2 };
         \\    bump(&o.inner.y);
@@ -34554,7 +34567,7 @@ test "borrow value projection is readonly through fields and indexes" {
         defer arena.deinit();
         const gpa = arena.allocator();
         var sink = Sink.init(gpa);
-        const source = try std.fmt.allocPrint(gpa, "struct Held {{ bytes: [UInt8; 1] }}\nfn mutate(inout x: UInt8) -> () {{ x = 2 }}\nfn main() -> UInt8 {{ var owned: Held = .{{ bytes = [1] }}; var b = borrow owned; {s}; b.bytes[0] }}", .{write});
+        const source = try std.fmt.allocPrint(gpa, "struct Held {{ bytes: [UInt8; 1] }}\nfn mutate(inout x: UInt8) {{ x = 2 }}\nfn main() -> UInt8 {{ var owned: Held = .{{ bytes = [1] }}; var b = borrow owned; {s}; b.bytes[0] }}", .{write});
         _ = try checkSourceInto(gpa, source, &sink);
         try testing.expect(diagnosticSays(&sink, .n_immutable, "observation"));
     }
@@ -34863,12 +34876,12 @@ test "borrow storage certificates accept optional allocation and reject mismatch
 
 test "the closure certificate accepts the library's shape and rejects a changed one" {
     const cases = [_]struct { head: []const u8, fields: []const u8, valid: bool }{
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64) -> (), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
-        .{ .head = "@(opaque, linear)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64) -> (), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64) -> (), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64) -> (), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64) -> (), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
-        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64) -> (), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = true },
+        .{ .head = "@(opaque, linear)", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@opaque", .fields = "entry: S, settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), len: UInt64, at: UInt64, storage: Option[Buffer[A]]", .valid = false },
+        .{ .head = "@opaque", .fields = "entry: ClosureEntry[S], settle: fn(at: UInt64, len: UInt64), at: UInt64, len: UInt64, storage: Option[Buffer[UInt8]]", .valid = false },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -34904,8 +34917,8 @@ test "borrow implementation Self resolves without a nominal head name" {
     defer arena.deinit();
     var sink = Sink.init(arena.allocator());
     _ = try checkSourceInto(arena.allocator(),
-        \\trait Release { fn release(sink self: Self) -> () }
-        \\impl[T] Release for borrow T { fn release(sink _self: Self) -> () {} }
+        \\trait Release { fn release(sink self: Self) }
+        \\impl[T] Release for borrow T { fn release(sink _self: Self) {} }
         \\fn main() -> UInt8 { let n: UInt8 = 3; Release.release(borrow n); n }
     , &sink);
     for (sink.list.items) |diagnostic| std.debug.print("{s}: {s}\n", .{ @tagName(diagnostic.code.?), diagnostic.message });
@@ -35236,10 +35249,10 @@ test "integer constraints do not permit parameter typed defaults" {
         \\fn _value[T: Integer](value: T = 1) -> T { copy(value) }
         \\fn main() -> UInt8 { 0 }
         ,
-        \\fn _value[T: Integer, F: fn(read value: T = 1) -> T](_call: F) -> () {}
+        \\fn _value[T: Integer, F: fn(read value: T = 1) -> T](_call: F) {}
         \\fn main() -> UInt8 { 0 }
         ,
-        \\fn _value[T: Integer]() -> () { let _call = |value: T = 1| copy(value); }
+        \\fn _value[T: Integer]() { let _call = |value: T = 1| copy(value); }
         \\fn main() -> UInt8 { 0 }
         ,
     };
@@ -35267,7 +35280,7 @@ test "integer property semantics retain concrete constants in early type express
     defer arena.deinit();
     const sink = try diagnose(arena.allocator(),
         \\let width = UInt8.max
-        \\fn _accept(_bytes: [UInt8; width]) -> () {}
+        \\fn _accept(_bytes: [UInt8; width]) {}
         \\fn _default(value: UInt8 = UInt8.min) -> UInt8 { value }
         \\fn main() -> UInt8 { width }
     );
@@ -35313,18 +35326,18 @@ test "integer property semantics reject writes and borrowed addresses" {
     const cases = [_][]const u8{
         \\fn main() -> UInt8 { UInt8.max = 0; 0 }
         ,
-        \\fn _change[T: Integer]() -> () { T.max = T(0) }
+        \\fn _change[T: Integer]() { T.max = T(0) }
         \\fn main() -> UInt8 { 0 }
         ,
-        \\fn clear(inout value: UInt8) -> () { value = 0 }
+        \\fn clear(inout value: UInt8) { value = 0 }
         \\fn main() -> UInt8 { clear(&UInt8.max); 0 }
         ,
-        \\fn clear(inout value: UInt8) -> () { value = 0 }
-        \\fn main() -> UInt8 { let call: fn(inout value: UInt8) -> () = clear; call(&UInt8.max); 0 }
+        \\fn clear(inout value: UInt8) { value = 0 }
+        \\fn main() -> UInt8 { let call: fn(inout value: UInt8) = clear; call(&UInt8.max); 0 }
         ,
         \\fn main() -> UInt8 { let _view = borrow UInt8.max; 0 }
         ,
-        \\fn _view[T: Integer]() -> () { let _bound = borrow T.max; }
+        \\fn _view[T: Integer]() { let _bound = borrow T.max; }
         \\fn main() -> UInt8 { 0 }
         ,
     };
@@ -35563,12 +35576,12 @@ test "transparent observations forward readonly operations from mixed traits" {
     const source =
         \\trait Counter {
         \\    fn count(self: Self) -> UInt8
-        \\    fn advance(inout self: Self) -> ()
+        \\    fn advance(inout self: Self)
         \\}
         \\struct State { number: UInt8 }
         \\impl Counter for State {
         \\    fn count(self: Self) -> UInt8 { self.number }
-        \\    fn advance(inout self: Self) -> () { self.number += 1 }
+        \\    fn advance(inout self: Self) { self.number += 1 }
         \\}
         \\fn main() -> UInt8 {
         \\    let state: State = .{ number = 7 }
@@ -35629,12 +35642,12 @@ test "transparent observations infer generic inherent receiver arguments" {
 test "transparent observations retain ambiguity between forwarded trait operations" {
     const source =
         \\trait Read { fn count(self: Self) -> UInt8 }
-        \\trait Mixed { fn count(self: Self) -> UInt8; fn change(inout self: Self) -> () }
+        \\trait Mixed { fn count(self: Self) -> UInt8; fn change(inout self: Self) }
         \\struct State {}
         \\impl Read for State { fn count(_self: Self) -> UInt8 { 1 } }
         \\impl Mixed for State {
         \\    fn count(_self: Self) -> UInt8 { 2 }
-        \\    fn change(inout _self: Self) -> () {}
+        \\    fn change(inout _self: Self) {}
         \\}
         \\fn main() -> UInt8 { let state: State = .{}; let view = borrow state; view.count() }
     ;
@@ -35719,7 +35732,7 @@ test "read capture rejects mutation through its alias" {
     defer arena.deinit();
     for ([_][]const u8{
         "fn main() -> UInt8 { let number = UInt8(2); let get = read [read number] || { number = 4; number }; get() }",
-        "fn change(inout number: UInt8) -> () { number = 4 }\nfn main() -> UInt8 { let number = UInt8(2); let get = read [read number] || { change(&number); number }; get() }",
+        "fn change(inout number: UInt8) { number = 4 }\nfn main() -> UInt8 { let number = UInt8(2); let get = read [read number] || { change(&number); number }; get() }",
     }) |source| {
         const diagnostics = try diagnose(arena.allocator(), source);
         var found_immutable = false;
@@ -35879,7 +35892,7 @@ test "captured contracts reject invalid destinations and hidden effects" {
         \\}
         , .message = "a contract path must name a declared source" },
         .{ .source =
-        \\fn accept[F: inout fn(value: borrow UInt8) -> ()](sink _callback: F) -> () {}
+        \\fn accept[F: inout fn(value: borrow UInt8)](sink _callback: F) {}
         \\fn main() -> UInt8 {
         \\    let first: UInt8 = 1
         \\    accept(inout [sink saved = borrow first] |value| -> where retains(saved: value) { saved = copy(value) })
@@ -35904,7 +35917,7 @@ test "captured contracts preserve contextual parameter retention" {
         \\    let first: UInt8 = 1
         \\    let second: UInt8 = 7
         \\    var slot: Slot = .{ saved = borrow first }
-        \\    let remember: fn(inout target: Slot, value: borrow UInt8) -> () where retains(target: value) = |inout target, value| { target.saved = copy(value) }
+        \\    let remember: fn(inout target: Slot, value: borrow UInt8) where retains(target: value) = |inout target, value| { target.saved = copy(value) }
         \\    remember(&slot, borrow second)
         \\    *slot.saved
         \\}

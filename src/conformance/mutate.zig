@@ -1010,8 +1010,9 @@ fn abruptAfterATransfer(
         fresh,
         "(sink _a: ",
         takes,
-        ", _b: UInt8) -> ",
-        answers,
+        // A callee returning `()` writes no result, and so does its wrapper.
+        if (types_of.declReturn(d.callee) == .unit) ", _b: UInt8)" else ", _b: UInt8) -> ",
+        if (types_of.declReturn(d.callee) == .unit) "" else answers,
         " { ",
         ast.exprText(callee),
         "(_a) }\n",
@@ -2500,9 +2501,9 @@ test "dropping an implementation can remove an imported module's only use" {
     const text =
         \\import std.io
         \\struct Mark {}
-        \\trait Render { fn show(self: Self) -> () }
+        \\trait Render { fn show(self: Self) }
         \\impl Render for Mark {
-        \\    fn show(_self: Self) -> () { io.eprint("") }
+        \\    fn show(_self: Self) { io.eprint("") }
         \\}
         \\fn main() -> UInt8 { let mark: Mark = .{}; Render.show(mark); 0 }
     ;
@@ -2735,7 +2736,7 @@ test "a disposal answering nothing is repeated as it stands" {
     const out = (try mutated(gpa, .repeated_disposal,
         \\@linear enum Key { Forged(UInt8) }
         \\
-        \\fn release(sink k: Key) -> () {
+        \\fn release(sink k: Key) {
         \\    match k { Forged(_) => {} }
         \\}
         \\
@@ -2878,7 +2879,7 @@ test "an unknown factory member leaves a later call's marks checked" {
         \\struct Handle {}
         \\impl Handle {
         \\    fn open() -> Handle { .{} }
-        \\    fn update(_self: Self, inout number: UInt64) -> () { number += 1 }
+        \\    fn update(_self: Self, inout number: UInt64) { number += 1 }
         \\}
         \\fn main() -> UInt8 {
         \\    let handle = Handle.open()
@@ -2936,7 +2937,7 @@ test "a program whose every member call is handed a binding is left alone" {
         \\
         \\impl Coins {
         \\    fn of(x: Coins) -> UInt8 { x.count }
-        \\    fn bump(inout x: Coins) -> () { x.count = 1 }
+        \\    fn bump(inout x: Coins) { x.count = 1 }
         \\}
         \\
         \\fn main() -> UInt8 {
@@ -3133,7 +3134,7 @@ test "the operand is written after the value, whatever separates the two" {
     const out = (try mutated(gpa, .abrupt_after_a_transfer,
         \\@linear enum Key { Forged(UInt8) }
         \\
-        \\fn release(sink k: Key) -> () {
+        \\fn release(sink k: Key) {
         \\    match k { Forged(_) => {} }
         \\}
         \\
@@ -3185,11 +3186,11 @@ test "a transfer in a function no integer answers for is left alone" {
     try testing.expect(try mutated(gpa, .abrupt_after_a_transfer,
         \\@linear enum Key { Forged(UInt8) }
         \\
-        \\fn release(sink k: Key) -> () {
+        \\fn release(sink k: Key) {
         \\    match k { Forged(_) => {} }
         \\}
         \\
-        \\fn drop(sink k: Key) -> () {
+        \\fn drop(sink k: Key) {
         \\    release(k)
         \\}
         \\

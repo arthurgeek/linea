@@ -5,7 +5,7 @@ struct Box { value: UInt64 }
 @copyable
 struct Pair { left: borrow UInt64, right: borrow UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

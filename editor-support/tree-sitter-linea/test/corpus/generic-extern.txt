@@ -3,7 +3,7 @@ Generic extern storage declarations
 ==================
 
 extern fn slot_stride[T](read shape: SlotType[T]) -> UInt64
-extern fn slot_put[T, R](inout owner: R, at: UInt64, len: UInt64, i: UInt64, sink v: T) -> ()
+extern fn slot_put[T, R](inout owner: R, at: UInt64, len: UInt64, i: UInt64, sink v: T)
 
 ---
 
@@ -46,5 +46,4 @@ extern fn slot_put[T, R](inout owner: R, at: UInt64, len: UInt64, i: UInt64, sin
       (parameter
         (convention)
         (identifier)
-        (type_identifier)))
-    (unit_type)))
+        (type_identifier)))))

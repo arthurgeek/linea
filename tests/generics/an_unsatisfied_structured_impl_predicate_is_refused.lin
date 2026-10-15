@@ -15,7 +15,7 @@ trait Ready {}
 impl[T] Ready for Selected[T]
 where Wrapper[T]: Mark {}
 
-fn accept[R: Ready](_value: R) -> () {}
+fn accept[R: Ready](_value: R) {}
 
 fn main() -> UInt8 {
     let selected: Selected[Bool] = .{ value = true }

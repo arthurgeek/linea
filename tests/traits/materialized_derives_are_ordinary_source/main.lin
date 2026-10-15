@@ -20,7 +20,7 @@ derive Debug for Pair
 enum Leaf { Value }
 
 impl Release for Leaf {
-    fn release(sink self: Leaf) -> () {
+    fn release(sink self: Leaf) {
         match self { Value => {} }
     }
 }

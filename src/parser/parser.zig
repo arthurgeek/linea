@@ -35,6 +35,8 @@ const StmtId = node.StmtId;
 /// a trailing comma, and the one for a tuple holding too many of either.
 const one_component_help = "`(x)` groups `x`; drop the comma, or add a second component";
 const too_many_help = "give a struct names past eight parts";
+const remove_written_unit = "remove `-> ()`";
+const omitted_unit_label = "a function writing no result returns `()`";
 
 const delimiter_unknown = std.math.maxInt(u32);
 const delimiter_invalid = delimiter_unknown - 1;
@@ -670,7 +672,7 @@ const Parser = struct {
             const at_function = self.cursor.at(.keyword_fn);
 
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(is_test)
+                try self.parseFunction(if (is_test) .test_ else .top_level)
             else if (self.cursor.at(.keyword_extern))
                 try self.parseExtern()
             else if (self.cursor.at(.keyword_trait))
@@ -1139,7 +1141,7 @@ const Parser = struct {
             const declares_a_traversal = self.atTraversal();
 
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(false)
+                try self.parseFunction(.member)
             else if (self.atProjection())
                 try self.parseProjection(.required)
             else if (self.atTraversal())
@@ -1323,7 +1325,7 @@ const Parser = struct {
         defer arena.deinit();
         const gpa = arena.allocator();
 
-        try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, "trait Show {}\nimpl Show for fn(a: UInt8) -> UInt8 {}\nimpl Show for inout fn(inout a: UInt8) -> () where carries() {}\nfn main() -> UInt8 { 0 }\n"));
+        try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, "trait Show {}\nimpl Show for fn(a: UInt8) -> UInt8 {}\nimpl Show for inout fn(inout a: UInt8) where carries() {}\nfn main() -> UInt8 { 0 }\n"));
         // An inherent block names a type and a derive names one the compiler
         // generates for, so neither takes a callable type.
         try testing.expect((try codesOf(gpa, "impl fn(a: UInt8) -> UInt8 {}\nfn main() -> UInt8 { 0 }\n")).len != 0);
@@ -2492,16 +2494,16 @@ const Parser = struct {
         });
     }
 
-    /// `fn name(params) -> Type { body }`.
-    /// A function with a body, which is every one outside a trait.
-    fn parseFunction(self: *Parser, is_test: bool) !node.DeclId {
-        return self.parseCallable(.required, .function, is_test);
+    /// `fn name(params) -> Type { body }`, or `fn name(params) { body }` for
+    /// one that returns nothing. A function with a body, which is every one outside a trait.
+    fn parseFunction(self: *Parser, site: Site) !node.DeclId {
+        return self.parseCallable(.required, .function, site);
     }
 
     /// A signature: the same header, ended by a newline rather than a body.
     /// The one declaration form that carries no code.
     fn parseSignature(self: *Parser) !node.DeclId {
-        return self.parseCallable(.signature, .function, false);
+        return self.parseCallable(.signature, .function, .member);
     }
 
     /// An `extern fn`, which names a symbol and declares no body.
@@ -2509,7 +2511,7 @@ const Parser = struct {
         // Past `extern`, so that what follows is the `fn` every other callable
         // starts at and one reader of a signature serves all three.
         _ = self.cursor.advance();
-        return self.parseCallable(.external, .function, false);
+        return self.parseCallable(.external, .function, .member);
     }
 
     /// `proj at(inout self: Self, i: I) -> Elem`, with a body where an
@@ -2519,7 +2521,7 @@ const Parser = struct {
     /// projection differs in is what its braces mean, and that is settled where
     /// the body is judged rather than where it is read.
     fn parseProjection(self: *Parser, body_rule: Body) !node.DeclId {
-        return self.parseCallable(body_rule, .projection, false);
+        return self.parseCallable(body_rule, .projection, .member);
     }
 
     /// What a callable does about a body.
@@ -2528,6 +2530,12 @@ const Parser = struct {
     /// a trait's signature is never called, and an `extern` is called and
     /// defined somewhere this compiler did not compile.
     const Body = enum { required, signature, external };
+
+    /// Where a callable is declared, which decides what an omitted result
+    /// means and so what a refused `-> ()` should become: a test answers its
+    /// default `Result`, and a top-level `main` may be the entry point, which
+    /// answers its exit status.
+    const Site = enum { member, top_level, test_ };
 
     /// Which member form is being read, which decides the word it begins with
     /// and the tag it is recorded under. Not what it does about a body: a
@@ -2551,13 +2559,6 @@ const Parser = struct {
             };
         }
 
-        fn declaresAResult(self: Callable) []const u8 {
-            return switch (self) {
-                .function => "a function declares what it returns",
-                .projection => "a projection declares the type of the place it names",
-            };
-        }
-
         fn needsABody(self: Callable) []const u8 {
             return switch (self) {
                 .function => "a function needs a body",
@@ -2566,7 +2567,95 @@ const Parser = struct {
         }
     };
 
-    fn parseCallable(self: *Parser, body_rule: Body, kind: Callable, is_test: bool) !node.DeclId {
+    /// `-> ()` after a callable's parameters, refused by [S-UnitResult]: a
+    /// callable that returns nothing writes no result type, so `()` there is
+    /// a second spelling of the omitted one. Consumes the `()` and answers
+    /// whether it was there, leaving the result unwritten either way.
+    ///
+    /// Only the unit type written whole. `-> ((), ())` and
+    /// `-> Result[(), E]` are results that hold a unit, not unit itself.
+    fn refuseWrittenUnit(self: *Parser, arrow: TokenId, label: []const u8, help: []const u8, before_where: ?[]const u8) !bool {
+        // `()` inside any number of grouping parentheses, `(())` included:
+        // every `(` before the first `)`, then as many `)`.
+        var opens: u32 = 0;
+        while (self.cursor.peekAt(opens) == .l_paren) opens += 1;
+        if (opens == 0) return false;
+        for (0..opens) |i| if (self.cursor.peekAt(opens + @as(u32, @intCast(i))) != .r_paren) return false;
+        // A lambda writing contracts keeps its arrow before `where`.
+        const said = if (before_where != null and self.cursor.peekAt(2 * opens) == .keyword_where) before_where.? else help;
+        for (0..2 * opens - 1) |_| _ = self.cursor.advance();
+        const close = self.cursor.advance();
+        const labels = try self.sink.arena.alloc(Label, 1);
+        labels[0] = .{
+            .file = self.file,
+            .span = Span.merge(self.cursor.spanAt(arrow), self.cursor.spanAt(close)),
+            .message = label,
+            .style = .primary,
+        };
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .s_unit_result,
+            .message = "a function that returns nothing writes no result type",
+            .labels = labels,
+            .notes = try self.sink.arena.dupe([]const u8, &.{said}),
+        });
+        return true;
+    }
+
+    test "a written unit result is refused wherever a result is written, and nothing holding a unit is" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+
+        const refused = [_][]const u8{
+            "fn f() -> () {}\n",
+            "fn f() -> () where carries() {}\n",
+            "fn f() -> (()) {}\n",
+            "trait T { fn f(self: Self) -> () }\n",
+            "extern fn f(at: UInt64) -> ()\n",
+            "fn f(_g: fn(x: UInt8) -> ()) {}\n",
+            "fn f() { let _g = |x: UInt8| -> () { x } }\n",
+            "test fn f() -> () {}\n",
+        };
+        for (refused) |text| {
+            try testing.expectEqualSlices(?Code, &.{.s_unit_result}, try codesOf(gpa, text));
+        }
+
+        const accepted = [_][]const u8{
+            "fn f() {}\n",
+            "fn f() where carries() {}\n",
+            "trait T { fn f(self: Self) }\n",
+            "extern fn f(at: UInt64)\n",
+            "fn f(_g: fn(x: UInt8), _h: inout fn(inout x: UInt8) where carries()) {}\n",
+            "fn f() -> ((), ()) { ((), ()) }\n",
+            "fn f() -> Result[(), UInt8] { .Ok(()) }\n",
+            "fn f() { let _g = |x: UInt8| -> where carries() { x } }\n",
+        };
+        for (accepted) |text| {
+            try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, text));
+        }
+
+        // A lambda writing contracts keeps its arrow, so only `()` goes,
+        // however many parentheses group it.
+        for ([_][]const u8{ "()", "(())" }) |unit| {
+            const text = try std.fmt.allocPrint(gpa, "fn f() {{ let _g = |x: UInt8| -> {s} where carries() {{ x }} }}\n", .{unit});
+            const source: Source = .{ .path = "t.lin", .text = text };
+            var sink = Sink.init(gpa);
+            var interner: Interner = .empty;
+            const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+            _ = try parse(gpa, &source, .from(0), tokens, &sink);
+            try testing.expectEqual(@as(usize, 1), sink.items().len);
+            try testing.expectEqualStrings("remove `()`; the `->` stays before `where`", sink.items()[0].notes[0]);
+        }
+    }
+
+    test "a projection still writes the type of the place it names" {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        try testing.expectEqualSlices(?Code, &.{.s_type}, try codesOf(arena.allocator(), "trait T { proj at(inout self: Self) }\n"));
+    }
+
+    fn parseCallable(self: *Parser, body_rule: Body, kind: Callable, site: Site) !node.DeclId {
         const wants_body = body_rule == .required;
         const start = self.cursor.current();
         _ = self.cursor.advance(); // fn, or proj
@@ -2579,9 +2668,23 @@ const Parser = struct {
 
         var returns: node.TypeRef = .{ .name = .none };
         var return_type: TokenId = .none;
-        if (self.cursor.eat(.arrow) != null) {
+        if (self.cursor.eat(.arrow)) |arrow| {
             return_type = self.cursor.current();
-            if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
+            // A `main` at the top of a file may be the entry point, whose
+            // result is its exit status, so the help says both what removing
+            // `-> ()` gives and what an entry point writes. Which file is the
+            // root is not known here.
+            const main = site == .top_level and self.cursor.tags[name.index()] == .identifier and
+                std.mem.eql(u8, self.cursor.textOf(name), "main");
+            const label = if (site == .test_) "a test writing no result answers `Result[(), testing.Failure]`" else omitted_unit_label;
+            const help = if (main) "remove `-> ()`, or write `-> UInt8` if this `main` is the program's entry point" else remove_written_unit;
+            if (kind == .function and try self.refuseWrittenUnit(arrow, label, help, null)) {
+                // Read as the omitted form it should have been, so the rest of
+                // the declaration is checked as a function returning `()`. A
+                // `main`'s is read as a refused result instead, so an entry
+                // point is not refused a second time by [S-Entry].
+                if (main) returns = .{ .at = arrow, .name = .none };
+            } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
                 self.cursor.at(.l_paren) or self.cursor.at(.keyword_fn) or self.cursor.at(.keyword_borrow))
             {
                 // Which type the name reaches is a question about names, so the
@@ -2592,10 +2695,13 @@ const Parser = struct {
                 returns = try self.parseWrittenType();
             } else {
                 try self.reportAt(.s_type, return_type, "expected a type", "a `->` introduces the return type");
-                returns = .{ .name = .none };
+                returns = .{ .at = return_type, .name = .none };
             }
-        } else if (!is_test) {
-            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", kind.declaresAResult());
+        } else if (kind == .projection) {
+            // A function that writes no result returns `()`, and a test
+            // answers its default `Result`. A projection names a place, and a
+            // place has a type that has to be written.
+            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", "a projection declares the type of the place it names");
         }
 
         const where_clause = try self.parseFunctionWhere();
@@ -3063,10 +3169,11 @@ const Parser = struct {
         };
         _ = self.cursor.advance();
         const params = try self.parseParams();
-        if (self.cursor.eat(.arrow) == null) {
-            try self.reportAt(.s_type, self.cursor.current(), "expected `->`", "a callable type names its result");
+        // No `->` is a callable type returning `()`, as it is for a function.
+        var result: node.TypeRef = .{ .name = .none };
+        if (self.cursor.eat(.arrow)) |arrow| {
+            if (!try self.refuseWrittenUnit(arrow, omitted_unit_label, remove_written_unit, null)) result = try self.parseWrittenType();
         }
-        const result = try self.parseWrittenType();
         const contracts = try self.parseContracts();
         const callable = try self.builder.addCallableType(.{ .at = at, .invocation = invocation, .invocation_token = invocation_token, .params = params, .result = result, .contracts = contracts });
         return .{ .kind = .callable, .at = at, .name = .none, .callable = callable };
@@ -3764,10 +3871,12 @@ const Parser = struct {
         var result: node.TypeRef = .{ .name = .none };
         var contracts: node.ContractRange = .{};
         if (result_arrow != .none) {
-            switch (self.cursor.peek()) {
+            // Without `where` after it, removing `-> ()` leaves the lambda's
+            // result to its body; with one, the `->` stays to introduce it.
+            if (!try self.refuseWrittenUnit(result_arrow, omitted_unit_label, remove_written_unit, "remove `()`; the `->` stays before `where`")) switch (self.cursor.peek()) {
                 .keyword_where => {},
                 else => result = try self.parseWrittenType(),
-            }
+            };
             contracts = try self.parseContracts();
             // The body has not started, so this comma ends the lambda's
             // contract list rather than an enclosing argument or parameter.
@@ -7930,7 +8039,7 @@ test "`internal` is refused where a declaration has no independent visibility" {
     try testing.expect(derived.errors > 0);
 
     const tested = try parseProgramText(gpa,
-        \\internal test fn token_works() -> () {}
+        \\internal test fn token_works() {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expect(tested.errors > 0);
@@ -7980,7 +8089,7 @@ test "an empty arm body is a block with nothing in it" {
 
     const got = try parseProgramText(gpa,
         \\enum Colour { Red, Green }
-        \\fn ignore(c: Colour) -> () {
+        \\fn ignore(c: Colour) {
         \\    match c {
         \\        Red => {},
         \\        Green => {},
@@ -8089,7 +8198,7 @@ test "`sink` is a convention beside `read` and `inout`" {
     const gpa = arena.allocator();
 
     const got = try parseProgramText(gpa,
-        \\fn release(sink n: UInt8) -> () {}
+        \\fn release(sink n: UInt8) {}
         \\fn main() -> UInt8 { release(1); 2 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -8273,7 +8382,7 @@ test "qualified trait references parse in every trait position" {
         \\struct Item {}
         \\derive protocol.Marker for Item
         \\impl protocol.Parent for Item {}
-        \\fn accepts[T: protocol.Parent](_value: T) -> () where T: protocol.Parent {}
+        \\fn accepts[T: protocol.Parent](_value: T) where T: protocol.Parent {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -8835,7 +8944,7 @@ test "borrow and grouped types are valid nested arguments" {
     defer arena.deinit();
     const codes = try codesOf(arena.allocator(),
         \\struct Pair[A, B] { first: A, second: B }
-        \\fn accept(a: Pair[(), borrow UInt8], b: Pair[(UInt8), ()]) -> () {}
+        \\fn accept(a: Pair[(), borrow UInt8], b: Pair[(UInt8), ()]) {}
     );
     try testing.expectEqual(@as(usize, 0), codes.len);
 }
@@ -8861,7 +8970,7 @@ test "a structural callable is a written type and a bound" {
 
     const got = try parseProgramText(gpa,
         \\fn apply[F: fn(read value: UInt8 = 2) -> UInt8](f: F) -> UInt8 { f() }
-        \\fn keep(f: fn(read value: UInt8 = 2) -> UInt8) -> () {}
+        \\fn keep(f: fn(read value: UInt8 = 2) -> UInt8) {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
@@ -9016,7 +9125,7 @@ test "written selections follow applied grouped and chained bases" {
     const got = try parseProgramText(arena.allocator(),
         \\fn first[T](_value: Box[T].Item) -> module.Box[T].Item { panic("unused") }
         \\fn second[T](_value: (Box[T]).Item.Next) -> [UInt8; 2].Item { panic("unused") }
-        \\fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
+        \\fn third[T](_value: (fn(read value: T) -> T).Item) {}
     );
     try testing.expectEqual(@as(u32, 0), got.errors);
     try testing.expect(std.mem.indexOf(u8, got.dump, "module.Box[T].Item") != null);
@@ -9029,7 +9138,7 @@ test "written selection missing member preserves following declarations" {
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "t.lin", .text =
-        \\fn broken[T](_value: Box[T].) -> () {}
+        \\fn broken[T](_value: Box[T].) {}
         \\fn main() -> UInt8 { 0 }
     };
     var sink = Sink.init(gpa);
@@ -9057,7 +9166,7 @@ test "written selection height includes its completed base" {
     try source.appendSlice(gpa, "UInt8");
     for (0..max_nesting / 2) |_| try source.append(gpa, ']');
     for (0..max_nesting / 2 + 1) |_| try source.appendSlice(gpa, ".Item");
-    try source.appendSlice(gpa, ") -> () {}\nfn main() -> UInt8 { 0 }");
+    try source.appendSlice(gpa, ") {}\nfn main() -> UInt8 { 0 }");
     const codes = try codesOf(gpa, source.items);
     const found = for (codes) |code| {
         if (code == .s_nesting) break true;
@@ -9469,7 +9578,7 @@ test "transparent observation contract paths settle projection order" {
     const gpa = arena.allocator();
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
-    const source: Source = .{ .path = "t.lin", .text = "fn inspect(view: borrow Holder) -> () where carries(*view.item, (*view).item, **view) {}" };
+    const source: Source = .{ .path = "t.lin", .text = "fn inspect(view: borrow Holder) where carries(*view.item, (*view).item, **view) {}" };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
     var ast = try parse(gpa, &source, .from(0), tokens, &sink);
     try testing.expectEqual(@as(u32, 0), sink.error_count);
@@ -9490,7 +9599,7 @@ test "transparent observation contract paths settle projection order" {
 test "transparent observation malformed contract paths recover" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const parsed = try parseProgramText(arena.allocator(), "fn broken(view: borrow UInt8) -> () where carries(*) {}\nfn next() -> UInt8 { 0 }");
+    const parsed = try parseProgramText(arena.allocator(), "fn broken(view: borrow UInt8) where carries(*) {}\nfn next() -> UInt8 { 0 }");
     try testing.expect(parsed.errors > 0);
     try testing.expect(std.mem.indexOf(u8, parsed.dump, "next") != null);
 }
@@ -9627,7 +9736,7 @@ test "lambda result annotations parse types and contracts after an arrow" {
     const source: Source = .{ .path = "contracts.lin", .text =
         \\fn main() -> UInt8 {
         \\    let inspect = [owner] |value: borrow UInt8| -> where carries(value), borrows(owner) value
-        \\    let store = inout [sink held] |input: borrow UInt8| -> () where retains(held: input) { held = copy(input) }
+        \\    let store = inout [sink held] |input: borrow UInt8| -> UInt8 where retains(held: input) { held = copy(input); 0 }
         \\    0
         \\}
     };
@@ -9726,7 +9835,7 @@ test "where contract lists attach to the nearest callable and reject bare clause
         .{ .text = "fn make[T]() -> fn(value: T) -> T where carries(value) {}", .valid = true },
         .{ .text = "fn get(value: UInt8) -> UInt8 carries(value) { value }", .valid = false },
         .{ .text = "fn get(value: UInt8) -> UInt8 where carries(value) borrows(value) { value }", .valid = false },
-        .{ .text = "fn get(cb: fn(value: UInt8) -> UInt8 carries(value)) -> () {}", .valid = false },
+        .{ .text = "fn get(cb: fn(value: UInt8) -> UInt8 carries(value)) {}", .valid = false },
     };
     for (cases) |case| {
         const parsed = try parseProgramText(arena.allocator(), case.text);
@@ -9800,8 +9909,8 @@ test "bare match arm jumps end at the arm comma" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const cases = [_][]const u8{
-        "fn main() -> () { loop { match item { None => break, Some(_) => continue, } } }",
-        "fn main() -> () { match item { None => return, Some(_) => {}, } }",
+        "fn main() { loop { match item { None => break, Some(_) => continue, } } }",
+        "fn main() { match item { None => return, Some(_) => {}, } }",
         "fn main() -> UInt8 { loop { match item { None => break 7, Some(_) => continue, } } }",
     };
     for (cases) |source| {
@@ -9830,7 +9939,7 @@ test "generated suffix relocation matches parsing after application source" {
             "fn text(x: UInt8) -> Str { \"{x} {x:?}\" }\n" ++
             "fn range() -> UInt8 { let _r = 1..=3; 0 }\n" ++
             "impl Index[UInt64] for Board via scores\nimpl Board { trav positions via scores }\n" ++
-            "fn selected[T](sink value: (Box[T]).Item.Next) -> () { let _ = value }\n",
+            "fn selected[T](sink value: (Box[T]).Item.Next) { let _ = value }\n",
     };
     var cached = try Modules.initPrefix(gpa, &sink, &interner, &source);
     defer cached.deinit();

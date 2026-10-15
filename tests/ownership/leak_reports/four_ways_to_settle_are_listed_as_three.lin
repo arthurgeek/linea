@@ -32,7 +32,7 @@ impl Lease {
         months
     }
 
-    pub fn forfeit(sink self: Lease) -> () {
+    pub fn forfeit(sink self: Lease) {
         let Lease { months: _ } = self
     }
 }

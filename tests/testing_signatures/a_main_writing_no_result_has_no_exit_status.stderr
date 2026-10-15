@@ -1,0 +1,5 @@
+error[S-Entry]: the entry point answers with `UInt8`, which is the exit status
+ --> tests/testing_signatures/a_main_writing_no_result_has_no_exit_status.lin:2:4
+  |
+2 | fn main() {}
+  |    ^^^^ this returns nothing; write `-> UInt8`

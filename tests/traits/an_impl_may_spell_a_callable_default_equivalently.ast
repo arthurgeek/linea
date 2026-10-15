@@ -1,28 +1,26 @@
 program decls=6
-  decl function "run" tokens 3..34
+  decl function "run" tokens 3..31
     in Apply
     type param "F" : fn(read value: UInt8 = 1 + 1) -> UInt8
     param read "_self" : Self
     param read "_f" : F
-    returns (
-  decl trait_ "Apply" tokens 0..35
-  decl struct_ "Tag" tokens 35..43
+  decl trait_ "Apply" tokens 0..32
+  decl struct_ "Tag" tokens 32..40
     field "value" : UInt8
-  decl function "run" tokens 48..79
+  decl function "run" tokens 45..73
     in Tag
     of trait Apply
     type param "F" : fn(read value: UInt8 = 2) -> UInt8
     param read "_self" : Tag
     param read "_f" : F
-    returns (
-    expr %4 block tokens 77..79
-  decl impl_ "Tag" tokens 43..80
+    expr %4 block tokens 71..73
+  decl impl_ "Tag" tokens 40..74
     of trait Apply
-  decl function "main" tokens 80..100
+  decl function "main" tokens 74..94
     returns UInt8
-    expr %9 block tokens 86..100
-      stmt %0 let_decl tokens 87..98 "_tag" : Tag
-        expr %7 struct_literal tokens 92..98
-          expr %5 name_ref tokens 94..95 "value"
-          expr %6 int_literal tokens 96..97 "0"
-      expr %8 int_literal tokens 98..99 "0"
+    expr %9 block tokens 80..94
+      stmt %0 let_decl tokens 81..92 "_tag" : Tag
+        expr %7 struct_literal tokens 86..92
+          expr %5 name_ref tokens 88..89 "value"
+          expr %6 int_literal tokens 90..91 "0"
+      expr %8 int_literal tokens 92..93 "0"

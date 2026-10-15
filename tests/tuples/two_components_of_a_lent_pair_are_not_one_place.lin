@@ -2,7 +2,7 @@
 // both names two places and no argument aliases another. The walk lends the
 // whole element, so each write through a binder is reported as a write to a
 // lent place. Passing one binder twice is still aliasing.
-fn add_into(inout target: UInt8, inout source: UInt8) -> () {
+fn add_into(inout target: UInt8, inout source: UInt8) {
     target = target + source
 }
 

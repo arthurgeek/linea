@@ -1,18 +1,16 @@
 program decls=3
-  decl function "_needs_wide" tokens 0..25
+  decl function "_needs_wide" tokens 0..22
     type param "F" : fn(read value: UInt16) -> UInt16
     param read "_f" : F
-    returns (
-    expr %0 block tokens 23..25
-  decl function "_forwards" tokens 25..65
+    expr %0 block tokens 20..22
+  decl function "_forwards" tokens 22..59
     type param "F" : fn(read value: UInt8) -> UInt8 + fn(read value: UInt16) -> UInt16
     param read "f" : F
-    returns (
-    expr %4 block tokens 59..65
-      expr %3 call tokens 60..64
-        expr %1 name_ref tokens 60..61 "_needs_wide"
-        expr %2 name_ref tokens 62..63 "f"
-  decl function "main" tokens 65..74
+    expr %4 block tokens 53..59
+      expr %3 call tokens 54..58
+        expr %1 name_ref tokens 54..55 "_needs_wide"
+        expr %2 name_ref tokens 56..57 "f"
+  decl function "main" tokens 59..68
     returns UInt8
-    expr %6 block tokens 71..74
-      expr %5 int_literal tokens 72..73 "0"
+    expr %6 block tokens 65..68
+      expr %5 int_literal tokens 66..67 "0"

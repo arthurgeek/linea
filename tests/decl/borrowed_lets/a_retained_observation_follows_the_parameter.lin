@@ -2,7 +2,7 @@ struct Point { x: UInt8 }
 
 struct Holder { view: borrow UInt8 }
 
-fn selected(inout holder: Holder, point: Point) -> () where retains(holder.view: borrow point.x) {
+fn selected(inout holder: Holder, point: Point) where retains(holder.view: borrow point.x) {
     let read Point { x } = point
     holder.view = borrow x
 }

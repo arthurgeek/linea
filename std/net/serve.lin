@@ -186,7 +186,7 @@ test fn finish_closes_the_listener_and_reports_the_accept_failure_before_the_clo
 // ends serving with `Accept`. Serving ends with `Ok` after `connections`
 // connections, and never ends when that is `.None`. The listener is closed on
 // every exit.
-pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, peer: Address) -> ()](sink listener: L, inout handler: H, connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, peer: Address)](sink listener: L, inout handler: H, connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     var accepting = listener
     var served: UInt64 = 0
     var pause_ms: UInt64 = 0

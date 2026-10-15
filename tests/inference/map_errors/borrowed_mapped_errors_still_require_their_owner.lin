@@ -1,4 +1,4 @@
-fn clear(inout value: UInt64) -> () {
+fn clear(inout value: UInt64) {
     value = 0
 }
 

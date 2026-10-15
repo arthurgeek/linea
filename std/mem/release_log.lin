@@ -90,7 +90,7 @@ test fn a_release_log_holds_its_codes_in_release_order() {
 }
 
 impl Release for ReleaseLog {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let ReleaseLog { buffer } = self
         buffer.release()
     }
@@ -99,7 +99,7 @@ impl Release for ReleaseLog {
 // Releasing a tag appends its code after the codes already recorded and counts
 // it. A log that is full traps on the out-of-bounds store.
 impl Release for ReleaseTag {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let ReleaseTag { at, extent, code } = self
         let count = linea_raw_load(at, extent, 0)
         linea_raw_store(at, extent, (count + 1) * release_word_bytes, code)

@@ -516,7 +516,7 @@ fn append_valid_bytes[A: Allocator](inout text: String[A], bytes: mem.Slice[UInt
 }
 
 impl[A: Allocator] Release for String[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let String { bytes: bytes } = self
         bytes.release()
     }
@@ -527,13 +527,13 @@ impl[A: Allocator] Release for String[A] {
 // type held in a `Vec` in generic code: releasing a `Vec[Utf8Failure[A], A]`
 // there would be refused.
 impl[A: Allocator] Release for Utf8Failure[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Utf8Failure { bytes: bytes, error: _ } = self
         bytes.release()
     }
 }
 
-fn release_failures[A: Allocator](sink failures: Vec[Utf8Failure[A], A]) -> () {
+fn release_failures[A: Allocator](sink failures: Vec[Utf8Failure[A], A]) {
     failures.release()
 }
 

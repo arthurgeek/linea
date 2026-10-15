@@ -7,7 +7,7 @@ impl Inventory {
         .{ count = count }
     }
 
-    pub fn restock(inout self: Inventory, by: UInt8) -> () {
+    pub fn restock(inout self: Inventory, by: UInt8) {
         self.count += by
     }
 }

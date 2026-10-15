@@ -14,19 +14,19 @@ enum Two { Value }
 enum Three { Value }
 
 impl Release for One {
-    fn release(sink self: One) -> () {
+    fn release(sink self: One) {
         match self { Value => match print("1") { Ok(_) => {}, Err(_) => {} } }
     }
 }
 
 impl Release for Two {
-    fn release(sink self: Two) -> () {
+    fn release(sink self: Two) {
         match self { Value => match print("2") { Ok(_) => {}, Err(_) => {} } }
     }
 }
 
 impl Release for Three {
-    fn release(sink self: Three) -> () {
+    fn release(sink self: Three) {
         match self { Value => match print("3") { Ok(_) => {}, Err(_) => {} } }
     }
 }

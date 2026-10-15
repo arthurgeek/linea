@@ -10,16 +10,16 @@ struct Tree[T] {
     children: Vec[Tree[T], SystemAllocator],
 }
 
-fn settle[T: Release](sink value: T) -> () {
+fn settle[T: Release](sink value: T) {
     value.release()
 }
 
-fn forest() -> () {
+fn forest() {
     let trees: Vec[Tree[Str], SystemAllocator] = Vec.new()
     settle(trees)
 }
 
-fn kids() -> () {
+fn kids() {
     let kids: Vec[Tree[Str], SystemAllocator] = Vec.new()
     kids.release()
 }
@@ -28,7 +28,7 @@ fn leaf(sink value: Str) -> Tree[Str] {
     .{ value = value, children = Vec.new() }
 }
 
-fn trees() -> () {
+fn trees() {
     var root = leaf("root")
     Vec.push(&root.children, leaf("child")).unwrap()
     root.release()

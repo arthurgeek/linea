@@ -13,7 +13,7 @@ impl Index[UInt64] for Fixed {
     }
 }
 
-fn bump(inout x: UInt8) -> () {
+fn bump(inout x: UInt8) {
     x = x + 10
 }
 

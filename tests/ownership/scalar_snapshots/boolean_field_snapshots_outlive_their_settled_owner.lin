@@ -1,7 +1,7 @@
 @linear
 struct Owner { enabled: Bool }
 
-fn close(sink owner: Owner) -> () {
+fn close(sink owner: Owner) {
     let Owner { enabled: _enabled } = owner
 }
 

@@ -1,7 +1,7 @@
 error[N-Immutable]: `bytes` is a read-only parameter
  --> tests/mem/a_read_buffer_does_not_authorize_writing.lin:4:28
   |
-3 | fn write_through_read(bytes: mem.Buffer[mem.SystemAllocator]) -> () {
+3 | fn write_through_read(bytes: mem.Buffer[mem.SystemAllocator]) {
   |                       ----- read-only parameter declared here
 4 |     mem.Buffer.store_byte(&bytes, 0, 7)
   |                            ^^^^^ this binding cannot be assigned

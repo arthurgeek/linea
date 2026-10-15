@@ -5,11 +5,11 @@ struct Box { value: UInt64 }
 
 struct Holder { kept: borrow UInt64, other: borrow UInt64 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 
-fn put(inout target: borrow UInt64, value: borrow UInt64) -> () where retains(target: value) {
+fn put(inout target: borrow UInt64, value: borrow UInt64) where retains(target: value) {
     target = copy(value)
 }
 

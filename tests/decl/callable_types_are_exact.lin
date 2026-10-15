@@ -4,9 +4,9 @@ let fallback: UInt8 = 2
 
 fn _accepts[
     F: fn(read lhs: UInt8, read rhs: UInt8 = fallback) -> UInt8,
-](_combine: F) -> () {}
+](_combine: F) {}
 
-fn _keeps(_f: fn(read value: UInt8 = fallback) -> UInt8) -> () {}
+fn _keeps(_f: fn(read value: UInt8 = fallback) -> UInt8) {}
 
 fn main() -> UInt8 {
     0

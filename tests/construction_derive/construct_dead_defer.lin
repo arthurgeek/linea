@@ -6,7 +6,7 @@ trait Build: Release {
 struct Token {}
 
 impl Release for Token {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Token {} = self
     }
 }

@@ -1,8 +1,8 @@
 error[O-Leak]: `_value` (a linear `Key`) is still owned when this path leaves
- --> tests/ownership/a_converted_lambda_body_is_checked.lin:7:51
+ --> tests/ownership/a_converted_lambda_body_is_checked.lin:7:45
   |
-7 |     let _drop: fn(sink _value: Key) -> () = |sink _value| {}
-  |                                                   ^^^^^^ never settled on the path that reaches the end of this block
-  |                                                            - the block ends here
+7 |     let _drop: fn(sink _value: Key) = |sink _value| {}
+  |                                             ^^^^^^ never settled on the path that reaches the end of this block
+  |                                                      - the block ends here
   |
   = help: take it apart with a `match`, or give it to something that takes it

@@ -4,7 +4,7 @@ struct Key {
     n: UInt8,
 }
 
-fn lock(sink k: Key, inout locked: UInt8) -> () {
+fn lock(sink k: Key, inout locked: UInt8) {
     let Key { n } = k
     locked = locked + n
 }

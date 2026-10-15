@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `()`, found `Int64`
+ --> tests/decl/a_function_writing_no_result_returns_unit.lin:4:5
+  |
+3 | fn count() {
+  |    ----- this function writes no result type, so it returns `()`
+4 |     3
+  |     ^ expected `()`, found `Int64`

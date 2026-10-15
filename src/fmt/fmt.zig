@@ -610,7 +610,8 @@ pub fn formatClosure(
         try w.print("{s} {s}: {s}", .{ @tagName(param.convention), param_names[i], param_types[i] });
         if (param_defaults[i]) |default| try w.print(" = {s}", .{default});
     }
-    try w.print(") -> {s} ", .{result});
+    // A closure returning `()` is written without a result.
+    if (std.mem.eql(u8, result, "()")) try w.writeAll(") ") else try w.print(") -> {s} ", .{result});
 
     const part = ast.partOf(ast.exprTokens(body).start);
     var p: Printer = .{
@@ -1933,7 +1934,8 @@ const Printer = struct {
     }
 
     fn writeReturnType(self: *Printer, d: DeclId) Error!void {
-        // Array and unit types are written even though neither has a name.
+        // An array type is written even though it has no name. A function
+        // returning `()` writes no result, so there is nothing to print.
         const ref = self.ast.declReturnRef(d);
         if (!ref.wasWritten()) return;
         // Between the arrow and the type, which is where it was written. It
@@ -2085,8 +2087,10 @@ const Printer = struct {
                     });
                 }
                 try self.closeList(l, params.len);
-                try self.write(" -> ");
-                try self.writeWrittenType(callable.result);
+                if (callable.result.wasWritten()) {
+                    try self.write(" -> ");
+                    try self.writeWrittenType(callable.result);
+                }
                 try self.writeContracts(self.ast.contracts[callable.contracts.start..callable.contracts.end]);
             },
         }
@@ -3950,18 +3954,18 @@ test "formatter spacing separates function bodies and import use groups" {
         \\use a.A
         \\use b.B
         \\
-        \\fn first() -> () {}
+        \\fn first() {}
         \\
-        \\fn second() -> () {}
+        \\fn second() {}
         \\
         \\impl A {
-        \\    fn first(self: Self) -> () {}
+        \\    fn first(self: Self) {}
         \\
-        \\    fn second(self: Self) -> () {}
+        \\    fn second(self: Self) {}
         \\}
         \\
     ;
-    try check(arena.allocator(), "import a\n\n\nimport b\nuse a.A\nuse b.B\nfn first() -> () {}\nfn second() -> () {}\nimpl A { fn first(self: Self) -> () {}\nfn second(self: Self) -> () {} }\n", want);
+    try check(arena.allocator(), "import a\n\n\nimport b\nuse a.A\nuse b.B\nfn first() {}\nfn second() {}\nimpl A { fn first(self: Self) {}\nfn second(self: Self) {} }\n", want);
     try check(arena.allocator(), want, want);
 }
 
@@ -3994,13 +3998,13 @@ test "formatter spacing preserves blank lines inside disabled regions" {
     const source =
         \\trait Steps {
         \\    // linea fmt: off
-        \\    fn first(self:Self)->()
+        \\    fn first(self:Self)
         \\
         \\
-        \\    fn second(self:Self)->()
+        \\    fn second(self:Self)
         \\    // linea fmt: on
         \\
-        \\    fn third(self: Self) -> ()
+        \\    fn third(self: Self)
         \\}
         \\
     ;
@@ -4263,8 +4267,8 @@ test "an empty block stays flat" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    try check(arena.allocator(), "fn nothing() -> () {\n}\nfn main() -> UInt8 { nothing(); 1 }",
-        \\fn nothing() -> () {}
+    try check(arena.allocator(), "fn nothing() {\n}\nfn main() -> UInt8 { nothing(); 1 }",
+        \\fn nothing() {}
         \\
         \\fn main() -> UInt8 {
         \\    nothing()
@@ -4307,8 +4311,8 @@ test "a convention the author wrote is kept, and one they omitted is not invente
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    try check(arena.allocator(), "fn take(read a:UInt8,b:UInt8,inout c:UInt8)->() { c = a; c = b; }",
-        \\fn take(read a: UInt8, b: UInt8, inout c: UInt8) -> () {
+    try check(arena.allocator(), "fn take(read a:UInt8,b:UInt8,inout c:UInt8) { c = a; c = b; }",
+        \\fn take(read a: UInt8, b: UInt8, inout c: UInt8) {
         \\    c = a
         \\    c = b
         \\}
@@ -4513,7 +4517,7 @@ test "a trailing-comma generic list finds its outer bracket after a callable bou
         \\trait Give[phantom T] {}
         \\fn take[
         \\    F: Give[fn(read value: UInt8) -> UInt8],
-        \\](_value: F) -> () {}
+        \\](_value: F) {}
         \\fn main() -> UInt8 { 0 }
         \\
     ,
@@ -4521,7 +4525,7 @@ test "a trailing-comma generic list finds its outer bracket after a callable bou
         \\
         \\fn take[
         \\    F: Give[fn(read value: UInt8) -> UInt8],
-        \\](_value: F) -> () {}
+        \\](_value: F) {}
         \\
         \\fn main() -> UInt8 {
         \\    0
@@ -4674,13 +4678,13 @@ test "an empty block arm stays flat" {
 
     try check(arena.allocator(),
         \\enum Colour { Red }
-        \\fn ignore(c: Colour) -> () { match c { Red => {} } }
+        \\fn ignore(c: Colour) { match c { Red => {} } }
         \\fn main() -> UInt8 { ignore(.Red); 1 }
         \\
     ,
         \\enum Colour { Red }
         \\
-        \\fn ignore(c: Colour) -> () {
+        \\fn ignore(c: Colour) {
         \\    match c { Red => {} }
         \\}
         \\
@@ -5044,8 +5048,8 @@ test "borrow values and source contracts survive formatting" {
         \\}
         \\
     );
-    try check(arena.allocator(), "fn save(inout dst:Holder,src:UInt8)->() where retains(dst:borrow src){dst.value=borrow src}",
-        \\fn save(inout dst: Holder, src: UInt8) -> () where retains(dst: borrow src) {
+    try check(arena.allocator(), "fn save(inout dst:Holder,src:UInt8) where retains(dst:borrow src){dst.value=borrow src}",
+        \\fn save(inout dst: Holder, src: UInt8) where retains(dst: borrow src) {
         \\    dst.value = borrow src
         \\}
         \\
@@ -5136,8 +5140,8 @@ test "omitted test signatures survive formatting twice" {
 test "inferred destructure preserves shorthand aliases and empty patterns when formatted" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    try check(arena.allocator(), "fn take()->(){let{field,other:renamed}=value;let{}=empty}",
-        \\fn take() -> () {
+    try check(arena.allocator(), "fn take(){let{field,other:renamed}=value;let{}=empty}",
+        \\fn take() {
         \\    let { field, other: renamed } = value
         \\    let {} = empty
         \\}
@@ -5149,14 +5153,14 @@ test "borrowed let keeps its read marker when formatted" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const written =
-        \\fn take() -> () {
+        \\fn take() {
         \\    let read Label(raw) = label
         \\    let read Point { x, y: _ } = point
         \\    let read {} = empty
         \\}
         \\
     ;
-    try check(arena.allocator(), "fn take()->(){let read Label(raw)=label;let read Point{x,y:_}=point;let read{}=empty}", written);
+    try check(arena.allocator(), "fn take(){let read Label(raw)=label;let read Point{x,y:_}=point;let read{}=empty}", written);
     try check(arena.allocator(), written, written);
 }
 
@@ -5164,14 +5168,14 @@ test "a comment between let and read stays between them" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const written =
-        \\fn take() -> () {
+        \\fn take() {
         \\    let // observe the point
         \\    read Point { x } = point
         \\}
         \\
     ;
     try check(arena.allocator(),
-        \\fn take() -> () {
+        \\fn take() {
         \\    let // observe the point
         \\        read Point { x } = point
         \\}
@@ -5183,7 +5187,7 @@ test "a comment in a braced literal's head settles in one pass" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const written =
-        \\fn main() -> () {
+        \\fn main() {
         \\    let c = Cell[UInt8] {
         \\        // element type
         \\        value = 1,
@@ -5196,7 +5200,7 @@ test "a comment in a braced literal's head settles in one pass" {
         \\
     ;
     try check(arena.allocator(),
-        \\fn main() -> () {
+        \\fn main() {
         \\    let c = Cell[ // element type
         \\        UInt8] { value = 1 }
         \\    let d: Cell[UInt8] = . // contextual
@@ -5353,7 +5357,7 @@ test "source contract trailing commas preserve nested callable boundaries" {
 test "bare match arm jumps preserve their comma boundary" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const source = "fn main() -> () { loop { match item { None => break, Some(_) => continue, } } match item { None => return, Some(_) => {}, } }";
+    const source = "fn main() { loop { match item { None => break, Some(_) => continue, } } match item { None => return, Some(_) => {}, } }";
     try testing.expect(try checkProperties(arena.allocator(), source) == .checked);
 }
 
@@ -5366,7 +5370,7 @@ test "source contract trailing commas preserve generic parameter separators" {
         \\    A,
         \\    T,
         \\    F: fn(sink accumulator: A, sink item: T) -> A where carries(accumulator, item),
-        \\](inout accumulator: A, sink item: T, combine: F) -> () where retains(accumulator: item, combine) {
+        \\](inout accumulator: A, sink item: T, combine: F) where retains(accumulator: item, combine) {
         \\    accumulator = combine(accumulator, item)
         \\}
         \\fn apply(callback: fn(value: UInt8) -> UInt8 where carries(value),) -> UInt8 { callback(7) }

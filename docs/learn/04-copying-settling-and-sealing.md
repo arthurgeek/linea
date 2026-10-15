@@ -807,18 +807,18 @@ fn begin(inout from: Account, cents: UInt64) -> Option[Transfer] {
 }
 
 // The money arrives in the recipient's account.
-fn commit(sink transfer: Transfer, inout to: Account) -> () {
+fn commit(sink transfer: Transfer, inout to: Account) {
     let Transfer { cents } = transfer
     to.cents += cents
 }
 
 // The money goes back to the sender's account.
-fn rollback(sink transfer: Transfer, inout from: Account) -> () {
+fn rollback(sink transfer: Transfer, inout from: Account) {
     let Transfer { cents } = transfer
     from.cents += cents
 }
 
-fn pay(inout from: Account, inout to: Account, cents: UInt64, approved: Bool) -> () {
+fn pay(inout from: Account, inout to: Account, cents: UInt64, approved: Bool) {
     match begin(&from, cents) {
         Some(transfer) => if approved {
             commit(transfer, &to)
@@ -863,7 +863,7 @@ Some(transfer) => if approved {
 error[N-Unused]: `rollback` is never used
   --> transfer_forgot.lin:30:4
    |
-30 | fn rollback(sink transfer: Transfer, inout from: Account) -> () {
+30 | fn rollback(sink transfer: Transfer, inout from: Account) {
    |    ^^^^^^^^ call it, or name it with a leading `_`
 error[O-Merge]: the paths here disagree about `transfer`
   --> transfer_forgot.lin:37:27
@@ -1151,7 +1151,7 @@ impl Transfer {
         cents
     }
 
-    fn rollback(sink self: Self) -> () {
+    fn rollback(sink self: Self) {
         let Transfer { cents: _ } = self
     }
 }
@@ -1215,7 +1215,7 @@ impl Transfer {
         cents
     }
 
-    fn rollback(sink self: Self) -> () {
+    fn rollback(sink self: Self) {
         let Transfer { cents: _ } = self
     }
 }

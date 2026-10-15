@@ -1,4 +1,4 @@
-fn settle[F: Release](sink callback: F) -> () {
+fn settle[F: Release](sink callback: F) {
     Release.release(callback)
 }
 

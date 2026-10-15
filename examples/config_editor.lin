@@ -256,7 +256,7 @@ let usage_text =
     \\       config_editor --stdin <path> <key> <value>
     \\rewrites normalized key=value lines; comments and blank lines are omitted
 
-fn report(sink failure: ConfigFailure) -> () {
+fn report(sink failure: ConfigFailure) {
     match failure {
         Usage => io.eprintln(usage_text),
         Arguments => io.eprintln("could not read command-line arguments"),

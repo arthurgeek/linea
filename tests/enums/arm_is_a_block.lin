@@ -18,7 +18,7 @@ fn weigh(c: Colour) -> UInt8 {
 
 // An empty block computes nothing and has the value `()`, which lets an arm do
 // nothing.
-fn ignore(c: Colour) -> () {
+fn ignore(c: Colour) {
     match read c {
         Red => {},
         Green => {},

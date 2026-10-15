@@ -69,7 +69,7 @@ struct VecTestElement {
 }
 
 impl Release for VecTestElement {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let VecTestElement { value: value, log_at: at, log_len: extent } = self
         let count = linea_raw_load(at, extent, 0)
         linea_raw_store(at, extent, (count + 1) * 8, value)
@@ -101,7 +101,7 @@ impl Allocator for VecTestAllocator {
         }
     }
 
-    fn dispose(sink b: Buffer[Self]) -> () {
+    fn dispose(sink b: Buffer[Self]) {
         let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: obligation } = b
         let count = linea_raw_load(allocator.log_at, allocator.log_len, 0)
         linea_raw_store(allocator.log_at, allocator.log_len, (count + 1) * 8, 99)
@@ -121,7 +121,7 @@ struct VecReleaseNotice {
 }
 
 impl Release for VecReleaseNotice {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let VecReleaseNotice { at: at, extent: extent, tag: tag } = self
         let count = linea_raw_load(at, extent, 0)
         linea_raw_store(at, extent, (count + 1) * 8, tag)
@@ -1115,7 +1115,7 @@ test fn a_system_drain_stopped_early_is_returned_by_finish_with_its_storage() {
 
 impl[T: Release, A: Allocator] Release for Drain[T, A] {
     // Release the elements not yet handed over, last first, then the storage.
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Drain { storage: owned, next, len } = self
         var storage = owned
         release_from(&storage, next, len)
@@ -1287,7 +1287,7 @@ impl[T, A: Allocator] Index[UInt64] for Vec[T, A] {
 }
 
 // Push a counting element that records its release in `log`.
-fn push_element(inout values: Vec[VecTestElement], number: UInt64, log: Buffer[SystemAllocator]) -> () {
+fn push_element(inout values: Vec[VecTestElement], number: UInt64, log: Buffer[SystemAllocator]) {
     let element = VecTestElement { value = number, log_at = log.at, log_len = log.len }
     &values.push(element).unwrap()
 }
@@ -1297,7 +1297,7 @@ impl[T: Release, A: Allocator] Vec[T, A] {
     // releasing the whole vector does. The storage keeps its capacity, so the
     // vector grows back into it without allocating. A `length` at or past the
     // vector's length changes nothing.
-    pub fn truncate(inout self: Self, length: UInt64) -> () {
+    pub fn truncate(inout self: Self, length: UInt64) {
         if length >= self.len {
             return
         }
@@ -1327,7 +1327,7 @@ test fn vec_truncate_releases_the_tail_last_first_and_keeps_capacity() {
 
 impl[T: Release, A: Allocator] Vec[T, A] {
     // Release every element, last first, and keep the storage for reuse.
-    pub fn clear(inout self: Self) -> () {
+    pub fn clear(inout self: Self) {
         &self.truncate(0)
     }
 }
@@ -1349,7 +1349,7 @@ test fn vec_clear_releases_every_element_and_keeps_capacity() {
 }
 
 impl[T: Release, A: Allocator] Release for Vec[T, A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Vec { storage: owned, len: length } = self
         var storage = owned
         release_from(&storage, 0, length)
@@ -1360,7 +1360,7 @@ impl[T: Release, A: Allocator] Release for Vec[T, A] {
 // Release the elements from `kept` up to `length` held in `storage`, last
 // first. Releasing a vector and truncating it both settle elements here, so
 // they settle them the same way.
-fn release_from[T: Release, A: Allocator](inout storage: Storage[T, A], kept: UInt64, length: UInt64) -> () {
+fn release_from[T: Release, A: Allocator](inout storage: Storage[T, A], kept: UInt64, length: UInt64) {
     let shape: SlotType[T] = .Type
     let stride = slot_stride(shape)
     let at = storage.at

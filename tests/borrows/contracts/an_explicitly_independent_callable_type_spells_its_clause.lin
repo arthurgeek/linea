@@ -5,7 +5,7 @@ fn keep(text: Str) -> Str {
     copy(text)
 }
 
-fn take(_f: fn(text: Str) -> Str where carries()) -> () {}
+fn take(_f: fn(text: Str) -> Str where carries()) {}
 
 fn main() -> UInt8 {
     take(keep)

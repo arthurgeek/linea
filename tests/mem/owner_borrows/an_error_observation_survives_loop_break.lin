@@ -5,7 +5,7 @@ struct Token { number: UInt8 }
 struct Failure { view: borrow UInt64 }
 
 impl Token {
-    fn close(sink self: Token) -> () {
+    fn close(sink self: Token) {
         let Token { number: _number } = self
     }
 }

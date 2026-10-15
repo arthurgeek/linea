@@ -3,8 +3,8 @@ Applied and grouped type selections
 ==================
 
 fn first[T](_value: module.Wrapper[T].Item) -> (Wrapper[T]).Item.Next {}
-fn second(_value: [UInt8; 2].Item) -> () {}
-fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
+fn second(_value: [UInt8; 2].Item) {}
+fn third[T](_value: (fn(read value: T) -> T).Item) {}
 
 ---
 
@@ -44,7 +44,6 @@ fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
             (type_identifier)
             (integer_literal))
           (type_identifier))))
-    (unit_type)
     (block))
   (function_declaration
     (identifier)
@@ -64,5 +63,4 @@ fn third[T](_value: (fn(read value: T) -> T).Item) -> () {}
                   (type_identifier)))
               (type_identifier)))
           (type_identifier))))
-    (unit_type)
     (block)))

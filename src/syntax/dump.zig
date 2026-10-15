@@ -540,8 +540,11 @@ fn dumpCallableType(w: *std.Io.Writer, ast: *const Ast, callable: node.CallableT
             }
         }
     }
-    try w.writeAll(") -> ");
-    try dumpWrittenType(w, ast, callable.result);
+    try w.writeByte(')');
+    if (callable.result.wasWritten()) {
+        try w.writeAll(" -> ");
+        try dumpWrittenType(w, ast, callable.result);
+    }
 }
 
 fn dumpTypeArgs(

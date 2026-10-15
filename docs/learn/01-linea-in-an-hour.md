@@ -376,8 +376,8 @@ It takes 4 large tiles
 or 15 small ones.
 ```
 
-A function's parameters and its result always have written types. The last
-expression in its body is its result, so `area` needs no `return`; `return`
+A function's parameters always have written types, and so does its result
+when it has one. The last expression in its body is its result, so `area` needs no `return`; `return`
 is for leaving early, as `tiles_needed` does when the floor divides evenly.
 
 `main` ends the same way: its last line, `.Ok(0)`, is its result, the exit
@@ -545,7 +545,7 @@ import std.io
 
 // `inout` lets `add_tip` change the caller's bill. The caller writes `&` to
 // show that the bill may change.
-fn add_tip(inout bill: UInt64, percent: UInt64) -> () {
+fn add_tip(inout bill: UInt64, percent: UInt64) {
     bill += bill * percent / 100
 }
 
@@ -565,11 +565,36 @@ before 4000, after 4600
 `before` kept its own copy of the number, so changing `dinner` did not change
 it. Two variables never share one value.
 
-`()` is the type with one value and nothing in it, which a function like
-`add_tip` returns when it has nothing to give back. Its one value is written
-the same way, `()`, so the type and the value look alike, as they do in Rust.
-A function that gives nothing back but can fail answers `Result[(), E]`, and
-its success is `.Ok(())`:
+`add_tip` has nothing to give back, so it writes no `->` and no result type.
+Such a function returns `()`, the type with one value and nothing in it.
+Rust lets you write that result out as `-> ()`; Linea refuses it, so a
+function returning nothing has exactly one spelling:
+
+```linea
+fn add_tip(inout bill: UInt64, percent: UInt64) -> () {
+    bill += bill * percent / 100
+}
+
+fn main() -> UInt8 {
+    var dinner = 4000
+    add_tip(&dinner, 15)
+    0
+}
+```
+
+```
+error[S-UnitResult]: a function that returns nothing writes no result type
+ --> tip.lin:1:49
+  |
+1 | fn add_tip(inout bill: UInt64, percent: UInt64) -> () {
+  |                                                 ^^^^^ a function writing no result returns `()`
+  |
+  = help: remove `-> ()`
+```
+
+The value of `()` is written the same way, `()`, so the type and the value
+look alike, as they do in Rust. A function that gives nothing back but can
+fail answers `Result[(), E]`, and its success is `.Ok(())`:
 
 ```linea
 import std.io
@@ -1272,7 +1297,7 @@ struct Payment {
 
 impl Payment {
     // `sink self` takes the payment, and the pattern takes it apart.
-    fn commit(sink self: Self, inout till: UInt64) -> () {
+    fn commit(sink self: Self, inout till: UInt64) {
         let Payment { cents } = self
         till += cents
     }

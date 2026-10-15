@@ -1,6 +1,6 @@
 // `&` marks a place, and what a call returns is not one. The call is still
 // resolved, so `fresh` is used.
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n += 1
 }
 

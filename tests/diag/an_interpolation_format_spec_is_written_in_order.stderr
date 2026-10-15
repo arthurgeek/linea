@@ -1,55 +1,55 @@
 error[S-Format]: a colon in an interpolation begins a format spec
- --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:6:47
+ --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:6:41
   |
-6 | fn _empty(x: UInt8) -> () { let _message = "{x:}" }
-  |                                               ^ write the spec after `:`, as in `:>4` or `:?`, or remove the colon
+6 | fn _empty(x: UInt8) { let _message = "{x:}" }
+  |                                         ^ write the spec after `:`, as in `:>4` or `:?`, or remove the colon
 error[S-Format]: a format spec is written `[[fill]align][+][0][width][.precision][?]`
- --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:7:48
+ --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:7:42
   |
-7 | fn _named(x: UInt8) -> () { let _message = "{x:name}" }
-  |                                                ^^^^ this part is out of that order or is not one of them
+7 | fn _named(x: UInt8) { let _message = "{x:name}" }
+  |                                          ^^^^ this part is out of that order or is not one of them
 error[S-Format]: zero padding and an alignment cannot both lay out one value
- --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:8:57
+ --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:8:51
   |
-8 | fn _zero_and_align(x: UInt8) -> () { let _message = "{x:<05}" }
-  |                                                         ^^^ zeros always go between a number's sign and its digits; remove one
+8 | fn _zero_and_align(x: UInt8) { let _message = "{x:<05}" }
+  |                                                   ^^^ zeros always go between a number's sign and its digits; remove one
 error[S-Format]: zero padding needs a width
- --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:9:53
+ --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:9:47
   |
-9 | fn _zero_alone(x: UInt8) -> () { let _message = "{x:0}" }
-  |                                                     ^ write the width after `0`, as in `02`
+9 | fn _zero_alone(x: UInt8) { let _message = "{x:0}" }
+  |                                               ^ write the width after `0`, as in `02`
 error[S-Format]: an alignment needs a width
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:10:54
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:10:48
    |
-10 | fn _align_alone(x: UInt8) -> () { let _message = "{x:>}" }
-   |                                                      ^ write the width after the alignment, as in `>4`
+10 | fn _align_alone(x: UInt8) { let _message = "{x:>}" }
+   |                                                ^ write the width after the alignment, as in `>4`
 error[S-Format]: a precision is a number of digits
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:11:56
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:11:50
    |
-11 | fn _point_alone(x: Float64) -> () { let _message = "{x:.}" }
-   |                                                        ^ write digits after `.`, as in `.2`
+11 | fn _point_alone(x: Float64) { let _message = "{x:.}" }
+   |                                                  ^ write digits after `.`, as in `.2`
 error[S-Format]: a width is at most 65535
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:12:51
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:12:45
    |
-12 | fn _too_wide(x: UInt8) -> () { let _message = "{x:65536}" }
-   |                                                   ^^^^^ no column of text is this wide
+12 | fn _too_wide(x: UInt8) { let _message = "{x:65536}" }
+   |                                             ^^^^^ no column of text is this wide
 error[S-Format]: a precision is at most 65535
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:13:56
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:13:50
    |
-13 | fn _too_precise(x: Float64) -> () { let _message = "{x:.70000}" }
-   |                                                        ^^^^^^ no Float64 has this many digits worth writing
+13 | fn _too_precise(x: Float64) { let _message = "{x:.70000}" }
+   |                                                  ^^^^^^ no Float64 has this many digits worth writing
 error[S-Format]: a format spec is written `[[fill]align][+][0][width][.precision][?]`
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:14:54
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:14:48
    |
-14 | fn _debug_first(x: UInt8) -> () { let _message = "{x:?4}" }
-   |                                                      ^^ this part is out of that order or is not one of them
+14 | fn _debug_first(x: UInt8) { let _message = "{x:?4}" }
+   |                                                ^^ this part is out of that order or is not one of them
 error[S-Format]: a format spec is written `[[fill]align][+][0][width][.precision][?]`
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:15:58
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:15:52
    |
-15 | fn _sign_after_zero(x: UInt8) -> () { let _message = "{x:0+4}" }
-   |                                                          ^^^ this part is out of that order or is not one of them
+15 | fn _sign_after_zero(x: UInt8) { let _message = "{x:0+4}" }
+   |                                                    ^^^ this part is out of that order or is not one of them
 error[S-Format]: a fill cannot be `{` or `\`
-  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:16:53
+  --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:16:47
    |
-16 | fn _brace_fill(x: UInt8) -> () { let _message = "{x:{>4}" }
-   |                                                     ^^^ these characters mean something else inside a string literal
+16 | fn _brace_fill(x: UInt8) { let _message = "{x:{>4}" }
+   |                                               ^^^ these characters mean something else inside a string literal

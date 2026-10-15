@@ -692,7 +692,7 @@ test "qualified trait references are indexed with their declaration" {
         \\
         \\struct Item {}
         \\impl protocol.Marker for Item {}
-        \\fn accepts[T: protocol.Marker](_value: T) -> () {}
+        \\fn accepts[T: protocol.Marker](_value: T) {}
         \\
         \\fn main() -> UInt8 {
         \\    let item: Item = .{}

@@ -87,8 +87,8 @@ trait Child: protocol.Parent {}
 template impl protocol.Marker {}
 derive protocol.Marker for Item
 impl protocol.Parent for Item {}
-fn accepts[T: protocol.Parent](read _value: T) -> () {}
-fn open(read _item: Item) -> () where Item: protocol.Parent {}
+fn accepts[T: protocol.Parent](read _value: T) {}
+fn open(read _item: Item) where Item: protocol.Parent {}
 struct Item {}
 
 ---
@@ -129,7 +129,6 @@ struct Item {}
         (convention)
         name: (identifier)
         type: (type_identifier)))
-    return_type: (unit_type)
     body: (block))
   (function_declaration
     name: (identifier)
@@ -138,7 +137,6 @@ struct Item {}
         (convention)
         name: (identifier)
         type: (type_identifier)))
-    return_type: (unit_type)
     (where_clause
       (where_predicate
         subject: (type_identifier)

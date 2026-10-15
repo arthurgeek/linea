@@ -1,5 +1,5 @@
 error[T-BorrowContract]: retention cannot write through an observation
- --> tests/borrows/transparent/retention_cannot_write_through_a_readonly_dereference.lin:3:77
+ --> tests/borrows/transparent/retention_cannot_write_through_a_readonly_dereference.lin:3:71
   |
-3 | fn rejected(inout _holder: borrow Holder, _value: borrow UInt8) -> () where retains(*_holder: _value) {}
-  |                                                                             ^^^^^^^ the destination crosses readonly referent storage
+3 | fn rejected(inout _holder: borrow Holder, _value: borrow UInt8) where retains(*_holder: _value) {}
+  |                                                                       ^^^^^^^ the destination crosses readonly referent storage

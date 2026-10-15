@@ -2,7 +2,7 @@ struct Point { x: UInt8 }
 
 struct Holder { view: borrow UInt8 }
 
-fn remember(inout holder: Holder, view: borrow UInt8) -> () where retains(holder.view: view) {
+fn remember(inout holder: Holder, view: borrow UInt8) where retains(holder.view: view) {
     holder.view = copy(view)
 }
 

@@ -39,7 +39,7 @@ struct DecodeFailure[A: Allocator] {
 // a `Vec` in generic code: releasing a `Vec[DecodeError[A], A]` there would be
 // refused.
 impl[A: Allocator] Release for DecodeFailure[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let DecodeFailure { cause: _, path } = self
         path.release()
     }
@@ -47,7 +47,7 @@ impl[A: Allocator] Release for DecodeFailure[A] {
 
 // Release a vector of errors from generic code, which needs DecodeError's
 // Release to be usable there.
-fn release_decode_errors[A: Allocator](sink errors: Vec[DecodeError[A], A]) -> () {
+fn release_decode_errors[A: Allocator](sink errors: Vec[DecodeError[A], A]) {
     errors.release()
 }
 

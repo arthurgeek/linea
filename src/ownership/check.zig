@@ -3318,7 +3318,7 @@ test "edit generation rotation waits for every computed descriptor" {
 test "a rejected callable call still accounts for a consuming callee" {
     const prefix =
         \\@linear enum Key { Held(UInt8) }
-        \\fn release(sink key: Key) -> () { match key { Held(_) => {} } }
+        \\fn release(sink key: Key) { match key { Held(_) => {} } }
         \\fn identity(value: UInt8) -> UInt8 { value }
         \\fn choose(sink key: Key) -> fn(read value: UInt8) -> UInt8 {
         \\    release(key)
@@ -3377,7 +3377,7 @@ test "an allocation failure cannot turn a rejected program into an accepted one"
     const key =
         \\@linear enum Key { Forged(UInt8) }
         \\
-        \\fn release(sink k: Key) -> () { match k { Forged(_) => {} } }
+        \\fn release(sink k: Key) { match k { Forged(_) => {} } }
         \\
     ;
 
@@ -3687,10 +3687,10 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         , .refused = false },
         .{ .source =
         \\struct Pair[T] { left: T, right: T }
-        \\fn fill[T: Copyable](inout pair: Pair[T], value: T) -> () where retains(pair: value) {
+        \\fn fill[T: Copyable](inout pair: Pair[T], value: T) where retains(pair: value) {
         \\    pair = .{ left = copy(value), right = copy(value) }
         \\}
-        \\fn fill_fields[T: Copyable](inout pair: Pair[T], value: T) -> () where retains(pair.left: value), retains(pair.right: value) {
+        \\fn fill_fields[T: Copyable](inout pair: Pair[T], value: T) where retains(pair.left: value), retains(pair.right: value) {
         \\    fill(&pair, value)
         \\}
         \\fn main() -> UInt8 {
@@ -3702,10 +3702,10 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         , .refused = false, .group = .targets },
         .{ .source =
         \\struct Pair[T] { left: T, right: T }
-        \\fn fill[T: Copyable](inout pair: Pair[T], value: T) -> () where retains(pair: value) {
+        \\fn fill[T: Copyable](inout pair: Pair[T], value: T) where retains(pair: value) {
         \\    pair = .{ left = copy(value), right = copy(value) }
         \\}
-        \\fn fill_fields[T: Copyable](inout pair: Pair[T], value: T) -> () where retains(pair.left: value) {
+        \\fn fill_fields[T: Copyable](inout pair: Pair[T], value: T) where retains(pair.left: value) {
         \\    fill(&pair, value)
         \\}
         \\fn main() -> UInt8 {
@@ -3747,7 +3747,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\fn unwrap[T](sink value: Maybe[T]) -> T where carries(value) {
         \\    match value { Some(value) => value, None => loop {} }
         \\}
-        \\fn restore[T](inout storage: Maybe[T]) -> () {
+        \\fn restore[T](inout storage: Maybe[T]) {
         \\    let value = unwrap(storage)
         \\    storage = .Some(value)
         \\}
@@ -3761,7 +3761,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         .{ .source =
         \\struct Pair { left: borrow UInt8, right: borrow UInt8 }
         \\fn forward(sink value: Pair) -> Pair where carries(value) { value }
-        \\fn swap(inout value: Pair) -> () {
+        \\fn swap(inout value: Pair) {
         \\    let saved = forward(value)
         \\    value = .{ left = copy(saved.right), right = copy(saved.left) }
         \\}
@@ -3787,7 +3787,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\struct Handle { owner: borrow Pool }
         \\impl Pool {
         \\    fn handle(self: Pool) -> Handle where borrows(self) { .{ owner = borrow self } }
-        \\    fn close(sink self: Pool) -> () { let Pool { at: _at } = self }
+        \\    fn close(sink self: Pool) { let Pool { at: _at } = self }
         \\}
         \\fn close_then_use(handle: Handle, sink pool: Pool) -> UInt8 {
         \\    pool.close()
@@ -3804,7 +3804,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\struct Handle { owner: borrow Pool }
         \\impl Pool {
         \\    fn handle(self: Pool) -> Handle where borrows(self) { .{ owner = borrow self } }
-        \\    fn close(sink self: Pool) -> () { let Pool { at: _at } = self }
+        \\    fn close(sink self: Pool) { let Pool { at: _at } = self }
         \\}
         \\fn close_then_use(sink pool: Pool) -> UInt8 {
         \\    let handle = pool.handle()
@@ -3818,7 +3818,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\struct Handle { owner: borrow Pool }
         \\impl Pool {
         \\    fn handle(self: Pool) -> Handle where borrows(self) { .{ owner = borrow self } }
-        \\    fn close(sink self: Pool) -> () { let Pool { at: _at } = self }
+        \\    fn close(sink self: Pool) { let Pool { at: _at } = self }
         \\}
         \\fn relay(sink pool: Pool) -> Pool { pool }
         \\fn main() -> UInt8 {
@@ -3835,7 +3835,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\struct Handle { owner: borrow Pool }
         \\impl Pool {
         \\    fn handle(self: Pool) -> Handle where borrows(self) { .{ owner = borrow self } }
-        \\    fn close(sink self: Pool) -> () { let Pool { at: _at } = self }
+        \\    fn close(sink self: Pool) { let Pool { at: _at } = self }
         \\}
         \\fn relay(sink pool: Pool) -> Pool { pool }
         \\fn identity(sink handle: Handle) -> Handle where carries(handle) { handle }
@@ -3980,7 +3980,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         , .refused = true },
         .{ .source =
         \\struct Holder { view: borrow UInt8 }
-        \\fn replace(inout holder: Holder, source: UInt8) -> () where retains(holder: borrow source) {
+        \\fn replace(inout holder: Holder, source: UInt8) where retains(holder: borrow source) {
         \\    let local = source + 1
         \\    holder.view = borrow local
         \\}
@@ -3993,7 +3993,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         , .refused = true },
         .{ .source =
         \\struct Holder { view: borrow UInt8 }
-        \\fn replace(inout holder: Holder, source: UInt8) -> () where retains(holder: borrow source) {
+        \\fn replace(inout holder: Holder, source: UInt8) where retains(holder: borrow source) {
         \\    holder.view = borrow source
         \\}
         \\fn main() -> UInt8 {
@@ -4029,7 +4029,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\@copyable enum Option[T] { None, Some(T) }
         \\@(opaque, linear) struct Buffer[A] { at: UInt64, len: UInt64, allocated: UInt64, allocator: A }
         \\struct Storage[phantom T, A] { buffer: Option[Buffer[A]], allocator: A, at: UInt64, len: UInt64 }
-        \\extern fn slot_put[T,A](inout owner: Storage[T,A], at: UInt64, len: UInt64, i: UInt64, sink v: T) -> () where retains(owner: v)
+        \\extern fn slot_put[T,A](inout owner: Storage[T,A], at: UInt64, len: UInt64, i: UInt64, sink v: T) where retains(owner: v)
         \\extern fn slot_take[T,A](inout owner: Storage[T,A], at: UInt64, len: UInt64, i: UInt64) -> T where carries(owner)
         \\fn extract[T,A: Copyable](sink owner: Storage[T,A]) -> Option[Buffer[A]] where carries(.Some: owner) {
         \\    let Storage { buffer: raw, allocator: _, at: _, len: _ } = owner
@@ -4224,8 +4224,8 @@ test "ownership hands off ordered schedules including expressions with no tracke
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "schedules.lin", .text =
-        \\fn first() -> () {}
-        \\fn second() -> () {}
+        \\fn first() {}
+        \\fn second() {}
         \\fn main() -> UInt8 {
         \\    defer first()
         \\    {
@@ -4396,7 +4396,7 @@ test "ownership borrow ignores an invalid assignment destination" {
     const gpa = arena.allocator();
     const source: Source = .{ .path = "invalid-field.lin", .text =
         \\struct Holder { view: borrow UInt8 }
-        \\fn retain(inout holder: Holder, value: UInt8) -> () where retains(holder.view: borrow value) {
+        \\fn retain(inout holder: Holder, value: UInt8) where retains(holder.view: borrow value) {
         \\    holder.missing = borrow value
         \\}
         \\fn main() -> UInt8 {

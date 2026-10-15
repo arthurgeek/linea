@@ -149,6 +149,7 @@ true of a different implementation.
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
 | [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157 and 0183; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
 | [0188](0188-the-unit-value-is-written-as-its-type.md) | The unit value is written as its type is, `()` | Accepted; supersedes the unit-expression clause of 0140 |
+| [0223](0223-a-function-returning-nothing-writes-no-result.md) | A function returning nothing writes no result | Accepted |
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted |
 | [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222 |

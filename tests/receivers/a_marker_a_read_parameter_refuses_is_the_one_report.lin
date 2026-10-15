@@ -10,7 +10,7 @@ impl Counter {
         self.count
     }
 
-    fn bump(inout self: Self) -> () {
+    fn bump(inout self: Self) {
         self.count += 1
     }
 }
@@ -19,7 +19,7 @@ fn read_total(counter: Counter) -> UInt8 {
     counter.count
 }
 
-fn add(inout counter: Counter) -> () {
+fn add(inout counter: Counter) {
     counter.count += 1
 }
 

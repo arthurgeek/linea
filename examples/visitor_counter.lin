@@ -7,7 +7,7 @@ import std.net
 // Read the visitor's name, then answer with their number and close.
 // `visitors` is the count of everyone greeted so far; a visitor whose name
 // never arrives is not counted.
-fn greet(sink connection: net.Connection, inout visitors: UInt64) -> () {
+fn greet(sink connection: net.Connection, inout visitors: UInt64) {
     // A refused buffer hands the connection back; `settled()` closes it.
     var reader = io.BufferedReader.open(capacity: 256, reader: connection).settled() else |reason| {
         io.eprintln("cannot buffer a connection: {reason}")
@@ -54,7 +54,7 @@ fn arrive(address: net.Address, name: Str) -> Option[net.Connection] {
 }
 
 // Print the greeting the server sent back, then close the connection.
-fn read_greeting(sink visitor: net.Connection) -> () {
+fn read_greeting(sink visitor: net.Connection) {
     var reader = io.BufferedReader.open(capacity: 256, reader: visitor).settled() else |reason| {
         io.eprintln("cannot buffer a connection: {reason}")
         return

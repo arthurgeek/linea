@@ -1,7 +1,7 @@
 error[S-Mutation]: this argument is mutated, so it is marked `&`
  --> tests/decl/inout_needs_marking.lin:7:10
   |
-1 | fn bump(inout n: UInt8) -> () {
+1 | fn bump(inout n: UInt8) {
   |               - declared `inout`
 7 |     bump(x)
   |          ^ expected `&` here

@@ -48,7 +48,7 @@ impl Key {
     }
 }
 
-fn bump(inout p: Pair, by: UInt8) -> () {
+fn bump(inout p: Pair, by: UInt8) {
     p.lo = p.lo + by
 }
 

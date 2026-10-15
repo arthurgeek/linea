@@ -1,0 +1,10 @@
+// A function that writes no result returns `()`, so a body ending in a value
+// is refused at that value, and the report points at the function.
+fn count() {
+    3
+}
+
+fn main() -> UInt8 {
+    count()
+    0
+}

@@ -178,7 +178,7 @@ pub fn generateInterpolation(gpa: std.mem.Allocator, bytes: []const u8) !Generat
         if (i != 0) try out.writer.writeAll(", ");
         try out.writer.print("v{d}: UInt8", .{i});
     }
-    try out.writer.writeAll(") -> () {\n    let _text = \"");
+    try out.writer.writeAll(") {\n    let _text = \"");
     for (0..pieces) |i| {
         const chosen = choices.below(interpolation_specs.len);
         specs[i] = @intCast(chosen);
@@ -616,12 +616,12 @@ const Gen = struct {
                 \\    match read held { _W0(carried) => carried, _W1 => 2 }
                 \\}
                 \\
-                \\fn _drop(sink held: L0) -> () {
+                \\fn _drop(sink held: L0) {
                 \\    match held { _W0(_carried) => {}, _W1 => {} }
                 \\}
                 \\
                 \\impl Release for L0 {
-                \\    fn release(sink self: Self) -> () {
+                \\    fn release(sink self: Self) {
                 \\        _drop(self)
                 \\    }
                 \\}
@@ -747,10 +747,9 @@ const Gen = struct {
         // A function answering the unit type, which is the only way a program
         // can reach a value of no width.
         //
-        // `()` is written as a return type and nowhere else: an annotation, a
-        // field, a payload and a type argument all refuse it, so no choice
-        // this generator makes over types can produce one and inference is the
-        // only route. That is why nothing in the corpus instantiated a generic
+        // No choice this generator makes over types produces `()`, so a
+        // function that returns it, writing no result, is the only route.
+        // That is why nothing in the corpus instantiated a generic
         // at a type of no width, and why the layout, the store and the load of
         // a part occupying no bytes were reached by nothing.
         //
@@ -759,7 +758,7 @@ const Gen = struct {
         self.unit = self.choices.odds(2);
         if (self.unit) {
             try out.writer.writeAll(
-                \\fn _nothing() -> () {
+                \\fn _nothing() {
                 \\    ()
                 \\}
                 \\
@@ -3607,11 +3606,11 @@ test "some generated program instantiates a generic at the unit type" {
     // in the corpus instantiated a generic at it either, which left the layout
     // of a part occupying no bytes -- and the store and the load the backend
     // emits for one -- reached by no program at all.
-    try testing.expect(try seedsContaining(gpa, 200, "fn _nothing() -> ()") > 0);
+    try testing.expect(try seedsContaining(gpa, 200, "fn _nothing()") > 0);
     try testing.expect(try seedsContaining(gpa, 200, "GE.Just(_nothing())") > 0);
 
     // And not every program, so the shapes without one stay reachable too.
-    try testing.expect(try seedsContaining(gpa, 200, "fn _nothing() -> ()") < 200);
+    try testing.expect(try seedsContaining(gpa, 200, "fn _nothing()") < 200);
 }
 
 test "some generated program declares a variant that carries a value" {

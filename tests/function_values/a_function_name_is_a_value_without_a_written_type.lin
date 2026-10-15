@@ -5,7 +5,7 @@ struct Coffee {
 }
 
 impl Coffee {
-    fn add_shot(inout self: Coffee) -> () {
+    fn add_shot(inout self: Coffee) {
         self.shots += 1
     }
 

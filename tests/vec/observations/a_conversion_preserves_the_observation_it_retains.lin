@@ -4,7 +4,7 @@ fn convert(value: borrow UInt64) -> Destination where carries(value) {
     .{ view = copy(value) }
 }
 
-fn replace(inout target: Destination, value: borrow UInt64) -> () where retains(target: value) {
+fn replace(inout target: Destination, value: borrow UInt64) where retains(target: value) {
     target = convert(value)
 }
 

@@ -12,7 +12,7 @@ enum Empty {}
 
 derive Consume for Empty
 
-fn _holds(_empty: Empty) -> () {}
+fn _holds(_empty: Empty) {}
 
 fn main() -> UInt8 {
     0

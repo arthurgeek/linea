@@ -1,7 +1,7 @@
 @linear
 struct Owner { bytes: [UInt8; 2] }
 
-fn close(sink owner: Owner) -> () {
+fn close(sink owner: Owner) {
     let Owner { bytes: _bytes } = owner
 }
 

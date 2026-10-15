@@ -44,7 +44,7 @@ impl[P: Allocator, T, H: Handler[T, P], S: log.Sink, A: Allocator] Handler[T, P]
 // `Logged` implements `Observer` itself: it logs each event and passes it on
 // to the handler it holds.
 impl[H: Observer, S: log.Sink, A: Allocator] Observer for Logged[H, S, A] where S.Error: Discardable {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
             Exchanged(exchange) => {
                 let duration: Option[time.Duration] = match mem.take(&self.started) {
@@ -233,7 +233,7 @@ impl[P: Allocator, T] Handler[T, P] for Counting {
 }
 
 impl Observer for Counting {
-    fn observe[P: Allocator](inout self: Self, _event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, _event: Event[P]) {
         self.observed += 1
     }
 }

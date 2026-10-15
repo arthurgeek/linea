@@ -10,7 +10,7 @@ struct Lamp {
 }
 
 impl Release for Lamp {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Lamp { id } = self
         match print("{id}") {
             Ok(_) => {},

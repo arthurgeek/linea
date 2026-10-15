@@ -49,7 +49,7 @@ impl Hasher {
     // Add one byte to the stream. The low limb's carry moves into the high
     // limb, and the high limb's carry past 2^32 is dropped, which is the
     // reduction modulo 2^64.
-    pub fn write_byte(inout self: Self, byte: UInt8) -> () {
+    pub fn write_byte(inout self: Self, byte: UInt8) {
         let product = self.low * multiplier + UInt64(byte) + 1
         self.high = (self.high * multiplier + product / limb_base) % limb_base
         self.low = product % limb_base
@@ -94,7 +94,7 @@ test fn long_streams_keep_checked_arithmetic_in_range() {
 
 impl Hasher {
     // Feed all eight bytes in little-endian order, independent of host layout.
-    pub fn write_u64(inout self: Self, value: UInt64) -> () {
+    pub fn write_u64(inout self: Self, value: UInt64) {
         var remaining = value
         for _i in 0..8 {
             &self.write_byte(UInt8(remaining % 256))

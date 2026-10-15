@@ -19,7 +19,7 @@ impl iter.Iterator for Arrivals {
 }
 
 impl Release for Arrivals {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Arrivals { next_weight: _ } = self
     }
 }

@@ -1,0 +1,11 @@
+error[N-TypeAlias]: `Step` is an alias of `fn(inout total: UInt8)`, which holds nothing to select
+ --> tests/decl/a_callable_type_returning_nothing_is_named_whole.lin:7:5
+  |
+7 |     Step.call()
+  |     ^^^^^^^^^ only a type a declaration names holds members
+error[T-Mismatch]: expected `fn(inout UInt8)`, found `Int64`
+ --> tests/decl/a_callable_type_returning_nothing_is_named_whole.lin:6:41
+  |
+6 |     let _step: fn(inout total: UInt8) = 5
+  |                ---------------------- expected because of this annotation
+  |                                         ^ expected `fn(inout UInt8)`, found `Int64`

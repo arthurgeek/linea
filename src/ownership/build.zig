@@ -2558,7 +2558,7 @@ test "a call refused for a generic mismatch reads the places it names" {
         \\struct Held { number: UInt8 }
         \\struct Flag {}
         \\struct Pair { value: Held }
-        \\fn same[T: Discardable](sink _a: T, sink _b: T) -> () {}
+        \\fn same[T: Discardable](sink _a: T, sink _b: T) {}
         \\fn main() -> UInt8 {
         \\    let pair: Pair = .{ value = .{ number = 1 } }
         \\    let flag: Flag = .{}
@@ -2573,7 +2573,7 @@ test "a call refused for a generic mismatch reads the places it names" {
 test "a rejected call reads its arguments" {
     const got = try graphOf(testing.allocator,
         \\struct Held { number: UInt8 }
-        \\fn take(sink _n: Held) -> () {}
+        \\fn take(sink _n: Held) {}
         \\fn main() -> Held {
         \\    let a: Held = .{ number = 1 }
         \\    let b: Held = .{ number = 2 }

@@ -29,7 +29,7 @@ impl Thermostat {
     }
 
     // `inout self` lets this operation change the thermostat it is called on.
-    fn warm_up(inout self: Self, degrees: Int64) -> () {
+    fn warm_up(inout self: Self, degrees: Int64) {
         self.current += degrees
     }
 }
@@ -115,7 +115,7 @@ Leave the `&` off `&hall.warm_up(5)` and the compiler asks for it:
 error[S-Mutation]: this receiver is mutated, so the call is marked `&`
   --> no_amp.lin:26:5
    |
-14 |     fn warm_up(inout self: Self, degrees: Int64) -> () {
+14 |     fn warm_up(inout self: Self, degrees: Int64) {
    |                      ---- declared `inout`
 26 |     hall.warm_up(5)
    |     ^^^^ write `&hall.warm_up(...)`
@@ -909,7 +909,7 @@ impl Coffee {
         250 + self.shots * 60
     }
 
-    fn add_shot(inout self: Self) -> () {
+    fn add_shot(inout self: Self) {
         self.shots += 1
     }
 }

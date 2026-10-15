@@ -140,7 +140,7 @@ impl[I: Iterator, A: Allocator, T: Display] Display for CollectFailure[I, A, T] 
 // Releasing a failed collection settles it, then releases the allocation
 // reason.
 impl[I: Iterator + Release, A: Allocator, T: Release] Release for CollectFailure[I, A, T] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         self.settle().release()
     }
 }

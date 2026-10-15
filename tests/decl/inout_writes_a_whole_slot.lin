@@ -1,14 +1,14 @@
 // Inout writes and local reads use the same natural storage width.
 // Replacing a negative value with a positive one works at every signed width.
-fn set8(inout x: Int8) -> () {
+fn set8(inout x: Int8) {
     x = 5
 }
 
-fn set16(inout x: Int16) -> () {
+fn set16(inout x: Int16) {
     x = 6
 }
 
-fn set32(inout x: Int32) -> () {
+fn set32(inout x: Int32) {
     x = 7
 }
 

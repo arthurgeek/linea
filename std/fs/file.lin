@@ -449,7 +449,7 @@ test fn a_direct_file_write_reports_scratch_allocation_failure() {
 }
 
 impl Release for File {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let File { fd: fd } = self
         let _closed = close_descriptor(fd)
     }

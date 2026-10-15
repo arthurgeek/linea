@@ -243,7 +243,7 @@ test fn a_listener_reports_the_port_it_was_given() {
 }
 
 impl Release for Listener {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Listener { fd: fd } = self
         let _closed = close_descriptor(fd)
     }

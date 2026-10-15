@@ -162,7 +162,7 @@ impl[P: Allocator, S, H: Handler[S, P], A: Allocator] Handler[S, P] for RequestI
 // `serve_http` left it in the buffers, so a `logged` inside logs the number.
 // An exchange the handler never saw reaches it as it is.
 impl[H: Observer, A: Allocator] Observer for RequestIds[H, A] {
-    fn observe[P: Allocator](inout self: Self, event: Event[P]) -> () {
+    fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match copy(event) {
             Exchanged(exchange) => {
                 let waiting = mem.take(&self.pending)

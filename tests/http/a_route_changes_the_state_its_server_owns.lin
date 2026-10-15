@@ -24,7 +24,7 @@ fn visits[P: Allocator](app: App, request: http.Request[P]) -> Result[http.Respo
     http.text(request, "{app.seen.length()} seen")
 }
 
-fn answer[H: http.Handler[(), mem.SystemAllocator]](inout server: H, target: Str) -> () {
+fn answer[H: http.Handler[(), mem.SystemAllocator]](inout server: H, target: Str) {
     let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
     var nothing = {}

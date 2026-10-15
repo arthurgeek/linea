@@ -1,7 +1,7 @@
 import std.mem
 
 fn main() -> Result[UInt8, mem.Oom] {
-    var kept: Vec[mem.Closure[inout fn() -> (), mem.SystemAllocator], mem.SystemAllocator] = Vec.new()
+    var kept: Vec[mem.Closure[inout fn(), mem.SystemAllocator], mem.SystemAllocator] = Vec.new()
     var count: UInt8 = 0
     var round: UInt8 = 0
     while round < 2 {

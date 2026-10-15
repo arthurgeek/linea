@@ -1,6 +1,6 @@
 // An `inout` lambda parameter written as a pattern lends each component
 // writably, so assigning `a` and `b` changes the pair the caller passed.
-fn bump[F: fn(inout pair: (UInt8, UInt8)) -> ()](sink pair: (UInt8, UInt8), step: F) -> (UInt8, UInt8) {
+fn bump[F: fn(inout pair: (UInt8, UInt8))](sink pair: (UInt8, UInt8), step: F) -> (UInt8, UInt8) {
     var held = pair
     step(&held)
     held

@@ -3035,7 +3035,7 @@ test "`&` on a `sink` argument is rejected" {
     // is given away outright, so `&` says nothing true of either.
     const got = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text =
-        \\fn release(sink _n: UInt8) -> () {}
+        \\fn release(sink _n: UInt8) {}
         \\fn main() -> UInt8 { var x: UInt8 = 1; release(&x); 2 }
         },
     });
@@ -3051,7 +3051,7 @@ test "a linear value is minted, lent, and given away" {
         .{ .path = "case.lin", .text =
         \\@linear enum Key { Forged(UInt8) }
         \\fn tag(k: Key) -> UInt8 { match read k { Forged(n) => n } }
-        \\fn release(sink k: Key) -> () { match k { Forged(_) => {} } }
+        \\fn release(sink k: Key) { match k { Forged(_) => {} } }
         \\fn main() -> UInt8 { let k = Key.Forged(9); let t = tag(k); release(k); t }
         },
     });
@@ -3067,7 +3067,7 @@ const key_lin =
     \\
     \\pub fn tag(k: Key) -> UInt8 { match read k { Forged(n) => n } }
     \\
-    \\pub fn release(sink k: Key) -> () { match k { Forged(_) => {} } }
+    \\pub fn release(sink k: Key) { match k { Forged(_) => {} } }
     \\
 ;
 
@@ -3174,7 +3174,7 @@ test "a copyable binding is moved by a consuming position, and `copy` keeps it" 
     const moved = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text =
         \\@copyable struct Account { id: UInt8 }
-        \\fn take(sink a: Account) -> () { let _n = a.id; }
+        \\fn take(sink a: Account) { let _n = a.id; }
         \\fn main() -> UInt8 {
         \\    let a: Account = .{ id = 1 };
         \\    take(a);
@@ -3188,7 +3188,7 @@ test "a copyable binding is moved by a consuming position, and `copy` keeps it" 
     const kept = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text =
         \\@copyable struct Account { id: UInt8 }
-        \\fn take(sink a: Account) -> () { let _n = a.id; }
+        \\fn take(sink a: Account) { let _n = a.id; }
         \\fn main() -> UInt8 {
         \\    let a: Account = .{ id = 1 };
         \\    take(copy(a));
@@ -3255,7 +3255,7 @@ test "a lend may not be taken from, regardless of settlement" {
     // explicit copy; lending itself grants no consuming authority.
     const linear_taken = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text = key_lin ++
-            \\fn steal(k: Key) -> () { release(k) }
+            \\fn steal(k: Key) { release(k) }
             \\fn main() -> UInt8 { let k = mint(1); steal(k); release(k); 0 }
         },
     });
@@ -3287,7 +3287,7 @@ test "a lend may not be taken from, regardless of settlement" {
 test "an `inout` parameter moved out and not put back is reported" {
     const got = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text = key_lin ++
-            \\fn drain(inout k: Key) -> () { release(k) }
+            \\fn drain(inout k: Key) { release(k) }
             \\fn main() -> UInt8 { var k = mint(1); drain(&k); 0 }
         },
     });
@@ -3297,7 +3297,7 @@ test "an `inout` parameter moved out and not put back is reported" {
 test "an `inout` parameter moved out and refilled is accepted" {
     const got = try checkModules(testing.allocator, &.{
         .{ .path = "case.lin", .text = key_lin ++
-            \\fn swap(inout k: Key) -> () { release(k); k = mint(2); }
+            \\fn swap(inout k: Key) { release(k); k = mint(2); }
             \\fn main() -> UInt8 { var k = mint(1); swap(&k); release(k); 0 }
         },
     });
@@ -3395,8 +3395,8 @@ test "a Linear part may not be taken out of a Linear whole" {
         .{ .path = "case.lin", .text =
         \\@linear pub enum Key { Forged(UInt8) }
         \\@linear pub struct Holder { k: Key }
-        \\pub fn release(sink k: Key) -> () { match k { Forged(_) => {} } }
-        \\pub fn take(sink h: Holder) -> () { release(h.k) }
+        \\pub fn release(sink k: Key) { match k { Forged(_) => {} } }
+        \\pub fn take(sink h: Holder) { release(h.k) }
         \\fn main() -> UInt8 { take(.{ k = Key.Forged(1) }); 0 }
         },
     });

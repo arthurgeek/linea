@@ -665,6 +665,15 @@ pub const TypeRef = struct {
         };
     }
 
+    /// Whether nothing at all was written: no type and no attempt at one.
+    ///
+    /// A callable's result in this state is `()`. A type the parser began
+    /// reading and refused keeps the token where it began, so a refusal is
+    /// not taken for an omission and checked on as `()`.
+    pub fn isOmitted(self: TypeRef) bool {
+        return !self.wasWritten() and self.at == .none;
+    }
+
     pub const Kind = enum {
         grouped,
         borrow,

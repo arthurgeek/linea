@@ -9,6 +9,6 @@ pub fn tag(k: Key) -> UInt8 {
     match read k { Forged(n) => n }
 }
 
-pub fn release(sink k: Key) -> () {
+pub fn release(sink k: Key) {
     match k { Forged(_) => {} }
 }

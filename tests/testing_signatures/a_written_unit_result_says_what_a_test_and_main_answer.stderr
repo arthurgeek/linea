@@ -1,0 +1,14 @@
+error[S-UnitResult]: a function that returns nothing writes no result type
+ --> tests/testing_signatures/a_written_unit_result_says_what_a_test_and_main_answer.lin:3:34
+  |
+3 | test fn a_tally_starts_at_zero() -> () {}
+  |                                  ^^^^^ a test writing no result answers `Result[(), testing.Failure]`
+  |
+  = help: remove `-> ()`
+error[S-UnitResult]: a function that returns nothing writes no result type
+ --> tests/testing_signatures/a_written_unit_result_says_what_a_test_and_main_answer.lin:5:11
+  |
+5 | fn main() -> () {}
+  |           ^^^^^ a function writing no result returns `()`
+  |
+  = help: remove `-> ()`, or write `-> UInt8` if this `main` is the program's entry point

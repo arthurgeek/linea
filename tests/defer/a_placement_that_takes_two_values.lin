@@ -14,13 +14,13 @@ struct Key {
     n: UInt8,
 }
 
-fn take2(sink a: Key, sink b: Key, inout freed: UInt8) -> () {
+fn take2(sink a: Key, sink b: Key, inout freed: UInt8) {
     let Key { n: _x } = a
     let Key { n: _y } = b
     freed = freed + 2
 }
 
-fn take1(sink k: Key, inout freed: UInt8) -> () {
+fn take1(sink k: Key, inout freed: UInt8) {
     let Key { n: _n } = k
     freed = freed + 1
 }

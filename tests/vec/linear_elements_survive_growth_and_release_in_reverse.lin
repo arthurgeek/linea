@@ -8,7 +8,7 @@ struct Token {
 }
 
 impl Release for Token {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Token { number: number, check: check } = self
         if check != number + 100 {
             panic("element changed while moving")

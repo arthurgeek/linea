@@ -4,7 +4,7 @@
 //
 // Written where it stands, the bump would happen first and `go` would answer
 // 2, making `main` answer 4. The golden says which.
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n = n + 1
 }
 

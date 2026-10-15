@@ -55,7 +55,7 @@ test fn standard_error_is_descriptor_two() {
 // wrapper never owned it, so a type holding one, such as a logger, can be
 // released whatever it writes to.
 impl Release for Descriptor {
-    fn release(sink _self: Self) -> () {}
+    fn release(sink _self: Self) {}
 }
 
 test fn releasing_a_descriptor_leaves_it_open() {

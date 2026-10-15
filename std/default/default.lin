@@ -31,7 +31,7 @@ template impl Default where
 }
 
 impl Default for () {
-    fn default() -> () {}
+    fn default() {}
 }
 
 impl Default for Int8 {

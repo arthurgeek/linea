@@ -16,12 +16,12 @@ struct Key {
     n: UInt8,
 }
 
-fn take(sink k: Key, inout freed: UInt8) -> () {
+fn take(sink k: Key, inout freed: UInt8) {
     let Key { n: _n } = k
     freed = freed + 1
 }
 
-fn give(sink k: Key, inout moved: UInt8) -> () {
+fn give(sink k: Key, inout moved: UInt8) {
     let Key { n: _n } = k
     moved = moved + 1
 }

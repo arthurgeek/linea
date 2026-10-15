@@ -11,17 +11,16 @@ program decls=7
     settles UInt8
   decl impl_ "Holder" tokens 18..43
     of trait Holds[fn(read value: UInt8 = 1 + 1) -> UInt8]
-  decl function "_reads" tokens 43..80
+  decl function "_reads" tokens 43..77
     type param "H" : Holds[fn(read value: UInt8 = 2) -> UInt8]
     param read "_holder" : H
     param read "_item" : H.Item
-    returns (
-    expr %4 block tokens 78..80
-  decl function "main" tokens 80..100
+    expr %4 block tokens 75..77
+  decl function "main" tokens 77..97
     returns UInt8
-    expr %9 block tokens 86..100
-      stmt %0 let_decl tokens 87..98 "_holder" : Holder
-        expr %7 struct_literal tokens 92..98
-          expr %5 name_ref tokens 94..95 "value"
-          expr %6 int_literal tokens 96..97 "0"
-      expr %8 int_literal tokens 98..99 "0"
+    expr %9 block tokens 83..97
+      stmt %0 let_decl tokens 84..95 "_holder" : Holder
+        expr %7 struct_literal tokens 89..95
+          expr %5 name_ref tokens 91..92 "value"
+          expr %6 int_literal tokens 93..94 "0"
+      expr %8 int_literal tokens 95..96 "0"

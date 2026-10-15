@@ -1,6 +1,6 @@
 import std.io
 
-fn consume[T: Release](sink value: T) -> () {
+fn consume[T: Release](sink value: T) {
     Release.release(value)
 }
 

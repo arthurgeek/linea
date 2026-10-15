@@ -82,13 +82,13 @@ struct ResponseHeaders[A: Allocator] {
 // a `Vec` in generic code: releasing a `Vec[ResponseHeaders[A], A]` there would
 // be refused.
 impl[A: Allocator] Release for ResponseHeaders[A] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let ResponseHeaders { allocator: _, fields } = self
         fields.release()
     }
 }
 
-fn release_header_lists[A: Allocator](sink lists: Vec[ResponseHeaders[A], A]) -> () {
+fn release_header_lists[A: Allocator](sink lists: Vec[ResponseHeaders[A], A]) {
     lists.release()
 }
 
@@ -199,7 +199,7 @@ impl[A: Allocator] ResponseHeaders[A] {
     // pass moves each kept header down over the matches before it, keeping
     // their order, and truncating releases the matches collected at the end,
     // which shifts nothing. The cost is the list's length.
-    fn remove(inout self: Self, name: Str) -> () where retains(self: self) {
+    fn remove(inout self: Self, name: Str) where retains(self: self) {
         var kept: UInt64 = 0
         for index in 0..self.fields.length() {
             if !self.fields[index].name.equals_ascii_folded(name) {

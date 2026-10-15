@@ -6,7 +6,7 @@ struct Crate {
 }
 
 impl Release for Crate {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Crate { kilograms: _ } = self
     }
 }

@@ -10,7 +10,7 @@ fn tag(k: Key) -> UInt8 {
 
 // `sink` takes ownership. This is how a linear value is finally disposed of:
 // taken apart, with the obligation ending where the parts do.
-fn release(sink k: Key) -> () {
+fn release(sink k: Key) {
     match k { Forged(_) => {} }
 }
 

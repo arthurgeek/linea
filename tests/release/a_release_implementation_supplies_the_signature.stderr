@@ -1,5 +1,5 @@
 error[T-Impl]: `Release` declares `release`'s `self` `sink`, and this declares it `read`
  --> tests/release/a_release_implementation_supplies_the_signature.lin:9:8
   |
-9 |     fn release(self: Self) -> () {
+9 |     fn release(self: Self) {
   |        ^^^^^^^ pass it the way the signature does

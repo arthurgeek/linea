@@ -15,7 +15,7 @@ struct Outer {
     z: UInt8,
 }
 
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n = n + 1
 }
 

@@ -32,6 +32,7 @@ for the code in brackets to reach the rule itself.
 | `S-Mutation` | error | Calling things: [`&` marks a receiver the call will change](02-calling-things.md#-marks-a-receiver-the-call-will-change) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Mutation]` |
 | `S-Params` | error | Calling things: [A closure that takes a pair apart](02-calling-things.md#a-closure-that-takes-a-pair-apart) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Params]` |
 | `S-Tuple` | error | Linea in an hour: [Tuples](01-linea-in-an-hour.md#tuples) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Tuple]` |
+| `S-UnitResult` | error | Linea in an hour: [`read`, `inout` and `sink`](01-linea-in-an-hour.md#read-inout-and-sink) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-UnitResult]` |
 | `T-Arity` | error | Memory: [A function's `_in` form takes the allocator](07-memory.md#a-functions-_in-form-takes-the-allocator) | [§4 Types](../linea-semantics.md#4-types), at `[T-Arity]` |
 | `T-BorrowContract` | error | Borrowing: [`borrows` — my result points into what you gave me](06-borrowing.md#borrows--my-result-points-into-what-you-gave-me) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[T-BorrowContract]` |
 | `T-Bound` | error | Calling things: [`@derive` on a generic type](02-calling-things.md#derive-on-a-generic-type) | [§4 Types](../linea-semantics.md#4-types), at `[T-Bound]` |

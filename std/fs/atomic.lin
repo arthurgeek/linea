@@ -381,7 +381,7 @@ internal fn scratch_path() -> String {
 
 // `remove_scratch` removes a file a test created, and ignores a file that is
 // already gone.
-internal fn remove_scratch(path: Path) -> () {
+internal fn remove_scratch(path: Path) {
     let allocator = mem.system()
     match prepare(allocator, path) {
         Err(_) => {},

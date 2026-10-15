@@ -30,14 +30,14 @@ module {
     llvm.store %a0, %s0 : i64, !llvm.ptr
     cf.br ^b0
   ^b0:
-    %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:32)
-    func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:32)
+    %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:26)
+    func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":1:26)
   }
   func.func private @"lin.;empty"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
     cf.br ^b0
   ^b0:
-    %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:18)
-    func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:18)
+    %v0 = arith.constant 0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:12)
+    func.return %v0 : i64 loc("tests/codegen/unit_values_have_a_computation.lin":3:12)
   }
   func.func private @"lin.;bare"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
     cf.br ^b0

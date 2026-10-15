@@ -10,11 +10,11 @@ fn halve(value: UInt8) -> UInt8 {
     value / 2
 }
 
-fn add_step[A: Allocator](inout steps: Vec[fn(value: UInt8) -> UInt8, A], step: fn(value: UInt8) -> UInt8) -> () {
+fn add_step[A: Allocator](inout steps: Vec[fn(value: UInt8) -> UInt8, A], step: fn(value: UInt8) -> UInt8) {
     Vec.push(&steps, copy(step)).unwrap()
 }
 
-fn settle[T: Release](sink value: T) -> () {
+fn settle[T: Release](sink value: T) {
     value.release()
 }
 

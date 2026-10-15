@@ -42,7 +42,7 @@ fn list[P: Allocator](inout _: (), request: http.Request[P]) -> Result[http.Resp
     http.text(request, "page {page}, {per_page} a page")
 }
 
-fn answer(inout router: http.Router[(), mem.SystemAllocator], target: Str) -> () {
+fn answer(inout router: http.Router[(), mem.SystemAllocator], target: Str) {
     let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
     var nothing = {}

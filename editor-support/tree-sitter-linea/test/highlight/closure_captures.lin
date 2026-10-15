@@ -1,4 +1,4 @@
-fn configure() -> () {
+fn configure() {
     let threshold = 3
     let predicate = [threshold] |sink item| item > threshold + 1
 //                   ^ variable

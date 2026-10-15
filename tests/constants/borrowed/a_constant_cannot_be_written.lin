@@ -8,7 +8,7 @@ struct Config {
 }
 
 impl Config {
-    fn grow(inout self: Config) -> () {
+    fn grow(inout self: Config) {
         self.limit = self.limit + 1
     }
 }
@@ -19,11 +19,11 @@ let limit: Int64 = 3
 
 let limits = [Int64(4), Int64(9)]
 
-fn bump(inout value: Int64) -> () {
+fn bump(inout value: Int64) {
     value = value + 1
 }
 
-fn reset(inout config: Config) -> () {
+fn reset(inout config: Config) {
     config.limit = 0
 }
 

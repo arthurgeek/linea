@@ -148,7 +148,7 @@ impl[E: Display, C: Display] Display for FinishReason[E, C] {
 // Releasing a failed finish abandons the pending bytes, then releases the
 // underlying stream, which ignores a failed close, and the write failure.
 impl[W: ByteWriter + Release, A: Allocator, E: Release] Release for FinishFailure[W, A, E] {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let FinishFailure { writer, failure } = self
         writer.abort().release()
         failure.release()

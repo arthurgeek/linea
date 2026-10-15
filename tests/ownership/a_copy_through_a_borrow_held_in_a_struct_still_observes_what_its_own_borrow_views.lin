@@ -14,7 +14,7 @@ struct Pick {
     whole: borrow Ref,
 }
 
-fn bump(inout b: Box) -> () {
+fn bump(inout b: Box) {
     b.value = b.value + 1
 }
 

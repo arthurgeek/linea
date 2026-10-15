@@ -12,7 +12,7 @@ impl Thermostat {
         Thermostat { target = 21, current = 17 }
     }
 
-    fn warm_up(inout self: Thermostat, degrees: Int64) -> () {
+    fn warm_up(inout self: Thermostat, degrees: Int64) {
         self.current += degrees
     }
 }

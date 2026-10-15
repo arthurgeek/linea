@@ -22,7 +22,7 @@ struct Stamp {
 }
 
 impl Release for Stamp {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Stamp { code: _code } = self
     }
 }
@@ -32,7 +32,7 @@ fn commit(sink tx: Transaction) -> UInt8 {
     code
 }
 
-fn rollback(sink tx: Transaction, inout count: UInt8) -> () {
+fn rollback(sink tx: Transaction, inout count: UInt8) {
     let Transaction { code: _code } = tx
     count = count + 1
 }
@@ -62,7 +62,7 @@ fn observe(plain: Plain) -> UInt8 {
     plain.code
 }
 
-fn discard[T: Release](sink value: T) -> () {
+fn discard[T: Release](sink value: T) {
     value.release()
 }
 

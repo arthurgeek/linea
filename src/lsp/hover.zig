@@ -182,8 +182,9 @@ fn enclosingExpr(chain: *positions.Index.Enclosing) ?ExprId {
 /// the expression is a call that made one.
 ///
 /// `ident[UInt8] -> UInt8` is the callee as it was written, the arguments the
-/// call settled, and what it gives back. The arrow is the language's own, so
-/// there is no notation to learn, and the arguments are spelled where an
+/// call settled, and what it gives back; a call giving back `()` has no arrow,
+/// as its signature has none. The arrow is the language's own, so there is no
+/// notation to learn, and the arguments are spelled where an
 /// instantiation is spelled everywhere else -- the same text `dump-inferred`
 /// writes over the same call.
 fn saidOfExpr(gpa: std.mem.Allocator, checked: *const Analysis, e: ExprId) ![]const u8 {
@@ -212,6 +213,12 @@ fn saidOfExpr(gpa: std.mem.Allocator, checked: *const Analysis, e: ExprId) ![]co
             if (args.len == 0) return gpa.dupe(u8, of);
             const spelled = try annotated.spellArgs(gpa, typing, args);
             defer gpa.free(spelled);
+            // A call to a function returning `()` is shown as its signature
+            // is written: without a result.
+            if (ty == .unit) return std.fmt.allocPrint(gpa, "{s}{s}", .{
+                ast.exprText(typecheck.calleeName(ast, call)),
+                spelled,
+            });
             return std.fmt.allocPrint(gpa, "{s}{s} -> {s}", .{
                 ast.exprText(typecheck.calleeName(ast, call)),
                 spelled,

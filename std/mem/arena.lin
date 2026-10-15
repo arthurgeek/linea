@@ -148,7 +148,7 @@ test fn an_arena_the_backing_refused_refuses_everything() {
 
 impl[H: Allocator] Release for Arena[H] {
     // Return the backing buffer after dependent allocations have been disposed.
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Arena { slab: slab } = self
         match slab {
             None => {},
@@ -228,7 +228,7 @@ impl[H: Allocator] Allocator for Handle[H] {
 
     // The buffer supplies its allocator, so callers cannot select another arena.
     // Keep extent checks before discarding a reservation; reclamation is collective.
-    fn dispose(sink b: Buffer[Handle[H]]) -> () {
+    fn dispose(sink b: Buffer[Handle[H]]) {
         let Buffer { at: at, len: length, allocated: allocated, allocator: allocator, obligation: _ } = b
         match read allocator.owner.slab {
             None => panic("an allocation has no backing arena"),
@@ -311,7 +311,7 @@ impl[H: Allocator] Arena[H] {
     // bytes that were used and no others: its cost is what was used, not the
     // slab's size. It takes the arena `inout`, so no handle or allocation
     // from it can still be live.
-    pub fn rewind(inout self: Self) -> () {
+    pub fn rewind(inout self: Self) {
         match read self.slab {
             None => {},
             Some(buffer) => {

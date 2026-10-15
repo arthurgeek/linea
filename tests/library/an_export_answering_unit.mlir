@@ -27,8 +27,8 @@ module {
     %v0 = arith.extsi %lw0 : i32 to i64 loc("tests/library/an_export_answering_unit/main.lin":2:27)
     %sw1 = arith.trunci %v0 : i64 to i32 loc("tests/library/an_export_answering_unit/main.lin":2:5)
     llvm.store %sw1, %s1 : i32, !llvm.ptr loc("tests/library/an_export_answering_unit/main.lin":2:5)
-    %v2 = arith.constant 0 : i64 loc("tests/library/an_export_answering_unit/main.lin":1:34)
-    func.return %v2 : i64 loc("tests/library/an_export_answering_unit/main.lin":1:34)
+    %v2 = arith.constant 0 : i64 loc("tests/library/an_export_answering_unit/main.lin":1:28)
+    func.return %v2 : i64 loc("tests/library/an_export_answering_unit/main.lin":1:28)
   }
   func.func @noop(%p0: i32) {
     %w0 = arith.extsi %p0 : i32 to i64

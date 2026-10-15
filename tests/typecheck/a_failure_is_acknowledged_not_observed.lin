@@ -10,7 +10,7 @@ import std.io
 use io.IoError
 use io.print
 
-fn ignores_it() -> () {
+fn ignores_it() {
     match print("a") {
         _ => {},
     }

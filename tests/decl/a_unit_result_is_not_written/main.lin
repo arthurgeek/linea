@@ -1,0 +1,43 @@
+// `-> ()` is refused wherever a result is written: a function that returns
+// nothing leaves the arrow out.
+extern fn linea_free(at: UInt64, size: UInt64, align: UInt64) -> ()
+
+struct Tally {
+    count: UInt8,
+}
+
+trait Bump {
+    fn bump(inout self: Self) -> ()
+}
+
+impl Bump for Tally {
+    fn bump(inout self: Self) -> () {
+        self.count += 1
+    }
+}
+
+fn add_tip(inout bill: UInt8) -> () where carries() {
+    bill += bill / 10
+}
+
+fn twice(inout value: UInt8, step: fn(inout value: UInt8) -> ()) {
+    step(&value)
+    step(&value)
+}
+
+fn pair() -> ((), ()) {
+    ({}, {})
+}
+
+fn main() -> UInt8 {
+    linea_free(0, 0, 8)
+    var bill: UInt8 = 40
+    add_tip(&bill)
+    twice(&bill, add_tip)
+    var tally = Tally { count = 0 }
+    &tally.bump()
+    let reset = |inout value: UInt8| -> () { value = 0 }
+    reset(&bill)
+    let _pair = pair()
+    bill + tally.count
+}

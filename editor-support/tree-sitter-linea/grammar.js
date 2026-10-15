@@ -23,17 +23,22 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  // `_type` is `_result_type` or `()`, substituted where it is written so
+  // that a written type and a written result reduce through one rule.
+  inline: $ => [$._type],
+
   conflicts: $ => [
     [$.capture_list, $.array_literal],
     [$._expression, $.capture],
     [$.literal_type, $._expression],
-    [$._type, $._type_only],
+    [$._result_type, $._type_only],
+    [$.type_arguments, $._type_only],
     [$.call_type_arguments, $.call_generic_arguments],
     [$.call_type_arguments, $._call_type],
     [$._expression, $.call_only_generic_type, $.call_generic_type, $.literal_type],
-    [$._type, $._call_type],
-    [$._type, $._expression],
-    [$._type, $._expression, $.literal_type],
+    [$._result_type, $._call_type],
+    [$._result_type, $._expression],
+    [$._result_type, $._expression, $.literal_type],
     [$.callable_type],
     [$.contract_clause],
     [$.call_expression, $.instantiation_expression],
@@ -122,7 +127,7 @@ module.exports = grammar({
       field('name', $.identifier),
       optional($.type_parameters),
       $.parameter_list,
-      optional(seq('->', field('return_type', $._type))),
+      optional(seq('->', field('return_type', $._result_type))),
       optional($.where_clause),
     ),
 
@@ -135,14 +140,14 @@ module.exports = grammar({
           field('name', $.identifier),
           optional($.type_parameters),
           $.parameter_list,
-          optional(seq('->', field('return_type', $._type))),
+          optional(seq('->', field('return_type', $._result_type))),
         ),
         seq(
           'fn',
           field('name', $.identifier),
           optional($.type_parameters),
           $.parameter_list,
-          optional(seq('->', field('return_type', $._type))),
+          optional(seq('->', field('return_type', $._result_type))),
         ),
       ),
       optional($.where_clause),
@@ -470,8 +475,7 @@ module.exports = grammar({
       field('name', $.identifier),
       optional($.type_parameters),
       $.parameter_list,
-      '->',
-      field('return_type', $._type),
+      optional(seq('->', field('return_type', $._result_type))),
       optional($.where_clause),
       optional(';'),
     ),
@@ -483,8 +487,7 @@ module.exports = grammar({
       field('name', $.identifier),
       optional($.type_parameters),
       $.parameter_list,
-      '->',
-      field('return_type', $._type),
+      optional(seq('->', field('return_type', $._result_type))),
       optional($.where_clause),
       field('body', $.block),
     ),
@@ -510,7 +513,15 @@ module.exports = grammar({
       optional(';'),
     ),
 
-    _type: $ => choice($.grouped_type, $.tuple_type, $.borrow_type, $.settled_ref_type, $.self_type, $.generic_type, $.array_type, $.callable_type, alias($.identifier, $.type_identifier), $.unit_type),
+    _type: $ => choice($._result_type, $.unit_type),
+
+    // The type written after a function's, a signature's, a callable type's or
+    // a lambda's `->`: any type except `()` written whole. An operation
+    // returning nothing leaves the arrow out, and [S-UnitResult] refuses
+    // `-> ()`, so it derives nothing here. `()` inside a result (`Result[(),
+    // E]`, `((), ())`) is an ordinary argument or element. A projection's
+    // result is never omitted and keeps `_type`.
+    _result_type: $ => choice($.grouped_type, $.tuple_type, $.borrow_type, $.settled_ref_type, $.self_type, $.generic_type, $.array_type, $.callable_type, alias($.identifier, $.type_identifier)),
 
     // A selection follows its complete type base, including type arguments.
     // Right-associative so a qualified name takes the type arguments that
@@ -570,8 +581,7 @@ module.exports = grammar({
       optional(field('invocation', choice('read', 'inout', 'sink'))),
       'fn',
       $.parameter_list,
-      '->',
-      field('return_type', $._type),
+      optional(seq('->', field('return_type', $._result_type))),
       optional($.contract_clause),
     )),
 
@@ -850,7 +860,7 @@ module.exports = grammar({
           seq('|', commaSep(alias($._lambda_parameter, $.parameter)), '|'),
         ),
         optional(seq('->', choice(
-          seq(field('return_type', $._type), optional($.contract_clause)),
+          seq(field('return_type', $._result_type), optional($.contract_clause)),
           $.contract_clause,
         ))),
         field('body', $._expression),

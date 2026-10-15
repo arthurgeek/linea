@@ -39,7 +39,8 @@ is the tuple of no components ([T-Tuple]). The type and its one value are both
 written `()` ([ADR 0188](adr/0188-the-unit-value-is-written-as-its-type.md)):
 `.Ok(())` is a `Result[(), E]` that succeeded. An empty block, `{}`, computes
 nothing, so its value is `()` as every block reaching its end without a tail
-is; it is not another spelling of the value.
+is; it is not another spelling of the value. A function that returns Unit
+writes no result type, and `-> ()` is refused ([S-UnitResult]).
 
 `Never` is an uppercase primitive and the type of an expression whose local
 continuation is unreachable. It has no values. It is zero-sized and vacuously
@@ -97,8 +98,8 @@ visibility   ::= "pub" | "internal"
 attribute    ::= "@" attribute_item | "@" "(" attribute_item ("," attribute_item)* ","? ")"
 attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
 constant     ::= "let" name (":" type_name)? "=" expression unwrap?
-function     ::= ("test" "trap"?)? "fn" name generics? "(" parameters? ")" "->" result function_where? block
-signature    ::= "fn" name generics? "(" parameters? ")" "->" result function_where?
+function     ::= ("test" "trap"?)? "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
+signature    ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where?
 external     ::= "extern" signature
 projsig      ::= "proj" name generics? "(" parameters? ")" "->" result function_where?
 result       ::= type_name
@@ -240,7 +241,7 @@ type_base    ::= name type_arguments? | "(" ")" | "(" type_name ")" | tuple_type
                | array_type | callable_type
 tuple_type   ::= "(" type_name "," type_name ("," type_name)* ","? ")"
 array_type   ::= "[" type_name ";" (expression | "_") "]"
-callable_type ::= convention? "fn" "(" parameters? ")" "->" result source_where?
+callable_type ::= convention? "fn" "(" parameters? ")" ("->" result)? source_where?
 type_arguments ::= "[" type_name ("," type_name)* ","? "]"
 ```
 
@@ -389,7 +390,8 @@ requiring an import or introducing a source binding. Normal unit fallthrough
 and bare `return` produce `Ok(())`; explicit return values must satisfy the
 result type. Assertions still propagate with `?`, and explicit deferred cleanup
 runs on both success and failure. A written return annotation keeps its
-ordinary meaning. Ordinary functions must declare their return type.
+ordinary meaning. A function that is not a test and writes no result returns
+`()` ([S-UnitResult]).
 
 A test is known outside the compiler by its qualified name: the path of its
 module's directory beneath the program root, each directory name followed by
@@ -591,6 +593,22 @@ symbol.
 **[S-Name]** Where the grammar expects a name, an identifier must appear.
 
 **[S-Type]** Where the grammar expects a type, a type name must appear.
+
+**[S-UnitResult]** A callable that returns Unit writes no result type:
+`fn add_tip(inout bill: UInt64) { ... }`. Leaving out `-> T` means the result
+is `()`, for a function, a method, a trait's signature, an `extern` and a
+callable type alike, so `add_tip` is a value of type
+`fn(inout bill: UInt64)`. Writing `-> ()`, or `()` in grouping parentheses, is
+refused where it is written, with help to remove it; on a top-level `main` the
+help also says that an entry point writes `-> UInt8`
+([ADR 0223](adr/0223-a-function-returning-nothing-writes-no-result.md)). Only
+the unit type written as such is refused: `-> Result[(), E]` and `-> ((), T)`
+are results that hold a Unit, and a name standing for `()`, such as an alias, is
+not looked through. A lambda that writes no result takes its body's
+type, Unit included, so `-> ()` is refused on a lambda too; one that writes
+contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
+A `test fn` that writes no result answers `Result[(), testing.Failure]`
+([S-Test]). A projection names a place and always writes its type.
 
 **[S-Equals]** A binding's name is followed by `=`.
 
@@ -4432,7 +4450,7 @@ An arm's body may be an expression or a block, as in an `if`. An empty block
 computes nothing and has the value `()`, allowing an arm to do nothing:
 
 ```
-fn release(sink k: Key) -> () {
+fn release(sink k: Key) {
     match k { Forged(_) => {} }
 }
 ```

@@ -3314,7 +3314,7 @@ fn smallOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
     try w.writeAll(
         "@linear enum Key { Forged(UInt8) }\n\n" ++
-            "fn release(sink key: Key) -> () {\n" ++
+            "fn release(sink key: Key) {\n" ++
             "    match key { Forged(_) => {} }\n" ++
             "}\n\n" ++
             "fn main() -> UInt8 {\n" ++
@@ -3343,7 +3343,7 @@ fn heavyOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 
     try w.writeAll(
         "@linear enum Key { Forged(UInt8) }\n\n" ++
-            "fn release(sink key: Key) -> () {\n" ++
+            "fn release(sink key: Key) {\n" ++
             "    match key { Forged(_) => {} }\n" ++
             "}\n\n" ++
             "fn main() -> UInt8 {\n" ++
@@ -3708,9 +3708,9 @@ fn reflectionComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
 
     try w.writeAll(
-        "trait Visit { fn visit(sink self: Self) -> () }\n\n" ++
+        "trait Visit { fn visit(sink self: Self) }\n\n" ++
             "template impl Visit {\n" ++
-            "    fn visit(sink _self: Self) -> () {\n" ++
+            "    fn visit(sink _self: Self) {\n" ++
             "        match _self { reflect.case => {\n" ++
             "            for component in reflect.components {\n" ++
             "                let _ = component.of(_self)\n" ++
@@ -3842,9 +3842,9 @@ fn reflectedEnumPayloadsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
 
     try w.writeAll(
-        "trait VisitPayloads { fn visit(sink self: Self) -> () }\n\n" ++
+        "trait VisitPayloads { fn visit(sink self: Self) }\n\n" ++
             "template impl VisitPayloads {\n" ++
-            "    fn visit(sink self: Self) -> () {\n" ++
+            "    fn visit(sink self: Self) {\n" ++
             "        match self { reflect.case => {\n" ++
             "            for component in reflect.components {\n" ++
             "                let _ordinal: UInt64 = component.ordinal\n" ++
@@ -3979,7 +3979,7 @@ fn genericDerivePredicatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     );
     for (0..n) |_| try w.writeAll("    T: Predicate,\n");
     try w.writeAll(
-        "\nfn _hold[T](_value: GenericTarget[T]) -> () {}\n\n" ++
+        "\nfn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
             "fn main() -> UInt8 { 0 }\n",
     );
     return out.toOwnedSlice();
@@ -9455,8 +9455,8 @@ const Recovery = struct {
 /// **The statement skip** in `endStatement` -- a statement no separator ended,
 /// skipped forward to the next thing that may begin one.
 ///
-/// **The declaration recoveries** -- a function with no body, a function with
-/// no return type, `stepOverTypeIntruders` for a type whose braces held a
+/// **The declaration recoveries** -- a function with no body, a function
+/// writing `-> ()`, `stepOverTypeIntruders` for a type whose braces held a
 /// member, and the skip to the next declaration for a token that begins none.
 ///
 /// The sites reached only by a trailing dot are not here. After a dot the
@@ -9480,9 +9480,9 @@ const recovery_shapes = [_]Recovery{
     .{ .where = .at_a_statement, .reports = "S-Equals", .written = "let _next" },
     // Two statements on one line, which `endStatement` skips out of.
     .{ .where = .at_a_statement, .reports = "S-Separator", .written = "_held 1" },
-    // A function with no body, and one that says nothing about what it returns.
+    // A function with no body, and one writing the `-> ()` it should leave out.
     .{ .where = .before_a_function, .reports = "S-Brace", .written = "fn _headless() -> UInt8\n\n" },
-    .{ .where = .before_a_function, .reports = "S-Type", .written = "fn _returnless() {\n    0\n}\n\n" },
+    .{ .where = .before_a_function, .reports = "S-UnitResult", .written = "fn _unit() -> () {}\n\n" },
     // A type whose braces held what an `impl` holds, which
     // `stepOverTypeIntruders` skips through the member's own braces.
     .{
@@ -11796,7 +11796,11 @@ fn writtenTypeName(
                 try out.appendSlice(gpa, text);
             }
         }
-        try out.appendSlice(gpa, ") -> ");
+        try out.append(gpa, ')');
+        // A callable type writing no result returns `()`, and is named
+        // without one as the checker names it.
+        if (!callable.result.wasWritten()) return try out.toOwnedSlice(gpa);
+        try out.appendSlice(gpa, " -> ");
         const result = try writtenTypeName(gpa, ast, res, memo, callable.result, self_is, purpose) orelse {
             out.deinit(gpa);
             return null;
@@ -12915,7 +12919,8 @@ fn writeSourceType(
                 }
             }
             try out.appendSlice(gpa, "->");
-            try writeSourceType(gpa, ast, res, memo, out, callable.result, reading, depth + 1);
+            // An omitted result is `()`, which no other result is written as.
+            if (callable.result.wasWritten()) try writeSourceType(gpa, ast, res, memo, out, callable.result, reading, depth + 1) else try out.appendSlice(gpa, "()");
             for (ast.contracts[callable.contracts.start..callable.contracts.end]) |contract| {
                 try out.print(gpa, "+contract{d}{}", .{ @intFromEnum(contract.kind), contract.borrows_source });
                 for ([_]node_mod.ContractPath{ contract.source, contract.destination, contract.target }) |path| {
@@ -13011,7 +13016,7 @@ test "source bound identity folds callable defaults" {
         \\    A: Give[fn(read value: UInt8 = 1 + 1) -> UInt8],
         \\    B: Give[fn(read value: UInt8 = 2) -> UInt8],
         \\    C: Give[fn(read value: UInt8 = 3) -> UInt8],
-        \\](_a: A, _b: B, _c: C) -> () {}
+        \\](_a: A, _b: B, _c: C) {}
         ,
     };
     var sink = Sink.init(gpa);
@@ -20279,7 +20284,7 @@ test "body type annotations receive every settled-reference oracle visit" {
     var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
         \\trait Has { type Item: Copyable }
         \\struct Cell[X] { value: X }
-        \\fn _invoke[T: Has](value: T.Item) -> () {
+        \\fn _invoke[T: Has](value: T.Item) {
         \\    let _direct = [value] || -> T.Item where carries(value) copy(value)
         \\    let _grouped = [value] || -> (T.Item) where carries(value) copy(value)
         \\    let _array = [value] || -> [T.Item; 1] where carries(value) [copy(value)]

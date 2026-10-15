@@ -143,7 +143,7 @@ fn calls() -> UInt8 {
 ==================
 A marked postfix call lends its receiver, and the mark binds to the first call
 ==================
-fn calls() -> () {
+fn calls() {
     &counter.bump()
     &tally.counter.add(2)
     &counters[1].bump()
@@ -157,7 +157,6 @@ fn calls() -> () {
   (function_declaration
     (identifier)
     (parameter_list)
-    (unit_type)
     (block
       (expression_statement
         (call_expression

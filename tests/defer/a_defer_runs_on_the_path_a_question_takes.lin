@@ -2,7 +2,7 @@
 // nothing is written at the point control leaves. The schedule reaches it
 // anyway, which is the whole reason `defer` is worth having in a language with
 // `?`.
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n = n + 1
 }
 

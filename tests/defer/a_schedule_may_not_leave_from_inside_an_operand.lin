@@ -4,7 +4,7 @@
 // The `return` below runs the schedules on its way out, and the schedule it
 // runs leaves from underneath it. Whatever the rule says, the frontend walks
 // the whole tree first and may not fall over doing it.
-fn take(sink _a: UInt8, _b: UInt8) -> () {
+fn take(sink _a: UInt8, _b: UInt8) {
     let _n = _a
 }
 

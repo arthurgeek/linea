@@ -2,11 +2,11 @@
 // iteration rather than once at the end of the loop. Accumulating the
 // schedules instead would need a list that grows at run time, which is the
 // drop-flag machinery under another name.
-fn bump(inout n: UInt8) -> () {
+fn bump(inout n: UInt8) {
     n = n + 1
 }
 
-fn go(inout n: UInt8) -> () {
+fn go(inout n: UInt8) {
     var i: UInt8 = 0
     while i < 3 {
         defer bump(&n)

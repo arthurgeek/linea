@@ -6499,7 +6499,7 @@ test "result and slot roles survive lowering" {
         \\struct Cell { value: UInt8 }
         \\fn make() -> Cell { .{ value = 9 } }
         \\
-        \\fn replace(inout x: UInt8) -> () {
+        \\fn replace(inout x: UInt8) {
         \\    x = 7
         \\}
         \\
@@ -6774,7 +6774,7 @@ test "lowering emits the discovered instance set and order" {
         \\fn recurse[T: Copyable](x: T, n: UInt8) -> T {
         \\    if n == 0 { copy(x) } else { recurse(x, n - 1) }
         \\}
-        \\fn later[T: Copyable](_x: T) -> () {}
+        \\fn later[T: Copyable](_x: T) {}
         \\
         \\fn main() -> UInt8 {
         \\    defer later(true)
@@ -7560,10 +7560,10 @@ test "immutable two-target callable selections lower to direct branches" {
         },
         .{
             .text =
-            \\fn first() -> () {}
-            \\fn second() -> () {}
+            \\fn first() {}
+            \\fn second() {}
             \\fn main() -> UInt8 {
-            \\    let selected: fn() -> () = if true { first } else { second }
+            \\    let selected: fn() = if true { first } else { second }
             \\    selected()
             \\    7
             \\}
@@ -7737,9 +7737,9 @@ test "a match arm with a Never payload has no value to bind" {
     const gpa = arena.allocator();
     var module = try lowerSource(gpa,
         \\enum Box[T] { None, Some(T) }
-        \\trait Discard { fn discard(sink self: Self) -> () }
+        \\trait Discard { fn discard(sink self: Self) }
         \\impl[T: Discardable] Discard for Box[T] {
-        \\    fn discard(sink self: Self) -> () {
+        \\    fn discard(sink self: Self) {
         \\        match self { None => {}, Some(value) => { let _ = value } }
         \\    }
         \\}
@@ -7855,10 +7855,10 @@ test "borrow values implement their own consuming traits" {
     defer arena.deinit();
     const gpa = arena.allocator();
     var module = try lowerSource(gpa,
-        \\trait Release { fn release(sink self: Self) -> () }
-        \\impl[T] Release for borrow T { fn release(sink _self: Self) -> () {} }
+        \\trait Release { fn release(sink self: Self) }
+        \\impl[T] Release for borrow T { fn release(sink _self: Self) {} }
         \\@linear struct Owner { value: UInt8 }
-        \\fn drop[T: Release](sink value: T) -> () { Release.release(value) }
+        \\fn drop[T: Release](sink value: T) { Release.release(value) }
         \\fn main() -> UInt8 {
         \\    let owner: Owner = .{ value = 7 }
         \\    drop(borrow owner)

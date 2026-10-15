@@ -6,7 +6,7 @@ import std.mem
 use mem.Arena
 use mem.system
 
-fn discard[T: Release](sink value: T) -> () {
+fn discard[T: Release](sink value: T) {
     Release.release(value)
 }
 
