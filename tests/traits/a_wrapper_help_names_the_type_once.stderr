@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Ordered`, and `Vec[Float64, mem.SystemAllocator]` does not implement it
+ --> tests/traits/a_wrapper_help_names_the_type_once.lin:5:11
+  |
+5 |     &rows.sort()
+  |           ^^^^ `Vec[Float64, mem.SystemAllocator]` and `Ordered` are both declared outside this program; wrap it in a type that implements `Ordered`

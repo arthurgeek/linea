@@ -7,4 +7,4 @@ error[T-Bound]: `T` requires `Encode`, and `Choice` does not implement it
   --> tests/json_typed/encode_enum_refused.lin:10:10
    |
 10 |     json.encode(&output, value).unwrap()
-   |          ^^^^^^ implement it for that type, or drop the bound
+   |          ^^^^^^ implement it for that type

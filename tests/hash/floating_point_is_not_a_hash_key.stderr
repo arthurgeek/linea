@@ -2,4 +2,4 @@ error[T-Bound]: `Hash` requires `Self` to implement it, and `Float64` does not
  --> tests/hash/floating_point_is_not_a_hash_key.lin:4:26
   |
 4 |     UInt8(hash.Hash.hash(1.0) % 256)
-  |                          ^^^ implement it for that type, or reach the operation on one that does
+  |                          ^^^ `Float64` and `Hash` are both declared outside this program; wrap it in a type that implements `Hash`, or reach the operation on one that does

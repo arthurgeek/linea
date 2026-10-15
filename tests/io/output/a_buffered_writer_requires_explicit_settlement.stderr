@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Release`, and `io.BufferedWriter[io.Descriptor, me
   --> tests/io/output/a_buffered_writer_requires_explicit_settlement.lin:12:5
    |
 12 |     consume(output)
-   |     ^^^^^^^ implement it for that type, or drop the bound
+   |     ^^^^^^^ `io.BufferedWriter[io.Descriptor, mem.SystemAllocator]` and `Release` are both declared outside this program; wrap it in a type that implements `Release`, or drop the bound

@@ -69,6 +69,33 @@ test fn frequency_keys_own_unicode_text_after_input_is_released() {
     testing.assert_eq(*counts.get("東京").unwrap(), 1, "owned multibyte key changed")?
 }
 
+// `RankedLines[A]` lists the entries of a `LineCounts[A]`, each borrowed
+// from the map, in the order the report prints them. The list itself is
+// allocated by the system allocator.
+alias RankedLines[A: Allocator] = Vec[borrow collections.Entry[String[A], UInt64], mem.SystemAllocator]
+
+// A map keeps no order, so `ranked` collects its entries into a vector and
+// sorts that: the most frequent lines first, and lines with equal counts in
+// the order `<` gives text, by Unicode scalar value. `entries()` borrows each
+// pair, so the lines and counts stay in the map.
+fn ranked[A: Allocator](counts: LineCounts[A]) -> Result[RankedLines[A], mem.Oom] where borrows(.Ok: counts) {
+    let { values, iterator: _ } = counts.entries().collect().settled()?
+    var rows = values
+    // `sort_by` takes a comparison that says whether `left` belongs before
+    // `right`.
+    &rows.sort_by(|left, right| left.value > right.value || (left.value == right.value && left.key.view() < right.key.view()))
+    .Ok(rows)
+}
+
+test fn ranked_lines_put_the_most_frequent_first_and_break_ties_by_text() {
+    defer let counts = count_lines("jam\ntea\nbread\ntea\njam\ntea\nbread\ncoffee\n").unwrap()
+    defer let rows = ranked(counts).unwrap()
+    testing.assert_eq(rows.length(), UInt64(4), "a counted line was not ranked")?
+    testing.assert(rows[0].key.view() == "tea" && rows[0].value == 3, "the most frequent line was not first")?
+    testing.assert(rows[1].key.view() == "bread" && rows[2].key.view() == "jam", "lines with equal counts were not in text order")?
+    testing.assert(rows[3].key.view() == "coffee" && rows[3].value == 1, "the least frequent line was not last")?
+}
+
 // Accept at most 1 MiB of input (1024 * 1024 UTF-8 bytes).
 let max_input_bytes: UInt64 = 1048576
 
@@ -120,11 +147,14 @@ fn main() -> Result[UInt8, io.IoError] {
         io.eprintln("could not allocate frequencies: {reason:?}")
         return .Ok(1)
     }
-    io.println("Frequencies ({counts.length()} distinct lines; order unspecified):")?
-    // `entries()` walks the map's pairs and leaves them in the map.
-    for entry in counts.entries() {
+    defer let rows = ranked(counts) else |reason| {
+        io.eprintln("could not allocate the report: {reason:?}")
+        return .Ok(1)
+    }
+    io.println("Frequencies ({rows.length()} distinct lines, most frequent first):")?
+    for row in rows.as_slice() {
         // `:>7` right-aligns each count in seven columns, as `uniq -c` does.
-        io.println("{entry.value:>7} {entry.key.view()}")?
+        io.println("{row.value:>7} {row.key.view()}")?
     }
     .Ok(0)
 }

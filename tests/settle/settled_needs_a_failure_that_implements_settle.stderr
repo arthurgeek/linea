@@ -2,4 +2,4 @@ error[T-Bound]: `E` requires `Settle`, and `Str` does not implement it
  --> tests/settle/settled_needs_a_failure_that_implements_settle.lin:5:18
   |
 5 |     match parsed.settled() {
-  |                  ^^^^^^^ implement it for that type, or drop the bound
+  |                  ^^^^^^^ `Str` and `Settle` are both declared outside this program; wrap it in a type that implements `Settle`

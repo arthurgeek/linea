@@ -2905,6 +2905,24 @@ type to be Discardable, and the fix is to give the value to an operation that
 keeps it or to settle it before. A bound written on a type parameter,
 `[T: Discardable]`, states what the parameter must be and keeps the general help.
 
+Where the unmet requirement is a trait, the help offers only edits the program
+can make. It offers implementing the trait for the type when a module of the
+program owns a side of that implementation under [M-Impl]. When neither side is
+the program's, as with `Ordered` and `Float64`, which the library declares, the
+help says so and offers a type the program declares that wraps the type and
+implements the trait. For a type no module declares, such as a closure or a
+function type, only the trait's module may implement it; when that module is
+outside the program, the help says so and offers passing a value of a type that
+implements the trait. It offers dropping the bound only where the program wrote
+the bound, not where the library did.
+
+Where an implementation matches the type but one of its own requirements is
+unmet, a note names that requirement, following it down to the last one unmet,
+and implementing the trait again would overlap that implementation. The help
+then offers meeting that last requirement, under the same rule: where the
+program may not write its implementation either, as with `Iterator` for
+`UInt64`, the help says so and offers a wrapper instead.
+
 The closed `Integer` bound admits exactly Int8, Int16, Int32, Int64, UInt8,
 UInt16, UInt32 and UInt64. It excludes Bool, Float64, nominal newtypes and
 user-defined types. It takes no arguments and cannot be implemented by a user. A

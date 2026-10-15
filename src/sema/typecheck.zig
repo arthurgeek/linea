@@ -10194,10 +10194,10 @@ const Checker = struct {
             try self.noteRefused(at);
             if (traitAt(self.ast, self.res, bound.named.name)) |refused_trait|
                 try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .trait = .{ .decl = refused_trait, .args = args } } });
-            try self.reportUnimplemented(
+            try self.reportUnmet(
                 self.ast.fileOf(at),
                 span,
-                "implement it for that type, or drop the bound",
+                self.unmetBoundHelp(bound.named.name),
                 "`{s}` requires `{s}`, and `{s}` does not implement it",
                 .{ subject, asks, (try self.heldName(held)) },
                 traitAt(self.ast, self.res, bound.named.name) orelse .none,
@@ -10886,13 +10886,14 @@ const Checker = struct {
 
     /// A trait operation reached at a `Self` that does not implement its trait.
     fn reportSelfUnimplemented(self: *Checker, at: Loc, trait: TokenId, held: TypeId) std.mem.Allocator.Error!void {
-        try self.reportUnimplemented(
+        const trait_decl = traitAt(self.ast, self.res, trait) orelse .none;
+        try self.reportUnmet(
             at.file,
             at.span,
-            "implement it for that type, or reach the operation on one that does",
+            unmet_self_help,
             "`{s}` requires `Self` to implement it, and `{s}` does not",
             .{ self.ast.tokenText(trait), (try self.typeName(held)) },
-            traitAt(self.ast, self.res, trait) orelse .none,
+            trait_decl,
             &.{},
             held,
         );
@@ -11854,6 +11855,93 @@ const Checker = struct {
         return self.record(id, .poison);
     }
 
+    /// What a refused trait requirement's help offers besides implementing
+    /// the trait: dropping the bound where the program wrote it, or reaching
+    /// the operation on another type. The label itself is chosen where the
+    /// report is built, once the notes say whether a matching implementation
+    /// has an unmet requirement of its own.
+    const UnmetHelp = struct {
+        /// The alternative edit, or empty where there is none.
+        otherwise: []const u8,
+        /// Whether to offer a value of another type where no module of the
+        /// program may write the implementation and no wrapper can be named.
+        /// Reaching the operation on another type already says this.
+        offers_passing: bool,
+    };
+
+    /// The help a refused bound gives: dropping the bound is offered only
+    /// where the program wrote it.
+    fn unmetBoundHelp(self: *Checker, bound_name: TokenId) UnmetHelp {
+        const bound_module = self.res.moduleOfFile(self.ast.fileOf(bound_name));
+        const droppable = bound_module == .none or !self.program.get(bound_module).library;
+        return .{ .otherwise = if (droppable) "drop the bound" else "", .offers_passing = true };
+    }
+
+    /// The help a trait operation reached at a `Self` that does not
+    /// implement the trait gives.
+    const unmet_self_help: UnmetHelp = .{ .otherwise = "reach the operation on one that does", .offers_passing = false };
+
+    /// The edit offered where a matching implementation has an unmet
+    /// requirement of its own that the program may meet.
+    const noted_requirement = "meet what the implementation below requires";
+
+    /// The label of a refused requirement, naming only edits this program
+    /// can make. `trait` and `held` are the requirement the edit would meet:
+    /// the refused one, or, where a matching implementation has an unmet
+    /// requirement of its own, the deepest one the notes name. `first` is the
+    /// edit to offer where the program may write that implementation.
+    fn unmetLabel(self: *Checker, help: UnmetHelp, trait: node.DeclId, held: TypeId, first: []const u8) std.mem.Allocator.Error![]const u8 {
+        const sep: []const u8 = if (help.otherwise.len > 0) ", or " else "";
+        const refusal = try self.programCannotImplement(trait, held) orelse
+            return std.fmt.allocPrint(self.sink.arena, "{s}{s}{s}", .{ first, sep, help.otherwise });
+        if (refusal.instead) |instead|
+            return std.fmt.allocPrint(self.sink.arena, "{s}; {s}{s}{s}", .{ refusal.reason, instead, sep, help.otherwise });
+        if (help.offers_passing)
+            return std.fmt.allocPrint(self.sink.arena, "{s}; pass a value whose type implements it{s}{s}", .{ refusal.reason, sep, help.otherwise });
+        return std.fmt.allocPrint(self.sink.arena, "{s}; {s}", .{ refusal.reason, help.otherwise });
+    }
+
+    /// Why no module of this program may implement a trait for a type, and
+    /// what the program can write instead.
+    const ImplementRefusal = struct {
+        reason: []const u8,
+        /// A wrapper type the program can declare, where the type has a
+        /// declaration to wrap; null for one such as a closure, where the
+        /// program can only pass a value of another type.
+        instead: ?[]const u8,
+    };
+
+    /// Why no module of this program may implement `trait` for `held`, or
+    /// null where one may, and where `held` is a parameter, which whatever
+    /// settles it answers for. The only modules that can own a side of the
+    /// implementation are the trait's and the type's, so the ownership rule
+    /// is asked of each that the program wrote.
+    fn programCannotImplement(self: *Checker, trait: node.DeclId, held: TypeId) std.mem.Allocator.Error!?ImplementRefusal {
+        if (trait == .none or held == .poison) return null;
+        const side: resolve_mod.ImplTypeSide = if (self.declaringType(held)) |d|
+            .{ .declared = self.program.moduleOf(d) }
+        else switch (self.builder.get(held)) {
+            .integer, .boolean, .float, .never => .primitive,
+            .parameter, .open_integer, .open_type, .poison => return null,
+            else => .unowned,
+        };
+        const trait_module = self.program.moduleOf(trait);
+        const candidates = [_]ModuleId{ trait_module, if (side == .declared) side.declared else .none };
+        for (candidates) |writer| {
+            if (writer == .none or self.program.get(writer).library) continue;
+            if (resolve_mod.ownsAnImplSide(writer, false, side, trait_module)) return null;
+        }
+        const trait_name = self.ast.tokenText(self.ast.declName(trait));
+        if (side == .unowned) return .{
+            .reason = try std.fmt.allocPrint(self.sink.arena, "only the module declaring `{s}` can implement it for this type, and it is outside this program", .{trait_name}),
+            .instead = null,
+        };
+        return .{
+            .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` and `{s}` are both declared outside this program", .{ try self.typeName(held), trait_name }),
+            .instead = try std.fmt.allocPrint(self.sink.arena, "wrap it in a type that implements `{s}`", .{trait_name}),
+        };
+    }
+
     /// Reports that `held` does not implement `trait`, with a note naming the
     /// requirement of a matching implementation that its arguments fail:
     /// `Labelled[T]` implements `Equatable` when `T` does, and `Token` does
@@ -11873,10 +11961,56 @@ const Checker = struct {
         trait_args: []const TypeId,
         held: TypeId,
     ) std.mem.Allocator.Error!void {
+        return self.reportLabelled(file, span, label, fmt, fmt_args, trait, trait_args, held, null);
+    }
+
+    /// `reportUnimplemented` for a refused trait requirement, labelled with
+    /// the edits `help` and the ownership rule leave this program. Where a
+    /// note names a matching implementation's unmet requirement, implementing
+    /// the trait again would overlap that implementation, so the label is
+    /// about the deepest requirement the notes name.
+    fn reportUnmet(
+        self: *Checker,
+        file: FileId,
+        span: Span,
+        help: UnmetHelp,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+        trait: node.DeclId,
+        trait_args: []const TypeId,
+        held: TypeId,
+    ) std.mem.Allocator.Error!void {
+        return self.reportLabelled(file, span, "", fmt, fmt_args, trait, trait_args, held, help);
+    }
+
+    /// The report `reportUnimplemented` and `reportUnmet` both make: labelled
+    /// `label`, or, given `help`, by `unmetLabel` once the notes are known.
+    fn reportLabelled(
+        self: *Checker,
+        file: FileId,
+        span: Span,
+        label: []const u8,
+        comptime fmt: []const u8,
+        fmt_args: anytype,
+        trait: node.DeclId,
+        trait_args: []const TypeId,
+        held: TypeId,
+        help: ?UnmetHelp,
+    ) std.mem.Allocator.Error!void {
         const labels = try self.sink.arena.alloc(Label, 1);
-        labels[0] = .{ .file = file, .span = span, .message = label, .style = .primary };
         var notes: std.ArrayList([]const u8) = .empty;
-        _ = try self.unmetNotes(&notes, trait, trait_args, held);
+        var deepest: ?UnmetDeepest = null;
+        _ = try self.unmetNotes(&notes, trait, trait_args, held, &deepest);
+        const message = if (help) |offered|
+            if (deepest) |requirement|
+                try self.unmetLabel(offered, requirement.trait, requirement.held, noted_requirement)
+            else if (notes.items.len > 0)
+                try self.unmetLabel(offered, .none, held, noted_requirement)
+            else
+                try self.unmetLabel(offered, trait, held, "implement it for that type")
+        else
+            label;
+        labels[0] = .{ .file = file, .span = span, .message = message, .style = .primary };
         try self.callableHeadNotes(&notes, trait, trait_args, held);
         try self.sink.add(.{
             .severity = .err,
@@ -12039,6 +12173,9 @@ const Checker = struct {
     /// separates a type that fails an implementation's requirement from one no
     /// implementation was written for.
     ///
+    /// Where the chain ends at a trait, `deepest` is set to the last
+    /// requirement a note names: the one an edit of the program would meet.
+    ///
     /// **Bound:** `unmet_requirement_depth` notes.
     fn unmetNotes(
         self: *Checker,
@@ -12046,6 +12183,7 @@ const Checker = struct {
         trait: node.DeclId,
         trait_args: []const TypeId,
         held: TypeId,
+        deepest: ?*?UnmetDeepest,
     ) std.mem.Allocator.Error!bool {
         var named = false;
         var asked_trait = trait;
@@ -12079,6 +12217,7 @@ const Checker = struct {
                     .{ (try self.heldName(unmet.head)), implemented, (try self.typeName(unmet.subject)), required, (try self.typeName(unmet.argument)) },
                 ));
                 self.gpa.free(unmet.args);
+                if (deepest) |out| out.* = null;
                 return true;
             }
             const required = try self.builder.spellInstance(self.ast.tokenText(self.ast.declName(unmet.trait)), unmet.args);
@@ -12104,9 +12243,16 @@ const Checker = struct {
             asked_trait = unmet.trait;
             asked_args = unmet.args;
             asked_type = unmet.argument;
+            if (deepest) |out| out.* = .{ .trait = asked_trait, .held = asked_type };
         }
         return named;
     }
+
+    /// The last trait requirement a chain of unmet-requirement notes names.
+    const UnmetDeepest = struct {
+        trait: node.DeclId,
+        held: TypeId,
+    };
 
     /// Adds to the diagnostic the sink holds at `at` the notes saying which
     /// requirement keeps `held` from implementing `trait`, where it fails one
@@ -12114,7 +12260,7 @@ const Checker = struct {
     fn explainMissing(self: *Checker, at: usize, trait: node.DeclId, held: TypeId) std.mem.Allocator.Error!void {
         var notes: std.ArrayList([]const u8) = .empty;
         defer notes.deinit(self.gpa);
-        if (!try self.unmetNotes(&notes, trait, &.{}, held)) return;
+        if (!try self.unmetNotes(&notes, trait, &.{}, held, null)) return;
         for (notes.items) |note| try self.addNote(at, note);
     }
 

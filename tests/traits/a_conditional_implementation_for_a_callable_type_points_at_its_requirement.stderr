@@ -1,0 +1,7 @@
+error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read visitor: Visitor, read request: Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(request)` does not implement it
+  --> tests/traits/a_conditional_implementation_for_a_callable_type_points_at_its_requirement.lin:16:26
+   |
+16 |     let routed = &router.route("GET /", greet)
+   |                          ^^^^^ meet what the implementation below requires
+   |
+   = help: `fn(read a: A, read request: Request[P]) -> Result[Response[P], Error[P]] where carries(request)` implements `Endpoint[(), SystemAllocator]` when `A` implements `Extract[SystemAllocator]`, and `Visitor` does not

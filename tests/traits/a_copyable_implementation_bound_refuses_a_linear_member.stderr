@@ -2,6 +2,6 @@ error[T-Bound]: `S` requires `Show`, and `Holder[Key]` does not implement it
   --> tests/traits/a_copyable_implementation_bound_refuses_a_linear_member.lin:22:13
    |
 22 |     let n = shown(h)
-   |             ^^^^^ implement it for that type, or drop the bound
+   |             ^^^^^ meet what the implementation below requires, or drop the bound
    |
    = help: `Holder[T]` implements `Show` when `T` is `Copyable`, and `Key` is not

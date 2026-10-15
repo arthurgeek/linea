@@ -2,6 +2,6 @@ error[T-Bound]: `Iterator` requires `Self` to implement it, and `Selected[Tokens
   --> tests/generics/an_impl_where_predicate_is_checked_at_the_call.lin:34:26
    |
 34 |     match Iterator.next(&selected) {
-   |                          ^^^^^^^^ implement it for that type, or reach the operation on one that does
+   |                          ^^^^^^^^ meet what the implementation below requires, or reach the operation on one that does
    |
    = help: `Selected[I]` implements `Iterator` when `I.Item` is `Discardable`, and `Token` is not

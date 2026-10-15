@@ -2,7 +2,7 @@ error[T-Bound]: `Ordered` requires `Comparable`, and `Token` does not implement 
  --> tests/traits/standard_ordered_requires_the_complete_family.lin:5:8
   |
 5 | derive Ordered for Token
-  |        ^^^^^^^ implement it for that type, or drop the bound
+  |        ^^^^^^^ implement it for that type
 error[T-Derive]: `Token` cannot derive `Ordered` because its `Comparable` prerequisite is absent or has stronger constraints
  --> tests/traits/standard_ordered_requires_the_complete_family.lin:5:8
   |

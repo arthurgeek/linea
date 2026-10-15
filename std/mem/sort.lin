@@ -1,0 +1,416 @@
+import std.testing
+
+// Sorting reorders a vector's elements in place. Both operations are stable,
+// allocate nothing, and move elements only by swapping two of them, so the
+// vector holds every one of its elements at each call of the comparison.
+impl[T: Ordered, A: Allocator] Vec[T, A] {
+    // Put the elements in ascending order by `<`. Equal elements keep their
+    // relative order. `T` must be `Ordered`, a total order, so that the result
+    // is defined for every input; `Float64` is only `Comparable`, because NaN
+    // is ordered against nothing, so a vector of floats is sorted with
+    // `sort_by` and a comparison that decides where NaN goes. Costs are those of
+    // `sort_by`.
+    pub fn sort(inout self: Self) -> () {
+        &self.sort_by(|left, right| left < right)
+    }
+}
+
+test fn sort_orders_integers_ascending() {
+    defer var values = sort_test_values([UInt64(5), 3, 9, 1, 3, 7].as_slice())
+    &values.sort()
+    testing.assert_eq(values.as_slice(), [UInt64(1), 3, 3, 5, 7, 9].as_slice(), "the integers were not sorted")?
+}
+
+test fn sort_keeps_sorted_input_and_reverses_descending_input() {
+    defer var ascending = Vec.from_fn(count: 100, initializer: |index| index).unwrap()
+    defer var descending = Vec.from_fn(count: 100, initializer: |index| 99 - index).unwrap()
+    &ascending.sort()
+    &descending.sort()
+    var ordered = true
+    for index in UInt64(0)..100 {
+        ordered = ordered && ascending[index] == index && descending[index] == index
+    }
+    testing.assert(ordered, "sorted or reversed input did not end ascending")?
+}
+
+test fn sort_orders_text_and_derived_orders() {
+    defer var words: Vec[Str] = Vec.new()
+    for word in ["pear", "apple", "fig", "apple"] {
+        &words.push(word).unwrap()
+    }
+    &words.sort()
+    testing.assert_eq(words.as_slice(), ["apple", "apple", "fig", "pear"].as_slice(), "the words were not in alphabetical order")?
+    defer var pairs: Vec[(UInt8, Str)] = Vec.new()
+    &pairs.push((2, "b")).unwrap()
+    &pairs.push((1, "z")).unwrap()
+    &pairs.push((2, "a")).unwrap()
+    &pairs.sort()
+    testing.assert_eq(pairs.as_slice(), [(UInt8(1), "z"), (2, "a"), (2, "b")].as_slice(), "tuples were not ordered by their first differing component")?
+}
+
+impl[T, A: Allocator] Vec[T, A] {
+    // Reorder the elements so that `less(left, right)` is false for every
+    // element `left` that ends up after an element `right`, keeping equal
+    // elements, those `less` orders in neither direction, in their relative
+    // order. `less` must be a strict weak order: never true for an element and
+    // itself, transitive, and with "neither is less" transitive too. Given any
+    // other comparison the sort still returns, and the vector holds the same
+    // elements in an unspecified order. `less` cannot observe the vector, which
+    // is lent to the sort, and a `less` that panics ends the program without
+    // unwinding, so no caller sees a partly sorted vector. The sort allocates
+    // nothing and cannot fail; for n elements it makes O(n log n) calls of
+    // `less` and O(n log² n) swaps.
+    pub fn sort_by[F: inout fn(read left: T, read right: T) -> Bool](inout self: Self, sink less: F) -> () where F: Discardable {
+        var ordering = less
+        stable_sort(&self, &ordering)
+    }
+}
+
+test fn sorting_an_empty_or_one_element_vector_compares_nothing() {
+    defer var empty: Vec[UInt64] = Vec.new()
+    defer var single = sort_test_values([UInt64(4)].as_slice())
+    var calls: UInt64 = 0
+    &empty.sort_by(
+        inout [inout calls] |left, right| {
+            calls += 1
+            left < right
+        },
+    )
+    &single.sort_by(
+        inout [inout calls] |left, right| {
+            calls += 1
+            left < right
+        },
+    )
+    testing.assert_eq(empty.length(), UInt64(0), "sorting an empty vector added an element")?
+    testing.assert_eq(single.as_slice(), [UInt64(4)].as_slice(), "sorting one element changed it")?
+    testing.assert_eq(calls, UInt64(0), "a vector with nothing to order called the comparison")?
+}
+
+test fn sort_by_keeps_equal_keys_in_order_at_every_length_up_to_seventy() {
+    var failures: UInt64 = 0
+    for count in UInt64(0)..=70 {
+        var probes = sort_test_probes(count, keys: 5, seed: count + 1)
+        &probes.sort_by(|left, right| left.key < right.key)
+        if !sorted_stably(&probes) {
+            failures += 1
+        }
+        probes.release()
+    }
+    testing.assert_eq(failures, UInt64(0), "a short vector was not sorted stably")?
+}
+
+test fn sort_by_sorts_a_large_random_vector_stably() {
+    for keys in [UInt64(7), 1000, 1000000] {
+        defer var probes = sort_test_probes(3000, keys, seed: keys)
+        &probes.sort_by(|left, right| left.key < right.key)
+        testing.assert(sorted_stably(&probes), "a large vector was not a stably sorted permutation")?
+    }
+}
+
+test fn sort_by_makes_n_log_n_comparisons() {
+    defer var probes = sort_test_probes(4096, keys: 4096, seed: 9)
+    var calls: UInt64 = 0
+    &probes.sort_by(
+        inout [inout calls] |left, right| {
+            calls += 1
+            left.key < right.key
+        },
+    )
+    // 4096 is 2^12. A random vector this size takes about 1.1 n log2 n
+    // comparisons. Allow twice n log2 n; a quadratic sort such as insertion
+    // sort would take about n² / 4, over four million.
+    testing.assert(calls <= 2 * 4096 * 12, "the sort made more than O(n log n) comparisons")?
+    testing.assert(sorted_stably(&probes), "the counted sort was wrong")?
+}
+
+test fn sorting_allocates_nothing() {
+    defer let log = AllocationLog.open(system(), 0).unwrap()
+    defer var values: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
+    for value in UInt64(0)..500 {
+        &values.push((value * 7919) % 500).unwrap()
+    }
+    let attempts = log.attempts()
+    &values.sort()
+    &values.sort_by(|left, right| left > right)
+    testing.assert_eq(log.attempts(), attempts, "sorting asked the vector's allocator for memory")?
+    testing.assert_eq(values[0], UInt64(499), "the descending sort did not put the largest first")?
+}
+
+test fn an_inconsistent_comparison_leaves_a_permutation() {
+    for count in [UInt64(1), 2, 3, 63, 64, 65, 1000] {
+        defer var probes = sort_test_probes(count, keys: 3, seed: count)
+        var calls: UInt64 = 0
+        // The answer depends on how often the comparison has been called, not
+        // on the elements, so it is not an order at all.
+        &probes.sort_by(
+            inout [inout calls] |_left, _right| {
+                calls += 1
+                calls % 3 == 0
+            },
+        )
+        &probes.sort_by(|_left, _right| true)
+        &probes.sort_by(|left, right| left.key <= right.key)
+        // A correct sort afterwards proves every origin is still present once.
+        &probes.sort_by(|left, right| left.origin < right.origin)
+        var intact = true
+        for index in UInt64(0)..count {
+            intact = intact && probes[index].origin == index
+        }
+        testing.assert(intact, "an inconsistent comparison lost or duplicated an element")?
+    }
+}
+
+test fn sort_by_reorders_linear_elements() {
+    var tickets: Vec[SortTicket] = Vec.new()
+    for number in [UInt64(30), 10, 20] {
+        &tickets.push(.{ number }).unwrap()
+    }
+    &tickets.sort_by(|left, right| left.number < right.number)
+    var order: UInt64 = 0
+    var pending = tickets.drain()
+    for ticket in &pending {
+        let SortTicket { number } = ticket
+        order = order * 100 + number
+    }
+    pending.finish().unwrap()
+    testing.assert_eq(order, UInt64(102030), "the tickets were not moved into ascending order")?
+}
+
+test fn floats_sort_with_a_comparison_that_places_nan() {
+    let nan = Float64(0.0) / 0.0
+    defer var readings: Vec[Float64] = Vec.new()
+    for reading in [Float64(2.5), nan, -1.0, 0.5, nan] {
+        &readings.push(reading).unwrap()
+    }
+    // Put NaN after every number; two NaNs are equal for the sort.
+    &readings.sort_by(|left, right| !left.is_nan() && (right.is_nan() || left < right))
+    testing.assert(readings[0] == -1.0 && readings[1] == 0.5 && readings[2] == 2.5, "the numbers were not ascending")?
+    testing.assert(readings[3].is_nan() && readings[4].is_nan(), "NaN did not sort last")?
+    // `<` orders NaN against nothing, so it is not a strict weak order here;
+    // the sort still returns the same five readings.
+    &readings.sort_by(|left, right| left < right)
+    var nans: UInt64 = 0
+    var sum: Float64 = 0.0
+    for index in UInt64(0)..5 {
+        if readings[index].is_nan() {
+            nans += 1
+        } else {
+            sum += readings[index]
+        }
+    }
+    testing.assert(nans == 2 && sum == 2.0, "sorting floats by `<` lost a reading")?
+}
+
+// Merge neighbouring runs of doubling width, starting from single elements,
+// until one run covers the vector. Each merge works without a buffer: it finds
+// where the two runs cross by binary search, rotates the middle into place
+// and merges the two halves that result. For n elements this makes
+// O(n log n) comparisons and O(n log² n) swaps, and recursion is O(log n)
+// deep. A merge with a buffer would make O(n log n) moves, but it would
+// allocate, so every sort could fail; this one cannot.
+fn stable_sort[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F) -> () {
+    let count = values.len
+    var run: UInt64 = 1
+    while run < count {
+        var start: UInt64 = 0
+        while count - start > run {
+            let middle = start + run
+            let end = if count - middle > run {
+                middle + run
+            } else {
+                count
+            }
+            merge(&values, &less, start, middle, end)
+            start = end
+        }
+        // Stop once one run covers the vector; otherwise doubling cannot
+        // overflow, since `run` is less than half the length.
+        if count - run <= run {
+            break
+        }
+        run += run
+    }
+}
+
+// Merge the sorted runs from `low` to `middle` and from `middle` to `high`,
+// both nonempty, into one sorted run. An element of the first run stays ahead
+// of an equal element of the second.
+fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F, low: UInt64, middle: UInt64, high: UInt64) -> () {
+    if middle - low == 1 {
+        // Move the single first element after every element of the second
+        // run that sorts before it.
+        var first = middle
+        var last = high
+        while first < last {
+            let half = first + (last - first) / 2
+            if sorts_before(&values, &less, half, low) {
+                first = half + 1
+            } else {
+                last = half
+            }
+        }
+        var at = low
+        while at + 1 < first {
+            swap_elements(&values, at, at + 1)
+            at += 1
+        }
+        return
+    }
+    if high - middle == 1 {
+        // Move the single last element before the first element of the first
+        // run that sorts after it.
+        var first = low
+        var last = middle
+        while first < last {
+            let half = first + (last - first) / 2
+            if sorts_before(&values, &less, middle, half) {
+                last = half
+            } else {
+                first = half + 1
+            }
+        }
+        var at = middle
+        while at > first {
+            swap_elements(&values, at, at - 1)
+            at -= 1
+        }
+        return
+    }
+    // Split the range at its midpoint. Search for `start`, the length of the
+    // first run's prefix that stays left of the midpoint, so that the first
+    // run's elements from `start` and the second run's elements up to `end`
+    // trade sides; one rotation swaps them, and each half is merged on its own.
+    let half = low + (high - low) / 2
+    let mirror = half + middle
+    var start = if middle > half {
+        mirror - high
+    } else {
+        low
+    }
+    var bound = if middle > half {
+        half
+    } else {
+        middle
+    }
+    let last = mirror - 1
+    while start < bound {
+        let probe = start + (bound - start) / 2
+        if sorts_before(&values, &less, last - probe, probe) {
+            bound = probe
+        } else {
+            start = probe + 1
+        }
+    }
+    let end = mirror - start
+    if start < middle && middle < end {
+        rotate(&values, start, middle, end)
+    }
+    if low < start && start < half {
+        merge(&values, &less, low, start, half)
+    }
+    if half < end && end < high {
+        merge(&values, &less, half, end, high)
+    }
+}
+
+// Exchange the elements from `low` to `middle` with those from `middle` to
+// `high`, keeping each group's order, by swapping equal-length blocks.
+fn rotate[T, A: Allocator](inout values: Vec[T, A], low: UInt64, middle: UInt64, high: UInt64) -> () {
+    var left = middle - low
+    var right = high - middle
+    while left != right {
+        if left > right {
+            swap_blocks(&values, middle - left, middle, right)
+            left -= right
+        } else {
+            swap_blocks(&values, middle - left, middle + right - left, left)
+            right -= left
+        }
+    }
+    swap_blocks(&values, middle - left, middle, left)
+}
+
+// Swap the `count` elements from `first` with the `count` from `second`.
+fn swap_blocks[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64, count: UInt64) -> () {
+    for offset in 0..count {
+        swap_elements(&values, first + offset, second + offset)
+    }
+}
+
+// Return whether element `first` sorts before element `second`.
+fn sorts_before[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F, first: UInt64, second: UInt64) -> Bool {
+    &less(values[first], values[second])
+}
+
+// Exchange elements `first` and `second`, two live indexes.
+fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64) -> () {
+    let shape: SlotType[T] = .Type
+    let stride = slot_stride(shape)
+    let at = values.storage.at
+    let extent = values.storage.len
+    let earlier: T = slot_take(&values.storage, at, extent, first * stride)
+    let later: T = slot_take(&values.storage, at, extent, second * stride)
+    slot_put(&values.storage, at, extent, first * stride, later)
+    slot_put(&values.storage, at, extent, second * stride, earlier)
+}
+
+// Build a vector of the given integers, in order.
+fn sort_test_values(values: Slice[UInt64]) -> Vec[UInt64] {
+    var built: Vec[UInt64] = Vec.new()
+    for value in copy(values) {
+        &built.push(*value).unwrap()
+    }
+    built
+}
+
+// A SortProbe is sorted by `key` alone; `origin` is its position before the
+// sort, so the result shows whether equal keys kept their order.
+@derive(Release)
+struct SortProbe {
+    key: UInt64,
+    origin: UInt64,
+}
+
+// Build `count` probes whose keys lie below `keys`, drawn from a linear
+// congruential generator started at `seed`. The generator's state stays below
+// 2^31, so its product with the multiplier fits a UInt64.
+fn sort_test_probes(count: UInt64, keys: UInt64, seed: UInt64) -> Vec[SortProbe] {
+    var state = seed
+    Vec.from_fn(
+        count,
+        inout [inout state, keys] |index| {
+            state = (state * 1103515245 + 12345) % 2147483648
+            SortProbe { key = (state / 65536) % keys, origin = index }
+        },
+    ).unwrap()
+}
+
+// Return whether `probes` holds every origin from zero below its length
+// exactly once, with keys ascending and equal keys in ascending origin.
+fn sorted_stably(inout probes: Vec[SortProbe]) -> Bool {
+    let count = probes.length()
+    var seen = Vec.filled(count, value: false).unwrap()
+    var holds = true
+    for index in UInt64(0)..count {
+        let origin = probes[index].origin
+        if origin >= count || seen[origin] {
+            holds = false
+        } else {
+            seen[origin] = true
+        }
+        if index > 0 {
+            let previous = probes[index - 1].key
+            let key = probes[index].key
+            holds = holds && (previous < key || (previous == key && probes[index - 1].origin < origin))
+        }
+    }
+    seen.release()
+    holds
+}
+
+// A SortTicket is linear: the sort must move each one exactly once.
+@linear
+struct SortTicket {
+    number: UInt64,
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Ordered`, and `Float64` does not implement it
+ --> tests/traits/a_bound_neither_side_of_which_the_program_declares_offers_a_wrapper.lin:7:15
+  |
+7 |     &readings.sort()
+  |               ^^^^ `Float64` and `Ordered` are both declared outside this program; wrap it in a type that implements `Ordered`

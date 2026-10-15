@@ -7,6 +7,6 @@ error[T-Bound]: `Sequence` requires `Self` to implement it, and `UInt64` does no
  --> tests/iter/operations/only_a_sequence_is_walked.lin:7:32
   |
 7 |     let written = Sequence.map(count, |sink value| value * 2)
-  |                                ^^^^^ implement it for that type, or reach the operation on one that does
+  |                                ^^^^^ `UInt64` and `Iterator` are both declared outside this program; wrap it in a type that implements `Iterator`, or reach the operation on one that does
   |
   = help: every type implementing `Iterator` implements `Sequence`, and `UInt64` does not implement `Iterator`

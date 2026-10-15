@@ -2,6 +2,6 @@ error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `<closure>` do
  --> tests/http/a_closure_is_registered_with_route_raw_and_not_route.lin:7:26
   |
 7 |     let routed = &router.route("GET /", |inout _state: (), request: http.Request| http.text(request, "x"))
-  |                          ^^^^^ implement it for that type, or drop the bound
+  |                          ^^^^^ only the module declaring `Endpoint` can implement it for this type, and it is outside this program; pass a value whose type implements it
   |
   = help: a closure's type is its own, so it matches none of the callable types `Endpoint` is implemented for; pass a named function

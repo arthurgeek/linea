@@ -914,6 +914,7 @@ The library tests itself.
   ok    mem.an_empty_buffer_is_allocated_rather_than_refused
   ok    mem.an_empty_slice_accepts_its_empty_subspan
   ok    mem.an_exchange_returns_the_value_it_replaces
+  ok    mem.an_inconsistent_comparison_leaves_a_permutation
   ok    mem.arena_vector_discard_does_not_invoke_optional_element_release
   ok    mem.as_slice_views_only_the_live_elements
   ok    mem.attempts_count_refused_acquisitions_too
@@ -930,6 +931,7 @@ The library tests itself.
   ok    mem.fd_reads_reject_a_count_past_the_remaining_buffer
   ok    mem.fd_reads_reject_an_offset_past_the_buffer
   ok    mem.filled_repeats_a_value_in_the_system_allocator
+  ok    mem.floats_sort_with_a_comparison_that_places_nan
   ok    mem.from_fn_builds_a_vector_in_the_system_allocator
   ok    mem.from_fn_inout_builds_a_vector_in_the_system_allocator
   ok    mem.from_fn_takes_an_initializer_that_changes_a_lent_count
@@ -955,6 +957,15 @@ The library tests itself.
   ok    mem.slice_iteration_retains_order_and_independent_observations
   ok    mem.slices_equal_by_their_elements
   ok    mem.slices_order_by_their_first_different_element
+  ok    mem.sort_by_keeps_equal_keys_in_order_at_every_length_up_to_seventy
+  ok    mem.sort_by_makes_n_log_n_comparisons
+  ok    mem.sort_by_reorders_linear_elements
+  ok    mem.sort_by_sorts_a_large_random_vector_stably
+  ok    mem.sort_keeps_sorted_input_and_reverses_descending_input
+  ok    mem.sort_orders_integers_ascending
+  ok    mem.sort_orders_text_and_derived_orders
+  ok    mem.sorting_allocates_nothing
+  ok    mem.sorting_an_empty_or_one_element_vector_compares_nothing
   ok    mem.store_byte_traps_past_the_end
   ok    mem.store_traps_at_a_misaligned_offset
   ok    mem.store_traps_past_the_end
@@ -1260,4 +1271,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1257 passed, 0 failed
+  1268 passed, 0 failed
