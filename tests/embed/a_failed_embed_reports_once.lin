@@ -1,0 +1,5 @@
+let page = embed("missing.html")
+
+fn main() -> UInt8 {
+    UInt8(page.length())
+}

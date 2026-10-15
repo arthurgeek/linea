@@ -1,0 +1,35 @@
+error[S-Embed]: `embed` takes one string literal naming the file
+ --> tests/embed/the_path_is_a_literal.lin:4:23
+  |
+4 |     let named = embed(name).length()
+  |                       ^^^^ the file is read when the program is compiled, so its path is written here
+error[S-Embed]: `embed` takes one string literal naming the file
+ --> tests/embed/the_path_is_a_literal.lin:5:23
+  |
+5 |     let built = embed("{name}").length()
+  |                       ^^^^^^^^ an interpolated path is computed when the program runs, and the file is read before
+error[S-Embed]: `embed` takes one string literal naming the file
+ --> tests/embed/the_path_is_a_literal.lin:7:9
+  |
+7 |         \\page.txt
+  |         ^^^^^^^^^^ a path is one line, written as a quoted string literal
+error[S-Embed]: `embed` takes one string literal naming the file
+ --> tests/embed/the_path_is_a_literal.lin:9:21
+  |
+9 |     let two = embed("a.txt", "b.txt").length()
+  |                     ^^^^^^^^^^^^^^^^ one file is embedded at a time
+error[S-Embed]: `embed` takes one string literal naming the file
+  --> tests/embed/the_path_is_a_literal.lin:10:22
+   |
+10 |     let none = embed().length()
+   |                      ^ name the file here, as a string literal
+error[S-Paren]: expected `(`
+  --> tests/embed/the_path_is_a_literal.lin:11:28
+   |
+11 |     let bare = embed_bytes "page.txt"
+   |                            ^^^^^^^^^^ the file is named in parentheses
+error[N-Unused]: `name` is never used
+ --> tests/embed/the_path_is_a_literal.lin:1:5
+  |
+1 | let name = "page.txt"
+  |     ^^^^ bind it as `_` if the value is not wanted

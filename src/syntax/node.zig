@@ -1236,6 +1236,13 @@ pub const Expr = struct {
         /// `"hello"`. A view of bytes the compiler emits into the binary, so
         /// its type is the library's `Str` and its storage outlives everything.
         str_literal,
+        /// `embed("page.html")`: the text of a file, read when the program is
+        /// compiled, as a `Str`. A leaf: its main token is the string literal
+        /// naming the file, and its range runs from `embed` to `)`.
+        embed,
+        /// `embed_bytes("logo.png")`: the bytes of a file, read when the
+        /// program is compiled, as a `mem.Slice[UInt8]`. Shaped as `embed`.
+        embed_bytes,
         bool_literal,
         /// `()`, the one value of the unit type.
         unit_literal,
@@ -1300,7 +1307,7 @@ pub const Expr = struct {
                 .lambda => .lambda,
                 .for_, .for_read, .for_inout => .call,
                 .copy_, .panic, .borrow, .dereference => .unary,
-                .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => .none,
+                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => .none,
                 .grouped, .negate, .not, .loop_, .break_, .return_, .marked, .variant_ref, .field, .try_ => .unary,
                 .from_end => .unary,
                 .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .index => .binary,
@@ -1327,7 +1334,7 @@ pub const Expr = struct {
                 .for_, .for_read, .for_inout => false,
                 .block, .conditional, .borrow, .dereference, .copy_, .panic, .grouped, .negate, .not, .from_end, .lambda => false,
                 .loop_, .break_, .return_, .marked, .variant_ref, .field, .try_ => false,
-                .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => false,
+                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => false,
                 .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .index => false,
                 .logical_and, .logical_or, .while_, .assign => false,
                 .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign => false,

@@ -1,0 +1,48 @@
+import std.mem
+
+let note = embed("note.txt")
+
+let raw = embed_bytes("note.txt")
+
+@copyable
+struct Page {
+    title: Str,
+    body: Str,
+}
+
+let home = Page { title = "Home", body = embed("note.txt") }
+
+fn length_of(text: Str = embed("note.txt")) -> UInt64 {
+    text.length()
+}
+
+fn banner() -> Str where carries() {
+    embed("note.txt")
+}
+
+fn banner_bytes() -> mem.Slice[UInt8] where carries() {
+    banner().as_bytes()
+}
+
+fn kept() -> mem.Slice[UInt8] where carries() {
+    raw
+}
+
+fn main() -> UInt8 {
+    if note.length() != 4 {
+        return 1
+    }
+    if home.body.length() != 4 {
+        return 2
+    }
+    if length_of() != 4 {
+        return 3
+    }
+    if banner_bytes().length() != 4 {
+        return 4
+    }
+    if kept().length() != 4 || raw[0] != 110 {
+        return 5
+    }
+    0
+}

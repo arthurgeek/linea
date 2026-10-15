@@ -1,0 +1,40 @@
+error[M-Embed]: an embedded path is relative to the file that writes it
+ --> tests/embed/a_path_is_spelled_plainly.lin:2:26
+  |
+2 |     let absolute = embed("/etc/hosts").length()
+  |                          ^^^^^^^^^^^^ remove the leading `/`
+error[M-Embed]: `\` is not a path separator
+ --> tests/embed/a_path_is_spelled_plainly.lin:3:27
+  |
+3 |     let backslash = embed("notes\\today.txt").length()
+  |                           ^^^^^^^^^^^^^^^^^^ write `/` between directories
+error[M-Embed]: an embedded path cannot hold `:`
+ --> tests/embed/a_path_is_spelled_plainly.lin:4:23
+  |
+4 |     let drive = embed("c:notes.txt").length()
+  |                       ^^^^^^^^^^^^^ a `:` names a drive or a stream on some systems
+error[M-Embed]: an embedded path cannot hold a NUL byte
+ --> tests/embed/a_path_is_spelled_plainly.lin:5:22
+  |
+5 |     let zero = embed("notes\0.txt").length()
+  |                      ^^^^^^^^^^^^^ remove it
+error[M-Embed]: a `.` in an embedded path names nothing
+ --> tests/embed/a_path_is_spelled_plainly.lin:6:21
+  |
+6 |     let dot = embed("./notes.txt").length()
+  |                     ^^^^^^^^^^^^^ remove it
+error[M-Embed]: `..` may only begin an embedded path
+ --> tests/embed/a_path_is_spelled_plainly.lin:7:23
+  |
+7 |     let inner = embed("notes/../today.txt").length()
+  |                       ^^^^^^^^^^^^^^^^^^^^ write the path without stepping back out of a directory it named
+error[M-Embed]: an embedded path has an empty part
+ --> tests/embed/a_path_is_spelled_plainly.lin:8:25
+  |
+8 |     let doubled = embed("notes//today.txt").length()
+  |                         ^^^^^^^^^^^^^^^^^^ write one `/` between two names, and none at the end
+error[M-Embed]: an embedded path names a file
+ --> tests/embed/a_path_is_spelled_plainly.lin:9:25
+  |
+9 |     let nothing = embed("").length()
+  |                         ^^ write the file's path here

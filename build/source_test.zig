@@ -1782,6 +1782,46 @@ test "the guide gate: a library's file with tests completes a project beside its
     try testing.expectEqualStrings("plants/plants.lin", reading.programs[0].target);
 }
 
+test "the guide gate: a labelled data block is a file beside the next program, not its output" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`usage.txt`:
+        \\
+        \\```text
+        \\usage: forecast CITY
+        \\```
+        \\
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    UInt8(embed("usage.txt").length())
+        \\}
+        \\```
+        \\
+        \\```linea
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
+        \\```
+        \\
+        \\```text
+        \\done
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs[0].files.len);
+    try testing.expectEqualStrings("main.lin", reading.programs[0].files[0].path);
+    try testing.expectEqualStrings("usage.txt", reading.programs[0].files[1].path);
+    try testing.expectEqualStrings("usage: forecast CITY", reading.programs[0].files[1].text);
+    // A data block joins the program after it and no other.
+    try testing.expectEqual(@as(usize, 1), reading.programs[1].files.len);
+    try testing.expectEqualStrings("done", reading.programs[1].expected.?);
+}
+
 test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

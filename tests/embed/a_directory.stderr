@@ -1,0 +1,5 @@
+error[M-Embed]: "templates" is a directory
+ --> tests/embed/a_directory/main.lin:2:17
+  |
+2 |     UInt8(embed("templates").length())
+  |                 ^^^^^^^^^^^ an embedded path names a file

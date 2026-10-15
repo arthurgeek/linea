@@ -337,7 +337,7 @@ lowers the expanded tree into a different semantic representation.
 | Source text | the loader | bytes per file | — |
 | `TokenList` | `lexer.tokenize` | structure-of-arrays | every token, losslessly: comments are tokens, whitespace is the gap between spans |
 | `Ast` | `parser.parse` | typed per category | declarations, statements, expressions, written trailing constraints — abstract, but keeping what tooling needs (parentheses are a node) |
-| `Program` | `driver/loader.zig` | source modules + canonical import routes + one source `Ast` | every source module the entry reached, its independently loaded root and root-relative source spelling, and the single source tree used by expansion and source-only tools |
+| `Program` | `driver/loader.zig` | source modules + canonical import routes + one source `Ast` + embedded files | every source module the entry reached, its independently loaded root and root-relative source spelling, the single source tree used by expansion and source-only tools, and the bytes of every file an `embed` or `embed_bytes` read with the expression that read each (`Program.embeds`) |
 | `ExpandedProgram` | `sema/resolve.zig` | source `Program` + expanded `Ast` + flat tables | the source IDs as an exact prefix, the expanded interner and owned generated sources, immutable active declarations and generated import targets per module, constant-time declaration ownership, generated-to-derive origins, resolver-paired template member plans, and immutable generated-implementation descriptors with component-requirement rows |
 | `Resolution` | `sema/resolve.zig` | side table over the expanded `Ast` | `targets`, `written`, `kinds`, `decls`, `type_names` with the trait rows indexed by module and by member name, `prelude`, qualified variant ordinals, references in constraint subjects and requirements, binding and lexical-scope tables, and both directions of `ExprId` ↔ `ClosureId` |
 | `Typing` | `sema/typecheck.zig` | side table over the expanded `Ast` | the type `pool`, expression and binding types including `Never`, checked literal and named constant values, interpolation value formats, normalised declaration constraints, capability and implementation-applicability answers, closure descriptors, function values, normalised call targets and arguments with their shared `call_index`, private storage declaration identities, context-dependent variant selections, implicit test-success sites, and match payload-disposal facts, implementations, instantiations, layouts, and generated member bodies suppressed during semantic recovery |
@@ -475,6 +475,19 @@ manifest is never a module of the root above it (`pathsOfModule` lists its
 manifest and stops there), and `pathsOfRoot` adds every dependency's files, so
 the command line, the language server and the conformance runner load the same
 graph.
+
+The loader also reads every file an `embed` or `embed_bytes` names, as each
+module is parsed (ADR 0227). A path is relative to the writing file's directory
+and bounded by its root: the directory of the root's manifest, the standard
+library's own directory for the library, or the file's directory where no
+manifest marks one. `driver/embedded.zig` resolves the spelling for every input
+and reads a path on disk one component at a time, so each is found by its
+exact spelling and no symbolic link is followed. In-memory input finds the
+file among the supplied files; an editor's input copies its buffers and reads
+embedded files from disk. Each file is read once per compilation, its bytes
+have the sources' lifetime, and [M-Embed] or [M-EmbedText] is reported against
+the literal naming it. No pass after the loader reads a file: the checker, the
+constant folder and lowering read `Program.embeds` through `Resolution.embeds`.
 
 Disk loading indexes source paths beneath the root, then reads source bytes
 only when their module is reached. Test discovery reaches every module in the
@@ -1829,7 +1842,7 @@ record that consumers must read.
 | --- | --- | --- |
 | Lexer → Parser | tokens, spans, reserved words | the `TokenList` itself |
 | Parser → Resolver | source tree shape, declaration kinds including template and standalone derive forms, ordered closed attribute groups and attached derive entries, normalized visibility and ownership policy, panic expressions, written trailing constraints | source `Ast` accessors — `declTokens`, `declName`, `declOwner`, `declAttributeGroups`, `attachedDeriveTraitRange`, `deriveRequestTraitRange`, `declTraitRef`, `boundsOf`, constraint subject and requirement accessors |
-| Loader → Resolver | which source modules exist, which independently loaded root owns each, what each imports, canonical routes between loaded modules, the source interner and source tree | `Program.modules` including typed `Module.root`, `Program.importRoute`, `Program.ast`, `Interner` |
+| Loader → Resolver | which source modules exist, which independently loaded root owns each, what each imports, canonical routes between loaded modules, the source interner and source tree, and the bytes each embed read | `Program.modules` including typed `Module.root`, `Program.importRoute`, `Program.ast`, `Interner`, `Program.embeds` (borrowed into `Resolution.embeds` for the checker, the constant folder and lowering) |
 | Resolver → Checker | immutable expanded syntax and active roots; generated declaration modules and import targets, declaration and rendered origins, template plans, generated-implementation descriptors and ordered component-requirement rows; which declaration each name reaches, each binding's kind, bound classification, references and open scopes for written constraints, the implementations the compiler provides, lambda source identity and parameter scopes | `ExpandedProgram` plus `Resolution` — `declsOf`, `moduleOf`, `importedBy`, declaration origins, generated span origins, `template_members`, `generatedImplementation`, `componentRequirements`, `targets`, `written`, `variant_ordinals`, `ambient_impls`, `closures`, scope tables; `boundNames` for the bounds |
 | Checker → Ownership | expanded roots; types including `Never`, universes, which expressions the checker refused, accepted source or generated bodies, generated bodies suppressed during semantic recovery, and each call's normalised target and arguments | `ExpandedProgram` plus `Typing` — binding/expression types, `refused`, `selected_places`, `folded_indices`, closure descriptors, `variant_uses`, `suppressed_generated_bodies` in shared module/root order, normalised calls and `call_index`; contract destinations remain keyed to the expanded AST transfer. Ownership decides consuming positions itself, from where each expression sits |
 | Checker → Instantiation | expanded roots; admitted generic call selections and their satisfied normalised constraints, callable conversions, normalised targets, implementations, `Self`, layouts, checked named constants | `ExpandedProgram` plus `Typing` — `constant_values`, declaration constraints, `function_values`, closure descriptors, normalised calls and `call_index`, `implementations`, `implementation_selections`, `laid_out`, `raw_accesses` |

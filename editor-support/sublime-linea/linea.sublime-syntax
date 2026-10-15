@@ -288,6 +288,9 @@ contexts:
       scope: keyword.control.flow.linea
     - match: '\b(copy|borrow|borrows|carries|retains)\b'
       scope: keyword.operator.word.linea
+    # A file read when the program is compiled.
+    - match: '\b(embed|embed_bytes)\b'
+      scope: support.function.builtin.linea
 
   literals:
     - match: '\b(true|false)\b'

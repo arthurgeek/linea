@@ -14364,6 +14364,7 @@ const Checker = struct {
             .float_literal => self.checkFloatLiteral(id, expected),
 
             .str_literal => self.checkStrLiteral(id, expected),
+            .embed, .embed_bytes => self.checkEmbed(id, expected),
 
             .bool_literal => self.checkBoolLiteral(id, expected),
 
@@ -14552,6 +14553,23 @@ const Checker = struct {
         );
 
         return try self.expect(id, self.type_of_decl.get(d), expected);
+    }
+
+    /// `embed` is text, typed as a string literal is; `embed_bytes` is the
+    /// library's byte slice, `mem.Slice[UInt8]`. A refused embed has its type
+    /// all the same: the loader reported it, and what uses it is still checked.
+    fn checkEmbed(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+        if (self.ast.exprTag(id) == .embed) return self.checkStrLiteral(id, expected);
+        const d = self.raw_accesses.slice;
+        if (d == .none) return self.report(
+            .t_literal,
+            id,
+            "bytes have no type here: the library declares no `mem.Slice`",
+            .{},
+            "build against a library that declares it",
+        );
+        const bytes = try self.builder.instantiate(self.type_of_decl.get(d), d, &.{.u8});
+        return try self.expect(id, bytes, expected);
     }
 
     fn checkPanic(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
@@ -26075,6 +26093,8 @@ const Checker = struct {
             .int_literal,
             .float_literal,
             .str_literal,
+            .embed,
+            .embed_bytes,
             .bool_literal,
             .unit_literal,
             .name_ref,

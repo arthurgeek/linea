@@ -38,6 +38,8 @@ pub const Code = enum {
     s_escape,
     /// A source file that is not UTF-8.
     s_encoding,
+    /// An `embed` or `embed_bytes` whose argument is not one string literal.
+    s_embed,
     s_char,
     s_string,
     /// A format selector inside an interpolation other than `:?`.
@@ -125,6 +127,10 @@ pub const Code = enum {
     /// answer to, a cycle, one name for two libraries, or `extern` granted on
     /// one side only.
     m_dependency,
+    /// An embedded path that names no regular file inside its root.
+    m_embed,
+    /// A file embedded with `embed` that is not UTF-8.
+    m_embed_text,
     /// An import nothing names. Its own rule rather than [N-Unused], because
     /// there is no `_` form to suggest: an import is removed.
     m_unused,
@@ -362,6 +368,7 @@ pub const Code = enum {
             .s_extern => "S-Extern",
             .s_escape => "S-Escape",
             .s_encoding => "S-Encoding",
+            .s_embed => "S-Embed",
             .s_char => "S-Char",
             .s_string => "S-String",
             .s_format => "S-Format",
@@ -410,6 +417,8 @@ pub const Code = enum {
             .n_type_alias => "N-TypeAlias",
             .m_import => "M-Import",
             .m_dependency => "M-Dependency",
+            .m_embed => "M-Embed",
+            .m_embed_text => "M-EmbedText",
             .m_unused => "M-Unused",
             .m_vis => "M-Vis",
             .m_entry => "M-Entry",

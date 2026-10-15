@@ -1,0 +1,5 @@
+let word = embed("word.txt")
+
+fn main() -> UInt8 {
+    UInt8(embed_bytes(r"word.txt").length() + word.length())
+}

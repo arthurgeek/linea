@@ -1011,7 +1011,7 @@ const Builder = struct {
             // A pattern names fields and binders rather than places: what it
             // does to the value is the destructure's business, recorded where
             // the destructure is.
-            .err, .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .reflection_root, .variant_ref, .struct_pattern, .tuple_pattern => {},
+            .err, .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .reflection_root, .variant_ref, .struct_pattern, .tuple_pattern => {},
 
             .lambda => {
                 try self.building.append(self.gpa, id);
@@ -1319,7 +1319,7 @@ const Builder = struct {
             .interp => true,
             .call, .struct_literal, .array_literal, .tuple_literal, .variant_ref, .copy_, .borrow, .try_, .lambda => true,
             .range => true,
-            .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .negate, .not => true,
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .negate, .not => true,
             // A value built from the number after the caret, which no place
             // names.
             .from_end => true,

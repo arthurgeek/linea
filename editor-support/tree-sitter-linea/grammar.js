@@ -688,6 +688,7 @@ module.exports = grammar({
       $.copy_expression,
       $.borrow_expression,
       $.panic_expression,
+      $.embed_expression,
       $.try_expression,
       $.marked_expression,
       $.lambda_expression,
@@ -836,6 +837,9 @@ module.exports = grammar({
 
     copy_expression: $ => prec(10, seq('copy', '(', $._expression, ')')),
     panic_expression: $ => prec(10, seq('panic', '(', field('message', $._expression), ')')),
+    // A file's text or bytes, read when the program is compiled. The path is
+    // one string literal, which the compiler holds to a quoted or raw one.
+    embed_expression: $ => prec(10, seq(choice('embed', 'embed_bytes'), '(', field('path', $.string_literal), ')')),
 
     // Postfix, at a field selection's precedence: `f()?.n` selects from what
     // `?` yielded, and `a?.b?` chains, which is what the parser's own suffix

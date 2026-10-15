@@ -182,6 +182,7 @@ expression   ::= literal | qualified | "(" expression ")" | tuple
                | "-" expression
                | "copy" "(" expression ")"
                | "panic" "(" expression ")"
+               | ("embed" | "embed_bytes") "(" string ")"
                | expression "." name
               | "!" expression
               | expression binop expression
@@ -253,8 +254,8 @@ statement, although it is a declaration.
 
 Words quoted in the grammar are reserved and cannot be names, with the
 exceptions below. This includes words used in only one grammatical position,
-such as `read`, `copy`, `sink`, `impl`, `opaque`, `linear`, `copyable` and
-`carrier`, so a reader can decide whether a name is legal without knowing the
+such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
+`linear`, `copyable` and `carrier`, so a reader can decide whether a name is legal without knowing the
 parser's state.
 
 `type`, `alias`, `proj`, `trav`, `it`, `via` and `default` are contextual
@@ -505,6 +506,29 @@ A multi-line literal is a string literal in every other respect. It has type
 after its last line is text, so a match arm whose body is a multi-line literal
 writes the body as a block and puts the comma after the block's `}`. It is not
 a pattern: the `=>` after it would be part of its last line.
+
+An **embedded file** is the content of a file the program carries, read when
+the program is compiled rather than when it runs:
+
+```linea
+let page = embed("templates/page.html")
+let icon = embed_bytes("icon.png")
+```
+
+`embed(path)` is the file's text, a `Str`, and `embed_bytes(path)` is its bytes,
+a `mem.Slice[UInt8]`. Every byte is kept as the file holds it: a byte order
+mark, `\r\n` line ends, a final line break and NUL bytes are all part of the
+value. The path is relative to the directory of the file that writes it, and
+which files it may name is [M-Embed]'s. The program needs nothing beside it
+when it runs, and a change to the file is seen the next time the program is
+compiled.
+
+**[S-Embed]** The argument of `embed` or `embed_bytes` is one string literal,
+quoted or raw, that names the file. The file is read before any name is
+resolved, so the path is written where it is used: a name, even of a string
+constant, an interpolated or multi-line literal, a second argument and no
+argument are refused. Both words are reserved and written with their
+parentheses; neither is a callable value.
 
 **[S-Format]** An expression inside an interpolation may be followed by a
 colon and a format spec, `[[fill]align][+][0][width][.precision][?]`, each
@@ -1647,6 +1671,32 @@ default; broader visibility must be explicit.
 ```
 pub fn open() -> UInt8 { 1 }
 ```
+
+**[M-Embed]** An embedded path names a regular file inside the root of the
+code that writes it. The path is relative to the directory of the writing
+file, and is one or more names separated by `/`. It may begin with a run of
+`..`, each naming the directory above, but may not climb above the root: the
+directory holding the program's or library's `linea.json`, or, for a file no
+program's source holds, the file's own directory. A program whose source sits
+in `src` therefore embeds `../templates/page.html` from `src/main.lin`, and the
+standard library embeds only files under its own directory. The path is
+refused when it is empty, begins with `/`, has an empty part (`a//b`, `a/`),
+holds a `.` part, a `..` after another name, a backslash, a NUL byte or a `:`,
+or climbs above the root. It names no file when no entry is spelled exactly as
+it is, byte for byte, including letter case on a filesystem that ignores case;
+when any directory on the way, or the file itself, is a symbolic link; when it
+names a directory or anything but a regular file; and when the file holds more
+than 16 MiB (16 777 216 bytes), which is refused before the file is read.
+
+Because no link below the root is followed, a path whose spelling stays inside
+the root stays inside it on disk. The root's own directory is not inspected, so
+a program reached through a link above it is unaffected. A file is read once
+per compilation however many expressions name it, and the code emitted for a
+program depends on the bytes it embeds and not on where the file sits.
+
+**[M-EmbedText]** A file embedded with `embed` is UTF-8 text, checked as a
+source file is ([S-Encoding]), because a `Str`'s bytes are valid UTF-8. A file
+of any bytes is embedded with `embed_bytes`.
 
 **[M-Vis]** A private name is accessible only in its declaring module. An
 `internal` name is also accessible to every module in the same loaded root. A
@@ -4192,6 +4242,7 @@ A **constant expression** is:
 - an integer literal;
 - a truth value, `true` or `false`;
 - a string literal without interpolation, raw or not;
+- an embedded file, `embed(path)` or `embed_bytes(path)`;
 - the unit value `()`;
 - a structure literal, fixed-array literal, tuple literal or enum variant
   construction whose stored components are constant expressions and whose
@@ -4243,9 +4294,15 @@ no arithmetic operations. A `Bool` constant is a literal or a reference to one,
 optionally parenthesised. Its value is `true` or `false`, distinct from every
 integer value, and a Bool cannot serve as a numeric bound or array length.
 
-A string constant is a string literal or an immutable reference to one,
-optionally parenthesised. Its value denotes static decoded bytes with the same
-UTF-8, escape and byte-length rules as a direct string literal. Embedded NUL and
+A string constant is a string literal, an embedded file read with `embed`, or
+an immutable reference to one, optionally parenthesised. Its value denotes
+static decoded bytes with the same UTF-8, escape and byte-length rules as a
+direct string literal; an embedded file's value is the file's bytes. A byte
+constant is an embedded file read with `embed_bytes`, or an immutable reference
+to one: its value is the file's bytes, as a `mem.Slice[UInt8]` viewing static
+storage. An embed the loader refused is a constant whose value does not exist,
+so it is reported once, by [M-Embed] or [M-EmbedText], and not again by
+[T-Const]. Embedded NUL and
 empty strings are admitted. String equality, concatenation, slicing, length calls
 and interpolation are not constant-expression forms, and text does not become an
 integer count, an arithmetic operand or a numeric conversion operand because it
@@ -4270,7 +4327,8 @@ annotation cannot take a contextual variant ([T-Infer]). An enum constant is not
 a number and cannot be an array length or an arithmetic or conversion operand.
 
 Copyable eligibility does not make an arbitrary observation static. A record
-containing literal-backed Str can be constant; the same record containing a
+containing literal-backed Str, or the byte slice of an embedded file, can be
+constant; the same record containing a
 runtime text view or `borrow` expression cannot. Resource owners, allocator calls
 and user-defined copy operations cannot appear inside constant values. A
 constant's value is laid out from checked data, without executing a constructor,
@@ -5176,7 +5234,9 @@ its container. Scope exits and deferred actions participate in the same check.
 sources its callable contract permits. A place lent `inout` to a closure never
 leaves the function that lends it: no contract permits returning or retaining a
 value that holds the lend. An observation of a constant, or of a part of one,
-depends on nothing, because a constant's storage is static. A trait
+depends on nothing, because a constant's storage is static. So do a string
+literal and an embedded file, whose bytes are static storage too: a function
+declaring `carries()` may return `embed("page.html")` or its `as_bytes()`. A trait
 implementation's member without a clause is held to the contract it adopts from
 its trait signature. An observation of local storage cannot escape that storage's
 scope, and copying or embedding the observation does not remove this restriction.

@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let absolute = embed("/etc/hosts").length()
+    let backslash = embed("notes\\today.txt").length()
+    let drive = embed("c:notes.txt").length()
+    let zero = embed("notes\0.txt").length()
+    let dot = embed("./notes.txt").length()
+    let inner = embed("notes/../today.txt").length()
+    let doubled = embed("notes//today.txt").length()
+    let nothing = embed("").length()
+    UInt8(absolute + backslash + drive + zero + dot + inner + doubled + nothing)
+}

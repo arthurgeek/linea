@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true}}}}}
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A file the program embeds is read from disk and checked, and a client that\n// can watch files is asked to watch it as it watches the program's source.\nlet motd = embed(\"motd.txt\")\n\nfn main() -> UInt8 {\n    UInt8(motd.length())\n}\n"}}}
+{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"motd.txt","type":2}]}}
+{"jsonrpc":"2.0","id":2,"method":"shutdown"}

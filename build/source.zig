@@ -903,14 +903,22 @@ const GuideFence = struct {
     line: usize,
     info: []const u8,
     body: []const u8,
-    /// The path in a `` `path.lin`: `` line directly above the fence.
+    /// The path in a `` `path.lin`: `` or `` `page.txt`: `` line directly
+    /// above the fence.
     label: ?[]const u8,
     unchecked: bool,
     /// The N of a `<!-- guide: first N diagnostics -->` line directly above.
     first: ?usize,
 
     fn isOutput(self: GuideFence) bool {
-        return self.info.len == 0 or std.mem.eql(u8, self.info, "text");
+        return (self.info.len == 0 or std.mem.eql(u8, self.info, "text")) and !self.isData();
+    }
+
+    /// A block labelled with a file that is not Linea source: a file written
+    /// beside the next program, which it may `embed`.
+    fn isData(self: GuideFence) bool {
+        const path = self.label orelse return false;
+        return !std.mem.endsWith(u8, path, ".lin");
     }
 
     fn hasEntryPoint(self: GuideFence) bool {
@@ -949,13 +957,15 @@ fn guideMarker(bare: []const u8) ?Marker {
     return .{ .first = count };
 }
 
-/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or
-/// null for any other line.
+/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or a
+/// data file's such as `` `usage.txt`: ``, or null for any other line. A data
+/// file's name carries an extension, so a line naming a word, `` `defer`: ``,
+/// labels nothing.
 fn guideLabel(line: []const u8) ?[]const u8 {
     const bare = std.mem.trim(u8, line, " \t");
-    if (bare.len < 8 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
+    if (bare.len < 4 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
     const path = bare[1 .. bare.len - 2];
-    if (!std.mem.endsWith(u8, path, ".lin") and !isManifestPath(path)) return null;
+    if (std.mem.indexOfScalar(u8, std.fs.path.basename(path), '.') == null) return null;
     for (path) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '/' and c != '.' and c != '-') return null;
     }
@@ -1102,6 +1112,8 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
     const fences = guideFences(gpa, chapter, &problems);
     var programs: std.ArrayList(GuideProgram) = .empty;
     var project: std.ArrayList(GuideFile) = .empty;
+    // Files written beside the next program, which it may embed.
+    var data: std.ArrayList(GuideFile) = .empty;
     var fragments: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(GuideBlock) = .empty;
@@ -1143,6 +1155,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             if (fence.label) |path| if (isManifestPath(path)) {
                 project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
             };
+            continue;
+        }
+        if (fence.isData()) {
+            data.append(gpa, .{ .path = fence.label.?, .text = fence.body }) catch @panic("out of memory");
             continue;
         }
         if (!is_linea) continue;
@@ -1202,6 +1218,8 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 const dir = std.fs.path.dirname(fence.label.?) orelse "";
                 if (dir.len > 0) root = dir;
             } else root = fence.label.?;
+            project.appendSlice(gpa, data.items) catch @panic("out of memory");
+            data.clearRetainingCapacity();
             programs.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
@@ -1216,8 +1234,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
         const name = if (command_block) |shown| shown.path else if (expected) |text| guideNamedFile(text) orelse "main.lin" else "main.lin";
-        const files = gpa.alloc(GuideFile, 1) catch @panic("out of memory");
+        const files = gpa.alloc(GuideFile, 1 + data.items.len) catch @panic("out of memory");
         files[0] = .{ .path = name, .text = fence.body };
+        @memcpy(files[1..], data.items);
+        data.clearRetainingCapacity();
         programs.append(gpa, .{
             .chapter = chapter.file,
             .line = fence.line,

@@ -1,0 +1,3 @@
+pub fn page() -> Str {
+    embed("../../templates/page.txt")
+}

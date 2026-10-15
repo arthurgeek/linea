@@ -1,0 +1,5 @@
+import pages
+
+fn main() -> UInt8 {
+    UInt8(embed("../x.txt").length() + pages.size())
+}

@@ -1,0 +1,8 @@
+error[M-EmbedText]: "logo.bin" is not UTF-8 text
+ --> tests/embed/text_that_is_not_utf8/main.lin:2:17
+  |
+2 |     UInt8(embed("logo.bin").length())
+  |                 ^^^^^^^^^^ byte 3 is 0x89, which begins no UTF-8 character
+  |
+  = help: the first byte that is not UTF-8 is at line 2, column 1 of the file
+  = help: `embed_bytes("logo.bin")` embeds a file of any bytes as a `mem.Slice[UInt8]`

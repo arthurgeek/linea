@@ -133,6 +133,7 @@ pub fn reachOfExpr(tag: Expr.Tag) Reach {
         .range => .generated,
         .float_literal => .generated,
         .str_literal => .{ .impossible = "the generator names no library declaration, so it cannot name `Str`" },
+        .embed, .embed_bytes => .{ .impossible = "the generator writes a program and no file beside it, so nothing it writes can embed one" },
         .panic => .{ .impossible = "the generator names no library declaration, so it cannot type a panic message as `Str`" },
         // For the same reason, and one more: what an interpolation renders is
         // reached through `Display`, which the library declares.
