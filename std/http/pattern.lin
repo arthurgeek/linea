@@ -68,13 +68,14 @@ struct Pattern {
 // may be empty, which a path ending in `/` makes. No name is repeated; the
 // names are checked in one pass through a map sized by the pattern.
 fn parse_pattern[A: Allocator](pattern: Str, allocator: A) -> Result[Pattern, RouteError] where carries(.Ok: pattern) {
-    let parts = match pattern.find(" ") {
-        Some(at) => {
-            let method = method_of(pattern.slice(0, at).unwrap())
+    let parts = match pattern.split_once(" ") {
+        Some(halves) => {
+            let (method_name, path) = halves
+            let method = method_of(method_name)
             if method == Method.Other {
                 return .Err(.InvalidPattern)
             }
-            Pattern { method = .Some(method), path = pattern.slice(at + 1, pattern.length()).unwrap() }
+            Pattern { method = .Some(method), path }
         },
         None => Pattern { method = .None, path = copy(pattern) },
     }

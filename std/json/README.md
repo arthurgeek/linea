@@ -43,8 +43,14 @@ edits a document and writes it back with members it never reads.
 `mem.Slice[UInt8]` and validates UTF-8. Both return an owned `Value` that depends
 on its allocator, not the source bytes. Release it explicitly. An arena must
 remain alive until every value allocated through its handle has finished.
-The [inventory program](../../examples/json_inventory.lin) reads bounded file
-input, releases its bytes, calculates a total, attaches it as a summary member
+`json.read_file(path)`, or `json.read_file_in(allocator, path)`, reads a file,
+parses its bytes as `parse_bytes` does and releases them, so the document never
+borrows them. The read stops at the parse limits' `max_input_bytes`, so the
+reader and the parser agree on how large a document may be. Its
+`ParseFileError` is `Read` with the `fs.ReadFileReason`, or `Parse` with the
+`ParseError`, so a caller reports which step failed; bytes that are not UTF-8
+are a `Parse` error of kind `InvalidUtf8`. The [inventory program](../../examples/json_inventory.lin)
+loads its file this way, calculates a total, attaches it as a summary member
 and writes the whole document back, members it never read included.
 
 ```sh
@@ -171,6 +177,12 @@ allocator type. Neither successful
 values nor decoding errors borrow the document or input. They retain
 the supplied allocator's ownership dependencies. There is no owning Decode
 implementation for borrowed `Str`.
+
+`json.decode_file(path)`, or `json.decode_file_in(allocator, path)`, does the
+same for a typed value: it reads the file, decodes it and releases the bytes. Its
+`DecodeFileError` is `Read` with the `fs.ReadFileReason`, or `Decode` with the
+`DecodeError`, which keeps the release obligation of a decode error, so a
+failing call is settled with `error.release()`.
 
 The temporary document and partially built target coexist during decoding.
 This API pays for both representations; release and allocation refusal settle

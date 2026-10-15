@@ -19,14 +19,14 @@ let max_settings_bytes: UInt64 = 65536
 // Return the value on the first line that names `key`, with the spaces around
 // it trimmed. The value is a view into `settings`, which `carries` states.
 fn setting(settings: Str, key: Str) -> Option[Str] where carries(.Some: settings) {
-    for line in settings.split("\n").unwrap() {
-        // `find` returns `None` for a comment or a blank line, which has no
-        // `=`. The `else` block then runs `continue` to skip to the next line.
-        let separator = line.find("=") else {
+    for line in settings.lines() {
+        // `split_once` returns `None` for a comment or a blank line, which has
+        // no `=`. The `else` block then runs `continue` to skip to the next line.
+        let (name, value) = line.split_once("=") else {
             continue
         }
-        if line.slice(0, separator).unwrap().trim_ascii() == key {
-            return .Some(line.slice(separator + 1, line.length()).unwrap().trim_ascii())
+        if name.trim_ascii() == key {
+            return .Some(value.trim_ascii())
         }
     }
     .None
@@ -48,8 +48,8 @@ fn load(args: env.Args) -> Option[String] {
         }
         return .Some(copied)
     }
-    let path = fs.Path.from_bytes(args.bytes_at(1).unwrap()) else |error| {
-        io.eprintln("the settings path cannot name a file: {error:?}")
+    let path = fs.Path.from_arg(args, 1) else {
+        io.eprintln("usage: server_settings [settings-file]")
         return .None
     }
     // `read_text` reads the file and decodes it as UTF-8; its error says which

@@ -15,11 +15,10 @@ impl log.Sink for Untimed {
     type Error = io.IoError
 
     fn write_line(_self: Self, line: Str) -> Result[(), io.IoError] where carries() {
-        let start = match line.find(" ") {
-            Some(space) => space + 1,
-            None => 0,
+        let (_, message) = line.split_once(" ") else {
+            ("", copy(line))
         }
-        io.print(line.slice(start, line.length()).unwrap())
+        io.print(message)
     }
 }
 

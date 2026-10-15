@@ -205,7 +205,7 @@ fn served_headed[S](inout router: Router[S], inout state: S, target: Str, header
     let described = match &router.serve_http(&state, sent.request()) {
         Ok(response) => {
             let code = response.status().code()
-            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            let body = response.text().unwrap()
             fmt.render_owned("{code} {body}").unwrap()
         },
         Err(error) => {
@@ -660,7 +660,7 @@ test fn the_library_extractors_and_a_type_that_reads_itself_are_arguments() {
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
     let described = match &router.serve_http(&nothing, sent.request()) {
-        Ok(response) => Str.from_bytes(response.body().unwrap()).unwrap() == "order 7 page 2 of 3",
+        Ok(response) => response.text().unwrap() == "order 7 page 2 of 3",
         Err(_) => false,
     }
     arena.release()

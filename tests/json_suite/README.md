@@ -14,9 +14,14 @@ zig-out/bin/linea build tests/json_suite/validate.lin -o /tmp/linea-json-validat
 python3 tests/json_suite/run.py /tmp/linea-json-validator
 ```
 
-The runner makes no network requests and does not run as part of the default
-whole-repository graph. It verifies the archive hash and complete, unique
-classification before execution. Each native process has a five-second timeout;
+The corpus walk runs the same check through the transcript
+[the_parser_classifies_every_suite_input.cmd](the_parser_classifies_every_suite_input.cmd),
+so `zig build test` fails when any verdict disagrees with its class; it takes
+about ten seconds, building the validator included. The transcript needs only
+`sh`, `tar` and the validator, and reports each wrong verdict with the
+validator's reason. `run.py` makes no network requests, and additionally
+verifies the archive hash and complete, unique classification before
+execution. Each native process has a five-second timeout;
 crashes, file failures and usage failures cannot count as valid rejection.
 
 [classification.tsv](classification.tsv) records the policy for every input.

@@ -371,11 +371,10 @@ fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A
         if line.length() == 0 {
             break
         }
-        let colon = line.find(":") else {
+        let (name, raw_value) = line.split_once(":") else {
             return .Err(.Status(.BadRequest))
         }
-        let name = line.slice(0, colon).unwrap()
-        let value = trim_optional_whitespace(line.slice(colon + 1, line.length()).unwrap())
+        let value = trim_optional_whitespace(raw_value)
         add_header_field(&stored, &header_fields, &tally, name, value, limits)?
     }
     body_length(tally)

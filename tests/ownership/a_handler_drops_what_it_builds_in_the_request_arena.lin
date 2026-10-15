@@ -29,7 +29,7 @@ fn main() -> UInt8 {
     let sent = http.new_request(arena.handle(), "GET", "/reverse?one+two+three", body: "").unwrap()
     let answered = match reverse(sent.request()) {
         Ok(response) => {
-            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            let body = response.text().unwrap()
             let _printed = io.println("{response.status().code()} {body}")
             0
         },

@@ -1023,7 +1023,7 @@ fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, meth
     let described = match &router.serve_http(&state, sent.request()) {
         Ok(response) => {
             let code = response.status().code()
-            let body = Str.from_bytes(response.body().unwrap()).unwrap()
+            let body = response.text().unwrap()
             match response.header("Allow") {
                 Some(allow) => fmt.render_owned("{code} {body} (Allow: {allow})").unwrap(),
                 None => fmt.render_owned("{code} {body}").unwrap(),

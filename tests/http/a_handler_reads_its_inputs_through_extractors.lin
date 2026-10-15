@@ -62,7 +62,7 @@ fn answer(inout router: http.Router[(), mem.SystemAllocator], method: Str, targe
     }
     var nothing = {}
     match &router.serve_http(&nothing, sent.request()) {
-        Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+        Ok(response) => io.println(response.text().unwrap()).unwrap(),
         Err(error) => io.println("{error}").unwrap(),
     }
     arena.release()

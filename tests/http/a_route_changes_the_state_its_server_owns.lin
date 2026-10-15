@@ -29,7 +29,7 @@ fn answer[H: http.Handler[(), mem.SystemAllocator]](inout server: H, target: Str
     let sent = http.new_request(arena.handle(), "GET", target, body: "").unwrap()
     var nothing = {}
     match &server.serve_http(&nothing, sent.request()) {
-        Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+        Ok(response) => io.println(response.text().unwrap()).unwrap(),
         Err(_) => io.println("refused").unwrap(),
     }
     arena.release()

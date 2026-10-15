@@ -12,14 +12,14 @@ A file that holds every field decodes and is written back.
 A field the settings do not declare is refused, naming where it sits.
 
   $ ./settings "$LINEA_ROOT"/tests/cmd/json_settings/unknown.json > out
-  UnknownField at $["extra"]
+  unknown field at $["extra"]
   [1]
   $ cat out
 
 A value of the wrong kind inside a list is refused, naming its index.
 
   $ ./settings "$LINEA_ROOT"/tests/cmd/json_settings/nested.json > out
-  WrongKind at $["ports"][1]
+  wrong kind of value at $["ports"][1]
   [1]
   $ cat out
 

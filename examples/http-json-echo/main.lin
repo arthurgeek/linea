@@ -274,10 +274,6 @@ fn parse_options(args: env.Args) -> Option[Options] {
 
 // Each test builds a request in an arena, as the server does, and hands it to
 // a handler. The arena is released after the response has been read.
-fn body_of(response: http.Response) -> Str where borrows(response) {
-    Str.from_bytes(response.body().unwrap()).unwrap()
-}
-
 // The tests hand the handlers a state whose logger writes only errors, so
 // the lines they log while answering stay out of the test report.
 fn quiet() -> App {
@@ -301,7 +297,7 @@ test fn echo_answers_the_caller_with_their_text() {
     var app = quiet()
     let response = &router.serve_http(&app, sent.request()).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
-    testing.assert_eq(body_of(response), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
+    testing.assert_ok_eq(response.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
     testing.assert_eq(app.echoed, 1, "the echo was not counted")?
 }
 
@@ -316,7 +312,7 @@ test fn echo_reads_the_caller_from_a_bearer_header() {
     let unnamed = sent_by(arena.handle(), "Bearer ", r#"{"text":"hi"}"#)
     var app = quiet()
     let answered = &router.serve_http(&app, folded.request()).unwrap()
-    testing.assert_eq(body_of(answered), r#"{"to":"alan","echo":"hi"}"#, "a folded scheme was not read")?
+    testing.assert_ok_eq(answered.text(), r#"{"to":"alan","echo":"hi"}"#, "a folded scheme was not read")?
     for sent in [basic, unnamed] {
         let refused = match &router.serve_http(&app, sent.request()) {
             Ok(_) => return testing.assert(false, "a request naming no caller was answered"),
@@ -414,7 +410,7 @@ test fn echo_answers_the_largest_messages_the_default_limits_allow() {
             return testing.assert_eq(error.status(), http.Status.Ok, "the longest message was refused")
         },
     }
-    testing.assert_eq(body_of(answered).length(), limits.max_body_bytes + 11, "the echo of the longest message changed")?
+    testing.assert_eq(answered.text().unwrap().length(), limits.max_body_bytes + 11, "the echo of the longest message changed")?
     // Each request is served from an arena of its own.
     defer let second = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
     let padded = sent_by(second.handle(), "Bearer ada", values.view())
@@ -451,7 +447,7 @@ test fn greet_escapes_the_name_as_a_json_string() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/greet/say%22hi%22", body: "").unwrap()
     let response = &router.serve_http(&app, sent.request()).unwrap()
-    testing.assert_eq(body_of(response), r#"{"hello":"say\"hi\""}"#, "the greeting changed")?
+    testing.assert_ok_eq(response.text(), r#"{"hello":"say\"hi\""}"#, "the greeting changed")?
 }
 
 // POST /signup reads a form's fields by name, exactly as a browser sends
@@ -463,7 +459,7 @@ test fn signup_reads_a_form_by_field_name() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
     let response = &router.serve_http(&app, sent.request()).unwrap()
-    testing.assert_eq(body_of(response), r#"{"signed_up":"Ada López","age":30}"#, "the signup changed")?
+    testing.assert_ok_eq(response.text(), r#"{"signed_up":"Ada López","age":30}"#, "the signup changed")?
     let json_sent = http.new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
     let refused = match &router.serve_http(&app, json_sent.request()) {
         Ok(_) => return testing.assert(false, "a JSON body was read as a form"),
@@ -482,9 +478,9 @@ test fn stats_counts_the_messages_echoed() {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let message = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
     let echoed = &server.serve_http(&nothing, message.request()).unwrap()
-    testing.assert_eq(body_of(echoed), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
+    testing.assert_ok_eq(echoed.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
     let asked = http.new_request(arena.handle(), "GET", "/stats", body: "").unwrap()
     let stats = &server.serve_http(&nothing, asked.request()).unwrap()
-    testing.assert_eq(body_of(stats), r#"{"echoed":1}"#, "the stats changed")?
+    testing.assert_ok_eq(stats.text(), r#"{"echoed":1}"#, "the stats changed")?
     testing.assert_eq(server.state().echoed, 1, "the state did not keep the count")?
 }

@@ -11,15 +11,21 @@ carry a range check, and failures that hand a value back.
 ## `Option`: a value that may be missing
 
 `Option[T]` is either `.Some(value)` or `.None`. Searching text is a typical
-source of one: `find` answers the position of what it found, or `.None`.
+source of one: `split_once` cuts text at the first occurrence of a separator
+and answers the part before it and the part after it, or `.None` when the
+separator does not occur.
 
 ```linea
 import std.io
 
-// `find` answers `.Some(position)` of the first colon, or `.None` when there is none.
+// `split_once` answers `.Some` of the text before and after the first colon,
+// or `.None` when there is none.
 fn hours_of(time: Str) -> Option[Str] {
-    match time.find(":") {
-        Some(colon) => time.slice(0, colon),
+    match time.split_once(":") {
+        Some(parts) => {
+            let (hours, _) = parts
+            .Some(hours)
+        },
         None => .None,
     }
 }
@@ -41,9 +47,10 @@ fn main() -> Result[UInt8, io.IoError] {
 noon: no colon
 ```
 
-`time.slice(0, colon)` returns an `Option[Str]` too, because the positions
-might not fall on character boundaries. Here the `Some` arm hands that option
-straight back.
+The two parts are a pair, a tuple
+([Linea in an hour](01-linea-in-an-hour.md#tuples)), and both are views into
+`time`. Here the `Some` arm takes the pair apart with a tuple pattern, keeps the
+hours and drops the rest.
 
 You cannot use an `Option[Str]` as a `Str`. The type makes you say what
 happens when the value is missing, and `match` makes you cover both cases.
@@ -63,9 +70,9 @@ value is missing, and otherwise hands you what was inside:
 import std.io
 
 fn hours_of(time: Str) -> Option[Str] {
-    // `?` returns `.None` from `hours_of` when `find` finds no colon.
-    let colon = time.find(":")?
-    time.slice(0, colon)
+    // `?` returns `.None` from `hours_of` when `split_once` finds no colon.
+    let (hours, _) = time.split_once(":")?
+    .Some(hours)
 }
 
 fn main() -> Result[UInt8, io.IoError] {
@@ -106,17 +113,16 @@ enum TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    let colon = match time.find(":") {
-        Some(colon) => colon,
+    let (hours_text, mins_text) = match time.split_once(":") {
+        Some(parts) => parts,
         None => return .Err(.NoColon),
     }
     // `parse[UInt64]()` reads the text as a `UInt64`, or fails with a `text.ParseError`.
-    let hours = match time.slice(0, colon).unwrap().parse[UInt64]() {
+    let hours = match hours_text.parse[UInt64]() {
         Ok(hours) => hours,
         Err(error) => return .Err(.Number(error)),
     }
-    let rest = time.slice(colon + 1, time.length()).unwrap()
-    let mins = match rest.parse[UInt64]() {
+    let mins = match mins_text.parse[UInt64]() {
         Ok(mins) => mins,
         Err(error) => return .Err(.Number(error)),
     }
@@ -156,10 +162,9 @@ means the same as `@copyable` on one line and `@derive(Debug)` on the next.
 the `copyable`.
 
 `unwrap()` takes the value out of an `Option` or `Result` and stops the
-program if there is none. It is right only where failure is impossible, as
-here: a colon that `find` located is always a character boundary, so these
-slices always succeed. Anywhere else, use `?`, a `match`, or `unwrap_or`,
-which supplies a fallback:
+program if there is none. It is right only where failure is impossible,
+such as reading the literal `"8080"` as a number. Anywhere else, use `?`, a
+`match`, or `unwrap_or`, which supplies a fallback:
 
 ```linea
 import std.io
@@ -212,12 +217,12 @@ impl From[text.ParseError] for TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    let colon = match time.find(":") {
-        Some(colon) => colon,
+    let (hours_text, mins_text) = match time.split_once(":") {
+        Some(parts) => parts,
         None => return .Err(.NoColon),
     }
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]()?
-    let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]()?
+    let hours = hours_text.parse[UInt64]()?
+    let mins = mins_text.parse[UInt64]()?
     if hours > 23 || mins > 59 {
         return .Err(.OutOfRange)
     }
@@ -253,13 +258,13 @@ is missing:
 error[T-TryAnswer]: this `?` may fail with `text.ParseError`, and no `From[text.ParseError] for TimeError` implementation converts it to the function's error type
   --> from_missing.lin:16:17
    |
-16 |     let hours = time.slice(0, colon).unwrap().parse[UInt64]()?
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+16 |     let hours = hours_text.parse[UInt64]()?
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
 error[T-TryAnswer]: this `?` may fail with `text.ParseError`, and no `From[text.ParseError] for TimeError` implementation converts it to the function's error type
   --> from_missing.lin:17:16
    |
-17 |     let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]()?
-   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+17 |     let mins = mins_text.parse[UInt64]()?
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
 ```
 
 This is Rust's `?` and `From` exactly. The conversion is written once, beside
@@ -296,12 +301,12 @@ enum TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    let colon = match time.find(":") {
-        Some(colon) => colon,
+    let (hours_text, mins_text) = match time.split_once(":") {
+        Some(parts) => parts,
         None => return .Err(.NoColon),
     }
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]()?
-    let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]()?
+    let hours = hours_text.parse[UInt64]()?
+    let mins = mins_text.parse[UInt64]()?
     if hours > 23 || mins > 59 {
         return .Err(.OutOfRange)
     }
@@ -399,25 +404,25 @@ enum TimeError {
     NoColon,
 }
 
-fn colon_of(time: Str) -> Result[UInt64, TimeError] {
-    let colon = time.find(":")?
-    .Ok(colon)
+fn hours_of(time: Str) -> Result[Str, TimeError] {
+    let (hours, _) = time.split_once(":")?
+    .Ok(hours)
 }
 
 fn main() -> UInt8 {
-    match colon_of("07:30") {
-        Ok(colon) => UInt8(colon),
+    match hours_of("07:30") {
+        Ok(hours) => UInt8(hours.length()),
         Err(_) => 1,
     }
 }
 ```
 
 ```
-error[T-TryAnswer]: this `?` may return `Option[UInt64]`, and the function answers with `Result[UInt64, TimeError]`
- --> option_in_result.lin:6:17
+error[T-TryAnswer]: this `?` may return `Option[(Str, Str)]`, and the function answers with `Result[Str, TimeError]`
+ --> option_in_result.lin:6:22
   |
-6 |     let colon = time.find(":")?
-  |                 ^^^^^^^^^^^^^^^ `?` returns from the function it is written in
+6 |     let (hours, _) = time.split_once(":")?
+  |                      ^^^^^^^^^^^^^^^^^^^^^ `?` returns from the function it is written in
 ```
 
 That is what the remaining `match` in `minutes` does, and `let … else` says it
@@ -440,12 +445,12 @@ enum TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    // `else` runs when `find` answers `.None`, and must leave the function.
-    let colon = time.find(":") else {
+    // `else` runs when `split_once` answers `.None`, and must leave the function.
+    let (hours_text, mins_text) = time.split_once(":") else {
         return .Err(.NoColon)
     }
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]()?
-    let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]()?
+    let hours = hours_text.parse[UInt64]()?
+    let mins = mins_text.parse[UInt64]()?
     if hours > 23 || mins > 59 {
         return .Err(.OutOfRange)
     }
@@ -518,26 +523,26 @@ error[T-LetElse]: a failed `Result[UInt64, text.ParseError]` carries an error, a
 And a block that neither leaves nor yields the right type is refused:
 
 ```linea
-fn first_colon(time: Str) -> UInt64 {
-    let colon = time.find(":") else {
+fn hour_width(time: Str) -> UInt64 {
+    let (hours, _) = time.split_once(":") else {
         "none"
     }
-    colon
+    hours.length()
 }
 
 fn main() -> UInt8 {
-    UInt8(first_colon("07:30"))
+    UInt8(hour_width("07:30"))
 }
 ```
 
 ```
-error[T-Mismatch]: expected a block that leaves or yields `UInt64`, found `Str`
+error[T-Mismatch]: expected a block that leaves or yields `(Str, Str)`, found `Str`
  --> letelse_bad3.lin:3:9
   |
-2 |     let colon = time.find(":") else {
-  |                                ---- an `else` block leaves, or yields what a success carries
+2 |     let (hours, _) = time.split_once(":") else {
+  |                                           ---- an `else` block leaves, or yields what a success carries
 3 |         "none"
-  |         ^^^^^^ expected a block that leaves or yields `UInt64`, found `Str`
+  |         ^^^^^^ expected a block that leaves or yields `(Str, Str)`, found `Str`
 ```
 
 Rust's `let … else` must always leave; Linea's may also supply a value, as
@@ -556,10 +561,10 @@ import std.io
 
 // A check that answers `()` on success, so there is nothing to bind.
 fn check_alarm(time: Str) -> Result[(), Str] {
-    let colon = time.find(":") else {
+    let (hours_text, _) = time.split_once(":") else {
         return .Err("write the time as HH:MM")
     }
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]() else |_| {
+    let hours = hours_text.parse[UInt64]() else |_| {
         return .Err("the hours are not a number")
     }
     if hours > 23 {
@@ -642,13 +647,13 @@ impl Display for TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    let colon = time.find(":") else {
+    let (hours_text, mins_text) = time.split_once(":") else {
         return .Err(.NoColon)
     }
     // Both parts fail with a `text.ParseError`, so one `From` could not tell
     // them apart. `map_err` wraps each error in the variant for its own part.
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]().map_err(.Hours)?
-    let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]().map_err(.Minutes)?
+    let hours = hours_text.parse[UInt64]().map_err(.Hours)?
+    let mins = mins_text.parse[UInt64]().map_err(.Minutes)?
     if hours > 23 || mins > 59 {
         return .Err(.OutOfRange)
     }
@@ -743,11 +748,11 @@ enum TimeError {
 }
 
 fn minutes(time: Str) -> Result[UInt64, TimeError] {
-    let colon = time.find(":") else {
+    let (hours_text, mins_text) = time.split_once(":") else {
         return .Err(.NoColon)
     }
-    let hours = time.slice(0, colon).unwrap().parse[UInt64]()?
-    let mins = time.slice(colon + 1, time.length()).unwrap().parse[UInt64]()?
+    let hours = hours_text.parse[UInt64]()?
+    let mins = mins_text.parse[UInt64]()?
     if hours > 23 || mins > 59 {
         return .Err(.OutOfRange)
     }
@@ -1357,6 +1362,109 @@ max_bytes)` takes one, as `new_in` does.
 bytes, or that wants them back when decoding fails. `io.read_text` and
 `io.read_text_in` do the same for any reader, such as standard input.
 
+### A path from the command line
+
+A file named on the command line arrives as an argument.
+`fs.Path.from_arg(args, i)` makes a path from argument `i`, or answers `.None`
+when there is no argument `i`, so one `let ... else` handles a missing name:
+
+```linea
+import std.env
+import std.fs
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `from_arg` answers `.None` when the program was given no argument 1.
+    let path = fs.Path.from_arg(env.args(), 1) else {
+        io.println("usage: show FILE")?
+        return .Ok(2)
+    }
+    defer let text = fs.read_text(path, max_bytes: 4096) else |error| {
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    io.print(text.view())?
+    .Ok(0)
+}
+```
+
+Run without an argument, it prints its usage:
+
+```
+usage: show FILE
+```
+
+`from_arg` keeps the argument's exact bytes, so a file name that is not valid
+UTF-8 still opens the file; `args.at(i)` would answer `.None` for it, as if
+the argument were missing. An argument ends at its first NUL byte, the one
+byte a path cannot hold, so every argument is a path.
+
+### Loading JSON from a file
+
+`json.read_file(path)` reads a file, parses it into a `json.Value` document and
+releases the bytes in one call. `json.decode_file(path)` does the same and
+decodes the document into a type that derives `json.Decode`. Both cap the
+read at the most the parser accepts, and their errors say whether reading the
+file or the document failed; bytes that are not UTF-8 are a failed document:
+
+```linea
+import std.fs
+import std.io
+import std.json
+import std.mem
+
+// `json.Decode[A]` lets `decode_file` build a `Station` from a document.
+@derive(Release, json.Decode[A])
+struct Station[A: Allocator = mem.SystemAllocator] {
+    name: String[A],
+    port: UInt16,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let path = fs.Path.from_str("station.json").unwrap()
+    // `.CreateNew` refuses to replace a `station.json` that is already there.
+    let _ = fs.write_file(path, r#"{"name":"harbour","port":8080}"#.as_bytes(), policy: .CreateNew) else |error| {
+        io.println("could not write the file: {error}")?
+        return .Ok(1)
+    }
+    // `decode_file` reads the file, decodes a `Station` from it and releases
+    // the text. The annotation names the type to build.
+    let loaded: Result[Station, json.DecodeFileError] = json.decode_file(path)
+    defer let station = loaded else |error| {
+        defer error.release()
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    io.println("{station.name.view()} listens on port {station.port}")?
+    // `remove_file` deletes the file the program wrote.
+    let _ = fs.remove_file(path) else |error| {
+        io.println("could not remove the file: {error}")?
+        return .Ok(1)
+    }
+    // `read_file` parses a file into a `json.Value` document. Its error says
+    // whether reading the file or parsing it failed.
+    let missing = fs.Path.from_str("missing.json").unwrap()
+    match json.read_file(missing) {
+        Ok(document) => document.release(),
+        Err(error) => io.println("{error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+harbour listens on port 8080
+file read failed: file operation failed after 0 bytes: Open failed (NotFound) after 0 bytes; errno 2
+```
+
+A `json.DecodeFileError` can hold the path of the field that failed to
+decode, which the decoder allocated, so the `else` releases it with
+`defer error.release()`. A `json.ParseFileError` owns nothing. Each has an
+`_in` form, `json.read_file_in(allocator, path)` and
+`json.decode_file_in(allocator, path)`, for a document built in another
+allocator. `fs.remove_file(path)` removes the file the program wrote, and
+reports a file that is not there as `NotFound`.
+
 ## What you have seen
 
 | You want | Write |
@@ -1380,6 +1488,9 @@ bytes, or that wants them back when decoding fails. `io.read_text` and
 | a `main` that chooses its exit statuses | `-> UInt8`, with `let x = f() else \|error\| { … }` printing with `io.eprintln` and returning a status |
 | to drop what a failure hands back and keep its reason | `result.settled()`, then `?` or `match` |
 | a file's text | `fs.read_text(path, max_bytes)`, or `fs.read_text_in(allocator, path, max_bytes)` |
+| a path from a command-line argument | `fs.Path.from_arg(env.args(), 1)`: `.None` when it is missing |
+| to remove a file | `fs.remove_file(path)` |
+| a JSON document or a typed value from a file | `json.read_file(path)`, or `let value: T = json.decode_file(path)?` |
 | both outcomes to carry on | `match` |
 | a value you know is there | `.unwrap()`, which stops the program if it is not |
 

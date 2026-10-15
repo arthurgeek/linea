@@ -399,14 +399,16 @@ test fn each_allocation_failure_covers_every_acquisition_from_the_parent() -> Re
 }
 
 // `status_lines` joins the status phrase of each answer's first line, or the
-// whole answer when it has no line, each followed by `|`.
+// whole line when it is too short to be a status line, such as `reset`, each
+// followed by `|`.
 fn status_lines(answers: Vec[String]) -> String {
     var lines = String.new()
     for answer in answers.as_slice() {
-        let first = match answer.find("\r\n") {
-            Some(end) => answer.slice(9, end).unwrap_or(""),
-            None => answer.view(),
+        // A status line holds the phrase after its 9-byte `HTTP/1.1 ` prefix.
+        let (line, _) = answer.split_once("\r\n") else {
+            (answer.view(), "")
         }
+        let first = line.slice(9, line.length()).unwrap_or(line)
         &lines.append(first).unwrap()
         &lines.append("|").unwrap()
     }

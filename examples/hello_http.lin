@@ -106,10 +106,6 @@ fn serve(port: UInt16) -> UInt8 {
 
 // A test builds a request in an arena, as the server does, and sends it
 // through the routes, so no socket is involved.
-fn body_of(response: http.Response) -> Str where borrows(response) {
-    Str.from_bytes(response.body().unwrap()).unwrap()
-}
-
 test fn health_answers_ok() {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
@@ -117,7 +113,7 @@ test fn health_answers_ok() {
     let sent = http.new_request(arena.handle(), "GET", "/health", "").unwrap()
     var nothing = ()
     let response = &router.serve_http(&nothing, sent.request()).unwrap()
-    testing.assert_eq(body_of(response), "ok", "the health answer changed")?
+    testing.assert_ok_eq(response.text(), "ok", "the health answer changed")?
 }
 
 test fn echo_answers_the_text_it_was_sent() {
@@ -129,7 +125,7 @@ test fn echo_answers_the_text_it_was_sent() {
     var nothing = ()
     let response = &router.serve_http(&nothing, sent.request()).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
-    testing.assert_eq(body_of(response), r#"{"echo":"hello"}"#, "the echo changed")?
+    testing.assert_ok_eq(response.text(), r#"{"echo":"hello"}"#, "the echo changed")?
 }
 
 test fn echo_refuses_a_body_without_text() {

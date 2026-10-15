@@ -331,6 +331,41 @@ test fn owned_text_splits_at_a_separator() {
 }
 
 impl[A: Allocator] String[A] {
+    // Split the text at the first occurrence of `separator`, or return None
+    // when it does not occur.
+    pub fn split_once(self: Self, separator: Str) -> Option[(Str, Str)] where borrows(.Some: self) {
+        self.view().split_once(separator)
+    }
+}
+
+test fn owned_text_splits_once_at_a_separator() {
+    defer let text = "a=b=c".to_owned().unwrap()
+    let (key, value) = text.split_once("=") else {
+        return testing.assert(false, "a present separator was not found")
+    }
+    testing.assert_eq(key, "a", "the part before the separator changed")?
+    testing.assert_eq(value, "b=c", "the part after the separator changed")?
+    testing.assert(text.split_once("&").is_none(), "an absent separator was found")?
+    .Ok(())
+}
+
+impl[A: Allocator] String[A] {
+    // Return an iterator over the lines of the text, without their terminators.
+    pub fn lines(self: Self) -> Lines where borrows(self) {
+        self.view().lines()
+    }
+}
+
+test fn owned_text_iterates_its_lines() {
+    defer let text = "a\r\nb".to_owned().unwrap()
+    var lines = text.lines()
+    testing.assert_eq(&lines.next(), Option.Some("a"), "the first line changed")?
+    testing.assert_eq(&lines.next(), Option.Some("b"), "the second line changed")?
+    testing.assert(&lines.next().is_none(), "the text had an extra line")?
+    .Ok(())
+}
+
+impl[A: Allocator] String[A] {
     // Return the text without leading and trailing ASCII whitespace.
     pub fn trim_ascii(self: Self) -> Str where borrows(self) {
         self.view().trim_ascii()

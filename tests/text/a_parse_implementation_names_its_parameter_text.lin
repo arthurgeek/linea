@@ -11,16 +11,16 @@ struct Time {
 // A `ParseError` says which byte is wrong.
 impl text.Parse for Time {
     fn parse(text: Str) -> Result[Time, text.ParseError] where carries() {
-        let colon = text.find(":") else {
+        let (hours_text, minutes_text) = text.split_once(":") else {
             return .Err(.Syntax(text.length()))
         }
-        let hours = text.slice(0, colon).unwrap().parse[UInt8]()?
-        let minutes = text.slice(colon + 1, text.length()).unwrap().parse[UInt8]()?
+        let hours = hours_text.parse[UInt8]()?
+        let minutes = minutes_text.parse[UInt8]()?
         if hours > 23 {
             return .Err(.Syntax(0))
         }
         if minutes > 59 {
-            return .Err(.Syntax(colon + 1))
+            return .Err(.Syntax(hours_text.length() + 1))
         }
         return .Ok(.{ hours, minutes })
     }

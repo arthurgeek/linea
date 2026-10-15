@@ -8,8 +8,7 @@ import std.testing
 // record below the threshold.
 fn severity(line: Str) -> Option[UInt64] {
     // `?` on an Option returns None from `severity` when the line has no space.
-    let separator = line.find(" ")?
-    let field = line.slice(0, separator)?
+    let (field, _) = line.split_once(" ")?
     // `parse[UInt64]()` names the type to read in brackets. `else |_|` drops
     // the parse error and returns None from `severity` instead.
     let value = field.parse[UInt64]() else |_| {

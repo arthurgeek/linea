@@ -45,7 +45,7 @@ fn main() -> UInt8 {
     for _ in UInt64(0)..2 {
         let sent = http.new_request(arena.handle(), "GET", "/number", body: "").unwrap()
         match &server.serve_http(&nothing, sent.request()) {
-            Ok(response) => io.println(Str.from_bytes(response.body().unwrap()).unwrap()).unwrap(),
+            Ok(response) => io.println(response.text().unwrap()).unwrap(),
             Err(_) => io.println("refused").unwrap(),
         }
     }

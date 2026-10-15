@@ -452,28 +452,22 @@ impl Capture {
 // each `duration=` value written as `D`.
 fn without_times(written: Str) -> String {
     var copied = String.new()
-    var rest = copy(written)
-    loop {
-        let end = rest.find("\n") else {
-            break
-        }
-        let line = rest.slice(21, end).unwrap_or("")
-        match line.find("duration=") {
-            Some(start) => {
-                let value_start = start + 9
-                let after = line.slice(value_start, line.length()).unwrap_or("")
-                let value_end = match after.find(" ") {
-                    Some(offset) => value_start + offset,
-                    None => line.length(),
+    for record in written.lines() {
+        let line = record.slice(21, record.length()).unwrap_or("")
+        match line.split_once("duration=") {
+            Some(halves) => {
+                let (before, value) = halves
+                let following = match value.find(" ") {
+                    Some(space) => value.slice(space, value.length()).unwrap(),
+                    None => "",
                 }
-                &copied.append(line.slice(0, value_start).unwrap_or("")).unwrap()
-                &copied.append("D").unwrap()
-                &copied.append(line.slice(value_end, line.length()).unwrap_or("")).unwrap()
+                &copied.append(before).unwrap()
+                &copied.append("duration=D").unwrap()
+                &copied.append(following).unwrap()
             },
             None => &copied.append(line).unwrap(),
         }
         &copied.append("\n").unwrap()
-        rest = rest.slice(end + 1, rest.length()).unwrap_or("")
     }
     copied
 }

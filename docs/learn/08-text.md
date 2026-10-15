@@ -128,7 +128,7 @@ error[T-Mismatch]: expected `Str`, found `{interpolation Str}`
 7   |     if &line.append("weather in {city}").is_err() {
     |                     ^^^^^^^^^^^^^^^^^^^ expected `Str`, found `{interpolation Str}`
    ::: std/text/string.lin
-406 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
+441 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
     |                                     ---- expected because of this parameter
 ```
 
@@ -473,6 +473,48 @@ croissant|
 jam      |
 ```
 
+## Cutting text apart: `lines` and `split_once`
+
+Most text a program reads is lines, and most lines are a name and a value
+around a separator. `lines()` walks the lines of a text, and `split_once`
+cuts one at the first occurrence of a separator:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let report = "ada -> 36\r\nbob -> 41\r\n\r\nno arrow here\r\n"
+    for line in report.lines() {
+        // `split_once` answers the text before and after the first ` -> `, or
+        // `.None` when the line has none; `else` handles that case.
+        let (name, score) = line.split_once(" -> ") else {
+            io.println("skipped: \"{line}\"")?
+            continue
+        }
+        io.println("{name} scored {score}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+ada scored 36
+bob scored 41
+skipped: ""
+skipped: "no arrow here"
+```
+
+A line ends at `\n` or `\r\n`, and the terminator is not part of the line, so
+a file written on Windows reads the same as one written elsewhere. Text that
+ends with a terminator has no empty line after it, but a blank line in the
+middle is an empty line, as the third line of `report` shows. `split_once`
+takes a separator of any width: it cuts out all of ` -> `, where `find` and
+`slice` would leave you to add the separator's length yourself. Both halves
+are views into the original text. An empty separator occurs at the very start,
+so it gives an empty first half and the whole text. `split` is the operation
+for every field rather than the first two parts, and it refuses an empty
+separator.
+
 ## Reading text as a value
 
 `parse` goes the other way: `"8080".parse[UInt16]()` reads text as a number
@@ -495,16 +537,16 @@ struct Time {
 // The `ParseError` says which byte is wrong.
 impl text.Parse for Time {
     fn parse(text: Str) -> Result[Time, text.ParseError] where carries() {
-        let colon = text.find(":") else {
+        let (hours_text, minutes_text) = text.split_once(":") else {
             return .Err(.Syntax(text.length()))
         }
-        let hours = text.slice(0, colon).unwrap().parse[UInt8]()?
-        let minutes = text.slice(colon + 1, text.length()).unwrap().parse[UInt8]()?
+        let hours = hours_text.parse[UInt8]()?
+        let minutes = minutes_text.parse[UInt8]()?
         if hours > 23 {
             return .Err(.Syntax(0))
         }
         if minutes > 59 {
-            return .Err(.Syntax(colon + 1))
+            return .Err(.Syntax(hours_text.length() + 1))
         }
         .Ok(.{ hours, minutes })
     }
@@ -551,8 +593,8 @@ error[T-Impl]: `Parse` declares `parse`'s parameter `text`, and this declares it
 
 So one name does two jobs in `parse`. In a type, such as `text.ParseError` in
 the signature, `text` names the `std.text` module. As a value, inside the
-body, `text` is the parameter, which shadows the module there: `text.find(":")`
-searches the text being parsed.
+body, `text` is the parameter, which shadows the module there: `text.split_once(":")`
+cuts the text being parsed.
 
 ## Raw literals: text exactly as written
 
@@ -758,6 +800,8 @@ server](../../examples/welcome_back.lin) escapes a name taken from the address.
 | a column, padding or decimals | `{value:>8}`, `{day:02}`, `{price:.2}` |
 | a layout chosen at run time | `fmt.write_display(value, spec, &writer)` with a `fmt.Spec` |
 | a view of a computed value past its statement | bind the value with `let` first; a temporary lasts to the end of its statement |
+| the lines of a text, without their terminators | `for line in text.lines()` |
+| the parts of a line around a separator | `let (name, value) = line.split_once("=") else { … }` |
 | a number or your own type from text | `"80".parse[UInt16]()`, `impl text.Parse for T` |
 | braces or backslashes as text | `r"…"`, or `r#"…"#` when the text has a `"` |
 | several lines | a run of `\\` lines |
