@@ -293,5 +293,12 @@ test fn lines_have_no_empty_final_line() {
     testing.assert_eq(&lone.next(), Option.Some(""), "a bare CRLF is not an empty line")?
     testing.assert_eq(&lone.next(), Option.Some(""), "the second bare CRLF is not an empty line")?
     testing.assert(&lone.next().is_none(), "bare CRLFs yielded a third line")?
+    // Only a carriage return directly before a newline is a terminator.
+    var unterminated = "a\r".lines()
+    testing.assert_eq(&unterminated.next(), Option.Some("a\r"), "a final carriage return without a newline was dropped")?
+    testing.assert(&unterminated.next().is_none(), "a final carriage return started another line")?
+    var doubled = "a\r\r\n".lines()
+    testing.assert_eq(&doubled.next(), Option.Some("a\r"), "a carriage return before the terminator was dropped")?
+    testing.assert(&doubled.next().is_none(), "a doubled carriage return started another line")?
     .Ok(())
 }
