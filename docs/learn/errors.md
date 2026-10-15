@@ -8,6 +8,7 @@ for the code in brackets to reach the rule itself.
 
 | Code | Kind | First shown in | Rule |
 | --- | --- | --- | --- |
+| `M-Embed` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Embed]` |
 | `M-Opaque` | error | Copying, settling and sealing: [`@opaque`: only the module can make one](04-copying-settling-and-sealing.md#opaque-only-the-module-can-make-one) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Opaque]` |
 | `M-Unused` | error | Testing: [Helpers that tests share](10-testing.md#helpers-that-tests-share) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Unused]` |
 | `M-Vis` | error | Linea in an hour: [Modules](01-linea-in-an-hour.md#modules) | [§3.8 Visibility](../linea-semantics.md#38-visibility), at `[M-Vis]` |

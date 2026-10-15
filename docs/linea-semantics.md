@@ -1663,15 +1663,6 @@ implementation reaches the prelude's declarations by identity: a module that
 declares its own `Result` or `Option` still derives `Debug`, `Display` and the
 other standard traits.
 
-### §3.8 Visibility
-
-A declaration is private, `internal`, `pub`, or `opaque`. Private is the
-default; broader visibility must be explicit.
-
-```
-pub fn open() -> UInt8 { 1 }
-```
-
 **[M-Embed]** An embedded path names a regular file inside the root of the
 code that writes it. The path is relative to the directory of the writing
 file, and is one or more names separated by `/`. It may begin with a run of
@@ -1697,6 +1688,15 @@ program depends on the bytes it embeds and not on where the file sits.
 **[M-EmbedText]** A file embedded with `embed` is UTF-8 text, checked as a
 source file is ([S-Encoding]), because a `Str`'s bytes are valid UTF-8. A file
 of any bytes is embedded with `embed_bytes`.
+
+### §3.8 Visibility
+
+A declaration is private, `internal`, `pub`, or `opaque`. Private is the
+default; broader visibility must be explicit.
+
+```
+pub fn open() -> UInt8 { 1 }
+```
 
 **[M-Vis]** A private name is accessible only in its declaring module. An
 `internal` name is also accessible to every module in the same loaded root. A
