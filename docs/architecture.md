@@ -1816,6 +1816,15 @@ a real file, including when build artefacts are kept after a failure. Decode it
 with `mlir-opt` to inspect it. Linea implements no bytecode format, and the tool
 and verification boundaries are unchanged.
 
+A program's manifest may name C sources (`"native"`) and libraries
+(`"link"`). The loader records both on `Program` (`native`, `link`), with each
+source joined to the manifest's directory. `toolchain.build` compiles each
+source to an object beside the LLVM IR at the build's level, with the
+sanitizer flags when the runtime has them, and links the objects before the
+runtime archive and `-l<name>` after it. The conformance runner carries a
+case's C files with its source and writes them under the build's scratch
+directory, and the outcome cache keys on their bytes.
+
 A build links one of two runtime archives that differ only in the allocator.
 `liblinea_rt_checked.a` compiles `runtime/linea_rt.c` with
 `LINEA_CHECK_STORAGE`, which gives every allocation pages of its own followed

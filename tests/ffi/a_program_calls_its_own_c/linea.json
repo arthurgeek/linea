@@ -1,0 +1,1 @@
+{ "extern": ["arithmetic"], "native": ["arithmetic/arithmetic.c"] }

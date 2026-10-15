@@ -326,6 +326,9 @@ const BuildRequest = struct {
     artifact: toolchain.Artifact = .executable,
     /// Which allocator the executable links.
     storage: toolchain.Storage,
+    /// The C sources and libraries the program's manifest names.
+    native: []const []const u8 = &.{},
+    link: []const []const u8 = &.{},
 };
 
 /// Writes IR, assembles it and links it against the runtime.
@@ -392,6 +395,8 @@ fn compileToExecutable(
         // decision: whoever put a sanitized library there is the only one that
         // knows the link has to name what instruments it.
         .sanitize = sanitize,
+        .native = req.native,
+        .link = req.link,
     };
     const failure = try toolchain.build(gpa, io, build_opts);
 
@@ -625,6 +630,26 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module\n",
                 .{loader.manifest_name},
             ),
+            error.ManifestNativeNotSource => try stderr_w.print(
+                "  the {s} names under `native` something other than a C source below it, such as \"store/bind.c\"\n",
+                .{loader.manifest_name},
+            ),
+            error.ManifestNativeMissing => try stderr_w.print(
+                "  the {s} names under `native` a C source that does not exist\n",
+                .{loader.manifest_name},
+            ),
+            error.ManifestLinkNotLibrary => try stderr_w.print(
+                "  the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3\n",
+                .{loader.manifest_name},
+            ),
+            error.ManifestLinksWithoutExtern => try stderr_w.print(
+                "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
+                .{loader.manifest_name},
+            ),
+            error.ManifestLibraryLinks => try stderr_w.print(
+                "  the {s} of a library names C to build or link, which only a program's build does\n",
+                .{loader.manifest_name},
+            ),
             error.ManifestGrantsNoModule => try stderr_w.print(
                 "  the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it\n",
                 .{loader.manifest_name},
@@ -808,6 +833,8 @@ pub fn run(process: std.process.Init) !u8 {
                                 .opt = opt_level,
                                 .keep = keep,
                                 .storage = storage,
+                                .native = program.native,
+                                .link = program.link,
                             });
 
                             // Removed whatever happened, including where the
@@ -904,6 +931,8 @@ pub fn run(process: std.process.Init) !u8 {
                                 .keep = keep,
                                 .artifact = if (program.kind == .library) .object else .executable,
                                 .storage = storage,
+                                .native = program.native,
+                                .link = program.link,
                             });
 
                             // A refusal to emit falls through to the renderer

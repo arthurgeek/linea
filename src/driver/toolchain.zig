@@ -304,6 +304,10 @@ pub const Options = struct {
     /// A sanitizer the runtime was built with, which the link has to name too
     /// so its support library is pulled in. Null for an ordinary build.
     sanitize: ?[]const u8 = null,
+    /// C sources compiled at the same level and linked into the executable.
+    native: []const []const u8 = &.{},
+    /// C libraries linked into the executable, each passed as `-l<name>`.
+    link: []const []const u8 = &.{},
 };
 
 /// The conversion pipeline the emitter is written against, confirmed by
@@ -334,6 +338,27 @@ pub fn build(
     opts: Options,
 ) !?Failure {
     if (try lowerToLlvm(gpa, io, opts.mid)) |f| return f;
+
+    // Each C source becomes an object beside the IR, compiled by the same `cc`
+    // at the same level, and instrumented when the runtime is.
+    const objects = try gpa.alloc([]const u8, opts.native.len);
+    defer gpa.free(objects);
+    for (opts.native, 0..) |source, i| {
+        objects[i] = try std.fmt.allocPrint(gpa, "{s}.{d}.o", .{ opts.mid.assembly, i });
+        var compile: std.ArrayList([]const u8) = .empty;
+        defer compile.deinit(gpa);
+        try compile.appendSlice(gpa, &.{
+            Tool.cc.command(),
+            try std.fmt.allocPrint(gpa, "-O{s}", .{opts.opt}),
+            "-c",
+            "-o",
+            objects[i],
+            source,
+        });
+        try appendSanitizeLink(gpa, &compile, opts.sanitize);
+        if (try runTool(gpa, io, .cc, compile.items)) |f| return f;
+    }
+    defer for (objects) |object| std.Io.Dir.cwd().deleteFile(io, object) catch {};
 
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(gpa);
@@ -370,7 +395,12 @@ pub fn build(
 
     if (opts.artifact == .executable) {
         try argv.appendSlice(gpa, &.{ "-x", "none" });
-        try appendRuntimeLink(gpa, &argv, opts.runtime_path);
+        try argv.appendSlice(gpa, objects);
+        try argv.append(gpa, opts.runtime_path);
+        // After the runtime and the objects that reference them, which is the
+        // order a static archive among the libraries needs.
+        for (opts.link) |name| try argv.append(gpa, try std.fmt.allocPrint(gpa, "-l{s}", .{name}));
+        try appendSystemLink(gpa, &argv);
     }
 
     try appendSanitizeLink(gpa, &argv, opts.sanitize);
@@ -407,7 +437,8 @@ pub fn linkDriver(
         driver_path,
         object_path,
     });
-    try appendRuntimeLink(gpa, &argv, runtime_path);
+    try argv.append(gpa, runtime_path);
+    try appendSystemLink(gpa, &argv);
 
     try appendSanitizeLink(gpa, &argv, sanitize);
 
@@ -444,14 +475,10 @@ test "a sanitized runtime is linked with its sanitizer and the undefined-behavio
     try testing.expectEqualStrings("-fsanitize=undefined", argv.items[1]);
 }
 
-/// Library dependencies follow the archive that references them. macOS math
-/// symbols are supplied by libSystem, which the host C compiler already links.
-fn appendRuntimeLink(
-    gpa: std.mem.Allocator,
-    argv: *std.ArrayList([]const u8),
-    runtime_path: []const u8,
-) !void {
-    try argv.append(gpa, runtime_path);
+/// The system libraries the runtime archive references, which follow it.
+/// macOS math symbols are supplied by libSystem, which the host C compiler
+/// already links.
+fn appendSystemLink(gpa: std.mem.Allocator, argv: *std.ArrayList([]const u8)) !void {
     if (builtin.os.tag == .linux) try argv.append(gpa, "-lm");
 }
 

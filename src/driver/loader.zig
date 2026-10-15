@@ -372,7 +372,7 @@ fn loadInputs(
     // already be a rooted one and the answer decides what it names. Read from
     // the root's manifest, which is what says a root is the library every
     // program depends on -- never from where the root sits or how it is named.
-    const declared = try declaredGiven(gpa, sorted, dir);
+    var declared = try declaredGiven(gpa, sorted, dir);
     defer declared.deinit(gpa);
     l.program_is_library = declared.standard;
     if (rootManifestOf(sorted, dir)) |manifest| {
@@ -385,9 +385,14 @@ fn loadInputs(
     // A grant naming a directory that holds no source is a typo in the one
     // file that decides what may call C, so a command run against the root
     // stops on it. An editor's in-memory root keeps loading.
-    if (input == .disk) for (declared.externs) |granted| {
-        if (!holdsModule(sorted, dir, granted)) return error.ManifestGrantsNoModule;
-    };
+    if (input == .disk) {
+        for (declared.externs) |granted| {
+            if (!holdsModule(sorted, dir, granted)) return error.ManifestGrantsNoModule;
+        }
+        for (declared.native) |path| {
+            std.Io.Dir.cwd().access(input.disk, path, .{}) catch return error.ManifestNativeMissing;
+        }
+    }
 
     // Which libraries the root depends on, read from every manifest the graph
     // reaches before the first import is followed: an import's first element
@@ -533,6 +538,8 @@ fn loadInputs(
         // tests it.
         .kind = kind,
         .roots = roots,
+        .native = takeList(&declared.native),
+        .link = takeList(&declared.link),
         .ast = ast,
     };
 }
@@ -556,11 +563,30 @@ pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_d
     // whatever is being typed and a half-written manifest is a normal state for
     // a file to be in. A root read as a program is what one without a manifest
     // already is.
-    const text = (rootManifestOf(files, root_dir) orelse return .{}).text;
-    return declaredFromText(gpa, text) catch |err| switch (err) {
+    const manifest = rootManifestOf(files, root_dir) orelse return .{};
+    var declared = declaredFromText(gpa, manifest.text) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{},
     };
+    errdefer declared.deinit(gpa);
+    // A source is named relative to the manifest, and built from wherever the
+    // files were read, so it is joined to the manifest's directory here.
+    const dir = dirOf(manifest.path);
+    if (dir.len == 0 or declared.native.len == 0) return declared;
+    const joined = try gpa.alloc([]const u8, declared.native.len);
+    var made: usize = 0;
+    errdefer {
+        for (joined[0..made]) |path| gpa.free(path);
+        gpa.free(joined);
+    }
+    for (declared.native) |path| {
+        joined[made] = try std.fs.path.join(gpa, &.{ dir, path });
+        made += 1;
+    }
+    for (declared.native) |path| gpa.free(path);
+    gpa.free(declared.native);
+    declared.native = joined;
+    return declared;
 }
 
 /// The manifest that marks the root among `files`: the nearest one at or above
@@ -1282,10 +1308,18 @@ pub const Declared = struct {
     /// spelled as an import inside the root names it, with `.` for the root
     /// module. Owned; `deinit` releases it.
     externs: []const []const u8 = &.{},
+    /// The C sources a build compiles beside the program, as the manifest
+    /// writes them: relative to the manifest's directory. Owned.
+    native: []const []const u8 = &.{},
+    /// The C libraries a build links, each a name `cc` takes after `-l`.
+    /// Owned.
+    link: []const []const u8 = &.{},
 
     pub fn deinit(self: Declared, gpa: std.mem.Allocator) void {
-        for (self.externs) |route| gpa.free(route);
-        gpa.free(self.externs);
+        inline for (.{ self.externs, self.native, self.link }) |list| {
+            for (list) |item| gpa.free(item);
+            gpa.free(list);
+        }
     }
 
     /// Whether the module an import reaches by `route` may declare `extern`
@@ -1315,6 +1349,13 @@ fn grantedTo(externs: []const []const u8, route: []const u8, root_name: []const 
     return false;
 }
 
+/// Moves a list out of a `Declared` that is still released afterwards.
+fn takeList(list: *[]const []const u8) []const []const u8 {
+    const taken = list.*;
+    list.* = &.{};
+    return taken;
+}
+
 /// Whether `text` spells a module as an import inside its root does: `.` for
 /// the root module, or identifiers joined by dots.
 fn spellsModule(text: []const u8) bool {
@@ -1329,8 +1370,60 @@ fn spellsModule(text: []const u8) bool {
     return true;
 }
 
-/// Reads the keys that make up `Declared`, refusing a `kind` it does not know
-/// and an `extern` grant that is not a list of module spellings.
+/// Whether `text` is a library name `cc` takes after `-l`: letters, digits
+/// and `_.+-`, so a manifest cannot pass the linker a flag.
+fn namesLibrary(text: []const u8) bool {
+    if (text.len == 0 or text[0] == '-') return false;
+    for (text) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '.' or c == '+' or c == '-')) return false;
+    return true;
+}
+
+/// Whether `text` names a C source below the manifest's directory: a relative
+/// path ending in `.c` with no `..` and no empty part.
+fn namesSource(text: []const u8) bool {
+    if (!std.mem.endsWith(u8, text, ".c") or text.len <= 2) return false;
+    var parts = std.mem.splitScalar(u8, text, '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+/// Copies a manifest list whose every entry is a string `accepts` takes, or
+/// refuses it with `refusal`. An absent key is an empty list.
+/// Why a manifest's list of strings was refused.
+const ListRefusal = error{ ManifestExternNotModules, ManifestNativeNotSource, ManifestLinkNotLibrary };
+
+fn stringsOf(
+    gpa: std.mem.Allocator,
+    value: ?std.json.Value,
+    accepts: *const fn ([]const u8) bool,
+    refusal: ListRefusal,
+) (ListRefusal || std.mem.Allocator.Error)![]const []const u8 {
+    const listed = switch (value orelse return &.{}) {
+        .array => |array| array.items,
+        else => return refusal,
+    };
+    for (listed) |item| switch (item) {
+        .string => |text| if (!accepts(text)) return refusal,
+        else => return refusal,
+    };
+    const copies = try gpa.alloc([]const u8, listed.len);
+    var copied: usize = 0;
+    errdefer {
+        for (copies[0..copied]) |text| gpa.free(text);
+        gpa.free(copies);
+    }
+    for (listed) |item| {
+        copies[copied] = try gpa.dupe(u8, item.string);
+        copied += 1;
+    }
+    return copies;
+}
+
+/// Reads the keys that make up `Declared`, refusing a `kind` it does not know,
+/// an `extern` grant that is not a list of module spellings, and C to build
+/// that nothing could call.
 fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     const kind = try kindNamed(written.kind);
     const standard = if (written.name) |name| std.mem.eql(u8, name, library.dependency_name) else false;
@@ -1338,25 +1431,20 @@ fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     // program taking it would be loaded as the library and lose the prelude
     // it expects, which reads as every ordinary name gone undefined.
     if (standard and kind != .library) return error.ManifestNamesTheLibrary;
-    const listed = switch (written.@"extern" orelse return .{ .kind = kind, .standard = standard }) {
-        .array => |array| array.items,
-        else => return error.ManifestExternNotModules,
-    };
-    for (listed) |item| switch (item) {
-        .string => |text| if (!spellsModule(text)) return error.ManifestExternNotModules,
-        else => return error.ManifestExternNotModules,
-    };
-    const externs = try gpa.alloc([]const u8, listed.len);
-    var copied: usize = 0;
-    errdefer {
-        for (externs[0..copied]) |route| gpa.free(route);
-        gpa.free(externs);
+    var declared: Declared = .{ .kind = kind, .standard = standard };
+    errdefer declared.deinit(gpa);
+    declared.externs = try stringsOf(gpa, written.@"extern", spellsModule, error.ManifestExternNotModules);
+    declared.native = try stringsOf(gpa, written.native, namesSource, error.ManifestNativeNotSource);
+    declared.link = try stringsOf(gpa, written.link, namesLibrary, error.ManifestLinkNotLibrary);
+    if (declared.native.len + declared.link.len > 0) {
+        // Only a granted module can call what these build, so C named without
+        // a grant is C nothing reaches.
+        if (declared.externs.len == 0) return error.ManifestLinksWithoutExtern;
+        // A library is built to an object, and no dependency mechanism yet
+        // carries a link line to the program that links it.
+        if (kind == .library) return error.ManifestLibraryLinks;
     }
-    for (listed) |item| {
-        externs[copied] = try gpa.dupe(u8, item.string);
-        copied += 1;
-    }
-    return .{ .kind = kind, .standard = standard, .externs = externs };
+    return declared;
 }
 
 fn declaredFromText(gpa: std.mem.Allocator, text: []const u8) !Declared {
@@ -1391,6 +1479,23 @@ test "a manifest declares a library's name and the modules it grants extern" {
     try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": true }"));
     try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": [\"store/sql\"] }"));
     try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": [\"\"] }"));
+}
+
+test "a manifest names the C a program builds and links" {
+    const gpa = testing.allocator;
+    const built = try declaredFromText(gpa, "{ \"extern\": [\"store\"], \"native\": [\"store/bind.c\"], \"link\": [\"sqlite3\", \"c++\"] }");
+    defer built.deinit(gpa);
+    try testing.expectEqualStrings("store/bind.c", built.native[0]);
+    try testing.expectEqualStrings("sqlite3", built.link[0]);
+    try testing.expectEqualStrings("c++", built.link[1]);
+
+    try testing.expectError(error.ManifestLinkNotLibrary, declaredFromText(gpa, "{ \"extern\": [\".\"], \"link\": [\"m -lfoo\"] }"));
+    try testing.expectError(error.ManifestLinkNotLibrary, declaredFromText(gpa, "{ \"extern\": [\".\"], \"link\": [\"-Wl,-rpath\"] }"));
+    try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"../outside.c\"] }"));
+    try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"/abs.c\"] }"));
+    try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"shim.h\"] }"));
+    try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"link\": [\"sqlite3\"] }"));
+    try testing.expectError(error.ManifestLibraryLinks, declaredFromText(gpa, "{ \"kind\": \"library\", \"extern\": [\".\"], \"link\": [\"sqlite3\"] }"));
 }
 
 fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest {
@@ -1475,6 +1580,10 @@ const Written = struct {
     /// module spellings. Read as a JSON value so that a grant of any other
     /// shape is refused by name rather than as text that is not JSON.
     @"extern": ?std.json.Value = null,
+    /// C sources to compile beside the program, relative to the manifest.
+    native: ?std.json.Value = null,
+    /// C libraries to link, by the name `cc` takes after `-l`.
+    link: ?std.json.Value = null,
 };
 
 /// The directory a manifest in `base` names with `path`, spelled without `.`
@@ -2933,6 +3042,10 @@ const Loader = struct {
             },
             error.ManifestExternNotModules => {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` grants `extern` to something that is not a list of its modules", .{ manifest_name, entry.path.? }, &.{});
+                return true;
+            },
+            error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestLinksWithoutExtern, error.ManifestLibraryLinks => {
+                try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` names C it cannot build or link", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
             error.ManifestNamesTheLibrary => Manifest{ .source = null, .declared = .{} },

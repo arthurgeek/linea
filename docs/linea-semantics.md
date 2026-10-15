@@ -1756,6 +1756,12 @@ root module. A grant of another shape, or one naming a directory of the root
 that holds no source, stops the command before anything is checked. The
 standard library's manifest is
 `{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io.core", "mem", "net", "scalar", "time"] }`.
+`"native"` lists C sources, relative to the manifest, that a build compiles
+with the same `cc` at the same level and links into the program, and `"link"`
+lists libraries the build links, each a name `cc` takes after `-l`
+(`["sqlite3"]`). Either requires an `"extern"` grant, since only a granted
+module can call what they build, and a library names neither: it is built to
+an object, and nothing yet carries its link line to the program that links it.
 Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
