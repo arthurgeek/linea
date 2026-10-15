@@ -1,0 +1,1 @@
+{ "extern": ["ledger"], "native": ["ledger/ledger.c"] }

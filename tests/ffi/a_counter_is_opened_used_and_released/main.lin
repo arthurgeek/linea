@@ -1,0 +1,16 @@
+import std.io
+import counter
+
+use counter.Counter
+
+fn main() -> Result[UInt8, io.IoError] {
+    var tally = Counter.open() else |_| {
+        return .Ok(1)
+    }
+    &tally.add(-3)
+    &tally.add(100)
+    let total = tally.total()
+    tally.close()
+    io.println("{total}")?
+    .Ok(0)
+}

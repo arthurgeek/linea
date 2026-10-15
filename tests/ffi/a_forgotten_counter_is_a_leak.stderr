@@ -1,0 +1,9 @@
+error[O-Leak]: `tally` (a linear `Counter`) is still owned when this path leaves
+  --> tests/ffi/a_forgotten_counter_is_a_leak/main.lin:6:9
+   |
+6  |     var tally = Counter.open() else |_| {
+   |         ^^^^^ never settled on the path that reaches the end of this block
+11 | }
+   | - the block ends here
+   |
+   = help: settle it first with `tally.close()`

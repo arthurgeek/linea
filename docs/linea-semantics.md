@@ -4154,9 +4154,12 @@ integer's representation, and an 8- or 16-bit integer is extended to a full
 register by whichever side produces it. A `Float64` is a C `double`. A newtype
 crosses whatever its ownership policy, because the parameter convention says
 what C does with the value: `read` and `inout` lend it for the call, and
-`sink` hands it to C, which consumes it. The compiler believes that statement as
+`sink` hands it to C, which consumes it. An `inout` parameter crosses as the
+address of its slot, which is C's `T *`: C reads the value there and may write
+another, as an out-parameter does. The compiler believes these statements as
 it believes the rest of the signature, so a linear newtype over `UInt64` is how
-a module holds a C object it must release. A refined newtype cannot cross,
+a module holds a C object it must release, and a `UInt64` lent `inout` is how
+it receives one from a function that writes it through a pointer. A refined newtype cannot cross,
 because C could hand back a value outside its range. `Bool` cannot cross,
 because no C ABI fixes which bytes are true. Aggregates cannot cross because
 doing so would expose the layout kept private by [L-Layout]; callables cannot

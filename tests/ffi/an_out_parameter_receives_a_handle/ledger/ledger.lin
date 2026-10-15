@@ -1,0 +1,41 @@
+@(opaque, linear)
+type Handle = UInt64
+
+// `inout` passes the address of `out`, so C's `struct ledger **` writes the
+// new ledger's address into it.
+extern fn ledger_open(inout out: UInt64, opening: Int64) -> Int32
+
+extern fn ledger_opening(ledger: Handle) -> Int64
+
+extern fn ledger_close(sink ledger: Handle)
+
+@(opaque, linear)
+struct Ledger { handle: Handle }
+
+pub enum OpenError { OutOfMemory, NegativeOpening }
+
+impl Ledger {
+    pub fn open(opening: Int64) -> Result[Ledger, OpenError] {
+        var address: UInt64 = 0
+        let status = ledger_open(&address, opening)
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        // A ledger exists whatever the status, so it is closed on failure.
+        let ledger = Ledger { handle = Handle(address) }
+        if status != 0 {
+            ledger.close()
+            return .Err(.NegativeOpening)
+        }
+        .Ok(ledger)
+    }
+
+    pub fn opening(self: Self) -> Int64 {
+        ledger_opening(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Ledger { handle: handle } = self
+        ledger_close(handle)
+    }
+}
