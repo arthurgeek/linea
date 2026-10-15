@@ -48,8 +48,8 @@ fn load(args: env.Args) -> Option[String] {
         }
         return .Some(copied)
     }
-    let path = fs.Path.from_arg(args, 1).unwrap() else |error| {
-        io.eprintln("the settings path cannot name a file: {error:?}")
+    let path = fs.Path.from_arg(args, 1) else {
+        io.eprintln("usage: server_settings [settings-file]")
         return .None
     }
     // `read_text` reads the file and decodes it as UTF-8; its error says which

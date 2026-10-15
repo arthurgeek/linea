@@ -91,17 +91,16 @@ test fn from_str_accepts_text_and_refuses_an_embedded_nul() {
 impl Path {
     // Take process argument `i` as a path, from its exact bytes: an argument
     // that is not valid UTF-8 still names a file. None means there is no such
-    // argument, and an error means the argument holds a NUL byte, so a caller
-    // can report the two differently.
-    pub fn from_arg(args: env.Args, i: UInt64) -> Option[Result[Path, PathError]] where carries() {
-        let bytes = args.bytes_at(i)?
-        .Some(Path.from_bytes(bytes))
+    // argument. An argument ends at its first NUL byte, as every C string
+    // does, so it holds none and is always a path.
+    pub fn from_arg(args: env.Args, i: UInt64) -> Option[Path] where carries() {
+        .Some(.{ bytes = args.bytes_at(i)? })
     }
 }
 
 test fn from_arg_takes_an_argument_as_a_path_and_refuses_a_missing_one() {
     let args = env.args()
-    let program = Path.from_arg(args, 0).unwrap().unwrap()
+    let program = Path.from_arg(args, 0).unwrap()
     testing.assert_eq(program.as_bytes(), args.bytes_at(0).unwrap(), "an argument path changed its bytes")?
     testing.assert(Path.from_arg(args, args.count()).is_none(), "an index at the count named a path")?
     testing.assert(Path.from_arg(args, UInt64.max).is_none(), "an out-of-range index named a path")?

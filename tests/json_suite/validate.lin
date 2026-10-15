@@ -8,9 +8,8 @@ fn main() -> UInt8 {
     if args.count() != 2 {
         return 64
     }
-    let path = match fs.Path.from_arg(args, 1).unwrap() {
-        Ok(path) => path,
-        Err(_) => return 64,
+    let path = fs.Path.from_arg(args, 1) else {
+        return 64
     }
     let parsed = json.read_file(path)
     match parsed {

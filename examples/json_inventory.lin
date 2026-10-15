@@ -18,7 +18,6 @@ import std.testing
 @copyable
 enum InventoryError {
     Usage,
-    Path(fs.PathError),
     File(json.ParseFileError),
     Json(json.ParseError),
     Products,
@@ -36,7 +35,6 @@ enum InventoryError {
 derive (
     Debug,
     Release,
-    From[fs.PathError],
     From[json.ParseFileError],
     From[json.ParseError],
     From[json.NumberAccessError],
@@ -149,7 +147,9 @@ fn load_inventory() -> Result[json.Value, InventoryError] {
     if args.count() != 2 {
         return .Err(.Usage)
     }
-    let path = fs.Path.from_arg(args, 1).unwrap()?
+    let path = fs.Path.from_arg(args, 1) else {
+        return .Err(.Usage)
+    }
     // `read_file` reads the file no further than the parser accepts, parses
     // it and releases the text. Its error says whether reading or parsing
     // failed.

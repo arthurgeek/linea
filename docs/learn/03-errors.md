@@ -1365,10 +1365,8 @@ bytes, or that wants them back when decoding fails. `io.read_text` and
 ### A path from the command line
 
 A file named on the command line arrives as an argument.
-`fs.Path.from_arg(args, i)` makes a path from argument `i`. It answers `.None`
-when there is no argument `i`, and otherwise a `Result`: the path, or a
-`fs.PathError` when the argument holds a NUL byte, which no path can. The two
-`let ... else` steps report the two cases differently:
+`fs.Path.from_arg(args, i)` makes a path from argument `i`, or answers `.None`
+when there is no argument `i`, so one `let ... else` handles a missing name:
 
 ```linea
 import std.env
@@ -1377,13 +1375,8 @@ import std.io
 
 fn main() -> Result[UInt8, io.IoError] {
     // `from_arg` answers `.None` when the program was given no argument 1.
-    let named = fs.Path.from_arg(env.args(), 1) else {
+    let path = fs.Path.from_arg(env.args(), 1) else {
         io.println("usage: show FILE")?
-        return .Ok(2)
-    }
-    // An argument holding a NUL byte names no file.
-    let path = named else |error| {
-        io.println("not a path: {error}")?
         return .Ok(2)
     }
     defer let text = fs.read_text(path, max_bytes: 4096) else |error| {
@@ -1403,7 +1396,8 @@ usage: show FILE
 
 `from_arg` keeps the argument's exact bytes, so a file name that is not valid
 UTF-8 still opens the file; `args.at(i)` would answer `.None` for it, as if
-the argument were missing.
+the argument were missing. An argument ends at its first NUL byte, the one
+byte a path cannot hold, so every argument is a path.
 
 ### Loading JSON from a file
 

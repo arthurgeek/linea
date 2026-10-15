@@ -126,8 +126,8 @@ fn main() -> Result[UInt8, io.IoError] {
     } else {
         // `from_arg` makes the path from the argument's original bytes, which
         // need not be UTF-8, though file contents must be.
-        let path = fs.Path.from_arg(args, 1).unwrap() else |reason| {
-            io.eprintln("invalid input path: {reason:?}")
+        let path = fs.Path.from_arg(args, 1) else {
+            io.eprintln(usage_text)
             return .Ok(1)
         }
         // `read_text` reads the file and decodes it as UTF-8. Its error says
