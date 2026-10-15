@@ -107,9 +107,10 @@ Its batch stdin mode never prompts from the same consumed stream.
 
 Set collections, HTTP clients, TLS and concurrency APIs are not provided; the
 HTTP server answers one request per connection, one connection at a time.
-Only a root whose `linea.json` grants `"extern": true` may declare `extern`
-functions; the standard library's manifest,
-`{ "kind": "library", "name": "std", "extern": true }`, is the one that does.
+Only a module that its root's `linea.json` lists under `"extern"` may declare
+`extern` functions. The standard library's manifest lists the seven modules
+that call the runtime:
+`{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io.core", "mem", "net", "scalar", "time"] }`.
 That manifest is also what makes this directory the standard library, so
 `linea check std` and `linea test path/to/std` compile it as itself from any
 working directory.

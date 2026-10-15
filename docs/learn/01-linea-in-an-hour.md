@@ -1691,8 +1691,8 @@ error[M-Vis]: `days_after_spring` is internal to another root
   |                                              ^^^^^^^^^^^^^^^^^ only modules in the same root may name it
 ```
 
-A library that calls C functions through `extern` says `"extern": true` in its
-own manifest. A program that uses it, even through another library, names it
+A library that calls C functions through `extern` lists the modules that do
+under `"extern"` in its own manifest, as `"extern": ["."]`. A program that uses it, even through another library, names it
 under `dependencies` with `"extern": true` too, agreeing to trust signatures
 the compiler cannot check.
 

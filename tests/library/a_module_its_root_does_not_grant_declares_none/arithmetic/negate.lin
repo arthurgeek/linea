@@ -1,0 +1,2 @@
+// This module is not listed under "extern", so it may not declare C.
+pub extern fn labs(value: Int64) -> Int64

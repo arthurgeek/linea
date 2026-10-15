@@ -1,0 +1,2 @@
+// The manifest trusts this module with C, so it may declare `abs`.
+pub extern fn abs(value: Int32) -> Int32

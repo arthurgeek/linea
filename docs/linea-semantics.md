@@ -1588,7 +1588,7 @@ already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
 when the library's `source` leaves the directory holding its manifest, or
 shares modules with another root's source (they are one directory, or one holds
-the other without the inner root's manifest between them); or when the library's manifest grants `"extern": true` and the
+the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the
@@ -1750,8 +1750,13 @@ entry point.
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
 `"library"`; `"name"` names a library, and the name `std` makes the root the
 standard library every program depends on, so only a library may take it;
-`"extern": true` grants [M-Extern]'s capability. The standard library's
-manifest is `{ "kind": "library", "name": "std", "extern": true }`. Whether a
+`"extern"` lists the modules granted [M-Extern]'s capability, each spelled as
+an import inside the root names it (`"store"`, `"io.core"`), with `"."` for the
+root module. A grant of another shape, or one naming a directory of the root
+that holds no source, stops the command before anything is checked. The
+standard library's manifest is
+`{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io.core", "mem", "net", "scalar", "time"] }`.
+Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
 
@@ -1889,16 +1894,16 @@ constructed from their parts, destructured, or inspected through those parts.
 struct Account { id: UInt8, balance: UInt8 }
 ```
 
-**[M-Extern]** An `extern` declaration appears only in a root whose manifest
-grants it, with `"extern": true`; the grant is any root's, program or library.
-A dependency's grant takes effect only where every manifest naming it, and the
-primary root's manifest, consent with `"extern": true` in an entry
-([M-Dependency]).
-The standard library's manifest grants it; a root whose manifest does not is
-refused. The compiler trusts an `extern` signature without inspecting its
-implementation, so the grant bounds that trust to roots that declare it
+**[M-Extern]** An `extern` declaration appears only in a module that its root's
+manifest lists under `"extern"`; any root, program or library, may grant its
+own modules. A dependency's grant takes effect only where every manifest
+naming it, and the primary root's manifest, consent with `"extern": true` in
+an entry ([M-Dependency]). A module the manifest does not list is refused. The
+compiler trusts an `extern` signature without inspecting its implementation,
+so the grant bounds that trust to the modules a reviewer was told to read
 ([ADR 0068](adr/0068-a-declaration-may-name-a-symbol-the-runtime-provides.md),
-[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
+[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
+[ADR 0228](adr/0228-a-granted-module-calls-c.md)).
 
 **[M-Export]** An `export` declaration designates exactly one concrete foreign
 ABI entry point. Six declaration forms are excluded.

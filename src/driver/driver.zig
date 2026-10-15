@@ -621,6 +621,14 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the `source` in its {s} leaves the directory holding it; name a directory inside that one\n",
                 .{loader.manifest_name},
             ),
+            error.ManifestExternNotModules => try stderr_w.print(
+                "  the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module\n",
+                .{loader.manifest_name},
+            ),
+            error.ManifestGrantsNoModule => try stderr_w.print(
+                "  the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it\n",
+                .{loader.manifest_name},
+            ),
             else => {},
         }
         return exit_io;

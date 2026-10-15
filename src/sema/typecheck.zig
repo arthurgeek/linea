@@ -17732,13 +17732,15 @@ const Checker = struct {
 
     fn checkExtern(self: *Checker, d: node.DeclId, granted: bool, library: bool) std.mem.Allocator.Error!void {
         if (!granted) {
+            const route = self.program.modulePath(self.current);
+            const shown = if (route.len == 0) "." else route;
             try self.sink.addErrorFmt(
                 .m_extern,
                 self.ast.fileOf(self.ast.declName(d)),
                 self.ast.tokenSpan(self.ast.declName(d)),
-                "call it through the standard library, which declares the ones that exist",
-                "an `extern` is only declared in a root whose manifest grants `\"extern\": true`",
-                .{},
+                "list this module under \"extern\" in linea.json to trust it with C, or call a module that is granted",
+                "an `extern` is declared only in a module its root's manifest grants, and linea.json does not list \"{s}\"",
+                .{shown},
             );
         }
 

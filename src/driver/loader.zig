@@ -213,7 +213,7 @@ pub const LibraryPrefix = struct {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if ((try declaredGiven(gpa, files, dirOfEntry(entry))).standard) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
         interner.* = try Interner.initPrefix(gpa, &self.interner);
         for (self.table.sources.items) |source| _ = try table.add(gpa, source);
         return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, self);
@@ -274,7 +274,7 @@ pub const CheckedLibrary = struct {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if ((try declaredGiven(gpa, files, dirOfEntry(entry))).standard) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose, true, null);
         const diagnostic_count = sink.list.items.len;
         const error_count = sink.error_count;
         const warning_count = sink.warning_count;
@@ -373,6 +373,7 @@ fn loadInputs(
     // the root's manifest, which is what says a root is the library every
     // program depends on -- never from where the root sits or how it is named.
     const declared = try declaredGiven(gpa, sorted, dir);
+    defer declared.deinit(gpa);
     l.program_is_library = declared.standard;
     if (rootManifestOf(sorted, dir)) |manifest| {
         l.bound = try rootDir(gpa, dirOf(manifest.path));
@@ -381,6 +382,12 @@ fn loadInputs(
         l.bound = try rootDir(gpa, dir);
         l.bound_kind = .alone;
     }
+    // A grant naming a directory that holds no source is a typo in the one
+    // file that decides what may call C, so a command run against the root
+    // stops on it. An editor's in-memory root keeps loading.
+    if (input == .disk) for (declared.externs) |granted| {
+        if (!holdsModule(sorted, dir, granted)) return error.ManifestGrantsNoModule;
+    };
 
     // Which libraries the root depends on, read from every manifest the graph
     // reaches before the first import is followed: an import's first element
@@ -482,9 +489,12 @@ fn loadInputs(
     // beside it took its own manifest's grant as it was loaded.
     // A dependency's modules take its own manifest's grant, which its
     // consumer consented to or the dependency was refused.
-    for (l.modules.items[prefix_modules..]) |*m| {
-        if (m.root == .primary) m.externs = declared.externs;
-        if (m.root.isDependency()) m.externs = l.graph.items[m.root.index()].externs;
+    for (l.modules.items[prefix_modules..], l.routes.items[prefix_modules..]) |*m, route| {
+        if (m.root == .primary) m.externs = declared.grants(route, if (m.library) library.dependency_name else "");
+        if (m.root.isDependency()) {
+            const held = l.graph.items[m.root.index()];
+            m.externs = grantedTo(held.externs, route, held.name);
+        }
     }
     const roots = try l.rootFacts();
     errdefer {
@@ -532,6 +542,13 @@ fn loadInputs(
 /// The shallowest one, because a root's manifest sits above every module of it:
 /// a program holding a submodule that carries a manifest of its own would
 /// otherwise be read as whatever that submodule said.
+/// Whether the root's manifest among `files` names it the standard library.
+fn isStandard(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!bool {
+    const declared = try declaredGiven(gpa, files, root_dir);
+    defer declared.deinit(gpa);
+    return declared.standard;
+}
+
 pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!Declared {
     // Total, unlike the read from disk. A manifest that will not parse stops a
     // command run against a root, because the person who ran it is there to be
@@ -540,11 +557,10 @@ pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_d
     // a file to be in. A root read as a program is what one without a manifest
     // already is.
     const text = (rootManifestOf(files, root_dir) orelse return .{}).text;
-    var parsed = std.json.parseFromSlice(Written, gpa, text, .{
-        .ignore_unknown_fields = true,
-    }) catch return .{};
-    defer parsed.deinit();
-    return declaredFrom(parsed.value) catch .{};
+    return declaredFromText(gpa, text) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return .{},
+    };
 }
 
 /// The manifest that marks the root among `files`: the nearest one at or above
@@ -618,12 +634,16 @@ test "the manifest at or above the root declares it, and one below it does not" 
 test "the shallowest manifest among the files declares the root" {
     const declared = try declaredGiven(testing.allocator, &.{
         .{ .path = "lib/inner/linea.json", .text = "{}" },
-        .{ .path = "lib/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"std\", \"extern\": true }" },
+        .{ .path = "lib/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"std\", \"extern\": [\".\"] }" },
         .{ .path = "lib/main.lin", .text = "" },
     }, null);
-    try testing.expectEqual(Declared{ .kind = .library, .standard = true, .externs = true }, declared);
-    try testing.expectEqual(Declared{}, try declaredGiven(testing.allocator, &.{.{ .path = "a/linea.json", .text = "{ not json" }}, null));
-    try testing.expectEqual(Declared{}, try declaredGiven(testing.allocator, &.{.{ .path = "a/main.lin", .text = "" }}, null));
+    defer declared.deinit(testing.allocator);
+    try testing.expect(declared.standard);
+    try testing.expect(declared.grants("std", library.dependency_name));
+    const broken = try declaredGiven(testing.allocator, &.{.{ .path = "a/linea.json", .text = "{ not json" }}, null);
+    try testing.expect(!broken.standard and broken.externs.len == 0);
+    const absent = try declaredGiven(testing.allocator, &.{.{ .path = "a/main.lin", .text = "" }}, null);
+    try testing.expect(!absent.standard and absent.externs.len == 0);
 }
 
 /// Every module the entry reaches, read from the filesystem.
@@ -1249,8 +1269,8 @@ const Manifest = struct {
 
 /// What a root's manifest says about the root beyond where its source sits:
 /// how it is built, whether it is the library every program depends on, and
-/// whether it may declare `extern` functions. A root without a manifest is a
-/// program that is neither.
+/// which of its modules may declare `extern` functions. A root without a
+/// manifest is a program that is neither and grants no module.
 pub const Declared = struct {
     kind: program_mod.Kind = .program,
     /// Whether the manifest names the root `std`. That root is the library
@@ -1258,29 +1278,119 @@ pub const Declared = struct {
     /// library rather than beside a second copy: a package is never its own
     /// dependency.
     standard: bool = false,
-    /// Whether the root may declare `extern` functions ([M-Extern]).
-    externs: bool = false,
+    /// The modules that may declare `extern` functions ([M-Extern]), each
+    /// spelled as an import inside the root names it, with `.` for the root
+    /// module. Owned; `deinit` releases it.
+    externs: []const []const u8 = &.{},
+
+    pub fn deinit(self: Declared, gpa: std.mem.Allocator) void {
+        for (self.externs) |route| gpa.free(route);
+        gpa.free(self.externs);
+    }
+
+    /// Whether the module an import reaches by `route` may declare `extern`
+    /// functions. See `grantedTo`.
+    pub fn grants(self: Declared, route: []const u8, root_name: []const u8) bool {
+        return grantedTo(self.externs, route, root_name);
+    }
 };
 
-/// Reads the keys that make up `Declared`, refusing a `kind` it does not know.
-fn declaredFrom(written: Written) !Declared {
+/// Whether `externs`, the modules a root's manifest grants, include the module
+/// an import reaches by `route`. A library's module is reached through the
+/// library's name, `root_name`, which its own manifest does not write, so it
+/// is stripped; a program's root has no name.
+fn grantedTo(externs: []const []const u8, route: []const u8, root_name: []const u8) bool {
+    const relative = if (root_name.len == 0)
+        route
+    else if (std.mem.eql(u8, route, root_name))
+        ""
+    else if (std.mem.startsWith(u8, route, root_name) and route.len > root_name.len and route[root_name.len] == '.')
+        route[root_name.len + 1 ..]
+    else
+        route;
+    for (externs) |granted| {
+        if (std.mem.eql(u8, granted, ".") and relative.len == 0) return true;
+        if (std.mem.eql(u8, granted, relative)) return true;
+    }
+    return false;
+}
+
+/// Whether `text` spells a module as an import inside its root does: `.` for
+/// the root module, or identifiers joined by dots.
+fn spellsModule(text: []const u8) bool {
+    if (std.mem.eql(u8, text, ".")) return true;
+    if (text.len == 0) return false;
+    var parts = std.mem.splitScalar(u8, text, '.');
+    while (parts.next()) |part| {
+        if (part.len == 0) return false;
+        if (!(std.ascii.isAlphabetic(part[0]) or part[0] == '_')) return false;
+        for (part) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_')) return false;
+    }
+    return true;
+}
+
+/// Reads the keys that make up `Declared`, refusing a `kind` it does not know
+/// and an `extern` grant that is not a list of module spellings.
+fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     const kind = try kindNamed(written.kind);
     const standard = if (written.name) |name| std.mem.eql(u8, name, library.dependency_name) else false;
     // The name every program's dependency answers to belongs to a library. A
     // program taking it would be loaded as the library and lose the prelude
     // it expects, which reads as every ordinary name gone undefined.
     if (standard and kind != .library) return error.ManifestNamesTheLibrary;
-    return .{ .kind = kind, .standard = standard, .externs = written.@"extern" };
+    const listed = switch (written.@"extern" orelse return .{ .kind = kind, .standard = standard }) {
+        .array => |array| array.items,
+        else => return error.ManifestExternNotModules,
+    };
+    for (listed) |item| switch (item) {
+        .string => |text| if (!spellsModule(text)) return error.ManifestExternNotModules,
+        else => return error.ManifestExternNotModules,
+    };
+    const externs = try gpa.alloc([]const u8, listed.len);
+    var copied: usize = 0;
+    errdefer {
+        for (externs[0..copied]) |route| gpa.free(route);
+        gpa.free(externs);
+    }
+    for (listed) |item| {
+        externs[copied] = try gpa.dupe(u8, item.string);
+        copied += 1;
+    }
+    return .{ .kind = kind, .standard = standard, .externs = externs };
 }
 
-test "a manifest declares a library's name and its extern capability" {
-    const standard = try declaredFrom(.{ .kind = "library", .name = "std", .@"extern" = true });
-    try testing.expectEqual(Declared{ .kind = .library, .standard = true, .externs = true }, standard);
-    const other = try declaredFrom(.{ .kind = "library", .name = "geometry" });
-    try testing.expectEqual(Declared{ .kind = .library }, other);
-    try testing.expectEqual(Declared{}, try declaredFrom(.{}));
-    try testing.expectError(error.ManifestKindUnknown, declaredFrom(.{ .kind = "plugin" }));
-    try testing.expectError(error.ManifestNamesTheLibrary, declaredFrom(.{ .name = "std" }));
+fn declaredFromText(gpa: std.mem.Allocator, text: []const u8) !Declared {
+    const parsed = try std.json.parseFromSlice(Written, gpa, text, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    return declaredFrom(gpa, parsed.value);
+}
+
+test "a manifest declares a library's name and the modules it grants extern" {
+    const gpa = testing.allocator;
+    const standard = try declaredFromText(gpa, "{ \"kind\": \"library\", \"name\": \"std\", \"extern\": [\"mem\", \"io.core\"] }");
+    defer standard.deinit(gpa);
+    try testing.expectEqual(program_mod.Kind.library, standard.kind);
+    try testing.expect(standard.standard);
+    try testing.expect(standard.grants("std.mem", "std"));
+    try testing.expect(standard.grants("std.io.core", "std"));
+    try testing.expect(!standard.grants("std.io", "std"));
+    try testing.expect(!standard.grants("std", "std"));
+
+    const rooted = try declaredFromText(gpa, "{ \"extern\": [\".\"] }");
+    defer rooted.deinit(gpa);
+    try testing.expect(rooted.grants("", ""));
+    try testing.expect(!rooted.grants("store", ""));
+
+    const other = try declaredFromText(gpa, "{ \"kind\": \"library\", \"name\": \"geometry\" }");
+    defer other.deinit(gpa);
+    try testing.expect(!other.standard);
+    try testing.expectEqual(@as(usize, 0), other.externs.len);
+
+    try testing.expectError(error.ManifestKindUnknown, declaredFromText(gpa, "{ \"kind\": \"plugin\" }"));
+    try testing.expectError(error.ManifestNamesTheLibrary, declaredFromText(gpa, "{ \"name\": \"std\" }"));
+    try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": true }"));
+    try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": [\"store/sql\"] }"));
+    try testing.expectError(error.ManifestExternNotModules, declaredFromText(gpa, "{ \"extern\": [\"\"] }"));
 }
 
 fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest {
@@ -1308,7 +1418,8 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     };
     defer parsed.deinit();
 
-    const declared = try declaredFrom(parsed.value);
+    const declared = try declaredFrom(gpa, parsed.value);
+    errdefer declared.deinit(gpa);
     // A `source` leaving the directory holding the manifest is refused here,
     // for a root and for a library alike: the one check either takes.
     if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
@@ -1321,6 +1432,7 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
 fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
     if (manifest.source) |named| gpa.free(named);
     if (manifest.name) |named| gpa.free(named);
+    manifest.declared.deinit(gpa);
 }
 
 /// The directory a library's modules sit in: the one holding its manifest,
@@ -1359,8 +1471,10 @@ const Written = struct {
     /// The library's name, which is how a root is known to be a dependency
     /// that programs import.
     name: ?[]const u8 = null,
-    /// Whether the root is trusted to declare `extern` functions.
-    @"extern": bool = false,
+    /// The modules trusted to declare `extern` functions, as a list of
+    /// module spellings. Read as a JSON value so that a grant of any other
+    /// shape is refused by name rather than as text that is not JSON.
+    @"extern": ?std.json.Value = null,
 };
 
 /// The directory a manifest in `base` names with `path`, spelled without `.`
@@ -1542,6 +1656,41 @@ fn kindNamed(written: ?[]const u8) !program_mod.Kind {
     if (std.mem.eql(u8, named, "program")) return .program;
     if (std.mem.eql(u8, named, "library")) return .library;
     return error.ManifestKindUnknown;
+}
+
+/// Whether a module spelled `granted` (`.` or dotted names) is a directory
+/// beneath `root` that holds a source file.
+fn holdsModule(files: []const InMemoryFile, root: []const u8, granted: []const u8) bool {
+    for (files) |f| {
+        if (!std.mem.endsWith(u8, f.path, ".lin")) continue;
+        const dir = dirOf(f.path);
+        if (std.mem.eql(u8, granted, ".")) {
+            if (std.mem.eql(u8, dir, root)) return true;
+            continue;
+        }
+        const start = root.len + @intFromBool(root.len > 0);
+        if (dir.len <= start or !std.mem.startsWith(u8, dir, root)) continue;
+        if (root.len > 0 and dir[root.len] != '/') continue;
+        const relative = dir[start..];
+        if (relative.len != granted.len) continue;
+        for (relative, granted) |a, b| {
+            if (a != b and !(a == '/' and b == '.')) break;
+        } else return true;
+    }
+    return false;
+}
+
+test "a grant names a directory of the root that holds source" {
+    const files: []const InMemoryFile = &.{
+        .{ .path = "app/main.lin", .text = "" },
+        .{ .path = "app/io/core/read.lin", .text = "" },
+        .{ .path = "app/store/linea.txt", .text = "" },
+    };
+    try testing.expect(holdsModule(files, "app", "."));
+    try testing.expect(holdsModule(files, "app", "io.core"));
+    try testing.expect(!holdsModule(files, "app", "io"));
+    try testing.expect(!holdsModule(files, "app", "store"));
+    try testing.expect(holdsModule(&.{.{ .path = "store/a.lin", .text = "" }}, "", "store"));
 }
 
 fn holdsManifest(io: std.Io, dir: []const u8) bool {
@@ -1743,7 +1892,9 @@ const Loader = struct {
         name: []const u8,
         manifest_dir: []const u8,
         source_dir: []const u8,
-        externs: bool = false,
+        /// The modules its manifest grants `extern`, owned by the scratch
+        /// arena the graph is read into.
+        externs: []const []const u8 = &.{},
         dependencies: std.ArrayList(RootId) = .empty,
         /// The names its manifest wrote under `dependencies` and that were
         /// refused, so an import of one reports nothing beyond the refusal.
@@ -1866,12 +2017,7 @@ const Loader = struct {
         if (self.in_library) {
             const from = self.modules.items.len;
             const loaded = try self.load(dir, null, standard_root);
-            const externs = try self.libraryExterns();
-            for (self.modules.items[from..]) |*m| {
-                m.root = standard_root;
-                m.library = true;
-                m.externs = externs;
-            }
+            try self.grantLibrary(from);
             return loaded;
         }
 
@@ -1910,19 +2056,21 @@ const Loader = struct {
 
         const from = self.modules.items.len;
         const loaded = try self.load(dir, null, standard_root);
-        const externs = try self.libraryExterns();
-        for (self.modules.items[from..]) |*m| {
-            m.root = standard_root;
-            m.library = true;
-            m.externs = externs;
-        }
+        try self.grantLibrary(from);
         return loaded;
     }
 
-    /// Whether the embedded library's manifest grants it `extern`, read the
-    /// way every root's manifest is read.
-    fn libraryExterns(self: *Loader) std.mem.Allocator.Error!bool {
-        return (try declaredGiven(self.gpa, &library.files, null)).externs;
+    /// Marks the library modules loaded from `from` on as the library's, and
+    /// grants each the `extern` capability the embedded library's manifest
+    /// gives it, read the way every root's manifest is read.
+    fn grantLibrary(self: *Loader, from: usize) std.mem.Allocator.Error!void {
+        const declared = try declaredGiven(self.gpa, &library.files, null);
+        defer declared.deinit(self.gpa);
+        for (self.modules.items[from..], self.routes.items[from..]) |*m, route| {
+            m.root = standard_root;
+            m.library = true;
+            m.externs = declared.grants(route, library.dependency_name);
+        }
     }
 
     fn loadLibrary(self: *Loader) LoadError!void {
@@ -2655,7 +2803,7 @@ const Loader = struct {
     fn refuseUnconsentedExterns(self: *Loader, manifest_path: []const u8, text: []const u8) LoadError!void {
         const a = self.scratch.allocator();
         for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
-            if (!held.externs) continue;
+            if (held.externs.len == 0) continue;
             const root: RootId = .from(i);
             if (self.dependencyNamed(.primary, held.name) == root or self.refusedBy(.primary, held.name)) continue;
             const via = held.via orelse continue;
@@ -2763,7 +2911,7 @@ const Loader = struct {
                 try self.reportManifest(manifest_path, text, entry.key, "name the dependency by the name its manifest gives it", "the library at `{s}` is named `{s}`, not `{s}`", .{ entry.path.?, held.name, entry.name }, &.{});
                 return true;
             }
-            if (try self.refusedConsent(manifest_path, text, entry, held.externs)) return true;
+            if (try self.refusedConsent(manifest_path, text, entry, held.externs.len != 0)) return true;
             if (consumer == .primary and held.primary_key == null) held.primary_key = entry.key;
             try self.graph.items[consumer.index()].dependencies.append(a, existing);
             return false;
@@ -2781,6 +2929,10 @@ const Loader = struct {
             },
             error.ManifestKindUnknown => {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` names a kind that is not `program` or `library`", .{ manifest_name, entry.path.? }, &.{});
+                return true;
+            },
+            error.ManifestExternNotModules => {
+                try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` grants `extern` to something that is not a list of its modules", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
             error.ManifestNamesTheLibrary => Manifest{ .source = null, .declared = .{} },
@@ -2806,7 +2958,7 @@ const Loader = struct {
             try self.reportManifest(manifest_path, text, entry.key, "one name names one library", "`{s}` names two libraries", .{name}, &.{note});
             return true;
         }
-        if (try self.refusedConsent(manifest_path, text, entry, parsed.declared.externs)) return true;
+        if (try self.refusedConsent(manifest_path, text, entry, parsed.declared.externs.len != 0)) return true;
 
         // A library's modules are the ones beneath its own source directory,
         // which sits inside the directory holding its manifest and shares no

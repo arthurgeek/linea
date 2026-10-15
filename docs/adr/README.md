@@ -98,6 +98,7 @@ true of a different implementation.
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171 |
 | [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
+| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Proposed |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
 | [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176; method-call fallback refined by 0192 |

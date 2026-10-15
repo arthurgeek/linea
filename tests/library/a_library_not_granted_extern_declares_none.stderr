@@ -1,5 +1,5 @@
-error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
  --> tests/library/a_library_not_granted_extern_declares_none/main.lin:1:11
   |
 1 | extern fn linea_close(fd: Int32) -> Int64
-  |           ^^^^^^^^^^^ call it through the standard library, which declares the ones that exist
+  |           ^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
