@@ -1,0 +1,17 @@
+// `File.close` fails with the error `std.io` exports as `io.IoError`, and the
+// report writes it that way even though this program imports only `std.fs`.
+import std.fs
+
+fn touch(name: Str) -> Result[(), fs.FsFailure] {
+    let path = fs.Path.from_str(name).unwrap()
+    let file = fs.File.create(path, policy: .Replace)?
+    file.close()?
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    match touch("notes.txt") {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}

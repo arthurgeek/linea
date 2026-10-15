@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may fail with `ConfigError`, and no `From[ConfigError] for io.IoError` implementation converts it to the function's error type
+  --> tests/try/a_conversion_the_program_cannot_write_offers_a_wrapper.lin:18:16
+   |
+18 |     let port = parse_port("8080")?
+   |                ^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `io.IoError` and `From[ConfigError]`; wrap it in a type this program declares that implements `From[ConfigError]`, or convert it before `?` with `.map_err(…)`

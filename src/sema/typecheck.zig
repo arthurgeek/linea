@@ -3816,11 +3816,15 @@ fn writeDeclaredName(
 
 /// The module name a reader in `from` writes before a declaration of `module`:
 /// the name of `from`'s import of that module, or of an import that re-exports
-/// the declaration publicly, and the declaring module's own name where `from`
-/// imports neither.
+/// the declaration publicly. Where `from` imports neither, a library
+/// declaration re-exported publicly by the module enclosing its own is
+/// written through that module, as `io.IoError` for the `IoError` that
+/// `std/io/core` declares and `std/io` exports; any other declaration through
+/// its declaring module's own name.
 ///
-/// **Bound:** the imports `from` writes, once each, and only while a report is
-/// being written.
+/// **Bound:** the imports `from` writes, once each, and for a library
+/// declaration no import reaches, the program's modules, once; only while a
+/// report is being written.
 fn writableQualifier(
     ast: *const Ast,
     program: *const ExpandedProgram,
@@ -3840,7 +3844,14 @@ fn writableQualifier(
         if (res.declaredBy(b) != d or res.isAmbient(b) or res.namingReachOf(b) != .public) continue;
         return ast.tokenText(ast.declName(import.decl));
     }
-    return program.get(module).name;
+    const declaring = program.get(module);
+    if (declaring.library) if (std.fs.path.dirname(declaring.dir)) |parent| for (program.modules, 0..) |enclosing, index| {
+        if (!std.mem.eql(u8, enclosing.dir, parent)) continue;
+        const b = res.namedIn(ModuleId.from(@intCast(index)), name) orelse break;
+        if (res.declaredBy(b) != d or res.isAmbient(b) or res.namingReachOf(b) != .public) break;
+        return enclosing.name;
+    };
+    return declaring.name;
 }
 
 test "a type is written with its arguments as the module writes them" {
@@ -12444,9 +12455,7 @@ const Checker = struct {
     /// **Bound:** a closure's captures are followed `max_capture_depth`
     /// closures deep.
     fn editFor(self: *Checker, trait: node.DeclId, args: []const TypeId, held: TypeId, direct: bool, depth: u8) std.mem.Allocator.Error!Edit {
-        const spelled = try self.builder.spellInstance(self.ast.tokenText(self.ast.declName(trait)), args);
-        defer self.gpa.free(spelled);
-        const trait_name = try self.sink.arena.dupe(u8, spelled);
+        const trait_name = try self.traitInstanceName(trait, args);
         const type_name = try self.typeName(held);
         if (self.builder.get(held) == .parameter) return self.boundsEdit(trait_name, held);
         // A closure releases what it captures, so the edit is the one its
@@ -12495,6 +12504,19 @@ const Checker = struct {
         // modules may.
         if (count == 1) return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "{s} in `{s}`", .{ what, self.program.get(writers[0]).name }) };
         return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "{s} in `{s}` or `{s}`", .{ what, self.program.get(writers[0]).name, self.program.get(writers[1]).name }) };
+    }
+
+    /// A trait applied to `args` as a report writes it to the module being
+    /// checked: each argument by `typeName`, so `From[io.IoError]` reads as the
+    /// headline beside it does.
+    fn traitInstanceName(self: *Checker, trait: node.DeclId, args: []const TypeId) std.mem.Allocator.Error![]const u8 {
+        const name = self.ast.tokenText(self.ast.declName(trait));
+        if (args.len == 0) return name;
+        var out: std.ArrayList(u8) = .empty;
+        try out.print(self.sink.arena, "{s}[", .{name});
+        for (args, 0..) |arg, i| try out.print(self.sink.arena, "{s}{s}", .{ if (i == 0) "" else ", ", try self.typeName(arg) });
+        try out.append(self.sink.arena, ']');
+        return out.items;
     }
 
     /// How many closures deep `editFor` follows a capture that does not
@@ -16877,11 +16899,20 @@ const Checker = struct {
             "this `?` may fail with `{s}`, and no `From[{s}] for {s}` implementation converts it to the function's error type",
             .{ failure_name, failure_name, try self.typeName(answered) },
         );
+        // The edit is `editFor`'s, the one a refused bound names: implementing
+        // the conversion where this program owns a side of it, and otherwise
+        // why it cannot and the wrapper it can declare instead.
+        const edit: Edit = if (self.from_decl) |from|
+            try self.editFor(from, &.{failure}, answered, false, 0)
+        else
+            .{ .edit = "implement the conversion" };
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{
             .file = self.ast.fileOfExpr(id),
             .span = self.ast.exprSpan(id),
-            .message = "`?` converts a different error through `From`: implement it, or convert the error before `?`",
+            .message = try std.fmt.allocPrint(self.sink.arena, "`?` converts a different error through `From`: {s}", .{
+                try self.unmetLabel(.{ .otherwise = "convert it before `?` with `.map_err(…)`", .another_value = null }, edit),
+            }),
             .style = .primary,
         };
         const notes: []const []const u8 = if (try self.settledReason(failure)) |reason|

@@ -259,12 +259,12 @@ error[T-TryAnswer]: this `?` may fail with `text.ParseError`, and no `From[text.
   --> from_missing.lin:16:17
    |
 16 |     let hours = hours_text.parse[UInt64]()?
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement `From[text.ParseError]` for `TimeError`, or convert it before `?` with `.map_err(…)`
 error[T-TryAnswer]: this `?` may fail with `text.ParseError`, and no `From[text.ParseError] for TimeError` implementation converts it to the function's error type
   --> from_missing.lin:17:16
    |
 17 |     let mins = mins_text.parse[UInt64]()?
-   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement `From[text.ParseError]` for `TimeError`, or convert it before `?` with `.map_err(…)`
 ```
 
 This is Rust's `?` and `From` exactly. The conversion is written once, beside
@@ -1171,7 +1171,7 @@ error[T-TryAnswer]: this `?` may fail with `collections.InsertFailure[UInt64, UI
   --> bookings_unsettled.lin:15:20
    |
 15 |     let _earlier = &bookings.insert(room, nights)?
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `mem.Oom` and `From[collections.InsertFailure[UInt64, UInt64]]`; wrap it in a type this program declares that implements `From[collections.InsertFailure[UInt64, UInt64]]`, or convert it before `?` with `.map_err(…)`
    |
    = help: call `.settled()` before `?`: it releases what `collections.InsertFailure[UInt64, UInt64]` hands back and keeps its reason, `mem.Oom`
 ```
@@ -1245,7 +1245,7 @@ error[T-TryAnswer]: this `?` may fail with `collections.InsertFailure[UInt64, UI
   --> bookings_unsettled.lin:23:20
    |
 23 |     let _earlier = &bookings.insert(room, nights)?
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement `From[collections.InsertFailure[UInt64, UInt64]]` for `BookingError`, or convert it before `?` with `.map_err(…)`
    |
    = help: call `.settled()` before `?`: it releases what `collections.InsertFailure[UInt64, UInt64]` hands back and keeps its reason, `mem.Oom`
 ```
