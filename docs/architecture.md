@@ -1793,6 +1793,11 @@ proof paths before machine code. These facts permit no allocation elision,
 byte GEPs over their recorded base and offset, preserving pointer relationships
 and the existing overflow, bounds and alignment checks.
 
+An `extern` declaration and an export thunk mark every 8- or 16-bit integer
+parameter and result `llvm.signext` or `llvm.zeroext`, by the declared type's
+signedness. Both supported C ABIs leave the bits above a narrow value to its
+producer, and C compiled by Clang reads the whole register.
+
 A `Never`-returning function has no MLIR result and is marked noreturn. A
 noreturn call is followed by `llvm.unreachable`, and no conversion or storage
 operation is emitted for `Never`. Panic passes the recorded `Str` address and

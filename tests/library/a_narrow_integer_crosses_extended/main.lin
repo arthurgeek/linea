@@ -1,0 +1,19 @@
+// C reads an `int8_t` or `uint16_t` argument only after the caller has
+// extended it to a full register, so these calls hand C the declared value.
+extern fn widen_signed(value: Int8) -> Int32
+
+extern fn widen_unsigned(value: UInt16) -> Int32
+
+export fn narrow_arguments_arrive_whole() -> UInt8 {
+    if widen_signed(-3) == -3 && widen_unsigned(65000) == 65000 {
+        1
+    } else {
+        0
+    }
+}
+
+// A C caller reads an `int8_t` result as the whole register, so the exported
+// function extends its answer before returning it.
+export fn negate(value: Int8) -> Int8 {
+    -value
+}

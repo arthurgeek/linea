@@ -209,13 +209,18 @@ pub fn emit(
         for (0..f.param_count) |pi| {
             if (pi > 0 or indirect) try w.writeAll(", ");
             try w.writeAll(paramTypeOf(module, id, f, pi));
+            if (!module.arrivesByAddress(f, pi)) try writeForeignExtension(w, module, f.locals[pi]);
         }
         try w.writeAll(")");
         // The callable signature records the declared result even though an
         // external has no local body. Verification holds every call to it.
         const answered = module.types.erased(module.types.get(f.signature).callable.result);
         if (resultTypeOf(module, id, answered)) |t| {
-            try w.print(" -> {s}", .{t});
+            if (foreignExtension(module, answered)) |extension| {
+                try w.print(" -> ({s} {s})", .{ t, extension });
+            } else {
+                try w.print(" -> {s}", .{t});
+            }
         }
         if (answered == .never) try w.writeAll(" attributes {passthrough = [\"noreturn\"]}");
         try w.writeAll("\n");
@@ -361,6 +366,28 @@ fn foreignTypeOf(ty: TypeId) []const u8 {
     };
 }
 
+/// The extension a C caller or callee expects of an integer narrower than 32
+/// bits, or null for a wider one.
+///
+/// Both supported C ABIs (AArch64 and x86-64 SysV) leave the register bits
+/// above an `int8_t` or `int16_t` to whoever produces the value: the caller for
+/// an argument, the callee for a result. Clang compiles C against that promise,
+/// so C reads `(int)value` as the whole register. Marking the declaration makes
+/// LLVM extend by the declared type's signedness on every call through it and
+/// in every thunk that answers one.
+fn foreignExtension(module: *const Module, ty: TypeId) ?[]const u8 {
+    const bits = ty.foreignWidth() orelse return null;
+    if (bits >= 32) return null;
+    return switch (module.representationOf(ty).computation) {
+        .integer => |signedness| if (signedness == .signed) "{llvm.signext}" else "{llvm.zeroext}",
+        else => null,
+    };
+}
+
+fn writeForeignExtension(w: *std.Io.Writer, module: *const Module, ty: TypeId) std.Io.Writer.Error!void {
+    if (foreignExtension(module, ty)) |extension| try w.print(" {s}", .{extension});
+}
+
 /// The symbol the outside world links against, which is never the body.
 ///
 /// It takes the declared types' widths, widens each to the convention the body
@@ -397,11 +424,19 @@ fn emitExportThunk(
     try w.print("  func.func @{s}(", .{name});
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const ty = if (module.arrivesByAddress(mir, i)) "!llvm.ptr" else foreignTypeOf(mir.locals[i]);
+        const by_address = module.arrivesByAddress(mir, i);
+        const ty = if (by_address) "!llvm.ptr" else foreignTypeOf(mir.locals[i]);
         try w.print("%p{d}: {s}", .{ i, ty });
+        if (!by_address) try writeForeignExtension(w, module, mir.locals[i]);
     }
     try w.writeAll(")");
-    if (answers) try w.print(" -> {s}", .{foreignTypeOf(mir.return_type)});
+    if (answers) {
+        if (foreignExtension(module, mir.return_type)) |extension| {
+            try w.print(" -> ({s} {s})", .{ foreignTypeOf(mir.return_type), extension });
+        } else {
+            try w.print(" -> {s}", .{foreignTypeOf(mir.return_type)});
+        }
+    }
     try w.writeAll(" {\n");
 
     // A value narrower than the convention arrives narrow and is widened the

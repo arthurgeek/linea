@@ -39,7 +39,7 @@ module {
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_write_some(i32, i64, i64) -> i64
-  func.func private @linea_io_category(i32) -> i8
+  func.func private @linea_io_category(i32) -> (i8 {llvm.zeroext})
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>} {
     %z0 = arith.constant 1 : i64
     %s0 = llvm.alloca %z0 x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr
