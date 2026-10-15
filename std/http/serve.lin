@@ -405,7 +405,9 @@ fn status_lines(answers: Vec[String]) -> String {
     var lines = String.new()
     for answer in answers.as_slice() {
         // A status line holds the phrase after its 9-byte `HTTP/1.1 ` prefix.
-        let (line, _) = answer.split_once("\r\n") else { (answer.view(), "") }
+        let (line, _) = answer.split_once("\r\n") else {
+            (answer.view(), "")
+        }
         let first = line.slice(9, line.length()).unwrap_or(line)
         &lines.append(first).unwrap()
         &lines.append("|").unwrap()

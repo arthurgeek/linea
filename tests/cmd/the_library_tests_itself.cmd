@@ -234,6 +234,7 @@ The library tests itself.
   ok    fs.reading_text_names_the_offset_of_invalid_utf8
   ok    fs.reading_text_releases_the_bytes_of_every_failure_and_every_refusal
   ok    fs.reading_text_reports_a_missing_file_as_a_read_failure
+  ok    fs.removing_a_file_takes_its_name_and_reports_a_missing_one
   ok    fs.saving_atomically_publishes_the_new_contents
   ok    fs.settling_a_failed_file_read_keeps_the_read_and_close_errors
   ok    fs.temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator
@@ -707,6 +708,7 @@ The library tests itself.
   ok    json.a_decode_error_displays_its_reason_and_the_path_to_it
   ok    json.a_decode_error_runs_out_of_memory_only_when_an_allocation_failed
   ok    json.a_decode_error_written_without_an_allocator_is_the_system_error
+  ok    json.a_decode_file_error_shows_its_variant_and_converts_through_question_mark
   ok    json.a_document_renders_into_an_arena
   ok    json.a_file_is_decoded_into_a_typed_value
   ok    json.a_file_is_decoded_into_an_arena
@@ -714,6 +716,7 @@ The library tests itself.
   ok    json.a_file_is_read_into_an_arena
   ok    json.a_file_larger_than_the_parse_limits_is_refused_at_the_read
   ok    json.a_file_that_is_missing_or_malformed_names_the_step_that_failed
+  ok    json.a_file_that_is_not_utf8_fails_to_parse_as_invalid_utf8
   ok    json.a_max_depth_holds_at_most_the_hard_depth
   ok    json.a_max_members_holds_at_most_the_hard_member_count
   ok    json.a_max_number_bytes_holds_at_most_the_hard_token_length
@@ -721,6 +724,7 @@ The library tests itself.
   ok    json.a_parse_error_displays_its_problem_and_the_byte_it_stopped_at
   ok    json.a_parsed_number_keeps_its_token_in_an_arena
   ok    json.a_writer_error_converts_into_an_encoding_failure
+  ok    json.an_empty_file_fails_to_parse_and_a_directory_fails_to_read
   ok    json.an_integer_number_keeps_its_token_in_an_arena
   ok    json.an_object_decoder_records_its_fields_in_an_arena
   ok    json.array_allocation_refusal_preserves_the_incoming_value
@@ -752,6 +756,7 @@ The library tests itself.
   ok    json.decode_parses_then_decodes_and_reports_a_parse_error
   ok    json.decoded_string_owns_storage_and_settles_allocation_failure
   ok    json.decoding_a_file_keeps_read_and_decode_failures_distinct
+  ok    json.decoding_a_file_that_is_not_utf8_fails_to_parse
   ok    json.derived_record_encoding_uses_field_order_and_null_option_values
   ok    json.derived_records_own_text_and_apply_optional_field_policy
   ok    json.document_output_escapes_every_control_byte
@@ -1285,4 +1290,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1282 passed, 0 failed
+  1287 passed, 0 failed

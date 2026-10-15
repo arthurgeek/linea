@@ -15,7 +15,9 @@ impl log.Sink for Untimed {
     type Error = io.IoError
 
     fn write_line(_self: Self, line: Str) -> Result[(), io.IoError] where carries() {
-        let (_, message) = line.split_once(" ") else { ("", copy(line)) }
+        let (_, message) = line.split_once(" ") else {
+            ("", copy(line))
+        }
         io.print(message)
     }
 }
