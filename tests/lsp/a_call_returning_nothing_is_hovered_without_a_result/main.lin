@@ -1,0 +1,16 @@
+// Hover on a call names the callee as it was instantiated. A function that
+// returns nothing writes no result, so the call is shown without one, and one
+// that returns a value is shown with the arrow and what it gives back.
+fn reset[T: Integer](inout counter: T) {
+    counter = T(0)
+}
+
+fn doubled[T: Integer](value: T) -> T {
+    value + value
+}
+
+fn main() -> UInt8 {
+    var visits: UInt8 = 4
+    reset(&visits)
+    doubled(visits)
+}
