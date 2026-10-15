@@ -1,0 +1,29 @@
+// An associated type may be defined through another implementation's settled
+// type written further down: `Ping.Dual` is `Pong.Dual`, which is `End`.
+trait Protocol {
+    type Dual
+}
+
+struct End {}
+
+struct Ping {}
+
+struct Pong {}
+
+impl Protocol for Ping {
+    type Dual = Pong.Dual
+}
+
+impl Protocol for Pong {
+    type Dual = End
+}
+
+struct Tag[phantom P] {
+    at: UInt64,
+}
+
+fn main() -> UInt8 {
+    let ping: Tag[Ping.Dual] = .{ at = 3 }
+    let ended: Tag[End] = ping
+    UInt8(ended.at)
+}

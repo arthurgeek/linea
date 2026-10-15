@@ -7261,6 +7261,16 @@ pub const Typing = struct {
         /// Borrowed from the checker, which owns it: readable, so this pass
         /// cannot write into another's answer or free memory it was lent.
         decl_returns: Returns.Reading = .empty,
+        /// While the checker settles implementations' associated types, the
+        /// members it has not settled yet, borrowed from it. A settled
+        /// reference the checker reads (`reading_reference`) reads none of
+        /// them: `settledBy` records in `unsettled_read` the one it was asked
+        /// for, so the definition reading it waits for it. A member read while
+        /// a type's fields are laid out is not a definition's reference and
+        /// reads what has been settled so far.
+        unsettled_members: ?*const std.AutoHashMapUnmanaged(DeclId, void) = null,
+        unsettled_read: DeclId = .none,
+        reading_reference: bool = false,
         /// `Typing.declared_requirements`, borrowed for the same reason: minting
         /// a projection is a reading of what its declaration was bounded by.
         declared_requirements: []const CapabilityRequirement = &.{},
@@ -9605,6 +9615,10 @@ pub const Typing = struct {
             // table says so and names both halves, where returning null here
             // said "this implementation supplies no return type" and dropped
             // the member out of overloading with nothing reported.
+            if (self.unsettled_members) |waiting| if (self.reading_reference and waiting.contains(member)) {
+                self.unsettled_read = member;
+                return null;
+            };
             const settled = self.decl_returns.get(member);
             if (settled == .poison) return null;
             if (impl.parameters == 0) return settled;

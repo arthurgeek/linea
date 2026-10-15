@@ -2452,6 +2452,17 @@ Self.Other` would define one associated type through another in the same
 implementation. An implementation defines each associated type exactly once;
 duplicate definitions are [N-Duplicate].
 
+A definition may read another implementation's settled type, `type Dual =
+Pong.Dual`, and means what that definition means, whichever implementation is
+written first. A definition that reads back to itself through such references,
+`Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
+inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
+once per cycle at the definition on it written first, naming each definition
+and what it reads. A definition that only reads into such a cycle is that
+report's consequence. A type applied to a definition read this way is a type,
+`type Iter = S[Box]` with a field of `S[T]` reading `T.Iter`, and is held to
+[T-InfiniteLayout] instead.
+
 An implementation supplies the trait's type arguments, as in
 `impl Holds[UInt8] for Coins` for `Holds[T]`. A wrong argument count is rejected
 before checking members.

@@ -8187,6 +8187,9 @@ const Checker = struct {
         // Interning can move pool arrays backing the selected key.
         const args = try self.gpa.dupe(TypeId, selected.args);
         defer self.gpa.free(args);
+        const reading = self.builder.reading_reference;
+        self.builder.reading_reference = true;
+        defer self.builder.reading_reference = reading;
         const settled = try self.builder.settledAtWithin(scope, selected.trait.index(), args, held, selected.sig, self.ast.tokenText(ref.name));
         return .{ .ty = settled.ty, .declared = selected.sig, .named = ref.name, .settled_once = true, .head_definition = settled.head_definition };
     }
@@ -8882,9 +8885,14 @@ const Checker = struct {
 
         const supplied = try self.gpa.alloc(TypeId, wanted);
         defer self.gpa.free(supplied);
+        var refused = false;
         for (self.ast.typeArgs(args), 0..) |a, i| {
             supplied[i] = try self.typeOfRefOf(m, owner, a);
+            if (supplied[i] == .poison) refused = true;
         }
+        // An argument that was refused was reported where it is written, and
+        // a type applied to it is that refusal's consequence.
+        if (refused) return .poison;
         try self.fillDefaults(decl, supplied, written);
         for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, decl, i);
         const made = try self.builder.instantiate(head, decl, supplied);
@@ -24668,10 +24676,119 @@ const Checker = struct {
             self.generic = outer_generic;
         }
 
+        // A definition may read another implementation's settled type, which
+        // is settled first whichever is written first: a definition that reads
+        // a member still waiting waits for it, and is settled again once that
+        // member is. What still waits when nothing more settles reaches itself.
+        //
+        // **Bound:** each pass settles at least one waiting definition or ends
+        // the walk, so a definition is read at most as many times as there are
+        // definitions on the chain of reads ahead of it.
+        var waiting: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
+        defer waiting.deinit(self.gpa);
+        var reads: std.AutoHashMapUnmanaged(node.DeclId, node.DeclId) = .empty;
+        defer reads.deinit(self.gpa);
         for (self.supplied.items) |pair| {
-            const member = pair.member;
-            if (!settlesAType(self.ast, member)) continue;
+            if (settlesAType(self.ast, pair.member)) try waiting.put(self.gpa, pair.member, {});
+        }
+        self.builder.unsettled_members = &waiting;
+        defer self.builder.unsettled_members = null;
+        var settled_any = true;
+        while (settled_any and waiting.count() != 0) {
+            settled_any = false;
+            for (self.supplied.items) |pair| {
+                if (!waiting.contains(pair.member)) continue;
+                self.builder.unsettled_read = .none;
+                const diagnostics_start = self.sink.items().len;
+                const errors_before = self.sink.error_count;
+                const warnings_before = self.sink.warning_count;
+                try self.settleDeclaredType(pair);
+                const read = self.builder.unsettled_read;
+                if (read != .none and read != pair.member) {
+                    // What it reported while reading a type that does not
+                    // exist yet, it says again when it is read once more.
+                    self.sink.list.shrinkRetainingCapacity(diagnostics_start);
+                    self.sink.error_count = errors_before;
+                    self.sink.warning_count = warnings_before;
+                    try reads.put(self.gpa, pair.member, read);
+                    continue;
+                }
+                _ = waiting.remove(pair.member);
+                _ = reads.remove(pair.member);
+                if (read == pair.member) {
+                    self.decl_returns.set(pair.member, .poison);
+                    try self.reportDefinitionCycle(pair.member, &reads);
+                }
+                settled_any = true;
+            }
+        }
+        // Every definition still waiting reads one that reaches itself; each
+        // cycle is reported once, at its first definition, and a definition
+        // that only reads into one is that report's consequence.
+        var reported: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
+        defer reported.deinit(self.gpa);
+        for (self.supplied.items) |pair| {
+            if (!waiting.contains(pair.member)) continue;
+            self.decl_returns.set(pair.member, .poison);
+            var at = pair.member;
+            var steps: usize = 0;
+            while (steps <= reads.count()) : (steps += 1) at = reads.get(at) orelse break;
+            if (reported.contains(at)) continue;
+            // Reported at the definition on the cycle written first.
+            var first = at;
+            var step = at;
+            while (true) {
+                try reported.put(self.gpa, step, {});
+                if (step.index() < first.index()) first = step;
+                step = reads.get(step) orelse break;
+                if (step == at) break;
+            }
+            try self.reportDefinitionCycle(first, &reads);
+        }
+    }
 
+    /// Reports the associated type definitions that read one another from
+    /// `first` back to it, each named as `Type.Name`, at `first`'s written
+    /// type.
+    fn reportDefinitionCycle(self: *Checker, first: node.DeclId, reads: *const std.AutoHashMapUnmanaged(node.DeclId, node.DeclId)) std.mem.Allocator.Error!void {
+        var chain: std.ArrayList(u8) = .empty;
+        defer chain.deinit(self.gpa);
+        var step = first;
+        var count: usize = 0;
+        while (true) : (count += 1) {
+            const next = reads.get(step) orelse first;
+            try chain.print(self.gpa, "{s}`{s}` is `{s}`", .{
+                if (count == 0) "" else ", ",
+                try self.definitionName(step),
+                try self.definitionName(next),
+            });
+            step = next;
+            if (step == first or count > reads.count()) break;
+        }
+        const written = self.ast.declReturnRef(first);
+        try self.sink.addErrorFmt(
+            .t_impl,
+            self.ast.fileOf(written.at),
+            self.ast.writtenSpan(written),
+            "define it as a type that does not read back to itself",
+            "this associated type is defined through itself: {s}",
+            .{chain.items},
+        );
+    }
+
+    /// An implementation's associated type definition as a program reads
+    /// it, `Ping.Dual`: the implementation's type, then the name.
+    fn definitionName(self: *Checker, member: node.DeclId) std.mem.Allocator.Error![]const u8 {
+        const name = self.ast.tokenText(self.ast.declName(member));
+        const row = self.enclosingRow(member) orelse return name;
+        return std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ try self.typeName(row.ty), name });
+    }
+
+    /// Settles one implementation's associated type definition, and checks
+    /// it against the bound its declaration carries.
+    fn settleDeclaredType(self: *Checker, pair: types_mod.Supplied) std.mem.Allocator.Error!void {
+        {
+            const member = pair.member;
             const written = self.ast.declReturnRef(member);
 
             // A settled reference is read through what an implementation
@@ -24691,14 +24808,15 @@ const Checker = struct {
                     "a settled type is not written as a settled reference",
                     .{},
                 );
-                continue;
+                return;
             }
 
             self.current = self.program.moduleOf(member);
             self.generic = member;
             const settled = try self.typeOfRefOf(self.current, member, written);
+            if (self.builder.unsettled_read != .none) return;
             self.decl_returns.set(pair.member, settled);
-            if (settled == .poison) continue;
+            if (settled == .poison) return;
 
             // The bound the declaration carries, discharged here because here
             // is where a type stands against it: settling is what answers the
@@ -24711,7 +24829,7 @@ const Checker = struct {
             // settled reference to this name.
             const declared = pair.sig;
             const bounds = self.ast.declBounds(declared);
-            if (bounds.len == 0) continue;
+            if (bounds.len == 0) return;
 
             // What is underlined is the type as it was written. An array
             // writes no head, so what stands in for it there is the settling
