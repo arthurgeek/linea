@@ -2,4 +2,4 @@ error[T-Bound]: `A` requires `Allocator`, and `UInt8` does not implement it
  --> tests/type_defaults/a_default_argument_meets_the_bound_of_its_parameter.lin:9:21
   |
 9 | fn _shelved(_shelf: Shelf[UInt8]) -> UInt8 {
-  |                     ^^^^^ `UInt8` and `Allocator` are both declared outside this program; wrap it in a type that implements `Allocator`, or drop the bound
+  |                     ^^^^^ the library declares both `UInt8` and `Allocator`; wrap it in a type this program declares that implements `Allocator`, or drop the bound

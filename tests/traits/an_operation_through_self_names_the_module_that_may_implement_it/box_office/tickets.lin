@@ -1,0 +1,9 @@
+pub struct Ticket {
+    seat: UInt8,
+}
+
+impl Ticket {
+    pub fn sell(seat: UInt8) -> Ticket {
+        Ticket { seat = seat }
+    }
+}

@@ -2,6 +2,6 @@ error[T-Bound]: `Outer[Token]` does not implement `Equatable`
   --> tests/traits/attached_derives/a_sealed_type_names_only_its_arguments_at_the_use/main.lin:11:16
    |
 11 |     if wrapped == wrapped {
-   |                ^^ the operator is a call on that trait, so implement it for this type
+   |                ^^ implement `Equatable` for `Token`
    |
    = help: `Outer[T]` implements `Equatable` when `T` implements `Equatable`, and `Token` does not

@@ -13,4 +13,4 @@ error[T-Bound]: `Pair[UInt8, UInt8]` does not implement `Give[UInt8]`
   --> tests/traits/a_head_binds_each_parameter_it_names_once.lin:32:5
    |
 32 |     Give.give(p, n)
-   |     ^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are
+   |     ^^^^^^^^^^^^^^^ implement `Give[UInt8]` for `Pair[UInt8, UInt8]`

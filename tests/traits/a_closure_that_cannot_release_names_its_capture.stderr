@@ -1,0 +1,5 @@
+error[T-Bound]: `F` requires `Release`, and `<closure>` does not implement it
+  --> tests/traits/a_closure_that_cannot_release_names_its_capture.lin:11:30
+   |
+11 |     let reveal = mem.Closure.open(
+   |                              ^^^^ it captures `key`; implement `Release` for `Key`

@@ -2,4 +2,4 @@ error[T-Bound]: `fn() -> UInt8` does not implement `Equatable`
  --> tests/decl/callable_equality_needs_equatable.lin:4:23
   |
 4 |     let _same = first == second
-  |                       ^^ the operator is a call on that trait, so implement it for this type
+  |                       ^^ only the library, which declares `Equatable`, may implement it for `fn() -> UInt8`; compare values of a type that implements it

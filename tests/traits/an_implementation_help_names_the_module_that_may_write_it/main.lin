@@ -1,0 +1,9 @@
+// `Show` is declared in `show` and `Square` in `shapes`, so only those
+// modules may implement one for the other, and the help names them.
+import shapes
+import show
+
+fn main() -> UInt8 {
+    let square: shapes.Square = .{ side = 2 }
+    show.shown(square)
+}

@@ -1,0 +1,22 @@
+// Inside a generic body a type parameter implements only what its bounds
+// promise, so the help offers adding the trait to its bounds.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+fn smallest[T](sink values: Vec[T]) -> Vec[T] {
+    var sorted = values
+    &sorted.sort()
+    sorted
+}
+
+fn shown[T](x: T) -> UInt8 {
+    Show.show(x)
+}
+
+fn main() -> UInt8 {
+    let values: Vec[UInt8] = Vec.new()
+    let sorted = smallest(values)
+    sorted.release()
+    shown(UInt8(1))
+}

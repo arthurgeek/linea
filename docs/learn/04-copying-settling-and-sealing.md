@@ -1607,7 +1607,7 @@ through `redeem` or `refund`, and nothing else. Every other route is closed:
     --> box-office/main.lin:11:21
      |
   11 |     Release.release(yours)
-     |                     ^^^^^ implement it for that type, or reach the operation on one that does
+     |                     ^^^^^ implement it for that type in `box_office`, or reach the operation on one that does
   ```
 
   `[T-Bound]` means a type is missing a trait that the operation needs.

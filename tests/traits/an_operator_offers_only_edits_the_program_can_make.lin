@@ -1,0 +1,26 @@
+// `==` and `<` call `Equatable` and `Comparable`. The library declares both
+// traits and `Vec` and `Bool`, so the help offers a wrapper, and for
+// `Labelled[Token]` it names the implementation the derived one requires.
+@derive(Equatable)
+struct Labelled[T] {
+    value: T,
+}
+
+struct Token {}
+
+fn main() -> UInt8 {
+    let a: Vec[Int64] = Vec.new()
+    let b: Vec[Int64] = Vec.new()
+    let same = a == b
+    a.release()
+    b.release()
+    let ordered = true < false
+    let first: Labelled[Token] = .{ value = .{} }
+    let second: Labelled[Token] = .{ value = .{} }
+    let labelled = first == second
+    if same || ordered || labelled {
+        1
+    } else {
+        0
+    }
+}

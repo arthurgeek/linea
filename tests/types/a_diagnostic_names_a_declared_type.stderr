@@ -30,4 +30,4 @@ error[T-Bound]: `Pair` does not implement `Comparable`
   --> tests/types/a_diagnostic_names_a_declared_type.lin:53:10
    |
 53 |     if p < q {
-   |          ^ the operator is a call on that trait, so implement it for this type
+   |          ^ implement it for that type

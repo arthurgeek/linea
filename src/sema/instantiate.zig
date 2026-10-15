@@ -1031,7 +1031,7 @@ fn discoverReporting(
             const field_type = pool.view().fieldType(closure.environment, field.index());
             const choice = try pool.implementationChoice(metadata.trait, &.{}, field_type) orelse {
                 const expr = typing.closureOf(closure.closure).expr;
-                try reportMissingImplementation(gpa, sink, ast, pool, metadata.trait, &.{}, field_type, ast.fileOfExpr(expr), ast.exprSpan(expr));
+                try reportMissingImplementation(gpa, sink, ast, pool, metadata.trait, &.{}, field_type, ast.fileOfExpr(expr), ast.exprSpan(expr), typecheck.missing_at_instantiation);
                 return;
             };
             const view = pool.view();
@@ -1651,6 +1651,7 @@ const Discovery = struct {
             held,
             self.ast.fileOfExpr(at),
             self.ast.exprSpan(at),
+            typecheck.missing_at_instantiation,
         );
     }
 

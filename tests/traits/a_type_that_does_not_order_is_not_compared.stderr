@@ -2,4 +2,4 @@ error[T-Bound]: `Name` does not implement `Comparable`
   --> tests/traits/a_type_that_does_not_order_is_not_compared.lin:17:10
    |
 17 |     if a < b {
-   |          ^ the operator is a call on that trait, so implement it for this type
+   |          ^ implement it for that type

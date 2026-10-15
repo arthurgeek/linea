@@ -1,0 +1,5 @@
+error[M-Impl]: no module declares `Float64`
+ --> tests/traits/an_impl_of_a_library_trait_for_a_library_type_offers_a_wrapper.lin:3:18
+  |
+3 | impl Ordered for Float64 {}
+  |                  ^^^^^^^ the library declares both `Float64` and `Ordered`; wrap it in a type this program declares that implements `Ordered`

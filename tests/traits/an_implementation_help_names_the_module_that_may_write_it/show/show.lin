@@ -1,0 +1,7 @@
+pub trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+pub fn shown[S: Show](s: S) -> UInt8 {
+    Show.show(s)
+}

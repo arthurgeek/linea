@@ -1,0 +1,7 @@
+// The library declares both `Ordered` and `Float64`, so this program cannot
+// implement one for the other, and is offered a wrapper of its own.
+impl Ordered for Float64 {}
+
+fn main() -> UInt8 {
+    0
+}

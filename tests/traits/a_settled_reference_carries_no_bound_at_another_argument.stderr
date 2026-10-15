@@ -2,4 +2,4 @@ error[T-Bound]: `C` requires `Lookup[Bool]`, and `H.Elem` does not implement it
   --> tests/traits/a_settled_reference_carries_no_bound_at_another_argument.lin:41:20
    |
 41 |     let j: UInt8 = index(e)
-   |                    ^^^^^ implement it for that type, or drop the bound
+   |                    ^^^^^ add `Lookup[Bool]` to `H.Elem`'s bounds, or drop the bound

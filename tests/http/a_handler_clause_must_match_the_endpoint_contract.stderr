@@ -2,7 +2,7 @@ error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(read autho
   --> tests/http/a_handler_clause_must_match_the_endpoint_contract.lin:25:26
    |
 25 |     let routed = &router.route("GET /", hello)
-   |                          ^^^^^ only the module declaring `Endpoint` can implement it for this type, and it is outside this program; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[(), SystemAllocator]`, may implement it for `fn(read Author, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#1)`; pass a value whose type implements it
    |
    = help: its parameter conventions are ones `Endpoint` is implemented for, so its parameter types or its contract differ from the implementation's
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit

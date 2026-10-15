@@ -2,6 +2,6 @@ error[T-Bound]: `Release` requires `Self` to implement it, and `Vec[Transaction,
  --> tests/vec/a_vector_cannot_release_contextual_elements.lin:8:21
   |
 8 |     Release.release(values)
-  |                     ^^^^^^ meet what the implementation below requires, or reach the operation on one that does
+  |                     ^^^^^^ implement `Release` for `Transaction`, or reach the operation on one that does
   |
   = help: `Vec[T, A]` implements `Release` when `T` implements `Release`, and `Transaction` does not

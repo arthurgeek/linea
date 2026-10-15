@@ -2,6 +2,6 @@ error[T-Bound]: `H` requires `Endpoint[(), SystemAllocator]`, and `fn(inout coun
   --> tests/http/a_stateful_function_is_not_registered_on_a_router_of_another_state.lin:17:26
    |
 17 |     let routed = &router.route("GET /", count)
-   |                          ^^^^^ only the module declaring `Endpoint` can implement it for this type, and it is outside this program; pass a value whose type implements it
+   |                          ^^^^^ only the library, which declares `Endpoint[(), SystemAllocator]`, may implement it for `fn(inout Counter, read Request[SystemAllocator]) -> Result[Response[SystemAllocator], Error[SystemAllocator]] where carries(#2)`; pass a value whose type implements it
    |
    = help: the implementation takes `S` from the function as `Counter`, and the bound asks for `()`

@@ -2,4 +2,4 @@ error[T-Bound]: `Selected` requires `Self` to implement it, and `Box[Bool]` does
   --> tests/default_implementations/recursive_ordinary_bounds_do_not_reach_the_default.lin:21:23
    |
 21 |     Selected.selected(value)
-   |                       ^^^^^ implement it for that type, or reach the operation on one that does
+   |                       ^^^^^ another implementation of `Selected` for `Box[Bool]` would overlap the one that matches it; reach the operation on one that does

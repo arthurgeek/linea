@@ -2,4 +2,4 @@ error[T-Bound]: `UInt16` does not implement `Combine[UInt8]`
   --> tests/traits/integer_generics/repeated_key_parameters_cannot_bind_different_types.lin:12:5
    |
 12 |     Combine.combine(UInt16(3), UInt8(4))
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement it for those arguments, or settle them to ones that are
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement `Combine[UInt8]` for `UInt16`

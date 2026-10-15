@@ -1,0 +1,5 @@
+error[T-Bound]: `Release` requires `Self` to implement it, and `Ticket` does not
+ --> tests/traits/an_operation_through_self_names_the_module_that_may_implement_it/main.lin:9:21
+  |
+9 |     Release.release(ticket)
+  |                     ^^^^^^ implement it for that type in `box_office`, or reach the operation on one that does

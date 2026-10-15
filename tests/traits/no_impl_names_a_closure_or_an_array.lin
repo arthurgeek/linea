@@ -1,0 +1,16 @@
+// No `impl` head can name a closure's type or an array's type, so the help
+// offers passing another value rather than implementing the trait.
+trait Show {
+    fn show(self: Self) -> Int64
+}
+
+fn display[T: Show](x: T) -> Int64 {
+    Show.show(x)
+}
+
+fn main() -> UInt8 {
+    let _n = display(|y: Int64| y + 1)
+    let numbers: [Int64; 3] = [1, 2, 3]
+    let _m = display(numbers)
+    0
+}

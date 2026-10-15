@@ -2,4 +2,4 @@ error[T-Bound]: `C` requires `Lookup[Bool]`, and `T` does not implement it
   --> tests/traits/a_required_trait_admits_no_other_argument.lin:38:5
    |
 38 |     flagged(t)
-   |     ^^^^^^^ implement it for that type, or drop the bound
+   |     ^^^^^^^ add `Lookup[Bool]` to `T`'s bounds, or drop the bound

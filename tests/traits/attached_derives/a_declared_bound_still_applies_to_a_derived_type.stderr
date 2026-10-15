@@ -2,7 +2,7 @@ error[T-Bound]: `Entry[Label, Bool]` does not implement `Equatable`
   --> tests/traits/attached_derives/a_declared_bound_still_applies_to_a_derived_type.lin:21:14
    |
 21 |     if first == first {
-   |              ^^ the operator is a call on that trait, so implement it for this type
+   |              ^^ implement `Hash` for `Label`
    |
    = help: `Entry[K, V]` implements `Equatable` when `K` implements `Hash`, and `Label` does not
 error[T-Bound]: `K` requires `Hash`, and `Label` does not implement it

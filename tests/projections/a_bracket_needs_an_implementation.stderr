@@ -2,4 +2,4 @@ error[T-Bound]: `Pair` does not implement `Index[UInt64]`
   --> tests/projections/a_bracket_needs_an_implementation.lin:11:10
    |
 11 |     copy(s[0])
-   |          ^ implement it for those arguments, or settle them to ones that are
+   |          ^ implement `Index[UInt64]` for `Pair`

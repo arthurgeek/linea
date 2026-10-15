@@ -2,14 +2,14 @@ error[T-Bound]: `Labelled[Token]` does not implement `Equatable`
   --> tests/traits/attached_derives/a_field_type_without_the_trait_is_named_at_the_use.lin:26:14
    |
 26 |     if first == second || same(third, fourth) {
-   |              ^^ the operator is a call on that trait, so implement it for this type
+   |              ^^ implement `Equatable` for `Token`
    |
    = help: `Labelled[T]` implements `Equatable` when `T` implements `Equatable`, and `Token` does not
 error[T-Bound]: `T` requires `Equatable`, and `Shelf[Token]` does not implement it
   --> tests/traits/attached_derives/a_field_type_without_the_trait_is_named_at_the_use.lin:26:27
    |
 26 |     if first == second || same(third, fourth) {
-   |                           ^^^^ meet what the implementation below requires, or drop the bound
+   |                           ^^^^ implement `Equatable` for `Token`, or drop the bound
    |
    = help: `Shelf[T]` implements `Equatable` when `Labelled[T]` implements `Equatable`, and `Labelled[Token]` does not
    = help: `Labelled[T]` implements `Equatable` when `T` implements `Equatable`, and `Token` does not

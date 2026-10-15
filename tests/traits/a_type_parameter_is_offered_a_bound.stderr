@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Ordered`, and `T` does not implement it
+ --> tests/traits/a_type_parameter_is_offered_a_bound.lin:9:13
+  |
+9 |     &sorted.sort()
+  |             ^^^^ add `Ordered` to `T`'s bounds
+error[T-Bound]: `Show` requires `Self` to implement it, and `T` does not
+  --> tests/traits/a_type_parameter_is_offered_a_bound.lin:14:15
+   |
+14 |     Show.show(x)
+   |               ^ add `Show` to `T`'s bounds, or reach the operation on one that does

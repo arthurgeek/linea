@@ -318,6 +318,9 @@ pub const ImplTypeSide = union(enum) {
     /// module owns its type side, so only the trait's module may implement
     /// for it.
     unowned,
+    /// A type no `impl` head can name: a closure, whose type is its own, or
+    /// an array. No module may write an implementation for it.
+    unnameable,
 };
 
 /// Whether `writer` may write an implementation of the trait declared in
@@ -326,11 +329,40 @@ pub const ImplTypeSide = union(enum) {
 /// it. The resolver asks this of every `impl` it admits, and the checker asks
 /// it when a refused bound decides whether to offer an implementation.
 pub fn ownsAnImplSide(writer: ModuleId, writer_is_library: bool, side: ImplTypeSide, trait_module: ModuleId) bool {
+    if (side == .unnameable) return false;
     if (trait_module != .none and trait_module == writer) return true;
     return switch (side) {
         .declared => |declaring| declaring == writer,
         .primitive => writer_is_library,
-        .unowned => false,
+        .unowned, .unnameable => false,
+    };
+}
+
+/// Why no module of a program may implement a trait for a type, and the
+/// edit it can make instead, where there is one.
+pub const ImplRefusal = struct {
+    reason: []const u8,
+    instead: ?[]const u8,
+};
+
+/// The one wording of why a program may not write an implementation of
+/// `trait_name` for `type_name`, whose type side is `side` and whose trait no
+/// module of the program declares. The resolver says it where such an `impl`
+/// is written, and the checker where a refused bound would need one.
+pub fn implRefusal(arena: std.mem.Allocator, side: ImplTypeSide, type_name: []const u8, trait_name: []const u8) std.mem.Allocator.Error!ImplRefusal {
+    return switch (side) {
+        .unnameable => .{
+            .reason = try std.fmt.allocPrint(arena, "no `impl` can name `{s}`", .{type_name}),
+            .instead = null,
+        },
+        .unowned => .{
+            .reason = try std.fmt.allocPrint(arena, "only the library, which declares `{s}`, may implement it for `{s}`", .{ trait_name, type_name }),
+            .instead = null,
+        },
+        .declared, .primitive => .{
+            .reason = try std.fmt.allocPrint(arena, "the library declares both `{s}` and `{s}`", .{ type_name, trait_name }),
+            .instead = try std.fmt.allocPrint(arena, "wrap it in a type this program declares that implements `{s}`", .{trait_name}),
+        },
     };
 }
 
@@ -345,6 +377,7 @@ test "a module owning either side of an implementation may write it" {
     try testing.expect(!ownsAnImplSide(other, false, .primitive, trait_home));
     try testing.expect(!ownsAnImplSide(other, true, .unowned, trait_home));
     try testing.expect(!ownsAnImplSide(other, false, .{ .declared = type_home }, .none));
+    try testing.expect(!ownsAnImplSide(trait_home, true, .unnameable, trait_home));
 }
 
 /// Whether a closure body may change a capture binding: an owned capture
@@ -7743,7 +7776,7 @@ const Resolver = struct {
                     if (self.ast.declTrait(d) == TokenId.none)
                         "an inherent `impl` goes in the module that declares the type"
                     else if (trait_decl != DeclId.none and self.program.get(self.moduleOf(trait_decl)).library)
-                        "the library declares both the trait and the type; give a type this program declares a method instead"
+                        try self.refusalHelp(if (unit_head) .unowned else .primitive, if (unit_head) "()" else self.ast.tokenText(tok), trait_decl)
                     else
                         "write it where the trait is declared",
                     "no module declares `{s}`",
@@ -7833,7 +7866,7 @@ const Resolver = struct {
                 if (self.ast.declTrait(d) == TokenId.none)
                     "write the `impl` in the module that declares the type"
                 else if (trait_decl != DeclId.none and self.program.get(from).library and self.program.get(self.moduleOf(trait_decl)).library)
-                    "the library declares both the trait and the type; give a type this program declares a method instead"
+                    try self.refusalHelp(.{ .declared = from }, self.ast.tokenText(if (tuple_head) self.ast.declName(declared) else tok), trait_decl)
                 else
                     "write it where the trait is declared, or where the type is",
                 "`{s}` is declared in `{s}`",
@@ -7860,6 +7893,14 @@ const Resolver = struct {
         // declaration its head names is kept for chaining its members under
         // that declaration: settled here, once, where the head was resolved.
         if (trait_decl == DeclId.none and !is_derive) try self.inherent_heads.append(self.gpa, .{ .impl = d, .names = declared });
+    }
+
+    /// The help for an `impl` this program may not write because the library
+    /// declares its trait and owns its type side.
+    fn refusalHelp(self: *Resolver, side: ImplTypeSide, type_name: []const u8, trait_decl: DeclId) std.mem.Allocator.Error![]const u8 {
+        const refusal = try implRefusal(self.sink.arena, side, type_name, self.ast.tokenText(self.ast.declName(trait_decl)));
+        const instead = refusal.instead orelse return refusal.reason;
+        return std.fmt.allocPrint(self.sink.arena, "{s}; {s}", .{ refusal.reason, instead });
     }
 
     /// Whether the module being resolved may write an implementation of

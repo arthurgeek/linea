@@ -1,0 +1,5 @@
+error[T-Bound]: `W` requires `Writer`, and `UInt8` does not implement it
+  --> tests/traits/a_bound_a_derive_wrote_is_not_offered_for_dropping.lin:12:26
+   |
+12 |     let _written = point.fmt(&out)
+   |                          ^^^ the library declares both `UInt8` and `Writer`; wrap it in a type this program declares that implements `Writer`

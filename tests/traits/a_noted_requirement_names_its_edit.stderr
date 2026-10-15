@@ -1,0 +1,7 @@
+error[T-Bound]: `S` requires `Show`, and `Pair[Token]` does not implement it
+  --> tests/traits/a_noted_requirement_names_its_edit.lin:22:5
+   |
+22 |     shown(pair)
+   |     ^^^^^ implement `Weigh` for `Token`, or drop the bound
+   |
+   = help: `Pair[T]` implements `Show` when `T` implements `Weigh`, and `Token` does not

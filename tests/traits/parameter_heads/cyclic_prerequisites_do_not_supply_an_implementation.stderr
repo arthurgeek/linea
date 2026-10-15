@@ -2,6 +2,6 @@ error[T-Bound]: `Route` requires `Self` to implement it, and `UInt8` does not
   --> tests/traits/parameter_heads/cyclic_prerequisites_do_not_supply_an_implementation.lin:16:17
    |
 16 |     Route.route(UInt8(0))
-   |                 ^^^^^^^^ meet what the implementation below requires, or reach the operation on one that does
+   |                 ^^^^^^^^ another implementation of `Allowed` for `UInt8` would overlap the one that matches it; reach the operation on one that does
    |
    = help: every type implementing `Allowed` implements `Route`, and `UInt8` does not implement `Allowed`

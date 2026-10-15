@@ -1,0 +1,18 @@
+// A closure releases what it captures, so it implements `Release` when each
+// owned capture does. `Key` does not, and the help names the capture.
+import std.mem
+
+struct Key {
+    id: UInt8,
+}
+
+fn main() -> UInt8 {
+    let key = Key { id = 3 }
+    let reveal = mem.Closure.open(
+        [sink key] || -> UInt8 {
+            key.id
+        },
+    ).unwrap()
+    reveal.release()
+    0
+}

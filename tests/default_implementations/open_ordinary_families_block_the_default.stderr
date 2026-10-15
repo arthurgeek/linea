@@ -2,6 +2,6 @@ error[T-Bound]: `Selected` requires `Self` to implement it, and `Box[T]` does no
   --> tests/default_implementations/open_ordinary_families_block_the_default.lin:28:23
    |
 28 |     Selected.selected(value, value)
-   |                       ^^^^^ meet what the implementation below requires, or reach the operation on one that does
+   |                       ^^^^^ add `Permitted` to `T`'s bounds, or reach the operation on one that does
    |
    = help: `Box[T]` implements `Selected` when `T` implements `Permitted`, and `T` does not

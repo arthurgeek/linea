@@ -2,4 +2,4 @@ error[T-Bound]: `B` does not implement `Equatable`
   --> tests/generics/an_operator_names_the_parameter_it_got.lin:12:10
    |
 12 |     if y == y {
-   |          ^^ the operator is a call on that trait, so implement it for this type
+   |          ^^ add `Equatable` to `B`'s bounds
