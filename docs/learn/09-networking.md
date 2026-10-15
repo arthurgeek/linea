@@ -125,7 +125,7 @@ client received: pong
   belongs to the `net.Acceptor` trait, hence `use net.Acceptor`; `close` is the
   listener's own and needs no `use`.
 - `write_str` sends text; `shutdown_write` tells the other side nothing more
-  is coming, which is what lets `io.read_all` on the far end finish.
+  is coming, which is what lets `io.read_text_in` on the far end finish.
 - `io.read_text_in(arena.handle(), &connection, max_bytes: 1024)` reads until
   the other side stops writing and decodes the bytes as UTF-8, answering the
   text or a `ReadTextError` that says which step failed and owns nothing.

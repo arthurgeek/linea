@@ -402,6 +402,57 @@ test fn direct_file_writes_require_a_policy_and_report_the_accepted_extent() {
     .Ok(())
 }
 
+// Remove the file at `path`. The path's parent directory is opened to remove
+// the final name from it, with scratch copies of both from `allocator`. A
+// failure to remove the name, such as a missing file, is the primary failure,
+// and a failure to close the parent is kept beside it.
+pub fn remove_file_in[A: Allocator](allocator: A, path: Path) -> Result[(), FsFailure] where carries() {
+    let target = prepare(allocator, path)?
+    let removed = mem._unlink_at_fd(target.name, target.parent)
+    let failure = if removed < 0 {
+        FsFailure.new(.Io(io.IoError.from_os(.Remove, Int32(-removed))))
+    } else {
+        FsFailure.empty()
+    }
+    complete(target, failure)
+}
+
+// Remove the file at `path`, as `remove_file_in` does, with the system
+// allocator for the path's scratch storage.
+pub fn remove_file(path: Path) -> Result[(), FsFailure] where carries() {
+    remove_file_in(mem.system(), path)
+}
+
+test fn removing_a_file_takes_its_name_and_reports_a_missing_one() {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    let _written = write_file(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
+    testing.assert_ok_eq(remove_file(path), (), "an existing file was not removed")?
+    let reopened = match File.open(path) {
+        Ok(file) => {
+            let _closed = file.close()
+            true
+        },
+        Err(_) => false,
+    }
+    testing.assert(!reopened, "a removed file still opened")?
+    let missing = match remove_file(path) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary {
+            Some(error) => match read error {
+                Io(reason) => reason.category == .NotFound,
+                _ => false,
+            },
+            None => false,
+        },
+    }
+    testing.assert(missing, "removing a missing file did not report it as not found")?
+    // The arena holds only the parent's and the name's scratch copies.
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let _again = write_file(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
+    testing.assert_ok_eq(remove_file_in(arena.handle(), path), (), "a file was not removed with an arena's scratch")?
+}
+
 test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
     // The arena holds the path scratch and anything the operation returns.
     defer let arena = mem.Arena.open(mem.system(), size: 1024)

@@ -1402,10 +1402,10 @@ byte a path cannot hold, so every argument is a path.
 ### Loading JSON from a file
 
 `json.read_file(path)` reads a file, parses it into a `json.Value` document and
-releases the text in one call. `json.decode_file(path)` does the same and
+releases the bytes in one call. `json.decode_file(path)` does the same and
 decodes the document into a type that derives `json.Decode`. Both cap the
 read at the most the parser accepts, and their errors say whether reading the
-file or the document failed:
+file or the document failed; bytes that are not UTF-8 are a failed document:
 
 ```linea
 import std.fs
@@ -1422,7 +1422,8 @@ struct Station[A: Allocator = mem.SystemAllocator] {
 
 fn main() -> Result[UInt8, io.IoError] {
     let path = fs.Path.from_str("station.json").unwrap()
-    let _ = fs.write_file(path, r#"{"name":"harbour","port":8080}"#.as_bytes(), policy: .Replace) else |error| {
+    // `.CreateNew` refuses to replace a `station.json` that is already there.
+    let _ = fs.write_file(path, r#"{"name":"harbour","port":8080}"#.as_bytes(), policy: .CreateNew) else |error| {
         io.println("could not write the file: {error}")?
         return .Ok(1)
     }
@@ -1435,6 +1436,11 @@ fn main() -> Result[UInt8, io.IoError] {
         return .Ok(1)
     }
     io.println("{station.name.view()} listens on port {station.port}")?
+    // `remove_file` deletes the file the program wrote.
+    let _ = fs.remove_file(path) else |error| {
+        io.println("could not remove the file: {error}")?
+        return .Ok(1)
+    }
     // `read_file` parses a file into a `json.Value` document. Its error says
     // whether reading the file or parsing it failed.
     let missing = fs.Path.from_str("missing.json").unwrap()
@@ -1456,7 +1462,8 @@ decode, which the decoder allocated, so the `else` releases it with
 `defer error.release()`. A `json.ParseFileError` owns nothing. Each has an
 `_in` form, `json.read_file_in(allocator, path)` and
 `json.decode_file_in(allocator, path)`, for a document built in another
-allocator.
+allocator. `fs.remove_file(path)` removes the file the program wrote, and
+reports a file that is not there as `NotFound`.
 
 ## What you have seen
 
@@ -1482,6 +1489,7 @@ allocator.
 | to drop what a failure hands back and keep its reason | `result.settled()`, then `?` or `match` |
 | a file's text | `fs.read_text(path, max_bytes)`, or `fs.read_text_in(allocator, path, max_bytes)` |
 | a path from a command-line argument | `fs.Path.from_arg(env.args(), 1)`: `.None` when it is missing |
+| to remove a file | `fs.remove_file(path)` |
 | a JSON document or a typed value from a file | `json.read_file(path)`, or `let value: T = json.decode_file(path)?` |
 | both outcomes to carry on | `match` |
 | a value you know is there | `.unwrap()`, which stops the program if it is not |
