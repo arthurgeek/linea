@@ -3878,7 +3878,11 @@ handed on with `?`, returned, or passed to something that takes it. A `Result`
 reports whether the computation succeeded, so this binder cannot discard it
 without acknowledging the alternatives. [T-Discard] governs expression
 statements, while [T-DiscardFailure] governs binders; a bare call in statement
-position is covered by [T-Discard], and an unread name by [N-Unused].
+position is covered by [T-Discard], and an unread name by [N-Unused]. Both
+reports offer `?` only where it would be accepted ([T-TryAnswer]): the function
+answers with a `Result` whose error the failure is or converts to, or, for a
+failure that settles to such a reason, `.settled()?`. Otherwise they offer
+`let … else |error| { … }`, which handles the failure where it happens.
 
 Explicit acknowledgement is sufficient. A `match` with only a `_` arm satisfies
 this rule by deliberately treating all alternatives alike; intentionally ignoring

@@ -2,4 +2,4 @@ error[T-DiscardFailure]: this `Result[(), io.IoError]` reports a failure, and `_
  --> tests/typecheck/a_failure_is_not_discarded.lin:9:13
   |
 9 |     let _ = print("gone")
-  |             ^^^^^^^^^^^^^ match it, hand it on with `?`, or return it
+  |             ^^^^^^^^^^^^^ match it, or handle the failure with `let _ = … else |error| { … }`

@@ -13837,7 +13837,7 @@ const Checker = struct {
                     "this expression produces {s} `{s}` that is discarded",
                     .{ article.before(try self.typeName(t)), (try self.typeName(t)) },
                     if (reports_failure)
-                        "match it, hand it on with `?`, or return it"
+                        try self.handlingOfFailure(t)
                     else if (names_function)
                         "call it with `(...)`, or bind it with `let _ =` to discard it deliberately"
                     else
@@ -13846,6 +13846,28 @@ const Checker = struct {
             }
             return;
         }
+    }
+
+    /// What a report about a discarded `Result` offers to do with it instead,
+    /// for [T-Discard] and [T-DiscardFailure] alike. `?` is offered only where
+    /// it would be accepted: the function answers with a `Result` whose error
+    /// the failure is or converts to, or, for a failure that settles to a
+    /// reason which does, `.settled()?`. Otherwise the failure is handled
+    /// where it happens, by the `let … else` that binds what succeeded.
+    fn handlingOfFailure(self: *Checker, t: TypeId) std.mem.Allocator.Error![]const u8 {
+        const carrier = self.carrierOf(t) orelse return "match it";
+        const failure = self.errorTypeOf(carrier);
+        if (self.current_return) |want| if (self.carrierOf(want.ty)) |answers| if (answers.kind == .result) {
+            const answered = self.errorTypeOf(answers);
+            if (failure == answered or failure == .poison or answered == .poison or try self.errorConversion(failure, answered) != null)
+                return "match it, hand it on with `?`, or return it";
+            if (try self.settledReason(failure)) |reason| if (reason == answered or try self.errorConversion(reason, answered) != null)
+                return "match it, or hand on its reason with `.settled()?`";
+        };
+        return if (self.payloadTypeOf(carrier) == .unit)
+            "match it, or handle the failure with `let _ = … else |error| { … }`"
+        else
+            "match it, or handle the failure with `let value = … else |error| { … }`";
     }
 
     fn checkLet(self: *Checker, s: StmtId) !void {
@@ -13895,7 +13917,7 @@ const Checker = struct {
                         d.init,
                         "this `{s}` reports a failure, and `_` discards it",
                         .{(try self.typeName(t))},
-                        "match it, hand it on with `?`, or return it",
+                        try self.handlingOfFailure(t),
                     );
                 }
             }
