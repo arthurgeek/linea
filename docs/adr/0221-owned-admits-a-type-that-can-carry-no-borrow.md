@@ -41,14 +41,21 @@ the answer the compiler already computes; the bound lets source ask for it.
   nothing: it is never an eligible contract source, and storing it adds nothing
   to a result or an `inout` destination. Contract inference, the ownership
   checker and storage lowering read the same containment table they read for a
-  concrete type, so the bound changes one seed and nothing else.
+  concrete type, so the bound changes one seed and nothing else. Storage's
+  filter, which keeps a dependency on a value only where its type may carry one
+  (`holdsDependencies`, over `mayCarry`), reads that table too: `Owned` is the
+  negation of `mayCarry`, not a second classifier.
 - **Checked at instantiation by the same table.** A type argument for an
   `Owned` parameter must carry nothing, which is the same `mayCarryDependencies`
   answer. A generic argument passes only when its own parameter is bounded
   `Owned`, as with `Copyable`. The [T-Bound] refusal names a path from the
   argument to what it carries, found over the same containment edges the table
   is computed from, never by a second classifier: `Label` is refused because its
-  field `text` is a `Str`, whose field `bytes` is a `Slice[UInt8]`.
+  field `text` is a `Str`, whose field `bytes` is a `Slice[UInt8]`. Its help
+  goes through the same edit routine as every other unmet bound, so it offers
+  only edits the program can make: adding `Owned` to the bounds of a parameter
+  the path ends at, and dropping the bound only where the program wrote it, not
+  on a library operation such as `Vec.append_slice`.
 - **Structural, never declared.** It is decided by the type's representation,
   private fields included, as `Copyable` is answered through an opaque type's
   fields. No declaration can claim it: `impl Owned for T` is [T-Bound], and so

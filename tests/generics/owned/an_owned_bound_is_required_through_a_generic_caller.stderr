@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Owned`, and `U` may stand for a type that carries 
   --> tests/generics/owned/an_owned_bound_is_required_through_a_generic_caller.lin:15:5
    |
 15 |     append_all(&values, items)
-   |     ^^^^^^^^^^ bound `U` by `Owned`
+   |     ^^^^^^^^^^ add `Owned` to `U`'s bounds, or drop the bound

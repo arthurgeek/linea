@@ -2,24 +2,24 @@ error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text.byte
   --> tests/generics/owned/a_type_that_can_carry_a_borrow_is_not_owned.lin:19:17
    |
 19 |     let label = keep(Label { text = "bench" })
-   |                 ^^^^ use a type that owns everything it holds, or drop the bound
+   |                 ^^^^ `Label` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: `bytes` is a `mem.Slice[UInt8]`, a view of storage it does not own
   --> tests/generics/owned/a_type_that_can_carry_a_borrow_is_not_owned.lin:20:16
    |
 20 |     let text = keep("hall")
-   |                ^^^^ use a type that owns everything it holds, or drop the bound
+   |                ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 error[T-Bound]: `T` requires `Owned`, and `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` can carry a borrow: `storage.allocator.owner` is a `borrow mem.Arena[mem.SystemAllocator]`, an observation of another value
   --> tests/generics/owned/a_type_that_can_carry_a_borrow_is_not_owned.lin:23:18
    |
 23 |     let values = keep(empty)
-   |                  ^^^^ use a type that owns everything it holds, or drop the bound
+   |                  ^^^^ `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 error[T-Bound]: `T` requires `Owned`, and `borrow UInt8` is an observation of another value
   --> tests/generics/owned/a_type_that_can_carry_a_borrow_is_not_owned.lin:26:20
    |
 26 |     let observed = keep(borrow number)
-   |                    ^^^^ use a type that owns everything it holds, or drop the bound
+   |                    ^^^^ `borrow UInt8` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text.bytes` is a `mem.Slice[UInt8]`, a view of storage it does not own
   --> tests/generics/owned/a_type_that_can_carry_a_borrow_is_not_owned.lin:24:15
    |
 24 |     let pool: Pool[Label] = .{ first = copy(label) }
-   |               ^^^^ use a type that owns everything it holds, or drop the bound
+   |               ^^^^ `Label` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound

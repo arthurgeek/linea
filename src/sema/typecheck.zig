@@ -10375,23 +10375,26 @@ const Checker = struct {
         reason: ?[]const u8,
     };
 
-    /// Refuses `held` for an `Owned` bound, naming the parts walked from it to
-    /// what carries the dependency. The path is found over the edges the
-    /// containment answer was computed from, so it names the reason that
-    /// answer gave.
-    fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
+    /// Refuses `held` for the `Owned` bound written at `bound`, naming the
+    /// parts walked from it to what carries the dependency. The path is found
+    /// over the edges the containment answer was computed from, so it names
+    /// the reason that answer gave. The label is the edit `editForOwned`
+    /// finds, with dropping the bound offered only where the program wrote it.
+    fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
         const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
         defer self.gpa.free(witness.steps);
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
+        var help = self.unmetBoundHelp(bound);
+        help.another_value = "pass a value whose type owns everything it holds";
+        const label = try self.unmetLabel(help, try self.editForOwned(held, witness.seed));
         const file = self.ast.fileOf(at);
         if (self.builder.get(witness.seed) == .parameter) {
-            const help = try std.fmt.allocPrint(self.sink.arena, "bound `{s}` by `Owned`", .{seed_name});
             if (witness.steps.len == 0) return self.sink.addErrorFmt(
                 .t_bound,
                 file,
                 span,
-                help,
+                label,
                 "`{s}` requires `Owned`, and `{s}` may stand for a type that carries a borrow",
                 .{ subject, held_name },
             );
@@ -10399,7 +10402,7 @@ const Checker = struct {
                 .t_bound,
                 file,
                 span,
-                help,
+                label,
                 "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is `{s}`, which may stand for a type that carries one",
                 .{ subject, held_name, try self.witnessPath(witness.steps), seed_name },
             );
@@ -10410,12 +10413,11 @@ const Checker = struct {
             "a view of storage it does not own"
         else
             "raw storage another value owns";
-        const help = "use a type that owns everything it holds, or drop the bound";
         if (witness.steps.len == 0) return self.sink.addErrorFmt(
             .t_bound,
             file,
             span,
-            help,
+            label,
             "`{s}` requires `Owned`, and `{s}` is {s}",
             .{ subject, held_name, what },
         );
@@ -10423,7 +10425,7 @@ const Checker = struct {
             .t_bound,
             file,
             span,
-            help,
+            label,
             "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, {s}",
             .{ subject, held_name, try self.witnessPath(witness.steps), article.before(seed_name), seed_name, what },
         );
@@ -10560,13 +10562,13 @@ const Checker = struct {
             try self.sink.addErrorFmt(.t_bound, self.ast.fileOf(at), span, "supply a built-in integer type or an Integer-constrained parameter", "`{s}` requires `Integer`, and `{s}` is not a built-in integer type", .{ subject, (try self.typeName(held)) });
             return true;
         }
-        if (ownedBound(self.ast, self.res, bounds) != null and held != .poison and try self.builder.mayCarryDependencies(held)) {
+        if (ownedBound(self.ast, self.res, bounds)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
             if (mode == .ask) return true;
             if (self.builder.view().mentionsOpenType(held)) return true;
             try self.noteRefused(at);
-            try self.reportNotOwned(subject, held, at, span);
+            try self.reportNotOwned(subject, held, bound, at, span);
             return true;
-        }
+        };
         if (try self.builder.meetsCapabilityWithin(self.generic, held, requirement)) return false;
         const demanded: []const u8 = switch (requirement) {
             .copyable => "Copyable",
@@ -12288,10 +12290,7 @@ const Checker = struct {
         defer self.gpa.free(spelled);
         const trait_name = try self.sink.arena.dupe(u8, spelled);
         const type_name = try self.typeName(held);
-        // Inside a generic body a parameter implements what its bounds
-        // promise and nothing else.
-        if (self.builder.get(held) == .parameter)
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ trait_name, type_name }) };
+        if (self.builder.get(held) == .parameter) return self.boundsEdit(trait_name, held);
         // A closure releases what it captures, so the edit is the one its
         // first capture that does not release needs.
         if (self.builder.closure_release) |release| if (release.trait == trait and depth < max_capture_depth) {
@@ -12352,12 +12351,26 @@ const Checker = struct {
             .discardable => "Discardable",
             .unrestricted => unreachable,
         };
+        if (self.builder.get(held) == .parameter) return self.boundsEdit(required, held);
         const type_name = try self.typeName(held);
-        if (self.builder.get(held) == .parameter)
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, type_name }) };
         if (capability == .copyable) if (self.declaringType(held)) |d| if (!self.declaredInLibrary(d))
             return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "mark `{s}` `@copyable`", .{type_name}) };
         return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `{s}`", .{ type_name, required }), .instead = null } };
+    }
+
+    /// The edit that would make `held` `Owned`, where `seed` is the part its
+    /// carrying path ends at. A parameter gains it through its bounds. No
+    /// implementation can make a type `Owned`, because the bound is decided
+    /// by what the type holds.
+    fn editForOwned(self: *Checker, held: TypeId, seed: TypeId) std.mem.Allocator.Error!Edit {
+        if (self.builder.get(seed) == .parameter) return self.boundsEdit("Owned", seed);
+        return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `Owned`", .{try self.typeName(held)}), .instead = null } };
+    }
+
+    /// Inside a generic body a parameter meets what its bounds promise and
+    /// nothing else, so the edit adds `required` to them.
+    fn boundsEdit(self: *Checker, required: []const u8, parameter: TypeId) std.mem.Allocator.Error!Edit {
+        return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, try self.typeName(parameter) }) };
     }
 
     /// The first capture `held`, a closure, owns whose type does not

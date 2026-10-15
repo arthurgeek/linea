@@ -1030,7 +1030,7 @@ error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text.byte
   --> labels.lin:26:8
    |
 26 |     if copy_all(&shown, labels.as_slice()).is_err() {
-   |        ^^^^^^^^ use a type that owns everything it holds, or drop the bound
+   |        ^^^^^^^^ `Label` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 ```
 
 `Label`'s field `text` is a `Str`, and a `Str`'s bytes are a view. To keep
@@ -1038,8 +1038,8 @@ labels, either store owned text, a `String`, or write the generic function
 without `Owned` and declare what it retains.
 
 A generic function that calls one bounded `Owned` needs the bound itself:
-passing its own `U` is refused with the help ``bound `U` by `Owned` ``, just as
-it would be for `Copyable`. An associated type can be bounded too, in the
+passing its own `U` is refused with the help ``add `Owned` to `U`'s bounds``,
+just as it would be for `Copyable`. An associated type can be bounded too, in the
 function's own `where` clause: `where I.Item: Owned` under `[I: Iterator]`.
 
 The standard library does this for you. `Vec.append_slice` copies an `Owned`
