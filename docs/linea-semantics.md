@@ -4166,7 +4166,9 @@ the operand of `?`, and a `Result`'s error must be the function's error type or
 convert into it. Success payload types may differ: a function returning
 `Option[String]` may use `?` on `Option[UInt8]` because failure returns no
 payload. There is no conversion between `Option` and `Result`. Using `?` in a
-function returning `UInt8` violates this rule.
+function returning `UInt8` violates this rule; the report names the result type
+that would carry the failure, `Result[UInt8, E]` with the operand's error, and
+handling the failure where it happens with `else`.
 
 A failing `Result` returns its error. An error of the function's own error type
 passes through unchanged and needs no implementation. An error of a different

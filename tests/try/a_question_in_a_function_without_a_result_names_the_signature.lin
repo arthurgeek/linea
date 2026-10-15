@@ -1,0 +1,9 @@
+// `?` hands a failure to the function's caller, so the function must answer
+// with a `Result` that can carry it. `main` answers with `UInt8`, and the report
+// names the signature that would carry `io.IoError`.
+import std.io
+
+fn main() -> UInt8 {
+    io.println("hello")?
+    0
+}

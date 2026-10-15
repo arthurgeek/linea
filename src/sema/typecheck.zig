@@ -16627,7 +16627,8 @@ const Checker = struct {
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
         const answers = self.carrierOf(want.ty);
-        if (answers == null or answers.?.kind != carrier.kind) return self.report(
+        if (answers == null) return self.reportTryWithoutCarrier(id, t, carrier, want.ty);
+        if (answers.?.kind != carrier.kind) return self.report(
             .t_try_answer,
             id,
             "this `?` may return `{s}`, and the function answers with `{s}`",
@@ -16658,6 +16659,36 @@ const Checker = struct {
         self.unwindsEveryLoop();
 
         return self.expect(id, self.payloadTypeOf(carrier), expected);
+    }
+
+    /// Reports a `?` in a function that answers with neither an `Option` nor a
+    /// `Result`, and names the two edits that make it work: the result type
+    /// that carries the failure, with what the function answers now as its
+    /// success, or handling the failure where it happens.
+    fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId) std.mem.Allocator.Error!TypeId {
+        const answered_name = try self.typeName(answered);
+        const help = switch (carrier.kind) {
+            .result => try std.fmt.allocPrint(
+                self.sink.arena,
+                "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`, or handle the failure here with `else |error| {{ … }}`",
+                .{ answered_name, try self.typeName(self.errorTypeOf(carrier)), if (answered == .unit) "()" else "…" },
+            ),
+            .option => try std.fmt.allocPrint(
+                self.sink.arena,
+                "make the function return `Option[{s}]` and end it with `.Some({s})`, or handle the absence here with `else {{ … }}`",
+                .{ answered_name, if (answered == .unit) "()" else "…" },
+            ),
+        };
+        const labels = try self.sink.arena.alloc(Label, 1);
+        labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = "`?` returns from the function it is written in", .style = .primary };
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_try_answer,
+            .message = try std.fmt.allocPrint(self.sink.arena, "this `?` may return `{s}`, and the function answers with `{s}`", .{ try self.typeName(operand), answered_name }),
+            .labels = labels,
+            .notes = try self.sink.arena.dupe([]const u8, &.{help}),
+        });
+        return self.record(id, .poison);
     }
 
     /// Returns what the operand of `e?` or `e else { … }` is expected to carry

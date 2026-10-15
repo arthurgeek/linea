@@ -1,0 +1,12 @@
+// A function that returns nothing has no `Result` to hand a failure on in, so
+// `?` inside it is refused and the report names the result type to write.
+import std.io
+
+fn greet() {
+    io.println("hello")?
+}
+
+fn main() -> UInt8 {
+    greet()
+    0
+}
