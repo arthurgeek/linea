@@ -5090,7 +5090,10 @@ terminates the process.
 scope exit, a consuming `match` leaves its contents unnamed, a write overwrites
 it, or a structure literal writes over a field of its base that holds one.
 `let _ = k` is not exempt: `_` marks intentional non-use, not permission to
-discard a Linear value.
+discard a Linear value. The report names the operations that settle the value,
+and where it is left on an early exit and its type implements `Release`, the
+schedule that settles it on every path: `defer let` or `defer var` for a
+single-name binding, and `defer name.release()` where it is bound otherwise.
 
 A consuming arm can discard a payload with `_` or by naming the variant without
 binding its contents: `Has =>` and `_ =>` have the same effect. The match has

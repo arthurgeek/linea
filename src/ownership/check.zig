@@ -1102,6 +1102,11 @@ const Checker = struct {
         const receiver = if (generated) null else try self.receiverOf(b);
         const notes = try arena.alloc([]const u8, 1);
         notes[0] = try self.settleHelp(ty, "settle it first with", receiver);
+        // A value left on an early exit is settled on every path by one
+        // schedule; one left only where its scope ends is settled there.
+        if (!generated and !discard and primary != null) if (try self.deferredReleaseHint(b, ty)) |hint| {
+            notes[0] = try std.fmt.allocPrint(arena, "{s}, or {s}", .{ notes[0], hint });
+        };
         // `let _ = badge` holds what `badge` held, and `badge` is the name the
         // reader wrote for it.
         const subject = if (discard and receiver != null)
@@ -1118,6 +1123,21 @@ const Checker = struct {
             .labels = labels.items,
             .notes = notes,
         });
+    }
+
+    /// The schedule that settles `b` on every path out, for a type that
+    /// implements `Release`, the trait `defer let` schedules: `defer let` (or
+    /// `defer var`) where a single-name `let` or `var` binds it, and
+    /// `defer name.release()` where it arrives for any other binding, a
+    /// parameter or a pattern's binder. Null for a type without `Release`.
+    fn deferredReleaseHint(self: *const Checker, b: BindingId, ty: TypeId) std.mem.Allocator.Error!?[]const u8 {
+        const release = self.typing.closure_release orelse return null;
+        if (!try self.reach().answers(self.gpa, ty, release.trait)) return null;
+        const name = try self.nameOf(b);
+        const s = self.res.stmtOf(b);
+        if (s != node.StmtId.none and self.ast.stmtTag(s) == .let_decl and self.ast.stmtData(s).pattern == ExprId.none and !self.ast.stmtIsDeferredBinding(s))
+            return try std.fmt.allocPrint(self.sink.arena, "declare it `defer {s} {s} = …` so every path releases it", .{ if (self.ast.stmtIsMutable(s)) "var" else "let", name });
+        return try std.fmt.allocPrint(self.sink.arena, "write `defer {s}.release()` where it is bound so every path releases it", .{name});
     }
 
     /// Names a binding for a message: by its name in backticks, or, for one a

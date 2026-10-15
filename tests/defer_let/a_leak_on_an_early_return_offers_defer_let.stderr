@@ -1,0 +1,20 @@
+error[O-Leak]: `note` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+ --> tests/defer_let/a_leak_on_an_early_return_offers_defer_let.lin:8:9
+  |
+6 | fn shout(sink note: String) -> UInt8 {
+  |               ---- acquired here
+8 |         return 2
+  |         ^^^^^^ still owned here
+  |
+  = help: settle it first with `note.release()`, or write `defer note.release()` where it is bound so every path releases it
+error[O-Leak]: `note` (a linear `String[mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/defer_let/a_leak_on_an_early_return_offers_defer_let.lin:19:9
+   |
+15 |     let note = "Buy milk".to_owned() else |_| {
+   |         ---- acquired here
+19 |         return .Ok(2)
+   |         ^^^^^^ still owned here
+21 |     io.println(note.view())?
+   |                            - also still owned here
+   |
+   = help: settle it first with `note.release()`, or declare it `defer let note = …` so every path releases it

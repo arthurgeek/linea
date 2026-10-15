@@ -951,12 +951,16 @@ error[O-Leak]: `basket` (a linear `Vec[Str, mem.SystemAllocator]`) is still owne
 20 | }
    | - also still owned where the block ends
    |
-   = help: settle it first with `basket.release()`
+   = help: settle it first with `basket.release()`, or declare it `defer var basket = …` so every path releases it
 ```
 
 The two `?` marks count as ways out, because a failed print returns from
 `main` early. Writing `basket.release()` before each of the four exits would
-work too; one `defer` says the same thing once.
+work too; one `defer` says the same thing once. The help offers a shorter
+spelling still: `defer var basket: Vec[Str, mem.SystemAllocator] = Vec.new()`
+declares the vector and schedules its release in one statement.
+[Copying, settling and sealing](04-copying-settling-and-sealing.md) covers
+`defer let` and `defer var`.
 
 `String` is the growable, owned counterpart of `Str`, in the same way. Both
 `Vec` and `String` are in the prelude.
