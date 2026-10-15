@@ -1,4 +1,4 @@
-error[T-Mismatch]: `T` was already settled as `UInt8` here, and this is a `Bool`
+error[T-Mismatch]: `T` was already settled as `UInt8`, and this is a `Bool`
   --> tests/generics/one_parameter_two_types_nested.lin:22:13
    |
 22 |     both(x, y)

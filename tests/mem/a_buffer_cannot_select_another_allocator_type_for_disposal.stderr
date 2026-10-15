@@ -5,3 +5,5 @@ error[T-Mismatch]: expected `Buffer[Elsewhere]`, found `Buffer[mem.SystemAllocat
    |                           ------ expected because of this parameter
 33 |             dispose_elsewhere(buffer)
    |                               ^^^^^^ expected `Buffer[Elsewhere]`, found `Buffer[mem.SystemAllocator]`
+   |
+   = help: only their allocators differ: the `Buffer` expected is in `Elsewhere`, and this one is in `mem.SystemAllocator`; build it with the allocator expected

@@ -1,0 +1,21 @@
+// `greeting_in` promises a `String` in the caller's allocator `A`, and
+// `String.new()` builds one in the system allocator. The report says that only
+// the allocators differ, and to build it with the `_in` form.
+import std.io
+import std.mem
+
+fn greeting_in[A: Allocator](_allocator: A, name: Str) -> Result[String[A], mem.Oom] where carries(.Ok: _allocator) {
+    var line = String.new()
+    defer line.release()
+    &line.append("hello, ")?
+    &line.append(name)?
+    .Ok(line)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let line = greeting_in(mem.system(), "Ada") else |_| {
+        return .Ok(1)
+    }
+    io.println(line.view())?
+    .Ok(0)
+}

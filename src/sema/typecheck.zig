@@ -13052,13 +13052,18 @@ const Checker = struct {
             &.{};
         const fill_note = self.defaultedFillNote(id, actual, want) catch return self.recordMismatch(id);
         const allocator_note = self.allocatorPassedNote(actual, want) catch return self.recordMismatch(id);
-        var extra: [2][]const u8 = undefined;
+        const allocators_note = self.allocatorMismatchNote(want.ty, actual) catch return self.recordMismatch(id);
+        var extra: [3][]const u8 = undefined;
         var extras: usize = 0;
         if (fill_note) |text| {
             extra[extras] = text;
             extras += 1;
         }
         if (allocator_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
+        if (allocators_note) |text| {
             extra[extras] = text;
             extras += 1;
         }
@@ -19703,6 +19708,57 @@ const Checker = struct {
         if (!try self.answersTrait(actual, self.allocator_decl)) return null;
         if (try self.answersTrait(want.ty, self.allocator_decl)) return null;
         return try self.allocatorFormNote(.{ .declaration = want.passed_to });
+    }
+
+    /// Where `expected` and `found` are one declaration applied to arguments
+    /// that differ only at a parameter bounded by `Allocator`, at any depth
+    /// (`Vec[String]` against `Vec[String[mem.Handle]]`), the note saying so:
+    /// which allocator each is in, and the edit that makes them agree. A
+    /// constructor has a system form `x` and an `_in` form taking the
+    /// allocator, so the edit names the form that builds in the allocator
+    /// expected. Null for any other pair.
+    ///
+    /// **Bound:** one walk over the two types' arguments, together.
+    fn allocatorMismatchNote(self: *Checker, expected: TypeId, found: TypeId) std.mem.Allocator.Error!?[]const u8 {
+        const allocator = self.allocator_decl orelse return null;
+        if (expected == .poison or found == .poison) return null;
+        const want = self.builder.instanceOf(expected) orelse return null;
+        const have = self.builder.instanceOf(found) orelse return null;
+        if (want.decl != have.decl) return null;
+        const parameters = self.ast.declTypeParams(want.decl);
+        const wanted = self.builder.argsOf(want);
+        const had = self.builder.argsOf(have);
+        if (wanted.len != had.len or wanted.len != parameters.len) return null;
+        var differing: ?usize = null;
+        for (wanted, had, parameters, 0..) |w, h, parameter, i| {
+            if (w == h) continue;
+            if (differing != null) return null;
+            if (!self.isBoundedBy(parameter, allocator)) return self.allocatorMismatchNote(w, h);
+            differing = i;
+        }
+        const at = differing orelse return null;
+        // An argument that is no allocator was refused for its bound, and
+        // the two do not differ in allocator.
+        if (!try self.answersTrait(wanted[at], allocator) or !try self.answersTrait(had[at], allocator)) return null;
+        const name = self.ast.tokenText(self.ast.declName(want.decl));
+        const in_expected = try self.typeName(wanted[at]);
+        const in_found = try self.typeName(had[at]);
+        const default = if (parameters[at].default.wasWritten()) try self.defaultAt(want.decl, at) else .poison;
+        if (wanted[at] == default) return try std.fmt.allocPrint(
+            self.sink.arena,
+            "only their allocators differ: the `{s}` expected is in `{s}`, the default where a type leaves its allocator out, and this one is in `{s}`; build it with the system form of the call that made it, without `_in`, or write `{s}` where the `{s}` expected is declared",
+            .{ name, in_expected, in_found, try self.typeName(found), name },
+        );
+        if (had[at] == default) return try std.fmt.allocPrint(
+            self.sink.arena,
+            "only their allocators differ: the `{s}` expected is in `{s}`, and this one is in `{s}`, the default; build it with the `_in` form of the call that made it, passing the allocator `{s}` stands for",
+            .{ name, in_expected, in_found, in_expected },
+        );
+        return try std.fmt.allocPrint(
+            self.sink.arena,
+            "only their allocators differ: the `{s}` expected is in `{s}`, and this one is in `{s}`; build it with the allocator expected",
+            .{ name, in_expected, in_found },
+        );
     }
 
     /// The name of the declaration beside `owner` that takes the allocator
@@ -29575,10 +29631,13 @@ const Checker = struct {
                         article.before(got_name),
                         got_name,
                     };
+                    const reported_at = self.sink.items().len;
                     _ = if (s.owner == d and written.len > 0)
                         self.report(.t_mismatch, a, "the call names `{s}` as `{s}` in its brackets, and this is {s} `{s}`", spelled, "one type parameter, two types")
                     else
-                        self.report(.t_mismatch, a, "`{s}` was already settled as `{s}` here, and this is {s} `{s}`", spelled, "one type parameter, two types");
+                        self.report(.t_mismatch, a, "`{s}` was already settled as `{s}`, and this is {s} `{s}`", spelled, "one type parameter, two types");
+                    if (self.sink.items().len > reported_at) if (try self.allocatorMismatchNote(at.was, at.got)) |note|
+                        try self.addNote(reported_at, note);
                     return null;
                 }
 

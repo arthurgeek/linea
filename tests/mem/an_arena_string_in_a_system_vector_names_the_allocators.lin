@@ -1,0 +1,21 @@
+// `Vec[String]` leaves both allocators to their default, the system allocator,
+// and `title` lives in the arena. The two `String`s differ only in their
+// allocator, and the report says so and how to make them agree.
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer arena.release()
+    defer var titles: Vec[String] = Vec.new()
+    let title = "Morning".to_owned_in(arena.handle()) else |_| {
+        return .Ok(1)
+    }
+    if &titles.push(title).settled().is_err() {
+        return .Ok(1)
+    }
+    io.println("{titles.length()}")?
+    .Ok(0)
+}

@@ -1,0 +1,7 @@
+error[T-Mismatch]: `T` was already settled as `String[mem.SystemAllocator]`, and this is a `String[mem.Handle[mem.SystemAllocator]]`
+  --> tests/mem/an_arena_string_in_a_system_vector_names_the_allocators.lin:16:21
+   |
+16 |     if &titles.push(title).settled().is_err() {
+   |                     ^^^^^ one type parameter, two types
+   |
+   = help: only their allocators differ: the `String` expected is in `mem.SystemAllocator`, the default where a type leaves its allocator out, and this one is in `mem.Handle[mem.SystemAllocator]`; build it with the system form of the call that made it, without `_in`, or write `String[mem.Handle[mem.SystemAllocator]]` where the `String` expected is declared
