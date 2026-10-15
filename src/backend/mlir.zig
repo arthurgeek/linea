@@ -343,26 +343,26 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module) std.Io.Writer.Erro
 
 /// The width one exported parameter or answer crosses the boundary in.
 ///
-/// The declared type's own width, which is what a C declaration spells. Not the
-/// width the body computes in: that is an implementation choice about where
-/// overflow is caught, and publishing it would make this module's calling
-/// convention something every caller has to match forever.
+/// The type a value crosses the C boundary as: its storage representation,
+/// which for an integer is the declared width rather than the width the body
+/// computes in. That width is an implementation choice about where overflow is
+/// caught, and publishing it would make this module's calling convention
+/// something every caller has to match forever.
 ///
-/// Only an integer reaches here. [T-Export] admits nothing else across, so a
-/// width the layout table never produces is a compiler defect rather than a
-/// signature to print.
-fn foreignTypeOf(ty: TypeId) []const u8 {
-    // The same question `[T-Export]` refused the signature by, so a type
-    // reaching here has already been admitted by it. A panic is therefore a
-    // defect in that check rather than a program a user can write.
-    const bits = ty.foreignWidth() orelse
-        std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{});
-    return switch (bits) {
-        8 => "i8",
-        16 => "i16",
-        32 => "i32",
-        64 => "i64",
-        else => unreachable,
+/// Only an integer, a `Float64` or a newtype over one reaches here: the
+/// checker refused every other type ([T-Extern], [T-Export]), so another
+/// representation is a compiler defect rather than a signature to print.
+fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
+    return switch (module.representationOf(ty).storage) {
+        .integer => |integer| switch (integer.bits) {
+            8 => "i8",
+            16 => "i16",
+            32 => "i32",
+            64 => "i64",
+            else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
+        },
+        .float64 => float_type,
+        else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),
     };
 }
 
@@ -376,11 +376,31 @@ fn foreignTypeOf(ty: TypeId) []const u8 {
 /// LLVM extend by the declared type's signedness on every call through it and
 /// in every thunk that answers one.
 fn foreignExtension(module: *const Module, ty: TypeId) ?[]const u8 {
-    const bits = ty.foreignWidth() orelse return null;
-    if (bits >= 32) return null;
-    return switch (module.representationOf(ty).computation) {
-        .integer => |signedness| if (signedness == .signed) "{llvm.signext}" else "{llvm.zeroext}",
+    return switch (module.representationOf(ty).storage) {
+        .integer => |integer| if (integer.bits >= 32)
+            null
+        else if (integer.signedness == .signed)
+            "{llvm.signext}"
+        else
+            "{llvm.zeroext}",
         else => null,
+    };
+}
+
+/// Whether a value's foreign type differs from the type the body computes it
+/// in, so a boundary narrows it going out and widens it coming in. Only an
+/// integer narrower than the computation width does.
+fn adaptsAtBoundary(module: *const Module, ty: TypeId) bool {
+    return !std.mem.eql(u8, foreignTypeOf(module, ty), computationType(module.representationOf(ty).computation));
+}
+
+/// How a narrow integer is widened to the computation width: by its declared
+/// signedness, so an unsigned type widens with zeroes and a signed one with
+/// its sign.
+fn widening(module: *const Module, ty: TypeId) []const u8 {
+    return switch (module.representationOf(ty).storage) {
+        .integer => |integer| if (integer.signedness == .signed) "extsi" else "extui",
+        else => std.debug.panic("compiler defect: a non-integer is widened at the foreign boundary", .{}),
     };
 }
 
@@ -425,16 +445,16 @@ fn emitExportThunk(
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
         const by_address = module.arrivesByAddress(mir, i);
-        const ty = if (by_address) "!llvm.ptr" else foreignTypeOf(mir.locals[i]);
+        const ty = if (by_address) "!llvm.ptr" else foreignTypeOf(module, mir.locals[i]);
         try w.print("%p{d}: {s}", .{ i, ty });
         if (!by_address) try writeForeignExtension(w, module, mir.locals[i]);
     }
     try w.writeAll(")");
     if (answers) {
         if (foreignExtension(module, mir.return_type)) |extension| {
-            try w.print(" -> ({s} {s})", .{ foreignTypeOf(mir.return_type), extension });
+            try w.print(" -> ({s} {s})", .{ foreignTypeOf(module, mir.return_type), extension });
         } else {
-            try w.print(" -> {s}", .{foreignTypeOf(mir.return_type)});
+            try w.print(" -> {s}", .{foreignTypeOf(module, mir.return_type)});
         }
     }
     try w.writeAll(" {\n");
@@ -446,14 +466,9 @@ fn emitExportThunk(
     for (0..mir.param_count) |i| {
         if (module.arrivesByAddress(mir, i)) continue;
         const ty = mir.locals[i];
-        const foreign = foreignTypeOf(ty);
-        if (std.mem.eql(u8, foreign, int_type)) continue;
-        const signed = switch (module.representationOf(ty).computation) {
-            .integer => |signedness| signedness == .signed,
-            else => std.debug.panic("compiler defect: a non-integer crosses the exported value boundary", .{}),
-        };
+        if (!adaptsAtBoundary(module, ty)) continue;
         try w.print("    %w{d} = arith.{s} %p{d} : {s} to {s}\n", .{
-            i, if (signed) "extsi" else "extui", i, foreign, int_type,
+            i, widening(module, ty), i, foreignTypeOf(module, ty), int_type,
         });
     }
 
@@ -466,8 +481,7 @@ fn emitExportThunk(
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const widened = !module.arrivesByAddress(mir, i) and
-            !std.mem.eql(u8, foreignTypeOf(mir.locals[i]), int_type);
+        const widened = !module.arrivesByAddress(mir, i) and adaptsAtBoundary(module, mir.locals[i]);
         try w.print("{s}{d}", .{ if (widened) "%w" else "%p", i });
     }
     try w.writeAll(") : (");
@@ -485,8 +499,8 @@ fn emitExportThunk(
         return;
     }
 
-    const foreign = foreignTypeOf(mir.return_type);
-    if (std.mem.eql(u8, foreign, int_type)) {
+    const foreign = foreignTypeOf(module, mir.return_type);
+    if (!adaptsAtBoundary(module, mir.return_type)) {
         try w.print("    func.return %answer : {s}\n  }}\n", .{foreign});
         return;
     }
@@ -1150,17 +1164,14 @@ const FunctionEmitter = struct {
         const indirect = module.returnsIndirectly(c.func);
         const ty = if (is_noreturn) TypeId.never else mir.typeOf(id);
 
-        const widens = !is_noreturn and external and !indirect and ty != .unit and
-            !std.mem.eql(u8, foreignTypeOf(ty), computationType(module.representationOf(ty).computation));
+        const widens = !is_noreturn and external and !indirect and ty != .unit and adaptsAtBoundary(module, ty);
 
         if (external) for (c.args, 0..) |a, i| {
             if (module.arrivesByAddress(callee, i)) continue;
             const parameter = callee.locals[i];
-            const internal = computationType(module.representationOf(parameter).computation);
-            const foreign = foreignTypeOf(parameter);
-            if (std.mem.eql(u8, internal, foreign)) continue;
+            if (!adaptsAtBoundary(module, parameter)) continue;
             try w.print("    %va{d}_{d} = arith.trunci %v{d} : {s} to {s}", .{
-                n, i, a.index(), internal, foreign,
+                n, i, a.index(), computationType(module.representationOf(parameter).computation), foreignTypeOf(module, parameter),
             });
             try self.here(span);
         };
@@ -1179,8 +1190,7 @@ const FunctionEmitter = struct {
         }
         for (c.args, 0..) |a, i| {
             if (i > 0 or indirect) try w.writeAll(", ");
-            const adapted = external and !module.arrivesByAddress(callee, i) and
-                !std.mem.eql(u8, foreignTypeOf(callee.locals[i]), computationType(module.representationOf(callee.locals[i]).computation));
+            const adapted = external and !module.arrivesByAddress(callee, i) and adaptsAtBoundary(module, callee.locals[i]);
             if (adapted) try w.print("%va{d}_{d}", .{ n, i }) else try self.writeValue(a);
         }
         try w.writeAll(") : (");
@@ -1214,13 +1224,8 @@ const FunctionEmitter = struct {
             try w.print("    %v{d} = arith.constant 0 : {s}", .{ n, int_type });
             try self.here(span);
         } else if (widens) {
-            const signed = switch (module.representationOf(ty).computation) {
-                .integer => |signedness| signedness == .signed,
-                else => std.debug.panic("compiler defect: a non-integer returns through an integer foreign boundary", .{}),
-            };
-            const foreign = foreignTypeOf(ty);
             try w.print("    %v{d} = arith.{s} %vr{d} : {s} to {s}", .{
-                n, if (signed) "extsi" else "extui", n, foreign, computationType(module.representationOf(ty).computation),
+                n, widening(module, ty), n, foreignTypeOf(module, ty), computationType(module.representationOf(ty).computation),
             });
             try self.here(span);
         }
@@ -2256,7 +2261,7 @@ fn paramTypeOf(module: *const Module, id: FunctionId, callee: *const Mir, i: usi
     // A parameter arriving by address is a pointer whatever it holds.
     if (module.arrivesByAddress(callee, i)) return "!llvm.ptr";
     const ty = callee.locals[i];
-    if (module.isExternal(id)) return foreignTypeOf(ty);
+    if (module.isExternal(id)) return foreignTypeOf(module, ty);
     return computationType(module.representationOf(ty).computation);
 }
 
@@ -2279,7 +2284,7 @@ fn resultTypeOf(module: *const Module, id: FunctionId, ret: TypeId) ?[]const u8 
     if (module.returnsIndirectly(id)) return null;
     if (ret == .never) return null;
     if (module.isExternal(id) and ret == .unit) return null;
-    if (module.isExternal(id)) return foreignTypeOf(ret);
+    if (module.isExternal(id)) return foreignTypeOf(module, ret);
     return computationType(module.representationOf(ret).computation);
 }
 

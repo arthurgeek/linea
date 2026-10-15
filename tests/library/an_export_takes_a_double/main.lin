@@ -1,0 +1,4 @@
+// A `Float64` crosses as a C `double` in both directions.
+export fn halve(value: Float64) -> Float64 {
+    value / 2.0
+}

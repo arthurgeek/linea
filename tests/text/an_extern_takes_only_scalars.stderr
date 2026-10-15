@@ -3,8 +3,8 @@ error[M-Extern]: an `extern` is declared only in a module its root's manifest gr
    |
 11 | extern fn width_of(p: Pair) -> UInt64
    |           ^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
-error[T-Extern]: `Pair` may not cross the foreign boundary: only an integer's representation is the language's to fix
+error[T-Extern]: `Pair` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
   --> tests/text/an_extern_takes_only_scalars.lin:11:20
    |
 11 | extern fn width_of(p: Pair) -> UInt64
-   |                    ^ pass what it is made of, as integers
+   |                    ^ pass what it is made of, as integers or `Float64`

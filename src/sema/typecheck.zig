@@ -18140,14 +18140,12 @@ const Checker = struct {
             return;
         }
 
-        // `foreignWidth` and not an arithmetic predicate: what may cross is
-        // decided by what a boundary can agree about, not by what an operator
-        // accepts. The two differ on `Float64`, which every operator takes and
-        // no ABI here fixes -- and the backend, which asks `foreignWidth`,
-        // would have been handed a type it cannot print.
+        // What may cross is decided by what both sides of a boundary agree a
+        // value's bits mean, not by what an operator accepts: `Bool` takes
+        // every logical operator and no C ABI fixes its byte.
         for (self.ast.declParams(d), 0..) |p, k| {
             const t = try self.declaredParamType(d, k);
-            if (t == .poison or t.foreignWidth() != null) continue;
+            if (t == .poison or self.crossesForeign(t)) continue;
             if (p.written.kind == .callable) {
                 const name = try spellWrittenOwned(self.gpa, self.ast, p.written);
                 defer self.gpa.free(name);
@@ -18159,7 +18157,7 @@ const Checker = struct {
 
         const written_answer = self.ast.declReturnRef(d);
         const answers = try self.declaredResultType(d);
-        if (answers != .poison and answers != .unit and answers.foreignWidth() == null) {
+        if (answers != .poison and answers != .unit and !self.crossesForeign(answers)) {
             if (written_answer.kind == .callable) {
                 const name = try spellWrittenOwned(self.gpa, self.ast, written_answer);
                 defer self.gpa.free(name);
@@ -18307,6 +18305,25 @@ const Checker = struct {
     /// Said the same way in both directions, because what is wrong is the same
     /// thing: the language does not fix this type's representation, so the two
     /// sides could not agree about it whichever way it travelled.
+    /// Whether a value of `t` crosses a foreign boundary ([T-Extern],
+    /// [T-Export]): an integer of 8, 16, 32 or 64 bits, a `Float64`, or an
+    /// unrefined newtype over one. Every bit pattern of these is a value on
+    /// both sides, so nothing C hands back can be a value Linea does not
+    /// define. A refined newtype is refused because C could hand back a value
+    /// outside its range; a newtype's ownership policy is the declaration's to
+    /// state with its parameter convention.
+    fn crossesForeign(self: *const Checker, t: TypeId) bool {
+        if (t == .f64) return true;
+        if (t.integerInfo()) |info| return switch (info.bits) {
+            8, 16, 32, 64 => true,
+            else => false,
+        };
+        return switch (self.builder.get(t)) {
+            .newtype => |newtype| !newtype.refined and self.crossesForeign(newtype.base),
+            else => false,
+        };
+    }
+
     fn reportForeignType(
         self: *Checker,
         d: node.DeclId,
@@ -18318,8 +18335,8 @@ const Checker = struct {
             category,
             self.ast.fileOf(self.ast.declName(d)),
             span,
-            "pass what it is made of, as integers",
-            "`{s}` may not cross the foreign boundary: only an integer's representation is the language's to fix",
+            "pass what it is made of, as integers or `Float64`",
+            "`{s}` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes",
             .{name},
         );
     }

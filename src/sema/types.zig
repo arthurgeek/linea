@@ -178,29 +178,6 @@ pub const TypeId = enum(u32) {
         };
     }
 
-    /// The width this type crosses a foreign boundary in, or null where it may
-    /// not cross at all.
-    ///
-    /// One question with one answer, asked by the checker to refuse a
-    /// signature and by the backend to print one. Two predicates here would
-    /// disagree somewhere, and the disagreement is a type the checker accepts
-    /// and the backend cannot emit -- which is a compiler crash on source a
-    /// programmer was told was fine.
-    ///
-    /// An integer's width and its signedness are the whole of its
-    /// representation, so both sides of a boundary already agree about it.
-    /// Nothing else does: where a structure's fields sit is the compiler's to
-    /// decide, a float carries a representation this language does not fix
-    /// across an ABI, and a linear value cannot cross code ownership never
-    /// read.
-    pub fn foreignWidth(self: TypeId) ?u8 {
-        const info = self.integerInfo() orelse return null;
-        return switch (info.bits) {
-            8, 16, 32, 64 => info.bits,
-            else => null,
-        };
-    }
-
     /// The values a type can represent.
     ///
     /// Wide enough for `UInt64`'s maximum and `Int64`'s minimum together, which is

@@ -1,0 +1,13 @@
+import std.io
+import geometry
+
+use geometry.Id
+
+fn main() -> Result[UInt8, io.IoError] {
+    let scaled = geometry.geometry_scale(1.5, 4)
+    let nan = geometry.geometry_not_a_number()
+    let unequal = nan != nan
+    let Id(next) = geometry.geometry_next_id(Id(41))
+    io.println("{scaled} {unequal} {next}")?
+    .Ok(0)
+}

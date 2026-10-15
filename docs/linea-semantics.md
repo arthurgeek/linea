@@ -4145,13 +4145,23 @@ substituted fields and payloads. A type argument occurring only behind `borrow`
 is observed, so its referent contributes no ownership obligation to the
 aggregate.
 
-**[T-Extern]** An `extern` accepts only integer parameters and returns an integer
-or Unit. Integer width and signedness define the representation shared across the
-boundary. Aggregates cannot cross because doing so would expose the layout kept
-private by [L-Layout]; linear values cannot cross because ownership cannot
-inspect paths through foreign code; callables cannot cross because their
-code-pointer representation and calling convention are not part of the foreign
-ABI contract.
+**[T-Extern]** An `extern`'s parameters and result cross the foreign boundary,
+and the result may also be Unit. What crosses is an integer of 8, 16, 32 or 64
+bits, a `Float64`, or an unrefined newtype over one, which crosses as its base:
+every bit pattern of these is a value on both sides, so nothing C hands back
+is a value Linea does not define. Integer width and signedness define the
+integer's representation, and an 8- or 16-bit integer is extended to a full
+register by whichever side produces it. A `Float64` is a C `double`. A newtype
+crosses whatever its ownership policy, because the parameter convention says
+what C does with the value: `read` and `inout` lend it for the call, and
+`sink` hands it to C, which consumes it. The compiler believes that statement as
+it believes the rest of the signature, so a linear newtype over `UInt64` is how
+a module holds a C object it must release. A refined newtype cannot cross,
+because C could hand back a value outside its range. `Bool` cannot cross,
+because no C ABI fixes which bytes are true. Aggregates cannot cross because
+doing so would expose the layout kept private by [L-Layout]; callables cannot
+cross because their code-pointer representation and calling convention are not
+part of the foreign ABI contract.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized
@@ -4163,8 +4173,8 @@ The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
 `linea_math_cos`, `linea_math_ln`, and `linea_math_exp` have the exact signature
 `(value: Float64) -> Float64`; `linea_math_pow` additionally takes
-`exponent: Float64`. These checked primitives are the sole Float64 exception.
-They are private, nongeneric externs with read parameters, no defaults and no
+`exponent: Float64`. These checked primitives are compiler-owned rather than
+foreign calls. They are private, nongeneric externs with read parameters, no defaults and no
 contracts or where predicates. A malformed trusted declaration is [T-Extern],
 even when its substituted signature would fit the ordinary integer boundary. A
 declaration of one of these symbols anywhere else, even in a root granted
@@ -4193,9 +4203,10 @@ signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
 ([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
 
-**[T-Export]** An `export` accepts only integer parameters and returns an integer
-or Unit. It applies the same boundary restriction as [T-Extern], using the same
-predicate; the separate rule names the export site that violates it.
+**[T-Export]** An `export`'s parameters and result cross the foreign boundary
+as an `extern`'s do, and the result may also be Unit. It applies the same
+boundary restriction as [T-Extern], using the same predicate; the separate rule
+names the export site that violates it.
 
 **[T-Try]** The operand of `?` must be the prelude's `Option` or `Result`,
 recognized by declaration identity. A user type with variants named `Ok` and
