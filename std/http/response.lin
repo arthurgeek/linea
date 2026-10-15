@@ -337,7 +337,10 @@ impl Display for BodyTextError {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         match read self {
             Streamed => &w.write_str("the body is streamed, so it is not held as text"),
-            Encoding(error) => error.fmt(&w),
+            Encoding(error) => {
+                &w.write_str("the body is not UTF-8: ")?
+                error.fmt(&w)
+            },
         }
     }
 }
@@ -383,6 +386,11 @@ test fn a_response_body_is_text_only_when_it_is_held_utf8() {
         Ok(_) => .None,
     }
     testing.assert_eq(invalid_at, .Some(1), "bytes ending inside a character were text")?
+    defer let encoding = match broken.text() {
+        Err(error) => fmt.render_owned("{error}").unwrap(),
+        Ok(_) => "".to_owned().unwrap(),
+    }
+    testing.assert_eq(encoding.view(), "the body is not UTF-8: invalid UTF-8 sequence at byte 1", "a body that is not UTF-8 did not say so")?
     defer let reason = match streamed.text() {
         Err(error) => fmt.render_owned("{error}").unwrap(),
         Ok(_) => "".to_owned().unwrap(),
