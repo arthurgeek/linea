@@ -3503,6 +3503,12 @@ variant's checked payload types. Any remaining parameter is [T-Infer]:
 `Option.Some(3)` determines a type, but `Option.None` does not, and
 `Result.Ok(3)` leaves the error type unknown.
 
+An argument built by another constructor than the one its parameter's type
+writes around a parameter the call leaves open can never settle it, and is
+[T-Mismatch] rather than [T-Infer]: `Chan[Recv[UInt64, End]]` passed for
+`Chan[Send[T, N]]` is reported against `Chan[Send[UInt64, N]]`, with what the
+call settled filled in and the open parameter by its name.
+
 Inference does not use later statements, with two exceptions: an integer
 literal's open type ([T-Literal]) and a function value's open type parameters
 ([N-NotAValue]) are settled by their uses within the body. `let x = Option.None;`

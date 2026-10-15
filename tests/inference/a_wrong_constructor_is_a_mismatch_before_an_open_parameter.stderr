@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Chan[Send[UInt64, N]]`, found `Chan[Recv[UInt64, End]]`
+  --> tests/inference/a_wrong_constructor_is_a_mismatch_before_an_open_parameter.lin:28:21
+   |
+22 | fn send[T, N: Protocol](c: Chan[Send[T, N]], _value: T) -> Chan[N] {
+   |                         - expected because of this parameter
+28 |     let sent = send(receiving, UInt64(3))
+   |                     ^^^^^^^^^ expected `Chan[Send[UInt64, N]]`, found `Chan[Recv[UInt64, End]]`

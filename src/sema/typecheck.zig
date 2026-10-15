@@ -29270,6 +29270,66 @@ const Checker = struct {
     /// walk rather than by a walk each -- two walks would check an argument
     /// mentioning both a second time, and report whatever is wrong inside it
     /// twice.
+    /// Reports, where a call leaves a type parameter open, an argument whose
+    /// type is built by another constructor than the one its parameter writes
+    /// around that parameter: `Chan[Recv[UInt64, End]]` for `Chan[Send[T, N]]`
+    /// can never settle `N`, and the shapes differing is the mistake. The
+    /// parameter is shown with what the call did settle, and an open one by
+    /// its name. Whether it reported one.
+    ///
+    /// **Bound:** the call's arguments, each type walked once.
+    fn reportShapeBeforeOpen(
+        self: *Checker,
+        d: node.DeclId,
+        args: []const ExprId,
+        params: []const node.Param,
+        walked: []const bool,
+        settling: []const Settling,
+    ) std.mem.Allocator.Error!bool {
+        for (args, 0..) |a, j| {
+            if (j >= params.len or a == ExprId.none or !walked[j]) continue;
+            const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
+            const got = self.builder.exprType(value);
+            if (got == .poison) continue;
+            const declared = try paramType(self, d, j);
+            if (!self.shapeClashAroundOpen(declared, got, settling)) continue;
+            var shown = declared;
+            for (settling) |s| {
+                const own: []const TypeId = if (s.owner.index() < self.param_types.len) self.param_types[s.owner.index()] else &.{};
+                if (own.len != s.found.len) continue;
+                const with_open = try self.gpa.alloc(TypeId, s.found.len);
+                defer self.gpa.free(with_open);
+                for (s.found, own, with_open) |f, parameter, *slot| slot.* = if (f == .poison) parameter else f;
+                shown = try self.builder.substitute(shown, s.owner.index(), with_open);
+            }
+            _ = self.reportMismatch(value, got, .{
+                .ty = shown,
+                .at = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) },
+                .reason = .parameter,
+            }, "");
+            return true;
+        }
+        return false;
+    }
+
+    /// Whether `got` is built, somewhere `declared` writes a type parameter
+    /// the call left open, by another constructor than the one around it.
+    fn shapeClashAroundOpen(self: *Checker, declared: TypeId, got: TypeId, settling: []const Settling) bool {
+        const want = self.builder.instanceOf(declared) orelse return false;
+        const have = self.builder.instanceOf(got) orelse return false;
+        if (want.decl != have.decl) {
+            for (settling) |s| for (s.found, 0..) |f, k| {
+                if (f == .poison and self.mentionsParameterAt(declared, s.owner, .stops, @intCast(k))) return true;
+            };
+            return false;
+        }
+        const wanted = self.builder.argsOf(want);
+        const had = self.builder.argsOf(have);
+        if (wanted.len != had.len) return false;
+        for (wanted, had) |w, h| if (self.shapeClashAroundOpen(w, h, settling)) return true;
+        return false;
+    }
+
     const Settling = struct {
         owner: node.DeclId,
         generics: []const node.TypeParam,
@@ -29703,6 +29763,7 @@ const Checker = struct {
             }
         };
 
+        if (!context_refused and try self.reportShapeBeforeOpen(d, args, params, walked, settling)) return null;
         var left_open = false;
         for (settling) |s| {
             for (s.found, s.generics, 0..) |f, g, k| {
