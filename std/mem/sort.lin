@@ -10,7 +10,7 @@ impl[T: Ordered, A: Allocator] Vec[T, A] {
     // is ordered against nothing, so a vector of floats is sorted with
     // `sort_by` and a comparison that decides where NaN goes. Costs are those of
     // `sort_by`.
-    pub fn sort(inout self: Self) -> () {
+    pub fn sort(inout self: Self) {
         &self.sort_by(|left, right| left < right)
     }
 }
@@ -60,7 +60,7 @@ impl[T, A: Allocator] Vec[T, A] {
     // unwinding, so no caller sees a partly sorted vector. The sort allocates
     // nothing and cannot fail; for n elements it makes O(n log n) calls of
     // `less` and O(n log² n) swaps.
-    pub fn sort_by[F: inout fn(read left: T, read right: T) -> Bool](inout self: Self, sink less: F) -> () where F: Discardable {
+    pub fn sort_by[F: inout fn(read left: T, read right: T) -> Bool](inout self: Self, sink less: F) where F: Discardable {
         var ordering = less
         stable_sort(&self, &ordering)
     }
@@ -209,7 +209,7 @@ test fn floats_sort_with_a_comparison_that_places_nan() {
 // O(n log n) comparisons and O(n log² n) swaps, and recursion is O(log n)
 // deep. A merge with a buffer would make O(n log n) moves, but it would
 // allocate, so every sort could fail; this one cannot.
-fn stable_sort[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F) -> () {
+fn stable_sort[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F) {
     let count = values.len
     var run: UInt64 = 1
     while run < count {
@@ -236,7 +236,7 @@ fn stable_sort[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool
 // Merge the sorted runs from `low` to `middle` and from `middle` to `high`,
 // both nonempty, into one sorted run. An element of the first run stays ahead
 // of an equal element of the second.
-fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F, low: UInt64, middle: UInt64, high: UInt64) -> () {
+fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inout values: Vec[T, A], inout less: F, low: UInt64, middle: UInt64, high: UInt64) {
     if middle - low == 1 {
         // Move the single first element after every element of the second
         // run that sorts before it.
@@ -316,7 +316,7 @@ fn merge[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Bool](inou
 
 // Exchange the elements from `low` to `middle` with those from `middle` to
 // `high`, keeping each group's order, by swapping equal-length blocks.
-fn rotate[T, A: Allocator](inout values: Vec[T, A], low: UInt64, middle: UInt64, high: UInt64) -> () {
+fn rotate[T, A: Allocator](inout values: Vec[T, A], low: UInt64, middle: UInt64, high: UInt64) {
     var left = middle - low
     var right = high - middle
     while left != right {
@@ -332,7 +332,7 @@ fn rotate[T, A: Allocator](inout values: Vec[T, A], low: UInt64, middle: UInt64,
 }
 
 // Swap the `count` elements from `first` with the `count` from `second`.
-fn swap_blocks[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64, count: UInt64) -> () {
+fn swap_blocks[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64, count: UInt64) {
     for offset in 0..count {
         swap_elements(&values, first + offset, second + offset)
     }
@@ -344,7 +344,7 @@ fn sorts_before[T, A: Allocator, F: inout fn(read left: T, read right: T) -> Boo
 }
 
 // Exchange elements `first` and `second`, two live indexes.
-fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64) -> () {
+fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second: UInt64) {
     let shape: SlotType[T] = .Type
     let stride = slot_stride(shape)
     let at = values.storage.at
