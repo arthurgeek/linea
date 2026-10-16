@@ -1,0 +1,21 @@
+// `named` may return a view of `other`, which its signature does not let it
+// carry. Both exits return that one view, so the mistake is reported once;
+// `either` returns views of two different owners, and each is reported.
+fn named(_first: Str, other: Str, early: Bool) -> Str where carries(_first) {
+    let kept = copy(other)
+    if early {
+        return kept
+    }
+    kept
+}
+
+fn either(_first: Str, second: Str, third: Str, early: Bool) -> Str where carries(_first) {
+    if early {
+        return copy(third)
+    }
+    copy(second)
+}
+
+fn main() -> UInt8 {
+    UInt8(named("a", "b", true).length() + either("a", "b", "c", false).length())
+}

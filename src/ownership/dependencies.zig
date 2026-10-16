@@ -911,6 +911,11 @@ const Analysis = struct {
     /// other report suppresses escapes there as its consequences. Sized by
     /// the function's exits.
     escape_exits: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Owners already reported as escaping through the result. Each exit
+    /// names the value it returns, so one view returned at several exits
+    /// would otherwise be reported once per exit; the missing clause is one.
+    /// Sized by the function's parameters.
+    escaped_owners: std.AutoHashMapUnmanaged(BindingId, void) = .empty,
     /// The capture sources that lent a place `inout`, each of which ended
     /// the earlier observations of that place. Sized likewise.
     lend_sites: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
@@ -926,6 +931,7 @@ const Analysis = struct {
         self.escaped_lends.deinit(self.gpa);
         self.escaped_sites.deinit(self.gpa);
         self.escape_exits.deinit(self.gpa);
+        self.escaped_owners.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
@@ -1952,7 +1958,9 @@ const Analysis = struct {
         if ((try self.escaped_sites.getOrPut(self.gpa, site)).found_existing) return;
         const arena = self.sink.arena;
         switch (escaped) {
-            .observation => {},
+            .observation => if (origin) |from| {
+                if ((try self.escaped_owners.getOrPut(self.gpa, from.place.root)).found_existing) return;
+            },
             // Every exit that carries one lend is the same mistake, so the
             // lend is reported once.
             .lend => |lent| {
