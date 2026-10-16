@@ -198,6 +198,41 @@ test "a root's files carry the manifest that identified it" {
     // The editor reads the root as the command line does: the manifest is
     // among its files, so an editor on the library does not load it beside
     // the embedded copy.
-    const declared = try loader.declaredGiven(testing.allocator, files);
+    const declared = try loader.declaredGiven(testing.allocator, files, null);
     try testing.expectEqual(loader.Declared{ .kind = .library, .standard = true }, declared);
+}
+
+test "a root's files carry the libraries its manifest names, with open buffers" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "guests");
+    try tmp.dir.createDirPath(testing.io, "names");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "guests/linea.json", .data = "{ \"dependencies\": { \"names\": { \"path\": \"../names\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "guests/main.lin", .data = "" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "names/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"names\" }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "names/names.lin", .data = "on disk" });
+    const guests = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}/guests", .{tmp.sub_path});
+    defer testing.allocator.free(guests);
+    const names = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}/names/names.lin", .{tmp.sub_path});
+    defer testing.allocator.free(names);
+
+    var docs: Documents = .{ .gpa = testing.allocator };
+    defer docs.deinit();
+    _ = try docs.set(names, "in the editor");
+
+    const found = try loader.rootOf(testing.allocator, testing.io, guests, .its_program, "");
+    defer found.deinit(testing.allocator);
+    const files = try docs.filesFor(testing.allocator, testing.io, found);
+    defer {
+        for (files) |f| {
+            testing.allocator.free(f.path);
+            testing.allocator.free(f.text);
+        }
+        testing.allocator.free(files);
+    }
+    var held: ?[]const u8 = null;
+    for (files) |f| if (std.mem.eql(u8, f.path, names)) {
+        held = f.text;
+    };
+    try testing.expectEqualStrings("in the editor", held.?);
 }

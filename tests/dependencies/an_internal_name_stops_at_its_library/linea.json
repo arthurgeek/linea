@@ -1,0 +1,5 @@
+{
+    "dependencies": {
+        "counter": { "path": "counter" }
+    }
+}

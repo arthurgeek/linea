@@ -1,0 +1,11 @@
+import canvas
+import shapes
+
+// `total` takes a `shapes.Point`, and the point `canvas.corner()` made is one.
+fn total(point: shapes.Point) -> UInt8 {
+    point.sum()
+}
+
+fn main() -> UInt8 {
+    total(canvas.corner())
+}

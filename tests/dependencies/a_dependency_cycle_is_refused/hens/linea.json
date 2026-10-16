@@ -1,0 +1,7 @@
+{
+    "kind": "library",
+    "name": "hens",
+    "dependencies": {
+        "eggs": { "path": "../eggs" }
+    }
+}

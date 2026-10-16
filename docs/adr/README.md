@@ -123,18 +123,19 @@ true of a different implementation.
 | [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172 and 0198 |
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
-| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096 |
+| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
 | [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088 and 0142 |
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
 | [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113 and 0213; default tier superseded by 0139; coherence partition superseded by 0148 |
-| [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101 and 0171 |
+| [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096 |
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
-| [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted |
+| [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
+| [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171 |
 | [0109](0109-text-io-and-formatting-have-separate-modules.md) | Text, I/O and formatting have separate modules | Accepted |
 | [0110](0110-a-trait-reference-may-be-qualified.md) | A trait reference may be qualified | Accepted; supersedes ADR 0080's bare trait-slot clause |
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |
@@ -275,7 +276,7 @@ ones most likely to be superseded as the compiler grows.
 | [0119](0119-zeroed-allocation-facts-survive-opaque-calls.md) | Zeroed allocation facts survive opaque calls | Accepted |
 | [0197](0197-a-checking-runtime-makes-a-use-of-freed-storage-abort.md) | A checking runtime makes a use of freed storage abort | Accepted |
 | [0121](0121-typed-storage-is-private-and-checked.md) | Typed storage is private and checked | Accepted; extends 0076 and 0088; storage lifetime clauses superseded by 0123 |
-| [0111](0111-import-paths-are-root-relative.md) | Import paths are root-relative | Accepted; supersedes ADR 0032's descending-path clause; reserved-root sentence superseded by 0171 |
+| [0111](0111-import-paths-are-root-relative.md) | Import paths are root-relative | Accepted; supersedes ADR 0032's descending-path clause; reserved-root sentence superseded by 0171; extended by 0229 |
 | [0133](0133-empty-typed-storage-needs-no-allocation.md) | Empty typed storage needs no allocation | Accepted; supersedes mandatory backing-buffer shape in 0123; extends 0098 |
 | [0136](0136-callback-binders-are-local-to-the-implementation.md) | Callback implementations choose local binders while contextual interfaces retain labels | Accepted; supersedes conversion name equality in 0105; refines 0077; extended by 0159; conversion contract equality superseded by 0159; labels in callable identity superseded by 0177 |
 | [0159](0159-a-converted-function-fits-its-carries-bound.md) | A converted function fits its `carries` bound | Accepted; extends 0136; supersedes conversion contract equality in 0136; extended by 0164 |

@@ -1,0 +1,7 @@
+// `canvas` depends on `shapes`; this program does not, so it cannot import it.
+import canvas
+import shapes
+
+fn main() -> UInt8 {
+    canvas.width() + shapes.side()
+}

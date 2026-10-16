@@ -1,0 +1,9 @@
+import squares
+
+fn main() -> UInt8 {
+    if squares.square(7) == 49 {
+        0
+    } else {
+        1
+    }
+}

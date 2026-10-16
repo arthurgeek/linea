@@ -1327,7 +1327,7 @@ fn typecheckInternal(
         for (program.declsOf(c.current)) |d| {
             if (c.isRetained(d)) continue;
             if (ast.declIsExtern(d)) try c.checkExtern(d, m.externs, m.library);
-            if (ast.declIsExport(d)) try c.checkExport(d);
+            if (c.program.publishesExport(d)) try c.checkExport(d);
 
             // Its own parameters answer for the whole declaration: the return
             // type, every annotation in the body, and every signature the body

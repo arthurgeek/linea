@@ -873,6 +873,15 @@ pub const ExpandedProgram = struct {
         return &self.modules[module.index()];
     }
 
+    /// Whether `decl` is an `export` the artefact being built publishes. One
+    /// in a dependency publishes nothing to the program that depends on it,
+    /// which calls it as an ordinary public function.
+    pub fn publishesExport(self: *const ExpandedProgram, decl: DeclId) bool {
+        if (!self.ast.declIsExport(decl)) return false;
+        const module = self.moduleOf(decl);
+        return module == .none or !self.get(module).root.isDependency();
+    }
+
     /// The dotted path a module is known by, which the loaded program
     /// recorded as its import route.
     pub fn modulePath(self: *const ExpandedProgram, module: ModuleId) []const u8 {

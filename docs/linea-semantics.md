@@ -1502,7 +1502,51 @@ library whose manifest gives it the name `std`, wherever it appears. It
 therefore cannot name a primary-root directory even where one has that name;
 such a directory is part of its program but no import reaches it. When the root
 being compiled is itself the library named `std`, the path names that root's own
-modules: a package is never its own dependency.
+modules: a package is never its own dependency. An import path whose first
+element is the name of a library the importing root depends on (below) names
+that library's root module, and its remaining elements a directory beneath the
+library's source; a directory of the importing root spelled the same way is not
+reached. A directory beneath a root that holds a manifest of its own is another
+root, never a module of the enclosing one, and an import reaching it without
+naming it as a dependency is refused. Only the importing root's own manifest
+decides what a first element names: a library another root depends on leaves
+this root's directories of that name importable, and an import that reaches
+neither a dependency of this root nor a directory of it, but names a library
+another root depends on, is refused with that said.
+
+**Dependencies.** A manifest names the libraries its root depends on, by the
+name every import of each starts with and the directory holding its manifest,
+relative to the manifest that writes it:
+
+```
+{ "dependencies": { "shapes": { "path": "../shapes" }, "sqlite": { "path": "../sqlite", "extern": true } } }
+```
+
+Each dependency is its own root ([M-Vis]): its `internal` declarations stay
+inside it, and it may name its own dependencies, which its consumer reaches
+only by naming them too. A library two manifests name is one root, so a type it
+declares is one type wherever it is named; a library is identified by the
+directory it sits in as the filesystem resolves it, however a manifest spells
+the path to it. A library's `source` names a directory inside the one holding
+its manifest. A dependency and its consumer are compiled together from source,
+and testing a root runs that root's tests alone.
+
+**[M-Dependency]** An entry under `dependencies` names a library this root may
+depend on. It is refused, at the entry in the manifest that writes it, when its
+`path` holds no manifest; when that manifest does not say `"kind": "library"`;
+when the library's own `"name"` is absent or differs from the entry's name;
+when the name is `std`, or is written twice in one manifest; when the name
+already names a library in another directory anywhere in the compilation; when
+the library reaches itself through dependencies, the cycle named in the help;
+when the library's `source` leaves the directory holding its manifest or holds
+another root's; or when the library's manifest grants `"extern": true` and the
+entry does not consent with `"extern": true`, or the entry consents and the
+manifest grants nothing. The program links every root's `extern`
+declarations, so the primary root's manifest also names every library in the
+graph whose manifest grants `extern`, with `"extern": true`, however deep it
+sits; the primary root's entry through which such a library is reached is
+refused until it does. A refused entry is left out of the compilation, and an
+import naming it reports nothing further.
 
 Root-relative imports may form cycles. Names can refer across a cycle in either
 direction, independent of declaration order. An import cycle does not imply
@@ -1625,7 +1669,7 @@ access for unloaded roots. Private and internal aliases are checked.
 
 **[M-Entry]** A library declares no entry point. A root whose manifest names it
 a library and which declares `main` is refused where the `main` is written,
-`pub fn main` included. This differs from [S-Entry], which requires a program
+`pub fn main` included; so is a dependency whose root module declares one. This differs from [S-Entry], which requires a program
 entry point.
 
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
@@ -1772,6 +1816,9 @@ struct Account { id: UInt8, balance: UInt8 }
 
 **[M-Extern]** An `extern` declaration appears only in a root whose manifest
 grants it, with `"extern": true`; the grant is any root's, program or library.
+A dependency's grant takes effect only where every manifest naming it, and the
+primary root's manifest, consent with `"extern": true` in an entry
+([M-Dependency]).
 The standard library's manifest grants it; a root whose manifest does not is
 refused. The compiler trusts an `extern` signature without inspecting its
 implementation, so the grant bounds that trust to roots that declare it
@@ -1795,6 +1842,10 @@ to foreign callers; modules below it cannot be named externally. An export
 below the root is diagnosed where declared. The published symbol uses the
 declaration's name, matching the C header, and omits the prefix applied to
 other Linea-defined symbols, so it must not collide with a runtime symbol.
+
+An `export` publishes an entry point of the root being built. In a dependency
+it publishes nothing to the program that depends on it, which calls it as an
+ordinary `pub` function, and none of these rules is asked of it.
 
 **[S-Export]** An `export` does not sit in an `impl`. It has a dedicated
 diagnostic, as [S-Test] does, so the restriction is not obscured by a generic

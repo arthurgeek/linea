@@ -1,0 +1,7 @@
+pub fn count() -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    0
+}

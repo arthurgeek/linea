@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "canvas": { "path": "libs/canvas" },
+        "colors": { "path": "libs/colors" }
+    }
+}

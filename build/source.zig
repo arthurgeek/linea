@@ -949,12 +949,13 @@ fn guideMarker(bare: []const u8) ?Marker {
     return .{ .first = count };
 }
 
-/// The path a `` `path.lin`: `` line labels, or null for any other line.
+/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or
+/// null for any other line.
 fn guideLabel(line: []const u8) ?[]const u8 {
     const bare = std.mem.trim(u8, line, " \t");
     if (bare.len < 8 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
     const path = bare[1 .. bare.len - 2];
-    if (!std.mem.endsWith(u8, path, ".lin")) return null;
+    if (!std.mem.endsWith(u8, path, ".lin") and !isManifestPath(path)) return null;
     for (path) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '/' and c != '.' and c != '-') return null;
     }
@@ -1061,6 +1062,12 @@ fn isTestSummary(line: []const u8) bool {
     return std.mem.eql(u8, passed_word, "passed,") and std.mem.eql(u8, failed_word, "failed");
 }
 
+/// Whether a label names a manifest, which a project carries beside its
+/// sources.
+fn isManifestPath(path: []const u8) bool {
+    return std.mem.eql(u8, std.fs.path.basename(path), "linea.json");
+}
+
 /// The file a pasted diagnostic or trap names, such as `pace_lent.lin` in
 /// `--> pace_lent.lin:10:21`. The standard library's own files are not it.
 fn guideNamedFile(output: []const u8) ?[]const u8 {
@@ -1129,12 +1136,23 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             }) catch @panic("out of memory");
             continue;
         }
+        // A labelled manifest joins the project as any labelled file does:
+        // it says what its directory's root is and which libraries it
+        // depends on.
+        if (std.mem.eql(u8, fence.info, "json")) {
+            if (fence.label) |path| if (isManifestPath(path)) {
+                project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
+            };
+            continue;
+        }
         if (!is_linea) continue;
         if (fence.label == null) project.clearRetainingCapacity();
         const has_entry = fence.hasEntryPoint();
         if (fence.label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
         const is_main_file = if (fence.label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
-        const alone = fence.label != null and project.items.len == 1 and has_entry;
+        var sources: usize = 0;
+        for (project.items) |file| sources += @intFromBool(std.mem.endsWith(u8, file.path, ".lin"));
+        const alone = fence.label != null and sources == 1 and has_entry;
         if (fence.label != null and !is_main_file and !alone) {
             fragments += @intFromBool(!has_entry);
             continue;

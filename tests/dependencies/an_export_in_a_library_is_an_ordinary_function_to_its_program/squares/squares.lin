@@ -1,0 +1,5 @@
+// `square` is published to C when this library is built on its own. A Linea
+// program that depends on the library calls it like any public function.
+pub export fn square(num: Int32) -> Int32 {
+    num * num
+}

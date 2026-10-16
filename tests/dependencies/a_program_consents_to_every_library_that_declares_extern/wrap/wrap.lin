@@ -1,0 +1,5 @@
+import descriptors
+
+pub fn close(fd: Int32) -> Bool {
+    descriptors.close_quietly(fd)
+}

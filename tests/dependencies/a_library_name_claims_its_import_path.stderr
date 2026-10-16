@@ -1,0 +1,5 @@
+error[M-Import]: the library `recipes` holds no module named `drafts`; an import starting with `recipes` names it, so this root's `recipes/drafts` cannot be imported
+ --> tests/dependencies/a_library_name_claims_its_import_path/main.lin:4:8
+  |
+4 | import recipes.drafts
+  |        ^^^^^^^^^^^^^^ cannot import it

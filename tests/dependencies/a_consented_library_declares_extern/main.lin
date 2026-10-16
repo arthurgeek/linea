@@ -1,0 +1,10 @@
+import descriptors
+
+// Descriptor -1 is never open, so closing it fails.
+fn main() -> UInt8 {
+    if descriptors.close_quietly(-1) {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,5 @@
+error[M-Dependency]: `nowhere` holds no linea.json
+ --> tests/dependencies/a_dependency_path_holds_no_library/linea.json:3:30
+  |
+3 |         "missing": { "path": "nowhere" }
+  |                              ^^^^^^^^^ name the directory that holds the library's linea.json

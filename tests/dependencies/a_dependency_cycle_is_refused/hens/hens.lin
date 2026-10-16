@@ -1,0 +1,3 @@
+pub fn count() -> UInt8 {
+    3
+}

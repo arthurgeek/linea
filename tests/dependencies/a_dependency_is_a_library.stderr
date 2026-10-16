@@ -1,0 +1,5 @@
+error[M-Dependency]: `tool` is a program, not a library
+ --> tests/dependencies/a_dependency_is_a_library/linea.json:3:9
+  |
+3 |         "tool": { "path": "tool" }
+  |         ^^^^^^ a dependency is entered through what it publishes, so its manifest says `"kind": "library"`

@@ -1,0 +1,11 @@
+// Naming `descriptors` with `"extern": true` is how the program consents to the
+// `extern` functions `wrap` reaches through it.
+import wrap
+
+fn main() -> UInt8 {
+    if wrap.close(-1) {
+        0
+    } else {
+        1
+    }
+}

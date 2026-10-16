@@ -1,0 +1,8 @@
+// `canvas` depends on a library named `utils`, which is its own business: this
+// program's `import utils` reaches its own `utils` module.
+import canvas
+import utils
+
+fn main() -> UInt8 {
+    canvas.size() + utils.one()
+}

@@ -1,0 +1,7 @@
+{
+    "dependencies": {
+        "lib": { "path": "lib", "extern": "yes" },
+        "nested": { "path": "lib", "extern": { "path": "../nowhere" } },
+        "other": { "path": "other" }
+    }
+}

@@ -1,0 +1,5 @@
+error[M-Dependency]: `wrap` reaches `descriptors`, whose manifest grants it `extern`, and this manifest does not consent to it
+ --> tests/dependencies/a_program_consents_to_every_library_that_declares_extern/linea.json:3:9
+  |
+3 |         "wrap": { "path": "wrap" }
+  |         ^^^^^^ name `descriptors` under `dependencies` here with `"extern": true` to trust the signatures it declares

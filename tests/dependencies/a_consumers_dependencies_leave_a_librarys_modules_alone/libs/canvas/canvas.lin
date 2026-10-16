@@ -1,0 +1,6 @@
+// `colors` here is a module of this library, whatever its consumer names.
+import colors
+
+pub fn size() -> UInt8 {
+    colors.two()
+}

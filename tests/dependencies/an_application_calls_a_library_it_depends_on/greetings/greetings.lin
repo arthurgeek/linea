@@ -1,0 +1,4 @@
+// `greeting` is public, so a program that depends on this library can call it.
+pub fn greeting() -> Str {
+    "hello from a library"
+}

@@ -1,0 +1,5 @@
+import chores
+
+fn main() -> UInt8 {
+    chores.count()
+}

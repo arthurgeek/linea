@@ -1,0 +1,7 @@
+error[M-Dependency]: `shapes` names two libraries
+ --> tests/dependencies/one_name_names_one_library/linea.json:4:9
+  |
+4 |         "shapes": { "path": "shapes" }
+  |         ^^^^^^^^ one name names one library
+  |
+  = help: rename one of them: `shapes` is already the library at `tests/dependencies/one_name_names_one_library/canvas/shapes`

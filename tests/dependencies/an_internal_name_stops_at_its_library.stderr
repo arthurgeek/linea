@@ -1,0 +1,5 @@
+error[M-Vis]: `step` is internal to another root
+ --> tests/dependencies/an_internal_name_stops_at_its_library/main.lin:4:13
+  |
+4 |     counter.step(counter.start())
+  |             ^^^^ only modules in the same root may name it

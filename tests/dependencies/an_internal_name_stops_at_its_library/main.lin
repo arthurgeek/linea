@@ -1,0 +1,5 @@
+import counter
+
+fn main() -> UInt8 {
+    counter.step(counter.start())
+}
