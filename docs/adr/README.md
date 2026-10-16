@@ -56,7 +56,7 @@ true of a different implementation.
 
 | # | Rule | Status |
 | --- | --- | --- |
-| [0013](0013-no-undefined-behaviour.md) | No operation has undefined behaviour | Accepted; extended by 0091 |
+| [0013](0013-no-undefined-behaviour.md) | No operation has undefined behaviour | Accepted; extended by 0091 and 0228 |
 | [0014](0014-unused-declarations-are-errors.md) | An unused declaration is an error | Accepted |
 | [0189](0189-a-names-case-is-part-of-its-kind.md) | A name's case is part of its kind | Accepted; extended by 0190 |
 | [0194](0194-an-alias-names-a-type-that-exists.md) | An alias names a type that exists | Accepted; extended by 0206 and 0215; path clause for a generic alias superseded by 0211 |
@@ -95,10 +95,10 @@ true of a different implementation.
 | [0065](0065-a-phantom-type-parameter-is-declared.md) | A phantom type parameter is declared, not inferred from disuse | Accepted; its bound clause superseded by 0099 |
 | [0066](0066-a-blocks-state-is-its-dominators-plus-what-it-changed.md) | A block's state is its dominator's, plus what it changed | Accepted; refined by 0073 |
 | [0067](0067-a-place-is-updated-through-itself.md) | A compound assignment updates a place through itself | Accepted |
-| [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171 |
-| [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068 |
+| [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
+| [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
-| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Proposed |
+| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013 and 0101 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
 | [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176; method-call fallback refined by 0192 |
@@ -125,7 +125,7 @@ true of a different implementation.
 | [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172 and 0198 |
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
-| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229 |
+| [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
 | [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088 and 0142 |
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
@@ -133,7 +133,7 @@ true of a different implementation.
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
 | [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113 and 0213; default tier superseded by 0139; coherence partition superseded by 0148 |
 | [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
-| [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096 |
+| [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096; extended by 0228 |
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
 | [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
