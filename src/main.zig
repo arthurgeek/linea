@@ -42,6 +42,7 @@ comptime {
     _ = @import("sema/intrinsics.zig");
     _ = @import("sema/observations.zig");
     _ = @import("sema/open_types.zig");
+    _ = @import("sema/usefulness.zig");
     _ = @import("sema/typecheck.zig");
     _ = @import("sema/retained_typing.zig");
     _ = @import("mir/mir.zig");

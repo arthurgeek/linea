@@ -1,0 +1,21 @@
+// A pattern in a `let` must match every value of its type: there is no other
+// arm for what it misses. The same holds for a part nested inside the pattern,
+// and for the pattern of a `let ... else`, whose `else` runs only when the
+// initializer is `None` or `Err`.
+fn lookup(present: Bool) -> Option[(Str, Option[UInt8])] {
+    if !present {
+        return .None
+    }
+    .Some(("port", .Some(80)))
+}
+
+fn main() -> UInt8 {
+    let found: Option[UInt8] = .Some(3)
+    let Some(n) = found
+    let pair: (Str, Option[UInt8]) = ("width", .Some(4))
+    let (_key, Some(width)) = pair
+    let (_name, Some(port)) = lookup(true) else {
+        return 1
+    }
+    n + width + port
+}

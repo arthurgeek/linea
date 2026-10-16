@@ -1232,8 +1232,8 @@ fn lowerFunction(
         if (param.pattern == ExprId.none) continue;
         const pattern_span = ast.exprSpan(param.pattern);
         const of = try l.typeAt(param.argument);
-        const address = try l.expr(param.argument);
-        try l.bindPatternFields(param.pattern, of, address, pattern_span, param.convention != .sink, false);
+        const value = try l.expr(param.argument);
+        try l.bindPattern(param.pattern, l.matchedValueOf(of, value), param.convention != .sink, pattern_span);
     }
 
     const body = source.body;
@@ -2460,57 +2460,185 @@ const Lowerer = struct {
         return self.disposals.reads(at);
     }
 
-    /// Bind owned field values or lend their original storage.
-    ///
-    /// A struct pattern's arguments alternate a field name and its binder,
-    /// and the checker recorded the field against the name; a tuple pattern's
-    /// are binders alone, each recorded against its own token. `names_fields`
-    /// says which, so one routine takes both apart.
-    fn bindPatternFields(
-        self: *Lowerer,
-        pattern: ExprId,
-        of: TypeId,
-        address: InstId,
-        span: Span,
-        lending: bool,
-        names_fields: bool,
-    ) std.mem.Allocator.Error!void {
-        const p = self.ast.call(pattern);
-        const stride: usize = if (names_fields) 2 else 1;
-        var i: usize = stride - 1;
-        while (i < p.args.len) : (i += stride) {
-            const binder = self.res.targetOf(p.args[i]);
-            if (binder == BindingId.none) continue;
+    /// Where a part of a value a pattern takes apart is: its type, its address
+    /// where it lives somewhere a lend can name, and its value where that is
+    /// already in hand. An aggregate's value is its address, so it has both.
+    const Matched = struct {
+        ty: TypeId,
+        address: InstId = .none,
+        value: InstId = .none,
+    };
 
-            // Which field the pattern names is the checker's selection; the
-            // offset is this instance's layout of that field. What the
-            // binder's storage holds is what the checker recorded for it, the
-            // same as for any other binding.
-            const selected = self.typing.fieldSelection(self.ast.exprMain(p.args[i + 1 - stride])) orelse continue;
-            const ty = try self.bindingTypeAt(binder);
+    /// A value lowering produced, about to be taken apart.
+    fn matchedValueOf(self: *const Lowerer, ty: TypeId, value: InstId) Matched {
+        if (self.isAggregate(ty)) return .{ .ty = ty, .address = value, .value = value };
+        return .{ .ty = ty, .value = value };
+    }
 
-            const at = try self.fieldAddr(address, ty, self.types().fieldOffset(of, selected.field.index()), span);
-            if (lending) {
-                try self.lent.put(self.gpa, binder, at);
+    /// A place about to be lent apart. A newtype's base is lent from the
+    /// newtype's own address, which `lendingPlace` finds even for a scalar.
+    fn matchedPlaceOf(self: *Lowerer, id: ExprId, ty: TypeId, span: Span) std.mem.Allocator.Error!Matched {
+        const place = try self.lendingPlace(id, ty, span);
+        if (self.isAggregate(ty)) return .{ .ty = ty, .address = place, .value = place };
+        if (self.types().get(ty) == .newtype) return .{ .ty = ty, .address = place };
+        return .{ .ty = ty, .value = place };
+    }
+
+    /// The value at `m`, read through its address where it is not in hand.
+    fn matchedValue(self: *Lowerer, m: Matched, span: Span) std.mem.Allocator.Error!InstId {
+        if (m.value != .none) return m.value;
+        return self.readThrough(m.address, m.ty, span);
+    }
+
+    /// The part of `m` that the part at `index` of `pattern`'s arguments
+    /// selects. Which part is the checker's selection -- a struct pattern's
+    /// field, a tuple's position, a variant's payload position -- and the
+    /// offset is this instance's layout of it. A newtype's base is the
+    /// newtype's own representation.
+    fn matchedPart(self: *Lowerer, pattern: ExprId, m: Matched, index: usize, span: Span) std.mem.Allocator.Error!Matched {
+        const args = self.ast.call(pattern).args;
+        const ty = try self.typeAt(args[index]);
+        const view = self.types();
+        const offset: u32 = switch (self.ast.exprTag(pattern)) {
+            .struct_pattern => blk: {
+                const selected = self.typing.fieldSelection(self.ast.exprMain(args[index - 1])) orelse
+                    @panic("compiler defect: a struct pattern's field was not settled before emission");
+                break :blk view.fieldOffset(m.ty, selected.field.index());
+            },
+            .tuple_pattern => view.fieldOffset(m.ty, @intCast(index)),
+            else => if (view.get(m.ty) == .newtype) {
+                if (m.address == .none) return .{ .ty = ty, .value = m.value };
+                return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, 0, span) };
+            } else view.variantFieldOffset(m.ty, self.variantIndex(pattern), @intCast(index)),
+        };
+        return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, offset, span) };
+    }
+
+    /// Where `pattern`'s parts sit among its arguments.
+    fn partStride(self: *const Lowerer, pattern: ExprId) ?usize {
+        return switch (self.ast.exprTag(pattern)) {
+            .struct_pattern => 2,
+            .tuple_pattern, .call => 1,
+            else => null,
+        };
+    }
+
+    /// Tests that `pattern` matches the value at `m`, its outer part first,
+    /// and branches to `fail` at the first part that does not, leaving the
+    /// lowerer where every test passed. A payload is read only once its
+    /// variant's tag has been tested, because control reaches the read only
+    /// through that test. Answers false after ending an arm whose variant
+    /// carries a concrete `Never`, which no value can be.
+    fn testPattern(self: *Lowerer, pattern: ExprId, m: Matched, fail: BlockId, span: Span) std.mem.Allocator.Error!bool {
+        // The parts that bind are skipped before this is asked, so a bare
+        // name here is the head of an arm: `_`, or a variant.
+        if (isCatchAll(self.ast, pattern)) return true;
+        switch (self.ast.exprTag(pattern)) {
+            .int_literal, .negate => {
+                const value = try self.matchedValue(m, span);
+                const want = try self.expr(pattern);
+                const eq = try self.emit(.cmp_eq, .bool_, span, .{ .binary = .{ .lhs = value, .rhs = want } });
+                try self.branchOn(eq, fail, span);
+                return true;
+            },
+            .range => {
+                const value = try self.matchedValue(m, span);
+                const pass = try self.b.addBlock();
+                try self.rangeArmGuard(pattern, value, pass, fail, span);
+                self.block = pass;
+                return true;
+            },
+            .name_ref, .call => if (self.types().get(m.ty) != .newtype) {
+                const k = self.variantIndex(pattern);
+                const tag = if (self.isAggregate(m.ty))
+                    try self.emit(.load_indirect, tag_type, span, .{ .unary = m.address })
+                else
+                    try self.matchedValue(m, span);
+                const want_ty = if (self.isAggregate(m.ty)) tag_type else m.ty;
+                const want = try self.emit(.constant, want_ty, span, .{ .constant = k });
+                const eq = try self.emit(.cmp_eq, .bool_, span, .{ .binary = .{ .lhs = tag, .rhs = want } });
+                try self.branchOn(eq, fail, span);
+                // A concrete Never field makes this variant impossible. End
+                // the arm before creating addresses for values that cannot
+                // exist.
+                const view = self.types();
+                for (0..view.variantFieldCount(m.ty, k)) |j| {
+                    if (view.variantFieldType(m.ty, k, @intCast(j)) != .never) continue;
+                    try self.finishNever(span);
+                    return false;
+                }
+            },
+            else => {},
+        }
+        const stride = self.partStride(pattern) orelse return true;
+        const args = self.ast.call(pattern).args;
+        var i = stride - 1;
+        while (i < args.len) : (i += stride) {
+            const part = args[i];
+            if (isCatchAll(self.ast, part) or self.ast.partBinds(part)) continue;
+            if (!try self.testPattern(part, try self.matchedPart(pattern, m, i, span), fail, span)) return false;
+        }
+        return true;
+    }
+
+    /// Continues where `cond` holds and goes to `fail` where it does not.
+    fn branchOn(self: *Lowerer, cond: InstId, fail: BlockId, span: Span) std.mem.Allocator.Error!void {
+        const pass = try self.b.addBlock();
+        _ = try self.b.setTerminator(self.block, .{
+            .tag = .branch,
+            .ty = .unit,
+            .span = span,
+            .data = .{ .branch = .{ .cond = cond, .then_block = pass, .else_block = fail } },
+        });
+        self.block = pass;
+    }
+
+    /// Binds every binder of `pattern`, at any depth, to its part of the
+    /// value at `m`: lent as the address the part sits at, or owned as its
+    /// value in a slot of its own. Emitted once every test passed, so only a
+    /// value the pattern matched is taken apart.
+    fn bindPattern(self: *Lowerer, pattern: ExprId, m: Matched, lending: bool, span: Span) std.mem.Allocator.Error!void {
+        const stride = self.partStride(pattern) orelse return;
+        const args = self.ast.call(pattern).args;
+        var i = stride - 1;
+        while (i < args.len) : (i += stride) {
+            const part = args[i];
+            if (!self.ast.partBinds(part)) {
+                if (self.partStride(part) != null) try self.bindPattern(part, try self.matchedPart(pattern, m, i, span), lending, span);
                 continue;
             }
-            const value = try self.readThrough(at, ty, span);
-
-            const local = try self.b.addLocal(ty, .value);
-            self.local_of_binding[binder.index()] = local;
-            try self.storeLocal(local, ty, span, value);
+            const target = self.res.targetOf(part);
+            if (target == BindingId.none) continue;
+            const at = try self.matchedPart(pattern, m, i, span);
+            if (lending) {
+                try self.lent.put(self.gpa, target, at.address);
+                continue;
+            }
+            const value = try self.matchedValue(at, span);
+            const local = try self.b.addLocal(at.ty, .value);
+            self.local_of_binding[target.index()] = local;
+            try self.storeLocal(local, at.ty, span, value);
         }
     }
 
-    /// `let S { f: b, .. } = e`: each binder gets a slot holding its field.
+    /// Ends the lends `bindPattern` made, at the end of the construct.
+    fn endPatternLends(self: *Lowerer, pattern: ExprId) void {
+        var parts = self.ast.patternParts(pattern);
+        while (parts.next()) |part| {
+            if (self.ast.partBinds(part)) {
+                const target = self.res.targetOf(part);
+                if (target != BindingId.none) _ = self.lent.remove(target);
+            } else {
+                self.endPatternLends(part);
+            }
+        }
+    }
+
+    /// `let S { f: b, .. } = e`: each binder gets a slot holding its part.
     ///
-    /// The value is taken apart rather than kept: every field is named exactly
+    /// The value is taken apart rather than kept: every part is named exactly
     /// once, so what the slot held is entirely accounted for by the slots the
     /// binders get.
-    ///
-    /// `let N(n) = e` is the other shape a pattern here can be: a newtype's
-    /// erasure means there is no address to read a field through, only the
-    /// value itself under the binder's own type.
     ///
     /// `let read` binds the same parts as lends of the place, which is what a
     /// `match read` arm's binders are: each name reads through the address
@@ -2523,52 +2651,8 @@ const Lowerer = struct {
         const span = self.ast.stmtSpan(s);
         const lending = self.ast.stmtTag(s) == .let_read_destructure;
         const of = try self.typeAt(d.init);
-
-        if (self.ast.exprTag(d.pattern) == .call) {
-            const value = if (lending) try self.lendingPlace(d.init, of, span) else try self.expr(d.init);
-            return self.destructureNewtype(d.pattern, value, span, lending);
-        }
-        // A tuple pattern takes the fields of a tuple instance apart by
-        // position, which the checker recorded against each binder, so it is
-        // the struct pattern's lowering with a binder at every argument.
-        const names_fields = switch (self.ast.exprTag(d.pattern)) {
-            .struct_pattern => true,
-            .tuple_pattern => false,
-            else => return,
-        };
-
-        const address = try self.expr(d.init);
-
-        return self.bindPatternFields(d.pattern, of, address, span, lending, names_fields);
-    }
-
-    /// `N(n)`: the binder is the value itself, retyped to the base.
-    ///
-    /// A newtype's representation is its base's, so nothing here reads
-    /// through an address or tests anything -- `dischargeRefinement` is the
-    /// only place a proof is asked for, and by the time a pattern runs one
-    /// already exists.
-    fn destructureNewtype(
-        self: *Lowerer,
-        pattern: ExprId,
-        value: InstId,
-        span: Span,
-        lending: bool,
-    ) std.mem.Allocator.Error!void {
-        const p = self.ast.call(pattern);
-        if (p.args.len != 1) return;
-
-        const target = self.res.targetOf(p.args[0]);
-        if (target == BindingId.none) return;
-
-        const ty = try self.bindingTypeAt(target);
-        if (lending) {
-            try self.lent.put(self.gpa, target, try self.fieldAddr(value, ty, 0, span));
-            return;
-        }
-        const local = try self.b.addLocal(ty, .value);
-        self.local_of_binding[target.index()] = local;
-        try self.storeLocal(local, ty, span, value);
+        const m = if (lending) try self.matchedPlaceOf(d.init, of, span) else self.matchedValueOf(of, try self.expr(d.init));
+        return self.bindPattern(d.pattern, m, lending, span);
     }
 
     /// The address of a field within a value held in memory.
@@ -2693,52 +2777,6 @@ const Lowerer = struct {
             return self.poison(span);
         }
         return self.buildVariant(ty, self.variantIndex(self.ast.withoutGroups(c.callee)), .{ .written = c.args }, span, dest);
-    }
-
-    /// Bind owned payload values or lend their original storage.
-    ///
-    /// Emitted at the top of the arm's own block, so the load happens only
-    /// where the tag has already been tested — the payload of a value that is
-    /// some other variant is not read, because control never arrives here.
-    /// Returns false after terminating an arm whose concrete payload cannot exist.
-    fn bindPayload(
-        self: *Lowerer,
-        pattern: ExprId,
-        scrutinee_ty: TypeId,
-        value: InstId,
-        span: Span,
-        lending: bool,
-    ) std.mem.Allocator.Error!bool {
-        if (self.ast.exprTag(pattern) != .call) return true;
-        if (!self.isAggregate(scrutinee_ty)) return true;
-
-        const k = self.variantIndex(pattern);
-        // A concrete Never field makes this variant impossible. End its arm
-        // before creating addresses or slots for values that cannot exist.
-        const view = self.types();
-        for (0..view.variantFieldCount(scrutinee_ty, k)) |j| {
-            if (view.variantFieldType(scrutinee_ty, k, @intCast(j)) != .never) continue;
-            try self.finishNever(span);
-            return false;
-        }
-
-        for (self.ast.call(pattern).args, 0..) |binder, j| {
-            const target = self.res.targetOf(binder);
-            if (target == BindingId.none) continue;
-
-            const ty = try self.typeAt(binder);
-            const at = try self.carriedAddress(scrutinee_ty, value, @intCast(k), @intCast(j), ty, span);
-            if (lending) {
-                try self.lent.put(self.gpa, target, at);
-                continue;
-            }
-            const carried = try self.readThrough(at, ty, span);
-
-            const local = try self.b.addLocal(ty, .value);
-            self.local_of_binding[target.index()] = local;
-            try self.storeLocal(local, ty, span, carried);
-        }
-        return true;
     }
 
     /// What a variant carries at one position, read out of the value.
@@ -3151,21 +3189,10 @@ const Lowerer = struct {
         return self.emit(.addr_of, ty, span, .{ .local = local });
     }
 
-    fn endPatternLends(self: *Lowerer, pattern: ExprId) void {
-        const tag = self.ast.exprTag(pattern);
-        if (tag != .call and tag != .struct_pattern and tag != .tuple_pattern) return;
-        const args = self.ast.call(pattern).args;
-        const step: usize = if (tag == .struct_pattern) 2 else 1;
-        var at: usize = if (tag == .struct_pattern) 1 else 0;
-        while (at < args.len) : (at += step) {
-            const target = self.res.targetOf(args[at]);
-            if (target != BindingId.none) _ = self.lent.remove(target);
-        }
-    }
-
-    /// `match e { … }` becomes a chain of tag tests.
+    /// `match e { … }` becomes a chain of arms, each testing its pattern and
+    /// then binding what it names.
     ///
-    /// A tag test is a comparison and a branch, which is what a conditional
+    /// A test is a comparison and a branch, which is what a conditional
     /// already lowers to, so nothing new reaches MIR and the edge table gains
     /// nothing. Where the match yields a value each arm stores to a slot and
     /// the join loads it, exactly as a conditional's arms do.
@@ -3173,49 +3200,11 @@ const Lowerer = struct {
         const m = self.ast.call(id);
         const scrutinee_ty = try self.typeAt(m.callee);
         const lending = self.ast.exprTag(id) == .match_read;
-        const value = if (lending)
-            try self.lendingPlace(m.callee, scrutinee_ty, span)
+        const matched = if (lending)
+            try self.matchedPlaceOf(m.callee, scrutinee_ty, span)
         else
-            try self.expr(m.callee);
-        if (scrutinee_ty == .never) return value;
-
-        // A struct or a tuple is a single-constructor domain: there is nothing
-        // to test and one arm, so the fields are bound and the arm runs.
-        // Reading a tag that is not there would read the first field as one.
-        if (m.args.len >= 2) switch (self.ast.exprTag(m.args[0])) {
-            .struct_pattern, .tuple_pattern => |kind| {
-                defer if (lending) self.endPatternLends(m.args[0]);
-                try self.bindPatternFields(m.args[0], scrutinee_ty, value, span, lending, kind == .struct_pattern);
-                return self.expr(m.args[1]);
-            },
-            else => {},
-        };
-
-        // A newtype is the same single-constructor domain: the checker
-        // closed the match on the one arm, so lowering runs it unconditionally
-        // too, with no tag to test.
-        if (m.args.len >= 2 and self.ast.exprTag(m.args[0]) == .call and self.types().get(scrutinee_ty) == .newtype) {
-            defer if (lending) self.endPatternLends(m.args[0]);
-            try self.destructureNewtype(m.args[0], value, span, lending);
-            return self.expr(m.args[1]);
-        }
-
-        // Where the scrutinee lives in memory its value is an address, so the
-        // tag is read through it. Everything below tests a tag either way,
-        // which is why an enum that carries something matches by the rule one
-        // that carries nothing already matched by.
-        //
-        // Only an arm that tests the tag reads it: a struct or a tuple has
-        // none, and a catch-all arm over one has nothing to ask of the value.
-        var tests_tag = false;
-        var arm: usize = 0;
-        while (arm + 1 < m.args.len) : (arm += 2) {
-            if (!isCatchAll(self.ast, m.args[arm])) tests_tag = true;
-        }
-        const tag = if (tests_tag and self.isAggregate(scrutinee_ty))
-            try self.emit(.load_indirect, tag_type, span, .{ .unary = value })
-        else
-            value;
+            self.matchedValueOf(scrutinee_ty, try self.expr(m.callee));
+        if (scrutinee_ty == .never) return if (matched.value != .none) matched.value else matched.address;
 
         const exit = try self.b.addBlock();
         const yields = ty != .unit and ty != .poison and ty != .never;
@@ -3224,46 +3213,11 @@ const Lowerer = struct {
         var i: usize = 0;
         while (i + 1 < m.args.len) : (i += 2) {
             const pattern = m.args[i];
-
-            const body_block = try self.b.addBlock();
             const next = try self.b.addBlock();
 
-            switch (self.ast.exprTag(pattern)) {
-                .range => try self.rangeArmGuard(pattern, tag, body_block, next, span),
-                .int_literal => {
-                    const want = try self.expr(pattern);
-                    const eq = try self.emit(.cmp_eq, .bool_, span, .{ .binary = .{ .lhs = tag, .rhs = want } });
-                    _ = try self.b.setTerminator(self.block, .{
-                        .tag = .branch,
-                        .ty = .unit,
-                        .span = span,
-                        .data = .{ .branch = .{ .cond = eq, .then_block = body_block, .else_block = next } },
-                    });
-                },
-                else => if (isCatchAll(self.ast, pattern)) {
-                    _ = try self.b.setTerminator(self.block, .{
-                        .tag = .jump,
-                        .ty = .unit,
-                        .span = span,
-                        .data = .{ .target = body_block },
-                    });
-                } else {
-                    const k = self.variantIndex(pattern);
-                    const want_ty = if (self.isAggregate(scrutinee_ty)) tag_type else scrutinee_ty;
-                    const want = try self.emit(.constant, want_ty, span, .{ .constant = k });
-                    const eq = try self.emit(.cmp_eq, .bool_, span, .{ .binary = .{ .lhs = tag, .rhs = want } });
-                    _ = try self.b.setTerminator(self.block, .{
-                        .tag = .branch,
-                        .ty = .unit,
-                        .span = span,
-                        .data = .{ .branch = .{ .cond = eq, .then_block = body_block, .else_block = next } },
-                    });
-                },
-            }
-
-            self.block = body_block;
-            defer if (lending) self.endPatternLends(pattern);
-            if (try self.bindPayload(pattern, scrutinee_ty, value, span, lending)) {
+            if (try self.testPattern(pattern, matched, next, span)) {
+                try self.bindPattern(pattern, matched, lending, span);
+                defer if (lending) self.endPatternLends(pattern);
                 if (slot) |s|
                     try self.storeExprIn(s, ty, span, m.args[i + 1])
                 else
@@ -3960,20 +3914,14 @@ const Lowerer = struct {
     /// pattern's binders each name their component of that place.
     fn lendWalked(self: *Lowerer, binder: ExprId, item: TypeId, place: InstId, span: Span) std.mem.Allocator.Error!void {
         if (self.ast.exprTag(binder) == .tuple_pattern)
-            return self.bindPatternFields(binder, item, place, span, true, false);
+            return self.bindPattern(binder, self.matchedValueOf(item, place), true, span);
         const target = self.res.targetOf(binder);
         if (target != BindingId.none) try self.lent.put(self.gpa, target, place);
     }
 
     /// Ends what `lendWalked` bound, at the end of the body.
     fn unlendWalked(self: *Lowerer, binder: ExprId) void {
-        if (self.ast.exprTag(binder) == .tuple_pattern) {
-            for (self.ast.call(binder).args) |component| {
-                const target = self.res.targetOf(component);
-                if (target != BindingId.none) _ = self.lent.remove(target);
-            }
-            return;
-        }
+        if (self.ast.exprTag(binder) == .tuple_pattern) return self.endPatternLends(binder);
         const target = self.res.targetOf(binder);
         if (target != BindingId.none) _ = self.lent.remove(target);
     }
@@ -3983,7 +3931,7 @@ const Lowerer = struct {
     /// of it.
     fn takeWalked(self: *Lowerer, binder: ExprId, item: TypeId, carried: InstId, span: Span) std.mem.Allocator.Error!void {
         if (self.ast.exprTag(binder) == .tuple_pattern)
-            return self.bindPatternFields(binder, item, carried, span, false, false);
+            return self.bindPattern(binder, self.matchedValueOf(item, carried), false, span);
         const local = try self.b.addLocal(item, .value);
         const target = self.res.targetOf(binder);
         if (target != BindingId.none) self.local_of_binding[target.index()] = local;

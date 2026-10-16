@@ -1378,21 +1378,29 @@ const Checker = struct {
     fn reportDiscarded(self: *Checker, arm: ExprId, scrutinee: ExprId) std.mem.Allocator.Error!void {
         const arena = self.sink.arena;
         const ty = self.typing.exprType(scrutinee);
-        const named = self.ast.exprTag(scrutinee) == .name_ref;
-        const labels = try arena.alloc(Label, 2);
+        // A variant nested inside a pattern is its own source: the part it
+        // drops is the one it stands at, so one label says so.
+        const nested = arm == scrutinee;
+        const named = !nested and self.ast.exprTag(scrutinee) == .name_ref;
+        const labels = try arena.alloc(Label, if (nested) 1 else 2);
         labels[0] = .{
             .file = self.ast.fileOfExpr(arm),
             .span = self.ast.exprSpan(arm),
-            .message = if (isCatchAll(self.ast, arm)) "`_` does not settle what it holds" else "this arm names none of what it holds",
+            .message = if (isCatchAll(self.ast, arm))
+                "`_` does not settle what it holds"
+            else if (nested)
+                "this pattern names none of what it holds"
+            else
+                "this arm names none of what it holds",
         };
-        labels[1] = .{
+        if (!nested) labels[1] = .{
             .file = self.ast.fileOfExpr(scrutinee),
             .span = self.ast.exprSpan(scrutinee),
             .message = "taken apart here",
             .style = .secondary,
         };
         const notes = try arena.alloc([]const u8, 1);
-        notes[0] = "name what it holds in the arm, so something can settle it";
+        notes[0] = if (nested) "name what it holds in the pattern, so something can settle it" else "name what it holds in the arm, so something can settle it";
         try self.emit(.{
             .severity = .err,
             .code = .o_leak,

@@ -1,16 +1,6 @@
-error[O-Lent]: this writes a place the construct around it is lending
-  --> tests/tuples/two_components_of_a_lent_pair_are_not_one_place.lin:12:18
-   |
-12 |         add_into(&left, &right)
-   |                  ^^^^^ write it after the construct ends, or take what it names instead of lending it
-error[O-Lent]: this writes a place the construct around it is lending
-  --> tests/tuples/two_components_of_a_lent_pair_are_not_one_place.lin:12:25
-   |
-12 |         add_into(&left, &right)
-   |                         ^^^^^^ write it after the construct ends, or take what it names instead of lending it
 error[N-Aliased]: this names a place another argument mutates
-  --> tests/tuples/two_components_of_a_lent_pair_are_not_one_place.lin:15:26
+  --> tests/tuples/two_components_of_a_lent_pair_are_not_one_place.lin:14:26
    |
-15 |         add_into(&first, &first)
+14 |         add_into(&first, &first)
    |                  ------ mutated by this argument
    |                          ^^^^^^ already passed `&` here

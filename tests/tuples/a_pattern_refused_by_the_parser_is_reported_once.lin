@@ -1,7 +1,7 @@
 // A pattern the parser refuses is reported there. The lambda holding it adds
 // no complaint that its parameter's type cannot be inferred.
 fn main() -> UInt8 {
-    let literal = |(1, 2)| 1
+    let wide = |(a, b, c, d, e, f, g, h, i)| a
     let empty = |()| 1
-    literal((1, 2)) + empty(())
+    wide((1, 2)) + empty(())
 }

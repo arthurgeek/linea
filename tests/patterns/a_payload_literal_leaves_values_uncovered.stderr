@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Some(10..=255)`
+ --> tests/patterns/a_payload_literal_leaves_values_uncovered.lin:4:5
+  |
+4 |     match read value {
+  |     ^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`

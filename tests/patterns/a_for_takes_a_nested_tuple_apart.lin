@@ -1,0 +1,10 @@
+// A `for` binder may nest tuple patterns: each row is an id and a span, and
+// the binder names the span's two ends directly.
+fn main() -> UInt8 {
+    let rows: [(UInt8, (UInt8, UInt8)); 2] = [(1, (2, 5)), (2, (4, 10))]
+    var total: UInt8 = 0
+    for read (id, (start, end)) in rows {
+        total += id * (end - start)
+    }
+    total - 15
+}

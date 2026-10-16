@@ -99,7 +99,7 @@ module {
     %v71 = llvm.load %s3 : !llvm.ptr -> i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     %v72 = arith.constant 0 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     %v73 = arith.cmpi eq, %v71, %v72 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-    cf.cond_br %v73, ^b9, ^b10 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    cf.cond_br %v73, ^b10, ^b9 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
   ^b2:
     %v43 = arith.constant 16 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:11)
     %v44 = llvm.getelementptr %s2[%v43] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:11)
@@ -137,10 +137,15 @@ module {
     "llvm.intr.memcpy"(%s3, %rs56, %cl62) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:11)
     cf.br ^b1 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:11)
   ^b8:
-    %lw91 = llvm.load %s5 : !llvm.ptr -> i8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-    %v91 = arith.extui %lw91 : i8 to i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-    func.return %v91 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    %lw92 = llvm.load %s5 : !llvm.ptr -> i8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    %v92 = arith.extui %lw92 : i8 to i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    func.return %v92 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
   ^b9:
+    %v86 = llvm.load %s3 : !llvm.ptr -> i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    %v87 = arith.constant 1 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    %v88 = arith.cmpi eq, %v86, %v87 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+    cf.cond_br %v88, ^b12, ^b11 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
+  ^b10:
     %v75 = arith.constant 8 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     %v76 = llvm.getelementptr %s3[%v75] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     %v77 = arith.constant 0 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
@@ -163,10 +168,6 @@ module {
     %sw84 = arith.trunci %v83 : i64 to i8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     llvm.store %sw84, %s5 : i8, !llvm.ptr loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     cf.br ^b8 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-  ^b10:
-    %v86 = arith.constant 1 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-    %v87 = arith.cmpi eq, %v71, %v86 : i64 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
-    cf.cond_br %v87, ^b11, ^b12 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
   ^b11:
     %tk2 = arith.constant 3 : i32 loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_rendered_where_it_is_written.lin":29:5)
@@ -1142,12 +1143,17 @@ module {
     %v1 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
     %v2 = arith.constant 1 : i64 loc("std/option/option.lin":L:C)
     %v3 = arith.cmpi eq, %v1, %v2 : i64 loc("std/option/option.lin":L:C)
-    cf.cond_br %v3, ^b2, ^b3 loc("std/option/option.lin":L:C)
+    cf.cond_br %v3, ^b3, ^b2 loc("std/option/option.lin":L:C)
   ^b1:
-    %rl22 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s2, %rl22) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    %rl23 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s2, %rl23) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     func.return loc("std/option/option.lin":L:C)
   ^b2:
+    %v13 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
+    %v14 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
+    %v15 = arith.cmpi eq, %v13, %v14 : i64 loc("std/option/option.lin":L:C)
+    cf.cond_br %v15, ^b5, ^b4 loc("std/option/option.lin":L:C)
+  ^b3:
     %v5 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
     %v6 = llvm.getelementptr %s0[%v5] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     %cl8 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
@@ -1155,21 +1161,17 @@ module {
     %cl11 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
     "llvm.intr.memcpy"(%s2, %s3, %cl11) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     cf.br ^b1 loc("std/option/option.lin":L:C)
-  ^b3:
-    %v13 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    %v14 = arith.cmpi eq, %v1, %v13 : i64 loc("std/option/option.lin":L:C)
-    cf.cond_br %v14, ^b4, ^b5 loc("std/option/option.lin":L:C)
   ^b4:
-    %cl18 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%s2, %s1, %cl18) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
-    cf.br ^b1 loc("std/option/option.lin":L:C)
-  ^b5:
     %tk1 = arith.constant 3 : i32 loc("std/option/option.lin":L:C)
     %tf1 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/option/option.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
+  ^b5:
+    %cl19 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%s2, %s1, %cl19) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    cf.br ^b1 loc("std/option/option.lin":L:C)
   }
   func.func private @"lin.std.text;starts_a_character"(%a0: !llvm.ptr, %a1: i64) -> i1 attributes {llvm.linkage = #llvm.linkage<internal>} {
     %z0 = arith.constant 1 : i64
@@ -1210,20 +1212,25 @@ module {
     %v14 = llvm.load %rs13 : !llvm.ptr -> i64 loc("std/text/str.lin":L:C)
     %v15 = arith.constant 1 : i64 loc("std/text/str.lin":L:C)
     %v16 = arith.cmpi eq, %v14, %v15 : i64 loc("std/text/str.lin":L:C)
-    cf.cond_br %v16, ^b5, ^b6 loc("std/text/str.lin":L:C)
+    cf.cond_br %v16, ^b6, ^b5 loc("std/text/str.lin":L:C)
   ^b3:
-    %lw47 = llvm.load %s2 : !llvm.ptr -> i8 loc("std/text/str.lin":L:C)
-    %lz47 = arith.constant 0 : i8 loc("std/text/str.lin":L:C)
-    %v47 = arith.cmpi ne, %lw47, %lz47 : i8 loc("std/text/str.lin":L:C)
-    func.return %v47 : i1 loc("std/text/str.lin":L:C)
+    %lw48 = llvm.load %s2 : !llvm.ptr -> i8 loc("std/text/str.lin":L:C)
+    %lz48 = arith.constant 0 : i8 loc("std/text/str.lin":L:C)
+    %v48 = arith.cmpi ne, %lw48, %lz48 : i8 loc("std/text/str.lin":L:C)
+    func.return %v48 : i1 loc("std/text/str.lin":L:C)
   ^b4:
-    %lw44 = llvm.load %s3 : !llvm.ptr -> i8 loc("std/text/str.lin":L:C)
-    %lz44 = arith.constant 0 : i8 loc("std/text/str.lin":L:C)
-    %v44 = arith.cmpi ne, %lw44, %lz44 : i8 loc("std/text/str.lin":L:C)
-    %sw45 = arith.extui %v44 : i1 to i8 loc("std/text/str.lin":L:C)
-    llvm.store %sw45, %s2 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
+    %lw45 = llvm.load %s3 : !llvm.ptr -> i8 loc("std/text/str.lin":L:C)
+    %lz45 = arith.constant 0 : i8 loc("std/text/str.lin":L:C)
+    %v45 = arith.cmpi ne, %lw45, %lz45 : i8 loc("std/text/str.lin":L:C)
+    %sw46 = arith.extui %v45 : i1 to i8 loc("std/text/str.lin":L:C)
+    llvm.store %sw46, %s2 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
     cf.br ^b3 loc("std/text/str.lin":L:C)
   ^b5:
+    %v37 = llvm.load %rs13 : !llvm.ptr -> i64 loc("std/text/str.lin":L:C)
+    %v38 = arith.constant 0 : i64 loc("std/text/str.lin":L:C)
+    %v39 = arith.cmpi eq, %v37, %v38 : i64 loc("std/text/str.lin":L:C)
+    cf.cond_br %v39, ^b11, ^b10 loc("std/text/str.lin":L:C)
+  ^b6:
     %v18 = arith.constant 8 : i64 loc("std/text/str.lin":L:C)
     %v19 = llvm.getelementptr %rs13[%v18] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/text/str.lin":L:C)
     %iw20 = llvm.load %v19 : !llvm.ptr -> i8 loc("std/text/str.lin":L:C)
@@ -1235,10 +1242,6 @@ module {
     %v23 = arith.constant 128 : i64 loc("std/text/str.lin":L:C)
     %v24 = arith.cmpi ult, %v22, %v23 : i64 loc("std/text/str.lin":L:C)
     cf.cond_br %v24, ^b7, ^b8 loc("std/text/str.lin":L:C)
-  ^b6:
-    %v37 = arith.constant 0 : i64 loc("std/text/str.lin":L:C)
-    %v38 = arith.cmpi eq, %v14, %v37 : i64 loc("std/text/str.lin":L:C)
-    cf.cond_br %v38, ^b10, ^b11 loc("std/text/str.lin":L:C)
   ^b7:
     %v26 = arith.constant 1 : i1 loc("std/text/str.lin":L:C)
     %sw27 = arith.extui %v26 : i1 to i8 loc("std/text/str.lin":L:C)
@@ -1260,17 +1263,17 @@ module {
     llvm.store %sw35, %s3 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
     cf.br ^b4 loc("std/text/str.lin":L:C)
   ^b10:
-    %v40 = arith.constant 0 : i1 loc("std/text/str.lin":L:C)
-    %sw41 = arith.extui %v40 : i1 to i8 loc("std/text/str.lin":L:C)
-    llvm.store %sw41, %s3 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
-    cf.br ^b4 loc("std/text/str.lin":L:C)
-  ^b11:
     %tk1 = arith.constant 3 : i32 loc("std/text/str.lin":L:C)
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/text/str.lin":L:C)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
+  ^b11:
+    %v41 = arith.constant 0 : i1 loc("std/text/str.lin":L:C)
+    %sw42 = arith.extui %v41 : i1 to i8 loc("std/text/str.lin":L:C)
+    llvm.store %sw42, %s3 : i8, !llvm.ptr loc("std/text/str.lin":L:C)
+    cf.br ^b4 loc("std/text/str.lin":L:C)
   }
   func.func private @"lin.std.mem;Slice[UInt8].subspan"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64, %a2: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
     %z0 = arith.constant 1 : i64
@@ -1428,12 +1431,17 @@ module {
     %v1 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
     %v2 = arith.constant 1 : i64 loc("std/option/option.lin":L:C)
     %v3 = arith.cmpi eq, %v1, %v2 : i64 loc("std/option/option.lin":L:C)
-    cf.cond_br %v3, ^b2, ^b3 loc("std/option/option.lin":L:C)
+    cf.cond_br %v3, ^b3, ^b2 loc("std/option/option.lin":L:C)
   ^b1:
-    %rl30 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s1, %rl30) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    %rl31 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s1, %rl31) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     func.return loc("std/option/option.lin":L:C)
   ^b2:
+    %v13 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
+    %v14 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
+    %v15 = arith.cmpi eq, %v13, %v14 : i64 loc("std/option/option.lin":L:C)
+    cf.cond_br %v15, ^b5, ^b4 loc("std/option/option.lin":L:C)
+  ^b3:
     %v5 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
     %v6 = llvm.getelementptr %s0[%v5] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     %cl8 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
@@ -1441,36 +1449,32 @@ module {
     %cl11 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
     "llvm.intr.memcpy"(%s1, %s2, %cl11) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     cf.br ^b1 loc("std/option/option.lin":L:C)
-  ^b3:
-    %v13 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    %v14 = arith.cmpi eq, %v1, %v13 : i64 loc("std/option/option.lin":L:C)
-    cf.cond_br %v14, ^b4, ^b5 loc("std/option/option.lin":L:C)
   ^b4:
-    %ba17 = llvm.mlir.addressof @linea_str5 : !llvm.ptr loc("std/option/option.lin":L:C)
-    %v17 = llvm.ptrtoint %ba17 : !llvm.ptr to i64 loc("std/option/option.lin":L:C)
-    %v18 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    llvm.store %v17, %s3 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
-    %v21 = arith.constant 28 : i64 loc("std/option/option.lin":L:C)
-    %v22 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
-    %v23 = llvm.getelementptr %s3[%v22] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
-    llvm.store %v21, %v23 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
-    %poa1 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    %ppa1 = llvm.getelementptr %s3[%poa1] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
-    %pva1 = llvm.load %ppa1 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
-    %pol1 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
-    %ppl1 = llvm.getelementptr %s3[%pol1] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
-    %pvl1 = llvm.load %ppl1 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
-    %pf1 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
+    %tk1 = arith.constant 3 : i32 loc("std/option/option.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/option/option.lin":L:C)
-    func.call @linea_panic(%pva1, %pvl1, %pf1, %tl1, %tc1) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
+    func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   ^b5:
-    %tk2 = arith.constant 3 : i32 loc("std/option/option.lin":L:C)
-    %tf2 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
+    %ba18 = llvm.mlir.addressof @linea_str5 : !llvm.ptr loc("std/option/option.lin":L:C)
+    %v18 = llvm.ptrtoint %ba18 : !llvm.ptr to i64 loc("std/option/option.lin":L:C)
+    %v19 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
+    llvm.store %v18, %s3 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
+    %v22 = arith.constant 28 : i64 loc("std/option/option.lin":L:C)
+    %v23 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
+    %v24 = llvm.getelementptr %s3[%v23] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    llvm.store %v22, %v24 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
+    %poa2 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
+    %ppa2 = llvm.getelementptr %s3[%poa2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %pva2 = llvm.load %ppa2 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
+    %pol2 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
+    %ppl2 = llvm.getelementptr %s3[%pol2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %pvl2 = llvm.load %ppl2 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
+    %pf2 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/option/option.lin":L:C)
-    func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
+    func.call @linea_panic(%pva2, %pvl2, %pf2, %tl2, %tc2) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   }
   func.func private @"lin.std.text;Str.byte"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {

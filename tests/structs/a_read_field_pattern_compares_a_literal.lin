@@ -1,0 +1,16 @@
+// `match read` compares a field against a literal with the same pattern a
+// plain `match` uses, and a value the literal excludes goes on to the next arm.
+struct Pair {
+    a: UInt8,
+    b: UInt8,
+}
+
+fn main() -> UInt8 {
+    let pair = Pair { a = 5, b = 2 }
+    let first = match read pair {
+        Pair { a: 1, b: _ } => 1,
+        Pair { a: 5, b } => b,
+        _ => 3,
+    }
+    first - 2
+}

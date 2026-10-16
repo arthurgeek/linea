@@ -1,5 +1,7 @@
-error[T-Mismatch]: this takes a `Some` apart, and the value is an `Option[UInt8]`
+error[T-Refutable]: this pattern does not match every `Option[UInt8]`
  --> tests/decl/borrowed_lets/an_enum_pattern_is_refutable.lin:3:14
   |
 3 |     let read Some(value) = choice
-  |              ^^^^^^^^^^^ the pattern names a different type
+  |              ^^^^^^^^^^^ `None` is not matched
+  |
+  = help: bind what it carries with `let ... else`, or take it apart with `match`

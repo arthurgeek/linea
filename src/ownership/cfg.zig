@@ -102,6 +102,17 @@ pub const Projection = union(enum) {
     element_component: @import("../support/interner.zig").StringId,
     /// A lending loop whose checked indexing selects its element's place.
     index: ExprId,
+    /// The part a pattern nested inside another selects: the path to the
+    /// pattern around it, then its own step, as `Cfg.pattern_parts` records
+    /// them for the node.
+    part: ExprId,
+};
+
+/// Where a pattern nested inside another sits: the pattern around it, or none
+/// for a part of the outermost pattern, and the step that selects it there.
+pub const PatternPart = struct {
+    within: ExprId,
+    step: Projection,
 };
 
 /// One thing that happens to a place.
@@ -573,6 +584,9 @@ pub const Cfg = struct {
     /// operation to track and is read wherever it is written. Sized by the
     /// program's uses of constants.
     static_reads: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The step each pattern node nested in another selects, keyed by the
+    /// node. Sized by the program's nested patterns.
+    pattern_parts: std.AutoHashMapUnmanaged(ExprId, PatternPart) = .empty,
     /// Closures refused for naming a binding they did not capture, in the
     /// order they were met, with what their bodies do with it. Sized by the
     /// refused closures, which is normally none.
@@ -597,6 +611,7 @@ pub const Cfg = struct {
         gpa.free(self.placements);
         self.temporary_statements.deinit(gpa);
         self.static_reads.deinit(gpa);
+        self.pattern_parts.deinit(gpa);
         self.* = undefined;
     }
 

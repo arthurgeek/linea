@@ -792,9 +792,22 @@ through injective key structure; associated projections cannot determine a
 binder by inversion. Selection, instantiation and retained queries consume the
 same declaration-ordered implementation arguments.
 
-Match exhaustiveness is tracked as one 64-bit word per match, one bit per
-variant, which is why an enum declares at most `max_variants` (64) variants
-([T-Variants]). A layout is rejected when its size exceeds `Layout.max_size`
+Coverage is one question in `sema/usefulness.zig`: whether a row of patterns is
+useful after the rows before it (Maranget's algorithm), with a witness for a
+value that row alone matches. `checkMatch` asks it of each arm against the arms
+before it ([T-Unreachable]) and of a wildcard against every arm ([T-Cover]); the
+irrefutable positions (`let`, `let read`, `let ... else`, a walk's binder and a
+lambda's parameter) ask it of a wildcard against their one pattern
+([T-Refutable]). The matrix is built per construct in an arena freed with it,
+sized by the construct's patterns; an enum column's signature is one 64-bit
+word, which is why an enum declares at most `max_variants` (64) variants
+([T-Variants]). A wildcard over a column whose constructors are all named
+branches once per constructor, so the worst case is exponential in a pattern's
+width -- the problem is NP-complete -- and each construct's questions together
+may build at most `usefulness.max_cells` (2^20) cells, past which it is
+[T-CoverLimit]. A matrix whose rows never put a wildcard where another row names
+a constructor follows one path per row, and costs the arms times the size of
+their patterns. A layout is rejected when its size exceeds `Layout.max_size`
 ([L-Size]), and an array length is stored in 32 bits ([T-ArraySize]).
 
 `Checker.checkPolyRec` examines constructor-growing normalized calls before
@@ -1036,11 +1049,23 @@ checker-owned and is discarded.
 
 Qualified variant selections retain their declaration-order ordinal in
 `Resolution.variant_ordinals`. Checking reads that answer for constructor
-payloads and generic argument inference. Context-dependent references and enum
-match arms are settled by the checker in `Typing.variant_uses`; arm records also
-retain whether the payload is left unnamed. Ownership reads that disposal fact,
-and MIR reads the selected ordinal for construction, tag tests and payload
-loads. Generic substitution preserves variant order, so no later consumer
+payloads and generic argument inference. Context-dependent references and
+variant patterns, at any depth of a pattern, are settled by the checker in
+`Typing.variant_uses`, keyed by the pattern node; a record also retains whether
+the payload is left unnamed. Ownership reads that disposal fact, and MIR reads
+the selected ordinal for construction, tag tests and payload loads.
+
+A nested pattern adds no node and no table of its own. The checker checks every
+pattern with one recursive routine, `checkPattern`, and records each part's
+answer where the outermost pattern's always was: its type by node, a variant
+pattern's ordinal in `variant_uses`, a struct field's identity in `field_names`,
+and a binder's type by binding. Ownership and lowering walk a pattern top-down
+and compose those answers into the path from the scrutinee to each part, so no
+pass selects a part a second way. The checker's own place relation for
+[O-Lent] and [N-Aliased] keeps, beside `binder_places`, a `pattern_places`
+entry for each nested pattern node, so a binder's place is a chain of one-step
+records ending at the value the construct took apart; ownership keeps the same
+chain as `Cfg.pattern_parts`, which `Projection.part` names. Generic substitution preserves variant order, so no later consumer
 searches a written variant's name again. Each sparse table follows the uses its
 pass settled: O(V) storage for V uses and expected O(1) lookup.
 
@@ -1312,7 +1337,10 @@ created and reports [O-Borrow] if the place it names was written, moved or
 released since. Liveness keeps that alias only until its last use, so the owner
 is free again afterwards. The checker still records `let read` binder places in
 its `binder_places` relation, which is what lets [N-Aliased] see a binder and
-its owner passed to one call.
+its owner passed to one call. A binder nested inside a pattern takes the part
+its whole path selects: its `.lent` or `.init` operation carries
+`Projection.part`, and `Cfg.pattern_parts` holds each nested node's step from
+the pattern around it.
 
 Dependency paths and immutable origin sets are interned within each function.
 Call-result contracts collect their contributed facts before interning the union,
@@ -1548,7 +1576,11 @@ scalar newtypes keep the original place or, for a match, materialize an unnamed
 temporary once. A `let read` initializer is always a checked place, so it never
 takes that temporary path. Match binder entries expire with the arm; `let read`
 entries stay for the rest of the function, keyed by their unique `BindingId`.
-Consuming patterns still load independent values. Ownership determines which
+Consuming patterns still load independent values. A `match` lowers as a chain
+of arms: `testPattern` tests each arm's pattern outer part first and branches
+to the next arm at the first part that fails, so a payload is read only behind
+its variant's tag test, then `bindPattern` binds every binder at any depth from
+the same chained field addresses. Ownership determines which
 observations may escape before lowering; MIR preserves that identity rather
 than copying a read binder into a new local slot.
 

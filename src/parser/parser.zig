@@ -4105,18 +4105,37 @@ const Parser = struct {
         return startsArmPattern(self.cursor.peek());
     }
 
-    /// Reports a parenthesised binder where a pattern binds a name, and
-    /// skips it whole, so the binders after it keep their places and the
-    /// mistake is one report. The error node stands where the binder did.
-    fn refuseParenBinder(self: *Parser, message: []const u8) std.mem.Allocator.Error!ExprId {
+    /// A pattern where a binder may stand: in a variant's or newtype's
+    /// payload, in a tuple's component, or after a struct field's `:`.
+    ///
+    /// The production an arm's head uses, so a pattern reads one way at every
+    /// depth, with two differences that follow from the position. A brace
+    /// opens an inferred struct pattern, which an arm's head never begins
+    /// with. A bare name is a name either way, and what it names is the
+    /// checker's question: a lowercase one or `_` binds, a capitalised one is
+    /// a variant ([N-Case]).
+    ///
+    /// A token no pattern begins with is reported where it stands and left for
+    /// the enclosing list, whose separator or closer it may be. `()` is the
+    /// exception: it is one mistake, so both of its tokens go with the report.
+    fn parseSubPattern(self: *Parser) std.mem.Allocator.Error!ExprId {
         const at = self.cursor.current();
-        try self.reportAt(.s_match, at, message, "a pattern does not nest; bind a name here, then take it apart with `let`");
-        if (self.delimiterEnd(at)) |close| {
-            self.cursor.seek(@intCast(close.index() + 1));
-        } else {
-            _ = self.cursor.advance();
+        if (self.cursor.at(.l_brace)) return self.parseStructPattern();
+        // A keyword written where a binder belongs is a name that cannot be
+        // one, which is the mistake to name rather than a missing pattern.
+        if (self.atKeywordName()) {
+            _ = try self.expectName(.s_match, "expected a name", "a pattern binds what its variant carries");
+            return self.builder.addLiteral(.name_ref, at, self.rangeFrom(at));
         }
-        return self.builder.addLiteral(.err, at, self.rangeFrom(at));
+        if (self.cursor.at(.keyword_reflect) or !self.atArmPattern()) {
+            try self.reportNoPattern(at);
+            if (self.cursor.at(.l_paren) and self.cursor.peekAt(1) == .r_paren) {
+                _ = self.cursor.advance();
+                _ = self.cursor.advance();
+            }
+            return self.builder.addLiteral(.err, at, self.rangeFrom(at));
+        }
+        return self.parseArmPattern();
     }
 
     /// Where a statement may end, or the next one begin. Including the tokens
@@ -4300,20 +4319,7 @@ const Parser = struct {
             if (self.cursor.eat(.colon) == null) {
                 try items.append(self.gpa, try self.builder.addLiteral(.name_ref, field, self.rangeFrom(field)));
             } else {
-                const at = self.cursor.current();
-                if (self.cursor.at(.identifier)) {
-                    _ = self.cursor.advance();
-                    try items.append(self.gpa, try self.builder.addLiteral(.name_ref, at, self.rangeFrom(at)));
-                } else if (self.cursor.at(.l_paren)) {
-                    try items.append(self.gpa, try self.refuseParenBinder("a field's binder is a name"));
-                } else {
-                    // A literal or a range here would ask the arm to compare
-                    // the field, and a pattern binds names and compares
-                    // nothing. The pattern is still read, so the tree holds
-                    // what was written and the fields after it.
-                    try self.reportAt(.s_match, at, "a field's binder is a name", "a struct pattern binds each field to a name, and compares none");
-                    try items.append(self.gpa, try self.parseArmPattern());
-                }
+                try items.append(self.gpa, try self.parseSubPattern());
             }
 
             if (self.cursor.eat(.comma) == null) break;
@@ -4340,32 +4346,8 @@ const Parser = struct {
         return self.parsePayloadPattern(at, bare);
     }
 
-    /// Skips a tuple pattern's binder that is not a name, up to the comma or
-    /// `)` that ends it, stepping over anything it opens. The `=` and the line
-    /// break that end the binding also end the skip, so a pattern missing its
-    /// `)` does not consume the value it takes apart.
-    fn skipTupleBinder(self: *Parser, at: TokenId) std.mem.Allocator.Error!ExprId {
-        while (!self.cursor.atEnd()) {
-            if (self.cursor.current() != at and self.cursor.precededByNewline()) break;
-            switch (self.cursor.peek()) {
-                .comma, .r_paren, .equal, .semicolon, .r_bracket, .r_brace => break,
-                .l_paren, .l_bracket, .l_brace => {
-                    const close = self.delimiterEnd(self.cursor.current()) orelse break;
-                    self.cursor.seek(@intCast(close.index() + 1));
-                },
-                else => _ = self.cursor.advance(),
-            }
-        }
-        return self.builder.addLiteral(.err, at, self.rangeFrom(at));
-    }
-
-    /// `(a, b, …)` at the head of a destructuring `let`: a tuple taken apart
-    /// by position, each binder a name or `_`.
-    ///
-    /// A binder is a name and nothing else, so a pattern does not nest. One
-    /// written anyway is reported once and skipped to the next comma, so the
-    /// binders after it keep their positions. The node is built whatever its
-    /// arity, as a tuple literal's is.
+    /// `(a, b, …)`: a tuple taken apart by position, each component a
+    /// pattern. The node is built whatever its arity, as a tuple literal's is.
     fn parseTuplePattern(self: *Parser) std.mem.Allocator.Error!ExprId {
         const open = self.cursor.current();
         _ = self.cursor.advance();
@@ -4375,27 +4357,18 @@ const Parser = struct {
         var refused = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
-            const at = self.cursor.current();
-            if (self.cursor.eat(.identifier) != null) {
-                try binders.append(self.gpa, try self.builder.addLiteral(.name_ref, at, self.rangeFrom(at)));
-            } else {
-                if (!refused) {
-                    refused = true;
-                    try self.reportAt(
-                        .s_tuple,
-                        at,
-                        "a tuple pattern binds a name or `_` to each component",
-                        if (self.cursor.at(.l_paren)) "take this component apart with a second `let`" else "a pattern binds names and compares nothing; bind a name here and compare it in the body",
-                    );
-                }
-                try binders.append(self.gpa, try self.skipTupleBinder(at));
+            const component = try self.parseSubPattern();
+            try binders.append(self.gpa, component);
+            if (self.builder.exprTag(component) == .err) {
+                refused = true;
+                break;
             }
             if (self.cursor.eat(.comma) == null) break;
         }
 
         // A pattern missing a comma or its `)` may hold more than was read,
-        // and a refused binder has already been reported, so none of them has
-        // its arity judged.
+        // and a component that is no pattern has already been reported, so
+        // none of them has its arity judged.
         if (self.cursor.eat(.r_paren) != null) {
             if (!refused) try self.checkTupleArity(open, binders.items.len, switch (binders.items.len) {
                 0 => "`()` has nothing to take apart",
@@ -4458,10 +4431,12 @@ const Parser = struct {
 
         const cases = [_]struct { text: []const u8, codes: []const ?Code }{
             .{ .text = "let read (a, _,) = p", .codes = &.{} },
-            // A pattern does not nest; the binder after it keeps its place.
-            .{ .text = "let ((a, b), c) = x", .codes = &.{.s_tuple} },
+            // A component is a pattern, so tuples nest and a literal is read
+            // as one; whether it matches every value is the checker's.
+            .{ .text = "let ((a, b), c) = x", .codes = &.{} },
             .{ .text = "let ((a, b)) = x", .codes = &.{.s_tuple} },
-            .{ .text = "let (a, 1) = x", .codes = &.{.s_tuple} },
+            .{ .text = "let (a, 1) = x", .codes = &.{} },
+            .{ .text = "let (a, =) = x", .codes = &.{.s_match} },
             .{ .text = "let (a) = x", .codes = &.{.s_tuple} },
             .{ .text = "let (a,) = x", .codes = &.{.s_tuple} },
             .{ .text = "let () = x", .codes = &.{.s_tuple} },
@@ -4532,7 +4507,7 @@ const Parser = struct {
         return self.parsePayloadPattern(at, bare);
     }
 
-    test "a tuple pattern is an arm's pattern, and a binder that is not a name is one report" {
+    test "a tuple pattern is an arm's pattern, and a pattern stands wherever a binder does" {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const gpa = arena.allocator();
@@ -4543,10 +4518,17 @@ const Parser = struct {
 
         const cases = [_]struct { arm: []const u8, codes: []const ?Code }{
             .{ .arm = "() => 0,", .codes = &.{.s_match} },
-            .{ .arm = "Some((a, b)) => 0,", .codes = &.{.s_match} },
-            .{ .arm = "Some(a, (b, c)) => 0,", .codes = &.{.s_match} },
-            .{ .arm = "(a, (b, c)) => 0,", .codes = &.{.s_tuple} },
-            .{ .arm = "S { f: (a, b) } => 0,", .codes = &.{.s_match} },
+            .{ .arm = "Some(()) => 0,", .codes = &.{.s_match} },
+            .{ .arm = "Some((a, b)) => 0,", .codes = &.{} },
+            .{ .arm = "Some(a, (b, c)) => 0,", .codes = &.{} },
+            .{ .arm = "(a, (b, c)) => 0,", .codes = &.{} },
+            .{ .arm = "S { f: (a, b) } => 0,", .codes = &.{} },
+            .{ .arm = "Some(None) => 0,", .codes = &.{} },
+            .{ .arm = "Ok(Point { x, y }) => 0,", .codes = &.{} },
+            .{ .arm = "Reading { s, v: Some(x) } => 0,", .codes = &.{} },
+            .{ .arm = "(Some(a), 0..=9) => 0,", .codes = &.{} },
+            .{ .arm = "Err({ a, b }) => 0,", .codes = &.{} },
+            .{ .arm = "Some(Some(-1)) => 0,", .codes = &.{} },
         };
         for (cases) |case| {
             const text = try std.fmt.allocPrint(gpa, "fn f(p: (UInt8, UInt8)) -> UInt8 {{\n    match p {{\n        {s}\n        _ => 1,\n    }}\n}}\n", .{case.arm});
@@ -5876,7 +5858,7 @@ const Parser = struct {
         const cases = [_]struct { text: []const u8, codes: []const ?Code }{
             .{ .text = "for () in xs {}", .codes = &.{.s_match} },
             .{ .text = "for (i) in xs {}", .codes = &.{.s_tuple} },
-            .{ .text = "for ((a, b), c) in xs {}", .codes = &.{.s_tuple} },
+            .{ .text = "for ((a, b), c) in xs {}", .codes = &.{} },
             .{ .text = "for (i, x in xs {}", .codes = &.{.s_paren} },
         };
         for (cases) |case| {
@@ -6299,12 +6281,12 @@ const Parser = struct {
         return e;
     }
 
-    /// The names a pattern binds, or the pattern unchanged where it binds none.
+    /// The patterns a variant's payload is taken apart with, or the pattern
+    /// unchanged where it takes nothing apart.
     ///
-    /// A binder is a name and nothing else. An arbitrary expression here would
-    /// read as a value to match against, which is a different feature and one
-    /// the language does not have -- accepting one now would make adding it
-    /// later a change in meaning rather than a change in what parses.
+    /// Each one is a pattern rather than an expression: an arbitrary
+    /// expression here would read as a value to compare against, which is a
+    /// different feature and one the language does not have.
     fn parseBinders(
         self: *Parser,
         start: TokenId,
@@ -6318,12 +6300,7 @@ const Parser = struct {
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
             const before = self.cursor.current();
 
-            if (self.cursor.at(.l_paren)) {
-                try names.append(self.gpa, try self.refuseParenBinder("a binder is a name"));
-            } else {
-                const b = try self.expectName(.s_match, "expected a name", "a pattern binds what its variant carries");
-                if (b != .none) try names.append(self.gpa, try self.builder.addLiteral(.name_ref, b, self.rangeFrom(b)));
-            }
+            try names.append(self.gpa, try self.parseSubPattern());
 
             if (self.cursor.eat(.comma) == null) break;
             if (self.cursor.current() == before) _ = self.cursor.advance();
@@ -6727,9 +6704,7 @@ const Parser = struct {
             .{ .text = "let _t = (1, 2, 3, 4, 5, 6, 7, 8, 9)", .help = "give a struct names past eight parts" },
             .{ .text = "let p: (UInt8,) = x", .help = "`(x)` groups `x`; drop the comma, or add a second component" },
             .{ .text = "let p: (A, A, A, A, A, A, A, A, A) = x", .help = "give a struct names past eight parts" },
-            .{ .text = "let (a, 1) = x", .help = "a pattern binds names and compares nothing; bind a name here and compare it in the body" },
-            .{ .text = "let (a, 2 + 3) = x", .help = "a pattern binds names and compares nothing; bind a name here and compare it in the body" },
-            .{ .text = "let (a, (b, c)) = x", .help = "take this component apart with a second `let`" },
+            .{ .text = "let (a, 2 + 3) = x", .help = "a tuple pattern separates its binders with commas" },
             .{ .text = "let () = x", .help = "`()` has nothing to take apart" },
             .{ .text = "let (a) = x", .help = "bind one value with `let a = …`" },
             .{ .text = "let (a,) = x", .help = "bind one value with `let a = …`" },

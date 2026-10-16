@@ -1,5 +1,0 @@
-error[S-Match]: a field's binder is a name
- --> tests/structs/a_field_pattern_is_no_range.lin:5:21
-  |
-5 |         Range { lo: 300..=400, hi, inclusive: _ } => hi,
-  |                     ^^^ a struct pattern binds each field to a name, and compares none

@@ -2573,6 +2573,35 @@ fn callableEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One `match` with n arms, each naming a key and a variant inside a struct
+/// pattern, then `_`. No arm puts a wildcard where another names a
+/// constructor, so coverage follows one path per arm and grows with n.
+fn matchArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Choice { Yes(UInt8), No }\nstruct Row { key: UInt64, choice: Choice }\nfn pick(sink row: Row) -> UInt64 {\n    match row {\n");
+    for (0..n) |i| try w.print("        Row {{ key: {d}, choice: Yes(_) }} => {d},\n", .{ i, i });
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    UInt8(pick(Row { key = 1, choice = .No }))\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// A pattern n variants deep, over n enums each carrying the one before it,
+/// so checking, coverage and lowering each walk a pattern of depth n.
+fn patternDepthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Level0 { Held(UInt8), Empty }\n");
+    for (1..n + 1) |i| try w.print("enum Level{d} {{ Held(Level{d}), Empty }}\n", .{ i, i - 1 });
+    try w.print("fn open(sink value: Level{d}) -> UInt8 {{\n    match value {{\n        ", .{n});
+    for (0..n + 1) |_| try w.writeAll("Held(");
+    try w.writeAll("inner");
+    for (0..n + 1) |_| try w.writeAll(")");
+    try w.writeAll(" => inner,\n        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    open(.Empty)\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// n generic function values named without a type in one body, each settled
 /// by a call through it, so the body's open values and open types grow with n.
 fn openFunctionValuesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -6138,6 +6167,8 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "editor diagnostic publication", .n = 1000, .cost = diagnosticPublicationCost },
     .{ .name = "editor qualified completion", .n = 500, .cost = qualifiedCompletionCost },
     .{ .name = "callable enum payloads", .n = 4000, .cost = throughTheTree(callableEnumModule) },
+    .{ .name = "match arms", .n = 4000, .cost = throughTheTree(matchArmsModule) },
+    .{ .name = "pattern depth", .n = 400, .cost = throughTheTree(patternDepthModule) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
     .{ .name = "constructor payload fields", .n = 2000, .cost = throughTheTree(constructorPayloadFieldsModule) },

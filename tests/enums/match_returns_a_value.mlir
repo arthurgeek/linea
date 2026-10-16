@@ -48,41 +48,41 @@ module {
     %v0 = llvm.load %s0 : !llvm.ptr -> i64 loc("tests/enums/match_returns_a_value.lin":4:16)
     %v1 = arith.constant 0 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
     %v2 = arith.cmpi eq, %v0, %v1 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
-    cf.cond_br %v2, ^b2, ^b3 loc("tests/enums/match_returns_a_value.lin":4:5)
+    cf.cond_br %v2, ^b3, ^b2 loc("tests/enums/match_returns_a_value.lin":4:5)
   ^b1:
     %lw20 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/enums/match_returns_a_value.lin":4:5)
     %v20 = arith.extui %lw20 : i8 to i64 loc("tests/enums/match_returns_a_value.lin":4:5)
     func.return %v20 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
   ^b2:
+    %v7 = arith.constant 1 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
+    %v8 = arith.cmpi eq, %v0, %v7 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
+    cf.cond_br %v8, ^b5, ^b4 loc("tests/enums/match_returns_a_value.lin":4:5)
+  ^b3:
     %v4 = arith.constant 0 : i64 loc("tests/enums/match_returns_a_value.lin":5:19)
     %sw5 = arith.trunci %v4 : i64 to i8 loc("tests/enums/match_returns_a_value.lin":4:5)
     llvm.store %sw5, %s1 : i8, !llvm.ptr loc("tests/enums/match_returns_a_value.lin":4:5)
     cf.br ^b1 loc("tests/enums/match_returns_a_value.lin":4:5)
-  ^b3:
-    %v7 = arith.constant 1 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
-    %v8 = arith.cmpi eq, %v0, %v7 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
-    cf.cond_br %v8, ^b4, ^b5 loc("tests/enums/match_returns_a_value.lin":4:5)
   ^b4:
+    %v13 = arith.constant 2 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
+    %v14 = arith.cmpi eq, %v0, %v13 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
+    cf.cond_br %v14, ^b7, ^b6 loc("tests/enums/match_returns_a_value.lin":4:5)
+  ^b5:
     %v10 = arith.constant 4 : i64 loc("tests/enums/match_returns_a_value.lin":6:19)
     %sw11 = arith.trunci %v10 : i64 to i8 loc("tests/enums/match_returns_a_value.lin":4:5)
     llvm.store %sw11, %s1 : i8, !llvm.ptr loc("tests/enums/match_returns_a_value.lin":4:5)
     cf.br ^b1 loc("tests/enums/match_returns_a_value.lin":4:5)
-  ^b5:
-    %v13 = arith.constant 2 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
-    %v14 = arith.cmpi eq, %v0, %v13 : i64 loc("tests/enums/match_returns_a_value.lin":4:5)
-    cf.cond_br %v14, ^b6, ^b7 loc("tests/enums/match_returns_a_value.lin":4:5)
   ^b6:
-    %v16 = arith.constant 1 : i64 loc("tests/enums/match_returns_a_value.lin":7:18)
-    %sw17 = arith.trunci %v16 : i64 to i8 loc("tests/enums/match_returns_a_value.lin":4:5)
-    llvm.store %sw17, %s1 : i8, !llvm.ptr loc("tests/enums/match_returns_a_value.lin":4:5)
-    cf.br ^b1 loc("tests/enums/match_returns_a_value.lin":4:5)
-  ^b7:
     %tk1 = arith.constant 3 : i32 loc("tests/enums/match_returns_a_value.lin":4:5)
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/match_returns_a_value.lin":4:5)
     %tl1 = arith.constant 4 : i32 loc("tests/enums/match_returns_a_value.lin":4:5)
     %tc1 = arith.constant 5 : i32 loc("tests/enums/match_returns_a_value.lin":4:5)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/match_returns_a_value.lin":4:5)
     llvm.unreachable loc("tests/enums/match_returns_a_value.lin":4:5)
+  ^b7:
+    %v16 = arith.constant 1 : i64 loc("tests/enums/match_returns_a_value.lin":7:18)
+    %sw17 = arith.trunci %v16 : i64 to i8 loc("tests/enums/match_returns_a_value.lin":4:5)
+    llvm.store %sw17, %s1 : i8, !llvm.ptr loc("tests/enums/match_returns_a_value.lin":4:5)
+    cf.br ^b1 loc("tests/enums/match_returns_a_value.lin":4:5)
   }
   func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {
     func.call @linea_set_args(%argc, %argv) : (i32, !llvm.ptr) -> ()

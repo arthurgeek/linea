@@ -1,5 +1,0 @@
-error[S-Match]: a field's binder is a name
-  --> tests/structs/a_destructure_binds_a_name_for_each_field.lin:10:19
-   |
-10 |     let Pair { a: 1, b } = pair
-   |                   ^ a struct pattern binds each field to a name, and compares none

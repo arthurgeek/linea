@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/patterns/a_nested_let_read_binder_is_protected_until_its_last_use.lin:17:5
+   |
+17 |     frame.origin = Point { x = 9 }
+   |     ^^^^^^^^^^^^ keep this place available until the last use of its observation
+18 |     x
+   |     - the observation is still used here

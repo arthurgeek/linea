@@ -16,6 +16,7 @@ const TokenRange = token.TokenRange;
 const TokenList = token.TokenList;
 const node = @import("node.zig");
 const Table = @import("../support/table.zig").Table;
+const name_case = @import("../support/name_case.zig");
 const Expr = node.Expr;
 const Stmt = node.Stmt;
 const Block = node.Block;
@@ -1362,6 +1363,42 @@ pub const Ast = struct {
     pub fn fieldIsShorthand(self: *const Ast, label: ExprId, value: ExprId) bool {
         return self.exprTag(label) != .err and self.exprMain(label) == self.exprMain(value);
     }
+
+    /// Whether a pattern's part is a binder: a bare lowercase name or `_`,
+    /// in a payload, a tuple's component or after a struct field's `:`. A
+    /// bare capitalised name there is a variant, which binds nothing. A name's
+    /// case is part of its kind, so the spelling settles which it is; the
+    /// resolver declares a binder by this answer and the checker types it by
+    /// the same one.
+    pub fn partBinds(self: *const Ast, part: ExprId) bool {
+        if (self.exprTag(part) != .name_ref) return false;
+        return name_case.of(self.tokenText(self.exprMain(part))) != .capital;
+    }
+
+    /// The parts a pattern node takes its value apart into, in source order:
+    /// what a variant's or newtype's pattern names inside its parentheses, a
+    /// tuple pattern's components, and a struct pattern's field patterns
+    /// (each after the field it takes). Nothing for any other node.
+    pub fn patternParts(self: *const Ast, pattern: ExprId) PatternParts {
+        return switch (self.exprTag(pattern)) {
+            .struct_pattern => .{ .args = self.call(pattern).args, .at = 1, .stride = 2 },
+            .tuple_pattern, .call => .{ .args = self.call(pattern).args, .at = 0, .stride = 1 },
+            else => .{ .args = &.{}, .at = 0, .stride = 1 },
+        };
+    }
+
+    pub const PatternParts = struct {
+        args: []const ExprId,
+        at: usize,
+        stride: usize,
+
+        pub fn next(self: *PatternParts) ?ExprId {
+            if (self.at >= self.args.len) return null;
+            const part = self.args[self.at];
+            self.at += self.stride;
+            return part;
+        }
+    };
 
     /// A call's callee and its arguments. The count is stored ahead of the
     /// run, so the arguments are a slice rather than a walk.
