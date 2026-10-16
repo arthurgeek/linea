@@ -3,3 +3,6 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 11 |     child.handle()
    |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `outer`; write `where borrows(outer)` to say so
+   = help: `child` belongs to `child_handle` and ends when it returns, so nothing returned may observe it

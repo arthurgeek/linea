@@ -5244,8 +5244,11 @@ referent of an observation carried by any parameter convention. Result targets
 and retention destinations cannot cross observation storage. An ambiguous
 inferred source requires an explicit `borrows` or `carries` clause; the ambiguity
 is the only error reported, and the body is not checked against a contract nobody
-declared. Where several of the sources are carriers the report says so and names
-them. A clause whose source, destination or target is refused is likewise the only
+declared. The report names each candidate's clause and the one clause listing them
+all: `borrows` for a parameter whose place the result may observe or whose
+contents a view would point into, and `carries` for one that is a view or a
+carrier already. Where several of the sources are carriers the report says so and
+names them. A clause whose source, destination or target is refused is likewise the only
 error: the body is not checked against what remains of the clause. A trait
 implementation's member cannot promise more than its signature. Bodies must obey
 these signature contracts.
@@ -5283,6 +5286,17 @@ Exits include explicit returns, trailing expressions and writes through `inout`
 parameters. Deferred owner disposal still occurs before the recipient can use a
 returned observation, so returning a view into a local owner is rejected. An
 independent owned value may leave its scope through the ordinary move rules.
+
+A report is made once per exit and is placed where the escaping value took its
+dependency, following a local binding back to the value written into it. It names
+the edit each source calls for, spelled as [T-BorrowContract] spells it: the one
+clause listing every parameter the value comes from (`where borrows(first,
+second)`), the retention clause for a value an `inout` parameter keeps (`where
+retains(seen: field)`), or, for a local owner, that it ends when the function
+returns. Where the type holding the observation declares `to_owned`, the report
+also offers the owned copy, which observes nothing and needs no clause; that is
+the fix where the signature is fixed by what it is passed to, as a route
+handler's is.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

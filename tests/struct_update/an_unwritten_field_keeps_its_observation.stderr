@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 11 |     Pair { left = copy(shared), ..first }
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `local` belongs to `pair` and ends when it returns, so nothing returned may observe it

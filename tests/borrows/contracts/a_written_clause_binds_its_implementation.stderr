@@ -3,3 +3,6 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 15 |         copy(request.name)
    |         ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `request`; write `where carries(request)` to say so
+   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause

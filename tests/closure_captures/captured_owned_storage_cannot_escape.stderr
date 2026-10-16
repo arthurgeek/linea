@@ -8,3 +8,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 2 |     let observe = [sink number = UInt8(7)] || -> where borrows(number) borrow number
   |                                                                        ^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `number` belongs to this closure and ends when it returns, so nothing returned may observe it

@@ -374,7 +374,7 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
  --> preferred.lin:3:4
   |
 3 | fn preferred[A: Allocator](primary: String[A], fallback: String[A], use_primary: Bool) -> Str {
-  |    ^^^^^^^^^ the result may borrow from `primary` or `fallback`; add `where borrows(primary)` or `where borrows(fallback)`, or list several sources in one clause
+  |    ^^^^^^^^^ the result may come from `primary` or `fallback`; add `where borrows(primary)` or `where borrows(fallback)`, or `where borrows(primary, fallback)` where it may come from either
 ```
 
 The fix is to say both: `where borrows(primary, fallback)`. The program then
@@ -602,10 +602,15 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 12 |     station.name.view()
    |     ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `station`; write `where borrows(station)` to say so
+   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
 ```
 
 The body is fine; what it hands back is a view of the station, and the
-signature does not admit that.
+signature does not admit that. The help names both ways out: say so with
+`where borrows(station)`, or return a `String` of its own, made with
+`.to_owned()`, which the caller owns and which points into nothing.
 
 **Forget `retains`** and the same thing happens where the function stores the
 view. Delete the `where retains(seen: field)` line from `remember`:
@@ -617,6 +622,8 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 7 |     &seen.push(field).settled()
   |     ^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `seen` keeps a value that comes from `field`; write `where retains(seen: field)` to say so
 ```
 
 **Forget `carries`** and it compiles, because with one possible source Linea
@@ -862,6 +869,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
    = help: `session` is a carrier and this signature writes no clause, so its contract is `where carries(session)`
    = help: the value comes from `fallback`; write `where carries(fallback)` to say so
+   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
 ```
 
 The report names the carrier that supplied the contract and the clause that says
@@ -903,7 +911,7 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
   --> main.lin:11:4
    |
 11 | fn describe(session: Session, visit: Visit) -> Str {
-   |    ^^^^^^^^ `session` and `visit` are carriers, so none is the default source; add `where carries(session)` or `where carries(visit)`, or list several sources in one clause
+   |    ^^^^^^^^ `session` and `visit` are carriers, so none is the default source; add `where carries(session)` or `where carries(visit)`, or `where carries(session, visit)` where it may come from either
 ```
 
 Only a struct or an enum can be a carrier. `http.Request` is one, which is why

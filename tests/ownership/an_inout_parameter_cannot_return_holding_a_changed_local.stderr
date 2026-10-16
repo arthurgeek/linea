@@ -3,6 +3,8 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 3 |     target = borrow local
   |     ^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `local` belongs to `point_at_local` and ends when it returns, so `target` may not keep an observation of it
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
  --> tests/ownership/an_inout_parameter_cannot_return_holding_a_changed_local.lin:4:5
   |

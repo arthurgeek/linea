@@ -6,7 +6,10 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 15 |     a
    |     - the observation is still used here
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:15:5
+  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:13:13
    |
-15 |     a
-   |     ^ escape observations only from the signature's declared sources
+13 |     let a = inner.handle()
+   |             ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `outer`; write `where borrows(outer)` to say so
+   = help: `inner` belongs to `scratch` and ends when it returns, so nothing returned may observe it

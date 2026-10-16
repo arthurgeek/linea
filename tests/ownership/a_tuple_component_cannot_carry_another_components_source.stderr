@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 4 |     (copy(b), copy(a))
   |     ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: the value comes from `a` and `b`; write `where carries(a, b)` to say so

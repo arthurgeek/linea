@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 2 |     target = copy(value)
   |     ^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `target` keeps a value that comes from `value`; write `where retains(target: value)` to say so

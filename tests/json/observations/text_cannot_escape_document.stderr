@@ -3,6 +3,9 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 6 |     document.as_str().unwrap()
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `document` belongs to `text` and ends when it returns, so nothing returned may observe it
+  = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
  --> tests/json/observations/text_cannot_escape_document.lin:5:11
   |

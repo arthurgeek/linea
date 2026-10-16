@@ -1,0 +1,23 @@
+// `Contact.name` is a view, and `contact_for` stores in it a view of `full`,
+// a `String` the function owns. The report points at the literal that stores
+// the view rather than at the function's opening brace.
+import std.io
+
+struct Contact {
+    name: Str,
+}
+
+fn contact_for(first: Str) -> Contact {
+    let full = first.to_owned() else |_| {
+        return Contact { name = "unknown" }
+    }
+    let contact = Contact { name = full.view() }
+    full.release()
+    contact
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let contact = contact_for("Ada")
+    io.println(contact.name)?
+    .Ok(0)
+}

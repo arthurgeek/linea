@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 3 |     target = .Some(borrow local)
   |     ^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `local` belongs to `fill` and ends when it returns, so `target` may not keep an observation of it

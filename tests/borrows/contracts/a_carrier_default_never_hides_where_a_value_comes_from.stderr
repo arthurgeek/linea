@@ -6,3 +6,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
    = help: `session` is a carrier and this signature writes no clause, so its contract is `where carries(session)`
    = help: the value comes from `other`; write `where carries(other)` to say so
+   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
