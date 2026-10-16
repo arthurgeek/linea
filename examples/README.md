@@ -88,3 +88,9 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 - [welcome_back.lin](welcome_back.lin): greets a visitor by name and counts visits in a cookie; reading and setting cookies, and escaping user text in HTML.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.
 - [http-json-echo](http-json-echo/main.lin): a JSON service with headers, forms, and shared counters; the largest example.
+
+## Calling C
+
+A trusted module that wraps a C library and hands the rest of the program ordinary Linea values.
+
+- [file-sizes](file-sizes/main.lin): prints how many bytes each file holds; a private `extern`, a `@linear` descriptor closed on every path, `ffi.CString`, C's text copied back, and `ffi.Errno` for C's reason.

@@ -1,0 +1,65 @@
+// Print how many bytes each file named on the command line holds, by asking
+// the C library through the `posix` module. `linea.json` lists that module
+// under "extern", which is what lets it call C.
+import std.env
+import std.io
+import std.testing
+import posix
+
+use env.args
+use io.IoError
+use io.line
+
+// Report one file's size, or why it has none.
+fn report[W: Writer](path: Str, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    match posix.size_of(path) {
+        Ok(size) => line("{path}: {size} bytes", &w),
+        Err(failure) => match failure {
+            InteriorNul(offset) => line("{path}: the path holds a NUL byte at {offset}", &w),
+            OutOfMemory => line("{path}: out of memory", &w),
+            System(category, message) => {
+                let written = line("{path}: {message.view()} ({category})", &w)
+                // `message` is a `String` this program owns, so it is released
+                // once printed.
+                message.release()
+                written
+            },
+        },
+    }
+}
+
+// `/dev/null` exists on every POSIX system and is always empty.
+test fn an_empty_file_measures_zero_bytes() {
+    defer var written = String.new()
+    report("/dev/null", &written).unwrap()
+    testing.assert_eq(written.view(), "/dev/null: 0 bytes\n", "the empty file was not measured as empty")?
+}
+
+// The category comes from `errno`, which `open` set when it found no file.
+test fn a_missing_file_reports_c_s_reason() {
+    defer var written = String.new()
+    report("/no/such/file.txt", &written).unwrap()
+    testing.assert_eq(written.view(), "/no/such/file.txt: No such file or directory (NotFound)\n", "the missing file was not reported")?
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let given = args()
+    var out = io.stdout()
+
+    // Without paths the usage goes to standard error, and 64 is the
+    // conventional exit status for a command used wrongly.
+    if given.count() <= 1 {
+        var err = io.stderr()
+        line("file-sizes: print how many bytes each file holds", &err)?
+        line("usage: file-sizes <path>...", &err)?
+        return .Ok(64)
+    }
+
+    for i in 1..given.count() {
+        match given.at(i) {
+            Some(path) => report(path, &out)?,
+            None => line("Skipping argument {i}: invalid UTF-8.", &out)?,
+        }
+    }
+    .Ok(0)
+}
