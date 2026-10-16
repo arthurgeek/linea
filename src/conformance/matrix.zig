@@ -216,6 +216,9 @@ test "an operation is written over the owner it is given" {
 /// A live observation of an owner's storage.
 pub const Observation = enum {
     slice,
+    /// A slice held in a newtype, whose construction keeps what the slice
+    /// observes.
+    wrapped,
     subspan,
     element,
     iterator,
@@ -246,7 +249,7 @@ pub const Observation = enum {
     /// pushes.
     pub fn fits(self: Observation, storage: Storage) bool {
         return switch (self) {
-            .slice, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture => storage == .vec or storage == .field or storage == .array,
+            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture => storage == .vec or storage == .field or storage == .array,
             .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array,
             .inout_capture => storage == .vec,
             .value_view, .entries, .map_inout_capture, .bare_entries => storage == .map,
@@ -265,6 +268,7 @@ pub const Observation = enum {
     fn open(self: Observation) []const u8 {
         return switch (self) {
             .slice => "let seen = owner.as_slice()",
+            .wrapped => "let seen = Wrapped(owner.as_slice())",
             .subspan => "let seen = owner.as_slice().subspan(1, 2).unwrap()",
             .element => "let seen = owner.as_slice().get(2).unwrap()",
             .iterator, .lent_walk => "var seen = owner.as_slice().iterate()",
@@ -313,6 +317,7 @@ pub const Observation = enum {
     fn read(self: Observation) []const u8 {
         return switch (self) {
             .slice => "seen[0]",
+            .wrapped => "first(seen)",
             .subspan => "seen[1]",
             .element, .value_view => "*seen",
             .iterator, .lent_walk, .filtered => "match Iterator.next(&seen) { Some(item) => *item, None => 0 }",
@@ -333,7 +338,7 @@ pub const Observation = enum {
             .lent_walk => .{ .sequence = "&seen", .item = "*item" },
             .mapped => .{ .sequence = "seen", .item = "item" },
             .entries => .{ .sequence = "seen", .item = "item.value" },
-            .element, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
+            .element, .wrapped, .read_capture, .inout_capture, .value_view, .map_inout_capture, .scalar_inout_capture, .scalar_read_capture => null,
             .bare_slice, .bare_iterator, .bare_mapped, .bare_entries => null,
         };
     }
@@ -421,17 +426,17 @@ test "the matrix holds every applicable cell of the three axes" {
     const all = try cells(testing.allocator);
     defer testing.allocator.free(all);
 
-    // Ten vector operations meet nine vector observations, six map operations
+    // Ten vector operations meet ten vector observations, six map operations
     // meet three map observations, and two assignments meet two captures.
     // Consuming operations leave both loops, and assignments leave `defer`.
     // Bare walks meet only the non-consuming operations, in a `for` body. A
-    // field and an array meet the eight observations a slice offers, less
+    // field and an array meet the nine observations a slice offers, less
     // `defer` for an array's assignments, and the three bare walks.
-    const vec = 10 * 9 * 6 - 3 * 9 * 2 - 1 * 9 + 7 * 3;
+    const vec = 10 * 10 * 6 - 3 * 10 * 2 - 1 * 10 + 7 * 3;
     const map = 6 * 3 * 6 - 2 * 3 * 2 + 4 * 1;
     const scalar = 2 * 2 * 6 - 2 * 2;
-    const field = 2 * (8 * 6 + 3);
-    const array = 2 * (8 * 5 + 3);
+    const field = 2 * (9 * 6 + 3);
+    const array = 2 * (9 * 5 + 3);
     try testing.expectEqual(@as(usize, vec + map + scalar + field + array), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
@@ -510,6 +515,20 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             );
         },
         .scalar, .array => {},
+    }
+    if (observation == .wrapped) {
+        if (storage == .array) try w.raw("import std.mem\n\n");
+        try w.raw(
+            \\@copyable
+            \\type Wrapped = mem.Slice[UInt64]
+            \\
+            \\fn first(wrapped: Wrapped) -> UInt64 {
+            \\    let Wrapped(view) = copy(wrapped)
+            \\    view[0]
+            \\}
+            \\
+            \\
+        );
     }
     if (cell.meeting == .deferred) try w.raw(
         \\fn add(inout total: UInt64, amount: UInt64) {

@@ -10,7 +10,8 @@ const ExpandedProgram = @import("../syntax/expanded_program.zig").ExpandedProgra
 const node = @import("../syntax/node.zig");
 const ExprId = node.ExprId;
 const BindingId = @import("../sema/ids.zig").BindingId;
-const Resolution = @import("../sema/resolve.zig").Resolution;
+const resolve_mod = @import("../sema/resolve.zig");
+const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
@@ -1634,6 +1635,11 @@ const Analysis = struct {
                         const prefix = try self.store.prepend(payloadHead(variant, @intCast(index)), .root);
                         result = try self.store.join(result, try self.store.prefixed(try self.value(state, arg), prefix));
                     }
+                } else if (resolve_mod.constructionOf(self.ast, self.res, id) != null) {
+                    // A newtype holds its one operand whole, so it carries
+                    // everything the operand carries.
+                    const args = self.ast.call(id).args;
+                    if (args.len == 1) result = try self.value(state, args[0]);
                 } else result = try self.callResult(state, id);
             },
             // A literal observes each piece it borrows and carries what each
