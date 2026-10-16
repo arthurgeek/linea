@@ -72,8 +72,9 @@ pub trait Allocator: Copyable {
     fn dispose(sink b: Buffer[Self])
 }
 
-// An owner provides a non-owning allocator handle. For an arena, the handle
-// borrows its storage and cannot outlive it; a system handle has no such owner.
+// A lender provides an allocator handle that owns none of the memory it hands
+// out. An arena's handle borrows the arena and cannot outlive it; the system's
+// handle borrows nothing.
 pub trait Lender {
     type Handle: Allocator
 

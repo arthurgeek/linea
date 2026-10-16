@@ -217,11 +217,11 @@ pieces of those bytes, so `banner_in(arena.handle(), title)` builds its string
 inside the arena.
 
 `handle` is the one operation of the `Lender` trait, which is why the program
-has `use mem.Lender`. A **memory owner** holds memory and lends out allocators
-that take from it without owning any of it. An arena is one. `mem.SystemAllocator`
+has `use mem.Lender`. A **lender** holds memory and lends out allocators that
+take from it without owning any of it. An arena is one. `mem.SystemAllocator`
 is another, whose handle is the system allocator itself, since the system's
-memory belongs to no value in your program. "Memory owner" names what a value
-does with bytes. It is not a third kind of ownership: who must give a value
+memory belongs to no value in your program. "Lender" names what a value does
+with bytes. It is not a third kind of ownership: who must give a value
 back is a separate question, answered in [Who owns it, and what it points
 into](#who-owns-it-and-what-it-points-into).
 
