@@ -1,0 +1,7 @@
+{
+    "kind": "library",
+    "name": "shout",
+    "dependencies": {
+        "quiet": { "path": "../quiet" }
+    }
+}

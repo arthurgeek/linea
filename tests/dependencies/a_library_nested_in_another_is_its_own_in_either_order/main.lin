@@ -1,0 +1,8 @@
+// A library whose directory sits inside another library's is a root of its
+// own, whichever of the two is named first.
+import zouter
+import ainner
+
+fn main() -> UInt8 {
+    zouter.fo() + ainner.fi()
+}

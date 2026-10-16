@@ -1,0 +1,7 @@
+// `a` and `b` each keep their source in their own `src`; `c` names `a`'s.
+import a
+import b
+
+fn main() -> UInt8 {
+    a.f() + b.f()
+}

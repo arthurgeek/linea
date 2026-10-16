@@ -82,10 +82,7 @@ pub const Documents = struct {
 
         var files: std.ArrayList(loader.InMemoryFile) = .empty;
         errdefer {
-            for (files.items) |f| {
-                gpa.free(f.path);
-                gpa.free(f.text);
-            }
+            freeEach(gpa, files.items);
             files.deinit(gpa);
         }
 
@@ -103,10 +100,35 @@ pub const Documents = struct {
                 try source_mod.readFileAlloc(io, gpa, path);
             errdefer gpa.free(text);
 
-            try files.append(gpa, .{ .path = path, .text = text });
+            // A manifest carries where its directory is, so the load from
+            // these files tells one library spelled two ways apart from two
+            // libraries exactly as the load from disk does.
+            const real: ?[:0]u8 = if (std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name))
+                std.Io.Dir.cwd().realPathFileAlloc(io, std.fs.path.dirname(path) orelse ".", gpa) catch null
+            else
+                null;
+            defer if (real) |held| gpa.free(held);
+            const identity = try gpa.dupe(u8, if (real) |held| held else "");
+            errdefer gpa.free(identity);
+
+            try files.append(gpa, .{ .path = path, .text = text, .identity = identity });
         }
 
         return files.toOwnedSlice(gpa);
+    }
+
+    /// Releases what `filesFor` returned.
+    pub fn freeFiles(gpa: std.mem.Allocator, files: []const loader.InMemoryFile) void {
+        freeEach(gpa, files);
+        gpa.free(files);
+    }
+
+    fn freeEach(gpa: std.mem.Allocator, files: []const loader.InMemoryFile) void {
+        for (files) |f| {
+            gpa.free(f.path);
+            gpa.free(f.text);
+            gpa.free(f.identity);
+        }
     }
 };
 
@@ -162,13 +184,7 @@ test "an open buffer is what filesFor returns, not the file it shadows" {
     const root = try loader.rootOf(testing.allocator, testing.io, path, .its_program, "");
     defer root.deinit(testing.allocator);
     const files = try docs.filesFor(testing.allocator, testing.io, root);
-    defer {
-        for (files) |f| {
-            testing.allocator.free(f.path);
-            testing.allocator.free(f.text);
-        }
-        testing.allocator.free(files);
-    }
+    defer Documents.freeFiles(testing.allocator, files);
 
     try testing.expectEqual(@as(usize, 1), files.len);
     try testing.expectEqualStrings("fn main() -> UInt8 {\n    0\n}\n", files[0].text);
@@ -187,13 +203,7 @@ test "a root's files carry the manifest that identified it" {
     const found = try loader.rootOf(testing.allocator, testing.io, root, .its_program, root);
     defer found.deinit(testing.allocator);
     const files = try docs.filesFor(testing.allocator, testing.io, found);
-    defer {
-        for (files) |f| {
-            testing.allocator.free(f.path);
-            testing.allocator.free(f.text);
-        }
-        testing.allocator.free(files);
-    }
+    defer Documents.freeFiles(testing.allocator, files);
 
     // The editor reads the root as the command line does: the manifest is
     // among its files, so an editor on the library does not load it beside
@@ -223,16 +233,44 @@ test "a root's files carry the libraries its manifest names, with open buffers" 
     const found = try loader.rootOf(testing.allocator, testing.io, guests, .its_program, "");
     defer found.deinit(testing.allocator);
     const files = try docs.filesFor(testing.allocator, testing.io, found);
-    defer {
-        for (files) |f| {
-            testing.allocator.free(f.path);
-            testing.allocator.free(f.text);
-        }
-        testing.allocator.free(files);
-    }
+    defer Documents.freeFiles(testing.allocator, files);
     var held: ?[]const u8 = null;
     for (files) |f| if (std.mem.eql(u8, f.path, names)) {
         held = f.text;
     };
     try testing.expectEqualStrings("in the editor", held.?);
+}
+
+test "the editor loads one library a manifest reaches by two spellings, as the command line does" {
+    const gpa = testing.allocator;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    for ([_][]const u8{ "app", "a", "c" }) |dir| try tmp.dir.createDirPath(testing.io, dir);
+    try tmp.dir.symLink(testing.io, "c", "clink", .{ .is_directory = true });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/linea.json", .data = "{ \"dependencies\": { \"a\": { \"path\": \"../a\" }, \"c\": { \"path\": \"../clink\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/main.lin", .data = "import a\nimport c\n" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "a/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"a\", \"dependencies\": { \"c\": { \"path\": \"../c\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "a/a.lin", .data = "import c\n" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"c\" }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "c/c.lin", .data = "" });
+    const app = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/app", .{tmp.sub_path});
+    defer gpa.free(app);
+
+    var docs: Documents = .{ .gpa = gpa };
+    defer docs.deinit();
+    const found = try loader.rootOf(gpa, testing.io, app, .its_program, "");
+    defer found.deinit(gpa);
+    const files = try docs.filesFor(gpa, testing.io, found);
+    defer Documents.freeFiles(gpa, files);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var table: @import("../support/source.zig").FileTable = .empty;
+    var sink = @import("../diagnostics/sink.zig").Sink.init(a);
+    var interner: @import("../support/interner.zig").Interner = .empty;
+    const program = try loader.loadFromMemory(a, &table, &sink, &interner, found.entry, files, .program, false, .borrow);
+    try testing.expect(!sink.hasErrors());
+    // The application, `a` and `c`, with `c` one library however it is named.
+    try testing.expectEqual(@as(usize, 4), program.roots.len);
 }

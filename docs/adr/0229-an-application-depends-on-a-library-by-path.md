@@ -51,7 +51,9 @@ imports start with and the directory holding the library's manifest.**
    absolute path, a relative one and one through a symbolic link name one
    library. A load from memory has only the spelling, and uses it. The
    library's `source` key is honoured as any root's is, and names a directory
-   inside the one holding the library's manifest that holds no other root.
+   inside the one holding the library's manifest, and shares no modules with
+   another root's source: a library nested in another's directory is a root of
+   its own, since its manifest stands between them, whichever is named first.
 3. **A dependency is a root of its own.** Its `internal` declarations stay
    inside it, in both directions and between sibling dependencies. It may name
    dependencies of its own, which its consumer reaches only by naming them too,
@@ -81,7 +83,8 @@ imports start with and the directory holding the library's manifest.**
    - it is `std`, or is written twice in one manifest;
    - it already names a library in another directory;
    - it closes a cycle;
-   - its `source` leaves the library's directory or holds another root;
+   - its `source` leaves the library's directory or shares modules with
+     another root's;
    - only one side grants `extern`.
 
    An import naming a refused dependency reports nothing further.

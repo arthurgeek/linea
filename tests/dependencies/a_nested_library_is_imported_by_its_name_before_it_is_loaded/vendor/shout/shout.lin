@@ -1,0 +1,3 @@
+pub fn loud() -> UInt8 {
+    3
+}

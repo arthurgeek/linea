@@ -1,0 +1,8 @@
+// `shout` loads its dependency `quiet` first; this program does not depend on
+// it, so `vendor.quiet` is still not a module it can import.
+import shout
+import vendor.quiet as hidden
+
+fn main() -> UInt8 {
+    shout.loud() + hidden.hush()
+}

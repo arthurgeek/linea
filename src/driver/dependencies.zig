@@ -28,6 +28,15 @@ pub const Entry = struct {
     consents_to_extern: bool = false,
     /// Why the entry cannot be read, where it cannot.
     problem: ?Problem = null,
+
+    /// The order a manifest's entries are read in: by name, and by where they
+    /// are written among entries of one name. Depth first in this order, a
+    /// library's identity does not depend on the order a manifest writes its
+    /// names in.
+    pub fn lessByName(_: void, x: Entry, y: Entry) bool {
+        const order = std.mem.order(u8, x.name, y.name);
+        return order == .lt or (order == .eq and x.key.start < y.key.start);
+    }
 };
 
 /// Why a value cannot be read, with where it is written and what to write

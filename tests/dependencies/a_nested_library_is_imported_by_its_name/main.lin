@@ -1,0 +1,8 @@
+// `vendor/shout` is the library `shout`, imported by its name, however the
+// imports before it reached it.
+import shout
+import vendor.shout as again
+
+fn main() -> UInt8 {
+    shout.loud() + again.loud()
+}

@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "zouter": { "path": "libs/outer" },
+        "ainner": { "path": "libs/outer/inner" }
+    }
+}

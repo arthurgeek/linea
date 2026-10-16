@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "aouter": { "path": "libs/outer" },
+        "zinner": { "path": "libs/outer/inner" }
+    }
+}

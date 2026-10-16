@@ -1507,8 +1507,10 @@ element is the name of a library the importing root depends on (below) names
 that library's root module, and its remaining elements a directory beneath the
 library's source; a directory of the importing root spelled the same way is not
 reached. A directory beneath a root that holds a manifest of its own is another
-root, never a module of the enclosing one, and an import reaching it without
-naming it as a dependency is refused. Only the importing root's own manifest
+root, never a module of the enclosing one, whether or not another root has
+loaded it, and an import reaching it by a directory path is refused; where it is
+a library the importing root depends on, the help names the library to import
+it by. Only the importing root's own manifest
 decides what a first element names: a library another root depends on leaves
 this root's directories of that name importable, and an import that reaches
 neither a dependency of this root nor a directory of it, but names a library
@@ -1538,8 +1540,9 @@ when the library's own `"name"` is absent or differs from the entry's name;
 when the name is `std`, or is written twice in one manifest; when the name
 already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
-when the library's `source` leaves the directory holding its manifest or holds
-another root's; or when the library's manifest grants `"extern": true` and the
+when the library's `source` leaves the directory holding its manifest, or
+shares modules with another root's source (they are one directory, or one holds
+the other without the inner root's manifest between them); or when the library's manifest grants `"extern": true` and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the

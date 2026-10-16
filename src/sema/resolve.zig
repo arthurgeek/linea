@@ -7344,11 +7344,6 @@ const Resolver = struct {
         return .none;
     }
 
-    /// The root module declares exactly one `main`, and it is `main() -> u8`.
-    ///
-    /// Asked of the root alone: a module that is imported declares no entry
-    /// point, and holding every module to the rule would make a library
-    /// uncompilable on its own terms.
     /// [M-Entry] at every entry point the root module `m` of a library
     /// declares, and whether it declared one.
     ///
@@ -7375,6 +7370,11 @@ const Resolver = struct {
         return found;
     }
 
+    /// The root module declares exactly one `main`, and it is `main() -> u8`.
+    ///
+    /// Asked of the root alone: a module that is imported declares no entry
+    /// point, and holding every module to the rule would make a library
+    /// uncompilable on its own terms.
     fn checkEntryPoint(self: *Resolver) !void {
         // A dependency is a library, and so is a root its manifest names one.
         for (self.program.roots) |held| {

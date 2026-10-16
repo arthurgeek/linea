@@ -1,0 +1,5 @@
+import quiet
+
+pub fn loud() -> UInt8 {
+    quiet.hush()
+}
