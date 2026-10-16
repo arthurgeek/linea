@@ -9832,27 +9832,38 @@ const Checker = struct {
 
     /// Refuses every trait a bound names at arguments its own parameters'
     /// bounds do not admit: `C: Conv[U]` where `trait Conv[T: Owned]` needs
-    /// `U` to be `Owned`, as a written `Pool[U]` does. Checked inside the
+    /// `U` to be `Owned`, as a written `Pool[U]` does. Asked of every place a
+    /// bound is written: a parameter's or `where` clause's bounds, a trait's
+    /// supertrait list and an associated type's bounds. Checked inside the
     /// declaration whose bound it is, so its parameters discharge what they
-    /// promise.
+    /// promise, and with a trait signature's `Self` read as that signature
+    /// reads it.
     ///
     /// **Bound:** each written bound is read once, and its arguments are
     /// checked through the one routine a written type's are.
     fn reportBrokenTraitBounds(self: *Checker) std.mem.Allocator.Error!void {
+        const outer_self = self.self_at_call;
+        defer self.self_at_call = outer_self;
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
+            self.generic = d;
+            self.current = self.program.moduleOf(d);
+            self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
             const range = self.constraints.rangeOfDeclaration(d);
             for (range.start..range.end) |at| {
-                for (self.constraints.requirementsOf(self.constraints.records[at])) |bound| {
-                    if (bound.kind != .named or bound.named.args.len() == 0) continue;
-                    const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
-                    self.generic = d;
-                    self.current = self.program.moduleOf(d);
-                    const args = try self.internedBoundArgs(.{ .module = self.current, .owner = d }, bound);
-                    defer if (args.len > 0) self.gpa.free(args);
-                    try self.checkArgumentBounds(trait, args, null, bound.named.name);
-                }
+                try self.reportBrokenBoundList(d, self.constraints.requirementsOf(self.constraints.records[at]));
             }
+            try self.reportBrokenBoundList(d, self.ast.declBounds(d));
+        }
+    }
+
+    fn reportBrokenBoundList(self: *Checker, d: node.DeclId, bounds: []const node.TraitBound) std.mem.Allocator.Error!void {
+        for (bounds) |bound| {
+            if (bound.kind != .named or bound.named.args.len() == 0) continue;
+            const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
+            const args = try self.internedBoundArgs(.{ .module = self.current, .owner = d }, bound);
+            defer if (args.len > 0) self.gpa.free(args);
+            try self.checkArgumentBounds(trait, args, null, bound.named.name);
         }
     }
 

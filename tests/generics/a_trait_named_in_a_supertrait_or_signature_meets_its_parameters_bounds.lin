@@ -1,0 +1,65 @@
+// A trait named at arguments must be given arguments its own parameters'
+// bounds admit, wherever it is named: in a supertrait list, in a bound on an
+// associated type, and in a trait signature at `Self` or `Self.Item`.
+trait Dup[T: Copyable] {
+    fn dup(self: Self, value: T) -> T where borrows(value)
+}
+
+trait Conv[T: Owned] {
+    fn conv(self: Self, count: UInt8) -> T
+}
+
+pub trait Paired[U]: Dup[U] {
+    fn paired(self: Self) -> UInt8
+}
+
+pub trait Counted[W]: Conv[W] {
+    fn counted(self: Self) -> UInt8
+}
+
+pub trait Holder {
+    type Item: Dup[Vec[UInt8]]
+
+    fn held(self: Self) -> UInt8
+}
+
+pub trait Bare {
+    type Item
+
+    fn pick[D: Dup[Self.Item]](self: Self, chooser: D) -> UInt8
+
+    fn twin[D: Dup[Self]](self: Self, chooser: D) -> UInt8
+}
+
+struct Plain {
+    n: UInt8,
+}
+
+impl Dup[UInt8] for Plain {
+    fn dup(self: Self, value: UInt8) -> UInt8 where borrows(value) {
+        value + self.n
+    }
+}
+
+impl Paired[UInt8] for Plain {
+    fn paired(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+impl Conv[UInt8] for Plain {
+    fn conv(self: Self, count: UInt8) -> UInt8 {
+        self.n + count
+    }
+}
+
+impl Counted[UInt8] for Plain {
+    fn counted(self: Self) -> UInt8 {
+        self.n
+    }
+}
+
+fn main() -> UInt8 {
+    let plain = Plain { n = 1 }
+    plain.dup(2)
+}

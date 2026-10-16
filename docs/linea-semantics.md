@@ -3025,8 +3025,10 @@ carries no dependency (§5.3).
 The `Owned` bound admits a type whose values can carry no dependency (§5.3). A
 type argument for an Owned parameter must carry nothing, which is decided by the
 type's representation, private fields included; a type parameter passed on
-meets it only when it is itself bounded Owned, and a trait named in a bound at
-an argument meets its parameter's `Owned` bound the same way. The refusal names
+meets it only when it is itself bounded Owned. A trait named at arguments meets
+its parameters' bounds the same way wherever a bound names it: on a type
+parameter, in a `where` clause, in a supertrait list, on an associated type,
+and in a trait signature at `Self` or `Self.Item`. The refusal names
 a path from the argument to what it carries, such as a field holding a `Str` or
 a `borrow`, through parts the program can select: it stops at a type whose
 representation is sealed and at a newtype's base. Its help offers only edits
