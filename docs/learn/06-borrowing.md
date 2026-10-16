@@ -1026,7 +1026,7 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text.bytes` is a `mem.Slice[UInt8]`, a view of storage it does not own
+error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text` is a `Str`, which holds a view of storage it does not own
   --> labels.lin:26:8
    |
 26 |     if copy_all(&shown, labels.as_slice()).is_err() {

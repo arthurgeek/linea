@@ -1315,7 +1315,14 @@ pub const ContainmentStep = BorrowContainment.Step;
 /// observation, a view, raw storage, or a type parameter that may be one.
 pub const DependencyWitness = struct {
     steps: []const ContainmentStep,
+    /// The type each step reaches: `parts[i]` is the part `steps[i]` selects.
+    parts: []const TypeId,
     seed: TypeId,
+
+    pub fn deinit(self: DependencyWitness, gpa: std.mem.Allocator) void {
+        gpa.free(self.steps);
+        gpa.free(self.parts);
+    }
 };
 
 pub const PathSelector = union(enum) { field: StringId, observed };
@@ -6557,14 +6564,16 @@ pub const Typing = struct {
         try testing.expect(try builder.dependencyWitness(gpa, reading) == null);
 
         const witness = (try builder.dependencyWitness(gpa, shelf)).?;
-        defer gpa.free(witness.steps);
+        defer witness.deinit(gpa);
         try testing.expectEqual(number, witness.seed);
         try testing.expectEqual(@as(usize, 2), witness.steps.len);
         try testing.expectEqualStrings("label", witness.steps[0].field);
         try testing.expectEqualStrings("first", witness.steps[1].field);
+        try testing.expectEqual(label, witness.parts[0]);
+        try testing.expectEqual(number, witness.parts[1]);
 
         const itself = (try builder.dependencyWitness(gpa, plain)).?;
-        defer gpa.free(itself.steps);
+        defer itself.deinit(gpa);
         try testing.expectEqual(plain, itself.seed);
         try testing.expectEqual(@as(usize, 0), itself.steps.len);
     }
@@ -8650,8 +8659,11 @@ pub const Typing = struct {
             var search: WitnessSearch = .{ .builder = self, .gpa = gpa };
             defer search.visited.deinit(gpa);
             defer search.steps.deinit(gpa);
+            defer search.parts.deinit(gpa);
             const seed = try search.from(t) orelse return null;
-            return .{ .steps = try search.steps.toOwnedSlice(gpa), .seed = seed };
+            const steps = try search.steps.toOwnedSlice(gpa);
+            errdefer gpa.free(steps);
+            return .{ .steps = steps, .parts = try search.parts.toOwnedSlice(gpa), .seed = seed };
         }
 
         const WitnessSearch = struct {
@@ -8659,6 +8671,7 @@ pub const Typing = struct {
             gpa: std.mem.Allocator,
             visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
             steps: std.ArrayList(ContainmentStep) = .empty,
+            parts: std.ArrayList(TypeId) = .empty,
             found: ?TypeId = null,
 
             /// The seed reached from `ty`, with `steps` holding the path to it.
@@ -8673,11 +8686,13 @@ pub const Typing = struct {
                 if (search.found != null) return;
                 if (!search.builder.dependency_facts.values.items[@intFromEnum(part)]) return;
                 try search.steps.append(search.gpa, step);
+                try search.parts.append(search.gpa, part);
                 if (try search.from(part)) |seed| {
                     search.found = seed;
                     return;
                 }
                 _ = search.steps.pop();
+                _ = search.parts.pop();
             }
         };
 

@@ -10378,19 +10378,53 @@ const Checker = struct {
     /// Refuses `held` for the `Owned` bound written at `bound`, naming the
     /// parts walked from it to what carries the dependency. The path is found
     /// over the edges the containment answer was computed from, so it names
-    /// the reason that answer gave. The label is the edit `editForOwned`
-    /// finds, with dropping the bound offered only where the program wrote it.
+    /// the reason that answer gave, and it stops at the outermost part whose
+    /// inside the reader cannot select: a sealed type's fields or a newtype's
+    /// base. The label is the edit `editForOwned` finds, with dropping the
+    /// bound offered only where the program wrote it.
     fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
         const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
-        defer self.gpa.free(witness.steps);
+        defer witness.deinit(self.gpa);
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
         help.another_value = "pass a value whose type owns everything it holds";
         const label = try self.unmetLabel(help, try self.editForOwned(held, witness.seed));
         const file = self.ast.fileOf(at);
+
+        const visible = self.selectableSteps(held, witness);
+        const path = try self.witnessPath(witness.steps[0..visible]);
+        const truncated = visible < witness.steps.len;
+        const part_name = if (visible == 0) held_name else try self.typeName(witness.parts[visible - 1]);
+        const what: []const u8 = if (self.builder.get(witness.seed) == .parameter)
+            try std.fmt.allocPrint(self.sink.arena, "`{s}`, which may stand for a type that carries one", .{seed_name})
+        else if (self.builder.get(witness.seed) == .borrow)
+            "an observation of another value"
+        else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
+            "a view of storage it does not own"
+        else
+            "raw storage another value owns";
+
+        if (truncated) {
+            if (visible == 0) return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: it holds {s}",
+                .{ subject, held_name, what },
+            );
+            return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, which holds {s}",
+                .{ subject, held_name, path, article.before(part_name), part_name, what },
+            );
+        }
         if (self.builder.get(witness.seed) == .parameter) {
-            if (witness.steps.len == 0) return self.sink.addErrorFmt(
+            if (visible == 0) return self.sink.addErrorFmt(
                 .t_bound,
                 file,
                 span,
@@ -10403,17 +10437,11 @@ const Checker = struct {
                 file,
                 span,
                 label,
-                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is `{s}`, which may stand for a type that carries one",
-                .{ subject, held_name, try self.witnessPath(witness.steps), seed_name },
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s}",
+                .{ subject, held_name, path, what },
             );
         }
-        const what: []const u8 = if (self.builder.get(witness.seed) == .borrow)
-            "an observation of another value"
-        else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
-            "a view of storage it does not own"
-        else
-            "raw storage another value owns";
-        if (witness.steps.len == 0) return self.sink.addErrorFmt(
+        if (visible == 0) return self.sink.addErrorFmt(
             .t_bound,
             file,
             span,
@@ -10427,8 +10455,25 @@ const Checker = struct {
             span,
             label,
             "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, {s}",
-            .{ subject, held_name, try self.witnessPath(witness.steps), article.before(seed_name), seed_name, what },
+            .{ subject, held_name, path, article.before(seed_name), seed_name, what },
         );
+    }
+
+    /// How many leading steps of `witness` name parts this module can
+    /// select. A sealed type's fields and a newtype's base are reached by no
+    /// selection here, and neither are the elements certified storage holds
+    /// or a type argument, so the path stops before each of them.
+    fn selectableSteps(self: *const Checker, held: TypeId, witness: types_mod.DependencyWitness) usize {
+        var owner = held;
+        for (witness.steps, witness.parts, 0..) |step, part, index| {
+            switch (step) {
+                .base, .stored, .argument => return index,
+                .field, .variant, .element, .environment => {},
+            }
+            if (self.sealedHere(owner)) return index;
+            owner = part;
+        }
+        return witness.steps.len;
     }
 
     /// A witness path as the parts a reader would select: fields and
@@ -10439,12 +10484,12 @@ const Checker = struct {
             const name: []const u8 = switch (step) {
                 .field => |field| field,
                 .variant => |variant| variant,
-                .base => "0",
-                .element, .stored => {
+                .element => {
                     try out.appendSlice(self.sink.arena, "[_]");
                     continue;
                 },
-                .environment, .argument => continue,
+                .environment => continue,
+                .base, .stored, .argument => unreachable,
             };
             if (out.items.len > 0) try out.append(self.sink.arena, '.');
             try out.appendSlice(self.sink.arena, name);

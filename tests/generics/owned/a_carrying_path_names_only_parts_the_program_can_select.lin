@@ -1,0 +1,37 @@
+import std.mem
+
+use mem.Lender
+
+// A newtype's base is reached by a pattern, not by a selection, and a sealed
+// library type's fields are not reachable at all, so the path a refusal names
+// stops at the outermost part the program can select.
+fn keep[T: Owned](sink value: T) -> T {
+    value
+}
+
+@copyable
+type Name = Str
+
+struct Shelf {
+    owner: Name,
+}
+
+@copyable
+struct Label {
+    text: Str,
+}
+
+fn main() -> UInt8 {
+    let name = keep(Name("ada"))
+    let shelf = keep(Shelf { owner = Name("lin") })
+    let label = keep(Label { text = "bench" })
+    let arena = mem.Arena.open(mem.system(), 64)
+    let empty: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    let values = keep(empty)
+    let length = values.length()
+    arena.release()
+    let Name(first) = name
+    let Shelf { owner } = shelf
+    let Name(second) = owner
+    UInt8(first.length() + second.length() + label.text.length() + length)
+}
