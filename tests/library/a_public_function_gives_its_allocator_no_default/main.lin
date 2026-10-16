@@ -10,3 +10,20 @@ pub fn chosen[P: Allocator = mem.SystemAllocator](parent: P = .System) -> Vec[St
 pub fn counted[S = UInt8](sink state: S = 0) -> S {
     state
 }
+
+// The pair's names come from the function's own, `_in` or not.
+pub fn kept_in[P: Allocator = mem.SystemAllocator](parent: P) -> Vec[Str, P] where carries(parent) {
+    Vec.new_in(parent)
+}
+
+pub struct Shelf {
+    size: UInt8,
+}
+
+impl Shelf {
+    // A method takes the allocator first after its receiver.
+    pub fn names[P: Allocator = mem.SystemAllocator](self: Self, parent: P) -> Vec[Str, P] where carries(parent) {
+        let _ = self.size
+        Vec.new_in(parent)
+    }
+}

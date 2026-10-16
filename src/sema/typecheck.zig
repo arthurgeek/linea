@@ -5239,7 +5239,7 @@ const Checker = struct {
     /// and the parameter's position. A public signature naming the alias, or
     /// leaving the parameter to its default, leaves the allocator to its
     /// default too.
-    carried_omissions: std.AutoHashMapUnmanaged(u64, TokenId) = .empty,
+    carried_omissions: std.AutoHashMapUnmanaged(u64, Carried) = .empty,
     /// The default being settled, as `carried_omissions` keys it, while
     /// `defaultAt` reads one.
     reading_default: ?u64 = null,
@@ -8884,7 +8884,7 @@ const Checker = struct {
                 try self.reportLibraryDefault(owner, tok, self.ast.tokenText(tok), null);
                 return false;
             }
-            try self.recordCarriedOmission(owner, tok);
+            try self.recordCarriedOmission(owner, null, tok);
             return false;
         };
         if (self.refusedBefore(tok)) return true;
@@ -8913,32 +8913,43 @@ const Checker = struct {
     }
 
     /// Records that `owner`, a declaration of a library root that is not
-    /// public, leaves an allocator to its default at `inside`: in the default
-    /// of its type parameter being read, or in an alias's written type. A
-    /// public signature that reaches it is refused where it names `owner`.
-    /// The one place such an omission is recorded, whether `owner` wrote it
-    /// or reached it through another alias or default.
-    fn recordCarriedOmission(self: *Checker, owner: node.DeclId, inside: TokenId) std.mem.Allocator.Error!void {
+    /// public, leaves an allocator to its default: in the default of its type
+    /// parameter being read, or in an alias's written type. `reached` is what
+    /// a type `owner` wrote carries, where the omission sits further in;
+    /// otherwise it sits at `inside`, written in `owner` itself. A public
+    /// signature that reaches it is refused where it names `owner`. The one
+    /// place such an omission is recorded, whether `owner` wrote it or reached
+    /// it through another alias or default.
+    fn recordCarriedOmission(self: *Checker, owner: node.DeclId, reached: ?Carried, inside: TokenId) std.mem.Allocator.Error!void {
         if (owner == node.DeclId.none or !self.program.inLibraryRoot(self.program.moduleOf(owner))) return;
         const key = if (self.reading_default) |reading| (if (reading >> 32 == owner.index()) reading else null) else null;
+        if (key) |reading| {
+            // A default that names a parameter of its own list was refused
+            // where it is written, and carries nothing further.
+            const parameter = self.ast.declTypeParams(owner)[@intCast(reading & 0xffff_ffff)];
+            if (self.mentionsTypeParameter(owner, parameter.default)) return;
+        }
         const slot = key orelse if (self.ast.declTag(owner) == .alias) carriedKey(owner, alias_body) else return;
         const held = try self.carried_omissions.getOrPut(self.gpa, slot);
-        if (!held.found_existing) held.value_ptr.* = inside;
+        if (held.found_existing) return;
+        held.value_ptr.* = reached orelse .{
+            .inside = inside,
+            .why = if (key != null) "this default leaves the allocator to its default" else "the alias leaves the allocator to its default here",
+        };
     }
 
     /// [T-DefaultedAllocator] where a type written at `tok` in `owner` reaches
     /// an omission `decl` carries in `slot`, or records it on `owner` when
     /// that is not a public signature either.
     fn checkCarriedOmission(self: *Checker, owner: node.DeclId, tok: TokenId, decl: node.DeclId, slot: u64) std.mem.Allocator.Error!void {
-        const inside = self.carried_omissions.get(carriedKey(decl, slot)) orelse return;
+        const carried = self.carried_omissions.get(carriedKey(decl, slot)) orelse return;
         if (try self.publicLibrarySignature(owner, tok)) {
             if (self.refusedBefore(tok)) return;
             try self.noteRefused(tok);
-            const why = if (slot == alias_body) "the alias leaves the allocator to its default here" else "this default leaves the allocator to its default";
-            try self.reportLibraryDefault(owner, tok, self.ast.tokenText(inside), .{ .inside = inside, .why = why });
+            try self.reportLibraryDefault(owner, tok, self.ast.tokenText(carried.inside), carried);
             return;
         }
-        try self.recordCarriedOmission(owner, inside);
+        try self.recordCarriedOmission(owner, carried, carried.inside);
     }
 
     /// [T-DefaultedAllocator] for a public signature of a library that leaves
@@ -9051,7 +9062,12 @@ const Checker = struct {
             if (self.refusedBefore(parameter.default.at)) continue;
             try self.noteRefused(parameter.default.at);
             const name = self.ast.tokenText(self.ast.declName(d));
-            const label = try std.fmt.allocPrint(self.sink.arena, "drop the default; offer `{s}` over `mem.SystemAllocator` beside `{s}_in`, which takes the allocator first", .{ name, name });
+            // The pair's two names come from the function's own, whichever of
+            // the two it is.
+            const base = if (std.mem.endsWith(u8, name, "_in")) name[0 .. name.len - 3] else name;
+            const params = self.ast.declParams(d);
+            const where = if (params.len > 0 and std.mem.eql(u8, self.ast.tokenText(params[0].name), "self")) "first after the receiver" else "first";
+            const label = try std.fmt.allocPrint(self.sink.arena, "drop the default; offer `{s}` over `mem.SystemAllocator` beside `{s}_in`, which takes the allocator {s}", .{ base, base, where });
             try self.reportLibraryDefaultAt(self.ast.fileOf(parameter.default.at), self.ast.writtenSpan(parameter.default), name, label, null);
         }
     }

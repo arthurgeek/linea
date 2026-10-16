@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: a default is a type that names no type parameter
+ --> tests/library/a_refused_default_carries_nothing_further/main.lin:3:20
+  |
+3 | struct Pair[K, V = Vec[K]] {
+  |                    ^^^ this names a parameter of the same list
