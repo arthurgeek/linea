@@ -83,6 +83,7 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
 - [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
+- [site-icon](site-icon/main.lin): serves a page and the icon a browser shows on its tab, as a CGI program; files embedded with `embed` and `embed_bytes`, and bytes answered with `http.bytes`.
 - [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values and streamed responses.
 - [welcome_back.lin](welcome_back.lin): greets a visitor by name and counts visits in a cookie; reading and setting cookies, and escaping user text in HTML.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.

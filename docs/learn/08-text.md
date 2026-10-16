@@ -789,6 +789,9 @@ fn main() -> Result[UInt8, io.IoError] {
 36 bytes in 3 lines
 ```
 
+The [site icon example](../../examples/site-icon/main.lin) serves an icon this
+way, from a CGI program that answers its bytes with `http.bytes`.
+
 `embed` checks that the file is UTF-8, because a `Str` always is. Here
 `price.txt` was saved with its last character, a euro sign, cut off after two of
 its three bytes:

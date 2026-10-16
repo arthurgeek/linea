@@ -1,0 +1,2 @@
+site-icon: REQUEST_METHOD is not set, so no web server started this program to answer a request
+run it from a web server, or describe a request: REQUEST_METHOD=GET PATH_INFO=/favicon.ico site-icon
