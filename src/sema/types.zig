@@ -1147,12 +1147,16 @@ const ScopedCapabilityFacts = struct {
 };
 
 const BorrowContainment = struct {
+    /// `raw_carriers` answers whether a value of the type may carry a
+    /// dependency: whether it can reach an observation, a view, raw storage or
+    /// a type parameter not bounded `Owned`. It is the one answer contract
+    /// inference, ownership, storage lowering and the `Owned` bound read.
     /// `writers` answers whether a value of the type may hold something that
     /// can write through a place lent `inout`: a closure, a function value,
     /// or a type parameter an instantiation could make one. It follows fields,
     /// observed referents and every type argument, phantom ones included, so
     /// a container that erases what it stores is still counted.
-    const Mode = enum { observations, raw_carriers, writers };
+    const Mode = enum { raw_carriers, writers };
     const none = std.math.maxInt(u32);
     const Edge = struct { owner: TypeId, next: u32 };
     values: std.ArrayList(bool) = .empty,
@@ -1289,7 +1293,7 @@ const BorrowContainment = struct {
                     .closure, .callable, .parameter, .open_type => try self.mark(gpa, ty),
                     else => {},
                 },
-                else => if (view.directDependencySeed(ty, mode == .raw_carriers)) try self.mark(gpa, ty),
+                else => if (view.directDependencySeed(ty)) try self.mark(gpa, ty),
             }
         }
         var next: usize = 0;
@@ -5217,7 +5221,6 @@ pub const Typing = struct {
     /// by the operand, or by the count under a `^`. An operand that folds to
     /// nothing, or to a negative number, is absent.
     folded_indices: std.AutoHashMapUnmanaged(ExprId, u64) = .empty,
-    borrow_containment: []const bool = &.{},
     dependency_containment: []const bool = &.{},
     writer_containment: []const bool = &.{},
     observation_traits: []const bool = &.{},
@@ -5624,7 +5627,6 @@ pub const Typing = struct {
         self.interpolation_positions.deinit(gpa);
         self.refused.deinit(gpa);
         self.folded_indices.deinit(gpa);
-        gpa.free(self.borrow_containment);
         gpa.free(self.dependency_containment);
         gpa.free(self.writer_containment);
 
@@ -6503,10 +6505,10 @@ pub const Typing = struct {
     /// its physical fields. Private storage certificates participate here so
     /// consumers cannot mistake erased storage for an independent scalar.
     pub fn hasDirectDependencies(self: *const Typing, t: TypeId) bool {
-        return self.directDependencySeed(t, true);
+        return self.directDependencySeed(t);
     }
 
-    fn directDependencySeed(self: *const Typing, t: TypeId, raw_carriers: bool) bool {
+    fn directDependencySeed(self: *const Typing, t: TypeId) bool {
         switch (self.get(t)) {
             .borrow => return true,
             // An instantiation may supply any type, so a parameter carries
@@ -6517,7 +6519,7 @@ pub const Typing = struct {
         }
         const declaration = self.declOfType(t) orelse return false;
         if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
-        if (raw_carriers and self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
+        if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
         return self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage and self.instanceOf(t) == null;
     }
 
@@ -6582,12 +6584,6 @@ pub const Typing = struct {
         try testing.expect(!typing.mayHoldWriter(readings));
         try testing.expect(typing.mayHoldWriter(task));
         try testing.expect(typing.mayHoldWriter(observed));
-    }
-
-    pub fn containsBorrow(self: *const Typing, t: TypeId) bool {
-        const index = @intFromEnum(t);
-        std.debug.assert(index < self.borrow_containment.len);
-        return self.borrow_containment[index];
     }
 
     pub fn capabilityOf(self: *const Typing, t: TypeId) Capability {
@@ -7273,7 +7269,6 @@ pub const Typing = struct {
         capability_facts: CapabilityFacts = .{},
         scoped_capability_facts: ScopedCapabilityFacts = .{},
         prepared_implementations: PreparedImplementations = .{},
-        borrow_facts: BorrowContainment = .{},
         dependency_facts: BorrowContainment = .{},
         writer_facts: BorrowContainment = .{},
         certified_storage: DeclId = .none,
@@ -8306,7 +8301,6 @@ pub const Typing = struct {
 
         pub fn setVariantFields(self: *Builder, t: TypeId, i: u32, first: u32, count: u32) void {
             self.capability_facts.invalidate(t);
-            self.borrow_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
 
@@ -8373,7 +8367,6 @@ pub const Typing = struct {
             // An unchanged edge leaves every derived fact valid.
             if (self.fields.items(.ty)[first_field + f] == ty) return;
             self.capability_facts.invalidate(t);
-            self.borrow_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
 
@@ -8466,7 +8459,6 @@ pub const Typing = struct {
         /// being asked just because it was diagnosed.
         pub fn setFieldType(self: *Builder, t: TypeId, i: u32, ty: TypeId) void {
             self.capability_facts.invalidate(t);
-            self.borrow_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
 
@@ -8506,7 +8498,6 @@ pub const Typing = struct {
 
         pub fn setNewtypeBase(self: *Builder, t: TypeId, base: TypeId) void {
             self.capability_facts.invalidate(t);
-            self.borrow_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
             self.writer_facts.invalidate(t);
 
@@ -8592,7 +8583,6 @@ pub const Typing = struct {
             self.capability_facts.deinit(self.gpa);
             self.scoped_capability_facts.deinit(self.gpa);
             self.prepared_implementations.deinit(self.gpa);
-            self.borrow_facts.deinit(self.gpa);
             self.dependency_facts.deinit(self.gpa);
             self.writer_facts.deinit(self.gpa);
 
@@ -8636,16 +8626,6 @@ pub const Typing = struct {
             self.* = undefined;
         }
 
-        /// Returns the handle for a descriptor, reusing the reserved one when
-        /// the descriptor is a builtin so a type never exists twice.
-        /// `[T; N]`, interned by what it holds rather than by how it is
-        /// spelled: the spelling is derived from the other two, so making it
-        /// part of the identity would let one type exist twice.
-        pub fn containsBorrow(self: *Builder, t: TypeId) !bool {
-            try self.borrow_facts.update(self, .observations);
-            return self.borrow_facts.values.items[@intFromEnum(t)];
-        }
-
         pub fn mayCarryDependencies(self: *Builder, t: TypeId) !bool {
             try self.dependency_facts.update(self, .raw_carriers);
             return self.dependency_facts.values.items[@intFromEnum(t)];
@@ -8656,7 +8636,6 @@ pub const Typing = struct {
         /// seeds no dependency. Answers already computed are dropped.
         pub fn promiseOwned(self: *Builder, t: TypeId) void {
             self.pool.items[@intFromEnum(t)].parameter.owned = true;
-            self.borrow_facts.invalidate(t);
             self.dependency_facts.invalidate(t);
         }
 
@@ -8685,7 +8664,7 @@ pub const Typing = struct {
             /// The seed reached from `ty`, with `steps` holding the path to it.
             fn from(search: *WitnessSearch, ty: TypeId) std.mem.Allocator.Error!?TypeId {
                 if ((try search.visited.getOrPut(search.gpa, ty)).found_existing) return null;
-                if (search.builder.view().directDependencySeed(ty, true)) return ty;
+                if (search.builder.view().directDependencySeed(ty)) return ty;
                 try BorrowContainment.eachChild(search.builder, ty, .raw_carriers, search);
                 return search.found;
             }
@@ -10462,7 +10441,6 @@ pub const Typing = struct {
 
         pub fn finish(self: *Builder, binding_types: BindingTypes) !Typing {
             try self.capability_facts.update(self);
-            try self.borrow_facts.update(self, .observations);
             try self.dependency_facts.update(self, .raw_carriers);
             try self.writer_facts.update(self, .writers);
             const mapped = self.interpolation_of.items.len;
@@ -10572,10 +10550,7 @@ pub const Typing = struct {
             self.capability_facts.deinit(self.gpa);
             const dependency_containment = try self.dependency_facts.values.toOwnedSlice(self.gpa);
             errdefer self.gpa.free(dependency_containment);
-            const borrow_containment = try self.borrow_facts.values.toOwnedSlice(self.gpa);
-            self.borrow_facts.deinit(self.gpa);
             self.dependency_facts.deinit(self.gpa);
-            errdefer self.gpa.free(borrow_containment);
             const writer_containment = try self.writer_facts.values.toOwnedSlice(self.gpa);
             self.writer_facts.deinit(self.gpa);
             errdefer self.gpa.free(writer_containment);
@@ -10658,7 +10633,6 @@ pub const Typing = struct {
                 .instance_of = instance_of,
                 .owned_names = owned_names,
                 .owned_contracts = owned_contracts,
-                .borrow_containment = borrow_containment,
                 .dependency_containment = dependency_containment,
                 .writer_containment = writer_containment,
                 .owned_bounds = owned_bounds,
@@ -12552,18 +12526,15 @@ test "unchanged callable payload fields preserve derived facts" {
     const callbacks = try builder.addEnum("Callbacks", .copyable, &.{.{ .name = "Held" }});
     builder.setVariantFields(callbacks, 0, try builder.addFields(&.{.{ .name = "value", .ty = callable }}), 1);
     _ = try builder.capabilityOf(callbacks);
-    try testing.expect(!try builder.containsBorrow(callbacks));
     try testing.expect(!try builder.mayCarryDependencies(callbacks));
     const generation = builder.generation;
     builder.setVariantFieldType(callbacks, 0, 0, callable);
     try testing.expect(!builder.capability_facts.dirty);
-    try testing.expect(!builder.borrow_facts.dirty);
     try testing.expect(!builder.dependency_facts.dirty);
     try testing.expectEqual(generation, builder.generation);
 
     builder.setVariantFieldType(callbacks, 0, 0, observation);
     try testing.expect(builder.generation != generation);
-    try testing.expect(try builder.containsBorrow(callbacks));
     try testing.expect(try builder.mayCarryDependencies(callbacks));
 }
 
