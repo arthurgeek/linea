@@ -355,17 +355,19 @@ pub const Handler = struct {
         arena: std.mem.Allocator,
         params: lsp.types.workspace.did_change_watched_files.Params,
     ) !void {
+        // A file the held program embeds is nothing an editor shows, so no
+        // document event follows its change: the program is checked again and
+        // published from here, once however many of its files the
+        // notification names, or what the editor shows about it stays as it
+        // was.
+        var republish: ?[]const u8 = null;
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
-            // A file the held program embeds is nothing an editor shows, so no
-            // document event follows its change: the program is checked again
-            // and published from here, or what the editor shows about it
-            // stays as it was.
-            const embedded_by = try handler.embeddedBy(arena, path);
+            if (republish == null) republish = try handler.embeddedBy(arena, path);
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
-            if (embedded_by) |entry| try handler.report(arena, entry);
         }
+        if (republish) |entry| try handler.report(arena, entry);
     }
 
     pub fn @"textDocument/didOpen"(
