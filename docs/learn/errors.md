@@ -10,6 +10,8 @@ for the code in brackets to reach the rule itself.
 | --- | --- | --- | --- |
 | `M-Embed` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Embed]` |
 | `M-EmbedText` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-EmbedText]` |
+| `M-Extern` | error | Calling C: [Only a trusted module declares C](11-calling-c.md#only-a-trusted-module-declares-c) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Extern]` |
+| `M-Foreign` | error | Calling C: [`std.ffi` stays inside the trusted module](11-calling-c.md#stdffi-stays-inside-the-trusted-module) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Foreign]` |
 | `M-Opaque` | error | Copying, settling and sealing: [`@opaque`: only the module can make one](04-copying-settling-and-sealing.md#opaque-only-the-module-can-make-one) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Opaque]` |
 | `M-Unused` | error | Testing: [Helpers that tests share](10-testing.md#helpers-that-tests-share) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Unused]` |
 | `M-Vis` | error | Linea in an hour: [Modules](01-linea-in-an-hour.md#modules) | [§3.8 Visibility](../linea-semantics.md#38-visibility), at `[M-Vis]` |
@@ -45,6 +47,7 @@ for the code in brackets to reach the rule itself.
 | `T-DeferLet` | error | Copying, settling and sealing: [`defer let`: bind a value and schedule its release](04-copying-settling-and-sealing.md#defer-let-bind-a-value-and-schedule-its-release) | [§4 Types](../linea-semantics.md#4-types), at `[T-DeferLet]` |
 | `T-Derive` | error | Calling things: [`@derive`: implementations the compiler writes](02-calling-things.md#derive-implementations-the-compiler-writes) | [§4 Types](../linea-semantics.md#4-types), at `[T-Derive]` |
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
+| `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
 | `T-Impl` | error | Text: [Reading text as a value](08-text.md#reading-text-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |

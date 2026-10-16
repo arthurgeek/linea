@@ -2099,6 +2099,49 @@ test "the guide gate: an unchecked program takes the data above it" {
     try testing.expectEqual(@as(usize, 0), at_end.programs.len);
 }
 
+test "the guide gate: a labelled manifest and C source join the project" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`tally/linea.json`:
+        \\
+        \\```json
+        \\{ "extern": ["counter"], "native": ["counter/counter.c"] }
+        \\```
+        \\
+        \\`tally/counter/counter.c`:
+        \\
+        \\```c
+        \\int counter_double(int value) { return value * 2; }
+        \\```
+        \\
+        \\`tally/counter/counter.lin`:
+        \\
+        \\```linea
+        \\pub extern fn counter_double(value: Int32) -> Int32
+        \\```
+        \\
+        \\`tally/main.lin`:
+        \\
+        \\```linea
+        \\import counter
+        \\
+        \\fn main() -> UInt8 {
+        \\    UInt8(counter.counter_double(2))
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqual(@as(usize, 4), reading.programs[0].files.len);
+    try testing.expectEqualStrings("tally/linea.json", reading.programs[0].files[0].path);
+    try testing.expectEqualStrings("tally/counter/counter.c", reading.programs[0].files[1].path);
+    try testing.expectEqualStrings("tally", reading.programs[0].target);
+}
+
 test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

@@ -122,6 +122,7 @@ module.exports = grammar({
     // An `extern` declares an operation without a source body, so
     // it is a header ended by a line break the way a trait's signature is.
     extern_declaration: $ => seq(
+      optional($.visibility),
       'extern',
       'fn',
       field('name', $.identifier),

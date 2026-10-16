@@ -89,7 +89,9 @@ until it is green.
   shows. A `linea` block with `fn main`, a `test fn` or a `` `path.lin`: ``
   label is a program; the bare or `text` block after it (past an optional `sh`
   block holding `linea run|check|test PATH`) is its output, and is all of what
-  the compiler prints. A block showing only the first diagnostics carries
+  the compiler prints. A fenced block labelled `` `path/linea.json`: ``,
+  `` `path.c`: `` or `` `path.h`: `` is a file of the labelled project around
+  it, so a program that builds and calls C runs. A block showing only the first diagnostics carries
   `<!-- guide: first N diagnostics -->` on the line above it and must be exactly
   those N with at least one more after them. Output that follows no program, or
   a program that cannot run, carries `<!-- guide: unchecked REASON -->` above

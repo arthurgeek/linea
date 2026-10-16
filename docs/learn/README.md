@@ -10,6 +10,7 @@
 8. [Text](08-text.md)
 9. [Networking](09-networking.md)
 10. [Testing](10-testing.md)
+11. [Calling C](11-calling-c.md)
 
 Appendices: [Patterns the standard library repeats](patterns.md) and
 [Errors the guide shows](errors.md).
