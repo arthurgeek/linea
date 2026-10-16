@@ -1,12 +1,21 @@
 An embedded path is bounded by the directory holding the program's
 `linea.json` however the program is named on the command line: as `.` from
-inside it, as `./site` from beside it, or by its entry file.
+inside it, as `./site`, `site/.` or an absolute path from beside it, or by its
+entry file.
 
   $ mkdir -p site/src site/templates
   $ printf '{"source": "src"}\n' > site/linea.json
   $ printf 'a page kept beside the source' > site/templates/page.txt
   $ printf 'import std.io\n\nfn main() -> Result[UInt8, io.IoError] {\n    io.println(embed("../templates/page.txt"))?\n    .Ok(0)\n}\n' > site/src/main.lin
   $ linea run ./site
+  a page kept beside the source
+  $ linea run site/.
+  a page kept beside the source
+  $ linea run ./site/./
+  a page kept beside the source
+  $ linea run "$PWD"//site
+  a page kept beside the source
+  $ linea run "$PWD"/./site
   a page kept beside the source
   $ cd site
   $ linea run .

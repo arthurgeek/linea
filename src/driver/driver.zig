@@ -617,6 +617,10 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the {s} names a kind that is not `program` or `library`\n",
                 .{loader.manifest_name},
             ),
+            error.ManifestSourceLeavesRoot => try stderr_w.print(
+                "  the `source` in its {s} leaves the directory holding it; name a directory inside that one\n",
+                .{loader.manifest_name},
+            ),
             else => {},
         }
         return exit_io;

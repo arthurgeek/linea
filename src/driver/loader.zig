@@ -68,23 +68,36 @@ fn dirOf(path: []const u8) []const u8 {
     return path[0..slash];
 }
 
-/// A directory as a prefix of the paths beneath it: `.` is the working
-/// directory, written as nothing, and a leading `./` names nothing either. The
-/// root's manifest may be spelled `./site/linea.json` while the sources beneath
-/// it are spelled `site/src/main.lin`, and an embed compares the two.
-fn plainDir(dir: []const u8) []const u8 {
-    var plain = dir;
-    while (std.mem.startsWith(u8, plain, "./")) plain = plain[2..];
-    while (plain.len > 1 and plain[plain.len - 1] == '/') plain = plain[0 .. plain.len - 1];
-    return if (std.mem.eql(u8, plain, ".")) "" else plain;
+/// A directory as a prefix of the paths beneath it, in `canonical` spelling,
+/// with the working directory written as nothing. The root's manifest may be
+/// spelled `./site/linea.json` or `/abs//site/linea.json` while the sources
+/// beneath it are spelled `site/src/main.lin`, and an embed compares the two.
+/// The caller owns the result.
+fn rootDir(gpa: std.mem.Allocator, dir: []const u8) std.mem.Allocator.Error![]u8 {
+    if (dir.len == 0) return gpa.dupe(u8, "");
+    const spelled = try canonical(gpa, dir);
+    if (std.mem.eql(u8, spelled, ".")) {
+        gpa.free(spelled);
+        return gpa.dupe(u8, "");
+    }
+    return spelled;
 }
 
-test "a directory is compared without the spellings that name nothing" {
-    try testing.expectEqualStrings("", plainDir("."));
-    try testing.expectEqualStrings("", plainDir("./"));
-    try testing.expectEqualStrings("site", plainDir("./site"));
-    try testing.expectEqualStrings("site/src", plainDir("./site/src/"));
-    try testing.expectEqualStrings("/abs/site", plainDir("/abs/site"));
+test "a directory is compared in one spelling" {
+    const gpa = testing.allocator;
+    for ([_][2][]const u8{
+        .{ ".", "" },
+        .{ "./", "" },
+        .{ "./site", "site" },
+        .{ "site/.", "site" },
+        .{ "./site/./", "site" },
+        .{ "/abs/dot//site", "/abs/dot/site" },
+        .{ "/abs/dot/./site", "/abs/dot/site" },
+    }) |pair| {
+        const got = try rootDir(gpa, pair[0]);
+        defer gpa.free(got);
+        try testing.expectEqualStrings(pair[1], got);
+    }
 }
 
 /// The last element of a path, which for a directory is the module's name.
@@ -362,10 +375,10 @@ fn loadInputs(
     const declared = try declaredGiven(gpa, sorted, dir);
     l.program_is_library = declared.standard;
     if (rootManifestOf(sorted, dir)) |manifest| {
-        l.bound = plainDir(dirOf(manifest.path));
+        l.bound = try rootDir(gpa, dirOf(manifest.path));
         l.bound_kind = if (declared.kind == .library) .library else .program;
     } else {
-        l.bound = plainDir(dir);
+        l.bound = try rootDir(gpa, dir);
         l.bound_kind = .alone;
     }
 
@@ -544,7 +557,7 @@ pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMem
         if (!std.mem.eql(u8, std.fs.path.basename(f.path), manifest_name)) continue;
         const at = std.mem.count(u8, f.path, "/");
         if (root_dir) |root| {
-            if (!within(withoutDot(root), withoutDot(dirOf(f.path)))) continue;
+            if (!spelledWithin(root, dirOf(f.path))) continue;
             if (chosen == null or at > depth) {
                 chosen = f;
                 depth = at;
@@ -557,13 +570,35 @@ pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMem
     return chosen;
 }
 
-/// A path without the `./` a walk from `.` writes before it, so `./std` and
-/// `std` compare as the one directory they name.
-fn withoutDot(path: []const u8) []const u8 {
-    var rest = path;
-    while (std.mem.startsWith(u8, rest, "./")) rest = rest[2..];
-    if (std.mem.eql(u8, rest, ".")) return "";
-    return rest;
+/// Whether `dir` is `bound` or beneath it, read the way `canonical` spells a
+/// path: a `.` part and an empty one, as in `./site/./` or `/abs//site`, name
+/// nothing, so every spelling of one directory compares as that directory.
+fn spelledWithin(dir: []const u8, bound: []const u8) bool {
+    if ((dir.len > 0 and dir[0] == '/') != (bound.len > 0 and bound[0] == '/')) return false;
+    var outer = std.mem.tokenizeScalar(u8, bound, '/');
+    var inner = std.mem.tokenizeScalar(u8, dir, '/');
+    while (nextNamed(&outer)) |part| {
+        const against = nextNamed(&inner) orelse return false;
+        if (!std.mem.eql(u8, part, against)) return false;
+    }
+    return true;
+}
+
+fn nextNamed(parts: *std.mem.TokenIterator(u8, .scalar)) ?[]const u8 {
+    while (parts.next()) |part| {
+        if (!std.mem.eql(u8, part, ".")) return part;
+    }
+    return null;
+}
+
+test "a directory lies within another however either is spelled" {
+    try testing.expect(spelledWithin("site/.", "./site"));
+    try testing.expect(spelledWithin("./site/./src", "site"));
+    try testing.expect(spelledWithin("/abs/dot//site", "/abs/dot/./site"));
+    try testing.expect(spelledWithin("site", "."));
+    try testing.expect(!spelledWithin("sites", "site"));
+    try testing.expect(!spelledWithin("site", "site/src"));
+    try testing.expect(!spelledWithin("/site", "site"));
 }
 
 test "the manifest at or above the root declares it, and one below it does not" {
@@ -1274,6 +1309,9 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     defer parsed.deinit();
 
     const declared = try declaredFrom(parsed.value);
+    // A `source` leaving the directory holding the manifest is refused here,
+    // for a root and for a library alike: the one check either takes.
+    if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
     const source: ?[]const u8 = if (parsed.value.source) |named| (if (named.len == 0) null else try gpa.dupe(u8, named)) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
@@ -1290,6 +1328,27 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
 fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
     const named = source orelse return dir;
     return joinedDir(gpa, dir, named);
+}
+
+/// Whether a manifest's `source`, read from the directory holding the
+/// manifest, names a directory inside that one. Decided by spelling, so a
+/// root read from disk and one read from memory agree: an absolute path, and
+/// one whose `..` climbs past the directory, name another directory's files.
+pub fn sourceStaysInside(gpa: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!bool {
+    if (source.len > 0 and source[0] == '/') return false;
+    const resolved = try std.fs.path.resolvePosix(gpa, &.{source});
+    defer gpa.free(resolved);
+    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
+}
+
+test "a manifest's source stays inside the directory holding it" {
+    const gpa = testing.allocator;
+    try testing.expect(try sourceStaysInside(gpa, "src"));
+    try testing.expect(try sourceStaysInside(gpa, "./src/"));
+    try testing.expect(try sourceStaysInside(gpa, "src/../lib"));
+    try testing.expect(!try sourceStaysInside(gpa, "../elsewhere/src"));
+    try testing.expect(!try sourceStaysInside(gpa, "src/../../x"));
+    try testing.expect(!try sourceStaysInside(gpa, "/tmp"));
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
@@ -1679,7 +1738,6 @@ const Loader = struct {
     /// editor watches. Owned until handed to the program.
     embed_watched: std.ArrayList([]const u8) = .empty,
 
-
     const GraphRoot = struct {
         /// The name imports of it start with; empty for the primary root.
         name: []const u8,
@@ -1748,6 +1806,7 @@ const Loader = struct {
 
     fn deinit(self: *Loader) void {
         self.scratch.deinit();
+        self.gpa.free(self.bound);
         self.embed_files.deinit(self.gpa);
         self.embed_sites.deinit(self.gpa);
         for ([_]*std.StringHashMapUnmanaged(EmbedState){ &self.embed_states, &self.library_embed_states }) |states| {
@@ -2026,9 +2085,11 @@ const Loader = struct {
             self.graph.items[owner.index()].manifest_dir
         else
             null;
-        const bound = plainDir(if (library_bound) library.prelude_dir else dependency orelse self.bound);
+        const bound = try rootDir(self.gpa, if (library_bound) library.prelude_dir else dependency orelse self.bound);
+        defer self.gpa.free(bound);
         const kind: BoundKind = if (library_bound or dependency != null) .library else self.bound_kind;
-        const source_dir = plainDir(dirOf(self.table.get(file).path));
+        const source_dir = try rootDir(self.gpa, dirOf(self.table.get(file).path));
+        defer self.gpa.free(source_dir);
         const relative_dir = if (bound.len == 0)
             source_dir
         else if (std.mem.eql(u8, source_dir, bound))
@@ -2723,6 +2784,10 @@ const Loader = struct {
                 return true;
             },
             error.ManifestNamesTheLibrary => Manifest{ .source = null, .declared = .{} },
+            error.ManifestSourceLeavesRoot => {
+                try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest", "the source of `{s}` leaves the directory that holds its manifest", .{entry.name}, &.{});
+                return true;
+            },
         };
         if (parsed.declared.kind != .library) {
             try self.reportManifest(manifest_path, text, entry.key, "a dependency is entered through what it publishes, so its manifest says `\"kind\": \"library\"`", "`{s}` is a program, not a library", .{entry.name}, &.{});
@@ -2747,11 +2812,8 @@ const Loader = struct {
         // which sits inside the directory holding its manifest and shares no
         // module with another root.
         const source_dir = try librarySourceDir(a, dir, parsed.source);
+        // `parseManifest` refused a `source` leaving the library's directory.
         const source_identity = try librarySourceDir(a, identity, parsed.source);
-        if (!within(source_identity, identity)) {
-            try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest", "the source of `{s}` leaves the directory that holds its manifest", .{name}, &.{});
-            return true;
-        }
         if (self.sourceOverlapping(source_identity, identity)) |other| {
             const note = try std.fmt.allocPrint(self.sink.arena, "keep each library's source apart; `{s}` reads modules from `{s}`", .{ self.rootLabel(other), self.graph.items[other.index()].source_dir });
             try self.reportManifest(manifest_path, text, entry.key, "two roots may not read the same modules", "the source of `{s}` overlaps the source of `{s}`", .{ name, self.rootLabel(other) }, &.{note});
