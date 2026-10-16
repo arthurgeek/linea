@@ -17,7 +17,8 @@ GET / answers the page, which names the icon in its head.
 
 GET /favicon.ico answers the icon's bytes as `image/x-icon`. The answer is its
 46-byte head, two header lines and a blank line each ending in CRLF, and then
-the 1150 bytes of `favicon.ico`, byte for byte.
+the 1150 bytes of `favicon.ico`, byte for byte: its line feeds, carriage
+returns and end-of-file marks are bytes like any other.
 
   $ env -i REQUEST_METHOD=GET PATH_INFO=/favicon.ico ./site > icon 2> /dev/null
   $ head -c 60 icon | tr -d '\r' | sed -n '1,2p'

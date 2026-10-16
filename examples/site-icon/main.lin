@@ -23,17 +23,7 @@ let page = embed("page.html")
 // as the program.
 //
 // `favicon.ico` is a 16 by 16 icon of an orange disc, 1150 bytes, written by
-// this Python:
-//
-//   import struct
-//   pixels = bytearray()
-//   for y in range(15, -1, -1):
-//       for x in range(16):
-//           inside = (x - 7.5) ** 2 + (y - 7.5) ** 2 <= 49
-//           pixels += bytes((0x1f, 0x8c, 0xf2, 0xff)) if inside else bytes(4)
-//   bmp = struct.pack('<IiiHHIIiiII', 40, 16, 32, 1, 32, 0, 1088, 0, 0, 0, 0) + pixels + bytes(64)
-//   ico = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', 16, 16, 0, 0, 1, 32, len(bmp), 22) + bmp
-//   open('favicon.ico', 'wb').write(ico)
+// `make-icon.py` beside this file.
 let favicon = embed_bytes("favicon.ico")
 
 // `home` answers the page as HTML. Its `<link rel="icon">` names the icon
