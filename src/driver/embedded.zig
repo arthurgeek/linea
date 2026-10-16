@@ -144,6 +144,11 @@ pub const Unread = union(enum) {
     /// The last component, or a directory on the way, matched a name only by
     /// letter case. Carries the spelling the directory holds.
     other_case: []const u8,
+    /// A name matched only once the bytes outside ASCII are set aside: the
+    /// same letters written with other Unicode characters, such as a
+    /// precomposed `é` against `e` and a combining accent. Carries the
+    /// spelling the directory holds.
+    other_form: []const u8,
     /// A directory where a file was named.
     directory,
     /// A symbolic link on the path, the file's own name included. Carries the
@@ -193,10 +198,22 @@ pub fn readFromDisk(gpa: std.mem.Allocator, io: std.Io, root: []const u8, rel: [
             },
             .file => {
                 if (!last) return .{ .unread = .missing };
-                const file = dir.openFile(io, name, .{ .follow_symlinks = false }) catch |err|
-                    return .{ .unread = .{ .unreadable = @errorName(err) } };
+                // Opened without waiting and without following a link, and
+                // asked what it is once open: the entry may have been replaced
+                // since the listing, and a pipe put there would otherwise block
+                // the compiler opening it.
+                const name_z = try gpa.dupeZ(u8, name);
+                defer gpa.free(name_z);
+                const fd = std.posix.openatZ(dir.handle, name_z, .{ .ACCMODE = .RDONLY, .NONBLOCK = true, .NOFOLLOW = true, .CLOEXEC = true }, 0) catch |err|
+                    return .{ .unread = switch (err) {
+                        error.SymLinkLoop => .{ .symlink = try gpa.dupe(u8, rel) },
+                        else => .{ .unreadable = @errorName(err) },
+                    } };
+                const file: std.Io.File = .{ .handle = fd, .flags = .{ .nonblocking = true } };
                 defer file.close(io);
-                const size = file.length(io) catch |err| return .{ .unread = .{ .unreadable = @errorName(err) } };
+                const stat = file.stat(io) catch |err| return .{ .unread = .{ .unreadable = @errorName(err) } };
+                if (stat.kind != .file) return .{ .unread = .special };
+                const size = stat.size;
                 if (size > max_bytes) return .{ .unread = .{ .too_large = size } };
                 const bytes = try gpa.alloc(u8, @intCast(size));
                 const got = file.readPositionalAll(io, bytes, 0) catch |err| {
@@ -225,6 +242,7 @@ const Found = union(enum) {
 /// for a name spelled otherwise.
 fn entryKind(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []const u8) std.mem.Allocator.Error!Found {
     var other: ?[]const u8 = null;
+    var other_form: ?[]const u8 = null;
     var it = dir.iterate();
     while (it.next(io) catch |err| return .{ .unread = .{ .unreadable = @errorName(err) } }) |entry| {
         if (std.mem.eql(u8, entry.name, name)) {
@@ -234,9 +252,67 @@ fn entryKind(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []const 
             return .{ .kind = stat.kind };
         }
         if (other == null and std.ascii.eqlIgnoreCase(entry.name, name)) other = try gpa.dupe(u8, entry.name);
+        if (other_form == null and sameOutsideAscii(entry.name, name)) other_form = try gpa.dupe(u8, entry.name);
     }
     if (other) |spelled| return .{ .unread = .{ .other_case = spelled } };
+    if (other_form) |spelled| return .{ .unread = .{ .other_form = spelled } };
     return .{ .unread = .missing };
+}
+
+/// Whether two names differ and both hold bytes outside ASCII, yet read alike
+/// once accents are set aside: the shape of one accented name written in two
+/// Unicode forms, a precomposed `é` against `e` and a combining accent, which
+/// a listing shows alike. Only a hint for a refusal, so the folding is the
+/// Latin-1 letters and the combining accents, and no more.
+fn sameOutsideAscii(a: []const u8, b: []const u8) bool {
+    if (std.mem.eql(u8, a, b)) return false;
+    if (!hasWide(a) or !hasWide(b)) return false;
+    var x = Folded{ .text = a };
+    var y = Folded{ .text = b };
+    while (true) {
+        const p = x.next();
+        const q = y.next();
+        if (p == null or q == null) return p == null and q == null;
+        if (p.? != q.?) return false;
+    }
+}
+
+fn hasWide(text: []const u8) bool {
+    for (text) |c| if (c >= 0x80) return true;
+    return false;
+}
+
+/// The scalars of a name with combining accents dropped, Latin-1 letters
+/// written as their base letter, and ASCII in lower case.
+const Folded = struct {
+    text: []const u8,
+    at: usize = 0,
+
+    /// The base letter of each scalar from U+00C0 to U+00FF, or 0 where it has
+    /// none.
+    const latin1 = "aaaaaa\x00ceeeeiiii\x00nooooo\x00ouuuuy\x00\x00aaaaaa\x00ceeeeiiii\x00nooooo\x00ouuuuy\x00y";
+
+    fn next(self: *Folded) ?u21 {
+        while (self.at < self.text.len) {
+            const len = std.unicode.utf8ByteSequenceLength(self.text[self.at]) catch 1;
+            const end = @min(self.at + len, self.text.len);
+            const scalar: u21 = std.unicode.utf8Decode(self.text[self.at..end]) catch self.text[self.at];
+            self.at = end;
+            if (scalar >= 0x300 and scalar <= 0x36f) continue;
+            if (scalar < 0x80) return std.ascii.toLower(@intCast(scalar));
+            if (scalar >= 0xc0 and scalar <= 0xff and latin1[scalar - 0xc0] != 0) return latin1[scalar - 0xc0];
+            return scalar;
+        }
+        return null;
+    }
+};
+
+test "a name written in another Unicode form is told apart from a different name" {
+    // `é` precomposed, and `e` followed by a combining acute accent.
+    try testing.expect(sameOutsideAscii("caf\xc3\xa9.txt", "cafe\xcc\x81.txt"));
+    try testing.expect(!sameOutsideAscii("caf\xc3\xa9.txt", "cafe.txt"));
+    try testing.expect(!sameOutsideAscii("page.txt", "page.txt"));
+    try testing.expect(!sameOutsideAscii("page.txt", "Page.txt"));
 }
 
 /// Reads `full` from files a caller supplied, found by exact path. Where none
@@ -244,6 +320,7 @@ fn entryKind(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []const 
 /// letter case says how it is spelled.
 pub fn readFromFiles(comptime File: type, files: []const File, full: []const u8) Read {
     var other: ?[]const u8 = null;
+    var other_form: ?[]const u8 = null;
     for (files) |f| {
         if (std.mem.eql(u8, f.path, full)) {
             if (f.text.len > max_bytes) return .{ .unread = .{ .too_large = f.text.len } };
@@ -253,8 +330,10 @@ pub fn readFromFiles(comptime File: type, files: []const File, full: []const u8)
     for (files) |f| {
         if (f.path.len > full.len and std.mem.startsWith(u8, f.path, full) and f.path[full.len] == '/') return .{ .unread = .directory };
         if (other == null and std.ascii.eqlIgnoreCase(f.path, full)) other = std.fs.path.basename(f.path);
+        if (other_form == null and sameOutsideAscii(f.path, full)) other_form = std.fs.path.basename(f.path);
     }
     if (other) |spelled| return .{ .unread = .{ .other_case = spelled } };
+    if (other_form) |spelled| return .{ .unread = .{ .other_form = spelled } };
     return .{ .unread = .missing };
 }
 

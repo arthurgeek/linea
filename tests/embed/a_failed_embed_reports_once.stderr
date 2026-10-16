@@ -2,4 +2,4 @@ error[M-Embed]: no file "missing.html" beside `a_failed_embed_reports_once.lin`
  --> tests/embed/a_failed_embed_reports_once.lin:1:18
   |
 1 | let page = embed("missing.html")
-  |                  ^^^^^^^^^^^^^^ the path is relative to the file that writes it
+  |                  ^^^^^^^^^^^^^^ the path is relative to the directory of `a_failed_embed_reports_once.lin`, so this names `missing.html` there

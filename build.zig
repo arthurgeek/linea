@@ -2287,6 +2287,8 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/structs/a_field_pattern_is_no_range.lin",
     "tests/decl/a_unit_result_is_not_written/main.lin",
     "tests/testing_signatures/a_written_unit_result_says_what_a_test_and_main_answer.lin",
+    "tests/embed/embed_is_reserved.lin",
+    "tests/embed/the_path_is_a_literal.lin",
 };
 
 /// Every corpus file the grammar is asked to derive.

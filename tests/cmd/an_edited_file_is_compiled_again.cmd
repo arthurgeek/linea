@@ -18,6 +18,6 @@ reported.
   4 |     io.println(embed("motd.txt"))?
     |                      ^^^^^^^^^^ byte 4 is 0xFF, which begins no UTF-8 character
     |
-    = help: the first byte that is not UTF-8 is at line 1, column 5 of the file
+    = note: that byte is at line 1, column 5 of the file
     = help: `embed_bytes("motd.txt")` embeds a file of any bytes as a `mem.Slice[UInt8]`
   [1]

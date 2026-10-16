@@ -23,10 +23,20 @@ error[S-Embed]: `embed` takes one string literal naming the file
    |
 10 |     let none = embed().length()
    |                      ^ name the file here, as a string literal
-error[S-Paren]: expected `(`
-  --> tests/embed/the_path_is_a_literal.lin:11:28
+error[S-Embed]: `embed` takes one string literal naming the file
+  --> tests/embed/the_path_is_a_literal.lin:11:24
    |
-11 |     let bare = embed_bytes "page.txt"
+11 |     let braced = embed(P { x = 1 }).length()
+   |                        ^^^^^^^^^^^ the file is read when the program is compiled, so its path is written here
+error[S-Embed]: `embed` takes one string literal naming the file
+  --> tests/embed/the_path_is_a_literal.lin:12:23
+   |
+12 |     let comma = embed("a.txt",).length()
+   |                       ^^^^^^^^ remove the comma after the path
+error[S-Paren]: expected `(`
+  --> tests/embed/the_path_is_a_literal.lin:13:28
+   |
+13 |     let bare = embed_bytes "page.txt"
    |                            ^^^^^^^^^^ the file is named in parentheses
 error[N-Unused]: `name` is never used
  --> tests/embed/the_path_is_a_literal.lin:1:5

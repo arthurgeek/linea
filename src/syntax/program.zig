@@ -269,6 +269,10 @@ pub const EmbedSite = struct {
 pub const Embeds = struct {
     files: []const Embedded = &.{},
     sites: []const EmbedSite = &.{},
+    /// Every path the program's embeds named, read or refused, as the loader
+    /// spelled it: what an editor watches, since a file that appears or
+    /// changes there changes the program. The library's are not among them.
+    watched: []const []const u8 = &.{},
 
     /// The file `expr` read, `.none` where its embed was refused, or null
     /// where `expr` is no embed the loader saw.
@@ -495,6 +499,8 @@ pub const Program = struct {
         // entries do; the two lists are the program's.
         gpa.free(self.embeds.files);
         gpa.free(self.embeds.sites);
+        for (self.embeds.watched) |path| gpa.free(path);
+        gpa.free(self.embeds.watched);
         self.ast.deinit(gpa);
         self.* = undefined;
     }

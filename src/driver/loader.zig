@@ -68,6 +68,25 @@ fn dirOf(path: []const u8) []const u8 {
     return path[0..slash];
 }
 
+/// A directory as a prefix of the paths beneath it: `.` is the working
+/// directory, written as nothing, and a leading `./` names nothing either. The
+/// root's manifest may be spelled `./site/linea.json` while the sources beneath
+/// it are spelled `site/src/main.lin`, and an embed compares the two.
+fn plainDir(dir: []const u8) []const u8 {
+    var plain = dir;
+    while (std.mem.startsWith(u8, plain, "./")) plain = plain[2..];
+    while (plain.len > 1 and plain[plain.len - 1] == '/') plain = plain[0 .. plain.len - 1];
+    return if (std.mem.eql(u8, plain, ".")) "" else plain;
+}
+
+test "a directory is compared without the spellings that name nothing" {
+    try testing.expectEqualStrings("", plainDir("."));
+    try testing.expectEqualStrings("", plainDir("./"));
+    try testing.expectEqualStrings("site", plainDir("./site"));
+    try testing.expectEqualStrings("site/src", plainDir("./site/src/"));
+    try testing.expectEqualStrings("/abs/site", plainDir("/abs/site"));
+}
+
 /// The last element of a path, which for a directory is the module's name.
 pub fn nameOf(dir: []const u8) []const u8 {
     if (dir.len == 0) return "";
@@ -343,10 +362,10 @@ fn loadInputs(
     const declared = try declaredGiven(gpa, sorted, dir);
     l.program_is_library = declared.standard;
     if (rootManifestOf(sorted, dir)) |manifest| {
-        l.bound = dirOf(manifest.path);
+        l.bound = plainDir(dirOf(manifest.path));
         l.bound_kind = if (declared.kind == .library) .library else .program;
     } else {
-        l.bound = dir;
+        l.bound = plainDir(dir);
         l.bound_kind = .alone;
     }
 
@@ -1650,9 +1669,15 @@ const Loader = struct {
     /// order the modules were parsed, so the sites ascend.
     embed_files: std.ArrayList(Embedded) = .empty,
     embed_sites: std.ArrayList(EmbedSite) = .empty,
-    /// Each file read so far, by the path it was read from, so a file named
-    /// from two directories or twice is read once.
-    embed_ids: std.StringHashMapUnmanaged(EmbedId) = .empty,
+    /// What each path named so far gave, by the path it was read from, so a
+    /// file named from two directories or twice is read once, and a refusal
+    /// is reported at every site naming it. The library's apart from the
+    /// program's.
+    embed_states: std.StringHashMapUnmanaged(EmbedState) = .empty,
+    library_embed_states: std.StringHashMapUnmanaged(EmbedState) = .empty,
+    /// Every path the program's embeds resolved to, read or refused, which an
+    /// editor watches. Owned until handed to the program.
+    embed_watched: std.ArrayList([]const u8) = .empty,
 
 
     const GraphRoot = struct {
@@ -1680,6 +1705,7 @@ const Loader = struct {
         primary_key: ?Span = null,
     };
     const BoundKind = enum { program, library, alone };
+    const EmbedState = union(enum) { read: EmbedId, unread: embedded.Unread };
 
     fn seedLibrary(self: *Loader, prefix: *const LibraryPrefix) !void {
         try self.modules.ensureTotalCapacity(self.gpa, prefix.program.modules.len);
@@ -1715,16 +1741,22 @@ const Loader = struct {
     fn takeEmbeds(self: *Loader) std.mem.Allocator.Error!program_mod.Embeds {
         const files = try self.embed_files.toOwnedSlice(self.gpa);
         errdefer self.gpa.free(files);
-        return .{ .files = files, .sites = try self.embed_sites.toOwnedSlice(self.gpa) };
+        const sites = try self.embed_sites.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(sites);
+        return .{ .files = files, .sites = sites, .watched = try self.embed_watched.toOwnedSlice(self.gpa) };
     }
 
     fn deinit(self: *Loader) void {
         self.scratch.deinit();
         self.embed_files.deinit(self.gpa);
         self.embed_sites.deinit(self.gpa);
-        var read_paths = self.embed_ids.keyIterator();
-        while (read_paths.next()) |path| self.gpa.free(path.*);
-        self.embed_ids.deinit(self.gpa);
+        for ([_]*std.StringHashMapUnmanaged(EmbedState){ &self.embed_states, &self.library_embed_states }) |states| {
+            var read_paths = states.keyIterator();
+            while (read_paths.next()) |path| self.gpa.free(path.*);
+            states.deinit(self.gpa);
+        }
+        for (self.embed_watched.items) |path| self.gpa.free(path);
+        self.embed_watched.deinit(self.gpa);
         self.by_dir.deinit(self.gpa);
         var held = self.in_dir.valueIterator();
         while (held.next()) |v| v.deinit(self.gpa);
@@ -1994,9 +2026,9 @@ const Loader = struct {
             self.graph.items[owner.index()].manifest_dir
         else
             null;
-        const bound = if (library_bound) library.prelude_dir else dependency orelse self.bound;
+        const bound = plainDir(if (library_bound) library.prelude_dir else dependency orelse self.bound);
         const kind: BoundKind = if (library_bound or dependency != null) .library else self.bound_kind;
-        const source_dir = dirOf(self.table.get(file).path);
+        const source_dir = plainDir(dirOf(self.table.get(file).path));
         const relative_dir = if (bound.len == 0)
             source_dir
         else if (std.mem.eql(u8, source_dir, bound))
@@ -2021,13 +2053,22 @@ const Loader = struct {
         const full = if (root.len == 0) try self.gpa.dupe(u8, rel) else try std.mem.concat(self.gpa, u8, &.{ root, "/", rel });
         var full_owned = true;
         defer if (full_owned) self.gpa.free(full);
+        const where: Where = .{ .dir = relative_dir orelse "", .rel = rel };
 
-        if (self.embed_ids.get(full)) |already| {
-            if (already != .none and ast.exprTag(id) == .embed) {
-                if (!try self.isText(id, self.embed_files.items[already.index()].bytes)) return .none;
-            }
-            return already;
-        }
+        // The library's files and the program's are read apart, so a program
+        // file spelled `std/x.txt` from a root in the working directory is
+        // never the library's `std/x.txt`.
+        const states = if (library_bound) &self.library_embed_states else &self.embed_states;
+        if (states.get(full)) |known| switch (known) {
+            .read => |already| {
+                if (ast.exprTag(id) == .embed and !try self.isText(id, self.embed_files.items[already.index()].bytes)) return .none;
+                return already;
+            },
+            .unread => |why| {
+                try self.refuseRead(id, why, where);
+                return .none;
+            },
+        };
 
         // Where the bytes come from, and whose lifetime they share: the same
         // answer `sourceFor` gives a source.
@@ -2039,16 +2080,19 @@ const Loader = struct {
                 .copy_reading_disk => |reading| .{ reading.io, reading.allocator },
             },
         };
+        // A file the program names is one a change to which changes the
+        // program, whether or not it could be read: an editor watches it.
+        if (!library_bound) try self.embed_watched.append(self.gpa, try self.gpa.dupe(u8, full));
         const read: embedded.Read = if (disk_io) |io|
-            try embedded.readFromDisk(storage.?, io, root, rel)
+            try embedded.readFromDisk(storage orelse self.gpa, io, root, rel)
         else
             embedded.readFromFiles(InMemoryFile, self.files, full);
         const bytes: []const u8 = switch (read) {
             .bytes => |b| if (disk_io == null) if (storage) |a| try a.dupe(u8, b) else b else b,
             .unread => |why| {
-                try self.refuseRead(id, why);
-                try self.embed_ids.put(self.gpa, full, .none);
+                try states.put(self.gpa, full, .{ .unread = why });
                 full_owned = false;
+                try self.refuseRead(id, why, where);
                 return .none;
             },
         };
@@ -2059,11 +2103,16 @@ const Loader = struct {
         } else unreachable;
         const embed_id: EmbedId = .from(self.embed_files.items.len);
         try self.embed_files.append(self.gpa, .{ .path = path, .bytes = bytes });
-        try self.embed_ids.put(self.gpa, full, embed_id);
+        try states.put(self.gpa, full, .{ .read = embed_id });
         full_owned = false;
         if (ast.exprTag(id) == .embed and !try self.isText(id, bytes)) return .none;
         return embed_id;
     }
+
+    /// Where a site's path resolved to, relative to its root: the directory of
+    /// the file writing it, and the file it names. What a refusal says to
+    /// place the path, and the same wherever the program sits.
+    const Where = struct { dir: []const u8, rel: []const u8 };
 
     /// Whether a file embedded as text is UTF-8, reporting [M-EmbedText] where
     /// it is not: a `Str`'s bytes are text by construction, as a literal's are
@@ -2078,18 +2127,36 @@ const Loader = struct {
         const place = lineColumnOf(bytes, at);
         const arena = self.sink.arena;
         const written = ast.tokenText(ast.exprMain(id));
-        const notes = try arena.alloc([]const u8, 2);
-        notes[0] = try std.fmt.allocPrint(arena, "the first byte that is not UTF-8 is at line {d}, column {d} of the file", .{ place.line, place.column });
-        notes[1] = try std.fmt.allocPrint(arena, "`embed_bytes({s})` embeds a file of any bytes as a `mem.Slice[UInt8]`", .{written});
-        try self.reportEmbed(.m_embed_text, id, try std.fmt.allocPrint(arena, "{s} is not UTF-8 text", .{written}), try std.fmt.allocPrint(arena, "byte {d} is 0x{X:0>2}, which begins no UTF-8 character", .{ at, bytes[at] }), notes);
+        const remarks = try arena.alloc([]const u8, 1);
+        remarks[0] = try std.fmt.allocPrint(arena, "that byte is at line {d}, column {d} of the file", .{ place.line, place.column });
+        const notes = try arena.alloc([]const u8, 1);
+        notes[0] = try std.fmt.allocPrint(arena, "`embed_bytes({s})` embeds a file of any bytes as a `mem.Slice[UInt8]`", .{written});
+        const byte = bytes[at];
+        // What is wrong at the byte: one that only continues a character, one
+        // no character begins with, or one beginning a character the bytes
+        // after it do not complete or that UTF-8 does not allow.
+        const why: []const u8 = if (byte >= 0x80 and byte < 0xc0)
+            "which continues a character none began"
+        else if (std.unicode.utf8ByteSequenceLength(byte)) |len| blk: {
+            if (at + len > bytes.len) break :blk "which begins a character the file ends before completing";
+            for (bytes[at + 1 .. at + len]) |next| {
+                if (next & 0xc0 != 0x80) break :blk "which begins a character the bytes after it do not continue";
+            }
+            break :blk "which begins a character written in more bytes than it needs, or one Unicode does not have";
+        } else |_| "which begins no UTF-8 character";
+        try self.reportEmbedWith(.m_embed_text, id, try std.fmt.allocPrint(arena, "{s} is not UTF-8 text", .{written}), try std.fmt.allocPrint(arena, "byte {d} is 0x{X:0>2}, {s}", .{ at, byte, why }), notes, remarks);
         return false;
     }
 
     fn reportEmbed(self: *Loader, code: Code, id: node.ExprId, message: []const u8, label: []const u8, notes: []const []const u8) LoadError!void {
+        return self.reportEmbedWith(code, id, message, label, notes, &.{});
+    }
+
+    fn reportEmbedWith(self: *Loader, code: Code, id: node.ExprId, message: []const u8, label: []const u8, notes: []const []const u8, remarks: []const []const u8) LoadError!void {
         const ast = self.trees.view();
         const labels = try self.sink.arena.alloc(@import("../diagnostics/diagnostic.zig").Label, 1);
         labels[0] = .{ .file = ast.fileOfExpr(id), .span = ast.tokenSpan(ast.exprMain(id)), .message = label };
-        try self.sink.add(.{ .severity = .err, .code = code, .message = message, .labels = labels, .notes = notes });
+        try self.sink.add(.{ .severity = .err, .code = code, .message = message, .labels = labels, .notes = notes, .remarks = remarks });
     }
 
     fn refuseSpelling(self: *Loader, id: node.ExprId, why: embedded.Spelling, kind: BoundKind) LoadError!void {
@@ -2114,13 +2181,17 @@ const Loader = struct {
         try self.reportEmbed(.m_embed, id, message, label, &.{});
     }
 
-    fn refuseRead(self: *Loader, id: node.ExprId, why: embedded.Unread) LoadError!void {
+    fn refuseRead(self: *Loader, id: node.ExprId, why: embedded.Unread, where: Where) LoadError!void {
         const arena = self.sink.arena;
         const ast = self.trees.view();
         const written = ast.tokenText(ast.exprMain(id));
         const beside = std.fs.path.basename(self.table.get(ast.fileOfExpr(id)).path);
         const message: []const u8, const label: []const u8 = switch (why) {
-            .missing => .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), "the path is relative to the file that writes it" },
+            .missing => .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), if (where.dir.len == 0)
+                try std.fmt.allocPrint(arena, "the path is relative to the directory of `{s}`, so this names `{s}` there", .{ beside, where.rel })
+            else
+                try std.fmt.allocPrint(arena, "the path is relative to `{s}`, so this names `{s}`", .{ where.dir, where.rel }) },
+            .other_form => |spelled| .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), try std.fmt.allocPrint(arena, "the directory holds `{s}`, which looks alike but is written with other Unicode characters", .{spelled}) },
             .other_case => |spelled| .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), try std.fmt.allocPrint(arena, "the directory holds `{s}`, spelled differently", .{spelled}) },
             .directory => .{ try std.fmt.allocPrint(arena, "{s} is a directory", .{written}), "an embedded path names a file" },
             .symlink => |link| .{ try std.fmt.allocPrint(arena, "{s} goes through a symbolic link", .{written}), try std.fmt.allocPrint(arena, "`{s}` is a link, and an embedded path names files and directories themselves", .{std.fs.path.basename(link)}) },

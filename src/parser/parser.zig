@@ -6189,7 +6189,12 @@ const Parser = struct {
             .r_paren => "name the file here, as a string literal",
             .str_open => "an interpolated path is computed when the program runs, and the file is read before",
             .string_line => "a path is one line, written as a quoted string literal",
-            .string_literal => if (self.cursor.peekAt(1) == .comma) "one file is embedded at a time" else compiled,
+            .string_literal => if (self.cursor.peekAt(1) != .comma)
+                compiled
+            else if (self.cursor.peekAt(2) == .r_paren)
+                "remove the comma after the path"
+            else
+                "one file is embedded at a time",
             else => compiled,
         };
         const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` takes one string literal naming the file", .{word});
@@ -6200,9 +6205,8 @@ const Parser = struct {
         while (true) {
             switch (self.cursor.peek()) {
                 .eof => break,
-                .r_brace => if (depth == 0) break,
                 .l_paren, .l_bracket, .l_brace => depth += 1,
-                .r_paren, .r_bracket => {
+                .r_paren, .r_bracket, .r_brace => {
                     if (depth == 0) break;
                     depth -= 1;
                 },

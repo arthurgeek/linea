@@ -8,6 +8,8 @@ fn main() -> UInt8 {
     ).length()
     let two = embed("a.txt", "b.txt").length()
     let none = embed().length()
+    let braced = embed(P { x = 1 }).length()
+    let comma = embed("a.txt",).length()
     let bare = embed_bytes "page.txt"
-    UInt8(named + built + lines + two + none + bare.length())
+    UInt8(named + built + lines + two + none + braced + comma + bare.length())
 }
