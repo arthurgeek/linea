@@ -540,6 +540,7 @@ fn typecheckInternal(
     defer c.template_signatures.deinit(gpa);
     defer c.declined_contracts.deinit(gpa);
     defer c.refused_owned_promises.deinit(gpa);
+    defer c.refused_owned_subjects.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
     defer c.defaulted_contracts.deinit(gpa);
     defer {
@@ -5176,6 +5177,10 @@ const Checker = struct {
     /// Declarations whose `where` clause promised `Owned` for a subject that
     /// is not theirs to bound. Their contract is not inferred.
     refused_owned_promises: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Each subject a refused `Owned` promise named, with the declaration
+    /// that wrote it. A use inside that declaration that needs the subject
+    /// `Owned` is the refused promise's consequence and is not reported again.
+    refused_owned_subjects: std.AutoHashMapUnmanaged(struct { decl: DeclId, subject: TypeId }, void) = .empty,
     /// Each implementation member without a clause, with the trait signature
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
@@ -10441,6 +10446,7 @@ const Checker = struct {
     fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
         const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
         defer witness.deinit(self.gpa);
+        if (self.refused_owned_subjects.contains(.{ .decl = self.generic, .subject = witness.seed })) return;
         const held_name = try self.typeName(held);
         const seed_name = try self.typeName(witness.seed);
         var help = self.unmetBoundHelp(bound);
@@ -12474,9 +12480,41 @@ const Checker = struct {
     /// its declaration promises it in a `where` clause.
     fn boundsEdit(self: *Checker, required: []const u8, parameter: TypeId) std.mem.Allocator.Error!Edit {
         const name = try self.typeName(parameter);
-        if (self.builder.standinOf(parameter) != null)
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}`", .{ name, required }) };
-        return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, name }) };
+        if (self.builder.standinOf(parameter) == null)
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, name }) };
+        // The clause that can promise it is the one of the declaration whose
+        // parameter it is read through: an implementation's, for its own
+        // parameter, which no member's clause may bound. A clause already
+        // there takes one more predicate; a second `where` would not parse.
+        const implementation = self.implementationOwning(parameter);
+        const clause_of = implementation orelse self.generic;
+        const has_clause = clause_of != .none and self.ast.declWhereToken(clause_of) != .none;
+        const text = if (implementation != null)
+            (if (has_clause)
+                try std.fmt.allocPrint(self.sink.arena, "add `{s}: {s}` to the implementation's `where` clause", .{ name, required })
+            else
+                try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}` to the implementation", .{ name, required }))
+        else if (has_clause)
+            try std.fmt.allocPrint(self.sink.arena, "add `{s}: {s}` to the `where` clause", .{ name, required })
+        else
+            try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}`", .{ name, required });
+        return .{ .edit = text };
+    }
+
+    /// The implementation whose parameter `subject`, an associated type read
+    /// through a parameter, is read through; null where that parameter is
+    /// not an implementation's.
+    fn implementationOwning(self: *const Checker, subject: TypeId) ?node.DeclId {
+        if (self.builder.standinOf(subject) == null) return null;
+        var root = subject;
+        while (self.builder.standinOf(root)) |standin| root = standin.held;
+        const owner = switch (self.builder.get(root)) {
+            .parameter => |p| p.owner,
+            else => return null,
+        };
+        if (owner >= self.ast.declCount()) return null;
+        const d = node.DeclId.at(@intCast(owner));
+        return if (self.ast.declTag(d) == .impl_) d else null;
     }
 
     /// The first capture `held`, a closure, owns whose type does not
@@ -27042,11 +27080,18 @@ const Checker = struct {
         // for some instantiations and not others; the refusal is the mistake,
         // so the contract is left undecided and nothing is reported against it.
         try self.refused_owned_promises.put(self.gpa, d, {});
+        try self.refused_owned_subjects.put(self.gpa, .{ .decl = d, .subject = subject }, {});
+        // An implementation's parameter is promised in the implementation's
+        // own clause, which every member then relies on.
+        const help = if (self.implementationOwning(subject) != null)
+            (try self.boundsEdit("Owned", subject)).edit
+        else
+            "write `Owned` where the type parameter is declared";
         try self.sink.addErrorFmt(
             .t_bound,
             self.ast.fileOf(bound),
             self.ast.tokenSpan(bound),
-            "write `Owned` where the type parameter is declared",
+            help,
             "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
             .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
         );

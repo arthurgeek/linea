@@ -2,7 +2,7 @@ error[T-Bound]: `I.Item` requires `Owned`, and `I.Item` may stand for a type tha
  --> tests/generics/owned/an_associated_type_is_bounded_owned_in_a_where_clause.lin:6:16
   |
 6 |     match iter.extend_owned(&values, &items) {
-  |                ^^^^^^^^^^^^ add `where I.Item: Owned`
+  |                ^^^^^^^^^^^^ add `I.Item: Owned` to the `where` clause
  ::: std/iter/collection.lin
 L | ) -> Result[(), mem.PushFailure[I.Item]] where I.Item: Owned {
   |                                                ------ required by this `where` clause

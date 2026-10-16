@@ -57,7 +57,9 @@ the answer the compiler already computes; the bound lets source ask for it.
   trait argument is checked against the trait's own parameter bounds the same
   way, so `C: Conv[U]` under `trait Conv[T: Owned]` needs `U: Owned`, as a
   written `Pool[U]` does. An associated type has no bound list, so the help
-  for one says to add `where I.Item: Owned`. The help
+  for one adds `I.Item: Owned` to a `where` clause: the declaration's own, or
+  the implementation's when `I` is the implementation's parameter, and a clause
+  already written takes it as one more predicate. The help
   goes through the same edit routine as every other unmet bound, so it offers
   only edits the program can make: adding `Owned` to the bounds of a parameter
   the path ends at, and dropping the bound only where the program wrote it, not
