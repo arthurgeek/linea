@@ -4,5 +4,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 12 |     app.last = request.path()
    |     ^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: `app` keeps a value that comes from `request`; write `where retains(app: request)` to say so
+   = help: `remember` is passed where a callable type is expected, and that type does not permit that clause, so it cannot be added
    = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so `app` may keep one, in a place typed to own it, with no clause

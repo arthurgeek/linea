@@ -5298,10 +5298,12 @@ the edit each source calls for, spelled as [T-BorrowContract] spells it: the one
 clause listing every parameter the value comes from (`where borrows(first,
 second)`), the retention clause for a value an `inout` parameter keeps (`where
 retains(seen: field)`), or, for a local owner, that it ends when the function
-returns. Where the type holding the observation declares `to_owned`, the report
-also offers the owned copy, which observes nothing and needs no clause; that is
-the fix where the signature is fixed by what it is passed to, as a route
-handler's is.
+returns. A member of a trait implementation answers to its trait's signature,
+and a function passed as a value of a callable type to that type; where that
+fixed signature does not permit the clause, the report says so instead of naming
+it. Where the type holding the observation declares `to_owned`, the report also
+offers the owned copy, which observes nothing and needs no clause; that is the
+fix where the signature is fixed, as a route handler's is.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

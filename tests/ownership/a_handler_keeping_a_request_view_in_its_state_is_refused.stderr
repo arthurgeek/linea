@@ -4,5 +4,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 14 |         self.path = request.path()
    |         ^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: `self` keeps a value that comes from `request`; write `where retains(self: request)` to say so
+   = help: `serve_http` implements `http.Handler`, whose signature does not permit that clause, so it cannot be added
    = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so `self` may keep one, in a place typed to own it, with no clause

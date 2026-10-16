@@ -2073,6 +2073,7 @@ const Analysis = struct {
         };
 
         var sources: std.ArrayList(types.ClauseSource) = .empty;
+        var positions: std.ArrayList(u32) = .empty;
         var named: std.ArrayList(u8) = .empty;
         var local: ?BindingId = null;
         // A consumed parameter whose own place is observed ends with the
@@ -2081,10 +2082,10 @@ const Analysis = struct {
         for (origins) |origin| {
             if (origin.temporary != .none or origin.lent != .none) continue;
             const root = origin.place.root;
-            const is_parameter = for (self.function.parameters) |parameter| {
-                if (parameter == root) break true;
-            } else false;
-            if (!is_parameter) {
+            const position: ?u32 = for (self.function.parameters, 0..) |parameter, at| {
+                if (parameter == root) break @intCast(at);
+            } else null;
+            if (position == null) {
                 if (!origin.external and local == null) local = root;
                 continue;
             }
@@ -2099,12 +2100,14 @@ const Analysis = struct {
             } else false;
             if (listed) continue;
             try sources.append(arena, .{ .spelling = spelling, .borrows = !origin.external });
+            try positions.append(arena, position.?);
         }
         for (sources.items, 0..) |source, i| {
             const joiner = if (i == 0) "" else if (i + 1 == sources.items.len) " and " else ", ";
             try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
         }
-        if (sources.items.len > 0) switch (leaving) {
+        const fixed = if (sources.items.len > 0) try self.fixedSignatureRefusing(leaving, sources.items, positions.items) else null;
+        if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else switch (leaving) {
             .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so", .{ named.items, try types.sourceClause(arena, sources.items) })),
             .retained => |destination| {
                 var clause: std.ArrayList(u8) = .empty;
@@ -2147,6 +2150,71 @@ const Analysis = struct {
             .labels = try arena.dupe(diagnostics.Label, &.{primary}),
             .notes = try notes.toOwnedSlice(arena),
         });
+    }
+
+    /// Why the clause naming `sources` (at `positions` among the function's
+    /// parameters) cannot be written, where the signature is not the
+    /// program's to change: a member of a trait implementation answers to the
+    /// signature its trait declares, and a function named as a value answers
+    /// to the callable type it was passed as. Either may still write a clause
+    /// its fixed signature permits, so null where that signature declares
+    /// every source the clause would name, and where nothing fixes it.
+    ///
+    /// **Bound:** one lookup of the signature a member supplies, one pass
+    /// over the program's function values, and the fixed signature's
+    /// contracts once per source, once per report.
+    fn fixedSignatureRefusing(self: *const Analysis, leaving: Leaving, sources: []const types.ClauseSource, positions: []const u32) std.mem.Allocator.Error!?[]const u8 {
+        const decl = self.function.decl;
+        if (decl == .none) return null;
+        const name = self.ast.tokenText(self.ast.declName(decl));
+        var fixed: types.TypeId = .poison;
+        var why: []const u8 = "";
+        if (self.typing.supply_index.signatureOf(decl)) |sig| {
+            fixed = self.typing.declSignature(sig);
+            const trait = self.ast.declOwner(sig);
+            const module = self.program.moduleOf(sig);
+            const qualifier = if (module == self.program.moduleOf(decl)) "" else try std.fmt.allocPrint(self.sink.arena, "{s}.", .{self.program.get(module).name});
+            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` implements `{s}{s}`, whose signature does not permit that clause, so it cannot be added", .{ name, qualifier, self.ast.tokenText(trait) });
+        } else for (self.typing.function_values) |named_value| switch (named_value.target) {
+            // A value passed to a generic bound keeps its own signature,
+            // which fixes nothing beyond what the function already wrote.
+            .declared => |target| if (target == decl and named_value.signature != self.typing.declSignature(decl)) {
+                fixed = named_value.signature;
+                why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit that clause, so it cannot be added", .{name});
+                break;
+            },
+            else => {},
+        };
+        const contracts = switch (self.typing.get(fixed)) {
+            .callable => |callable| callable.contracts,
+            else => return null,
+        };
+        for (sources, positions) |source, position| {
+            const permitted = for (contracts) |contract| {
+                const from = switch (contract.source.root) {
+                    .parameter => |at| at,
+                    else => continue,
+                };
+                if (from != position) continue;
+                switch (leaving) {
+                    .returned => switch (contract.kind) {
+                        .borrows => break true,
+                        .carries => if (!source.borrows) break true,
+                        .retains => {},
+                    },
+                    .retained => |destination| {
+                        if (contract.kind != .retains or (source.borrows and !contract.borrows_source)) continue;
+                        const kept = contract.destination orelse continue;
+                        switch (kept.root) {
+                            .parameter => |at| if (self.function.parameters[at] == destination) break true,
+                            else => {},
+                        }
+                    },
+                }
+            } else false;
+            if (!permitted) return why;
+        }
+        return null;
     }
 
     /// Whether `held`, the type holding the escaping observation, declares
