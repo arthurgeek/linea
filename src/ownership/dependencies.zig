@@ -906,6 +906,11 @@ const Analysis = struct {
     /// written, so each exit after that write would repeat one report. Sized
     /// by the function's escapes.
     escaped_sites: std.AutoHashMapUnmanaged(EscapeSite, void) = .empty,
+    /// Exits that have reported an escape. Another escape at such an exit is
+    /// an independent mistake and is still reported; an exit claimed by any
+    /// other report suppresses escapes there as its consequences. Sized by
+    /// the function's exits.
+    escape_exits: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The capture sources that lent a place `inout`, each of which ended
     /// the earlier observations of that place. Sized likewise.
     lend_sites: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
@@ -920,6 +925,7 @@ const Analysis = struct {
         self.reported_temporaries.deinit(self.gpa);
         self.escaped_lends.deinit(self.gpa);
         self.escaped_sites.deinit(self.gpa);
+        self.escape_exits.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
@@ -1906,6 +1912,21 @@ const Analysis = struct {
         return site;
     }
 
+    /// Where a returned value that carries `owner` is reported: what
+    /// `carriedFrom` finds, and past a block no join leads out of, its tail,
+    /// which is the value a reader would change rather than the braces.
+    /// Each step into a tail moves inside the block, so the walk ends within
+    /// the block's nesting.
+    fn returnedFrom(self: *const Analysis, start: ExprId, owner: BindingId) ExprId {
+        var site = self.carriedFrom(start, owner);
+        while (self.ast.exprTag(site) == .block) {
+            const tail = self.ast.blockOf(site).tail;
+            if (tail == .none) break;
+            site = self.carriedFrom(self.ast.withoutGroups(tail), owner);
+        }
+        return site;
+    }
+
     const EscapeSite = struct { file: FileId, span: Span };
 
     fn exprSite(self: *const Analysis, id: ExprId) EscapeSite {
@@ -1925,8 +1946,9 @@ const Analysis = struct {
     }
 
     fn escape(self: *Analysis, at: ExprId, site: EscapeSite, escaped: Escaped, origin: ?Origin) !void {
-        if (self.reported.contains(at)) return;
+        if (self.reported.contains(at) and !self.escape_exits.contains(at)) return;
         try self.reported.put(self.gpa, at, {});
+        try self.escape_exits.put(self.gpa, at, {});
         if ((try self.escaped_sites.getOrPut(self.gpa, site)).found_existing) return;
         const arena = self.sink.arena;
         switch (escaped) {
@@ -2208,7 +2230,7 @@ const Analysis = struct {
                 }
             }
             if (!try self.coveredFact(signature.result, fact, &targets))
-                try self.escape(at, self.exprSite(self.carriedFrom(returned_value, fact.origin.place.root)), if (fact.origin.lent != .none)
+                try self.escape(at, self.exprSite(self.returnedFrom(returned_value, fact.origin.place.root)), if (fact.origin.lent != .none)
                     .{ .lend = fact.origin.lent }
                 else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation, fact.origin);
         };

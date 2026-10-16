@@ -1,0 +1,26 @@
+// Each vector keeps text its signature does not let it retain. The two
+// retentions are independent mistakes, so each is reported where it is made,
+// whether one exit or two follow them.
+fn one_exit(inout first: Vec[Str], inout second: Vec[Str], left: Str, right: Str) -> UInt64 {
+    &first.push(copy(left)).unwrap()
+    &second.push(copy(right)).unwrap()
+    first.length() + second.length()
+}
+
+fn two_exits(inout first: Vec[Str], inout second: Vec[Str], left: Str, right: Str, early: Bool) -> UInt64 {
+    &first.push(copy(left)).unwrap()
+    if early {
+        return first.length()
+    }
+    &second.push(copy(right)).unwrap()
+    first.length() + second.length()
+}
+
+fn main() -> UInt8 {
+    var first: Vec[Str] = Vec.new()
+    var second: Vec[Str] = Vec.new()
+    let kept = one_exit(&first, &second, "tea", "milk") + two_exits(&first, &second, "rice", "salt", false)
+    first.release()
+    second.release()
+    UInt8(kept)
+}
