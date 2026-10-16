@@ -34,6 +34,26 @@ const Source = source_mod.Source;
 /// widening what `initialize` advertises to match. Nothing here switches on
 /// a method name by hand; that dispatch belongs to the generated protocol
 /// types, not to an opinion of this module's.
+/// A path written as a glob that matches it and nothing else: each character
+/// a glob reads as a pattern is put in a class of its own, `[*]`, which every
+/// glob the protocol's clients read takes as that character.
+fn globLiteral(gpa: std.mem.Allocator, path: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (path) |c| switch (c) {
+        '*', '?', '[', ']', '{', '}' => try out.appendSlice(gpa, &.{ '[', c, ']' }),
+        else => try out.append(gpa, c),
+    };
+    return out.toOwnedSlice(gpa);
+}
+
+test "a watched path's glob characters match only themselves" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqualStrings("page[[]1[]].txt", try globLiteral(arena.allocator(), "page[1].txt"));
+    try std.testing.expectEqualStrings("a[*][?][{]b[}]", try globLiteral(arena.allocator(), "a*?{b}"));
+    try std.testing.expectEqualStrings("templates/page.html", try globLiteral(arena.allocator(), "templates/page.html"));
+}
+
 pub const Handler = struct {
     gpa: std.mem.Allocator,
     /// Backing for each retained Analysis, distinct from message/index storage.
@@ -337,8 +357,14 @@ pub const Handler = struct {
     ) !void {
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
+            // A file the held program embeds is nothing an editor shows, so no
+            // document event follows its change: the program is checked again
+            // and published from here, or what the editor shows about it
+            // stays as it was.
+            const embedded_by = try handler.embeddedBy(arena, path);
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
+            if (embedded_by) |entry| try handler.report(arena, entry);
         }
     }
 
@@ -885,7 +911,7 @@ pub const Handler = struct {
     fn watchEmbeds(handler: *Handler, arena: std.mem.Allocator, held: *const analysis.Analysis) !void {
         if (!handler.watch_offered) return;
         var paths: std.ArrayList([]const u8) = .empty;
-        for (held.program.embeds.files) |file| try paths.append(arena, file.path);
+        for (held.program.embeds.watched) |path| try paths.append(arena, path);
         if (paths.items.len == handler.embeds_watched.items.len) {
             for (paths.items, handler.embeds_watched.items) |now, before| {
                 if (!std.mem.eql(u8, now, before)) break;
@@ -918,7 +944,7 @@ pub const Handler = struct {
                 std.mem.startsWith(u8, path, handler.root) and path[handler.root.len] == '/';
             const relative = if (inside) path[handler.root.len + 1 ..] else std.fs.path.basename(path);
             var watcher: std.json.ObjectMap = .empty;
-            try watcher.put(arena, "globPattern", .{ .string = try std.mem.concat(arena, u8, &.{ "**/", relative }) });
+            try watcher.put(arena, "globPattern", .{ .string = try std.mem.concat(arena, u8, &.{ "**/", try globLiteral(arena, relative) }) });
             try watchers.append(.{ .object = watcher });
         }
         var options: std.json.ObjectMap = .empty;
@@ -958,6 +984,17 @@ pub const Handler = struct {
         return std.mem.eql(u8, held.table.get(file).text, text);
     }
 
+    /// The entry of the held program when it embeds `path`, read or not, or
+    /// null. Copied into `arena`, since invalidating releases the analysis.
+    fn embeddedBy(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !?[]const u8 {
+        const held = handler.cached orelse return null;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        for (held.of.program.embeds.watched) |watched| {
+            if (std.mem.eql(u8, watched, named)) return try arena.dupe(u8, held.entry);
+        }
+        return null;
+    }
+
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
     ///
     /// The loader's module directories include namespace dependencies on files
@@ -976,9 +1013,10 @@ pub const Handler = struct {
             handler.drop();
             return;
         }
-        // A file the program embeds is as much its input as a source is.
-        for (held.of.program.embeds.files) |file| {
-            if (std.mem.eql(u8, file.path, named)) {
+        // A file the program embeds is as much its input as a source is, and
+        // so is one it names that could not be read.
+        for (held.of.program.embeds.watched) |watched| {
+            if (std.mem.eql(u8, watched, named)) {
                 handler.drop();
                 return;
             }
