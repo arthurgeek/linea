@@ -175,9 +175,16 @@ Most C libraries hand out pointers to objects you must later free: SQLite's
 - `@linear` means every one must reach the function that frees it.
 
 A newtype crosses to C as the value it wraps, so C receives the pointer
-itself. A parameter written without a convention lends the object to C for
-the call. `sink` gives it to C for good, which is how the function that frees
-it is declared:
+itself. How the `extern` takes the handle says what C does with the object:
+
+- `read` lends it to C for the call, and promises C only reads it.
+- A parameter written without a convention lends it too, and C may change
+  it. Such a function is called only from a method that takes the wrapper
+  `inout self` or `sink self`, so nothing read from the object earlier can
+  still be in use.
+- `sink` gives it to C for good, which is how the function that frees it is
+  declared. It too is called from a method taking `sink self` or
+  `inout self`.
 
 `ledger/linea.json`:
 
@@ -217,7 +224,7 @@ extern fn counter_open() -> UInt64
 
 extern fn counter_add(counter: Handle, amount: Int8)
 
-extern fn counter_total(counter: Handle) -> Int64
+extern fn counter_total(read counter: Handle) -> Int64
 
 extern fn counter_close(sink counter: Handle)
 
@@ -311,7 +318,7 @@ type Handle = UInt64
 
 extern fn counter_open() -> UInt64
 
-extern fn counter_total(counter: Handle) -> Int64
+extern fn counter_total(read counter: Handle) -> Int64
 
 extern fn counter_close(sink counter: Handle)
 
@@ -414,7 +421,7 @@ type Handle = UInt64
 // new ledger's address into it.
 extern fn ledger_open(inout out: UInt64, opening: Int64) -> Int32
 
-extern fn ledger_opening(ledger: Handle) -> Int64
+extern fn ledger_opening(read ledger: Handle) -> Int64
 
 extern fn ledger_close(sink ledger: Handle)
 
@@ -626,9 +633,9 @@ type Handle = UInt64
 extern fn greeter_open() -> UInt64
 
 // The answer points into the greeter, so it borrows the handle.
-extern fn greeter_name(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
-extern fn greeter_record(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_record(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
 // C reads a NUL-terminated string, which a `CString` holds.
 extern fn greeter_rename(greeter: Handle, name: ffi.CText)
@@ -717,13 +724,12 @@ Ada, then Grace; a record of 6 bytes
 ```
 
 Renaming rewrites the bytes the name points at. A wrapper that held on to the
-`CText` across a rename would read whatever C wrote there next. The compiler
-cannot see that `greeter_rename` changes the greeter: C takes the handle by
-value, as every C function taking the object does. So the wrapper calls a C
-function that changes or frees its object only from a method that takes the
-wrapper `inout` or `sink`, and never directly while a `CText` read from that
-object is still in use. Then `greeter_name` borrowing the handle and `rename`
-taking the greeter `inout` are enough for Linea to refuse the stale read:
+`CText` across a rename would read whatever C wrote there next. C takes the
+handle by value either way, so the declaration says which calls only read:
+`greeter_name` marks its parameter `read`, and `greeter_rename` does not. A
+call that may change the greeter is allowed only in a method taking the
+greeter `inout` or `sink`, as `rename` does. That `inout` is what refuses the
+stale read:
 
 ```linea
 fn stale(inout person: Greeter) -> String {
@@ -742,6 +748,30 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
    |     ^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
 75 |     copied(name)
    |            ---- the observation is still used here
+```
+
+A method that took the greeter as a plain `self` could not call
+`greeter_rename` at all:
+
+```linea
+impl Greeter {
+    pub fn rename_quietly(self: Self, name: Str) {
+        let copied = ffi.CString.open(name) else |_| {
+            return
+        }
+        greeter_rename(self.handle, copied.text())
+        copied.release()
+    }
+}
+```
+
+<!-- guide: unchecked a fragment added to the end of the greeter module above, shown for the error it gets -->
+```
+error[T-ExternHandle]: `greeter_rename` may change the object its handle holds, so the call needs that object lent whole
+  --> greeting/greeter/greeter.lin:77:9
+   |
+77 |         greeter_rename(self.handle, copied.text())
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call it from a method taking `inout self` or `sink self`, or mark `greeter` `read` if C only reads it
 ```
 
 ### `std.ffi` stays inside the trusted module
@@ -819,7 +849,7 @@ extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: In
 // `close_v2` always releases the connection, even while a statement is open.
 extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
 
-extern fn sqlite3_errmsg(database: DatabaseHandle) -> ffi.CText where borrows(database)
+extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
 
 extern fn sqlite3_prepare_v2(database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, tail: UInt64) -> Int32
 
@@ -827,7 +857,7 @@ extern fn sqlite_shim_bind_text(statement: StatementHandle, index: Int32, text: 
 
 extern fn sqlite3_step(statement: StatementHandle) -> Int32
 
-extern fn sqlite3_column_text(statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
+extern fn sqlite3_column_text(read statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
 
 extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
 
@@ -887,7 +917,9 @@ impl Database {
         copied(sqlite3_errmsg(self.handle))
     }
 
-    pub fn prepare(self: Self, sql: Str) -> Result[Statement, Error] {
+    // Preparing changes the connection's error state, which `message` reads,
+    // so it takes the connection `inout`.
+    pub fn prepare(inout self: Self, sql: Str) -> Result[Statement, Error] {
         var address: UInt64 = 0
         let code = sqlite3_prepare_v2(self.handle, ffi.bytes(sql), Int32(sql.length()), &address, 0)
         if code != ok {
@@ -959,33 +991,33 @@ import sqlite
 use sqlite.Database
 use sqlite.Error
 
-fn run(database: Database, sql: Str) -> Result[(), Error] {
-    defer var statement = database.prepare(sql)?
+fn run(inout database: Database, sql: Str) -> Result[(), Error] {
+    defer var statement = &database.prepare(sql)?
     let _row = &statement.step()?
     .Ok(())
 }
 
-fn add(database: Database, name: Str) -> Result[(), Error] {
-    defer var insert = database.prepare("INSERT INTO guests VALUES (?1)")?
+fn add(inout database: Database, name: Str) -> Result[(), Error] {
+    defer var insert = &database.prepare("INSERT INTO guests VALUES (?1)")?
     &insert.bind_text(1, name)?
     let _row = &insert.step()?
     .Ok(())
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let database = Database.open(":memory:") else |_| {
+    defer var database = Database.open(":memory:") else |_| {
         return .Ok(1)
     }
-    let _created = run(database, "CREATE TABLE guests (name TEXT)") else |_| {
+    let _created = run(&database, "CREATE TABLE guests (name TEXT)") else |_| {
         return .Ok(2)
     }
-    let _first = add(database, "Grace") else |_| {
+    let _first = add(&database, "Grace") else |_| {
         return .Ok(3)
     }
-    let _second = add(database, "Ada") else |_| {
+    let _second = add(&database, "Ada") else |_| {
         return .Ok(4)
     }
-    defer var names = database.prepare("SELECT name FROM guests ORDER BY name") else |_| {
+    defer var names = &database.prepare("SELECT name FROM guests ORDER BY name") else |_| {
         return .Ok(5)
     }
     while true {
@@ -998,7 +1030,7 @@ fn main() -> Result[UInt8, io.IoError] {
         defer let name = names.text(0)
         io.println("{name}")?
     }
-    match database.prepare("SELEC name FROM guests") {
+    match &database.prepare("SELEC name FROM guests") {
         Ok(statement) => statement.finish(),
         Err(failure) => {
             defer let said = database.message()
@@ -1242,37 +1274,50 @@ fn collect(inout rows: Rows, count: Int32, values: ffi.CTextList, names: ffi.CTe
     0
 }
 
-// Run `sql` against a fresh in-memory database, one line per row it
-// produced, or the code SQLite refused with.
-pub fn rows_of(sql: Str) -> Result[String, Int32] {
-    let path = ffi.CString.open(":memory:") else |_| {
-        return .Err(7)
+// A connection to an in-memory database. It must be closed.
+@(opaque, linear)
+struct Database { handle: DatabaseHandle }
+
+impl Database {
+    pub fn open() -> Result[Database, Int32] {
+        let path = ffi.CString.open(":memory:") else |_| {
+            return .Err(7)
+        }
+        var address: UInt64 = 0
+        let opened = sqlite3_open_v2(path.text(), &address, read_write_create, 0)
+        path.release()
+        if address == 0 {
+            return .Err(7)
+        }
+        let database = Database { handle = DatabaseHandle(address) }
+        if opened != ok {
+            database.close()
+            return .Err(opened)
+        }
+        .Ok(database)
     }
-    var address: UInt64 = 0
-    let opened = sqlite3_open_v2(path.text(), &address, read_write_create, 0)
-    path.release()
-    if address == 0 {
-        return .Err(7)
+
+    // Run `sql`, one line per row it produced, or the code SQLite refused
+    // with. Running statements changes the database, so it is lent `inout`.
+    pub fn rows_of(inout self: Self, sql: Str) -> Result[String, Int32] {
+        let statements = ffi.CString.open(sql) else |_| {
+            return .Err(7)
+        }
+        var rows = Rows { lines = String.new() }
+        let ran = sqlite3_exec(self.handle, statements.text(), collect, &rows, 0)
+        statements.release()
+        let Rows { lines: lines } = rows
+        if ran != ok {
+            lines.release()
+            return .Err(ran)
+        }
+        .Ok(lines)
     }
-    let database = DatabaseHandle(address)
-    if opened != ok {
-        let _closed = sqlite3_close_v2(database)
-        return .Err(opened)
+
+    pub fn close(sink self: Self) {
+        let Database { handle: handle } = self
+        let _closed = sqlite3_close_v2(handle)
     }
-    let statements = ffi.CString.open(sql) else |_| {
-        let _closed = sqlite3_close_v2(database)
-        return .Err(7)
-    }
-    var rows = Rows { lines = String.new() }
-    let ran = sqlite3_exec(database, statements.text(), collect, &rows, 0)
-    statements.release()
-    let _closed = sqlite3_close_v2(database)
-    let Rows { lines: lines } = rows
-    if ran != ok {
-        lines.release()
-        return .Err(ran)
-    }
-    .Ok(lines)
 }
 ```
 
@@ -1282,10 +1327,17 @@ pub fn rows_of(sql: Str) -> Result[String, Int32] {
 import std.io
 import sqlite
 
+use sqlite.Database
+
 fn main() -> Result[UInt8, io.IoError] {
     let sql = "CREATE TABLE guests (name TEXT, visits INTEGER); INSERT INTO guests VALUES ('Grace', 3), ('Ada', 1); SELECT name, visits FROM guests ORDER BY visits;"
-    defer let lines = sqlite.rows_of(sql) else |_| {
+    var database = Database.open() else |_| {
         return .Ok(1)
+    }
+    let rows = &database.rows_of(sql)
+    database.close()
+    defer let lines = rows else |_| {
+        return .Ok(2)
     }
     io.print(lines.view())?
     .Ok(0)
@@ -1313,11 +1365,10 @@ against the C library's documentation:
 3. C keeps no pointer into Linea memory after the call returns: not a
    `Bytes`, not a `CText` from a `CString`, not a context.
 4. A `CText` answer whose text lives inside a C object says so with
-   `borrows`. A C function that changes or frees that object is called only
-   from a wrapper method taking the wrapper `inout` or `sink`, as the
-   greeter's `rename` and `close` are, and never directly while a `CText`
-   read from that object is still in use. The `extern` itself takes the handle
-   as a plain parameter, which the compiler cannot tell from a read.
+   `borrows`, and an `extern` marks its handle `read` only where C truly only
+   reads the object. The compiler holds every other call to a method taking
+   the wrapper `inout` or `sink`, so a `read` written on a function that
+   changes the object is the one way to defeat it.
 5. C calls a callback only during the call that passed it.
 6. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.

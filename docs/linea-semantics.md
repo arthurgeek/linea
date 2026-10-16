@@ -4241,6 +4241,16 @@ fn add_square(inout tally: Tally, square: Int32) -> Int32 {
 `squares_visit(5, add_square, &tally)` lends `tally` for the call, and every
 call C makes to `add_square` receives it.
 
+**[T-ExternHandle]** An `extern` parameter whose type is a sealed (`@opaque`)
+newtype declared in the `extern`'s own module is a handle to an object C
+holds. Written `read`, the parameter promises that C only reads the object, and
+only an `extern` may write `read` on a parameter. A handle parameter without
+`read` (a plain lend, `inout` or `sink`) lets C change or free the object, so a
+call to that `extern` appears only in a method whose receiver `self` is
+`inout` or `sink`. That receiver lends the whole object to the method, so an
+observation read from the object before the call, such as a `CText`, is
+refused by [O-Borrow] wherever it would still be used.
+
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
 runtime functions it calls: `std.fs` and `std.net` each declare `linea_close`, and

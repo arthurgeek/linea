@@ -5,7 +5,7 @@ type Handle = UInt64
 // new ledger's address into it.
 extern fn ledger_open(inout out: UInt64, opening: Int64) -> Int32
 
-extern fn ledger_opening(ledger: Handle) -> Int64
+extern fn ledger_opening(read ledger: Handle) -> Int64
 
 extern fn ledger_close(sink ledger: Handle)
 

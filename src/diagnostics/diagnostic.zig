@@ -342,6 +342,9 @@ pub const Code = enum {
     /// A callback an `extern` takes is not one C can call: its form, its
     /// context, or an argument with no fixed function behind it.
     t_extern_callback,
+    /// A C function that may change the object a sealed handle holds is
+    /// called from somewhere that does not hold the object whole.
+    t_extern_handle,
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
@@ -511,6 +514,7 @@ pub const Code = enum {
             .t_extern => "T-Extern",
             .t_extern_agreement => "T-ExternAgreement",
             .t_extern_callback => "T-ExternCallback",
+            .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",

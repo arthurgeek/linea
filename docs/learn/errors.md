@@ -48,6 +48,7 @@ for the code in brackets to reach the rule itself.
 | `T-Derive` | error | Calling things: [`@derive`: implementations the compiler writes](02-calling-things.md#derive-implementations-the-compiler-writes) | [§4 Types](../linea-semantics.md#4-types), at `[T-Derive]` |
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
 | `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
+| `T-ExternHandle` | error | Calling C: [Text and bytes: `std.ffi`](11-calling-c.md#text-and-bytes-stdffi) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
 | `T-Impl` | error | Text: [Reading text as a value](08-text.md#reading-text-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |

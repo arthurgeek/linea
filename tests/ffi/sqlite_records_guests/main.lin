@@ -5,29 +5,29 @@ use sqlite.Database
 use sqlite.Error
 
 // Insert one guest through a statement with two parameters.
-fn add(database: Database, name: Str, visits: Int64) -> Result[(), Error] {
-    defer var insert = database.prepare("INSERT INTO guests VALUES (?1, ?2)")?
+fn add(inout database: Database, name: Str, visits: Int64) -> Result[(), Error] {
+    defer var insert = &database.prepare("INSERT INTO guests VALUES (?1, ?2)")?
     &insert.bind_text(1, name)?
     &insert.bind_integer(2, visits)?
     let _row = &insert.step()?
     .Ok(())
 }
 
-fn record_guests(database: Database) -> Result[(), Error] {
-    database.execute("CREATE TABLE guests (name TEXT, visits INTEGER)")?
-    add(database, "Grace", 3)?
-    add(database, "Ada", 1)?
+fn record_guests(inout database: Database) -> Result[(), Error] {
+    &database.execute("CREATE TABLE guests (name TEXT, visits INTEGER)")?
+    add(&database, "Grace", 3)?
+    add(&database, "Ada", 1)?
     .Ok(())
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let database = Database.open(":memory:") else |_| {
+    defer var database = Database.open(":memory:") else |_| {
         return .Ok(1)
     }
-    let _recorded = record_guests(database) else |_| {
+    let _recorded = record_guests(&database) else |_| {
         return .Ok(2)
     }
-    defer var guests = database.prepare("SELECT name, visits FROM guests ORDER BY name") else |_| {
+    defer var guests = &database.prepare("SELECT name, visits FROM guests ORDER BY name") else |_| {
         return .Ok(3)
     }
     while true {
@@ -42,7 +42,7 @@ fn main() -> Result[UInt8, io.IoError] {
         io.println("{name}, visits: {visits}")?
     }
     // SQLite refuses a statement it cannot parse, and says why.
-    match database.prepare("SELEC name FROM guests") {
+    match &database.prepare("SELEC name FROM guests") {
         Ok(statement) => {
             statement.finish()
             io.println("the misspelled statement was accepted")?

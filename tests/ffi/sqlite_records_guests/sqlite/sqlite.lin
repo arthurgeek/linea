@@ -14,7 +14,7 @@ extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: In
 // connection alive until the statement is finalized.
 extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
 
-extern fn sqlite3_errmsg(database: DatabaseHandle) -> ffi.CText where borrows(database)
+extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
 
 extern fn sqlite3_prepare_v2(database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, tail: UInt64) -> Int32
 
@@ -25,9 +25,9 @@ extern fn sqlite3_bind_int64(statement: StatementHandle, index: Int32, value: In
 extern fn sqlite3_step(statement: StatementHandle) -> Int32
 
 // The text lives inside the statement until it steps again or is finalized.
-extern fn sqlite3_column_text(statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
+extern fn sqlite3_column_text(read statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
 
-extern fn sqlite3_column_int64(statement: StatementHandle, column: Int32) -> Int64
+extern fn sqlite3_column_int64(read statement: StatementHandle, column: Int32) -> Int64
 
 extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
 
@@ -92,7 +92,9 @@ impl Database {
         copied(sqlite3_errmsg(self.handle))
     }
 
-    pub fn prepare(self: Self, sql: Str) -> Result[Statement, Error] {
+    // Preparing changes the connection's error state, which `message` reads,
+    // so it takes the connection `inout`.
+    pub fn prepare(inout self: Self, sql: Str) -> Result[Statement, Error] {
         var address: UInt64 = 0
         let code = sqlite3_prepare_v2(self.handle, ffi.bytes(sql), Int32(sql.length()), &address, 0)
         if code != ok {
@@ -105,8 +107,8 @@ impl Database {
     }
 
     // Run one statement that answers no rows.
-    pub fn execute(self: Self, sql: Str) -> Result[(), Error] {
-        defer var statement = self.prepare(sql)?
+    pub fn execute(inout self: Self, sql: Str) -> Result[(), Error] {
+        defer var statement = &self.prepare(sql)?
         let _row = &statement.step()?
         .Ok(())
     }

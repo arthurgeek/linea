@@ -1,0 +1,15 @@
+error[T-ExternHandle]: `greeter_rename` may change the object its handle holds, so the call needs that object lent whole
+  --> tests/ffi/a_changing_call_takes_its_object_whole/greeter/greeter.lin:38:9
+   |
+38 |         greeter_rename(self.handle, copied.text())
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call it from a method taking `inout self` or `sink self`, or mark `greeter` `read` if C only reads it
+error[T-ExternHandle]: `greeter_rename` may change the object its handle holds, so the call needs that object lent whole
+  --> tests/ffi/a_changing_call_takes_its_object_whole/greeter/greeter.lin:50:5
+   |
+50 |     greeter_rename(greeter, name)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call it from a method taking `inout self` or `sink self`, or mark `greeter` `read` if C only reads it
+error[T-ExternHandle]: `greeter_rename` may change the object its handle holds, so the call needs that object lent whole
+  --> tests/ffi/a_changing_call_takes_its_object_whole/greeter/greeter.lin:51:5
+   |
+51 |     greeter_rename(greeter, name)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call it from a method taking `inout self` or `sink self`, or mark `greeter` `read` if C only reads it

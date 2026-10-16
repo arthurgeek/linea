@@ -11,7 +11,8 @@ extern fn counter_open() -> UInt64
 // address of the handle itself, which is C's `struct counter **`.)
 extern fn counter_add(counter: Handle, amount: Int8)
 
-extern fn counter_total(counter: Handle) -> Int64
+// C only reads the counter here, which `read` says.
+extern fn counter_total(read counter: Handle) -> Int64
 
 extern fn counter_close(sink counter: Handle)
 

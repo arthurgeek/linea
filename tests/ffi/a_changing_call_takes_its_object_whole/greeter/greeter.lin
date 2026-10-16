@@ -1,0 +1,52 @@
+import std.ffi
+
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn greeter_open() -> UInt64
+
+// C only reads the greeter here, which `read` says.
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+// Without `read`, C may change the greeter, so the call needs the greeter
+// lent whole: from a method taking it `inout` or `sink`.
+extern fn greeter_rename(greeter: Handle, name: ffi.CText)
+
+extern fn greeter_close(sink greeter: Handle)
+
+@(opaque, linear)
+struct Greeter { handle: Handle }
+
+impl Greeter {
+    pub fn open() -> Option[Greeter] {
+        let address = greeter_open()
+        if address == 0 {
+            return .None
+        }
+        .Some(.{ handle = Handle(address) })
+    }
+
+    pub fn name_is_empty(self: Self) -> Bool {
+        greeter_name(self.handle).length() == 0
+    }
+
+    // A read receiver would let a name read earlier outlive the rename.
+    pub fn rename(self: Self, name: Str) {
+        let copied = ffi.CString.open(name) else |_| {
+            return
+        }
+        greeter_rename(self.handle, copied.text())
+        copied.release()
+    }
+
+    pub fn close(sink self: Self) {
+        let Greeter { handle: handle } = self
+        greeter_close(handle)
+    }
+}
+
+// Nor may a function that is not a method of the greeter.
+fn _rename_twice(greeter: Handle, name: ffi.CText) {
+    greeter_rename(greeter, name)
+    greeter_rename(greeter, name)
+}

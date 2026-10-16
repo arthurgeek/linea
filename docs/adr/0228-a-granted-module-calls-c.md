@@ -107,6 +107,16 @@ dependencies, and taking one apart hands them to the binding. Before this
 record the construction dropped them, which for a view of C memory was a read
 after free.
 
+**An `extern` says which calls only read the object** ([T-ExternHandle]). A
+handle parameter, a sealed newtype of the `extern`'s own module, written
+`read` promises that C only reads the object. Without `read` (a plain lend,
+`inout` or `sink`) C may change or free it, and the `extern` is called only
+from a method whose receiver is `inout self` or `sink self`. That receiver
+lends the whole object to the method, so a `CText` read from the object before
+the call is refused by [O-Borrow] wherever it is used after. C takes the
+handle by value either way, so the marker is the only thing that can tell the
+compiler a call leaves the object as it was.
+
 **A callback is a plain `fn` with an optional context** ([T-ExternCallback]).
 Its parameters and result cross, apart from a leading `inout` parameter whose
 type the `extern` also takes as its one `inout` parameter of that type. C
@@ -123,11 +133,8 @@ every `extern` signature:
 - each declaration matches the C prototype;
 - conventions tell the truth about ownership;
 - C keeps no pointer into Linea memory after a call returns;
-- text living inside a C object is declared `borrows`, and a C function that
-  changes or frees the object is called only from a wrapper method taking the
-  wrapper `inout` or `sink`, never directly while text read from it is in use:
-  the `extern` takes the handle as a plain parameter, which the compiler cannot
-  tell from a read;
+- text living inside a C object is declared `borrows`, and `read` is written
+  on a handle parameter only where C truly only reads the object;
 - C calls a callback only during the call that passed it, on the calling thread;
 - every length given to C or to `copy_bytes` is the length of its memory.
 
@@ -155,11 +162,6 @@ every `extern` signature:
   - `ffi.Errno[R]` would read `errno` immediately after a call.
   - A callback context of a type parameter would need one instance per symbol
     across instantiations.
-  - A convention that lends a handle exclusively by value, so an `extern` that
-    changes its object ends what was borrowed from it at the declaration
-    rather than through the wrapper's discipline. One shape is to treat a plain
-    lend of a linear newtype to an `extern` as exclusive, which would also end
-    the borrows of read-only calls.
 
 ## Alternatives considered
 

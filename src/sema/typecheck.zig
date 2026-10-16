@@ -1434,6 +1434,7 @@ fn typecheckInternal(
     try c.checkEntryAnswer();
     try c.checkTestAnswers();
     try c.checkForeignCallbacks();
+    try c.checkHandleChanges();
     try c.checkForeignUses(foreign_module);
 
     // Last, because a body and an implementation both write types too, and a
@@ -18603,6 +18604,60 @@ const Checker = struct {
             "`{s}` is `std.ffi`'s, and only a module its root's manifest grants may use it",
             .{self.ast.tokenText(self.ast.declName(target))},
         );
+    }
+
+    /// [T-ExternHandle]: an `extern` that takes a sealed handle of its own
+    /// module without marking the parameter `read` may change the object the
+    /// handle holds, so it is called only from a method whose receiver is
+    /// `inout` or `sink`. That receiver is what ends a `CText` borrowed from
+    /// the object before the call. One walk over the calls.
+    fn checkHandleChanges(self: *Checker) std.mem.Allocator.Error!void {
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const changed = (try self.changedHandle(callee)) orelse continue;
+            const owner = self.expression_owners[call.at.index()];
+            if (owner != .none and self.holdsReceiverWhole(owner)) continue;
+            const label = try std.fmt.allocPrint(
+                self.sink.arena,
+                "call it from a method taking `inout self` or `sink self`, or mark `{s}` `read` if C only reads it",
+                .{self.ast.tokenText(changed.name)},
+            );
+            try self.sink.addErrorFmt(
+                .t_extern_handle,
+                self.ast.fileOfExpr(call.at),
+                self.ast.exprSpan(call.at),
+                label,
+                "`{s}` may change the object its handle holds, so the call needs that object lent whole",
+                .{self.ast.tokenText(self.ast.declName(callee))},
+            );
+        }
+    }
+
+    /// The first parameter of the `extern` `d` that takes a sealed newtype
+    /// declared in `d`'s own module without saying `read`, or null.
+    fn changedHandle(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!?node.Param {
+        for (self.ast.declParams(d), 0..) |param, k| {
+            if (param.convention == .read and self.ast.paramConventionToken(param) != .none) continue;
+            const t = try self.declaredParamType(d, k);
+            if (t == .poison or self.builder.get(t) != .newtype) continue;
+            const declared = self.builder.view().declOfType(t) orelse continue;
+            if (self.ast.declVisibility(declared) != .opaque_) continue;
+            if (self.program.moduleOf(declared) != self.program.moduleOf(d)) continue;
+            return param;
+        }
+        return null;
+    }
+
+    /// Whether `d` is a method whose receiver, `self`, is `inout` or `sink`.
+    fn holdsReceiverWhole(self: *const Checker, d: node.DeclId) bool {
+        const params = self.ast.declParams(d);
+        if (params.len == 0 or params[0].name == .none) return false;
+        if (!std.mem.eql(u8, self.ast.tokenText(params[0].name), "self")) return false;
+        return params[0].convention == .inout or params[0].convention == .sink;
     }
 
     /// [T-ExternCallback] at a call: C calls a callback through an entry made

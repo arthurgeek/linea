@@ -5,7 +5,7 @@ type Handle = UInt64
 
 extern fn greeter_open() -> UInt64
 
-extern fn greeter_name(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
 extern fn greeter_rename(greeter: Handle)
 

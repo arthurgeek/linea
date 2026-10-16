@@ -1,7 +1,9 @@
 import counter
 
+use counter.Counter
+
 fn main() -> UInt8 {
-    if counter.opened(false) {
+    if Counter.open().close_unless(false) {
         0
     } else {
         1

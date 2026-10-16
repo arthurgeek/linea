@@ -8,13 +8,13 @@ extern fn greeter_open() -> UInt64
 
 // Each answer points into the greeter, so it borrows the handle it was read
 // from.
-extern fn greeter_name(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
-extern fn greeter_nothing(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_nothing(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
-extern fn greeter_garbled(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_garbled(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
-extern fn greeter_record(greeter: Handle) -> ffi.CText where borrows(greeter)
+extern fn greeter_record(read greeter: Handle) -> ffi.CText where borrows(greeter)
 
 extern fn greeter_rename(greeter: Handle)
 

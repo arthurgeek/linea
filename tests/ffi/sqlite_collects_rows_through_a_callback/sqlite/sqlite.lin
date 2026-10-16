@@ -59,35 +59,48 @@ fn collect(inout rows: Rows, count: Int32, values: ffi.CTextList, names: ffi.CTe
 
 pub enum Failure { OutOfMemory, Refused(Int32) }
 
-// Run `sql` against a fresh in-memory database and answer every row it
-// produced, one line per row.
-pub fn rows_of(sql: Str) -> Result[String, Failure] {
-    let path = ffi.CString.open(":memory:") else |_| {
-        return .Err(.OutOfMemory)
+// A connection to an in-memory database. It must be closed.
+@(opaque, linear)
+struct Database { handle: DatabaseHandle }
+
+impl Database {
+    pub fn open() -> Result[Database, Failure] {
+        let path = ffi.CString.open(":memory:") else |_| {
+            return .Err(.OutOfMemory)
+        }
+        var address: UInt64 = 0
+        let opened = sqlite3_open_v2(path.text(), &address, read_write_create, 0)
+        path.release()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        let database = Database { handle = DatabaseHandle(address) }
+        if opened != ok {
+            database.close()
+            return .Err(.Refused(opened))
+        }
+        .Ok(database)
     }
-    var address: UInt64 = 0
-    let opened = sqlite3_open_v2(path.text(), &address, read_write_create, 0)
-    path.release()
-    if address == 0 {
-        return .Err(.OutOfMemory)
+
+    // Run `sql` and answer every row it produced, one line per row.
+    // Running statements changes the database, so it is lent `inout`.
+    pub fn rows_of(inout self: Self, sql: Str) -> Result[String, Failure] {
+        let statements = ffi.CString.open(sql) else |_| {
+            return .Err(.OutOfMemory)
+        }
+        var rows = Rows { lines = String.new(), unreadable = 0 }
+        let ran = sqlite3_exec(self.handle, statements.text(), collect, &rows, 0)
+        statements.release()
+        let Rows { lines: lines, unreadable: _unreadable } = rows
+        if ran != ok {
+            lines.release()
+            return .Err(.Refused(ran))
+        }
+        .Ok(lines)
     }
-    let database = DatabaseHandle(address)
-    if opened != ok {
-        let _closed = sqlite3_close_v2(database)
-        return .Err(.Refused(opened))
+
+    pub fn close(sink self: Self) {
+        let Database { handle: handle } = self
+        let _closed = sqlite3_close_v2(handle)
     }
-    let statements = ffi.CString.open(sql) else |_| {
-        let _closed = sqlite3_close_v2(database)
-        return .Err(.OutOfMemory)
-    }
-    var rows = Rows { lines = String.new(), unreadable = 0 }
-    let ran = sqlite3_exec(database, statements.text(), collect, &rows, 0)
-    statements.release()
-    let _closed = sqlite3_close_v2(database)
-    let Rows { lines: lines, unreadable: _unreadable } = rows
-    if ran != ok {
-        lines.release()
-        return .Err(.Refused(ran))
-    }
-    .Ok(lines)
 }

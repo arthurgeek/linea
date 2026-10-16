@@ -7298,7 +7298,9 @@ const Resolver = struct {
         for (self.program.modules) |*m| {
             for (m.decls.start..m.decls.end) |i| {
                 const d = DeclId.at(@intCast(i));
-                for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
+                // An `extern` says with `read` that C only reads a handle it
+                // is given, which a default would not say ([T-ExternHandle]).
+                if (!self.ast.declIsExtern(d)) for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
                 // A member carries only `pub`, and a signature carries
                 // nothing: the parser accepts no other word inside either
                 // pair of braces, so there is nothing here that it let past.
