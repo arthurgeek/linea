@@ -789,8 +789,30 @@ fn main() -> Result[UInt8, io.IoError] {
 36 bytes in 3 lines
 ```
 
-`embed` checks that the file is UTF-8, because a `Str` always is; a file that is
-not is refused with a note pointing at `embed_bytes`.
+`embed` checks that the file is UTF-8, because a `Str` always is. Here
+`price.txt` was saved with its last character, a euro sign, cut off after two of
+its three bytes:
+
+<!-- guide: unchecked a file that is not UTF-8 cannot be pasted into this page -->
+```linea
+fn main() -> UInt8 {
+    UInt8(embed("price.txt").length())
+}
+```
+
+```
+error[M-EmbedText]: "price.txt" is not UTF-8 text
+ --> main.lin:2:17
+  |
+2 |     UInt8(embed("price.txt").length())
+  |                 ^^^^^^^^^^^ byte 9 is 0xE2, which begins a character the file ends before completing
+  |
+  = note: that byte is at line 1, column 10 of the file
+  = help: `embed_bytes("price.txt")` embeds a file of any bytes as a `mem.Slice[UInt8]`
+```
+
+The note says where in the file to look, and the help names the form that takes
+the file as it is.
 
 The path is a string literal written right there, never a variable, because the
 file is read before the program runs. It is relative to the file that writes

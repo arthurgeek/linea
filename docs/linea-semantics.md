@@ -255,8 +255,8 @@ statement, although it is a declaration.
 Words quoted in the grammar are reserved and cannot be names, with the
 exceptions below. This includes words used in only one grammatical position,
 such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
-`linear`, `copyable` and `carrier`, so a reader can decide whether a name is legal without knowing the
-parser's state.
+`linear`, `copyable` and `carrier`, so a reader can decide whether a name is
+legal without knowing the parser's state.
 
 `type`, `alias`, `proj`, `trav`, `it`, `via` and `default` are contextual
 words, not reserved words.
@@ -4294,19 +4294,19 @@ no arithmetic operations. A `Bool` constant is a literal or a reference to one,
 optionally parenthesised. Its value is `true` or `false`, distinct from every
 integer value, and a Bool cannot serve as a numeric bound or array length.
 
-A string constant is a string literal, an embedded file read with `embed`, or
-an immutable reference to one, optionally parenthesised. Its value denotes
-static decoded bytes with the same UTF-8, escape and byte-length rules as a
-direct string literal; an embedded file's value is the file's bytes. A byte
-constant is an embedded file read with `embed_bytes`, or an immutable reference
-to one: its value is the file's bytes, as a `mem.Slice[UInt8]` viewing static
-storage. An embed the loader refused is a constant whose value does not exist,
-so it is reported once, by [M-Embed] or [M-EmbedText], and not again by
-[T-Const]. Embedded NUL and
-empty strings are admitted. String equality, concatenation, slicing, length calls
-and interpolation are not constant-expression forms, and text does not become an
-integer count, an arithmetic operand or a numeric conversion operand because it
-is constant. Function defaults admit these same string constant forms.
+A string constant is a string literal, an embedded file read with `embed`, or an
+immutable reference to one, optionally parenthesised. Its value denotes static
+decoded bytes with the same UTF-8, escape and byte-length rules as a direct
+string literal; an embedded file's value is the file's bytes. A byte constant is
+an embedded file read with `embed_bytes`, or an immutable reference to one: its
+value is the file's bytes, as a `mem.Slice[UInt8]` viewing static storage. An
+embed the loader refused is a constant whose value does not exist, so it is
+reported once, by [M-Embed] or [M-EmbedText], and not again by [T-Const].
+Embedded NUL and empty strings are admitted. String equality, concatenation,
+slicing, length calls and interpolation are not constant-expression forms, and
+text does not become an integer count, an arithmetic operand or a numeric
+conversion operand because it is constant. Function defaults admit these same
+string constant forms.
 
 Aggregate literals obey ordinary contextual typing, field completeness,
 uniqueness, extent, payload, range and opacity checks. The annotation on a named
@@ -5236,8 +5236,8 @@ leaves the function that lends it: no contract permits returning or retaining a
 value that holds the lend. An observation of a constant, or of a part of one,
 depends on nothing, because a constant's storage is static. So do a string
 literal and an embedded file, whose bytes are static storage too: a function
-declaring `carries()` may return `embed("page.html")` or its `as_bytes()`. A trait
-implementation's member without a clause is held to the contract it adopts from
+declaring `carries()` may return `embed("page.html")` or its `as_bytes()`.
+A trait implementation's member without a clause is held to the contract it adopts from
 its trait signature. An observation of local storage cannot escape that storage's
 scope, and copying or embedding the observation does not remove this restriction.
 Replacing a statically known array slot removes that slot's previous carried

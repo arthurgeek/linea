@@ -18483,11 +18483,10 @@ const BuildRunOptions = struct {
 };
 
 /// What one outcome is filed under beside the salt: the module, the driver
-/// linked against it, and the level it was compiled at.
-/// What an outcome is filed under. Everything a program's behaviour depends
-/// on reaches its IR, the bytes of every file it embeds included, so a program
-/// whose embedded file changed is a different key and never reads the outcome
-/// recorded for the old bytes.
+/// linked against it, and the level it was compiled at. Everything a program's
+/// behaviour depends on reaches its IR, the bytes of every file it embeds
+/// included, so a program whose embedded file changed is a different key and
+/// never reads the outcome recorded for the old bytes.
 const OutcomeKey = struct {
     ir: []const u8,
     driver: ?[]const u8 = null,
