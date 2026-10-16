@@ -1,0 +1,7 @@
+error[T-Infer]: nothing here says what `T` is
+  --> tests/inference/an_allocator_settled_by_the_call_is_written_in_the_annotation.lin:10:23
+   |
+10 |     defer var names = Vec.new_in(arena.handle())
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it
+   |
+   = help: say what `T` is where `names` is declared: `var names: Vec[T, mem.Handle[mem.SystemAllocator]] = Vec.new_in(arena.handle())`, with a type in place of `T`

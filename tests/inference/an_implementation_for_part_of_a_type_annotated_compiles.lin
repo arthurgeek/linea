@@ -1,0 +1,20 @@
+// The annotation the report on `Pair.empty()` shows, with `Bool` for `B`.
+struct Pair[A, B] {
+    a: Option[A],
+    b: Option[B],
+}
+
+impl[B] Pair[UInt8, B] {
+    fn empty() -> Self {
+        .{ a = .None, b = .None }
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, Bool] = Pair.empty()
+    if pair.b.is_some() {
+        1
+    } else {
+        4
+    }
+}

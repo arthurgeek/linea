@@ -1,0 +1,11 @@
+// The annotation the report on `Vec.new_in(arena.handle())` shows, with `Str`
+// for `T`.
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer var names: Vec[Str, mem.Handle[mem.SystemAllocator]] = Vec.new_in(arena.handle())
+    UInt8(names.length() + 5)
+}

@@ -29459,31 +29459,31 @@ const Checker = struct {
     /// mentioning both a second time, and report whatever is wrong inside it
     /// twice.
     /// The help for a constructor call `Head.op(…)` that leaves a parameter of
-    /// `Head` open and is the whole initialiser of an unannotated binding: the
-    /// annotation that says what the parameter is, with the parameters the
-    /// type declares without a default named in its brackets. Null anywhere
-    /// else.
-    fn annotationSettling(self: *Checker, call: ExprId, generics: []const node.TypeParam, open: []const u8) std.mem.Allocator.Error!?[]const u8 {
+    /// the implementation it reaches open and is the whole initialiser of an
+    /// unannotated binding: the annotation that says what the parameter is,
+    /// written as the implementation's head type with what the call settled
+    /// in place and each open parameter by its name. Null anywhere else.
+    fn annotationSettling(self: *Checker, call: ExprId, s: Settling, open: []const u8) std.mem.Allocator.Error!?[]const u8 {
         const stmt = self.initialising orelse return null;
         const init = self.ast.stmtData(stmt).init;
         if (self.ast.withoutGroups(init) != call) return null;
         const callee = self.ast.withoutGroups(self.ast.call(call).callee);
         if (self.ast.exprTag(callee) != .field) return null;
-        const head = self.ast.exprText(self.ast.unaryOperand(callee));
         const written = self.ast.exprText(init);
         if (written.len > 40 or std.mem.indexOfScalar(u8, written, '\n') != null) return null;
-        var parameters: std.ArrayList(u8) = .empty;
-        for (generics) |g| {
-            if (g.default.wasWritten()) continue;
-            try parameters.print(self.sink.arena, "{s}{s}", .{ if (parameters.items.len == 0) "" else ", ", self.ast.tokenText(g.name) });
-        }
-        return try std.fmt.allocPrint(self.sink.arena, "say what `{s}` is where `{s}` is declared: `{s} {s}: {s}[{s}] = {s}`, with a type in place of `{s}`", .{
+        const row = self.rowFor(s.owner) orelse return null;
+        const own: []const TypeId = if (s.owner.index() < self.param_types.len) self.param_types[s.owner.index()] else return null;
+        if (own.len != s.found.len) return null;
+        const with_open = try self.gpa.alloc(TypeId, s.found.len);
+        defer self.gpa.free(with_open);
+        for (s.found, own, with_open) |f, parameter, *slot| slot.* = if (f == .poison) parameter else f;
+        const annotation = try self.typeName(try self.builder.substitute(row.ty, s.owner.index(), with_open));
+        return try std.fmt.allocPrint(self.sink.arena, "say what `{s}` is where `{s}` is declared: `{s} {s}: {s} = {s}`, with a type in place of `{s}`", .{
             open,
             self.ast.tokenText(self.ast.stmtData(stmt).name),
             if (self.ast.stmtIsMutable(stmt)) "var" else "let",
             self.ast.tokenText(self.ast.stmtData(stmt).name),
-            head,
-            parameters.items,
+            annotation,
             written,
             open,
         });
@@ -30006,7 +30006,7 @@ const Checker = struct {
                     .{named},
                     "no argument determines it, and nothing expects a type of it",
                 );
-                if (through_alias == null and s.owner == over and self.sink.items().len > reported_at) if (try self.annotationSettling(id, s.generics, named)) |help|
+                if (through_alias == null and s.owner == over and self.sink.items().len > reported_at) if (try self.annotationSettling(id, s, named)) |help|
                     try self.addNote(reported_at, help);
                 return null;
             }
