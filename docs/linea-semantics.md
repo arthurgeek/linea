@@ -5302,8 +5302,12 @@ returns. A member of a trait implementation answers to its trait's signature,
 and a function passed as a value of a callable type to that type; where that
 fixed signature does not permit the clause, the report says so instead of naming
 it. Where the type holding the observation declares `to_owned`, the report also
-offers the owned copy, which observes nothing and needs no clause; that is the
-fix where the signature is fixed, as a route handler's is.
+offers the owned copy, which observes nothing and needs no clause, naming the type
+that holds it and the failure copying can report: `Result[String, mem.Oom]` for
+a result that was the view, `String` where a part of the result or an `inout`
+parameter held it. Where a local owner of that type supplied the view, it offers
+the owner itself instead. The owned copy is the fix where the signature is
+fixed, as a route handler's is.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

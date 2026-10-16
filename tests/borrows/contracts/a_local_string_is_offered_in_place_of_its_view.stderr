@@ -1,0 +1,15 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/borrows/contracts/a_local_string_is_offered_in_place_of_its_view.lin:9:5
+  |
+9 |     .Ok(line.view())
+  |     ^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `line` belongs to `titled` and ends when it returns, so nothing returned may observe it
+  = help: `line` owns the text already: put `line` itself where its view is, declaring `String[mem.SystemAllocator]` there
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/borrows/contracts/a_local_string_is_offered_in_place_of_its_view.lin:6:15
+  |
+6 |     defer var line = String.new()
+  |               ^^^^ keep this place available until the last use of its observation
+9 |     .Ok(line.view())
+  |     ---------------- the observation is returned here

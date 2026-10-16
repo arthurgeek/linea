@@ -604,13 +604,20 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |     ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: the value comes from `station`; write `where borrows(station)` to say so
-   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
 ```
 
 The body is fine; what it hands back is a view of the station, and the
 signature does not admit that. The help names both ways out: say so with
 `where borrows(station)`, or return a `String` of its own, made with
-`.to_owned()`, which the caller owns and which points into nothing.
+`.to_owned()`, which the caller owns and which points into nothing. Copying can
+run out of memory, so that version answers `Result[String, mem.Oom]`:
+
+```linea
+fn label(station: Station) -> Result[String, mem.Oom] {
+    station.name.view().to_owned()
+}
+```
 
 **Forget `retains`** and the same thing happens where the function stores the
 view. Delete the `where retains(seen: field)` line from `remember`:
@@ -869,7 +876,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
    = help: `session` is a carrier and this signature writes no clause, so its contract is `where carries(session)`
    = help: the value comes from `fallback`; write `where carries(fallback)` to say so
-   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
 ```
 
 The report names the carrier that supplied the contract and the clause that says

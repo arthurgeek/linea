@@ -12,6 +12,8 @@ const ExprId = node.ExprId;
 const BindingId = @import("../sema/ids.zig").BindingId;
 const Resolution = @import("../sema/resolve.zig").Resolution;
 const types = @import("../sema/types.zig");
+const writtenTypeName = @import("../sema/typecheck.zig").writtenTypeName;
+const ModuleId = @import("../syntax/program.zig").ModuleId;
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const diagnostics = @import("../diagnostics/diagnostic.zig");
@@ -2137,12 +2139,30 @@ const Analysis = struct {
                 .retained => |destination| try std.fmt.allocPrint(arena, "`{s}` belongs to {s} and ends when it returns, so `{s}` may not keep an observation of it", .{ self.ast.tokenText(self.res.declaringToken(owner)), function, self.ast.tokenText(self.res.declaringToken(destination)) }),
             });
         }
-        // A clause is not always the fix: a function passed where a callable
-        // type is expected cannot add one, and the owned copy needs none.
-        if ((sources.items.len > 0 or local != null or consumed != null) and self.declaresOwnedCopy(held)) try notes.append(arena, switch (leaving) {
-            .returned => "a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause",
-            .retained => |destination| try std.fmt.allocPrint(arena, "a copy made with `.to_owned()` owns what it holds and observes nothing, so `{s}` may keep one, in a place typed to own it, with no clause", .{self.ast.tokenText(self.res.declaringToken(destination))}),
-        });
+        // A clause is not always the fix, and the owned copy needs none. It
+        // names the type that owns the text and the failure making it can
+        // report, so the edit can be written as read.
+        if (sources.items.len > 0 or local != null or consumed != null) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file))) |owned| {
+            const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
+                .callable => |callable| held != null and held.? == callable.result,
+                else => false,
+            } else false;
+            const local_owns = if (local) |owner| self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) else false;
+            try notes.append(arena, if (leaving == .returned and local_owns)
+                try std.fmt.allocPrint(arena, "`{s}` owns the text already: put `{s}` itself where its view is, declaring `{s}` {s}", .{
+                    self.ast.tokenText(self.res.declaringToken(local.?)),
+                    self.ast.tokenText(self.res.declaringToken(local.?)),
+                    owned.name,
+                    if (in_result) "as the result" else "there",
+                })
+            else switch (leaving) {
+                .returned => if (in_result)
+                    try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare the result `Result[{s}, {s}]` and return `….to_owned()`, which copies the text and can fail with `{s}`", .{ owned.name, owned.failure, owned.failure })
+                else
+                    try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where the result holds the view, and store `….to_owned()` there, which copies the text and can fail with `{s}`", .{ owned.name, owned.failure }),
+                .retained => |destination| try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where `{s}` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `{s}`", .{ owned.name, self.ast.tokenText(self.res.declaringToken(destination)), owned.failure }),
+            });
+        };
         try self.sink.add(.{
             .severity = .err,
             .code = .o_escapes,
@@ -2217,15 +2237,33 @@ const Analysis = struct {
         return null;
     }
 
-    /// Whether `held`, the type holding the escaping observation, declares
-    /// `to_owned`, the library's name for the copy that owns what it holds.
-    fn declaresOwnedCopy(self: *const Analysis, held: ?types.TypeId) bool {
-        const declared = self.typing.declOfType(held orelse return false) orelse return false;
+    /// What `held`, the type holding the escaping observation, copies itself
+    /// into with `to_owned`, the library's name for the copy that owns what it
+    /// holds: the success its result carries and the failure it may report,
+    /// each written as the module `from`, where the report is, writes it. Null where `held`
+    /// declares no `to_owned` answering a `Result`.
+    ///
+    /// **Bound:** the members `held`'s declaration holds, once per report.
+    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
+        const declared = self.typing.declOfType(held orelse return null) orelse return null;
         var members = self.res.membersOfType(declared);
         while (members.next()) |member| {
-            if (std.mem.eql(u8, self.ast.tokenText(self.ast.declName(self.res.declaredBy(member))), "to_owned")) return true;
+            const sig = self.res.declaredBy(member);
+            if (!std.mem.eql(u8, self.ast.tokenText(self.ast.declName(sig)), "to_owned")) continue;
+            const result = switch (self.typing.get(self.typing.declSignature(sig))) {
+                .callable => |callable| callable.result,
+                else => return null,
+            };
+            const instance = self.typing.instanceOf(result) orelse return null;
+            const args = self.typing.argsOf(instance);
+            if (args.len != 2) return null;
+            return .{
+                .ty = args[0],
+                .name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[0]),
+                .failure = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[1]),
+            };
         }
-        return false;
+        return null;
     }
 
     fn childType(self: *const Analysis, ty: types.TypeId, head: u96) ?types.TypeId {

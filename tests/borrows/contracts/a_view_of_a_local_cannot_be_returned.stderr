@@ -5,7 +5,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |     ^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: `line` belongs to `greeting` and ends when it returns, so nothing returned may observe it
-   = help: a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause
+   = help: `line` owns the text already: put `line` itself where its view is, declaring `String[mem.SystemAllocator]` as the result
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
   --> tests/borrows/contracts/a_view_of_a_local_cannot_be_returned.lin:7:11
    |
