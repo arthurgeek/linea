@@ -4,4 +4,4 @@ error[T-TryAnswer]: this `?` may return `Option[UInt8]`, and the function answer
 9 |     some()?
   |     ^^^^^^^ `?` returns from the function it is written in
   |
-  = help: make the function return `Option[UInt8]` and end it with `.Some(…)`, or handle the absence here with `else { … }`
+  = help: make the function return `Option[UInt8]` and end it with `.Some(…)`

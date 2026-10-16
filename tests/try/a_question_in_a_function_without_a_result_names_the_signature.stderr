@@ -4,4 +4,4 @@ error[T-TryAnswer]: this `?` may return `Result[(), io.IoError]`, and the functi
 7 |     io.println("hello")?
   |     ^^^^^^^^^^^^^^^^^^^^ `?` returns from the function it is written in
   |
-  = help: make the function return `Result[UInt8, io.IoError]` and end it with `.Ok(…)`, or handle the failure here with `else |error| { … }`
+  = help: make the function return `Result[UInt8, io.IoError]` and end it with `.Ok(…)`, or handle the failure here with `let _ = … else |_| { … }` in place of `?`

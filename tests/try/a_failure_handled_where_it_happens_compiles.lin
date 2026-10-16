@@ -1,0 +1,19 @@
+// The two ways the reports offer to handle a failure in a function that
+// cannot hand it on: `let _ = … else` for a call kept for its effect, and
+// `let … else` for a value being bound. `|_|` discards the error, which the
+// blocks do not read.
+import std.io
+
+fn parse() -> Result[UInt8, Str] {
+    .Ok(1)
+}
+
+fn main() -> UInt8 {
+    let _ = io.println("hello") else |_| {
+        return 1
+    }
+    let count = parse() else |_| {
+        return 2
+    }
+    count
+}

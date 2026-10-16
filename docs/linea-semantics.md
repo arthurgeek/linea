@@ -3882,7 +3882,7 @@ position is covered by [T-Discard], and an unread name by [N-Unused]. Both
 reports offer `?` only where it would be accepted ([T-TryAnswer]): the function
 answers with a `Result` whose error the failure is or converts to, or, for a
 failure that settles to such a reason, `.settled()?`. Otherwise they offer
-`let … else |error| { … }`, which handles the failure where it happens.
+`let … else |_| { … }`, which handles the failure where it happens.
 
 Explicit acknowledgement is sufficient. A `match` with only a `_` arm satisfies
 this rule by deliberately treating all alternatives alike; intentionally ignoring
@@ -4171,8 +4171,11 @@ convert into it. Success payload types may differ: a function returning
 `Option[String]` may use `?` on `Option[UInt8]` because failure returns no
 payload. There is no conversion between `Option` and `Result`. Using `?` in a
 function returning `UInt8` violates this rule; the report names the result type
-that would carry the failure, `Result[UInt8, E]` with the operand's error, and
-handling the failure where it happens with `else`.
+that would carry the failure, `Result[UInt8, E]` with the operand's error. Where
+the `?` is the whole of a statement, it also offers handling the failure there:
+`let count = … else |_| { … }` for the initialiser of `let count`, and
+`let _ = … else |_| { … }` for an expression kept for its effect. `else` stands
+nowhere else, so a `?` inside a larger expression is offered only the signature.
 
 A failing `Result` returns its error. An error of the function's own error type
 passes through unchanged and needs no implementation. An error of a different

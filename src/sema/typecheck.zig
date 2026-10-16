@@ -5447,6 +5447,10 @@ const Checker = struct {
     /// The unannotated `let` or `var` whose initialiser is being checked, so a
     /// call that leaves its type open can show the annotation that settles it.
     initialising: ?StmtId = null,
+    /// The expression a statement is made of, while it is checked: the whole
+    /// initialiser of a `let`, or an expression kept for its effect. A
+    /// failure is handled with `let … else` only where it is one of these.
+    statement_value: ?StatementValue = null,
     default_test_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
@@ -13863,7 +13867,11 @@ const Checker = struct {
         {
             const e = self.ast.stmtData(s).init;
             if (e == ExprId.none) return;
+            const previous_statement = self.statement_value;
+            defer self.statement_value = previous_statement;
+            self.statement_value = if (self.ast.stmtTag(s) == .expr_stmt) .{ .expr = self.ast.withoutGroups(e), .kind = .effect } else null;
             const t = try self.check(e, null);
+            self.statement_value = previous_statement;
 
             // A value computed and not bound is a value thrown away.
             if (t != .unit and t != .never and t != .poison) {
@@ -13910,9 +13918,9 @@ const Checker = struct {
                 return "match it, or hand on its reason with `.settled()?`";
         };
         return if (self.payloadTypeOf(carrier) == .unit)
-            "match it, or handle the failure with `let _ = … else |error| { … }`"
+            "match it, or handle the failure with `let _ = … else |_| { … }`"
         else
-            "match it, or handle the failure with `let value = … else |error| { … }`";
+            "match it, or handle the failure with `let value = … else |_| { … }`";
     }
 
     fn checkLet(self: *Checker, s: StmtId) !void {
@@ -13936,6 +13944,9 @@ const Checker = struct {
 
         const previous_initialising = self.initialising;
         defer self.initialising = previous_initialising;
+        const previous_statement = self.statement_value;
+        defer self.statement_value = previous_statement;
+        self.statement_value = if (d.init != ExprId.none and d.pattern == ExprId.none) .{ .expr = self.ast.withoutGroups(d.init), .kind = .binding, .name = self.ast.tokenText(d.name) } else null;
         self.initialising = if (!d.annotation.wasWritten() and d.pattern == ExprId.none) s else null;
         const t = if (d.init == ExprId.none)
             TypeId.poison
@@ -16740,18 +16751,22 @@ const Checker = struct {
     /// success, or handling the failure where it happens.
     fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId) std.mem.Allocator.Error!TypeId {
         const answered_name = try self.typeName(answered);
-        const help = switch (carrier.kind) {
-            .result => try std.fmt.allocPrint(
-                self.sink.arena,
-                "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`, or handle the failure here with `else |error| {{ … }}`",
-                .{ answered_name, try self.typeName(self.errorTypeOf(carrier)), if (answered == .unit) "()" else "…" },
-            ),
-            .option => try std.fmt.allocPrint(
-                self.sink.arena,
-                "make the function return `Option[{s}]` and end it with `.Some({s})`, or handle the absence here with `else {{ … }}`",
-                .{ answered_name, if (answered == .unit) "()" else "…" },
-            ),
+        const ending = if (answered == .unit) "()" else "…";
+        const signature = switch (carrier.kind) {
+            .result => try std.fmt.allocPrint(self.sink.arena, "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`", .{ answered_name, try self.typeName(self.errorTypeOf(carrier)), ending }),
+            .option => try std.fmt.allocPrint(self.sink.arena, "make the function return `Option[{s}]` and end it with `.Some({s})`", .{ answered_name, ending }),
         };
+        // `else` handles a failure only as the whole of a statement: the
+        // initialiser of a `let`, or a `let _` written for a value kept for
+        // its effect.
+        const binder = if (carrier.kind == .result) " |_|" else "";
+        const where: ?StatementValue = if (self.statement_value) |statement| if (statement.expr == id) statement else null else null;
+        const help = if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `let {s} = … else{s} {{ … }}` in place of `?`", .{
+            signature,
+            if (carrier.kind == .result) "failure" else "absence",
+            statement.name,
+            binder,
+        }) else signature;
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = "`?` returns from the function it is written in", .style = .primary };
         try self.sink.add(.{
@@ -16763,6 +16778,15 @@ const Checker = struct {
         });
         return self.record(id, .poison);
     }
+
+    /// An expression a statement is made of, and which statement.
+    const StatementValue = struct {
+        expr: ExprId,
+        kind: Kind,
+        /// The binding's name, for a `let` initialiser.
+        name: []const u8 = "_",
+        const Kind = enum { binding, effect };
+    };
 
     /// Returns what the operand of `e?` or `e else { … }` is expected to carry
     /// on success. The construct's own expectation passes to the operand one

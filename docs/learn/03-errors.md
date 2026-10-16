@@ -604,7 +604,7 @@ error[T-Discard]: this expression produces a `Result[(), Str]` that is discarded
   --> check_discarded.lin:22:9
    |
 22 |         check_alarm(alarm)
-   |         ^^^^^^^^^^^^^^^^^^ match it, or handle the failure with `let _ = … else |error| { … }`
+   |         ^^^^^^^^^^^^^^^^^^ match it, or handle the failure with `let _ = … else |_| { … }`
 ```
 
 `main` answers with an `io.IoError`, and a `Str` failure does not convert to
