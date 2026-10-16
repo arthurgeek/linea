@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `chosen`.
+ --> tests/library/a_public_function_gives_its_allocator_no_default/main.lin:5:30
+  |
+5 | pub fn chosen[P: Allocator = mem.SystemAllocator](parent: P = .System) -> Vec[Str, P] where carries(parent) {
+  |                              ^^^^^^^^^^^^^^^^^^^ drop the default; offer `chosen` over `mem.SystemAllocator` beside `chosen_in`, which takes the allocator first

@@ -361,7 +361,7 @@ error[T-Arity]: expected 0 argument(s), found 1
 5  |     defer let city = "Lisbon".to_owned(mem.system()) else |_| {
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
-36 |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+36 |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
@@ -820,7 +820,7 @@ drives these steps with a real handler once handlers have been introduced.
 | --- | --- |
 | a value with a life of its own: a configuration, a cache, a table that grows | `mem.system()`, and `release()` or `defer … .release()` |
 | many values that die together: one request, one line of input, one pass of a loop | a `mem.Arena`, released once, or rewound between passes |
-| a library function that allocates | take `A: Allocator` as a parameter and let the caller choose; name it `x_in`, and add `x` for the system allocator |
+| a library function that allocates | take `A: Allocator` as a parameter and let the caller choose; name it `x_in`, and add `x` whose signature writes `mem.SystemAllocator` ([below](#a-library-lets-its-caller-choose-the-allocator)) |
 | a closure kept for later | `mem.Closure.open(closure)`, or `mem.Closure.open_in(allocator, closure)`, settled like that allocator's memory |
 | a test that must check every allocation failure is handled | `mem.AllocationLog`, which refuses a chosen allocation; [Testing](10-testing.md#every-allocation-can-fail) shows it |
 
@@ -832,11 +832,143 @@ allocates until the first insertion. The
 [prime sieve](../../examples/prime_sieve.lin) use vectors from the system
 allocator.
 
+## A library lets its caller choose the allocator
+
+A program decides where its own memory comes from, so it may leave the
+allocator out and take the system allocator. A library is written for programs
+it has never met, and one of them may keep everything in an arena. So a
+library's public signatures say which allocator they work with, every time.
+
+Here is a small library that adds an exclamation mark to a word. `shout_in`
+builds the result in whatever allocator the caller passes, and `shout` is the
+convenience form over the system allocator, whose signature writes that out:
+
+`shout/linea.json`:
+
+```json
+{ "kind": "library", "name": "shout" }
+```
+
+`shout/shout.lin`:
+
+```linea
+import std.fmt
+import std.mem
+
+// `shout_in` builds the shouted word in the allocator its caller passes, so a
+// caller with an arena keeps the word in the arena.
+pub fn shout_in[A: Allocator](allocator: A, word: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    fmt.render_owned_in(allocator, "{word}!")
+}
+
+// `shout` builds it from the system allocator, and its result type says so.
+pub fn shout(word: Str) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+    shout_in(mem.system(), word)
+}
+```
+
+A program that depends on the library chooses per call:
+
+`greeter/linea.json`:
+
+```json
+{ "dependencies": { "shout": { "path": "../shout" } } }
+```
+
+`greeter/main.lin`:
+
+```linea
+import shout
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    let arena = mem.Arena.open(mem.system(), size: 256)
+    defer arena.release()
+    // This word lives in the arena and goes back with it.
+    let kept = shout.shout_in(arena.handle(), "hello") else |_| {
+        return .Ok(1)
+    }
+    // This one comes from the system allocator, so the program releases it.
+    defer let loud = shout.shout("world") else |_| {
+        return .Ok(1)
+    }
+    io.println("{kept.view()} {loud.view()}")?
+    .Ok(0)
+}
+```
+
+```sh
+linea run greeter
+```
+
+```
+hello! world!
+```
+
+Write a result as `Result[String, mem.Oom]` instead, and the library no longer
+compiles, because `String` there means the system allocator without saying so:
+
+`loud/linea.json`:
+
+```json
+{ "kind": "library", "name": "loud" }
+```
+
+`loud/loud.lin`:
+
+```linea
+import std.fmt
+import std.mem
+import std.testing
+
+// `shout` writes `String` for its result, which leaves the allocator out.
+pub fn shout(word: Str) -> Result[String, mem.Oom] where carries() {
+    fmt.render_owned_in(mem.system(), "{word}!")
+}
+
+test fn a_word_is_shouted() {
+    defer let loud = shout("hi") else |_| {
+        return .Err(testing.refused("the word fits"))
+    }
+    testing.assert_eq(loud.view(), "hi!", "the word is shouted")?
+}
+```
+
+```sh
+linea check loud
+```
+
+```
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `String`.
+ --> loud/loud.lin:6:35
+  |
+6 | pub fn shout(word: Str) -> Result[String, mem.Oom] where carries() {
+  |                                   ^^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+```
+
+The rule covers what a program using the library can see: a public function's
+parameters and result, the types inside them such as `Option[Vec[Str]]`, a
+public struct's fields, a public alias, and the head of an `impl` whose
+functions are public. Function bodies and private helpers keep the short form,
+since no caller sees them. A public function also cannot give its allocator a
+default, as in `[A: Allocator = mem.SystemAllocator]`: a caller leaving it out
+would take the system allocator without writing it, so the library writes the
+pair instead.
+
+If you know Rust: a crate whose API names `Vec<T>` has quietly chosen the
+global allocator for its users, because `Vec<T, A = Global>` fills it in. Linea
+lets a program do that and asks a library to say it.
+
 ## What you have seen
 
 - A constructor or function that allocates has two forms: `x(...)` uses the
   system allocator and `x_in(allocator, ...)` takes the allocator the caller
   chooses, as `new` and `new_in` do.
+- A library's public signatures state their allocator: a parameter
+  `A: Allocator`, or `mem.SystemAllocator` written out.
 - Allocation can fail, and says so with a `Result`.
 - Memory from `mem.system()` is released by hand; `defer` schedules the release
   on every way out, and a path that returns the value skips it.

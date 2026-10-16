@@ -74,7 +74,7 @@ pub fn decode_in[A: Allocator, T: Decode[A]](allocator: A, input: Str, limits: P
 
 // Parse `input` within `limits` and decode it as a T allocated from the system
 // allocator.
-pub fn decode[T: Decode[mem.SystemAllocator]](input: Str, limits: ParseLimits = standard_limits) -> Result[T, DecodeError] where carries() {
+pub fn decode[T: Decode[mem.SystemAllocator]](input: Str, limits: ParseLimits = standard_limits) -> Result[T, DecodeError[mem.SystemAllocator]] where carries() {
     decode_in(mem.system(), input, limits: limits)
 }
 
@@ -114,7 +114,7 @@ pub fn from_value_in[A: Allocator, T: Decode[A]](allocator: A, value: Value[A]) 
 
 // Decode an already parsed value as a T allocated from the system allocator,
 // leaving the value with the caller.
-pub fn from_value[T: Decode[mem.SystemAllocator]](value: Value) -> Result[T, DecodeError] where carries() {
+pub fn from_value[T: Decode[mem.SystemAllocator]](value: Value[mem.SystemAllocator]) -> Result[T, DecodeError[mem.SystemAllocator]] where carries() {
     from_value_in(mem.system(), value)
 }
 
@@ -432,7 +432,7 @@ test fn open_accepts_only_an_object() {
 impl ObjectDecoder[mem.SystemAllocator] {
     // Start decoding the members of `value`, which must be an object,
     // recording the names read in the system allocator.
-    pub fn open(value: Value) -> Result[Self, DecodeError] where borrows(.Ok.object: value) {
+    pub fn open(value: Value[mem.SystemAllocator]) -> Result[Self, DecodeError[mem.SystemAllocator]] where borrows(.Ok.object: value) {
         ObjectDecoder.open_in(mem.system(), value)
     }
 }

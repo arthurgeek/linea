@@ -1,0 +1,28 @@
+// A public trait's signatures are part of what an implementation, anywhere,
+// must write.
+pub trait Source {
+    fn names(self: Self) -> Vec[Str]
+}
+
+pub trait Producer {
+    type Item
+
+    fn produce(self: Self) -> Self.Item
+}
+
+pub struct Shelf {
+    count: UInt8,
+}
+
+// A type a public type settles for a trait is what a caller receives.
+impl Producer for Shelf {
+    type Item = Vec[Str]
+
+    fn produce(self: Self) -> Vec[Str] {
+        if self.count == 0 {
+            Vec.new()
+        } else {
+            Vec.new()
+        }
+    }
+}

@@ -102,6 +102,25 @@ function is an ordinary `pub` function to the program that depends on it. It
 is not published from that program's artefact, and [M-Export]'s rules are not
 asked of it, so a library with a C interface can still be a dependency.
 
+### A dependency's `export` is not exported
+
+Only the program's own `export`s reach C. A library author who writes
+`pub export fn square(...)` and expects the symbol `square` in every program
+that uses the library gets none: the library's `export` is published when the
+library itself is built (`linea build` on the library makes an object that
+exports it), and a program that depends on the library calls it as a Linea
+function.
+
+The reason is that the artefact a program builds has one owner of its C
+interface, and that owner is the program. If every dependency's `export`
+reached C, two libraries exporting the same name would collide in one
+artefact, and a program would carry a C interface it never wrote and cannot
+see in its own source. A library that wants to offer C symbols through a
+program says so in the program, which writes its own `export` wrapping the
+library's function. This is written down here, in the semantics beside
+[M-Export], and in the guide, because nothing in the compiler's output says
+it: the program compiles and runs, and the symbol is simply absent.
+
 **[M-Entry] holds for every library root**, a dependency's root module
 included.
 

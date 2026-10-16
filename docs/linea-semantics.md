@@ -1843,9 +1843,11 @@ below the root is diagnosed where declared. The published symbol uses the
 declaration's name, matching the C header, and omits the prefix applied to
 other Linea-defined symbols, so it must not collide with a runtime symbol.
 
-An `export` publishes an entry point of the root being built. In a dependency
-it publishes nothing to the program that depends on it, which calls it as an
-ordinary `pub` function, and none of these rules is asked of it.
+A dependency's `export` is not exported. Only the root being built publishes C
+symbols, so an `export` in a library a program depends on gives that program's
+artefact no C-visible symbol: the program calls it as an ordinary `pub`
+function, and none of these rules is asked of it. Building the library on its
+own publishes it.
 
 **[S-Export]** An `export` does not sit in an `impl`. It has a dedicated
 diagnostic, as [S-Test] does, so the restriction is not obscured by a generic
@@ -3946,7 +3948,40 @@ that requires it. `fn f[A: Allocator](v: Vec[T, A]) -> Vec[T]` would otherwise
 return a system vector silently, where the declaration says it is generic over
 where memory comes from. The help says to write the parameter, or to write the
 default out where the system allocator is meant. A declaration with no allocator
-parameter writes the short form freely.
+parameter writes the short form freely, unless it is a public signature of a
+library.
+
+A library's public signatures state their allocator. In a library root (the
+standard library, a dependency, or a primary root whose manifest says
+`"kind": "library"`), a type written without the argument of a defaulted
+allocator parameter is refused in every position a signature publishes to
+another root: a `pub` function's parameters, result, bounds and `where` clause;
+a `pub` trait's signatures; the head of an inherent implementation of a public
+type that has a `pub` member, and those members' signatures; a type a public
+type settles for a trait; a `pub` struct's fields and a `pub` enum's payloads; a
+`pub` alias, newtype or constant, a type parameter's default included. A
+wrapper's arguments, a tuple's components and a callable type's parameters and
+result are written types in the same position. A private alias the signature
+names counts as what it writes, and so does the default a signature leaves a
+private declaration's type parameter to; the report shows where the alias or
+the default leaves the allocator out. The signature writes the
+allocator as a parameter, `Vec[Str, A]` with `A: Allocator`, which keeps it
+usable with any allocator, or spells out `mem.SystemAllocator`, which makes the
+restriction deliberate: `Vec[Str]` and `Vec[Str, mem.SystemAllocator]` are one
+type, and the written argument is what tells them apart. A public library
+function's type parameter bounded by `Allocator` takes no default, since a
+caller leaving the argument out would take the system allocator without
+writing it; such a function is a pair, `x` over the system allocator and
+`x_in` taking the allocator first, which is what that report's help says. Function bodies, calls, private and
+`internal` declarations, an `@opaque` type's representation and the members of
+a trait implementation are not signatures another root reads, and keep the
+short form. A declaration that is generic over an allocator is held to the
+clause above, whose help names its parameter. The report reads "Public library
+signature uses the default allocator for `Vec`." with the help "Specify
+`mem.SystemAllocator` to make this restriction intentional, or make the
+allocator a generic parameter to preserve allocator polymorphism." A type a
+trait implementation settles cannot take an allocator parameter, so there the
+help offers `mem.SystemAllocator` alone.
 
 **[T-Phantom]** A type parameter absent from every struct field, enum variant and
 trait signature must be declared `phantom`. It contributes to type identity

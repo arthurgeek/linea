@@ -914,7 +914,7 @@ program that opens the listener itself. A service whose routes share state
 passes it as `state: app`, and `listen_and_serve` returns it when serving ends
 ([Shared state](#shared-state)); a service that shares nothing, like this one,
 leaves it out. Each request is served from memory that comes from the system
-allocator unless the call names another with `parent:`
+allocator; `http.listen_and_serve_in` takes another first
 ([Limits](#limits)).
 
 ### Asking the first server questions
@@ -1790,10 +1790,12 @@ standard ones, so struct update changes only what you write. In
     let finished = http.listen_and_serve(net.loopback(8080), server, state: app, limits: limits) else |error| {
 ```
 
-Each request is served from an arena carved from the system allocator. Pass
-`parent:` to carve it from another one, such as `parent: arena.handle()`; a
-call inside code that is generic over an allocator writes `parent:` too, since
-a default there would silently exclude every other allocator.
+Each request is served from an arena carved from the system allocator. To
+carve it from another one, call `http.listen_and_serve_in` (or
+`http.serve_in`) with that allocator first, such as
+`http.listen_and_serve_in(arena.handle(), address, server, limits: limits)`;
+code that is generic over an allocator calls the `_in` form, so the allocator
+it was given reaches every request.
 
 | Field | Default | What it bounds |
 | --- | --- | --- |
@@ -2030,10 +2032,11 @@ with `env.variable`.
   around `logged` puts the number in the line.
 - A closure can be a route, registered with `route_raw`, or a streamed body that carries what its handler
   computed; `body.flush()` sends what has been written.
-- `http.listen_and_serve(address, handler, state:, parent:, limits:)` opens the
+- `http.listen_and_serve(address, handler, state:, limits:)` opens the
   listener, serves, and closes and releases everything on every path; only the
   address and the handler are required, and `http.serve` is the loop for a
-  program that opens the listener itself.
+  program that opens the listener itself. `listen_and_serve_in` and `serve_in`
+  take the allocator each request is carved from first.
 - `http.Limits`, passed as `limits:`, bounds what a request may send and how
   many connections are answered.
 - `http.serve_cgi(handler)` answers the one request a web server started the

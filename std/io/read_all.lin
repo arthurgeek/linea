@@ -248,7 +248,7 @@ pub fn read_all_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_b
 
 // Read `reader` through EOF into storage from the system allocator, under the
 // limits of `read_all_in`.
-pub fn read_all[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[Vec[UInt8], ReadAllFailure[mem.SystemAllocator, R.Error]] where carries(.Err.reason.Input.reason: reader) {
+pub fn read_all[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ReadAllFailure[mem.SystemAllocator, R.Error]] where carries(.Err.reason.Input.reason: reader) {
     read_all_in(mem.system(), &reader, max_bytes)
 }
 
@@ -477,7 +477,7 @@ pub fn read_text_in[R: Reader, A: Allocator](allocator: A, inout reader: R, max_
 
 // Read `reader` through EOF as UTF-8 text from the system allocator. See
 // `read_text_in`.
-pub fn read_text[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[String, ReadTextError[R.Error]] where carries(.Err: reader), R.Error: Release {
+pub fn read_text[R: Reader](inout reader: R, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], ReadTextError[R.Error]] where carries(.Err: reader), R.Error: Release {
     read_text_in(mem.system(), &reader, max_bytes)
 }
 

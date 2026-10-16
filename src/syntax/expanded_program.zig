@@ -873,6 +873,12 @@ pub const ExpandedProgram = struct {
         return &self.modules[module.index()];
     }
 
+    /// Whether module `m` belongs to a library root.
+    pub fn inLibraryRoot(self: *const ExpandedProgram, m: ModuleId) bool {
+        if (m == .none) return false;
+        return program_mod.moduleInLibraryRoot(self.get(m), self.kind);
+    }
+
     /// Whether `decl` is an `export` the artefact being built publishes. One
     /// in a dependency publishes nothing to the program that depends on it,
     /// which calls it as an ordinary public function.

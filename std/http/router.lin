@@ -176,7 +176,7 @@ test fn a_router_built_in_an_allocator_answers_404() {
     .Ok(())
 }
 
-impl[S] Router[S] {
+impl[S] Router[S, mem.SystemAllocator] {
     // `new` makes a router that keeps its routes in the system allocator. Its
     // state type comes from the context, and is `()` when nothing names one.
     pub fn new() -> Self {

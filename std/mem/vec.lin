@@ -254,7 +254,7 @@ test fn vec_new_in_starts_empty() {
     testing.assert_eq(length, 0, "a new vector contains elements")?
 }
 
-impl[T] Vec[T] {
+impl[T] Vec[T, SystemAllocator] {
     // Make an empty vector that allocates nothing until an element arrives,
     // and takes its storage from the system allocator.
     pub fn new() -> Self {
@@ -323,7 +323,7 @@ impl[T, A: Allocator] Vec[T, A] {
     }
 }
 
-impl[T] Vec[T] {
+impl[T] Vec[T, SystemAllocator] {
     // Build a vector in the system allocator by calling the initializer once
     // per index, as `from_fn_in` does.
     pub fn from_fn[F: inout fn(index: UInt64) -> T](count: UInt64, sink initializer: F) -> Result[Self, Oom] where
@@ -505,7 +505,7 @@ test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
     testing.assert_eq(capacity, UInt64(32), "mutable vector constructor rounded up capacity")?
 }
 
-impl[T] Vec[T] {
+impl[T] Vec[T, SystemAllocator] {
     // Build a vector in the system allocator as `from_fn_inout_in` does, with
     // an initializer whose state the caller keeps.
     pub fn from_fn_inout[F: inout fn(index: UInt64) -> T](count: UInt64, inout initializer: F) -> Result[Self, Oom] where carries(.Ok: initializer) {
@@ -1234,7 +1234,7 @@ impl[T: Copyable, A: Allocator] Vec[T, A] {
     }
 }
 
-impl[T: Copyable] Vec[T] {
+impl[T: Copyable] Vec[T, SystemAllocator] {
     // Repeat a Copyable value into independent slots in the system allocator,
     // as `filled_in` does.
     pub fn filled(count: UInt64, value: T) -> Result[Self, Oom] where carries(.Ok: value) {

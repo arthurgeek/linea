@@ -1,0 +1,12 @@
+import rooms
+import std.mem
+
+use mem.Allocator
+
+fn _inside[B: Allocator](_allocator: B) -> UInt64 {
+    rooms.reserve(8)
+}
+
+fn main() -> UInt8 {
+    UInt8(rooms.reserve(4))
+}

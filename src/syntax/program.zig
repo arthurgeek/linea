@@ -143,6 +143,15 @@ pub const Module = struct {
 /// the only thing that read the manifest.
 pub const Kind = enum { program, library };
 
+/// Whether `module` belongs to a library root, in a compilation whose primary
+/// root is built as `kind`: the standard library, a dependency, or a primary
+/// root built as a library. The one answer `Program` and `ExpandedProgram`
+/// both give.
+pub fn moduleInLibraryRoot(module: *const Module, kind: Kind) bool {
+    if (module.library or module.root.isDependency()) return true;
+    return module.root == .primary and kind == .library;
+}
+
 /// What the loader read about one dependency library from the manifests that
 /// name it: the name every import of it starts with, where its source sits,
 /// its root module once an import has reached it, and the libraries its own
@@ -333,9 +342,7 @@ pub const Program = struct {
     /// library publishes is held to rules a program's declarations are not.
     pub fn inLibraryRoot(self: *const Program, m: ModuleId) bool {
         if (m == .none) return false;
-        const module = self.get(m);
-        if (module.library or module.root.isDependency()) return true;
-        return module.root == .primary and self.kind == .library;
+        return moduleInLibraryRoot(self.get(m), self.kind);
     }
 
     /// Which module a declaration belongs to.

@@ -109,10 +109,10 @@ test fn a_logger_builds_its_lines_in_the_allocator_it_was_given() {
     testing.assert(logger.enabled(.Warn), "the logger dropped its minimum level")?
 }
 
-impl[S: Sink] Logger[S] {
+impl[S: Sink] Logger[S, mem.SystemAllocator] {
     // `open` makes a logger that writes the lines at `minimum` and above to
     // `output`, building each line in a buffer from the system allocator.
-    pub fn open(sink output: S, minimum: Level) -> Logger[S] where carries(output) {
+    pub fn open(sink output: S, minimum: Level) -> Logger[S, mem.SystemAllocator] where carries(output) {
         Logger.open_in(mem.system(), output, minimum)
     }
 }
@@ -142,7 +142,7 @@ test fn a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given() 
 
 // `to_stderr` makes a logger that writes the lines at `minimum` and above to
 // standard error, building each in a buffer from the system allocator.
-pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor] {
+pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor, mem.SystemAllocator] {
     to_stderr_in(mem.system(), minimum)
 }
 

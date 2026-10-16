@@ -77,9 +77,9 @@ test fn a_serve_error_displays_its_cause() {
 // Accept connections on `listener` and answer one request on each through
 // `handler`, one connection at a time. `handler` takes no state of its own: a
 // program that shares state serves `http.with_state(state, handler)`, which
-// owns it and lends it down. `parent:` defaults to the system allocator, as it
-// does for `listen_and_serve`. Serving keeps one arena of
-// `limits.request_arena_bytes` carved from `parent`: each request is read into
+// owns it and lends it down. Serving keeps one arena of
+// `limits.request_arena_bytes` carved from the system allocator, or from the
+// `parent` `serve_in` takes: each request is read into
 // it, the handler builds its response in it, and once the response is
 // written the arena is rewound, which zeroes only the bytes that exchange
 // used, so a small request costs little however large the arena is. When
@@ -95,8 +95,24 @@ test fn a_serve_error_displays_its_cause() {
 // serving with `Accept`. Serving ends with `Ok` after `limits.connections`
 // connections, and never ends when that is `.None`. The listener is closed on
 // every exit.
-pub fn serve[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P: Allocator = mem.SystemAllocator](sink listener: L, inout handler: H, parent: P = .System, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+pub fn serve[L: net.Acceptor + io.Close, H: Handler[(), mem.SystemAllocator] + Observer](sink listener: L, inout handler: H, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
+    serve_in(mem.system(), listener, &handler, limits: limits)
+}
+
+// `serve_in` serves as `serve` does, carving each request's arena, and the
+// buffer a refused request is discarded into, from `parent`.
+pub fn serve_in[P: Allocator, L: net.Acceptor + io.Close, H: Handler[(), P] + Observer](parent: P, sink listener: L, inout handler: H, limits: Limits = standard_limits) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     serve_announcing(listener, &handler, parent, limits, .None)
+}
+
+test fn serving_in_an_arena_carves_the_exchanges_from_it() {
+    let arena = mem.Arena.open(mem.system(), size: 1048576)
+    defer arena.release()
+    defer var router = Router.new_in(arena.handle())
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let served = serve_in(arena.handle(), listener, &router, limits: serving(0))
+    testing.assert(served.is_ok(), "serving nothing from an arena failed")?
+    .Ok(())
 }
 
 // Serve as `serve` does. When `announce` holds the address `listener` is bound
@@ -300,7 +316,7 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
         request_arena_bytes = 98304,
         ..serving(9),
     }
-    let served = serve(listener, &router, parent: parent.allocator(), limits: limits)
+    let served = serve_in(parent.allocator(), listener, &router, limits: limits)
     router.release()
     let settled = parent.all_disposed()
     let acquired = parent.acquired()
@@ -343,7 +359,7 @@ test fn an_arena_parent_serves_every_exchange_from_one_request_arena() {
     defer let parent = mem.Arena.open(mem.system(), size: 102408)
     defer let tables = mem.Arena.open(mem.system(), size: 16384)
     var router = exchanges_router(tables.handle())
-    let served = serve(listener, &router, parent: parent.handle(), limits: limits)
+    let served = serve_in(parent.handle(), listener, &router, limits: limits)
     router.release()
     defer let health = read_to_end(first)
     defer let echoed = read_to_end(second)
@@ -379,7 +395,7 @@ test fn each_allocation_failure_covers_every_acquisition_from_the_parent() -> Re
                 request_arena_bytes = 98304,
                 ..serving(1),
             }
-            let served = serve(listener, &router, parent: allocator, limits: limits)
+            let served = serve_in(allocator, listener, &router, limits: limits)
             router.release()
             tables.release()
             let answer = read_or_reset(client)
@@ -444,7 +460,7 @@ test fn a_refused_arena_is_answered_503() {
     // Serving first takes the buffer a 503 discards input into, then opens the
     // arena; refuse the arena.
     parent.refuse_attempt(parent.attempts() + 2)
-    let served = serve(listener, &router, parent: parent.allocator(), limits: serving(2))
+    let served = serve_in(parent.allocator(), listener, &router, limits: serving(2))
     router.release()
     let settled = parent.all_disposed()
     parent.release()
@@ -478,7 +494,7 @@ test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
         request_arena_bytes = 98304,
         ..serving(2),
     }
-    let served = serve(listener, &router, parent: parent.handle(), limits: limits)
+    let served = serve_in(parent.handle(), listener, &router, limits: limits)
     router.release()
     defer let answered_first = read_or_reset(first)
     defer let answered_second = read_or_reset(second)
@@ -493,7 +509,7 @@ test fn a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting()
     defer let parent = mem.Arena.open(mem.system(), size: 0)
     defer let tables = mem.Arena.open(mem.system(), size: 16384)
     defer var router = exchanges_router(tables.handle())
-    let served = serve(listener, &router, parent: parent.handle(), limits: serving(1))
+    let served = serve_in(parent.handle(), listener, &router, limits: serving(1))
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving began without a buffer to discard refused input into")?
     .Ok(())
 }
@@ -654,8 +670,8 @@ test fn a_listen_and_serve_error_displays_its_cause() {
 // chooses what it serves and this function owns the listener and the handler.
 // `state` is what the routes share, wrapped around `handler` as `with_state`
 // does; a service that shares nothing leaves it out, and its state is `()`.
-// `parent` supplies the memory of each exchange and is the system allocator
-// unless the program passes another.
+// Each exchange's memory comes from the system allocator; `listen_and_serve_in`
+// takes the allocator it comes from first.
 //
 // `handler` and `state` are released on every failure, including when listening
 // fails, and the listener is closed on every exit. On success the handler is
@@ -665,7 +681,13 @@ test fn a_listen_and_serve_error_displays_its_cause() {
 // told the address the listener is bound to as `Event.Listening`, which is how
 // a program that asked for port 0 learns its port. A program that opens its own
 // listener calls `serve`.
-pub fn listen_and_serve[H: Handler[S, P] + Observer + Release, S: Release = (), P: Allocator = mem.SystemAllocator](address: net.Address, sink handler: H, sink state: S = (), parent: P = .System, limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
+pub fn listen_and_serve[H: Handler[S, mem.SystemAllocator] + Observer + Release, S: Release = ()](address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
+    listen_and_serve_in(mem.system(), address, handler, state: state, limits: limits)
+}
+
+// `listen_and_serve_in` listens and serves as `listen_and_serve` does, carving
+// each exchange's memory from `parent`.
+pub fn listen_and_serve_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Release = ()](parent: P, address: net.Address, sink handler: H, sink state: S = (), limits: Limits = standard_limits) -> Result[S, ListenAndServeError] where carries(state, handler) {
     let server = with_state(state, handler)
     let listener = net.listen(address) else |error| {
         server.release()
@@ -674,6 +696,15 @@ pub fn listen_and_serve[H: Handler[S, P] + Observer + Release, S: Release = (), 
     let bound = listener.local_address()
     let served = serve_opened(listener, bound, server, parent, limits)?
     .Ok(served.into_state())
+}
+
+test fn listening_in_an_arena_carves_the_exchanges_from_it() {
+    let arena = mem.Arena.open(mem.system(), size: 1048576)
+    defer arena.release()
+    let router = Router.new_in(arena.handle())
+    let served = listen_and_serve_in(arena.handle(), net.loopback(0), router, limits: serving(0))
+    testing.assert(served.is_ok(), "listening without serving from an arena failed")?
+    .Ok(())
 }
 
 test fn the_state_is_returned_when_serving_ends() {
@@ -699,7 +730,7 @@ test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
 
 test fn a_server_that_serves_nothing_ends_and_releases_its_handler() {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let served = listen_and_serve(net.loopback(0), exchanges_router(log.allocator()), parent: log.allocator(), limits: serving(0))
+    let served = listen_and_serve_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: serving(0))
     let settled = log.all_disposed()
     log.release()
     testing.assert_ok_eq(served, (), "serving nothing failed")?
@@ -711,7 +742,7 @@ test fn a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released() {
     let held = net.listen(net.loopback(0)).unwrap()
     let taken = held.local_address().unwrap()
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let served = listen_and_serve(taken, exchanges_router(log.allocator()), parent: log.allocator(), limits: serving(1))
+    let served = listen_and_serve_in(log.allocator(), taken, exchanges_router(log.allocator()), limits: serving(1))
     let settled = log.all_disposed()
     log.release()
     held.close().unwrap()
@@ -733,9 +764,9 @@ test fn serving_that_cannot_begin_announces_nothing_and_releases_the_handler() {
     let small = Limits { request_arena_bytes = 1, ..serving(1) }
     let arena = listen_and_serve(net.loopback(0), announcer, limits: small)
     defer let parent = mem.Arena.open(mem.system(), size: 0)
-    let memory = listen_and_serve(net.loopback(0), Announcer { report = file.logger(minimum: .Info) }, parent: parent.handle(), limits: serving(1))
+    let memory = listen_and_serve_in(parent.handle(), net.loopback(0), Announcer { report = file.logger(minimum: .Info) }, limits: serving(1))
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let released = listen_and_serve(net.loopback(0), exchanges_router(log.allocator()), parent: log.allocator(), limits: Limits { request_arena_bytes = 1, ..serving(1) })
+    let released = listen_and_serve_in(log.allocator(), net.loopback(0), exchanges_router(log.allocator()), limits: Limits { request_arena_bytes = 1, ..serving(1) })
     let settled = log.all_disposed()
     log.release()
     defer let lines = file.finish()

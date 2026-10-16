@@ -149,7 +149,7 @@ test fn failure_starts_a_value_error_at_the_root() {
     testing.assert_eq(shown.view(), "unknown field at $", "a new failure had a path")?
 }
 
-impl DecodeError {
+impl DecodeError[mem.SystemAllocator] {
     // Start a value error for `reason`, with an empty path in the system
     // allocator.
     pub fn failure(reason: DecodeReason) -> Self {
@@ -194,7 +194,7 @@ test fn decode_error_paths_own_names_and_expose_root_first_segments() {
     testing.assert_eq(rendered.view(), r#"OutOfRange at $["settings"]["retries"][2]"#, "decode path lost its segment order or owned name")?
 }
 
-impl DecodeError {
+impl DecodeError[mem.SystemAllocator] {
     // Record that the error lies under the field `name`, copying the name
     // into the system allocator, as `at_field_in` does.
     pub fn at_field(sink self: Self, name: Str) -> Self where carries(self) {

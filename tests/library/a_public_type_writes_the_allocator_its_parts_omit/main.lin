@@ -1,0 +1,23 @@
+import std.mem
+
+// A public type's fields and payloads are part of what a caller sees.
+pub struct Shelf {
+    titles: Vec[Str],
+}
+
+pub enum Slot {
+    Empty,
+    Filled(String),
+}
+
+pub alias Titles = Vec[Str]
+
+// A sealed type's fields are not: no caller outside the library reads them.
+@opaque
+struct Sealed {
+    titles: Vec[Str],
+}
+
+pub struct Spelled {
+    titles: Vec[Str, mem.SystemAllocator],
+}

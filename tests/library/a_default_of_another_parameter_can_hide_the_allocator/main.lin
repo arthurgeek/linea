@@ -1,0 +1,24 @@
+// A type parameter that is not an allocator may default to a type that leaves
+// one out. A public signature that leaves the parameter to that default leaves
+// the allocator to its default too.
+alias Boxed[T = Vec[Str]] = Option[T]
+
+pub fn boxed() -> Boxed {
+    .None
+}
+
+struct Hidden[T = Vec[UInt16]] {
+    value: T,
+}
+
+pub fn hidden() -> Hidden {
+    Hidden { value = Vec.new() }
+}
+
+pub struct Holder[T = Vec[UInt8]] {
+    value: T,
+}
+
+pub fn held() -> Holder {
+    Holder { value = Vec.new() }
+}

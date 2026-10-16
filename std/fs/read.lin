@@ -122,7 +122,7 @@ pub fn read_file_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -
 
 // Read the file at `path` through EOF into storage from the system allocator,
 // under the limits of `read_file_in`.
-pub fn read_file(path: Path, max_bytes: UInt64) -> Result[Vec[UInt8], ReadFileFailure[mem.SystemAllocator]] where carries() {
+pub fn read_file(path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ReadFileFailure[mem.SystemAllocator]] where carries() {
     read_file_in(mem.system(), path, max_bytes)
 }
 
@@ -265,7 +265,7 @@ pub fn read_text_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -
 
 // Read the file at `path` as UTF-8 text from the system allocator. See
 // `read_text_in`.
-pub fn read_text(path: Path, max_bytes: UInt64) -> Result[String, ReadTextError] {
+pub fn read_text(path: Path, max_bytes: UInt64) -> Result[String[mem.SystemAllocator], ReadTextError] {
     read_text_in(mem.system(), path, max_bytes)
 }
 

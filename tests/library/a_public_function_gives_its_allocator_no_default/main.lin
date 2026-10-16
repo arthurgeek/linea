@@ -1,0 +1,12 @@
+import std.mem
+
+// A caller that leaves `parent:` out takes the system allocator without
+// writing it, so a public function's allocator parameter has no default.
+pub fn chosen[P: Allocator = mem.SystemAllocator](parent: P = .System) -> Vec[Str, P] where carries(parent) {
+    Vec.new_in(parent)
+}
+
+// A type parameter that is not an allocator may still default.
+pub fn counted[S = UInt8](sink state: S = 0) -> S {
+    state
+}

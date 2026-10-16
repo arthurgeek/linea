@@ -1552,6 +1552,54 @@ own manifest. A program that uses it, even through another library, names it
 under `dependencies` with `"extern": true` too, agreeing to trust signatures
 the compiler cannot check.
 
+A library may also offer functions to C with `export`, and that is the
+library's own business: an `export` reaches C only from the project being
+built, so a program that depends on the library gets no C symbol from it and
+calls the function like any other public one.
+
+`metric/linea.json`:
+
+```json
+{ "kind": "library", "name": "metric" }
+```
+
+`metric/metric.lin`:
+
+```linea
+// `to_centimetres` is exported to C when `metric` itself is built. A Linea
+// program that depends on `metric` calls it as an ordinary public function.
+pub export fn to_centimetres(inches: Int32) -> Int32 {
+    inches * 254 / 100
+}
+```
+
+`beds/linea.json`:
+
+```json
+{ "dependencies": { "metric": { "path": "../metric" } } }
+```
+
+`beds/main.lin`:
+
+```linea
+import metric
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("A 48-inch bed is {metric.to_centimetres(48)} cm long.")?
+    .Ok(0)
+}
+```
+
+Run the program with `linea run beds`:
+
+```
+A 48-inch bed is 121 cm long.
+```
+
+To publish `to_centimetres` as a C symbol, build `metric` on its own, or
+write an `export` in the program itself.
+
 If you know Rust: the entry is a path dependency, `almanac = { path =
 "../almanac" }` in `Cargo.toml`, and `internal` is `pub(crate)`.
 

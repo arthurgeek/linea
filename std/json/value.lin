@@ -64,7 +64,7 @@ test fn null_makes_a_null_value_without_allocating() {
     testing.assert_eq(null.height, UInt64(0), "scalar height was not zero")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make the null value in the system allocator. It allocates nothing.
     pub fn null() -> Self {
         Value.null_in(mem.system())
@@ -90,7 +90,7 @@ test fn boolean_makes_a_boolean_value_without_allocating() {
     testing.assert_eq(boolean.height, UInt64(0), "scalar height was not zero")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make a boolean value in the system allocator. It allocates nothing.
     pub fn boolean(value: Bool) -> Self {
         Value.boolean_in(mem.system(), value)
@@ -116,7 +116,7 @@ test fn array_makes_an_empty_array_without_allocating() {
     testing.assert_eq(array.height, UInt64(1), "empty array height was not one")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make an empty array in the system allocator. It allocates nothing until
     // an element is appended.
     pub fn array() -> Self {
@@ -143,7 +143,7 @@ test fn object_makes_an_empty_object_without_allocating() {
     testing.assert_eq(object.height, UInt64(1), "empty object height was not one")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make an empty object in the system allocator. It allocates nothing until
     // a member is inserted.
     pub fn object() -> Self {
@@ -172,7 +172,7 @@ test fn string_values_own_their_text() {
     testing.assert_eq(string.as_str().unwrap(), "tea", "string retained its source")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make a string value holding a copy of `input`, in the system allocator.
     pub fn string(input: Str) -> Result[Self, mem.Oom] where carries() {
         Value.string_in(mem.system(), input)
@@ -207,7 +207,7 @@ test fn number_values_keep_their_spelling_and_refuse_other_text() {
     testing.assert(refused, "a leading zero became a number")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make a number value from `input` in the system allocator, as
     // `number_in` does.
     pub fn number(input: Str) -> Result[Self, NumberError] where carries() {
@@ -233,7 +233,7 @@ test fn from_int_makes_a_number_value() {
     testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed constructor changed its value")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make a number value whose token is the decimal text of `value`, in the
     // system allocator.
     pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
@@ -259,7 +259,7 @@ test fn from_uint_makes_a_number_value() {
     testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned constructor changed its value")?
 }
 
-impl Value {
+impl Value[mem.SystemAllocator] {
     // Make a number value whose token is the decimal text of `value`, in the
     // system allocator.
     pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {

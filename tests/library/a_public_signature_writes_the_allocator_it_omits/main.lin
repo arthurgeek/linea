@@ -1,0 +1,60 @@
+import std.mem
+
+// Each public signature below leaves a vector's or a string's allocator to its
+// default, so a caller holding an arena could not use it.
+pub fn names() -> Vec[Str] {
+    Vec.new()
+}
+
+pub fn count(items: Vec[Str]) -> UInt64 {
+    items.length()
+}
+
+pub fn maybe() -> Option[Vec[Str]] {
+    .None
+}
+
+pub fn owned(word: Str) -> Result[String, mem.Oom] where carries() {
+    word.to_owned()
+}
+
+pub fn pair() -> (Vec[Str], UInt8) {
+    (Vec.new(), 1)
+}
+
+pub fn maker() -> fn() -> Vec[Str] {
+    make
+}
+
+fn make() -> Vec[Str] {
+    Vec.new()
+}
+
+// Writing the system allocator out makes the restriction deliberate, and a
+// parameter keeps the function usable with any allocator.
+pub fn system() -> Vec[Str, mem.SystemAllocator] {
+    Vec.new()
+}
+
+pub fn kept[A: Allocator](allocator: A) -> Vec[Str, A] where carries(allocator) {
+    Vec.new_in(allocator)
+}
+
+// Private and internal signatures, and every function body, may leave the
+// allocator out: no caller outside the library sees them.
+fn helper() -> Vec[Str] {
+    Vec.new()
+}
+
+internal fn shared() -> Vec[Str] {
+    Vec.new()
+}
+
+pub fn total() -> UInt64 {
+    let local: Vec[Str] = helper()
+    let more = shared()
+    let sum = local.length() + more.length()
+    local.release()
+    more.release()
+    sum
+}

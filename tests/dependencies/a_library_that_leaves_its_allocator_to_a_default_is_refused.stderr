@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/dependencies/a_library_that_leaves_its_allocator_to_a_default_is_refused/shelf/shelf.lin:3:19
+  |
+3 | pub fn names() -> Vec[Str] {
+  |                   ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

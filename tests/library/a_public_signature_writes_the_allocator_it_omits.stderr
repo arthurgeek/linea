@@ -1,0 +1,30 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:9:21
+  |
+9 | pub fn count(items: Vec[Str]) -> UInt64 {
+  |                     ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:5:19
+  |
+5 | pub fn names() -> Vec[Str] {
+  |                   ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:13:26
+   |
+13 | pub fn maybe() -> Option[Vec[Str]] {
+   |                          ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `String`.
+  --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:17:35
+   |
+17 | pub fn owned(word: Str) -> Result[String, mem.Oom] where carries() {
+   |                                   ^^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:21:19
+   |
+21 | pub fn pair() -> (Vec[Str], UInt8) {
+   |                   ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_public_signature_writes_the_allocator_it_omits/main.lin:25:27
+   |
+25 | pub fn maker() -> fn() -> Vec[Str] {
+   |                           ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Pool`.
+ --> tests/library/an_inherent_impl_with_a_public_member_writes_its_allocator/main.lin:9:9
+  |
+9 | impl[T] Pool[T] {
+  |         ^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

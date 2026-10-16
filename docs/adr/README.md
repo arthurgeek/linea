@@ -61,9 +61,9 @@ true of a different implementation.
 | [0189](0189-a-names-case-is-part-of-its-kind.md) | A name's case is part of its kind | Accepted; extended by 0190 |
 | [0194](0194-an-alias-names-a-type-that-exists.md) | An alias names a type that exists | Accepted; extended by 0206 and 0215; path clause for a generic alias superseded by 0211 |
 | [0211](0211-a-generic-alias-heads-a-path-and-the-call-settles-its-parameters.md) | A generic alias heads a path, and the call settles its parameters | Accepted; supersedes the path clause of 0194; extends 0206 |
-| [0215](0215-a-type-parameter-may-default-its-argument.md) | A type parameter may default its argument | Accepted; supersedes 0206; extends 0098 and 0194; extended by 0217 and 0219 |
+| [0215](0215-a-type-parameter-may-default-its-argument.md) | A type parameter may default its argument | Accepted; supersedes 0206; extends 0098 and 0194; extended by 0217, 0219 and 0225 |
 | [0217](0217-a-call-leaves-an-undetermined-parameter-to-its-types-default.md) | A call leaves an undetermined parameter to its type's default | Accepted; extends 0215; extended by 0219 |
-| [0219](0219-a-function-type-parameter-and-its-parameter-may-default.md) | A function type parameter and its parameter may default | Accepted; extends 0077, 0215 and 0217 |
+| [0219](0219-a-function-type-parameter-and-its-parameter-may-default.md) | A function type parameter and its parameter may default | Accepted; extends 0077, 0215 and 0217; extended by 0225 |
 | [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md) | Tuple syntax denotes a positional aggregate whose identity is a prelude declaration | Accepted; builds on 0060, 0129, 0151, 0179 and 0188; extended by 0200 |
 | [0200](0200-a-tuples-arity-is-a-readability-policy-the-parser-enforces.md) | A tuple's arity is a readability policy the parser enforces | Accepted; extends 0199 |
 | [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147 |
@@ -244,7 +244,8 @@ ones most likely to be superseded as the compiler grows.
 | [0097](0097-release-is-named-never-scheduled.md) | Release is named, never scheduled | Superseded by 0104 |
 | [0098](0098-a-container-names-its-allocator-in-its-type.md) | A container names its allocator in its type | Accepted; extended by 0133, 0173, 0191, 0206 and 0215 |
 | [0191](0191-the-caller-chooses-every-allocator.md) | The caller chooses every allocator, a test instrument's included | Accepted; extends 0095 and 0098; every-allocating-API clause superseded by 0220 |
-| [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md) | A constructor or function that allocates pairs a system form with an `_in` form | Accepted; supersedes the every-allocating-API clause of 0191 |
+| [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md) | A constructor or function that allocates pairs a system form with an `_in` form | Accepted; supersedes the every-allocating-API clause of 0191; server-parent clause superseded by 0225 |
+| [0225](0225-a-library-signature-states-its-allocator.md) | A library's public signature states its allocator | Accepted; extends 0215 and 0219; supersedes the server-parent clause of 0220 |
 | [0206](0206-allocator-spelling-is-shortened-by-alias-never-by-default.md) | Allocator spelling is shortened by an alias, never by a default type argument | Superseded by 0215; extends 0098 and 0194; extended by 0211 |
 | [0209](0209-a-from-derive-converts-the-variant-the-source-names.md) | A `From` derive converts the variant its source type names | Accepted; extends 0113 and 0145 |
 | [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148 |

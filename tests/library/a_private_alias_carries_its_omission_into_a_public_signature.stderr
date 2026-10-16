@@ -1,0 +1,14 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/library/a_private_alias_carries_its_omission_into_a_public_signature/main.lin:5:20
+  |
+3 | alias Titles = Vec[Str]
+  |                --- the alias leaves the allocator to its default here
+5 | pub fn titles() -> Titles {
+  |                    ^^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_private_alias_carries_its_omission_into_a_public_signature/main.lin:9:19
+   |
+9  | pub fn later() -> Later {
+   |                   ^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+13 | alias Later = Vec[UInt8]
+   |               --- the alias leaves the allocator to its default here

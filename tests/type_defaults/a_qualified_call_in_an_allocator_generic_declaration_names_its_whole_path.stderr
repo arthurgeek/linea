@@ -1,5 +1,5 @@
-error[T-DefaultedAllocator]: `http.listen_and_serve` leaves its allocator `P` to a default, and this declaration is generic over an allocator itself
- --> tests/type_defaults/a_qualified_call_in_an_allocator_generic_declaration_names_its_whole_path.lin:8:11
+error[T-DefaultedAllocator]: `rooms.reserve` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+ --> tests/type_defaults/a_qualified_call_in_an_allocator_generic_declaration_names_its_whole_path/main.lin:7:5
   |
-8 |     match http.listen_and_serve(net.loopback(0), router) {
-  |           ^^^^^^^^^^^^^^^^^^^^^ write the allocator: `B`, or `mem.SystemAllocator` where the system allocator is meant
+7 |     rooms.reserve(8)
+  |     ^^^^^^^^^^^^^ write the allocator: `B`, or `mem.SystemAllocator` where the system allocator is meant

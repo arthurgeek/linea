@@ -33,7 +33,7 @@ test fn an_empty_allocator_refuses_owned_text() {
 
 impl Str {
     // Copy encoded text into storage owned by the system allocator.
-    pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+    pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
         self.to_owned_in(mem.system())
     }
 }

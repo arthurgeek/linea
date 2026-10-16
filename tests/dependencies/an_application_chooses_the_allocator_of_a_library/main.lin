@@ -1,0 +1,21 @@
+import shout
+import std.io
+import std.mem
+
+use mem.Owner
+
+fn main() -> Result[UInt8, io.IoError] {
+    let arena = mem.Arena.open(mem.system(), size: 256)
+    defer arena.release()
+    // `shout_in` builds the word in the arena, which gives it back when it is
+    // released.
+    let kept = shout.shout_in(arena.handle(), "hello") else |_| {
+        return .Ok(1)
+    }
+    // `shout` builds it from the system allocator, so this program releases it.
+    defer let loud = shout.shout("world") else |_| {
+        return .Ok(1)
+    }
+    io.println("{kept.view()} {loud.view()}")?
+    .Ok(0)
+}
