@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:20:24
    |
 20 |     let count: UInt8 = label(first)
-   |                        ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                        ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-Mismatch]: expected `UInt8`, found `Str`
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:20:24
    |
@@ -13,7 +13,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:22:22
    |
 22 |     let wide = width(label(second))
-   |                      ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                      ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-Mismatch]: expected `UInt8`, found `Str`
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:22:22
    |
@@ -25,7 +25,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:24:17
    |
 24 |     let named = label(third)
-   |                 ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                 ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-Condition]: expected `Bool`, found `Str`
   --> tests/generics/a_bound_refused_call_keeps_its_declared_result.lin:25:8
    |

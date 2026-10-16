@@ -12,4 +12,4 @@ error[T-Bound]: `T` requires `Copyable`, and `Token` does not have that capabili
   --> tests/decl/a_written_signature_selects_a_generic_function.lin:21:58
    |
 21 |     let _outside_bound: fn(read value: Token) -> Token = bounded
-   |                                                          ^^^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                                                          ^^^^^^^ mark `Token` `@copyable`, or drop the bound

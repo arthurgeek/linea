@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capabil
   --> tests/ownership/a_refused_call_with_a_known_signature_reads_what_it_reads.lin:15:5
    |
 15 |     show(ticket)
-   |     ^^^^ use a type meeting the capability requirement, or relax the bound
+   |     ^^^^ mark `Ticket` `@copyable`, or drop the bound
 error[O-Leak]: `ticket` (a linear `Ticket`) is still owned when this path leaves
   --> tests/ownership/a_refused_call_with_a_known_signature_reads_what_it_reads.lin:14:9
    |

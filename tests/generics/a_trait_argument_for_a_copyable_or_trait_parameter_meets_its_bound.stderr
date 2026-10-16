@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Copyable`, and `U` does not have that capability
+  --> tests/generics/a_trait_argument_for_a_copyable_or_trait_parameter_meets_its_bound.lin:37:13
+   |
+37 | fn twice[D: Dup[U], U](chooser: D, value: U) -> U where borrows(value) {
+   |             ^^^ add `Copyable` to `U`'s bounds, or drop the bound
+error[T-Bound]: `T` requires `Show`, and `U` does not implement it
+  --> tests/generics/a_trait_argument_for_a_copyable_or_trait_parameter_meets_its_bound.lin:41:13
+   |
+41 | fn drawn[X: Render[U], U](renderer: X, value: U) -> UInt8 {
+   |             ^^^^^^ add `Show` to `U`'s bounds, or drop the bound

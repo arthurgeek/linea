@@ -4,4 +4,4 @@ error[T-Bound]: `K` requires `Copyable`, and `Ticket` does not have that capabil
 6  |     fn doubled(self: Self, sink unit: K) -> UInt8 where K: Copyable {
    |                                                         - required by this `where` clause
 26 |     Booth { fee = 2 }.doubled(Ticket { seat = 3 })
-   |                       ^^^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                       ^^^^^^^ mark `Ticket` `@copyable`, or drop the bound

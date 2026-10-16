@@ -1824,6 +1824,22 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
     return false;
 }
 
+/// The bound in a run that demands a capability: the first that names
+/// `Copyable`, `Discardable` or `Linear`, or else the first named bound, a
+/// trait that requires the capability. Null where the run names nothing.
+fn capabilityToken(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
+    var first: ?TokenId = null;
+    for (bounds) |bound| {
+        if (bound.kind != .named) continue;
+        if (first == null) first = bound.named.name;
+        switch (resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name))) {
+            .capability => return bound.named.name,
+            else => {},
+        }
+    }
+    return first;
+}
+
 /// The first bound in a run that names `Owned`. Only the run itself is read:
 /// a trait cannot require `Owned`, so no trait it reaches adds the demand.
 fn ownedBound(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
@@ -10714,7 +10730,15 @@ const Checker = struct {
                 try std.fmt.allocPrint(self.sink.arena, "{s}. {s}", .{ general, reason })
             else
                 general;
-        } else "use a type meeting the capability requirement, or relax the bound";
+        } else help: {
+            // The edit a capability bound offers is the one every other unmet
+            // bound's help is built from: through the parameter's bounds, a
+            // declaration this program can mark, or another value, and the
+            // bound dropped only where the program wrote it.
+            var offered = self.unmetBoundHelp(capabilityToken(self.ast, self.res, bounds) orelse at);
+            offered.another_value = try std.fmt.allocPrint(self.sink.arena, "pass a value whose type is `{s}`", .{demanded});
+            break :help try self.unmetLabel(offered, try self.editForCapability(requirement, held));
+        };
         try self.sink.addErrorFmt(
             .t_bound,
             self.ast.fileOf(at),
@@ -12460,8 +12484,12 @@ const Checker = struct {
         };
         if (self.builder.get(held) == .parameter) return self.boundsEdit(required, held);
         const type_name = try self.typeName(held);
-        if (capability == .copyable) if (self.declaringType(held)) |d| if (!self.declaredInLibrary(d))
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "mark `{s}` `@copyable`", .{type_name}) };
+        // The attribute is written on the declaration, so it is named there,
+        // without the arguments an instantiation supplies.
+        // A declaration already marked is not `Copyable` here because of what
+        // it was given, which marking it again does not change.
+        if (capability == .copyable) if (self.declaringType(held)) |d| if (!self.declaredInLibrary(d) and self.ast.declOwnershipPolicy(d) != .copyable)
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "mark `{s}` `@copyable`", .{self.ast.tokenText(self.ast.declName(d))}) };
         return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `{s}`", .{ type_name, required }), .instead = null } };
     }
 
@@ -12480,6 +12508,12 @@ const Checker = struct {
     /// its declaration promises it in a `where` clause.
     fn boundsEdit(self: *Checker, required: []const u8, parameter: TypeId) std.mem.Allocator.Error!Edit {
         const name = try self.typeName(parameter);
+        // A trait signature's `Self` is bounded by the trait's supertrait
+        // list, which may not name `Owned`.
+        if (self.builder.standinOf(parameter) == null and std.mem.eql(u8, name, "Self")) {
+            if (std.mem.eql(u8, required, "Owned")) return .{ .refused = .{ .reason = "a trait's `Self` cannot be bounded `Owned`", .instead = null } };
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to the trait's supertraits", .{required}) };
+        }
         if (self.builder.standinOf(parameter) == null)
             return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, name }) };
         // The clause that can promise it is the one of the declaration whose

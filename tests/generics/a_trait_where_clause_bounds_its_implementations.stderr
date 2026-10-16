@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Discardable`, and `Token` does not have that capab
  --> tests/generics/a_trait_where_clause_bounds_its_implementations.lin:9:6
   |
 9 | impl Accept[Token] for UInt8 {}
-  |      ^^^^^^ use a type meeting the capability requirement, or relax the bound
+  |      ^^^^^^ `Token` is not `Discardable`; pass a value whose type is `Discardable`, or drop the bound

@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Discardable`, and `Mid[Key]` does not have that ca
   --> tests/generics/a_discardable_bound_reads_nested_component_obligations.lin:20:13
    |
 20 | fn take(_h: Held[Mid[Key]]) -> UInt8 {
-   |             ^^^^ use a type meeting the capability requirement, or relax the bound
+   |             ^^^^ `Mid[Key]` is not `Discardable`; pass a value whose type is `Discardable`, or drop the bound
 error[O-Leak]: this linear `Held[Mid[Key]]` is never settled
   --> tests/generics/a_discardable_bound_reads_nested_component_obligations.lin:25:10
    |

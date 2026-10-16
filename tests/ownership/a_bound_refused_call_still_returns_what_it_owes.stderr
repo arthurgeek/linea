@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:21:16
    |
 21 |     let lock = open(pair)
-   |                ^^^^ use a type meeting the capability requirement, or relax the bound
+   |                ^^^^ mark `Pair` `@copyable`, or drop the bound
 error[O-Move]: `lock` has already been moved
   --> tests/ownership/a_bound_refused_call_still_returns_what_it_owes.lin:23:18
    |

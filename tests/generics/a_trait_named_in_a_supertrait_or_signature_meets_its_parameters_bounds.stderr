@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Copyable`, and `U` does not have that capability
   --> tests/generics/a_trait_named_in_a_supertrait_or_signature_meets_its_parameters_bounds.lin:12:22
    |
 12 | pub trait Paired[U]: Dup[U] {
-   |                      ^^^ use a type meeting the capability requirement, or relax the bound
+   |                      ^^^ add `Copyable` to `U`'s bounds, or drop the bound
 error[T-Bound]: `T` requires `Owned`, and `W` may stand for a type that carries a borrow
   --> tests/generics/a_trait_named_in_a_supertrait_or_signature_meets_its_parameters_bounds.lin:16:23
    |
@@ -12,14 +12,14 @@ error[T-Bound]: `T` requires `Copyable`, and `Vec[UInt8, mem.SystemAllocator]` d
   --> tests/generics/a_trait_named_in_a_supertrait_or_signature_meets_its_parameters_bounds.lin:21:16
    |
 21 |     type Item: Dup[Vec[UInt8]]
-   |                ^^^ use a type meeting the capability requirement, or relax the bound
+   |                ^^^ `Vec[UInt8, mem.SystemAllocator]` is not `Copyable`; pass a value whose type is `Copyable`, or drop the bound
 error[T-Bound]: `T` requires `Copyable`, and `Self.Item` does not have that capability
   --> tests/generics/a_trait_named_in_a_supertrait_or_signature_meets_its_parameters_bounds.lin:29:16
    |
 29 |     fn pick[D: Dup[Self.Item]](self: Self, chooser: D) -> UInt8
-   |                ^^^ use a type meeting the capability requirement, or relax the bound
+   |                ^^^ add `where Self.Item: Copyable`, or drop the bound
 error[T-Bound]: `T` requires `Copyable`, and `Self` does not have that capability
   --> tests/generics/a_trait_named_in_a_supertrait_or_signature_meets_its_parameters_bounds.lin:31:16
    |
 31 |     fn twin[D: Dup[Self]](self: Self, chooser: D) -> UInt8
-   |                ^^^ use a type meeting the capability requirement, or relax the bound
+   |                ^^^ add `Copyable` to the trait's supertraits, or drop the bound
