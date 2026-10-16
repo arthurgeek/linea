@@ -1,0 +1,7 @@
+import std.ffi
+
+// The manifest grants this module, so it may import `std.ffi`.
+pub fn width() -> UInt64 {
+    let _lent = ffi.bytes("shelf")
+    3
+}

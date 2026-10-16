@@ -1,0 +1,9 @@
+import counter
+
+fn main() -> UInt8 {
+    if counter.opened(false) {
+        0
+    } else {
+        1
+    }
+}

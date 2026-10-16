@@ -1,0 +1,162 @@
+import std.mem
+import std.testing
+import std.text
+
+use text.Utf8Failure
+
+// The address of NUL-terminated text, which crosses as a C `const char *` in
+// either direction. A `CText` an `extern` returns points at memory C owns, and
+// is valid for as long as the declaration's contract says: an `extern`
+// answering text that lives inside a handle declares `borrows(handle)`. One
+// taken from a `CString` borrows it. A `CText` is read only by copying it.
+@(opaque, copyable)
+type CText = UInt64
+
+// Why C's text could not be copied: C answered a null pointer, the bytes are
+// not UTF-8, or the allocator refused the copy.
+@derive(Debug, Release, From[text.Utf8Error], From[mem.Oom])
+pub enum CTextError {
+    Null,
+    Encoding(text.Utf8Error),
+    Allocation(mem.Oom),
+}
+
+impl CText {
+    // Whether C answered a null pointer rather than text.
+    pub fn is_null(self: Self) -> Bool {
+        let read CText(at) = self
+        at == 0
+    }
+}
+
+test fn only_a_zero_address_is_null() {
+    testing.assert(CText(0).is_null(), "a zero address was not null")?
+    defer let held = CString.open("x").unwrap()
+    testing.assert(!held.text().is_null(), "held text was null")?
+    .Ok(())
+}
+
+impl CText {
+    // How many bytes precede the terminating NUL. Zero for a null pointer.
+    pub fn length(self: Self) -> UInt64 {
+        let read CText(at) = self
+        if at == 0 {
+            return 0
+        }
+        var count: UInt64 = 0
+        while mem.foreign_byte(at, count) != 0 {
+            count += 1
+        }
+        count
+    }
+}
+
+test fn the_length_stops_at_the_terminator() {
+    defer let held = CString.open("Ada").unwrap()
+    testing.assert_eq(held.text().length(), UInt64(3), "the terminator was miscounted")?
+    testing.assert_eq(CText(0).length(), UInt64(0), "a null pointer had a length")?
+    .Ok(())
+}
+
+// Copy `length` bytes from the C address `at` into storage from `allocator`.
+fn copied_in[A: Allocator](allocator: A, at: UInt64, length: UInt64) -> Result[mem.Vec[UInt8, A], mem.Oom] where carries(.Ok: allocator) {
+    defer var copied: mem.Vec[UInt8, A] = mem.Vec.new_in(allocator)
+    &copied.reserve(length)?
+    for i in 0..length {
+        &copied.push(mem.foreign_byte(at, i)).settled()?
+    }
+    .Ok(copied)
+}
+
+test fn bytes_are_copied_from_an_address() {
+    defer let held = CString.open("xyz").unwrap()
+    let lent = held.text()
+    let read CText(at) = lent
+    defer let copied = copied_in(mem.system(), at, 2).unwrap()
+    testing.assert_eq(copied.length(), UInt64(2), "the copy took another length")?
+    testing.assert_eq(copied[1], UInt8(121), "the copy read another byte")?
+    .Ok(())
+}
+
+impl CText {
+    // Copy the text, checking it is UTF-8, into storage from `allocator`.
+    pub fn to_owned_in[A: Allocator](self: Self, allocator: A) -> Result[String[A], CTextError] where carries(.Ok: allocator) {
+        if self.is_null() {
+            return .Err(.Null)
+        }
+        let read CText(at) = self
+        let bytes = copied_in(allocator, at, self.length())?
+        match String.from_bytes(bytes) {
+            Ok(owned) => .Ok(owned),
+            Err(failure) => {
+                let Utf8Failure { bytes: rejected, error: problem } = failure
+                rejected.release()
+                .Err(.Encoding(problem))
+            },
+        }
+    }
+}
+
+test fn text_is_copied_into_the_given_allocator() {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    defer let held = CString.open("Grace").unwrap()
+    let copied = held.text().to_owned_in(arena.handle()).unwrap()
+    testing.assert_eq(copied.view(), "Grace", "the copy changed the text")?
+    .Ok(())
+}
+
+impl CText {
+    // Copy the text, checking it is UTF-8, into the system allocator.
+    pub fn to_owned(self: Self) -> Result[String, CTextError] where carries() {
+        self.to_owned_in(mem.system())
+    }
+}
+
+test fn null_text_is_refused_rather_than_read() {
+    let refused = match CText(0).to_owned() {
+        Ok(owned) => {
+            owned.release()
+            false
+        },
+        Err(failure) => match failure {
+            Null => true,
+            _ => false,
+        },
+    }
+    testing.assert(refused, "a null pointer was read")?
+    .Ok(())
+}
+
+impl CText {
+    // Copy exactly `length` bytes, NULs included, into storage from
+    // `allocator`. C states the length, typically beside the text, and this
+    // trusts it: it is the one copy that reads past a NUL.
+    pub fn copy_bytes_in[A: Allocator](self: Self, allocator: A, length: UInt64) -> Result[mem.Vec[UInt8, A], CTextError] where carries(.Ok: allocator) {
+        if length != 0 && self.is_null() {
+            return .Err(.Null)
+        }
+        let read CText(at) = self
+        .Ok(copied_in(allocator, at, length)?)
+    }
+}
+
+test fn bytes_past_a_nul_are_copied_by_length() {
+    defer let held = CString.open("ab").unwrap()
+    defer let copied = held.text().copy_bytes_in(mem.system(), length: 3).unwrap()
+    testing.assert_eq(copied.length(), UInt64(3), "the copy took another length")?
+    testing.assert_eq(copied[2], UInt8(0), "the terminator was not copied")?
+    .Ok(())
+}
+
+impl CText {
+    // Copy exactly `length` bytes, NULs included, into the system allocator.
+    pub fn copy_bytes(self: Self, length: UInt64) -> Result[mem.Vec[UInt8], CTextError] where carries() {
+        self.copy_bytes_in(mem.system(), length: length)
+    }
+}
+
+test fn no_bytes_are_copied_from_a_null_pointer_of_no_length() {
+    defer let copied = CText(0).copy_bytes(length: 0).unwrap()
+    testing.assert_eq(copied.length(), UInt64(0), "bytes appeared from nowhere")?
+    .Ok(())
+}

@@ -2,5 +2,5 @@ import ffi_side
 import arithmetic
 
 fn main() -> UInt8 {
-    UInt8(ffi_side.abs(-3)) + UInt8(arithmetic.labs(-4))
+    UInt8(ffi_side.magnitude(-3)) + UInt8(arithmetic.magnitude(-4))
 }

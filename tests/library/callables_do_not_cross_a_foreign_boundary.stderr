@@ -1,15 +1,5 @@
-error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
- --> tests/library/callables_do_not_cross_a_foreign_boundary/main.lin:3:11
-  |
-3 | extern fn _receives(_f: fn(read value: UInt8) -> UInt8) -> UInt8
-  |           ^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
-error[T-Extern]: `fn(read value: UInt8) -> UInt8` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
- --> tests/library/callables_do_not_cross_a_foreign_boundary/main.lin:3:25
-  |
-3 | extern fn _receives(_f: fn(read value: UInt8) -> UInt8) -> UInt8
-  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ pass what it is made of, as integers or `Float64`
 error[T-Export]: `fn(read value: UInt8) -> UInt8` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
- --> tests/library/callables_do_not_cross_a_foreign_boundary/main.lin:5:21
+ --> tests/library/callables_do_not_cross_a_foreign_boundary/main.lin:3:21
   |
-5 | export fn sends(_f: fn(read value: UInt8) -> UInt8) -> UInt8 {
+3 | export fn sends(_f: fn(read value: UInt8) -> UInt8) -> UInt8 {
   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ pass what it is made of, as integers or `Float64`

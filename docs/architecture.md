@@ -1374,7 +1374,12 @@ collect their field facts before one canonical set union.
 Callable result bounds remain compact ambient facts. At a return or inout
 boundary, ownership checks whether declared target prefixes collectively cover
 every component that typing says may carry dependencies. A value's direct
-dependency seed cannot be discharged through its physical fields. This permits
+dependency seed cannot be discharged through its physical fields. The seeds
+are an observation, a type parameter, and the declarations the checker
+recognises by identity: `mem.Slice`, `mem.Buffer` and `mem.Storage`, and
+`std.ffi`'s `Bytes`, `CText` and `CTextList`, newtypes over a C address whose
+contracts tie them to what they view. A seeded newtype is not a
+dependency-free scalar, so a `carries` contract into one is kept. This permits
 an optional payload to be unpacked and restored while preserving distinct
 record-field obligations. Target suffixes are grouped by path step; immediate
 capable-component counts are cached by mentioned type within the function, so
@@ -1792,6 +1797,14 @@ proof paths before machine code. These facts permit no allocation elision,
 `nonnull` or `noalias` assumptions. Verified raw accesses use non-inbounds
 byte GEPs over their recorded base and offset, preserving pointer relationships
 and the existing overflow, bounds and alignment checks.
+
+A callback an `extern` takes lowers to `foreign_function_addr`, the address of
+a C-callable entry to one concrete function; the verifier refuses the value
+anywhere but as an argument of a direct call to an `extern`. The backend writes
+one private entry per function so passed, with the routine that writes an
+export's thunk: both take the declared types' C widths, widen them, call the
+body and narrow its answer. A crossing value is rendered from its storage
+representation, and a callback crosses as `!llvm.ptr`.
 
 An `extern` declaration and an export thunk mark every 8- or 16-bit integer
 parameter and result `llvm.signext` or `llvm.zeroext`, by the declared type's

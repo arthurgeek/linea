@@ -130,6 +130,19 @@ The library tests itself.
   ok    env.every_entry_has_a_name
   ok    env.every_variable_has_a_name_and_no_equals_sign_in_it
   ok    env.raw_arguments_preserve_existing_storage_and_missing_indices
+  ok    ffi.a_view_of_nothing_is_lent_at_an_address
+  ok    ffi.bytes_are_copied_from_an_address
+  ok    ffi.bytes_past_a_nul_are_copied_by_length
+  ok    ffi.entries_are_read_where_the_list_holds_them
+  ok    ffi.lent_text_reads_back_as_the_original
+  ok    ffi.no_bytes_are_copied_from_a_null_pointer_of_no_length
+  ok    ffi.null_text_is_refused_rather_than_read
+  ok    ffi.only_a_zero_address_is_null
+  ok    ffi.text_holding_a_nul_is_refused_where_the_nul_is
+  ok    ffi.text_is_copied_into_the_given_allocator
+  ok    ffi.text_is_copied_with_a_terminator
+  ok    ffi.text_is_lent_at_its_first_byte
+  ok    ffi.the_length_stops_at_the_terminator
   ok    fmt.a_default_spec_adds_no_padding
   ok    fmt.a_fill_of_several_scalars_stays_within_the_width
   ok    fmt.a_nullary_parse_error_renders_its_reason
@@ -907,6 +920,9 @@ The library tests itself.
   ok    mem.a_closure_keeps_its_captures_in_an_arena
   ok    mem.a_closure_opened_in_the_system_allocator_calls_what_it_captured
   ok    mem.a_drain_stopped_early_is_returned_by_finish_and_resumes
+  ok    mem.a_foreign_address_is_where_the_bytes_are
+  ok    mem.a_foreign_byte_is_read_at_its_offset
+  ok    mem.a_foreign_word_is_read_at_its_offset
   ok    mem.a_handle_written_without_a_parent_is_a_handle_over_the_system
   ok    mem.a_lambda_that_captures_nothing_allocates_nothing
   ok    mem.a_new_release_log_holds_no_releases

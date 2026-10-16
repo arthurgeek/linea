@@ -1,0 +1,32 @@
+import std.ffi
+import std.mem
+
+use mem.Owner
+
+// C reads a NUL-terminated string, which `ffi.CString` holds.
+extern fn measure_length(text: ffi.CText) -> UInt64
+
+pub enum LengthError { InteriorNul(UInt64), OutOfMemory }
+
+// How many bytes C counts before the terminating NUL. Text holding a NUL of
+// its own would end early in C, so it is refused.
+pub fn length_of(text: Str) -> Result[UInt64, LengthError] {
+    let copied = ffi.CString.open(text) else |failure| {
+        return .Err(match failure {
+            InteriorNul(offset) => .InteriorNul(offset),
+            Allocation(_) => .OutOfMemory,
+        })
+    }
+    let measured = measure_length(copied.text())
+    copied.release()
+    .Ok(measured)
+}
+
+// The same, copying the text into an arena that is dropped afterwards.
+pub fn length_in_arena(text: Str) -> UInt64 {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    let copied = ffi.CString.open_in(arena.handle(), text) else |_| {
+        return 0
+    }
+    measure_length(copied.text())
+}

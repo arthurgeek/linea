@@ -1,0 +1,24 @@
+import std.ffi
+import std.mem
+
+// C reads `length` bytes from the address `ffi.Bytes` holds. The `Bytes` keeps
+// the text's owner borrowed while it lives, which here is the call.
+extern fn checksum_sum(bytes: ffi.Bytes, length: UInt64) -> UInt64
+
+extern fn checksum_has_address(bytes: ffi.Bytes) -> Int32
+
+// Add up the bytes of `text`.
+pub fn of(text: Str) -> UInt64 {
+    checksum_sum(ffi.bytes(text), text.length())
+}
+
+// Add up `bytes`.
+pub fn of_bytes(bytes: mem.Slice[UInt8]) -> UInt64 {
+    checksum_sum(ffi.bytes_of(bytes), bytes.length())
+}
+
+// Whether C receives an address for `text`, which it does even when the
+// text is empty.
+pub fn has_address(text: Str) -> Bool {
+    checksum_has_address(ffi.bytes(text)) != 0
+}

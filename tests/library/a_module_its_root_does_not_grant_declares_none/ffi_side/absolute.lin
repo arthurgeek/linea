@@ -1,2 +1,6 @@
 // The manifest trusts this module with C, so it may declare `abs`.
-pub extern fn abs(value: Int32) -> Int32
+extern fn abs(value: Int32) -> Int32
+
+pub fn magnitude(value: Int32) -> Int32 {
+    abs(value)
+}

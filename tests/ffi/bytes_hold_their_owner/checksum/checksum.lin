@@ -1,0 +1,14 @@
+import std.ffi
+import std.mem
+
+extern fn checksum_sum(bytes: ffi.Bytes, length: UInt64) -> UInt64
+
+// Growing the vector may move its bytes, so the address lent before it is
+// refused after it.
+pub fn grown_while_lent() -> UInt64 {
+    defer var owner: mem.Vec[UInt8] = mem.Vec.new()
+    &owner.push(1).unwrap()
+    let lent = ffi.bytes_of(owner.as_slice())
+    &owner.push(2).unwrap()
+    checksum_sum(lent, 1)
+}

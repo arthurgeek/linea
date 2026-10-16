@@ -343,8 +343,13 @@ pub fn build(
     // at the same level, and instrumented when the runtime is.
     const objects = try gpa.alloc([]const u8, opts.native.len);
     defer gpa.free(objects);
+    // Every object made so far is removed whichever way the build ends, so a
+    // source that fails to compile leaves none of the earlier ones behind.
+    var made: usize = 0;
+    defer for (objects[0..made]) |object| std.Io.Dir.cwd().deleteFile(io, object) catch {};
     for (opts.native, 0..) |source, i| {
         objects[i] = try std.fmt.allocPrint(gpa, "{s}.{d}.o", .{ opts.mid.assembly, i });
+        made = i + 1;
         var compile: std.ArrayList([]const u8) = .empty;
         defer compile.deinit(gpa);
         try compile.appendSlice(gpa, &.{
@@ -358,7 +363,6 @@ pub fn build(
         try appendSanitizeLink(gpa, &compile, opts.sanitize);
         if (try runTool(gpa, io, .cc, compile.items)) |f| return f;
     }
-    defer for (objects) |object| std.Io.Dir.cwd().deleteFile(io, object) catch {};
 
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(gpa);

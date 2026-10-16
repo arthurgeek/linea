@@ -1,0 +1,1 @@
+{ "extern": ["checksum"], "native": ["checksum/checksum.c"] }

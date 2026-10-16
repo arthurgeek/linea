@@ -1533,6 +1533,7 @@ const Lowerer = struct {
             .float_math,
             .check,
             .function_addr,
+            .foreign_function_addr,
             => .value,
         };
         return self.b.addInst(self.block, .{ .tag = tag, .result_role = role, .ty = ty, .span = span, .data = data });
@@ -5194,6 +5195,16 @@ const Lowerer = struct {
                         continue;
                     }
                 }
+            }
+            // C calls a callback through an entry in its own convention, so an
+            // `extern`'s callback argument is that entry's address. The checker
+            // gave every such argument a fixed target ([T-ExternCallback]).
+            if (self.ast.declIsExtern(named) and self.typing.get(param.ty) == .callable) {
+                const value = self.calls.functionValueOf(self.typing, self.ast.withoutGroups(a)) orelse
+                    @panic("compiler defect: a callback passed to C has no fixed target");
+                const target = try self.functionTarget(value);
+                try args.append(self.gpa, try self.b.addForeignFunctionAddr(self.block, try self.substituted(value.signature), self.ast.exprSpan(a), target));
+                continue;
             }
             if (try self.appendCallArgument(&args, a, param)) |stopped| return stopped;
         }

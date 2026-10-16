@@ -1,0 +1,33 @@
+import std.ffi
+
+// A label owns its text; `name` lends it.
+@(opaque, linear)
+struct Label {
+    text: ffi.CString,
+}
+
+// The text a label lends, sealed so only this module reads it.
+@(opaque, copyable)
+type Name = ffi.CText
+
+impl Label {
+    pub fn open(text: Str) -> Label {
+        .{ text = ffi.CString.open(text).unwrap() }
+    }
+
+    // The name points into the label, so returning it without saying it
+    // borrows the label is refused.
+    pub fn name(self: Self) -> Name {
+        Name(self.text.text())
+    }
+
+    pub fn close(sink self: Self) {
+        let Label { text: text } = self
+        text.release()
+    }
+}
+
+pub fn spell(name: Name) -> String {
+    let Name(text) = copy(name)
+    text.to_owned().unwrap()
+}

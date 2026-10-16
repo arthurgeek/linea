@@ -1,0 +1,5 @@
+import squares
+
+fn main() -> UInt8 {
+    UInt8(squares.sum())
+}

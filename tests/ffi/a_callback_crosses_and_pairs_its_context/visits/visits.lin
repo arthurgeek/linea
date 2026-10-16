@@ -1,0 +1,24 @@
+struct Tally {
+    total: Int64,
+}
+
+// C cannot hand a callback a `Bool`.
+extern fn visit_flags(visit: fn(flag: Bool) -> Int32) -> Int32
+
+// The callback's context is a `Tally`, and the call lends none to C.
+extern fn _visit_unpaired(visit: fn(inout tally: Tally, square: Int32) -> Int32) -> Int32
+
+// C may call the callback many times, so it is a plain `fn`.
+extern fn _visit_once(visit: sink fn(square: Int32) -> Int32) -> Int32
+
+pub fn run() -> Int32 {
+    visit_flags(
+        |flag: Bool| -> Int32 {
+            if flag {
+                1
+            } else {
+                0
+            }
+        },
+    )
+}

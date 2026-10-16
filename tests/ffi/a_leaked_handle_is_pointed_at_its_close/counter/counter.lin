@@ -1,0 +1,17 @@
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn counter_open() -> UInt64
+
+extern fn counter_close(sink counter: Handle)
+
+// Leaving early forgets the C object. Taking the handle apart would forget it
+// just as surely, so the help names the function that closes it.
+pub fn opened(fail: Bool) -> Bool {
+    let handle = Handle(counter_open())
+    if fail {
+        return false
+    }
+    counter_close(handle)
+    true
+}

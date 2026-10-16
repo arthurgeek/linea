@@ -2,8 +2,8 @@ import std.io
 import arithmetic
 
 fn main() -> Result[UInt8, io.IoError] {
-    let squared = arithmetic.arithmetic_square(12)
-    let total = arithmetic.arithmetic_sum(40, 2)
+    let squared = arithmetic.square(12)
+    let total = arithmetic.sum(40, 2)
     io.println("{squared} {total}")?
     .Ok(0)
 }

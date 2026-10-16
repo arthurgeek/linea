@@ -1,9 +1,21 @@
 // A `Float64` crosses as a C `double`.
-pub extern fn geometry_scale(length: Float64, times: Int32) -> Float64
+extern fn geometry_scale(length: Float64, times: Int32) -> Float64
 
-pub extern fn geometry_not_a_number() -> Float64
+extern fn geometry_not_a_number() -> Float64
 
 // A newtype crosses as its base, so C sees this `Id` as a `uint64_t`.
 pub type Id = UInt64
 
-pub extern fn geometry_next_id(id: Id) -> Id
+extern fn geometry_next_id(id: Id) -> Id
+
+pub fn scale(length: Float64, times: Int32) -> Float64 {
+    geometry_scale(length, times)
+}
+
+pub fn not_a_number() -> Float64 {
+    geometry_not_a_number()
+}
+
+pub fn next_id(id: Id) -> Id {
+    geometry_next_id(id)
+}

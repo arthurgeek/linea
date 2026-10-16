@@ -799,6 +799,7 @@ const Function = struct {
         // pass that reports defects.
         if (!try self.cover()) return false;
         if (!try self.references()) return false;
+        if (!try self.foreignEntriesReachOnlyC()) return false;
         if (!try self.verifySignature()) return false;
 
         const locations = try self.gpa.alloc(Location, self.mir.insts.len);
@@ -1324,6 +1325,7 @@ const Function = struct {
             .float_math,
             .check,
             .function_addr,
+            .foreign_function_addr,
             .call_indirect,
             .call_noreturn,
             .call_indirect_noreturn,
@@ -1333,6 +1335,81 @@ const Function = struct {
             .trap,
             => {},
         }
+        return true;
+    }
+
+    /// A C-callable entry follows C's convention, so only C may call it: every
+    /// use of a `foreign_function_addr` is an argument of a direct call to an
+    /// `extern`. One pass over the function's instructions, reading each
+    /// operand once.
+    fn foreignEntriesReachOnlyC(self: *Function) std.mem.Allocator.Error!bool {
+        const mir = self.mir;
+        for (0..mir.insts.len) |i| {
+            const user = InstId.at(@intCast(i));
+            var single: [6]InstId = @splat(.none);
+            const used: []const InstId = switch (mir.tagOf(user).payload()) {
+                .call => {
+                    const c = mir.callOf(user);
+                    if (self.module.isExternal(c.func)) continue;
+                    for (c.args) |a| if (try self.refuseForeignEntry(user, a)) return false;
+                    continue;
+                },
+                .indirect_call => {
+                    const c = mir.indirectCallOf(user);
+                    if (try self.refuseForeignEntry(user, c.callee)) return false;
+                    for (c.args) |a| if (try self.refuseForeignEntry(user, a)) return false;
+                    continue;
+                },
+                .unary => blk: {
+                    single[0] = mir.unaryOf(user);
+                    break :blk single[0..1];
+                },
+                .binary => blk: {
+                    const pair = mir.binaryOf(user);
+                    single[0] = pair.lhs;
+                    single[1] = pair.rhs;
+                    break :blk single[0..2];
+                },
+                .store => blk: {
+                    single[0] = mir.storeOf(user).value;
+                    break :blk single[0..1];
+                },
+                .float_math => blk: {
+                    const math = mir.floatMathOf(user);
+                    single[0] = math.lhs;
+                    single[1] = math.rhs;
+                    break :blk single[0..2];
+                },
+                .raw_access => blk: {
+                    const raw = mir.rawAccessOf(user);
+                    single = .{ raw.address, raw.length, raw.value, raw.overflow_check, raw.bounds_check, raw.alignment_check };
+                    break :blk single[0..6];
+                },
+                .check => blk: {
+                    single[0] = mir.checkOf(user).value;
+                    break :blk single[0..1];
+                },
+                .branch => blk: {
+                    single[0] = mir.branchOf(user).cond;
+                    break :blk single[0..1];
+                },
+                .trap => blk: {
+                    single[0] = mir.trapOf(user).message;
+                    break :blk single[0..1];
+                },
+                .constant, .bytes, .static, .local, .function, .target => continue,
+            };
+            for (used) |operand| if (try self.refuseForeignEntry(user, operand)) return false;
+        }
+        return true;
+    }
+
+    /// Reports `operand` where it is a C-callable entry used by `user`, which
+    /// is not a direct call to an `extern`.
+    fn refuseForeignEntry(self: *Function, user: InstId, operand: InstId) std.mem.Allocator.Error!bool {
+        if (operand == .none or operand.index() >= self.mir.insts.len) return false;
+        if (self.mir.tagOf(operand) != .foreign_function_addr) return false;
+        try self.report(self.mir.spanOf(user), "%{d} uses C-callable entry %{d} as something other than an argument of an extern call", .{ user.index(), operand.index() });
         return true;
     }
 
@@ -1802,6 +1879,7 @@ const Function = struct {
                 .float_math,
                 .check,
                 .function_addr,
+                .foreign_function_addr,
                 => .value,
             };
             const got = mir.resultRoleOf(id);
@@ -3275,6 +3353,28 @@ test "a code pointer can be stored loaded and called" {
     const checked = try h.run();
     try testing.expect(checked.ok);
     try testing.expectEqual(@as(usize, 0), checked.said.len);
+}
+
+test "a C-callable entry is passed to an extern and never called from Linea" {
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.signature = Harness.nullary_callable;
+    b.return_type = .u8;
+    const entry = try b.addBlock();
+    const pointer = try b.addForeignFunctionAddr(entry, Harness.nullary_callable, Span.empty, FunctionId.at(1));
+    const result = try b.addIndirectCall(entry, .value, .u8, Span.empty, pointer, &.{});
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
+    const functions = try gpa.dupe(Mir, &.{
+        try b.finish(entry, .from(0)),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+    });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "as something other than an argument of an extern call");
 }
 
 test "a code pointer cannot be forged by a constant" {

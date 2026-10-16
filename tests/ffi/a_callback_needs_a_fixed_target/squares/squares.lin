@@ -1,0 +1,22 @@
+struct Tally {
+    total: Int64,
+}
+
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+// `visit` could be any function at all, so there is no one entry C could be
+// handed for it.
+pub fn sum_with(visit: fn(inout tally: Tally, square: Int32) -> Int32) -> Int64 {
+    var tally = Tally { total = 0 }
+    let _visited = squares_visit(3, visit, &tally)
+    tally.total
+}
+
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    0
+}
+
+pub fn sum() -> Int64 {
+    sum_with(add_square)
+}

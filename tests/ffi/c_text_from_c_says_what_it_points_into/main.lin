@@ -1,0 +1,5 @@
+import notes
+
+fn main() -> UInt8 {
+    UInt8(notes.length_of(0))
+}

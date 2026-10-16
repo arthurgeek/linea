@@ -1,0 +1,5 @@
+error[M-Foreign]: only a module its root's manifest grants may import `std.ffi`
+ --> tests/ffi/only_a_granted_module_imports_ffi/main.lin:1:8
+  |
+1 | import std.ffi
+  |        ^^^^^^^ call a module that is granted, or list this one under "extern" in linea.json

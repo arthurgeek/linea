@@ -1,0 +1,46 @@
+import std.mem
+import std.testing
+
+// `std.ffi` holds what a module trusted with C passes to it and reads back.
+// Only a module its root's manifest lists under "extern" may import it, and
+// such a module may not publish its types ([M-Foreign]).
+
+// The address of the first of a run of bytes, which crosses to C as a
+// `const uint8_t *`. A `Bytes` carries the dependencies of the view it was
+// taken from, so the bytes' owner can be neither freed nor changed while it
+// lives; its last use is normally the call that lends it.
+@(opaque, copyable)
+type Bytes = UInt64
+
+// Lend the bytes of `text` to C. Empty text still has an address, so a C
+// function that reads a null pointer as "no value" receives empty text.
+pub fn bytes(text: Str) -> Bytes where carries(text) {
+    bytes_of(text.as_bytes())
+}
+
+test fn text_is_lent_at_its_first_byte() {
+    let Bytes(at) = bytes("guest")
+    testing.assert_eq(mem.foreign_byte(at, 0), UInt8(103), "text was lent from another byte")?
+    let Bytes(empty) = bytes("")
+    testing.assert(empty != 0, "empty text was lent as a null pointer")?
+    .Ok(())
+}
+
+// Lend the bytes `view` holds to C, at a non-null address even when it holds
+// none.
+pub fn bytes_of(view: mem.Slice[UInt8]) -> Bytes where carries(view) {
+    let at = mem.foreign_address(view)
+    if at != 0 {
+        return Bytes(at)
+    }
+    // A literal's bytes live as long as the program, so this address is
+    // never stale.
+    Bytes(mem.foreign_address("\0".as_bytes()))
+}
+
+test fn a_view_of_nothing_is_lent_at_an_address() {
+    defer let empty: mem.Vec[UInt8] = mem.Vec.new()
+    let Bytes(at) = bytes_of(empty.as_slice())
+    testing.assert(at != 0, "an empty view was lent as a null pointer")?
+    .Ok(())
+}

@@ -1904,12 +1904,35 @@ struct Account { id: UInt8, balance: UInt8 }
 manifest lists under `"extern"`; any root, program or library, may grant its
 own modules. A dependency's grant takes effect only where every manifest
 naming it, and the primary root's manifest, consent with `"extern": true` in
-an entry ([M-Dependency]). A module the manifest does not list is refused. The
-compiler trusts an `extern` signature without inspecting its implementation,
-so the grant bounds that trust to the modules a reviewer was told to read
+an entry ([M-Dependency]). A module the manifest does not list is refused. An
+`extern` is private to its module: `pub` or `internal` on one is refused,
+because another module calling C directly would be trusted with C too. The
+granted module publishes ordinary functions that call it. The compiler
+trusts an `extern` signature without inspecting its implementation, so the
+grant bounds that trust to the modules a reviewer was told to read
 ([ADR 0068](adr/0068-a-declaration-may-name-a-symbol-the-runtime-provides.md),
 [ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
 [ADR 0228](adr/0228-a-granted-module-calls-c.md)).
+
+**[M-Foreign]** Only a module its root's manifest grants `extern` may use
+`std.ffi`: import it, call any function or method `std.ffi` declares, or take
+one as a value, whatever `std.ffi` value it is handed. A trait's operation
+reached through one of `std.ffi`'s implementations, such as `release` on a
+`CString`, reads no C memory and is not refused. A module that is not granted may
+hold such a value and pass it on, which reads nothing. A granted module also
+publishes none of its types, as an earlier and plainer report: no function that
+is not private names one in its signature, no `pub use` or alias names one, and
+no struct or enum whose representation another module can reach holds one in a
+field or payload.
+`std.ffi` holds what crosses to C as an address: `Bytes` lends a view's bytes,
+`CText` is NUL-terminated text, `CTextList` is C's `char **`, and `CString`
+owns text with a NUL after it. A `Bytes`, `CText` or `CTextList` is a copyable
+newtype over the address whose dependencies originate at the value, as a
+`mem.Slice`'s do, so a contract ties it to what it views: `ffi.bytes(text)`
+carries `text`, and an `extern` answering a pointer into a handle declares
+`borrows(handle)`. Their operations trust what C supplied, such as a length,
+which is why they stay inside the module the grant names
+([ADR 0228](adr/0228-a-granted-module-calls-c.md)).
 
 **[M-Export]** An `export` declaration designates exactly one concrete foreign
 ABI entry point. Six declaration forms are excluded.
@@ -4159,12 +4182,17 @@ address of its slot, which is C's `T *`: C reads the value there and may write
 another, as an out-parameter does. The compiler believes these statements as
 it believes the rest of the signature, so a linear newtype over `UInt64` is how
 a module holds a C object it must release, and a `UInt64` lent `inout` is how
-it receives one from a function that writes it through a pointer. A refined newtype cannot cross,
+it receives one from a function that writes it through a pointer. An `extern`
+whose result can carry a dependency, such as a `std.ffi` view, writes a
+contract saying what the result points into, `borrows(handle)` or
+`carries()`: no body is read to infer one, and a handle parameter carries none
+by default, so a declaration that writes none is refused. A refined newtype cannot cross,
 because C could hand back a value outside its range. `Bool` cannot cross,
 because no C ABI fixes which bytes are true. Aggregates cannot cross because
-doing so would expose the layout kept private by [L-Layout]; callables cannot
-cross because their code-pointer representation and calling convention are not
-part of the foreign ABI contract.
+doing so would expose the layout kept private by [L-Layout]. A callable crosses
+only as an `extern`'s callback, in the form [T-ExternCallback] checks; nothing
+else hands C a code pointer, because the convention a Linea function is called
+in is not part of the foreign ABI contract.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized
@@ -4184,6 +4212,34 @@ declaration of one of these symbols anywhere else, even in a root granted
 `extern`, is [T-Extern]: the symbols are compiler-owned. An ordinary body with
 the same name remains an ordinary function. The runtime symbols are reserved
 against exports.
+
+**[T-ExternCallback]** An `extern` may take a callback, a parameter of a plain
+`fn` type that C calls during the call through a C function pointer. Its
+parameters and result cross the boundary, apart from a leading `inout`
+parameter, which is a context: the `extern` takes exactly one `inout` parameter
+of the same type, which C receives as a `void *` and hands back on every call.
+The callback is declared without a convention, is a plain `fn` rather than an
+`inout fn` or `sink fn`, and promises to retain nothing. At a call, its
+argument names a function or is a lambda that captures nothing, because C calls
+an entry generated for one fixed function; a function value whose target is
+known only at run time is refused. The entry takes the callback's parameters in
+their C widths and calls the function, and nothing but an `extern` call is
+handed one. The compiler believes the declaration: C calls the callback only
+during the call, on the calling thread, with the context it was lent.
+
+```linea
+struct Tally { total: Int64 }
+
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    0
+}
+```
+
+`squares_visit(5, add_square, &tally)` lends `tally` for the call, and every
+call C makes to `add_square` receives it.
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the

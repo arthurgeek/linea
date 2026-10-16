@@ -1,0 +1,17 @@
+import std.io
+import measure
+
+fn main() -> Result[UInt8, io.IoError] {
+    let guest = measure.length_of("guest") else |_| {
+        return .Ok(1)
+    }
+    let in_arena = measure.length_in_arena("visitors")
+    match measure.length_of("ab\0c") {
+        Ok(_) => return .Ok(2),
+        Err(failure) => match failure {
+            InteriorNul(offset) => io.println("{guest} {in_arena} a NUL at {offset}")?,
+            OutOfMemory => return .Ok(3),
+        },
+    }
+    .Ok(0)
+}

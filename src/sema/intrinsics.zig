@@ -84,6 +84,10 @@ pub const RawAccesses = struct {
     closure_entry: DeclId = .none,
     closure_settle: DeclId = .none,
     closure_size: DeclId = .none,
+    /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`: copyable newtypes over a
+    /// C address whose dependencies originate at the value, as a
+    /// `mem.Slice`'s do, so a contract can tie one to what it views.
+    foreign_views: [3]DeclId = .{ .none, .none, .none },
 
     /// Identify private storage declarations before checking their generic signatures.
     pub fn init(program: *const ExpandedProgram, ast: *const Ast) RawAccesses {
@@ -108,6 +112,11 @@ pub const RawAccesses = struct {
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
+            .foreign_views = .{
+                program.libraryDeclIn("ffi", "Bytes") orelse .none,
+                program.libraryDeclIn("ffi", "CText") orelse .none,
+                program.libraryDeclIn("ffi", "CTextList") orelse .none,
+            },
         };
     }
 

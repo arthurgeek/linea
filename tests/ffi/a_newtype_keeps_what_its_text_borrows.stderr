@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ffi/a_newtype_keeps_what_its_text_borrows/main.lin:17:5
+   |
+17 |     held.release()
+   |     ^^^^ keep this place available until the last use of its observation
+19 |     let got = read_back(w)
+   |                         - the observation is still used here

@@ -243,7 +243,24 @@ pub fn emit(
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
         const name = module.exportedNameOf(id) orelse continue;
-        try emitExportThunk(w, module, f, id, name);
+        try emitForeignEntry(w, module, f, id, .{ .exported = name });
+    }
+
+    // One C-callable entry per function passed to C as a callback, found in
+    // one scan of the instructions.
+    const called_back = try gpa.alloc(bool, module.functions.len);
+    defer gpa.free(called_back);
+    @memset(called_back, false);
+    for (module.functions, 0..) |*f, i| {
+        if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
+        for (0..f.insts.len) |at| {
+            const inst = InstId.at(@intCast(at));
+            if (f.tagOf(inst) == .foreign_function_addr) called_back[f.functionOf(inst).index()] = true;
+        }
+    }
+    for (module.functions, called_back, 0..) |*f, wanted, i| {
+        if (!wanted) continue;
+        try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back);
     }
 
     try w.writeAll("}\n");
@@ -353,7 +370,10 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module) std.Io.Writer.Erro
 /// checker refused every other type ([T-Extern], [T-Export]), so another
 /// representation is a compiler defect rather than a signature to print.
 fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
-    return switch (module.representationOf(ty).storage) {
+    const representation = module.representationOf(ty).storage;
+    if (representation != .code_pointer and !types_mod.crossesForeign(&module.types, ty))
+        std.debug.panic("compiler defect: a type the checker refused crosses the foreign boundary", .{});
+    return switch (representation) {
         .integer => |integer| switch (integer.bits) {
             8 => "i8",
             16 => "i16",
@@ -362,6 +382,8 @@ fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
             else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
         },
         .float64 => float_type,
+        // A callback crosses as the address of its C-callable entry.
+        .code_pointer => "!llvm.ptr",
         else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),
     };
 }
@@ -408,7 +430,32 @@ fn writeForeignExtension(w: *std.Io.Writer, module: *const Module, ty: TypeId) s
     if (foreignExtension(module, ty)) |extension| try w.print(" {s}", .{extension});
 }
 
-/// The symbol the outside world links against, which is never the body.
+/// Which C-callable entry to a body is being written: the symbol an export
+/// publishes, or the private entry a callback passed to C is called through.
+const ForeignEntry = union(enum) {
+    exported: []const u8,
+    called_back,
+};
+
+/// Writes the name of a callback's C-callable entry.
+fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.Writer.Error!void {
+    try w.writeByte('@');
+    try writeSymbolName(w, module.nameOf(id), symbol_names.callback_prefix);
+}
+
+/// The function type of a body's C-callable entry, as `func.constant` names it.
+fn writeForeignEntryType(w: *std.Io.Writer, module: *const Module, mir: *const Mir) std.Io.Writer.Error!void {
+    try w.writeAll("(");
+    for (0..mir.param_count) |i| {
+        if (i > 0) try w.writeAll(", ");
+        try w.writeAll(if (module.arrivesByAddress(mir, i)) "!llvm.ptr" else foreignTypeOf(module, mir.locals[i]));
+    }
+    try w.writeAll(") -> ");
+    if (mir.return_type == .unit) try w.writeAll("()") else try w.writeAll(foreignTypeOf(module, mir.return_type));
+}
+
+/// A C-callable entry to a body: the symbol the outside world links against
+/// for an export, and the private entry C calls a callback through.
 ///
 /// It takes the declared types' widths, widens each to the convention the body
 /// was compiled for, calls it, and narrows the answer back. The narrowing
@@ -423,12 +470,12 @@ fn writeForeignExtension(w: *std.Io.Writer, module: *const Module, ty: TypeId) s
 /// The body stays internal behind it, so a library has the shape a program
 /// already has: bodies with every caller in hand, and a wrapper that is the one
 /// symbol anything outside names.
-fn emitExportThunk(
+fn emitForeignEntry(
     w: *std.Io.Writer,
     module: *const Module,
     mir: *const Mir,
     id: FunctionId,
-    name: []const u8,
+    entry: ForeignEntry,
 ) std.Io.Writer.Error!void {
     // What the thunk itself answers: the declared type, or nothing where that
     // is Unit, because a C function returning void sets no register.
@@ -441,7 +488,14 @@ fn emitExportThunk(
     // the compiler, would be the one to say so.
     const callee_answers = resultTypeOf(module, id, mir.return_type);
 
-    try w.print("  func.func @{s}(", .{name});
+    switch (entry) {
+        .exported => |name| try w.print("  func.func @{s}(", .{name}),
+        .called_back => {
+            try w.writeAll("  func.func private ");
+            try writeCalledBackName(w, module, id);
+            try w.writeAll("(");
+        },
+    }
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
         const by_address = module.arrivesByAddress(mir, i);
@@ -457,6 +511,9 @@ fn emitExportThunk(
             try w.print(" -> {s}", .{foreignTypeOf(module, mir.return_type)});
         }
     }
+    // A callback's entry is reached only through the address the program
+    // hands C, so the object publishes no symbol for it, as for a body.
+    if (entry == .called_back) try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>}");
     try w.writeAll(" {\n");
 
     // A value narrower than the convention arrives narrow and is widened the
@@ -1052,6 +1109,21 @@ const FunctionEmitter = struct {
                 try self.here(span);
                 try self.w.print("    %v{d} = builtin.unrealized_conversion_cast %fa{d} : ", .{ n, n });
                 try self.writeFunctionType(target);
+                try self.w.writeAll(" to !llvm.ptr");
+                try self.here(span);
+            },
+
+            .foreign_function_addr => {
+                const n = id.index();
+                const target = mir.functionOf(id);
+                const body = self.module.functionOf(target);
+                try self.w.print("    %fa{d} = func.constant ", .{n});
+                try writeCalledBackName(self.w, self.module, target);
+                try self.w.writeAll(" : ");
+                try writeForeignEntryType(self.w, self.module, body);
+                try self.here(span);
+                try self.w.print("    %v{d} = builtin.unrealized_conversion_cast %fa{d} : ", .{ n, n });
+                try writeForeignEntryType(self.w, self.module, body);
                 try self.w.writeAll(" to !llvm.ptr");
                 try self.here(span);
             },
