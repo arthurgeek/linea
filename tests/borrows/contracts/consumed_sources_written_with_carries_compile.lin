@@ -1,0 +1,15 @@
+// The clause the report on two consumed sources names: `carries(x, y)` says
+// the result keeps what `x` and `y` already carry, and the program runs.
+struct Pair[X, Y] {
+    x: X,
+    y: Y,
+}
+
+fn make[X, Y](sink x: X, sink y: Y) -> Pair[X, Y] where carries(x, y) {
+    Pair[X, Y] { x = x, y = y }
+}
+
+fn main() -> UInt8 {
+    let p = make(UInt8(1), UInt8(2))
+    p.x
+}

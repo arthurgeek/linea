@@ -2075,6 +2075,9 @@ const Analysis = struct {
         var sources: std.ArrayList(types.ClauseSource) = .empty;
         var named: std.ArrayList(u8) = .empty;
         var local: ?BindingId = null;
+        // A consumed parameter whose own place is observed ends with the
+        // function like a local, and no clause can name it.
+        var consumed: ?BindingId = null;
         for (origins) |origin| {
             if (origin.temporary != .none or origin.lent != .none) continue;
             const root = origin.place.root;
@@ -2083,6 +2086,11 @@ const Analysis = struct {
             } else false;
             if (!is_parameter) {
                 if (!origin.external and local == null) local = root;
+                continue;
+            }
+            const convention = self.res.parameterConvention(self.ast, root) orelse .read;
+            if (!origin.external and !types.suppliesEscapingPlace(convention)) {
+                if (consumed == null) consumed = root;
                 continue;
             }
             const spelling = self.ast.tokenText(self.res.declaringToken(root));
@@ -2112,6 +2120,10 @@ const Analysis = struct {
                 try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause.items }));
             },
         };
+        if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
+            self.ast.tokenText(self.res.declaringToken(owner)),
+            if (self.function.decl == .none) "this closure" else try std.fmt.allocPrint(arena, "`{s}`", .{self.ast.tokenText(self.ast.declName(self.function.decl))}),
+        }));
         if (local) |owner| {
             const function: []const u8 = if (self.function.decl == .none)
                 "this closure"
@@ -2124,7 +2136,7 @@ const Analysis = struct {
         }
         // A clause is not always the fix: a function passed where a callable
         // type is expected cannot add one, and the owned copy needs none.
-        if ((sources.items.len > 0 or local != null) and self.declaresOwnedCopy(held)) try notes.append(arena, switch (leaving) {
+        if ((sources.items.len > 0 or local != null or consumed != null) and self.declaresOwnedCopy(held)) try notes.append(arena, switch (leaving) {
             .returned => "a copy made with `.to_owned()` owns what it holds and observes nothing, so returning one needs no clause",
             .retained => |destination| try std.fmt.allocPrint(arena, "a copy made with `.to_owned()` owns what it holds and observes nothing, so `{s}` may keep one, in a place typed to own it, with no clause", .{self.ast.tokenText(self.res.declaringToken(destination))}),
         });

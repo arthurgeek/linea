@@ -1455,11 +1455,22 @@ pub fn isEligibleSource(builder: *Typing.Builder, parameter: CallableParam, resu
 /// `carries`, for one that keeps what the parameter already observes.
 pub const ClauseSource = struct { spelling: []const u8, borrows: bool };
 
+/// Whether a parameter passed by `convention` can supply the place an
+/// escaping observation observes. A consumed parameter ends with the
+/// function, so nothing may observe it past the return: `borrows` cannot name
+/// it, and only what it already carries may leave. The one rule for refusing
+/// such a clause and for every report that suggests one.
+pub fn suppliesEscapingPlace(convention: Convention) bool {
+    return convention != .sink;
+}
+
 /// Whether the clause naming `parameter` as a source of `result` is
-/// `borrows`: the parameter lends the place the result observes, or owns what
-/// a view of it would observe. A parameter whose type may be copied is a view
-/// already, and a result taken from it carries what it observes.
+/// `borrows`: the parameter can supply an escaping place, and it lends the
+/// place the result observes or owns what a view of it would observe. A
+/// parameter whose type may be copied is a view already, and a result taken
+/// from it carries what it observes.
 pub fn borrowsFrom(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
+    if (!suppliesEscapingPlace(parameter.convention)) return false;
     return lendsPlace(builder, parameter, result) or !try builder.mayCopy(parameter.ty);
 }
 

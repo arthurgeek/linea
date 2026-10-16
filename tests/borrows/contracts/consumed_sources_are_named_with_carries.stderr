@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/borrows/contracts/consumed_sources_are_named_with_carries.lin:9:4
+  |
+9 | fn make[X, Y](sink x: X, sink y: Y) -> Pair[X, Y] {
+  |    ^^^^ the result may come from `x` or `y`; add `where carries(x)` or `where carries(y)`, or `where carries(x, y)` where it may come from either

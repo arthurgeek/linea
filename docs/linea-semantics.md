@@ -5245,9 +5245,11 @@ and retention destinations cannot cross observation storage. An ambiguous
 inferred source requires an explicit `borrows` or `carries` clause; the ambiguity
 is the only error reported, and the body is not checked against a contract nobody
 declared. The report names each candidate's clause and the one clause listing them
-all: `borrows` for a parameter whose place the result may observe or whose
-contents a view would point into, and `carries` for one that is a view or a
-carrier already. Where several of the sources are carriers the report says so and
+all: `borrows` for a parameter it does not consume whose place the result may
+observe or whose contents a view would point into, and `carries` for one that is
+a view or a carrier already, or that it consumes. A consumed parameter ends with
+the function, so no clause lets anything observe its place past the return, and
+[O-Escapes] says so instead of naming one. Where several of the sources are carriers the report says so and
 names them. A clause whose source, destination or target is refused is likewise the only
 error: the body is not checked against what remains of the clause. A trait
 implementation's member cannot promise more than its signature. Bodies must obey

@@ -7557,7 +7557,7 @@ const Checker = struct {
                     switch (source.root) {
                         .callee => unreachable,
                         .parameter => |parameter| {
-                            if (params[parameter].convention == .sink) self.reportAtToken(.t_borrow_contract, clause.at, "a consumed parameter cannot supply escaping place storage", "borrow a read or inout parameter", null);
+                            if (!types_mod.suppliesEscapingPlace(params[parameter].convention)) self.reportAtToken(.t_borrow_contract, clause.at, "a consumed parameter cannot supply escaping place storage", "borrow a read or inout parameter", null);
                             params[parameter].stable_address = true;
                         },
                         .capture => |capture| {
