@@ -66,23 +66,19 @@ fn renderOne(
     }
     try w.writeAll("]");
 
-    try w.writeAll(",\"notes\":[");
+    // Named as the human form prints them: advice is `= help:`, a fact
+    // about the problem is `= note:`.
+    try w.writeAll(",\"help\":[");
     for (d.notes, 0..) |n, i| {
         if (i > 0) try w.writeByte(',');
         try std.json.Stringify.value(n, .{}, w);
     }
-    try w.writeAll("]");
-    // Written only where there are any, so a diagnostic without one reads as
-    // it always has.
-    if (d.remarks.len > 0) {
-        try w.writeAll(",\"remarks\":[");
-        for (d.remarks, 0..) |n, i| {
-            if (i > 0) try w.writeByte(',');
-            try std.json.Stringify.value(n, .{}, w);
-        }
-        try w.writeAll("]");
+    try w.writeAll("],\"notes\":[");
+    for (d.remarks, 0..) |n, i| {
+        if (i > 0) try w.writeByte(',');
+        try std.json.Stringify.value(n, .{}, w);
     }
-    try w.writeAll("}\n");
+    try w.writeAll("]}\n");
 }
 
 pub fn renderAllJson(
@@ -124,6 +120,43 @@ test "emits one JSON object per diagnostic" {
     try testing.expectEqual(@as(usize, 1), labels.len);
     try testing.expectEqual(@as(i64, 1), labels[0].object.get("line").?.integer);
     try testing.expectEqual(@as(i64, 9), labels[0].object.get("column").?.integer);
+}
+
+test "advice is written under help and a fact under notes, as the human form prints them" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const src: Source = .{ .path = "t.lin", .text = "x\n" };
+    var table: FileTable = .empty;
+    defer table.deinit(testing.allocator);
+    _ = try table.add(testing.allocator, src);
+    try table.buildMaps(testing.allocator);
+
+    var sink = Sink.init(arena.allocator());
+    try sink.add(.{
+        .severity = .err,
+        .code = .m_embed_text,
+        .message = "not text",
+        .labels = &.{.{ .file = .from(0), .span = .{ .start = 0, .end = 1 }, .message = "here" }},
+        .notes = &.{"embed it as bytes"},
+        .remarks = &.{"at line 1"},
+    });
+    try sink.addError(.s_char, .from(0), .{ .start = 0, .end = 1 }, "plain", "here");
+
+    var out: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer out.deinit();
+    try renderAllJson(&out.writer, &table, &sink);
+
+    var lines = std.mem.splitScalar(u8, out.written(), '\n');
+    const first = try std.json.parseFromSlice(std.json.Value, testing.allocator, lines.next().?, .{});
+    defer first.deinit();
+    try testing.expectEqualStrings("embed it as bytes", first.value.object.get("help").?.array.items[0].string);
+    try testing.expectEqualStrings("at line 1", first.value.object.get("notes").?.array.items[0].string);
+    // Every object has both keys, so a reader needs no case for a missing one.
+    const second = try std.json.parseFromSlice(std.json.Value, testing.allocator, lines.next().?, .{});
+    defer second.deinit();
+    try testing.expectEqual(@as(usize, 0), second.value.object.get("help").?.array.items.len);
+    try testing.expectEqual(@as(usize, 0), second.value.object.get("notes").?.array.items.len);
 }
 
 test "a message quoting the source does not scale the object it is written in" {
