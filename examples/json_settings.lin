@@ -113,7 +113,7 @@ test fn settings_output_stops_at_the_first_writer_error() {
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }
     let result = write_settings(&disk, settings)
-    testing.assert(match result { Err(error) => match error { Writer(_) => true, _ => false }, Ok(_) => false }, "output failure was hidden")?
+    testing.assert(match result { Err(Writer(_)) => true, _ => false }, "output failure was hidden")?
     testing.assert_eq(disk.attempts, 2, "output continued after failure")?
     testing.assert_eq(settings.name.view(), "catalog", "output failure changed the settings")?
 }

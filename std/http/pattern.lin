@@ -69,8 +69,7 @@ struct Pattern {
 // names are checked in one pass through a map sized by the pattern.
 fn parse_pattern[A: Allocator](pattern: Str, allocator: A) -> Result[Pattern, RouteError] where carries(.Ok: pattern) {
     let parts = match pattern.split_once(" ") {
-        Some(halves) => {
-            let (method_name, path) = halves
+        Some((method_name, path)) => {
             let method = method_of(method_name)
             if method == Method.Other {
                 return .Err(.InvalidPattern)

@@ -81,7 +81,7 @@ test fn integer_parsing_rejects_non_decimal_input() {
     let invalid = ["", "+", "-", " 1", "1 ", "1_0", "0x10", "１", "1.0"]
     for read input in invalid {
         let result = input.parse[Int64]()
-        testing.assert(match result { Err(error) => match error { Syntax(_) => true, _ => false }, _ => false }, "non-decimal input was accepted")?
+        testing.assert(match result { Err(Syntax(_)) => true, _ => false }, "non-decimal input was accepted")?
     }
     let unsigned = "-1".parse[UInt64]()
     testing.assert_eq(unsigned, .Err(.Syntax(0)), "unsigned parser accepted a minus")?

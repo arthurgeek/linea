@@ -220,7 +220,8 @@ test fn a_reader_buffers_from_the_system_allocator() {
         return testing.assert(false, "a system read-ahead buffer was refused")
     }
     let length = match &reader.read_raw_line_borrowed(max_bytes: 8) {
-        Ok(line) => match line { Some(value) => value.length(), None => 0 },
+        Ok(Some(value)) => value.length(),
+        Ok(None) => 0,
         Err(_) => 0,
     }
     let _source = reader.abandon()
@@ -245,8 +246,7 @@ test fn open_returns_the_reader_when_no_buffer_is_made() {
             let _source = reader.abandon()
             false
         },
-        Err(failure) => {
-            let BufferOpenFailure { resource, reason } = failure
+        Err(BufferOpenFailure { resource, reason }) => {
             resource.position == 0 && match reason { Allocation(_) => true, ZeroCapacity => false }
         },
     }
@@ -305,7 +305,8 @@ test fn abandon_returns_the_reader_and_drops_its_read_ahead() {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ab", None => false },
+        Ok(Some(value)) => value == "ab",
+        Ok(None) => false,
         Err(_) => false,
     }
     let returned = reader.abandon()
@@ -332,14 +333,14 @@ test fn an_oversized_line_retains_its_consumed_prefix() {
         return testing.assert(false, "reader allocation failed")
     }
     let refused = match &reader.read_line_borrowed(max_bytes: 3) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
+        Err(Limit) => true,
+        _ => false,
     }
     let pending = reader.pending()
     let preserved = pending.length() == 4 && pending[0] == 97 && pending[3] == 100
     let blocked = match &reader.read_line_borrowed(max_bytes: 16) {
-        Err(error) => match error { RecoveryRequired => true, _ => false },
-        Ok(_) => false,
+        Err(RecoveryRequired) => true,
+        _ => false,
     }
     let _source = reader.abandon()
     testing.assert(refused && preserved && blocked, "line limit lost bytes or silently skipped recovery")?
@@ -370,15 +371,18 @@ test fn text_lines_strip_only_their_terminators() {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "á", None => false },
+        Ok(Some(value)) => value == "á",
+        Ok(None) => false,
         _ => false,
     }
     let empty = match &reader.read_line_borrowed(max_bytes: 0) {
-        Ok(line) => match line { Some(value) => value == "", None => false },
+        Ok(Some(value)) => value == "",
+        Ok(None) => false,
         _ => false,
     }
     let final_line = match &reader.read_line_borrowed(max_bytes: 5) {
-        Ok(line) => match line { Some(value) => value == "last\r", None => false },
+        Ok(Some(value)) => value == "last\r",
+        Ok(None) => false,
         _ => false,
     }
     let ended = match &reader.read_line_borrowed(max_bytes: 0) {
@@ -397,12 +401,13 @@ test fn an_incomplete_utf8_prefix_is_retained_after_input_failure() {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
+        Ok(Some(value)) => value == "ok",
+        Ok(None) => false,
         Err(_) => false,
     }
     let failed = match &reader.read_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { Input(failure) => failure.reason == 9 && failure.stream_offset == 4, _ => false },
-        Ok(_) => false,
+        Err(Input(failure)) => failure.reason == 9 && failure.stream_offset == 4,
+        _ => false,
     }
     let bytes = reader.pending()
     let retained = bytes.length() == 1 && bytes[0] == 195
@@ -418,11 +423,13 @@ test fn a_smaller_line_limit_releases_excess_record_capacity() {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(value) => value == "a long first line", None => false },
+        Ok(Some(value)) => value == "a long first line",
+        Ok(None) => false,
         Err(_) => false,
     }
     let next = match &reader.read_line_borrowed(max_bytes: 1) {
-        Ok(line) => match line { Some(value) => value == "x", None => false },
+        Ok(Some(value)) => value == "x",
+        Ok(None) => false,
         Err(_) => false,
     }
     let bounded = match read reader.record {
@@ -508,10 +515,8 @@ test fn invalid_owned_text_restores_the_complete_raw_record() {
         return testing.assert(false, "reader allocation failed")
     }
     let invalid = match &reader.read_line(max_bytes: 4) {
-        Err(error) => match error {
-            Encoding(problem) => problem.offset == 0 && problem.stream_offset == 0,
-            _ => false,
-        },
+        Err(Encoding(problem)) => problem.offset == 0 && problem.stream_offset == 0,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -531,7 +536,8 @@ test fn invalid_owned_text_restores_the_complete_raw_record() {
         Err(_) => false,
     }
     let next = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
+        Ok(Some(value)) => value == "ok",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -547,10 +553,8 @@ test fn owned_lines_are_allocated_from_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let kept = match &reader.read_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.view() == "a line long enough to grow its record twice",
-        },
+        Ok(None) => false,
+        Ok(Some(line)) => line.view() == "a line long enough to grow its record twice",
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -609,7 +613,8 @@ test fn a_borrowed_raw_line_keeps_its_terminator_and_bytes_that_are_not_utf8() {
         return testing.assert(false, "reader allocation failed")
     }
     let kept = match &reader.read_raw_line_borrowed(max_bytes: 3) {
-        Ok(line) => match line { Some(value) => value == [UInt8(255), 13, 10].as_slice(), None => false },
+        Ok(Some(value)) => value == [UInt8(255), 13, 10].as_slice(),
+        Ok(None) => false,
         Err(_) => false,
     }
     let ended = match &reader.read_raw_line_borrowed(max_bytes: 3) {
@@ -667,21 +672,17 @@ test fn a_raw_line_preserves_crlf_without_text_conversion() {
         return testing.assert(false, "reader allocation failed")
     }
     let raw = match &reader.read_raw_line(max_bytes: 5) {
-        Ok(line) => match line {
-            None => false,
-            Some(bytes) => {
-                let intact = bytes.length() == 5 && bytes[3] == 13 && bytes[4] == 10
-                bytes.release()
-                intact
-            },
+        Ok(None) => false,
+        Ok(Some(bytes)) => {
+            let intact = bytes.length() == 5 && bytes[3] == 13 && bytes[4] == 10
+            bytes.release()
+            intact
         },
         Err(_) => false,
     }
     let last = match &reader.read_raw_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line {
-            None => false,
-            Some(bytes) => bytes.length() == 4 && bytes[0] == 108 && bytes[3] == 116,
-        },
+        Ok(None) => false,
+        Ok(Some(bytes)) => bytes.length() == 4 && bytes[0] == 108 && bytes[3] == 116,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -697,10 +698,8 @@ test fn owned_raw_lines_are_allocated_from_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let kept = match &reader.read_raw_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
-        },
+        Ok(None) => false,
+        Ok(Some(line)) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -843,7 +842,8 @@ test fn read_exact_collects_a_body_split_across_reads() {
         Err(_) => false,
     }
     let rest = match &reader.read_raw_line_borrowed(max_bytes: 6) {
-        Ok(line) => match line { Some(value) => value.length() == 6 && value[0] == 32 && value[5] == 100, None => false },
+        Ok(Some(value)) => value.length() == 6 && value[0] == 32 && value[5] == 100,
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -864,7 +864,8 @@ test fn read_exact_allocates_the_body_from_its_allocator() {
         return testing.assert(false, "reader allocation failed")
     }
     let refused = match &reader.read_exact_in(allocator: scarce.handle(), count: 5, max_bytes: 10) {
-        Err(error) => match error { Allocation(_reason) => true, _ => false },
+        Err(Allocation(_reason)) => true,
+        Err(_) => false,
         Ok(bytes) => {
             bytes.release()
             false
@@ -897,14 +898,16 @@ test fn read_exact_refuses_past_its_limit_before_reading() {
         return testing.assert(false, "reader allocation failed")
     }
     let refused = match &reader.read_exact(count: 11, max_bytes: 10) {
-        Err(error) => match error { Limit => true, _ => false },
+        Err(Limit) => true,
+        Err(_) => false,
         Ok(bytes) => {
             bytes.release()
             false
         },
     }
     let intact = match &reader.read_raw_line_borrowed(max_bytes: 11) {
-        Ok(line) => match line { Some(value) => value.length() == 11 && value[0] == 104 && value[10] == 100, None => false },
+        Ok(Some(value)) => value.length() == 11 && value[0] == 104 && value[10] == 100,
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -919,7 +922,8 @@ test fn read_exact_reports_how_much_arrived_before_the_end() {
         return testing.assert(false, "reader allocation failed")
     }
     let ended = match &reader.read_exact(count: 5, max_bytes: 10) {
-        Err(error) => match error { Ended(n) => n == 3, _ => false },
+        Err(Ended(n)) => n == 3,
+        Err(_) => false,
         Ok(bytes) => {
             bytes.release()
             false
@@ -937,11 +941,12 @@ test fn read_exact_refuses_while_a_line_read_needs_recovery() {
         return testing.assert(false, "reader allocation failed")
     }
     let limited = match &reader.read_line_borrowed(max_bytes: 3) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
+        Err(Limit) => true,
+        _ => false,
     }
     let blocked = match &reader.read_exact(count: 1, max_bytes: 4) {
-        Err(error) => match error { RecoveryRequired => true, _ => false },
+        Err(RecoveryRequired) => true,
+        Err(_) => false,
         Ok(bytes) => {
             bytes.release()
             false
@@ -961,7 +966,8 @@ test fn read_exact_reports_a_reader_that_overruns_its_destination() {
         return testing.assert(false, "reader allocation failed")
     }
     let invalid = match &reader.read_exact(count: 2, max_bytes: 4) {
-        Err(error) => match error { InvalidProgress => true, _ => false },
+        Err(InvalidProgress) => true,
+        Err(_) => false,
         Ok(bytes) => {
             bytes.release()
             false
@@ -1004,11 +1010,8 @@ test fn taking_an_invalid_complete_line_does_not_discard_the_following_line() {
         return testing.assert(false, "reader allocation failed")
     }
     let invalid = match &reader.read_line_borrowed(max_bytes: 4) {
-        Err(error) => match error {
-            Encoding(problem) => problem.offset == 0 && problem.stream_offset == 0,
-            _ => false,
-        },
-        Ok(_) => false,
+        Err(Encoding(problem)) => problem.offset == 0 && problem.stream_offset == 0,
+        _ => false,
     }
     let extracted = match &reader.take_pending() {
         None => false,
@@ -1023,7 +1026,8 @@ test fn taking_an_invalid_complete_line_does_not_discard_the_following_line() {
         Err(_) => false,
     }
     let next = match &reader.read_line_borrowed(max_bytes: 2) {
-        Ok(line) => match line { Some(value) => value == "ok", None => false },
+        Ok(Some(value)) => value == "ok",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1042,8 +1046,8 @@ test fn allocation_failure_preserves_the_prefix_and_unconsumed_lookahead() {
         return testing.assert(false, "the initial reader buffer was refused")
     }
     let refused = match &reader.read_line_borrowed(max_bytes: 128) {
-        Err(error) => match error { Allocation(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Allocation(_)) => true,
+        _ => false,
     }
     let prefix = reader.pending()
     let intact = prefix.length() == 64 && prefix[63] == 97
@@ -1112,16 +1116,16 @@ test fn partial_discard_preserves_extractable_bytes_but_prevents_resume() {
         return testing.assert(false, "reader allocation failed")
     }
     let limited = match &reader.read_line_borrowed(max_bytes: 1) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
+        Err(Limit) => true,
+        _ => false,
     }
     let partial = match &reader.discard_pending(max_bytes: 1) {
         Ok(progress) => progress.discarded == 1 && !progress.boundary,
         Err(_) => false,
     }
     let cannot_resume = match &reader.resume_line_borrowed(max_bytes: 6) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
+        Err(ResumeUnavailable) => true,
+        _ => false,
     }
     let extracted = match &reader.take_pending() {
         None => false,
@@ -1136,7 +1140,8 @@ test fn partial_discard_preserves_extractable_bytes_but_prevents_resume() {
         Err(_) => false,
     }
     let next = match &reader.read_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(value) => value == "next", None => false },
+        Ok(Some(value)) => value == "next",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1167,15 +1172,17 @@ test fn an_incomplete_line_resumes_with_its_retained_prefix() {
         return testing.assert(false, "reader allocation failed")
     }
     let limited = match &reader.read_line_borrowed(max_bytes: 2) {
-        Err(error) => match error { Limit => true, _ => false },
-        Ok(_) => false,
+        Err(Limit) => true,
+        _ => false,
     }
     let resumed = match &reader.resume_line_borrowed(max_bytes: 6) {
-        Ok(line) => match line { Some(value) => value == "abcdef", None => false },
+        Ok(Some(value)) => value == "abcdef",
+        Ok(None) => false,
         Err(_) => false,
     }
     let next = match &reader.read_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(value) => value == "next", None => false },
+        Ok(Some(value)) => value == "next",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1190,12 +1197,13 @@ test fn resuming_with_a_smaller_limit_bounds_the_retained_capacity() {
         return testing.assert(false, "reader allocation failed")
     }
     let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Input(_)) => true,
+        _ => false,
     }
     reader.reader.fail_at = UInt64.max
     let resumed = match &reader.resume_line_borrowed(max_bytes: 1) {
-        Ok(line) => match line { Some(value) => value == "x", None => false },
+        Ok(Some(value)) => value == "x",
+        Ok(None) => false,
         Err(_) => false,
     }
     let bounded = match read reader.record {
@@ -1217,13 +1225,13 @@ test fn refused_resume_shrinking_preserves_the_previous_prefix() {
         return testing.assert(false, "the initial reader buffer was refused")
     }
     let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Input(_)) => true,
+        _ => false,
     }
     reader.reader.fail_at = UInt64.max
     let refused = match &reader.resume_line_borrowed(max_bytes: 1) {
-        Err(error) => match error { Allocation(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Allocation(_)) => true,
+        _ => false,
     }
     let pending = reader.pending()
     let intact = pending.length() == 1 && pending[0] == 120 && reader.reader.position == 1
@@ -1253,12 +1261,13 @@ test fn a_resumed_borrowed_line_is_held_in_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let failed = match &reader.read_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Input(_)) => true,
+        _ => false,
     }
     reader.reader.fail_at = UInt64.max
     let kept = match &reader.resume_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(line) => line == "a line long enough to grow its record twice", None => false },
+        Ok(Some(line)) => line == "a line long enough to grow its record twice",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1322,7 +1331,8 @@ test fn an_input_failure_can_resume_an_owned_line() {
         return testing.assert(false, "reader allocation failed")
     }
     let failed = match &reader.read_line(max_bytes: 2) {
-        Err(error) => match error { Input(_) => true, _ => false },
+        Err(Input(_)) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -1331,13 +1341,11 @@ test fn an_input_failure_can_resume_an_owned_line() {
     reader.reader.fail_at = UInt64.max
     let resumed = match &reader.resume_line(max_bytes: 2) {
         Err(_) => false,
-        Ok(line) => match line {
-            None => false,
-            Some(line) => {
-                let intact = line.view() == "á"
-                line.release()
-                intact
-            },
+        Ok(None) => false,
+        Ok(Some(line)) => {
+            let intact = line.view() == "á"
+            line.release()
+            intact
         },
     }
     let _source = reader.abandon()
@@ -1353,7 +1361,8 @@ test fn a_resumed_owned_line_is_allocated_from_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let failed = match &reader.read_line(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
+        Err(Input(_)) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -1361,10 +1370,8 @@ test fn a_resumed_owned_line_is_allocated_from_an_arena() {
     }
     reader.reader.fail_at = UInt64.max
     let kept = match &reader.resume_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.view() == "a line long enough to grow its record twice",
-        },
+        Ok(None) => false,
+        Ok(Some(line)) => line.view() == "a line long enough to grow its record twice",
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1431,26 +1438,28 @@ test fn a_borrowed_raw_line_resumes_with_its_retained_prefix() {
         return testing.assert(false, "reader allocation failed")
     }
     let failed = match &reader.read_raw_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { Input(failure) => failure.reason == 9 && failure.stream_offset == 2, _ => false },
-        Ok(_) => false,
+        Err(Input(failure)) => failure.reason == 9 && failure.stream_offset == 2,
+        _ => false,
     }
     reader.reader.fail_at = UInt64.max
     // A line read raw resumes only as a raw line.
     let as_text = match &reader.resume_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
+        Err(ResumeUnavailable) => true,
+        _ => false,
     }
     let resumed = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
-        Ok(line) => match line { Some(bytes) => bytes == "ab\r\n".as_bytes(), None => false },
+        Ok(Some(bytes)) => bytes == "ab\r\n".as_bytes(),
+        Ok(None) => false,
         Err(_) => false,
     }
     let next = match &reader.read_raw_line_borrowed(max_bytes: 3) {
-        Ok(line) => match line { Some(bytes) => bytes == "cd\n".as_bytes(), None => false },
+        Ok(Some(bytes)) => bytes == "cd\n".as_bytes(),
+        Ok(None) => false,
         Err(_) => false,
     }
     let again = match &reader.resume_raw_line_borrowed(max_bytes: 4) {
-        Err(error) => match error { ResumeUnavailable => true, _ => false },
-        Ok(_) => false,
+        Err(ResumeUnavailable) => true,
+        _ => false,
     }
     let _source = reader.abandon()
     testing.assert(failed, "the input failure was not reported at its stream byte")?
@@ -1469,12 +1478,13 @@ test fn a_resumed_borrowed_raw_line_is_held_in_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let failed = match &reader.read_raw_line_borrowed(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
-        Ok(_) => false,
+        Err(Input(_)) => true,
+        _ => false,
     }
     reader.reader.fail_at = UInt64.max
     let kept = match &reader.resume_raw_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line { Some(line) => line == "a line long enough to grow its record twice\n".as_bytes(), None => false },
+        Ok(Some(line)) => line == "a line long enough to grow its record twice\n".as_bytes(),
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1541,7 +1551,8 @@ test fn raw_resume_preserves_invalid_utf8_and_the_terminator() {
         return testing.assert(false, "reader allocation failed")
     }
     let limited = match &reader.read_raw_line(max_bytes: 0) {
-        Err(error) => match error { Limit => true, _ => false },
+        Err(Limit) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -1549,13 +1560,11 @@ test fn raw_resume_preserves_invalid_utf8_and_the_terminator() {
     }
     let resumed = match &reader.resume_raw_line(max_bytes: 2) {
         Err(_) => false,
-        Ok(line) => match line {
-            None => false,
-            Some(line) => {
-                let intact = line.length() == 2 && line[0] == 255 && line[1] == 10
-                line.release()
-                intact
-            },
+        Ok(None) => false,
+        Ok(Some(line)) => {
+            let intact = line.length() == 2 && line[0] == 255 && line[1] == 10
+            line.release()
+            intact
         },
     }
     let _source = reader.abandon()
@@ -1571,7 +1580,8 @@ test fn a_resumed_owned_raw_line_is_allocated_from_an_arena() {
         return testing.assert(false, "an arena reader was refused")
     }
     let failed = match &reader.read_raw_line(max_bytes: 64) {
-        Err(error) => match error { Input(_) => true, _ => false },
+        Err(Input(_)) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -1579,10 +1589,8 @@ test fn a_resumed_owned_raw_line_is_allocated_from_an_arena() {
     }
     reader.reader.fail_at = UInt64.max
     let kept = match &reader.resume_raw_line(max_bytes: 64) {
-        Ok(line) => match line {
-            None => false,
-            Some(line) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
-        },
+        Ok(None) => false,
+        Ok(Some(line)) => line.as_slice() == "a line long enough to grow its record twice\n".as_bytes(),
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -1835,8 +1843,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         let bytes = &self.take_bytes(length)
         match String.from_bytes(bytes) {
             Ok(line) => return .Ok(.Some(line)),
-            Err(failure) => {
-                let Utf8Failure { bytes: bytes, error: error } = failure
+            Err(Utf8Failure { bytes: bytes, error: error }) => {
                 let replacement = mem.vector_into_buffer(bytes)
                 let empty = replace_pending_buffer(&self.record, replacement)
                 empty.release()

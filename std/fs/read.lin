@@ -28,7 +28,8 @@ impl ReadFileReason {
     // allocation-failure walk accepts from a refused run.
     fn is_refusal(self: Self) -> Bool {
         match read self.primary {
-            Some(error) => match read error { Open(failure) => failure.is_refusal(), Read(cause) => cause.is_refusal() },
+            Some(Open(failure)) => failure.is_refusal(),
+            Some(Read(cause)) => cause.is_refusal(),
             None => false,
         }
     }
@@ -147,7 +148,7 @@ test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
             return testing.assert(false, "an oversized file read succeeded")
         },
         Err(failure) => {
-            let limited = match read failure.reason.primary { Some(reason) => match read reason { Read(error) => match read error { Limit => true, _ => false }, _ => false }, None => false }
+            let limited = match read failure.reason.primary { Some(Read(Limit)) => true, _ => false }
             let intact = match read failure.partial { Some(bytes) => bytes.length() == 4 && bytes[0] == 97 && bytes[3] == 100, None => false }
             let closed = failure.reason.close.is_none()
             failure.release()
@@ -216,7 +217,7 @@ test fn a_file_open_failure_has_no_partial_allocation() {
             return testing.assert(false, "a missing file was opened")
         },
         Err(failure) => {
-            let opening = match read failure.reason.primary { Some(reason) => match read reason { Open(_) => true, _ => false }, None => false }
+            let opening = match read failure.reason.primary { Some(Open(_)) => true, _ => false }
             let no_data = failure.partial.is_none()
             let no_close = failure.reason.close.is_none()
             failure.release()
@@ -292,10 +293,8 @@ test fn reading_text_names_the_offset_of_invalid_utf8() {
             text.release()
             UInt64.max
         },
-        Err(error) => match error {
-            Encoding(encoding) => encoding.offset,
-            Read(_) => UInt64.max,
-        },
+        Err(Encoding(encoding)) => encoding.offset,
+        Err(Read(_)) => UInt64.max,
     }
     testing.assert_eq(offset, UInt64(1), "invalid UTF-8 was not reported at its first bad byte")?
 }
@@ -308,10 +307,8 @@ test fn reading_text_reports_a_missing_file_as_a_read_failure() {
             text.release()
             false
         },
-        Err(error) => match error {
-            Read(reason) => reason.primary.is_some(),
-            Encoding(_) => false,
-        },
+        Err(Read(reason)) => reason.primary.is_some(),
+        Err(Encoding(_)) => false,
     }
     testing.assert(opening, "a missing file was not a read failure")?
 }
@@ -332,10 +329,8 @@ test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> 
                     decoded.release()
                     .Err(.Encoding(text.Utf8Error { offset = 0 }))
                 },
-                Err(error) => match error {
-                    Encoding(_) => .Ok(()),
-                    Read(reason) => .Err(.Read(reason)),
-                },
+                Err(Encoding(_)) => .Ok(()),
+                Err(Read(reason)) => .Err(.Read(reason)),
             }
         },
         ReadTextError.is_refusal,
@@ -353,8 +348,7 @@ fn finish_file_read[A: Allocator](sink file: File, sink outcome: Result[Vec[UInt
             Ok(_) => .Ok(bytes),
             Err(reason) => .Err(.{ partial = .Some(bytes), reason = .{ primary = .None, close = .Some(reason) } }),
         },
-        Err(failure) => {
-            let ReadAllFailure { partial: partial, reason: reason } = failure
+        Err(ReadAllFailure { partial: partial, reason: reason }) => {
             let close: Option[io.IoError] = match closed { Ok(_) => .None, Err(reason) => .Some(reason) }
             return .Err(.{ partial = partial, reason = .{ primary = .Some(.Read(reason)), close = close } })
         },
@@ -391,14 +385,8 @@ test fn a_file_read_failure_and_close_failure_are_both_retained() {
         },
         Err(failure) => {
             let read_failed = match read failure.reason.primary {
-                Some(reason) => match read reason {
-                    Read(error) => match read error {
-                        Input(input) => input.stream_offset == 0 && match read input.reason.category { InvalidDescriptor => true, _ => false },
-                        _ => false,
-                    },
-                    _ => false,
-                },
-                None => false,
+                Some(Read(Input(input))) => input.stream_offset == 0 && match read input.reason.category { InvalidDescriptor => true, _ => false },
+                _ => false,
             }
             let close_failed = match read failure.reason.close { Some(error) => match read error.category { InvalidDescriptor => true, _ => false }, None => false }
             let no_bytes = match read failure.partial { Some(bytes) => bytes.length() == 0, None => false }

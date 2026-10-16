@@ -342,8 +342,7 @@ impl Hash for DirectKey {
 struct MapTicket { id: UInt64 }
 
 fn settle_ticket(sink entry: Entry[UInt64, MapTicket]) -> UInt64 {
-    let Entry { key, value } = entry
-    let MapTicket { id } = value
+    let Entry { key, value: MapTicket { id } } = entry
     key + id
 }
 
@@ -490,8 +489,7 @@ impl[K, V, A: Allocator] Map[K, V, A] {
     }
 
     fn transform_at[F: inout fn(sink value: V) -> V](inout self: Self, index: UInt64, inout transform: F) where retains(self: transform) {
-        let Resident { code, entry } = &self.take_at(index)
-        let Entry { key: stored, value } = entry
+        let Resident { code, entry: Entry { key: stored, value } } = &self.take_at(index)
         &self.restore_at(index, code, .{ key = stored, value = &transform(value) })
     }
 
@@ -659,8 +657,7 @@ test fn first_allocation_failure_returns_a_linear_value() {
     let arena = mem.Arena.open(mem.system(), size: 8)
     var values: Map[UInt64, MapTicket, mem.Handle] = Map.new_in(arena.handle())
     let ticket = match &values.insert(4, .{ id = 9 }) {
-        Err(failure) => {
-            let InsertFailure { reason: _, key, value } = failure
+        Err(InsertFailure { reason: _, key, value }) => {
             settle_ticket(.{ key, value })
         },
         Ok(previous) => {
@@ -752,8 +749,7 @@ impl[K: Hash, V, A: Allocator] Map[K, V, A] {
         let code = key.hash()
         match self.find(key, code, |candidate, query| candidate == query) {
             Some(index) => {
-                let Resident { code: resident_code, entry } = &self.take_at(index)
-                let Entry { key: stored, value: current } = entry
+                let Resident { code: resident_code, entry: Entry { key: stored, value: current } } = &self.take_at(index)
                 &self.restore_at(index, resident_code, .{ key = stored, value = &combining(current, value) })
                 return .Ok(())
             },
@@ -1184,25 +1180,18 @@ test fn upsert_returns_linear_factory_errors_and_mismatched_entries() {
         .Ok(.{ key = 3, value = .{ id = 9 } })
     }
     let recovered = match &values.upsert(2, wrong, |sink value| value) {
-        Err(failure) => match failure {
-            KeyMismatch(entry) => settle_ticket(entry),
-            Factory(_) => panic("mismatch became a factory error"),
-            Allocation(_) => panic("system allocation refused"),
-        },
+        Err(KeyMismatch(entry)) => settle_ticket(entry),
+        Err(Factory(_)) => panic("mismatch became a factory error"),
+        Err(Allocation(_)) => panic("system allocation refused"),
         Ok(_) => panic("mismatched key entered the map"),
     }
     let fail = |_query: UInt64, _allocator: mem.SystemAllocator| -> Result[Entry[UInt64, MapTicket], MapTicket] where carries() {
         .Err(.{ id = 41 })
     }
     let reason = match &values.upsert(2, fail, |sink value| value) {
-        Err(failure) => match failure {
-            Factory(ticket) => {
-                let MapTicket { id } = ticket
-                id
-            },
-            KeyMismatch(_) => panic("factory error became a mismatch"),
-            Allocation(_) => panic("reserved map attempted allocation"),
-        },
+        Err(Factory(MapTicket { id })) => id,
+        Err(KeyMismatch(_)) => panic("factory error became a mismatch"),
+        Err(Allocation(_)) => panic("reserved map attempted allocation"),
         Ok(_) => panic("failed factory inserted an entry"),
     }
     values.finish().unwrap()
@@ -1249,10 +1238,8 @@ test fn upsert_returns_an_entry_when_matching_key_and_query_hashes_disagree() {
         },
         |sink value| value,
     ) {
-        Err(failure) => match failure {
-            KeyMismatch(entry) => entry,
-            _ => panic("hash disagreement was not returned as a key mismatch"),
-        },
+        Err(KeyMismatch(entry)) => entry,
+        Err(_) => panic("hash disagreement was not returned as a key mismatch"),
         Ok(_) => panic("inconsistent key entered the map"),
     }
     testing.assert(rejected.key.matches(7), "the witness did not reach hash validation")?
@@ -1301,10 +1288,8 @@ test fn upsert_inout_leaves_owned_callback_captures_with_the_caller() {
     var transform = [sink added] |sink value: UInt64| value + added.id
     &values.upsert_inout(1, &make, &transform).unwrap()
     &values.upsert_inout(1, &make, &transform).unwrap()
-    let { ticket: recovered } = make.into_captures()
-    let MapTicket { id: factory_id } = recovered
-    let { added: recovered_added } = transform.into_captures()
-    let MapTicket { id: transform_id } = recovered_added
+    let { ticket: MapTicket { id: factory_id } } = make.into_captures()
+    let { added: MapTicket { id: transform_id } } = transform.into_captures()
     testing.assert_eq(factory_id + transform_id, UInt64(45), "upsert consumed callback captures")?
     testing.assert_eq(*values.get(1).unwrap(), UInt64(45), "owned captures were unavailable to callbacks")?
 }
@@ -1320,11 +1305,9 @@ test fn upsert_inout_refusal_returns_owned_callback_captures_untouched() {
     let added = MapTicket { id = 3 }
     var transform = [sink added] |sink value: UInt64| value + added.id
     let refused = &values.upsert_inout(1, &make, &transform)
-    let allocation_failed = match refused { Err(failure) => match failure { Allocation(_) => true, _ => false }, Ok(_) => false }
-    let { ticket: recovered } = make.into_captures()
-    let MapTicket { id: factory_id } = recovered
-    let { added: recovered_added } = transform.into_captures()
-    let MapTicket { id: transform_id } = recovered_added
+    let allocation_failed = match refused { Err(Allocation(_)) => true, _ => false }
+    let { ticket: MapTicket { id: factory_id } } = make.into_captures()
+    let { added: MapTicket { id: transform_id } } = transform.into_captures()
     values.finish().unwrap()
     arena.release()
     testing.assert(allocation_failed, "tiny arena accepted a map reservation")?

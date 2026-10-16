@@ -213,8 +213,7 @@ impl[H: Allocator] Allocator for Handle[H] {
     fn acquire(self: Self, size: UInt64) -> Result[Buffer[Handle[H]], Oom] {
         match arena_reserve(*self.owner, size) {
             None => .Err(Oom.Exhausted),
-            Some(reserved) => {
-                let ArenaReservation { at: at, allocated: allocated } = reserved
+            Some(ArenaReservation { at: at, allocated: allocated }) => {
                 return .Ok(.{
                     at = at,
                     len = size,

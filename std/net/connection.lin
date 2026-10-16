@@ -64,10 +64,8 @@ test fn a_connection_to_a_closed_port_is_refused() {
             let _closed = connection.close()
             false
         },
-        Err(error) => match read error {
-            Io(reason) => match read reason.category { ConnectionRefused => true, _ => false },
-            _ => false,
-        },
+        Err(Io(reason)) => match read reason.category { ConnectionRefused => true, _ => false },
+        Err(_) => false,
     }
     testing.assert(listener_closed, "closing the listener failed")?
     testing.assert(refused, "a connection to a closed port was not refused")?
@@ -376,8 +374,7 @@ impl io.ByteWriter for Connection {
         var descriptor = io.descriptor(self.fd)
         match &descriptor.write_some(bytes) {
             Ok(written) => .Ok(written),
-            Err(failure) => {
-                let WriteFailure { kind: kind, reason: reason, written: written } = failure
+            Err(WriteFailure { kind: kind, reason: reason, written: written }) => {
                 let reported: Option[io.IoError] = match reason {
                     Some(error) => .Some(timed_out(error)),
                     None => .None,

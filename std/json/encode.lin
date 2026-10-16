@@ -438,12 +438,10 @@ impl Encode for SwallowedCodecFailure {
         &encoder.begin_array(&writer)?
         match &encoder.value(&writer, invalid) {
             Ok(_) => {},
-            Err(error) => match error {
-                Writer(_error) => panic("unexpected writer failure"),
-                InvalidState => {},
-                DepthLimit => {},
-                NonFiniteNumber => {},
-            },
+            Err(Writer(_error)) => panic("unexpected writer failure"),
+            Err(InvalidState) => {},
+            Err(DepthLimit) => {},
+            Err(NonFiniteNumber) => {},
         }
         &encoder.end_array(&writer)
     }
@@ -496,8 +494,8 @@ test fn nested_codecs_emit_one_value_and_preserve_the_callers_container() {
         &values.push(invalid).unwrap()
         defer var output = String.new()
         let refused = match encode(&output, values) {
-            Err(error) => match error { InvalidState => true, _ => false },
-            Ok(_) => false,
+            Err(InvalidState) => true,
+            _ => false,
         }
         testing.assert(refused, "nested codec changed the array's element count or container boundary")?
     }
@@ -507,7 +505,7 @@ test fn swallowed_child_and_writer_failures_poison_the_encoder() {
     for empty in [true, false] {
         let invalid: SwallowedCodecFailure = .{ empty }
         defer var output = String.new()
-        testing.assert(match encode(&output, invalid) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }, "swallowed child failure was accepted")?
+        testing.assert(match encode(&output, invalid) { Err(InvalidState) => true, _ => false }, "swallowed child failure was accepted")?
     }
     defer let message = "stopped".to_owned().unwrap()
     var writer: RefusingJsonWriter = .{ remaining = 0, accepted = 0, error = message.view() }
@@ -515,7 +513,7 @@ test fn swallowed_child_and_writer_failures_poison_the_encoder() {
     let failure = &encoder.string(&writer, "tea")
     failure.release()
     let finished: Result[(), EncodeError[Str]] = &encoder.finish()
-    testing.assert(match finished { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }, "swallowed writer failure was accepted")?
+    testing.assert(match finished { Err(InvalidState) => true, _ => false }, "swallowed writer failure was accepted")?
 }
 
 impl Encoder {
@@ -530,7 +528,7 @@ test fn null_writes_one_null_value() {
     defer var output = String.new()
     var encoder = Encoder.new()
     &encoder.null(&output).unwrap()
-    let second = match &encoder.null(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    let second = match &encoder.null(&output) { Err(InvalidState) => true, _ => false }
     testing.assert_eq(output.view(), "null", "null was not written")?
     testing.assert(second, "a second root value was accepted")?
 }
@@ -578,11 +576,8 @@ test fn typed_encoding_preserves_borrowed_writer_errors() {
     for budget in UInt64(0)..5 {
         var writer: RefusingJsonWriter = .{ remaining = budget, accepted = 0, error = message.view() }
         let refused = match encode(&writer, "tea") {
-            Err(error) => match error {
-                Writer(message) => message == "stopped",
-                _ => false,
-            },
-            Ok(_) => false,
+            Err(Writer(message)) => message == "stopped",
+            _ => false,
         }
         testing.assert(refused && writer.accepted <= budget, "typed encoding changed the writer failure")?
     }
@@ -623,8 +618,8 @@ test fn float64_writes_the_shortest_digits_and_refuses_nan() {
     &encoder.float64(&output, 0.1).unwrap()
     var refused = Encoder.new()
     let nan = match &refused.float64(&output, 0.0 / 0.0) {
-        Err(error) => match error { NonFiniteNumber => true, _ => false },
-        Ok(_) => false,
+        Err(NonFiniteNumber) => true,
+        _ => false,
     }
     testing.assert_eq(output.view(), "0.1", "a float lost its shortest digits")?
     testing.assert(nan, "NaN was written as JSON")?
@@ -653,8 +648,8 @@ test fn encoder_bounds_nested_containers_at_128() {
         &excessive.begin_array(&output).unwrap()
     }
     let refused = match &excessive.begin_array(&output) {
-        Err(error) => match error { DepthLimit => true, _ => false },
-        Ok(_) => false,
+        Err(DepthLimit) => true,
+        _ => false,
     }
     testing.assert(refused, "encoder exceeded its depth bound")?
 }
@@ -710,10 +705,10 @@ impl Encoder {
 test fn key_is_refused_outside_an_object() {
     defer var output = String.new()
     var root = Encoder.new()
-    let at_root = match &root.key(&output, "a") { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    let at_root = match &root.key(&output, "a") { Err(InvalidState) => true, _ => false }
     var array = Encoder.new()
     &array.begin_array(&output).unwrap()
-    let in_array = match &array.key(&output, "a") { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    let in_array = match &array.key(&output, "a") { Err(InvalidState) => true, _ => false }
     testing.assert(at_root, "a key was written outside every container")?
     testing.assert(in_array, "a key was written inside an array")?
 }
@@ -732,7 +727,7 @@ test fn end_array_closes_only_an_array() {
     &encoder.end_array(&output).unwrap()
     var mismatched = Encoder.new()
     &mismatched.begin_object(&output).unwrap()
-    let refused = match &mismatched.end_array(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    let refused = match &mismatched.end_array(&output) { Err(InvalidState) => true, _ => false }
     testing.assert_eq(output.view(), r"[]{", "an empty array was not closed")?
     testing.assert(refused, "an array closed an object")?
 }
@@ -750,7 +745,7 @@ test fn end_object_refuses_an_object_waiting_for_a_value() {
     var encoder = Encoder.new()
     &encoder.begin_object(&output).unwrap()
     &encoder.key(&output, "a").unwrap()
-    let refused = match &encoder.end_object(&output) { Err(error) => match error { InvalidState => true, _ => false }, Ok(_) => false }
+    let refused = match &encoder.end_object(&output) { Err(InvalidState) => true, _ => false }
     testing.assert(refused, "an object closed before its member's value")?
 }
 
@@ -800,8 +795,8 @@ test fn typed_encoding_rejects_invalid_custom_codec_sequences() {
         let invalid: InvalidCodec = .{ mode }
         defer var output = String.new()
         let refused = match encode(&output, invalid) {
-            Err(error) => match error { InvalidState => true, _ => false },
-            Ok(_) => false,
+            Err(InvalidState) => true,
+            _ => false,
         }
         testing.assert(refused, "invalid codec produced a successful encoding")?
     }
@@ -838,8 +833,8 @@ test fn typed_encoding_preserves_finite_floats_and_refuses_nonfinite_values() {
     for value in [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0] {
         defer var output = String.new()
         let refused = match encode(&output, value) {
-            Err(error) => match error { NonFiniteNumber => true, _ => false },
-            Ok(_) => false,
+            Err(NonFiniteNumber) => true,
+            _ => false,
         }
         testing.assert(refused && output.length() == 0, "nonfinite float produced JSON output")?
     }

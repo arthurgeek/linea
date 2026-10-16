@@ -111,7 +111,7 @@ test fn tag_predicates_preserve_affine_payloads() {
     let number = match present.unwrap() { Value(value) => value }
     let empty = match absent {
         None => true,
-        Some(payload) => match payload { Value(_) => false },
+        Some(Value(_)) => false,
     }
     testing.assert(present_tags && absent_tags && empty, "Option predicates changed a tag")?
     testing.assert_eq(number, 7, "Option predicates consumed or changed the payload")?
@@ -125,7 +125,7 @@ test fn tag_predicates_preserve_linear_payloads() {
     let number = match present.unwrap() { Value(value) => value }
     let empty = match absent {
         None => true,
-        Some(payload) => match payload { Value(_) => false },
+        Some(Value(_)) => false,
     }
     testing.assert(present_tags && absent_tags && empty, "Option predicates changed a tag")?
     testing.assert_eq(number, 7, "Option predicates consumed or changed the payload")?

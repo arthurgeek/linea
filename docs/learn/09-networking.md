@@ -83,13 +83,12 @@ fn main() -> UInt8 {
         let _closed = listener.close()
         return 1
     }
-    let accepted = &listener.accept() else |error| {
+    let Accepted { connection, address: _ } = &listener.accept() else |error| {
         io.eprintln("cannot accept: {error}")
         let _client = client.close()
         let _closed = listener.close()
         return 1
     }
-    let Accepted { connection, address: _ } = accepted
     var server = connection
     let exchanged = exchange(&client, &server)
     // Every connection and the listener are closed whatever happened above.
@@ -523,12 +522,12 @@ fn serve(port: UInt16, clients: UInt64) -> UInt8 {
 fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
     var served: UInt64 = 0
     while served < clients {
-        let accepted = &listener.accept() else |error| {
+        // `Accepted` holds the connection and the address of the client, and
+        // the pattern takes both out of it as soon as `accept` succeeds.
+        let Accepted { connection, address } = &listener.accept() else |error| {
             io.eprintln("cannot accept a client: {error}")
             return false
         }
-        // `Accepted` holds the connection and the address of the client.
-        let Accepted { connection, address } = accepted
         var open = connection
         echo(&open, address)
         // The connection is closed here, once, whether or not the echo worked.

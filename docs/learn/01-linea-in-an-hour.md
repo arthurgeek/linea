@@ -1148,8 +1148,9 @@ The dearest price is 1200 cents.
 each component. A tuple that stays whole is one value, and `range._0`,
 `range._1` name its components by position, counting from zero.
 [Iterating](05-iterating.md#pairs-from-enumerate-and-zip) takes pairs apart in
-a `for`, and [Calling things](02-calling-things.md#a-closure-that-takes-a-pair-apart)
-in a lambda's parameters.
+a `for`, [Calling things](02-calling-things.md#a-closure-that-takes-a-pair-apart)
+in a lambda's parameters, and [Patterns inside patterns](#patterns-inside-patterns)
+inside another pattern.
 
 Use a tuple for a positional relationship that is obvious from where it
 appears: the lowest and highest price, or an item and its position. Use a
@@ -1232,6 +1233,149 @@ error[O-Move]: `floor` is lent, and this takes it
 
 This is the first ownership error most people meet, and it reads the way it
 sounds: `describe` was lent the floor, and a plain `match` would keep it.
+
+### Patterns inside patterns
+
+A pattern can stand wherever a name does: inside a variant's parentheses, as a
+tuple's component, or after a struct field's `:`. The arm then takes the value
+apart as deep as it needs, in one step:
+
+```linea
+import std.io
+
+// A setting from a line such as `port=8080`: its name and its number, or
+// nothing for a line that is not one.
+fn setting(line: Str) -> Option[(Str, UInt64)] {
+    let (name, number) = line.split_once("=") else {
+        return .None
+    }
+    let value = number.parse[UInt64]() else |_| {
+        return .None
+    }
+    .Some((name, value))
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let lines = ["port=8080", "# a comment", "workers=4"]
+    for line in lines {
+        match setting(line) {
+            // `(name, value)` takes apart the pair that `Some` carries.
+            Some((name, value)) => io.println("{name} is {value}")?,
+            None => io.println("skipped: {line}")?,
+        }
+    }
+    .Ok(0)
+}
+```
+
+```
+port is 8080
+skipped: # a comment
+workers is 4
+```
+
+`Some((name, value))` matches a `Some` and takes apart the pair it carries, so
+the arm names both parts directly. Inside a pattern a lowercase name binds the
+part it stands at and `_` ignores it, while a capitalised name is a variant to
+match, as in `Ok(None)` or `Err(Read(Limit))`.
+
+Coverage looks inside every pattern. Two optional lights have four shapes, and
+one arm per shape covers them:
+
+```linea
+import std.io
+
+// Which of two lights are on, each with its brightness.
+fn describe(lights: (Option[UInt8], Option[UInt8])) -> Result[(), io.IoError] {
+    match read lights {
+        (Some(left), Some(right)) => io.println("both on, at {left} and {right}"),
+        (Some(left), None) => io.println("left on, at {left}"),
+        (None, Some(right)) => io.println("right on, at {right}"),
+        (None, None) => io.println("both off"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    describe((.Some(80), .None))?
+    describe((.None, .None))?
+    .Ok(0)
+}
+```
+
+```
+left on, at 80
+both off
+```
+
+Leave one shape out and the compiler names the value no arm takes, written as
+a pattern:
+
+```linea
+import std.io
+
+fn describe(lights: (Option[UInt8], Option[UInt8])) -> Result[(), io.IoError] {
+    match read lights {
+        (Some(left), Some(right)) => io.println("both on, at {left} and {right}"),
+        (Some(left), None) => io.println("left on, at {left}"),
+        (None, None) => io.println("both off"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    describe((.None, .None))?
+    .Ok(0)
+}
+```
+
+```
+error[T-Cover]: this `match` does not cover `(None, Some)`
+ --> lights_missing.lin:4:5
+  |
+4 |     match read lights {
+  |     ^^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`
+```
+
+`Some` is written bare because any brightness is missing. An arm that no value
+can reach, such as `(Some(left), _)` after `(Some(left), None)` and
+`(Some(left), Some(right))`, is refused the same way.
+
+How the parts are held is the construct's choice, at every depth. A plain
+`match` takes the value and each name owns its part; `match read` lends every
+name the part it stands at, however deep, without copying anything:
+
+```linea
+import std.io
+
+// `match read` lends each binder its part of the booking, however deep the
+// part sits: `name` reads the `String` inside the pair inside `Some`, and
+// nothing is copied.
+fn describe(booking: Option[(String, UInt64)]) -> Result[(), io.IoError] {
+    match read booking {
+        Some((name, seats)) => io.println("{name} booked {seats} seats"),
+        None => io.println("nothing is booked"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let name = "Ada".to_owned() else |_| {
+        return .Ok(1)
+    }
+    let booking: Option[(String, UInt64)] = .Some((name, 4))
+    let described = describe(booking)
+    booking.release()
+    described?
+    .Ok(0)
+}
+```
+
+```
+Ada booked 4 seats
+```
+
+`name` is a view of the `String` inside the pair inside the option, so
+`describe` reads it without owning it, and `main` still owns `booking` and
+releases it. In Rust, a pattern matched through a reference binds each part by
+reference; `match read` does that for every name in the pattern at once.
 
 ### Operations with `impl`
 

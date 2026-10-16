@@ -115,7 +115,8 @@ test fn settling_a_failed_read_releases_the_partial_bytes() {
             bytes.release()
             false
         },
-        Err(reason) => match reason { Limit => true, _ => false },
+        Err(Limit) => true,
+        Err(_) => false,
     }
     testing.assert(limited, "settling a failed read lost its reason")?
     .Ok(())
@@ -498,10 +499,8 @@ test fn reading_text_names_the_offset_of_invalid_utf8() {
             decoded.release()
             UInt64.max
         },
-        Err(error) => match error {
-            Encoding(encoding) => encoding.offset,
-            Read(_) => UInt64.max,
-        },
+        Err(Encoding(encoding)) => encoding.offset,
+        Err(Read(_)) => UInt64.max,
     }
     testing.assert_eq(offset, UInt64(1), "invalid UTF-8 was not reported at its first bad byte")?
 }
@@ -514,10 +513,9 @@ test fn reading_text_reports_a_reader_failure_as_a_read_failure() {
             decoded.release()
             false
         },
-        Err(error) => match error {
-            Read(reason) => match reason { Input(_) => true, _ => false },
-            Encoding(_) => false,
-        },
+        Err(Read(Input(_))) => true,
+        Err(Read(_)) => false,
+        Err(Encoding(_)) => false,
     }
     testing.assert(failed, "a failing reader was not a read failure")?
 }
@@ -535,10 +533,8 @@ test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> 
                     decoded.release()
                     .Err(.Encoding(text.Utf8Error { offset = 0 }))
                 },
-                Err(error) => match error {
-                    Encoding(_) => .Ok(()),
-                    Read(reason) => .Err(.Read(reason)),
-                },
+                Err(Encoding(_)) => .Ok(()),
+                Err(Read(reason)) => .Err(.Read(reason)),
             }
         },
         ReadTextError.is_refusal,

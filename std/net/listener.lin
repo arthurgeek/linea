@@ -72,7 +72,8 @@ test fn a_second_listener_on_one_address_is_in_use() {
             let _closed = second.close()
             false
         },
-        Err(error) => match read error { AddressInUse => true, _ => false },
+        Err(AddressInUse) => true,
+        Err(_) => false,
     }
     let closed = first.close().is_ok()
     testing.assert(refused, "a second listener bound an address in use")?
@@ -120,7 +121,8 @@ test fn a_connection_reaches_its_own_listener() {
     }
     // The client closed after writing, so the line ends at end of input.
     let received = match &reader.read_line_borrowed(max_bytes: 16) {
-        Ok(line) => match line { Some(text) => text == "ping", None => false },
+        Ok(Some(text)) => text == "ping",
+        Ok(None) => false,
         Err(_) => false,
     }
     let connection_closed = reader.abandon().close().is_ok()
@@ -141,8 +143,7 @@ test fn a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_ac
     // is handed out: either accepting it reports the reset, or it is
     // accepted and its first read does.
     let reset = match &listener.accept() {
-        Ok(accepted) => {
-            let Accepted { connection: connection, address: _ } = accepted
+        Ok(Accepted { connection: connection, address: _ }) => {
             var torn = connection
             var buffer = mem.system().acquire(8).unwrap()
             let received = &torn.read_some(&buffer, offset: 0, count: 8)
@@ -153,10 +154,8 @@ test fn a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_ac
                 Err(error) => Option.Some(error.category),
             }
         },
-        Err(error) => match read error {
-            Io(reason) => Option.Some(reason.category),
-            _ => Option.None,
-        },
+        Err(Io(reason)) => Option.Some(reason.category),
+        Err(_) => Option.None,
     }
     let Accepted { connection: served, address: _ } = &listener.accept().unwrap()
     served.close().unwrap()

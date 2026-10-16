@@ -122,7 +122,7 @@ test fn atomic_save_rejects_special_permission_bits_before_io() {
         Ok(_) => return testing.assert(false, "special permission bits were accepted"),
         Err(failure) => {
             testing.assert(!failure.published, "invalid permissions published a file")?
-            testing.assert(match read failure.primary { Some(reason) => match read reason { InvalidPermissions => true, _ => false }, None => false }, "permission error lost its context")?
+            testing.assert(match read failure.primary { Some(InvalidPermissions) => true, _ => false }, "permission error lost its context")?
         },
     }
     .Ok(())
@@ -182,8 +182,8 @@ test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() 
             testing.assert(!failure.published, "nonregular destination was published")?
             testing.assert_eq(failure.written, UInt64(0), "nonregular destination reached the write")?
             testing.assert(match read failure.primary {
-                Some(reason) => match read reason { Io(error) => match read error.operation { Metadata => true, _ => false }, _ => false },
-                None => false,
+                Some(Io(error)) => match read error.operation { Metadata => true, _ => false },
+                _ => false,
             }, "nonregular destination lost the metadata failure")?
         },
     }
@@ -230,7 +230,7 @@ test fn an_atomic_save_reports_scratch_allocation_failure() {
     defer remove_scratch(path)
     let refused = match save_atomic_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
         Ok(_) => false,
-        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
     }
     testing.assert(refused, "an atomic save took its scratch from another allocator")?
     .Ok(())

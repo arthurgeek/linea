@@ -129,7 +129,7 @@ error[T-Mismatch]: expected `Str`, found `{interpolation Str}`
 7   |     if &line.append("weather in {city}").is_err() {
     |                     ^^^^^^^^^^^^^^^^^^^ expected `Str`, found `{interpolation Str}`
    ::: std/text/string.lin
-441 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
+440 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
     |                                     ---- expected because of this parameter
 ```
 

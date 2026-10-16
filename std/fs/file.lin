@@ -60,7 +60,7 @@ impl FsFailure {
     // which an allocation-failure walk accepts from a refused run; a failure
     // only in cleanup is not one.
     fn is_refusal(self: Self) -> Bool {
-        match read self.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false }
+        match read self.primary { Some(Allocation(_)) => true, _ => false }
     }
 }
 
@@ -174,7 +174,7 @@ test fn opening_a_path_reports_scratch_allocation_failure() {
             file.release()
             return testing.assert(false, "opening a path skipped refused scratch")
         },
-        Err(failure) => testing.assert(match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false }, "scratch refusal lost allocation context")?,
+        Err(failure) => testing.assert(match read failure.primary { Some(Allocation(_)) => true, _ => false }, "scratch refusal lost allocation context")?,
     }
     .Ok(())
 }
@@ -285,7 +285,7 @@ test fn creating_a_file_reports_scratch_allocation_failure() {
             file.release()
             false
         },
-        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
     }
     testing.assert(refused, "creating a file took its scratch from another allocator")?
     .Ok(())
@@ -439,11 +439,8 @@ test fn removing_a_file_takes_its_name_and_reports_a_missing_one() {
     let missing = match remove_file(path) {
         Ok(_) => false,
         Err(failure) => match read failure.primary {
-            Some(error) => match read error {
-                Io(reason) => reason.category == .NotFound,
-                _ => false,
-            },
-            None => false,
+            Some(Io(reason)) => reason.category == .NotFound,
+            _ => false,
         },
     }
     testing.assert(missing, "removing a missing file did not report it as not found")?
@@ -493,7 +490,7 @@ test fn a_direct_file_write_reports_scratch_allocation_failure() {
     defer remove_scratch(path)
     let refused = match write_file_in(arena.handle(), path, "tea".as_bytes(), policy: .CreateNew) {
         Ok(_) => false,
-        Err(failure) => match read failure.primary { Some(reason) => match read reason { Allocation(_) => true, _ => false }, None => false },
+        Err(failure) => match read failure.primary { Some(Allocation(_)) => true, _ => false },
     }
     testing.assert(refused, "a direct write took its scratch from another allocator")?
     .Ok(())

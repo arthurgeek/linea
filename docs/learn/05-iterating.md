@@ -282,6 +282,30 @@ jam costs 40 cents
 view of a `Str` in the array, and `*item` reads the text it points at, just as
 `*cents` read a number in the chains above.
 
+A component of the pattern can be a pattern of its own. Here each item is a
+pair whose first part is itself a pair, and one pattern names all three:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let order = ["coffee", "croissant", "jam"]
+    let cents = [250, 175, 40]
+    // `enumerate` pairs each item with its position, and `zip` pairs that
+    // pair with a price, so the pattern takes a pair inside a pair apart.
+    for ((i, item), price) in order.as_slice().enumerate().zip(cents.as_slice()) {
+        io.println("{i + 1}. {*item}: {*price} cents")?
+    }
+    .Ok(0)
+}
+```
+
+```
+1. coffee: 250 cents
+2. croissant: 175 cents
+3. jam: 40 cents
+```
+
 A slice hands out borrowed items, so a slice of pairs cannot be taken apart
 the same way. The pair is something you only look at, and a pattern in a plain
 `for` takes its value apart, which a view does not allow:

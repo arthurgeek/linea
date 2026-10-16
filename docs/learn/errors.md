@@ -56,6 +56,7 @@ for the code in brackets to reach the rule itself.
 | `T-Operands` | error | Linea in an hour: [Values and their types](01-linea-in-an-hour.md#values-and-their-types) | [§4 Types](../linea-semantics.md#4-types), at `[T-Operands]` |
 | `T-Overflow` | error | Linea in an hour: [Arithmetic is checked](01-linea-in-an-hour.md#arithmetic-is-checked) | [§4 Types](../linea-semantics.md#4-types), at `[T-Overflow]` |
 | `T-Refine` | error | Errors: [Limiting the values](03-errors.md#limiting-the-values) | [§4 Types](../linea-semantics.md#4-types), at `[T-Refine]` |
+| `T-Refutable` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-Refutable]` |
 | `T-TryAnswer` | error | Errors: [`?` converts errors with `From`](03-errors.md#-converts-errors-with-from) | [§4 Types](../linea-semantics.md#4-types), at `[T-TryAnswer]` |
 | `T-UnknownOperation` | error | Calling things: [A dot call reaches operations, not free functions](02-calling-things.md#a-dot-call-reaches-operations-not-free-functions) | [§3 Names](../linea-semantics.md#3-names), at `[T-UnknownOperation]` |
 

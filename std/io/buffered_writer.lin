@@ -313,8 +313,7 @@ test fn allocation_refusal_returns_an_untouched_writer() {
             let _sink = writer.abort()
             false
         },
-        Err(failure) => {
-            let BufferOpenFailure { resource: returned, reason: reason } = failure
+        Err(BufferOpenFailure { resource: returned, reason: reason }) => {
             returned.length == 0 && returned.stop == 7 && match reason { Allocation(_) => true, ZeroCapacity => false }
         },
     }
@@ -333,8 +332,7 @@ test fn a_buffered_writer_holds_its_bytes_in_an_arena() {
     // ASCII t is byte 116 and a line ending is byte 10.
     let delivered = match writer.finish() {
         Ok(output) => output.length == 4 && output.bytes[0] == 116 && output.bytes[3] == 10,
-        Err(failure) => {
-            let FinishFailure { writer: returned, failure: _ } = failure
+        Err(FinishFailure { writer: returned, failure: _ }) => {
             let _output = returned.abort()
             false
         },
@@ -409,8 +407,7 @@ test fn a_buffered_writer_renders_a_utf8_line_across_short_writes() {
     let wrote = line("é", &writer).is_ok()
     let delivered = match writer.finish() {
         Ok(output) => output.length == 3 && output.bytes[0] == 195 && output.bytes[1] == 169 && output.bytes[2] == 10,
-        Err(failure) => {
-            let FinishFailure { writer: returned, failure: _ } = failure
+        Err(FinishFailure { writer: returned, failure: _ }) => {
             let _output = returned.abort()
             false
         },
@@ -475,8 +472,7 @@ test fn finishing_after_an_underlying_flush_failure_does_not_repeat_bytes() {
     let empty = returned.pending().length() == 0 && returned.pending_bytes() == 0
     let finished = match returned.finish() {
         Ok(output) => output.failed && output.output.length == 4 && output.output.bytes[0] == 100 && output.output.bytes[3] == 101,
-        Err(failure) => {
-            let FinishFailure { writer: writer, failure: _ } = failure
+        Err(FinishFailure { writer: writer, failure: _ }) => {
             let _output = writer.abort()
             false
         },
@@ -520,8 +516,7 @@ impl[W: ByteWriter, A: Allocator] ByteWriter for BufferedWriter[W, A] {
         if self.start + self.length == self.bytes.length() {
             match &self.drain() {
                 Ok(_) => {},
-                Err(failure) => {
-                    let WriteFailure { kind: kind, reason: reason, written: _ } = failure
+                Err(WriteFailure { kind: kind, reason: reason, written: _ }) => {
                     return .Err(.{ kind = kind, reason = reason, written = 0 })
                 },
             }
@@ -550,8 +545,7 @@ impl[W: ByteWriter, A: Allocator] ByteWriter for BufferedWriter[W, A] {
         let written = pending - self.pending_bytes()
         match result {
             Ok(_) => .Ok(written),
-            Err(failure) => {
-                let WriteFailure { kind: kind, reason: reason, written: _ } = failure
+            Err(WriteFailure { kind: kind, reason: reason, written: _ }) => {
                 return .Err(.{ kind = kind, reason = reason, written = written })
             },
         }
@@ -608,8 +602,7 @@ test fn buffered_output_retries_only_its_unsent_suffix() {
     writer.writer.stop = 8
     let delivered = match writer.finish() {
         Ok(output) => output.length == 5 && output.bytes[0] == 104 && output.bytes[1] == 101 && output.bytes[2] == 108 && output.bytes[3] == 108 && output.bytes[4] == 111,
-        Err(failure) => {
-            let FinishFailure { writer: returned, failure: _ } = failure
+        Err(FinishFailure { writer: returned, failure: _ }) => {
             let _sink = returned.abort()
             false
         },
@@ -637,8 +630,7 @@ test fn draining_a_full_buffer_can_fail_without_accepting_new_bytes() {
     let suffix = pending.length() == 1 && pending[0] == 99
     let recovered = match writer.finish() {
         Ok(_) => false,
-        Err(failure) => {
-            let FinishFailure { writer: returned, failure: failure } = failure
+        Err(FinishFailure { writer: returned, failure: failure }) => {
             let untouched = failure.written == 0
             let output = returned.abort()
             untouched && output.length == 2 && output.bytes[0] == 97 && output.bytes[1] == 98
@@ -667,8 +659,7 @@ test fn a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes() {
     let suffix = pending == "def".as_bytes()
     let delivered = match writer.finish() {
         Ok(output) => output.length == 6 && output.bytes[0] == 97 && output.bytes[1] == 98 && output.bytes[2] == 99 && output.bytes[3] == 100 && output.bytes[4] == 101 && output.bytes[5] == 102,
-        Err(failure) => {
-            let FinishFailure { writer: returned, failure: _ } = failure
+        Err(FinishFailure { writer: returned, failure: _ }) => {
             let _output = returned.abort()
             false
         },

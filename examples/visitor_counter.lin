@@ -14,10 +14,8 @@ fn greet(sink connection: net.Connection, inout visitors: UInt64) {
         return
     }
     let name = match &reader.read_line_borrowed(max_bytes: 64) {
-        Ok(line) => match line {
-            Some(text) => text,
-            None => "stranger",
-        },
+        Ok(Some(text)) => text,
+        Ok(None) => "stranger",
         Err(error) => {
             io.eprintln("cannot read a name: {error}")
             let _closed = reader.abandon().close()
@@ -60,12 +58,10 @@ fn read_greeting(sink visitor: net.Connection) {
         return
     }
     match &reader.read_line_borrowed(max_bytes: 256) {
-        Ok(line) => match line {
-            Some(text) => {
-                let _printed = io.println(text)
-            },
-            None => io.eprintln("the server said nothing"),
+        Ok(Some(text)) => {
+            let _printed = io.println(text)
         },
+        Ok(None) => io.eprintln("the server said nothing"),
         Err(error) => io.eprintln("cannot read a greeting: {error}"),
     }
     let _closed = reader.abandon().close()

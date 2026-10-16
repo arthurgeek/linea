@@ -111,10 +111,7 @@ impl Status {
             NotImplemented => 501,
             ServiceUnavailable => 503,
             HttpVersionNotSupported => 505,
-            Other(code) => {
-                let Code(value) = copy(code)
-                value
-            },
+            Other(Code(value)) => value,
         }
     }
 }

@@ -66,11 +66,9 @@ impl[H: Observer, S: log.Sink, A: Allocator] Observer for Logged[H, S, A] where 
 fn level_of[P: Allocator](exchange: Exchange[P]) -> log.Level {
     let answered = match read exchange.failure {
         None => true,
-        Some(failure) => match read failure {
-            Refused(_) => true,
-            Unread(_) => true,
-            _ => false,
-        },
+        Some(Refused(_)) => true,
+        Some(Unread(_)) => true,
+        Some(_) => false,
     }
     let code = match read exchange.status {
         Some(status) => status.code(),
