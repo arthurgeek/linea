@@ -1822,6 +1822,55 @@ test "the guide gate: a labelled data block is a file beside the next program, n
     try testing.expectEqualStrings("done", reading.programs[1].expected.?);
 }
 
+test "the guide gate: a data block with no program after it is reported" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const at_end = readFixture(gpa,
+        \\`orphan.txt`:
+        \\
+        \\```text
+        \\nobody embeds this
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), at_end.problems.len);
+    try testing.expectEqual(@as(usize, 3), at_end.problems[0].line);
+
+    const before_a_fragment = readFixture(gpa,
+        \\`orphan.txt`:
+        \\
+        \\```text
+        \\nobody embeds this
+        \\```
+        \\
+        \\```linea
+        \\let x = 1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), before_a_fragment.problems.len);
+    try testing.expectEqual(@as(usize, 0), before_a_fragment.programs.len);
+}
+
+test "the guide gate: a Linea block labelled with another kind of file is refused, not read as data" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`notes.txt`:
+        \\
+        \\```linea
+        \\fn main() -> UInt8 { this does not compile }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), reading.problems.len);
+    try testing.expectEqual(@as(usize, 0), reading.programs.len);
+}
+
 test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
