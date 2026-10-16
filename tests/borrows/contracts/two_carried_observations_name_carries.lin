@@ -1,0 +1,13 @@
+// `first` and `second` are views already, and the result is a copy of one of
+// them, so it carries what they observe. The clause for that is `carries`.
+fn longer(first: Str, second: Str) -> Str {
+    if first.length() >= second.length() {
+        copy(first)
+    } else {
+        copy(second)
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(longer("ab", "abc").length())
+}

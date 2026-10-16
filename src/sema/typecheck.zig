@@ -7596,12 +7596,16 @@ const Checker = struct {
                 defer sources.deinit(self.gpa);
                 var clauses: std.ArrayList(u8) = .empty;
                 defer clauses.deinit(self.gpa);
+                var every: std.ArrayList(types_mod.ClauseSource) = .empty;
+                defer every.deinit(self.gpa);
                 var listed: usize = 0;
                 for (params) |parameter| {
                     if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
                     const separator = if (listed == 0) "" else if (listed + 1 == eligible) " or " else ", ";
+                    const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = try types_mod.borrowsFrom(&self.builder, parameter, result) };
+                    try every.append(self.gpa, source);
                     try sources.print(self.gpa, "{s}`{s}`", .{ separator, parameter.spelling });
-                    try clauses.print(self.gpa, "{s}`where borrows({s})`", .{ separator, parameter.spelling });
+                    try clauses.print(self.gpa, "{s}`{s}`", .{ separator, try types_mod.sourceClause(self.sink.arena, &.{source}) });
                     listed += 1;
                 }
                 if (carriers.count > 1) {
@@ -7609,20 +7613,34 @@ const Checker = struct {
                     defer named.deinit(self.gpa);
                     var carried: std.ArrayList(u8) = .empty;
                     defer carried.deinit(self.gpa);
+                    var carrying: std.ArrayList(types_mod.ClauseSource) = .empty;
+                    defer carrying.deinit(self.gpa);
                     var listed_carriers: usize = 0;
                     for (params) |parameter| {
                         if (!try self.isCarrierType(parameter.ty)) continue;
                         if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
                         const joiner = if (listed_carriers == 0) "" else if (listed_carriers + 1 == carriers.count) " and " else ", ";
                         const alternative = if (listed_carriers == 0) "" else if (listed_carriers + 1 == carriers.count) " or " else ", ";
+                        const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = false };
+                        try carrying.append(self.gpa, source);
                         try named.print(self.gpa, "{s}`{s}`", .{ joiner, parameter.spelling });
-                        try carried.print(self.gpa, "{s}`where carries({s})`", .{ alternative, parameter.spelling });
+                        try carried.print(self.gpa, "{s}`{s}`", .{ alternative, try types_mod.sourceClause(self.sink.arena, &.{source}) });
                         listed_carriers += 1;
                     }
-                    const help = try std.fmt.allocPrint(self.sink.arena, "{s} are carriers, so none is the default source; add {s}, or list several sources in one clause", .{ named.items, carried.items });
+                    const help = try std.fmt.allocPrint(self.sink.arena, "{s} are carriers, so none is the default source; add {s}, or `{s}` where it may come from {s}", .{
+                        named.items,
+                        carried.items,
+                        try types_mod.sourceClause(self.sink.arena, carrying.items),
+                        if (listed_carriers == 2) "either" else "any of them",
+                    });
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source, and several parameters are carriers", help, null);
                 } else {
-                    const help = try std.fmt.allocPrint(self.sink.arena, "the result may borrow from {s}; add {s}, or list several sources in one clause", .{ sources.items, clauses.items });
+                    const help = try std.fmt.allocPrint(self.sink.arena, "the result may come from {s}; add {s}, or `{s}` where it may come from {s}", .{
+                        sources.items,
+                        clauses.items,
+                        try types_mod.sourceClause(self.sink.arena, every.items),
+                        if (listed == 2) "either" else "any of them",
+                    });
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source", help, null);
                 }
                 // The body has no contract to be checked against, so the

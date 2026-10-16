@@ -1450,6 +1450,54 @@ pub fn isEligibleSource(builder: *Typing.Builder, parameter: CallableParam, resu
     return lendsPlace(builder, parameter, result) or try builder.mayCarryDependencies(parameter.ty);
 }
 
+/// A source a clause names: the parameter's spelling, and whether the clause
+/// is `borrows`, for a result that observes the parameter's place, or
+/// `carries`, for one that keeps what the parameter already observes.
+pub const ClauseSource = struct { spelling: []const u8, borrows: bool };
+
+/// Whether the clause naming `parameter` as a source of `result` is
+/// `borrows`: the parameter lends the place the result observes, or owns what
+/// a view of it would observe. A parameter whose type may be copied is a view
+/// already, and a result taken from it carries what it observes.
+pub fn borrowsFrom(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
+    return lendsPlace(builder, parameter, result) or !try builder.mayCopy(parameter.ty);
+}
+
+/// The `where` clause naming `sources`, the `borrows` sources first:
+/// `where borrows(first, second)`, `where carries(left)`, or
+/// `where borrows(first), carries(second)`. Every report that names the
+/// clause a signature lacks spells it here, so a signature the checker could
+/// not infer and a body the ownership pass refused are given one answer.
+pub fn sourceClause(arena: std.mem.Allocator, sources: []const ClauseSource) std.mem.Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, "where ");
+    var groups: usize = 0;
+    for ([_]bool{ true, false }) |borrows| {
+        var listed: usize = 0;
+        for (sources) |source| {
+            if (source.borrows != borrows) continue;
+            if (listed == 0) {
+                if (groups > 0) try out.appendSlice(arena, ", ");
+                try out.appendSlice(arena, if (borrows) "borrows(" else "carries(");
+                groups += 1;
+            } else try out.appendSlice(arena, ", ");
+            try out.appendSlice(arena, source.spelling);
+            listed += 1;
+        }
+        if (listed > 0) try out.append(arena, ')');
+    }
+    return out.items;
+}
+
+test sourceClause {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try testing.expectEqualStrings("where borrows(first, second)", try sourceClause(a, &.{ .{ .spelling = "first", .borrows = true }, .{ .spelling = "second", .borrows = true } }));
+    try testing.expectEqualStrings("where carries(left)", try sourceClause(a, &.{.{ .spelling = "left", .borrows = false }}));
+    try testing.expectEqualStrings("where borrows(first), carries(second)", try sourceClause(a, &.{ .{ .spelling = "second", .borrows = false }, .{ .spelling = "first", .borrows = true } }));
+}
+
 test inferredSource {
     const gpa = testing.allocator;
     var b = try Typing.Builder.init(gpa);

@@ -2,4 +2,4 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
  --> tests/borrows/contracts/an_inherent_method_infers_its_contract.lin:8:8
   |
 8 |     fn greet(self: Self, name: Str) -> Str {
-  |        ^^^^^ the result may borrow from `self` or `name`; add `where borrows(self)` or `where borrows(name)`, or list several sources in one clause
+  |        ^^^^^ the result may come from `self` or `name`; add `where borrows(self)` or `where carries(name)`, or `where borrows(self), carries(name)` where it may come from either
