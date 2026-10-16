@@ -19771,14 +19771,16 @@ const Checker = struct {
         const wanted = self.builder.argsOf(want);
         const had = self.builder.argsOf(have);
         if (wanted.len != had.len or wanted.len != parameters.len) return null;
+        // Exactly one argument may differ; any more and the allocator is not
+        // the only difference.
         var differing: ?usize = null;
-        for (wanted, had, parameters, 0..) |w, h, parameter, i| {
+        for (wanted, had, 0..) |w, h, i| {
             if (w == h) continue;
             if (differing != null) return null;
-            if (!self.isBoundedBy(parameter, allocator)) return self.allocatorMismatchNote(w, h);
             differing = i;
         }
         const at = differing orelse return null;
+        if (!self.isBoundedBy(parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
         // An argument that is no allocator was refused for its bound, and
         // the two do not differ in allocator.
         if (!try self.answersTrait(wanted[at], allocator) or !try self.answersTrait(had[at], allocator)) return null;
