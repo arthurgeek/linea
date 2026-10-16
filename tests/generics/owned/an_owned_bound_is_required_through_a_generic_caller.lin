@@ -1,6 +1,6 @@
 import std.mem
 
-fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) {
     for item in copy(items) {
         match &values.push(copy(*item)) {
             Ok(_) => {},
@@ -11,7 +11,7 @@ fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], it
 
 // `U` may be instantiated with a type that carries a borrow, so it cannot
 // stand where `Owned` is required.
-fn outer[U: Copyable](inout values: Vec[U], items: mem.Slice[U]) -> () {
+fn outer[U: Copyable](inout values: Vec[U], items: mem.Slice[U]) {
     append_all(&values, items)
 }
 

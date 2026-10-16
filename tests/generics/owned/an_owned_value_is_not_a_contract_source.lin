@@ -21,12 +21,12 @@ struct Ticket {
 }
 
 impl Release for Ticket {
-    fn release(sink self: Self) -> () {
+    fn release(sink self: Self) {
         let Ticket { number: _ } = self
     }
 }
 
-fn keep_all[T: Owned + Release, A: mem.Allocator](inout values: Vec[T, A], sink first: T, sink second: T) -> () {
+fn keep_all[T: Owned + Release, A: mem.Allocator](inout values: Vec[T, A], sink first: T, sink second: T) {
     match &values.push(first) {
         Ok(_) => {},
         Err(failure) => {

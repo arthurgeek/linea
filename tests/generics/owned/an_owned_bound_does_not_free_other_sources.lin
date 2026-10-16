@@ -9,7 +9,7 @@ struct Entry[T] {
 
 // `T` is Owned, but `label` is a `Str`: storing it in `entries` keeps the text
 // it views, which the signature does not declare.
-fn record[T: Owned, A: mem.Allocator](inout entries: Vec[Entry[T], A], sink value: T, label: Str) -> () {
+fn record[T: Owned, A: mem.Allocator](inout entries: Vec[Entry[T], A], sink value: T, label: Str) {
     match &entries.push(.{ value, label = copy(label) }) {
         Ok(_) => {},
         Err(_) => panic("full"),

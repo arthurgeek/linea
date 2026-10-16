@@ -10,7 +10,7 @@ A dependency set belongs to a value and is not split by layer. `mem.Slice[T]`
 is a carrier whatever `T` is, so in
 
 ```linea
-fn append_all[T: Copyable, A: mem.Allocator](inout values: mem.Vec[T, A], items: mem.Slice[T]) -> ()
+fn append_all[T: Copyable, A: mem.Allocator](inout values: mem.Vec[T, A], items: mem.Slice[T])
 ```
 
 a body that pushes `copy(*item)` is [O-Escapes] at the push, and the only clause

@@ -4,7 +4,7 @@ use mem.Lender
 
 // Every Integer type is Owned, so copying elements out of a slice retains
 // nothing of it.
-fn append_all[T: Integer, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+fn append_all[T: Integer, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) {
     for item in copy(items) {
         match &values.push(copy(*item)) {
             Ok(_) => {},

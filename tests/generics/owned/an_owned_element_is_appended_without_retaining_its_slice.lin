@@ -4,7 +4,7 @@ use mem.Lender
 
 // Each element copied out of `items` is Owned, so the vector keeps nothing of
 // the slice it was read from and the function needs no `retains` clause.
-fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) -> () {
+fn append_all[T: Copyable + Owned, A: mem.Allocator](inout values: Vec[T, A], items: mem.Slice[T]) {
     for item in copy(items) {
         match &values.push(copy(*item)) {
             Ok(_) => {},
