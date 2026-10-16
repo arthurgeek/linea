@@ -71,7 +71,18 @@ fn renderOne(
         if (i > 0) try w.writeByte(',');
         try std.json.Stringify.value(n, .{}, w);
     }
-    try w.writeAll("]}\n");
+    try w.writeAll("]");
+    // Written only where there are any, so a diagnostic without one reads as
+    // it always has.
+    if (d.remarks.len > 0) {
+        try w.writeAll(",\"remarks\":[");
+        for (d.remarks, 0..) |n, i| {
+            if (i > 0) try w.writeByte(',');
+            try std.json.Stringify.value(n, .{}, w);
+        }
+        try w.writeAll("]");
+    }
+    try w.writeAll("}\n");
 }
 
 pub fn renderAllJson(

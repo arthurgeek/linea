@@ -532,7 +532,12 @@ pub const Diagnostic = struct {
     code: ?Code = null,
     message: []const u8,
     labels: []const Label = &.{},
+    /// Advice for the next edit, each written `= help:`.
     notes: []const []const u8 = &.{},
+    /// Facts about the problem that no label can point at, such as where in a
+    /// file the compiler does not show the problem lies, each written
+    /// `= note:` before the advice.
+    remarks: []const []const u8 = &.{},
 
     pub fn primaryLabel(self: *const Diagnostic) ?Label {
         for (self.labels) |l| {
