@@ -152,6 +152,16 @@ every `extern` signature:
 - `std.ffi`'s views are dependency seeds by declaration, as `mem.Slice` is, and
   a seeded newtype is no longer a dependency-free scalar. Other newtypes over
   scalars are unchanged.
+- **Nothing checks a hand-written declaration against the real C signature.**
+  A wrong width, a missing parameter, `inout` where C takes the object by value,
+  or `read` on a function that changes its object is undefined behaviour in C,
+  and the compiler believes it. Austral is in the same position. Keeping the
+  declarations private to small granted modules limits how far a mistake can
+  spread; it does not detect one. Possible checks, not built: a test that
+  compiles a C translation unit including the library's header and taking the
+  address of each declared function at the prototype the Linea declaration
+  implies, so the C compiler compares them; or a tool that reads the header and
+  reports each declaration that disagrees.
 - A library root cannot yet name C to link, because nothing carries its link
   line to the program that links it. The `sqlite` library the guest book will
   depend on waits for library dependencies.
@@ -165,12 +175,44 @@ every `extern` signature:
 
 ## Alternatives considered
 
-**Header import, as Zig's `@cImport`.** It needs a C frontend and a model of the
-preprocessor in the compiler. It imports every declaration a header holds, so
-the believed surface becomes the header rather than what a reviewer read.
-Headers do not say who owns what: `sqlite3_column_text` and `sqlite3_errmsg`
-both answer `const char *` with different lifetimes, and only a hand-written
-`borrows` states the difference.
+**Header import, as Zig's `@cImport` or cgo's preamble.** Both translate a C
+header into declarations as the program compiles. That needs a C frontend and
+a model of the preprocessor in the compiler. It imports every declaration a
+header holds, so the believed surface becomes the header rather than what a
+reviewer read. Headers do not say who owns what: `sqlite3_column_text` and
+`sqlite3_errmsg` both answer `const char *` with different lifetimes, and only
+a hand-written `borrows` states the difference. Austral, too, declares foreign
+functions by hand, and the signatures must match C
+([Austral spec](https://austral-lang.org/spec/spec.html)).
+
+**Rust's per-item `safe` on a foreign declaration.** From the 2024 edition an
+external block is written `unsafe extern`, its functions are unsafe to call,
+and the declarer may mark an item `safe`, which then needs no unsafe call site
+([Rust reference, external blocks](https://doc.rust-lang.org/reference/items/external-blocks.html)).
+That lets the declaration itself vouch for its callers, with no wrapper. It
+lost because a Linea wrapper is where C's types end: `std.ffi`'s views, raw
+addresses and C's integer conventions stay inside the granted module, and the
+rest of the program sees ordinary Linea types whose rules the compiler checks.
+A `safe` C declaration callable from anywhere would put those types in every
+module and spread the trusted surface to its callers. A private `extern`
+behind `pub fn` wrappers matches Austral's "linear interface, non-linear
+interior" and Safe Haskell's Trustworthy modules, whose author vouches for the
+exported API
+([GHC user guide, Safe Haskell](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/safe_haskell.html)).
+
+**Go's allowlist of linker flags.** Go concatenates every package's `#cgo
+LDFLAGS` into the link and checks flags written in source against an allowlist
+(`-D`, `-U`, `-I`, `-l` by default, widened through `CGO_LDFLAGS_ALLOW`),
+because `-fplugin` in a fetched package let `go get` run arbitrary code
+(CVE-2018-6574); flags the user sets in `CGO_LDFLAGS` are trusted
+([cgo](https://pkg.go.dev/cmd/cgo), [Go wiki, InvalidFlag](https://go.dev/wiki/InvalidFlag),
+[golang/go#42565](https://github.com/golang/go/issues/42565)). `link` takes
+library names only and refuses every flag. It lost to that because an
+allowlist must be widened whenever a new safe flag is wanted and is unsafe
+whenever a new compiler option turns out to be dangerous, while a name cannot
+become a flag. Search paths and unusual options come from the builder's
+environment, which Nix supplies, as Go trusts `CGO_LDFLAGS`. The cost is that
+a library needing an unusual linker option cannot state it.
 
 **A bindgen tool** that writes `.lin` declarations from a header once. It has
 the same ownership gap and adds a maintained tool whose output a person must
