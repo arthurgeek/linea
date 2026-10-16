@@ -1806,6 +1806,13 @@ export's thunk: both take the declared types' C widths, widen them, call the
 body and narrow its answer. A crossing value is rendered from its storage
 representation, and a callback crosses as `!llvm.ptr`.
 
+An `extern` answering `ffi.Errno[R]` is lowered with a signature answering `R`,
+interned by discovery through `RawAccesses.errnoSignature` before the pool
+closes. Each call to it lowers to that call, then a call to the runtime's
+`linea_errno`, which discovery reaches with it, and then the `Errno` built from
+the two values. Lowering emits the two calls next to each other, so no
+instruction between them can change `errno`.
+
 An `extern` declaration and an export thunk mark every 8- or 16-bit integer
 parameter and result `llvm.signext` or `llvm.zeroext`, by the declared type's
 signedness. Both supported C ABIs leave the bits above a narrow value to its

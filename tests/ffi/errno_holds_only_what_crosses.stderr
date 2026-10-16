@@ -1,0 +1,10 @@
+error[T-Extern]: `Str` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
+ --> tests/ffi/errno_holds_only_what_crosses/names/names.lin:4:11
+  |
+4 | extern fn getlogin() -> ffi.Errno[Str]
+  |           ^^^^^^^^ pass what it is made of, as integers or `Float64`
+error[T-Extern]: `ffi.Errno[Int32]` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
+ --> tests/ffi/errno_holds_only_what_crosses/names/names.lin:8:17
+  |
+8 | extern fn reuse(earlier: ffi.Errno[Int32]) -> Int32
+  |                 ^^^^^^^ pass what it is made of, as integers or `Float64`

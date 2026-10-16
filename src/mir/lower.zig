@@ -1089,6 +1089,11 @@ fn lowerFunction(
     var b = Mir.Builder.init(gpa);
     errdefer b.deinit();
     b.signature = try instance.through(&mono.pool, source.signature);
+    // An `extern` answering `ffi.Errno[R]` returns `R` from C. Each call to it
+    // builds the `Errno` from that and the `errno` read after it.
+    if (instance.body == .declaration and ast.declIsExtern(d)) {
+        if (try typing.raw_accesses.errnoSignature(gpa, &mono.pool, b.signature)) |answered| b.signature = answered;
+    }
 
     const entry_block = try b.addBlock();
 
@@ -5291,7 +5296,25 @@ const Lowerer = struct {
             return self.loadLocal(local, element, span);
         }
         const callee = self.mono.idFor(d, settled, held, impl_args);
+        if (self.ast.declIsExtern(d)) {
+            if (self.library.raw.errnoValue(&self.mono.pool, ty)) |value| return self.errnoCall(id, ty, value, span, callee, args.items);
+        }
         return self.sourceCall(id, ty, span, callee, args.items);
+    }
+
+    /// A call to an `extern` answering `ffi.Errno[R]`: C's `R`, then the
+    /// runtime's read of `errno`, emitted next so no code between the two can
+    /// change it, and the `Errno` built from both.
+    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, value_ty: TypeId, span: Span, callee: FunctionId, args: []const InstId) !InstId {
+        const value = try self.sourceCall(written, value_ty, span, callee, args);
+        const read = self.mono.idFor(self.library.raw.errno_read, &.{}, .poison, &.{});
+        const code = try self.directCall(.i32, span, read, &.{});
+        const base = try self.baseFor(ty, span, null);
+        const value_field = self.types().lookupField(ty, "value") orelse return self.poison(span);
+        const code_field = self.types().lookupField(ty, "code") orelse return self.poison(span);
+        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, span), value_field.ty, value, span);
+        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, span), code_field.ty, code, span);
+        return base;
     }
 
     fn fieldValue(self: *Lowerer, base: InstId, ty: TypeId, name: []const u8, span: Span) !InstId {

@@ -801,6 +801,94 @@ error[M-Foreign]: only a module its root's manifest grants may import `std.ffi`
   |        ^^^^^^^ call a module that is granted, or list this one under "extern" in linea.json
 ```
 
+## When C fails: `ffi.Errno`
+
+Many C functions answer a sentinel such as -1 when they fail and leave the
+reason in `errno`, a per-thread integer the C library sets. Reading it later is
+a trap: freeing memory, writing output or any other call in between may change
+it, and a call that succeeds may leave it holding anything at all. So an
+`extern` asks for it in its result instead. Declared to answer
+`ffi.Errno[Int32]`, POSIX's `unlink` still returns C's `int`, and the compiler
+reads `errno` immediately after the call returns, before anything else runs.
+
+What an `Errno` holds is reached only by saying what failure looks like.
+`failed_at(-1)` answers `.Err(code)` when C returned -1 and `.Ok(value)`
+otherwise; `failed_when(failed)` takes the test as a `Bool`, for a function
+whose failure is not one value; `value()` reads what C returned. The code is
+reached only after the wrapper has said the call failed. `io.IoError.from_os` turns the
+code into a portable category such as `NotFound`, the same one `std.fs`
+reports:
+
+`cleanup/linea.json`:
+
+```json
+{ "extern": ["posix"] }
+```
+
+`cleanup/posix/posix.lin`:
+
+```linea
+import std.ffi
+import std.io
+
+// `unlink` answers -1 and sets `errno` when it fails. Answering
+// `ffi.Errno[Int32]` keeps that `errno` beside the result.
+extern fn unlink(path: ffi.CText) -> ffi.Errno[Int32]
+
+// Remove the file at `path`, reporting why C could not.
+pub fn remove(path: Str) -> Result[Int32, io.IoError] {
+    let named = ffi.CString.open(path) else |_| {
+        // `EINVAL` is 22 on every POSIX system: C cannot be handed text
+        // holding a NUL.
+        return .Err(io.IoError.from_os(.Remove, 22))
+    }
+    let answer = unlink(named.text())
+    // Releasing the copy frees memory, which may change `errno`; `answer`
+    // already holds the value it had when `unlink` returned.
+    named.release()
+    match answer.failed_at(-1) {
+        Ok(value) => .Ok(value),
+        Err(code) => .Err(io.IoError.from_os(.Remove, code)),
+    }
+}
+```
+
+`cleanup/main.lin`:
+
+```linea
+import std.fs
+import std.io
+import posix
+
+fn remove_and_report(path: Str) -> Result[(), io.IoError] {
+    match posix.remove(path) {
+        Ok(_) => io.println("removed {path}"),
+        Err(failure) => io.println("could not remove {path}: {failure.category}"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let draft = fs.Path.from_str("draft.txt").unwrap()
+    let _written = fs.write_file(draft, "first draft".as_bytes(), .Replace) else |_| {
+        return .Ok(1)
+    }
+    remove_and_report("draft.txt")?
+    remove_and_report("draft.txt")?
+    .Ok(0)
+}
+```
+
+```
+removed draft.txt
+could not remove draft.txt: NotFound
+```
+
+The second call finds nothing to remove, and the `ENOENT` that `unlink` left
+in `errno` arrives as the category `NotFound`. In Rust the same wrapper reads
+`std::io::Error::last_os_error()` right after the call, which works only if
+nothing runs in between; here the declaration reads it before anything else
+can run.
+
 ## Linking a library: SQLite
 
 A library the system or Nix provides is named under `"link"`: `"sqlite3"`

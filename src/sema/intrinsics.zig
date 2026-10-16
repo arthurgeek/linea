@@ -88,6 +88,10 @@ pub const RawAccesses = struct {
     /// C address whose dependencies originate at the value, as a
     /// `mem.Slice`'s do, so a contract can tie one to what it views.
     foreign_views: [3]DeclId = .{ .none, .none, .none },
+    /// `ffi.Errno`, which an `extern` answers to have `errno` read after the
+    /// call, and the runtime's `linea_errno` that reads it.
+    errno: DeclId = .none,
+    errno_read: DeclId = .none,
 
     /// Identify private storage declarations before checking their generic signatures.
     pub fn init(program: *const ExpandedProgram, ast: *const Ast) RawAccesses {
@@ -117,6 +121,7 @@ pub const RawAccesses = struct {
                 program.libraryDeclIn("ffi", "CText") orelse .none,
                 program.libraryDeclIn("ffi", "CTextList") orelse .none,
             },
+            .errno = program.libraryDeclIn("ffi", "Errno") orelse .none,
         };
     }
 
@@ -129,6 +134,7 @@ pub const RawAccesses = struct {
         checked.environment_count = libraryExternDecl(program, ast, typing, "linea_env_count");
         checked.environment_at = libraryExternDecl(program, ast, typing, "linea_env_at");
         checked.environment_len = libraryExternDecl(program, ast, typing, "linea_env_len");
+        checked.errno_read = libraryExternDecl(program, ast, typing, "linea_errno");
         checked.store = libraryExternDecl(program, ast, typing, "linea_raw_store");
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
         checked.store8 = libraryExternDecl(program, ast, typing, "linea_raw_store8");
@@ -138,6 +144,30 @@ pub const RawAccesses = struct {
 
     /// Whether `d` opens a closure: its first type parameter is the callback,
     /// which must be callable as the closure's `S`.
+    /// The `R` of `ffi.Errno[R]` where `t` is one, asked of a pool being
+    /// built or of a finished typing. An `extern` answering `t` returns `R`
+    /// from C.
+    pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
+        if (self.errno == .none) return null;
+        const instance = pool.instanceOf(t) orelse return null;
+        if (instance.decl != self.errno) return null;
+        return pool.appliedTo(t)[0];
+    }
+
+    /// The signature C is called with for an `extern` of `signature`: the
+    /// same parameters answering `R` where it answers `ffi.Errno[R]`, or null
+    /// where it answers anything else. Discovery interns it before the pool
+    /// closes and lowering finds it there.
+    pub fn errnoSignature(self: RawAccesses, gpa: std.mem.Allocator, pool: *Typing.Builder, signature: TypeId) std.mem.Allocator.Error!?TypeId {
+        const declared = pool.get(signature).callable;
+        const value = self.errnoValue(pool, declared.result) orelse return null;
+        const params = try gpa.dupe(types_mod.CallableParam, pool.callableParams(declared));
+        defer gpa.free(params);
+        const contracts = try gpa.dupe(types_mod.CallableContract, declared.contracts);
+        defer gpa.free(contracts);
+        return try pool.internCallable(params, value, contracts, declared.invocation);
+    }
+
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }

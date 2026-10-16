@@ -51,6 +51,10 @@ uint8_t linea_io_category(int code) {
     }
 }
 
+int linea_errno(void) {
+    return errno;
+}
+
 /* Defined with the allocator. Under the checking allocator it aborts where
  * the bytes were freed or reach outside their allocation; otherwise it
  * returns. */

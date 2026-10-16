@@ -45,6 +45,10 @@ extern fn linea_env_at(i: UInt64) -> UInt64
 
 extern fn linea_env_len(i: UInt64) -> UInt64
 
+// `errno` as the call just made left it. Only the compiler calls this,
+// immediately after a call to an `extern` answering `ffi.Errno`.
+extern fn linea_errno() -> Int32
+
 // Return how many entries the environment the process was started with holds.
 internal fn environment_count() -> UInt64 {
     linea_env_count()

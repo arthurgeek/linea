@@ -18342,13 +18342,19 @@ const Checker = struct {
         }
 
         const written_answer = self.ast.declReturnRef(d);
-        const answers = try self.declaredResultType(d);
+        // An `extern` answering `ffi.Errno[R]` returns `R` from C; the
+        // `errno` beside it is read by the runtime after the call.
+        const declared_answer = try self.declaredResultType(d);
+        const answers = if (category == .t_extern)
+            self.raw_accesses.errnoValue(&self.builder, declared_answer) orelse declared_answer
+        else
+            declared_answer;
         // An answer that can point somewhere, such as a `CText`, gets its
         // dependencies from the contract alone: C's body is not read, and no
         // parameter of a handle type carries one by default. So the
         // declaration states where it points.
         if (category == .t_extern and answers != .poison and self.ast.declContracts(d).len == 0 and
-            try self.builder.mayCarryDependencies(answers))
+            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers))
         {
             try self.sink.addErrorFmt(
                 .t_extern,

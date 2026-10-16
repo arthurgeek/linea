@@ -4194,6 +4194,16 @@ only as an `extern`'s callback, in the form [T-ExternCallback] checks; nothing
 else hands C a code pointer, because the convention a Linea function is called
 in is not part of the foreign ABI contract.
 
+An `extern` may instead answer `std.ffi`'s `Errno[R]`, where `R` crosses as a
+result does. C's function returns `R`, and the call evaluates to an `Errno`
+holding that value and the `errno` the call left set, read with no other
+evaluation between the call's return and the read. `Errno` is an opaque
+copyable type: its value is `value()`, and its code is reachable only through
+`failed_at(failure)`, which is `.Err(code)` when the value equals `failure` and
+`.Ok(value)` otherwise, or `failed_when(failed)`, which is `.Err(code)` when
+`failed` is true. `Errno` is not itself a type that crosses, so it is never a
+parameter and never an exported function's result.
+
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized
 primitive must retain its compiler-defined private signature; violations are

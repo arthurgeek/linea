@@ -134,6 +134,7 @@ The library tests itself.
   ok    ffi.bytes_are_copied_from_an_address
   ok    ffi.bytes_past_a_nul_are_copied_by_length
   ok    ffi.entries_are_read_where_the_list_holds_them
+  ok    ffi.errno_is_answered_only_when_the_call_failed
   ok    ffi.lent_text_reads_back_as_the_original
   ok    ffi.no_bytes_are_copied_from_a_null_pointer_of_no_length
   ok    ffi.null_text_is_refused_rather_than_read
@@ -142,7 +143,9 @@ The library tests itself.
   ok    ffi.text_is_copied_into_the_given_allocator
   ok    ffi.text_is_copied_with_a_terminator
   ok    ffi.text_is_lent_at_its_first_byte
+  ok    ffi.the_failure_value_selects_errno
   ok    ffi.the_length_stops_at_the_terminator
+  ok    ffi.the_value_is_what_c_returned
   ok    fmt.a_default_spec_adds_no_padding
   ok    fmt.a_fill_of_several_scalars_stays_within_the_width
   ok    fmt.a_nullary_parse_error_renders_its_reason

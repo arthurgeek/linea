@@ -117,6 +117,21 @@ the call is refused by [O-Borrow] wherever it is used after. C takes the
 handle by value either way, so the marker is the only thing that can tell the
 compiler a call leaves the object as it was.
 
+**`errno` is captured with the call that set it, and read only once the call
+has failed.** An `extern` declared to answer `ffi.Errno[R]` returns `R` from C,
+and `R` is held to what crosses. Lowering emits the call and then a call to the
+runtime's `linea_errno()`, with nothing between them, and builds the
+`Errno` from both. `errno` is a thread-local whose accessor is
+`__errno_location()` on Linux and `__error()` on Darwin; the runtime is C, so it
+reads the `errno` macro and the compiler never names either. `Errno` is opaque
+and copyable, and its code is reachable only through `failed_at(failure)`,
+which answers `.Err(code)` when C returned the failure value it is given, and
+`failed_when(failed)` for a function whose failure is not one value; `value()`
+reads what C returned. A successful call may leave `errno` holding anything,
+so there is no way to read it without first saying the call failed. A
+wrapper turns the code into its own error, for example with
+`io.IoError.from_os(.Remove, code)`, whose category is portable.
+
 **A callback is a plain `fn` with an optional context** ([T-ExternCallback]).
 Its parameters and result cross, apart from a leading `inout` parameter whose
 type the `extern` also takes as its one `inout` parameter of that type. C
@@ -169,7 +184,6 @@ every `extern` signature:
   - `extern struct` would pin [L-Layout] for a struct crossing by pointer. By
     value, the C ABI's per-target classification of aggregates would have to be
     implemented first.
-  - `ffi.Errno[R]` would read `errno` immediately after a call.
   - A callback context of a type parameter would need one instance per symbol
     across instantiations.
 
@@ -184,6 +198,18 @@ reviewer read. Headers do not say who owns what: `sqlite3_column_text` and
 a hand-written `borrows` states the difference. Austral, too, declares foreign
 functions by hand, and the signatures must match C
 ([Austral spec](https://austral-lang.org/spec/spec.html)).
+
+**Reading `errno` with a later call, as Rust's
+`std::io::Error::last_os_error()` does.** A separate `ffi.errno()` in Linea
+would run after whatever code lowering places between the two calls: a
+release that calls `free`, an allocation, a write. Any of these may change
+`errno`, and POSIX lets even a successful call change it. Capturing it in the
+call's own result leaves no gap, and the opaque type leaves no way to read it
+before the caller has said the call failed. cgo does the same for a call
+written `n, err := C.f()`, whose `err` is the `errno` set by that call
+([cgo](https://pkg.go.dev/cmd/cgo)). Capturing `errno` after every
+`extern` would add a call to each one for the minority of C functions that
+report through it, so a declaration asks for it in its result.
 
 **Rust's per-item `safe` on a foreign declaration.** From the 2024 edition an
 external block is written `unsafe extern`, its functions are unsafe to call,

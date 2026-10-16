@@ -34,6 +34,7 @@ pub const table = [_]Call{
     .{ .module = "mem", .name = "linea_env_count" },
     .{ .module = "mem", .name = "linea_env_at" },
     .{ .module = "mem", .name = "linea_env_len" },
+    .{ .module = "mem", .name = "linea_errno" },
     .{ .module = "core", .name = "report" },
     .{ .module = "core", .name = "ran" },
     .{ .module = "testing", .name = "selected" },

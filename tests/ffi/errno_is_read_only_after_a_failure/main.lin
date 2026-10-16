@@ -1,0 +1,17 @@
+import std.io
+import files
+
+fn main() -> Result[UInt8, io.IoError] {
+    match files.remove("no-such-file-anywhere.txt") {
+        Ok(_) => return .Ok(1),
+        Err(failure) => io.println("removing a missing file: {failure.category}")?,
+    }
+    match files.close_descriptor(-1) {
+        Ok(_) => return .Ok(2),
+        Err(failure) => io.println("closing no descriptor: {failure.category}")?,
+    }
+    if files.exists(".") {
+        io.println("the current directory exists")?
+    }
+    .Ok(0)
+}

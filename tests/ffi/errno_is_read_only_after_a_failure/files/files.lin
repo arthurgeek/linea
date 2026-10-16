@@ -1,0 +1,44 @@
+import std.ffi
+import std.io
+
+// Each answers -1 and sets `errno` on failure. `ffi.Errno` keeps the `errno`
+// C left set as the call returned, before anything else can overwrite it.
+extern fn unlink(path: ffi.CText) -> ffi.Errno[Int32]
+
+extern fn close(descriptor: Int32) -> ffi.Errno[Int32]
+
+extern fn access(path: ffi.CText, mode: Int32) -> ffi.Errno[Int32]
+
+// Remove the file at `path`.
+pub fn remove(path: Str) -> Result[Int32, io.IoError] {
+    let named = ffi.CString.open(path) else |_| {
+        // 22 is `EINVAL`, the code for an argument C cannot use, on every
+        // POSIX system.
+        return .Err(io.IoError.from_os(.Remove, 22))
+    }
+    let answer = unlink(named.text())
+    named.release()
+    match answer.failed_at(-1) {
+        Ok(value) => .Ok(value),
+        Err(code) => .Err(io.IoError.from_os(.Remove, code)),
+    }
+}
+
+// Close a descriptor this program never opened.
+pub fn close_descriptor(descriptor: Int32) -> Result[Int32, io.IoError] {
+    match close(descriptor).failed_at(-1) {
+        Ok(value) => .Ok(value),
+        Err(code) => .Err(io.IoError.from_os(.Close, code)),
+    }
+}
+
+// Whether `path` names something that exists. Success leaves `errno` alone,
+// so only `value()` is read.
+pub fn exists(path: Str) -> Bool {
+    let named = ffi.CString.open(path) else |_| {
+        return false
+    }
+    let answer = access(named.text(), 0)
+    named.release()
+    answer.value() == 0
+}

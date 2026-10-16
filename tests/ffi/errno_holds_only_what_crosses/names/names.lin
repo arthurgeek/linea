@@ -1,0 +1,19 @@
+import std.ffi
+
+// C returns a pointer or an integer, never Linea text.
+extern fn getlogin() -> ffi.Errno[Str]
+
+// C cannot be handed what a previous call answered, because only Linea knows
+// how an `Errno` is laid out.
+extern fn reuse(earlier: ffi.Errno[Int32]) -> Int32
+
+pub fn check() -> UInt8 {
+    let _name = getlogin()
+    UInt8(reuse(reuse_seed()))
+}
+
+fn reuse_seed() -> ffi.Errno[Int32] {
+    seed()
+}
+
+extern fn seed() -> ffi.Errno[Int32]
