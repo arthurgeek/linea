@@ -47,6 +47,10 @@
             pkgs.nodejs
             # Transcript cases drive the HTTP examples with `curl`.
             pkgs.curl
+            # The C-interop cases link SQLite with `"link": ["sqlite3"]` and
+            # include its header; the shell's compiler wrapper puts both on
+            # the search paths.
+            pkgs.sqlite
           ];
 
           shellHook = ''
