@@ -5761,7 +5761,14 @@ const Checker = struct {
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
                 switch (constraint.subject) {
-                    .written => |written| if (ownedBound(self.ast, self.res, requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound, &promised),
+                    // Each `Owned` the clause writes is a promise, so one
+                    // written twice in a list is refused as one written in
+                    // two clauses is.
+                    .written => |written| for (requirements) |requirement| {
+                        if (requirement.kind != .named) continue;
+                        if (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) != .owned) continue;
+                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised);
+                    },
                     .parameter => {},
                 }
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };

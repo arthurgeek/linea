@@ -3,3 +3,8 @@ error[T-Bound]: `I.Item` is bounded `Owned` twice
   |
 1 | fn first[I: Iterator](inout items: I) -> Option[I.Item] where I.Item: Owned, I.Item: Owned {
   |                                                                                      ^^^^^ drop one of the two bounds
+error[T-Bound]: `I.Item` is bounded `Owned` twice
+ --> tests/generics/owned/an_owned_projection_is_written_once.lin:5:80
+  |
+5 | fn second[I: Iterator](inout items: I) -> Option[I.Item] where I.Item: Owned + Owned {
+  |                                                                                ^^^^^ drop one of the two bounds
