@@ -1,0 +1,18 @@
+import std.iter
+
+// `I.Item` has no bound list of its own; the function promises `Owned` for it
+// in its `where` clause.
+fn fill[I: Iterator](inout values: Vec[I.Item], inout items: I) -> UInt64 where I.Item: Discardable {
+    match iter.extend_owned(&values, &items) {
+        Ok(_) => values.length(),
+        Err(_) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    var numbers: Vec[UInt8] = Vec.new()
+    var source = UInt8(1)..4
+    let filled = fill(&numbers, &source)
+    numbers.release()
+    UInt8(filled)
+}

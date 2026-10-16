@@ -539,6 +539,7 @@ fn typecheckInternal(
     defer gpa.free(c.declared_results);
     defer c.template_signatures.deinit(gpa);
     defer c.declined_contracts.deinit(gpa);
+    defer c.refused_owned_promises.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
     defer c.defaulted_contracts.deinit(gpa);
     defer {
@@ -5172,6 +5173,9 @@ const Checker = struct {
     /// Declarations whose result contract was left undecided: inference found
     /// several sources, or the trait signature a member adopts from did.
     declined_contracts: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Declarations whose `where` clause promised `Owned` for a subject that
+    /// is not theirs to bound. Their contract is not inferred.
+    refused_owned_promises: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Each implementation member without a clause, with the trait signature
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
@@ -7773,6 +7777,10 @@ const Checker = struct {
             defer types_mod.freeContracts(self.gpa, adopted);
             return self.builder.internCallable(callable_params, result, adopted, .read);
         };
+        if (written.len == 0 and self.refused_owned_promises.contains(d)) {
+            try self.declined_contracts.put(self.gpa, d, {});
+            return self.builder.internCallable(callable_params, result, &.{}, .read);
+        }
         var outcome: ContractOutcome = .{};
         const contracts = try self.normalizeContracts(callable_params, params, result, written, self.ast.declName(d), null, &outcome);
         defer types_mod.freeContracts(self.gpa, contracts);
@@ -12413,9 +12421,14 @@ const Checker = struct {
     }
 
     /// Inside a generic body a parameter meets what its bounds promise and
-    /// nothing else, so the edit adds `required` to them.
+    /// nothing else, so the edit adds `required` to them. An associated type
+    /// read through a parameter, `I.Item`, has no bound list of its own, and
+    /// its declaration promises it in a `where` clause.
     fn boundsEdit(self: *Checker, required: []const u8, parameter: TypeId) std.mem.Allocator.Error!Edit {
-        return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, try self.typeName(parameter) }) };
+        const name = try self.typeName(parameter);
+        if (self.builder.standinOf(parameter) != null)
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}`", .{ name, required }) };
+        return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, name }) };
     }
 
     /// The first capture `held`, a closure, owns whose type does not
@@ -26959,6 +26972,10 @@ const Checker = struct {
     /// would be relied on where nothing checked it.
     fn promiseWrittenOwned(self: *Checker, d: node.DeclId, written: node.TypeRef, subject: TypeId, bound: TokenId) std.mem.Allocator.Error!void {
         if (self.ownsSubject(d, subject)) return self.builder.promiseOwned(subject);
+        // The signature's contract would be inferred as if the promise held
+        // for some instantiations and not others; the refusal is the mistake,
+        // so the contract is left undecided and nothing is reported against it.
+        try self.refused_owned_promises.put(self.gpa, d, {});
         try self.sink.addErrorFmt(
             .t_bound,
             self.ast.fileOf(bound),
