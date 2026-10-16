@@ -9827,6 +9827,33 @@ const Checker = struct {
                 site.at,
             );
         }
+        try self.reportBrokenTraitBounds();
+    }
+
+    /// Refuses every trait a bound names at arguments its own parameters'
+    /// bounds do not admit: `C: Conv[U]` where `trait Conv[T: Owned]` needs
+    /// `U` to be `Owned`, as a written `Pool[U]` does. Checked inside the
+    /// declaration whose bound it is, so its parameters discharge what they
+    /// promise.
+    ///
+    /// **Bound:** each written bound is read once, and its arguments are
+    /// checked through the one routine a written type's are.
+    fn reportBrokenTraitBounds(self: *Checker) std.mem.Allocator.Error!void {
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            const range = self.constraints.rangeOfDeclaration(d);
+            for (range.start..range.end) |at| {
+                for (self.constraints.requirementsOf(self.constraints.records[at])) |bound| {
+                    if (bound.kind != .named or bound.named.args.len() == 0) continue;
+                    const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
+                    self.generic = d;
+                    self.current = self.program.moduleOf(d);
+                    const args = try self.internedBoundArgs(.{ .module = self.current, .owner = d }, bound);
+                    defer if (args.len > 0) self.gpa.free(args);
+                    try self.checkArgumentBounds(trait, args, null, bound.named.name);
+                }
+            }
+        }
     }
 
     /// Refuses a type argument its parameter's bounds do not admit.

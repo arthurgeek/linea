@@ -3025,11 +3025,14 @@ carries no dependency (§5.3).
 The `Owned` bound admits a type whose values can carry no dependency (§5.3). A
 type argument for an Owned parameter must carry nothing, which is decided by the
 type's representation, private fields included; a type parameter passed on
-meets it only when it is itself bounded Owned. The refusal names a path from the
-argument to what it carries, such as a field holding a `Str` or a `borrow`,
-and its help offers only edits the program can make: adding `Owned` to the
-bounds of a parameter the path ends at, and dropping the bound where the program
-wrote it.
+meets it only when it is itself bounded Owned, and a trait named in a bound at
+an argument meets its parameter's `Owned` bound the same way. The refusal names
+a path from the argument to what it carries, such as a field holding a `Str` or
+a `borrow`, through parts the program can select: it stops at a type whose
+representation is sealed and at a newtype's base. Its help offers only edits
+the program can make: adding `Owned` to the bounds of a parameter the path ends
+at, or `where I.Item: Owned` for an associated type, and dropping the bound where
+the program wrote it. `Owned` written twice on one subject is [T-Bound].
 `Owned` is written on a type parameter, inline or in its declaration's own
 `where` clause, or in that clause on an associated type read through one of the
 declaration's own parameters: `where I.Item: Owned` under `[I: Iterator]`, or
