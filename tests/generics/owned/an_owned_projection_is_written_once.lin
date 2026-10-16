@@ -1,0 +1,8 @@
+fn first[I: Iterator](inout items: I) -> Option[I.Item] where I.Item: Owned, I.Item: Owned {
+    &items.next()
+}
+
+fn main() -> UInt8 {
+    var source = UInt8(4)..7
+    first(&source).unwrap()
+}

@@ -5740,9 +5740,12 @@ const Checker = struct {
             }
         }
 
+        var promised: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer promised.deinit(self.gpa);
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             starts[i] = @intCast(contextual.items.len);
+            promised.clearRetainingCapacity();
             const enclosing = self.res.implEnclosing(d);
             parents[i] = if (enclosing != .none and enclosing != d)
                 enclosing
@@ -5758,7 +5761,7 @@ const Checker = struct {
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
                 switch (constraint.subject) {
-                    .written => |written| if (ownedBound(self.ast, self.res, requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound),
+                    .written => |written| if (ownedBound(self.ast, self.res, requirements)) |bound| try self.promiseWrittenOwned(d, written, resolved, bound, &promised),
                     .parameter => {},
                 }
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };
@@ -26970,8 +26973,26 @@ const Checker = struct {
     /// declaration can name. An enclosing implementation's parameter is
     /// shared with that implementation's other members, and a promise there
     /// would be relied on where nothing checked it.
-    fn promiseWrittenOwned(self: *Checker, d: node.DeclId, written: node.TypeRef, subject: TypeId, bound: TokenId) std.mem.Allocator.Error!void {
-        if (self.ownsSubject(d, subject)) return self.builder.promiseOwned(subject);
+    fn promiseWrittenOwned(
+        self: *Checker,
+        d: node.DeclId,
+        written: node.TypeRef,
+        subject: TypeId,
+        bound: TokenId,
+        /// The subjects `d`'s clauses have promised so far.
+        promised: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!void {
+        if (self.ownsSubject(d, subject)) {
+            if ((try promised.getOrPut(self.gpa, subject)).found_existing) return self.sink.addErrorFmt(
+                .t_bound,
+                self.ast.fileOf(bound),
+                self.ast.tokenSpan(bound),
+                "drop one of the two bounds",
+                "`{s}` is bounded `Owned` twice",
+                .{self.ast.writtenText(written)},
+            );
+            return self.builder.promiseOwned(subject);
+        }
         // The signature's contract would be inferred as if the promise held
         // for some instantiations and not others; the refusal is the mistake,
         // so the contract is left undecided and nothing is reported against it.
