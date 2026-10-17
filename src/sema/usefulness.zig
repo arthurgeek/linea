@@ -184,19 +184,49 @@ pub fn Coverage(comptime Context: type) type {
             return .{ .reached = pass.reached[0..rows.len], .missing = pass.missing.items };
         }
 
-        fn walk(self: *Self, pass: *Pass, rows: []const Ref) Error!void {
-            if (rows.len == 0) return;
-            // Every column consumed: the first row left matches what the path
-            // describes, and every row after it is behind it.
-            if (rows[0].cells.len == 0) {
-                const first = rows[0].id;
-                pass.reached[first] = true;
-                if (pass.query == first and pass.missing.items.len < max_witnesses) try self.record(pass);
+        /// One branch of a column: the step that names it and the rows it
+        /// holds.
+        const Branch = struct { step: Step, rows: []const Ref };
+
+        /// Walks the matrix to every leaf. A column that splits into one
+        /// branch is followed in place rather than by a call, so a wide row
+        /// costs no depth of recursion; only a column that splits recurses.
+        fn walk(self: *Self, pass: *Pass, start: []const Ref) Error!void {
+            const depth = pass.path.items.len;
+            defer pass.path.shrinkRetainingCapacity(depth);
+            var rows = start;
+            while (true) {
+                if (rows.len == 0) return;
+                // Every column consumed: the first row left matches what the
+                // path describes, and every row after it is behind it.
+                if (rows[0].cells.len == 0) {
+                    const first = rows[0].id;
+                    pass.reached[first] = true;
+                    if (pass.query == first and pass.missing.items.len < max_witnesses) try self.record(pass);
+                    return;
+                }
+                const branches = try self.split_column(rows);
+                if (branches.len == 1) {
+                    try pass.path.append(self.arena, branches[0].step);
+                    rows = branches[0].rows;
+                    continue;
+                }
+                for (branches) |b| {
+                    try pass.path.append(self.arena, b.step);
+                    try self.walk(pass, b.rows);
+                    _ = pass.path.pop();
+                }
                 return;
             }
+        }
+
+        /// The branches the head column splits into, in order: each
+        /// constructor a row names, then the values none names.
+        fn split_column(self: *Self, rows: []const Ref) Error![]const Branch {
             const ty = rows[0].cells[0].ty;
+            var out: std.ArrayList(Branch) = .empty;
             switch (self.context.kind(ty)) {
-                .product => try self.branch(pass, rows, ty, .product),
+                .product => try out.append(self.arena, try self.branch(rows, ty, .product)),
                 .variants => |count| {
                     var named = try std.DynamicBitSetUnmanaged.initEmpty(self.arena, count);
                     for (rows) |r| switch (r.cells[0].pattern.*) {
@@ -205,9 +235,9 @@ pub fn Coverage(comptime Context: type) type {
                     };
                     var k: u32 = 0;
                     while (k < count) : (k += 1) {
-                        if (named.isSet(k)) try self.branch(pass, rows, ty, .{ .variant = k });
+                        if (named.isSet(k)) try out.append(self.arena, try self.branch(rows, ty, .{ .variant = k }));
                     }
-                    if (named.count() == count) return;
+                    if (named.count() == count) return out.items;
                     // The variants no row names: any of them, carrying
                     // anything; with none named, any value at all.
                     var absent: std.ArrayList(Witness) = .empty;
@@ -219,46 +249,42 @@ pub fn Coverage(comptime Context: type) type {
                             if (!named.isSet(k)) try absent.append(self.arena, try self.applied(ty, .{ .variant = k }, null));
                         }
                     }
-                    try self.rest(pass, rows, ty, absent.items);
+                    try out.append(self.arena, try self.rest(rows, ty, absent.items));
                 },
-                .integer => |bounds| try self.integers(pass, rows, ty, bounds),
-                .opaque_ => try self.rest(pass, rows, ty, &.{.{ .ty = ty, .shape = .wild }}),
+                .integer => |bounds| try self.integers(&out, rows, ty, bounds),
+                .opaque_ => try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }})),
             }
+            return out.items;
         }
 
         /// The branch for constructor `c`: each row naming it, with its head
         /// replaced by the constructor's parts, and each row with a wildcard
         /// there, in their order.
-        fn branch(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, c: Ctor) Error!void {
+        fn branch(self: *Self, rows: []const Ref, ty: Ty, c: Ctor) Error!Branch {
             const arity = self.context.arity(ty, c);
             var kept: std.ArrayList(Ref) = .empty;
             for (rows) |r| {
                 if (try self.specialise(r, c, arity)) |s| try kept.append(self.arena, s);
             }
-            try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .ctor = c } });
-            defer _ = pass.path.pop();
-            try self.walk(pass, kept.items);
+            return .{ .step = .{ .ty = ty, .choice = .{ .ctor = c } }, .rows = kept.items };
         }
 
         /// The branch for the values no row's head names: the rows with a
-        /// wildcard there, without it.
-        fn rest(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, absent: []const Witness) Error!void {
+        /// wildcard there, their tails shared.
+        fn rest(self: *Self, rows: []const Ref, ty: Ty, absent: []const Witness) Error!Branch {
             var kept: std.ArrayList(Ref) = .empty;
             for (rows) |r| {
                 if (r.cells[0].pattern.* != .wild) continue;
-                const cells = try self.take(r.cells.len - 1);
-                @memcpy(cells, r.cells[1..]);
-                try kept.append(self.arena, .{ .cells = cells, .id = r.id });
+                try self.charge(1);
+                try kept.append(self.arena, .{ .cells = r.cells[1..], .id = r.id });
             }
-            try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .absent = absent } });
-            defer _ = pass.path.pop();
-            try self.walk(pass, kept.items);
+            return .{ .step = .{ .ty = ty, .choice = .{ .absent = absent } }, .rows = kept.items };
         }
 
         /// An integer column, cut at every boundary its rows' literals and
         /// ranges write. Each interval a row names gets a branch; the
         /// intervals none names share one branch of the wildcard rows.
-        fn integers(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, bounds: Interval) Error!void {
+        fn integers(self: *Self, out: *std.ArrayList(Branch), rows: []const Ref, ty: Ty, bounds: Interval) Error!void {
             const atoms = try self.split(rows, bounds);
             // Which rows each interval holds, in row order: a range's rows by
             // binary search over the cut points, a wildcard's in all.
@@ -270,19 +296,16 @@ pub fn Coverage(comptime Context: type) type {
                 const rest_cells = r.cells[1..];
                 switch (r.cells[0].pattern.*) {
                     .integers => |range| {
-                        const first = atomAt(atoms, range.lo);
-                        var a = first;
+                        var a = atomAt(atoms, range.lo);
                         while (a < atoms.len and atoms[a].lo <= range.hi) : (a += 1) {
                             named[a] = true;
-                            const cells = try self.take(rest_cells.len);
-                            @memcpy(cells, rest_cells);
-                            try buckets[a].append(self.arena, .{ .cells = cells, .id = r.id });
+                            try self.charge(1);
+                            try buckets[a].append(self.arena, .{ .cells = rest_cells, .id = r.id });
                         }
                     },
                     else => for (buckets) |*b| {
-                        const cells = try self.take(rest_cells.len);
-                        @memcpy(cells, rest_cells);
-                        try b.append(self.arena, .{ .cells = cells, .id = r.id });
+                        try self.charge(1);
+                        try b.append(self.arena, .{ .cells = rest_cells, .id = r.id });
                     },
                 }
             }
@@ -292,16 +315,14 @@ pub fn Coverage(comptime Context: type) type {
                     if (gaps.items.len < max_witnesses) try gaps.append(self.arena, .{ .ty = ty, .shape = .{ .integers = atom } });
                     continue;
                 }
-                try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .ctor = .{ .integers = atom } } });
-                defer _ = pass.path.pop();
-                try self.walk(pass, buckets[a].items);
+                try out.append(self.arena, .{ .step = .{ .ty = ty, .choice = .{ .ctor = .{ .integers = atom } } }, .rows = buckets[a].items });
             }
             if (gaps.items.len == 0) return;
             // A gap that is the whole range is any value at all.
             if (gaps.items.len == 1 and gaps.items[0].shape.integers.lo == bounds.lo and gaps.items[0].shape.integers.hi == bounds.hi) {
                 gaps.items[0] = .{ .ty = ty, .shape = .wild };
             }
-            try self.rest(pass, rows, ty, gaps.items);
+            try out.append(self.arena, try self.rest(rows, ty, gaps.items));
         }
 
         /// The interval holding `value`. `atoms` is sorted and covers the
@@ -329,6 +350,12 @@ pub fn Coverage(comptime Context: type) type {
                 .product => |args| args,
                 .integers => return null,
             };
+            // A constructor with no parts drops the head, and the row's tail
+            // is shared rather than copied.
+            if (arity == 0) {
+                try self.charge(1);
+                return .{ .cells = r.cells[1..], .id = r.id };
+            }
             const out = try self.take(arity + r.cells.len - 1);
             for (0..arity) |i| {
                 out[i] = .{
@@ -342,9 +369,15 @@ pub fn Coverage(comptime Context: type) type {
 
         /// Room for `n` cells, held against the budget.
         fn take(self: *Self, n: usize) Error![]Cell {
+            try self.charge(n);
+            return self.arena.alloc(Cell, n);
+        }
+
+        /// Holds `n` cells of work against the budget: cells copied, or a
+        /// row's tail shared into a branch.
+        fn charge(self: *Self, n: usize) Error!void {
             self.cells += n;
             if (self.cells > self.limit) return error.TooIntricate;
-            return self.arena.alloc(Cell, n);
         }
 
         /// The intervals `bounds` is cut into by every boundary of the
