@@ -1,0 +1,29 @@
+import std.ffi
+
+@(opaque, linear)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+
+extern fn named_reset(handle: Name)
+
+extern fn named_close(sink handle: Name)
+
+// `for inout` lends each handle in turn as a place that may change, so C may
+// reset the object it names.
+pub fn reset_all_and_measure() -> UInt64 {
+    var held = [named_open(), named_open()]
+    for inout handle in held {
+        named_reset(handle)
+    }
+    var total: UInt64 = 0
+    for read handle in held {
+        total += named_name(handle).length()
+    }
+    for handle in held {
+        named_close(handle)
+    }
+    total
+}
