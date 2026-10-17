@@ -14,6 +14,7 @@ const Resolution = @import("../sema/resolve.zig").Resolution;
 const types = @import("../sema/types.zig");
 const helpTypeName = @import("../sema/typecheck.zig").helpTypeName;
 const importNote = @import("../sema/typecheck.zig").importNote;
+const clauseEdit = @import("../sema/typecheck.zig").clauseEdit;
 const ModuleId = @import("../syntax/program.zig").ModuleId;
 const TokenId = @import("../lexer/token.zig").TokenId;
 const Typing = types.Typing;
@@ -2159,6 +2160,14 @@ const Analysis = struct {
             }
         };
         const fixed = if (sources.items.len > 0) try self.fixedSignatureRefusing(leaving, sources.items, positions.items, clause) else null;
+        // The clause help, where there is one, is also an edit a tool can
+        // write: the whole clause in place of the one the signature wrote.
+        // Only where the clause answers every origin leaving here: a local
+        // owner or a consumed parameter is one no clause can permit.
+        const edit = if (sources.items.len > 0 and fixed == null and local == null and consumed == null)
+            try clauseEdit(arena, self.ast, self.function.decl, clause)
+        else
+            null;
         if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else switch (leaving) {
             .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so", .{ named.items, clause })),
             .retained => |destination| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause })),
@@ -2234,6 +2243,7 @@ const Analysis = struct {
                 break :labels labels.items;
             },
             .notes = try notes.toOwnedSlice(arena),
+            .edit = edit,
         });
     }
 

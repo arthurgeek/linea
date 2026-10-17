@@ -11,6 +11,7 @@ const Span = span_mod.Span;
 const Loc = span_mod.Loc;
 const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const HelpEdit = @import("../diagnostics/diagnostic.zig").Edit;
 const LabelStyle = @import("../diagnostics/diagnostic.zig").LabelStyle;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Interner = @import("../support/interner.zig").Interner;
@@ -3758,6 +3759,28 @@ pub fn writtenTypeName(
     var out: std.Io.Writer.Allocating = .init(arena);
     writeTypeName(&out.writer, ast, program, res, pool, from, t) catch return error.OutOfMemory;
     return out.toOwnedSlice() catch return error.OutOfMemory;
+}
+
+/// The edit writing `clause` as `d`'s `where` clause: in place of the one it
+/// wrote, or after its result where it wrote none. Null where `d` has no body
+/// to find the clause's end by, or where its `where` also holds type
+/// predicates, which the clause named does not carry.
+pub fn clauseEdit(arena: std.mem.Allocator, ast: *const Ast, d: node.DeclId, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
+    if (d == .none) return null;
+    const body = ast.declBody(d);
+    if (body == .none) return null;
+    if (ast.declWherePredicates(d).len != 0) return null;
+    const opening = ast.exprTokens(body).start;
+    if (opening.index() == 0) return null;
+    const before = TokenId.at(opening.index() - 1);
+    const where = ast.declWhereToken(d);
+    if (where != .none) return .{
+        .file = ast.fileOf(where),
+        .span = .{ .start = ast.tokenSpan(where).start, .end = ast.tokenSpan(before).end },
+        .text = clause,
+    };
+    const end = ast.tokenSpan(before).end;
+    return .{ .file = ast.fileOf(before), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}", .{clause}) };
 }
 
 /// A type written into a help, for a reader in module `from` to copy into
@@ -7587,6 +7610,9 @@ const Checker = struct {
         /// The parameter whose carrier type supplied the contract of a
         /// signature that wrote no clause.
         carrier: ?u32 = null,
+        /// The declaration the signature belongs to, where it is one, which
+        /// a report's edit writes the clause into.
+        decl: node.DeclId = .none,
     };
 
     const CarrierParameters = struct {
@@ -7757,13 +7783,20 @@ const Checker = struct {
                     });
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source, and several parameters are carriers", help, null);
                 } else {
+                    const every_clause = try types_mod.sourceClause(self.sink.arena, every.items);
                     const help = try std.fmt.allocPrint(self.sink.arena, "the result may come from {s}; add {s}, or `{s}` where it may come from {s}", .{
                         sources.items,
                         clauses.items,
-                        try types_mod.sourceClause(self.sink.arena, every.items),
+                        every_clause,
                         if (listed == 2) "either" else "any of them",
                     });
+                    const reported = self.sink.items().len;
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source", help, null);
+                    // The clause naming every candidate is the one edit that
+                    // answers whichever the body uses.
+                    if (outcome) |out| if (try clauseEdit(self.sink.arena, self.ast, out.decl, every_clause)) |edit| if (self.sink.items().len > reported) {
+                        self.sink.mutableItems()[reported].edit = edit;
+                    };
                 }
                 // The body has no contract to be checked against, so the
                 // ambiguity is the only error it reports.
@@ -7968,7 +8001,7 @@ const Checker = struct {
             try self.declined_contracts.put(self.gpa, d, {});
             return self.builder.internCallable(callable_params, result, &.{}, .read);
         }
-        var outcome: ContractOutcome = .{};
+        var outcome: ContractOutcome = .{ .decl = d };
         const contracts = try self.normalizeContracts(callable_params, params, result, written, self.ast.declName(d), null, &outcome);
         defer types_mod.freeContracts(self.gpa, contracts);
         if (outcome.declined) try self.declined_contracts.put(self.gpa, d, {});

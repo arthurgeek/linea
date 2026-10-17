@@ -117,6 +117,20 @@ until it is green.
   consecutive from zero, so a failure names a reproducing number). A generated
   program the compiler rejects is a failure: the generator and the compiler
   disagree about the language.
+- Every rejected case of one file is also held to its helps: a diagnostic may
+  carry an `edit`, the machine-readable form of one of its helps, and the
+  conformance runner applies it and checks the case again. The error must be
+  gone from the line it was reported at; a new error elsewhere is the program's
+  next mistake and is allowed, and a help at the same line whose edit leads
+  back is followed at most four times, then reported as a loop. There is no
+  golden, `-Dupdate` cannot silence it, and the run fails under a floor of
+  cases that carried an edit. Edits carried today: the `where` clause
+  [O-Escapes] and [T-BorrowContract] name, where the clause answers everything
+  reported there. Helps that carry none yet, and are checked only by reading:
+  the [T-Infer] annotation (it names a type to fill in), `let … else` in place
+  of `?`, the owned copy (it changes the result type and the body), the
+  `import` a help names, the [O-Leak] `defer let`, and the allocator forms. A
+  help offering an edit a tool could write should carry it.
 
 ### CI lanes
 

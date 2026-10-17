@@ -527,6 +527,16 @@ pub const Label = struct {
 /// A single reported problem. Held as a plain struct rather than column-wise:
 /// a handful exist per compilation and rendering touches every field of each,
 /// so there is no bulk traversal for dense columns to pay off against.
+/// A help's edit in a form a tool can apply without reading the help's text:
+/// replace the bytes `span` covers in `file` with `text`. An empty span
+/// inserts. Carried beside the prose, which it never replaces, so what a
+/// reader is told and what a tool would write are the same edit.
+pub const Edit = struct {
+    file: FileId,
+    span: Span,
+    text: []const u8,
+};
+
 pub const Diagnostic = struct {
     severity: Severity,
     code: ?Code = null,
@@ -538,6 +548,10 @@ pub const Diagnostic = struct {
     /// file the compiler does not show the problem lies, each written
     /// `= note:` before the advice.
     remarks: []const []const u8 = &.{},
+    /// The edit one of the notes names, where it names one concrete enough
+    /// to write: the `where` clause a signature lacks. Null for a help that
+    /// leaves a choice to the reader, such as a type to fill in.
+    edit: ?Edit = null,
 
     pub fn primaryLabel(self: *const Diagnostic) ?Label {
         for (self.labels) |l| {
