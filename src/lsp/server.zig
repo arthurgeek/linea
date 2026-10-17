@@ -34,6 +34,26 @@ const Source = source_mod.Source;
 /// widening what `initialize` advertises to match. Nothing here switches on
 /// a method name by hand; that dispatch belongs to the generated protocol
 /// types, not to an opinion of this module's.
+/// A path written as a glob that matches it and nothing else: each character
+/// a glob reads as a pattern is put in a class of its own, `[*]`, which every
+/// glob the protocol's clients read takes as that character.
+fn globLiteral(gpa: std.mem.Allocator, path: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (path) |c| switch (c) {
+        '*', '?', '[', ']', '{', '}' => try out.appendSlice(gpa, &.{ '[', c, ']' }),
+        else => try out.append(gpa, c),
+    };
+    return out.toOwnedSlice(gpa);
+}
+
+test "a watched path's glob characters match only themselves" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqualStrings("page[[]1[]].txt", try globLiteral(arena.allocator(), "page[1].txt"));
+    try std.testing.expectEqualStrings("a[*][?][{]b[}]", try globLiteral(arena.allocator(), "a*?{b}"));
+    try std.testing.expectEqualStrings("templates/page.html", try globLiteral(arena.allocator(), "templates/page.html"));
+}
+
 pub const Handler = struct {
     gpa: std.mem.Allocator,
     /// Backing for each retained Analysis, distinct from message/index storage.
@@ -137,10 +157,16 @@ pub const Handler = struct {
     /// the next one. The two directions number their requests independently,
     /// so nothing here has to avoid an id the client chose.
     sent: i64 = 0,
+    /// The files the client was last asked to watch because the held analysis
+    /// embeds them. Owned.
+    embeds_watched: std.ArrayList([]const u8) = .empty,
 
     /// The name the file watch is registered under. The client keys the
     /// registration by it, which is what an unregistration would name.
     const watch_registration = "linea.watchedFiles";
+    /// The name the watch of the files the held analysis embeds is registered
+    /// under, replaced as the set of files changes.
+    const embeds_registration = "linea.embeddedFiles";
 
     /// One module's analysis with the module it is of.
     const Cached = struct {
@@ -329,11 +355,19 @@ pub const Handler = struct {
         arena: std.mem.Allocator,
         params: lsp.types.workspace.did_change_watched_files.Params,
     ) !void {
+        // A file the held program embeds is nothing an editor shows, so no
+        // document event follows its change: the program is checked again and
+        // published from here, once however many of its files the
+        // notification names, or what the editor shows about it stays as it
+        // was.
+        var republish: ?[]const u8 = null;
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
+            if (republish == null) republish = try handler.embeddedBy(arena, path);
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
         }
+        if (republish) |entry| try handler.report(arena, entry);
     }
 
     pub fn @"textDocument/didOpen"(
@@ -744,12 +778,13 @@ pub const Handler = struct {
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
         // them whenever it likes.
-        var fresh = try analysis.of(handler.gpa, handler.region_backing, handler.library, files, entry);
+        var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, entry, handler.io);
         errdefer fresh.deinit();
         const key = try handler.gpa.dupe(u8, entry);
 
         handler.drop();
         handler.cached = .{ .entry = key, .of = fresh };
+        try handler.watchEmbeds(arena, &handler.cached.?.of);
         return &handler.cached.?.of;
     }
 
@@ -763,6 +798,8 @@ pub const Handler = struct {
     /// now does once per case.
     pub fn deinit(handler: *Handler) void {
         handler.drop();
+        for (handler.embeds_watched.items) |path| handler.gpa.free(path);
+        handler.embeds_watched.deinit(handler.gpa);
         handler.documents.deinit();
         handler.setRoot("");
     }
@@ -865,6 +902,74 @@ pub const Handler = struct {
         handler.watch_asked = id;
     }
 
+    /// Asks the client to say when a file the held analysis embeds changes, as
+    /// it says for a `.lin` file. An embedded file may be named anything, so
+    /// the files are watched by their own paths, under a registration of their
+    /// own that is replaced whenever the program comes to embed other files.
+    ///
+    /// Costs nothing where the client offers no watching or the analysis
+    /// embeds the files already watched, and otherwise one unregistration and
+    /// one registration, each one message.
+    fn watchEmbeds(handler: *Handler, arena: std.mem.Allocator, held: *const analysis.Analysis) !void {
+        if (!handler.watch_offered) return;
+        var paths: std.ArrayList([]const u8) = .empty;
+        for (held.program.embeds.watched) |path| try paths.append(arena, path);
+        if (paths.items.len == handler.embeds_watched.items.len) {
+            for (paths.items, handler.embeds_watched.items) |now, before| {
+                if (!std.mem.eql(u8, now, before)) break;
+            } else return;
+        }
+
+        if (handler.embeds_watched.items.len > 0) {
+            const id = handler.sent + 1;
+            try handler.transport.writeRequest(
+                handler.io,
+                arena,
+                .{ .number = id },
+                "client/unregisterCapability",
+                lsp.types.Unregistration.Params,
+                .{ .unregisterations = &.{.{ .id = embeds_registration, .method = "workspace/didChangeWatchedFiles" }} },
+                .{ .emit_null_optional_fields = false },
+            );
+            handler.sent = id;
+        }
+        for (handler.embeds_watched.items) |path| handler.gpa.free(path);
+        handler.embeds_watched.clearRetainingCapacity();
+        if (paths.items.len == 0) return;
+
+        var watchers: std.json.Array = .init(arena);
+        for (paths.items) |path| {
+            // A pattern ending in the path from the workspace, as the `.lin`
+            // watch is a pattern rather than a location: the file under any
+            // folder the client opened matches it.
+            const inside = handler.root.len > 0 and path.len > handler.root.len and
+                std.mem.startsWith(u8, path, handler.root) and path[handler.root.len] == '/';
+            const relative = if (inside) path[handler.root.len + 1 ..] else std.fs.path.basename(path);
+            var watcher: std.json.ObjectMap = .empty;
+            try watcher.put(arena, "globPattern", .{ .string = try std.mem.concat(arena, u8, &.{ "**/", try globLiteral(arena, relative) }) });
+            try watchers.append(.{ .object = watcher });
+        }
+        var options: std.json.ObjectMap = .empty;
+        try options.put(arena, "watchers", .{ .array = watchers });
+        const id = handler.sent + 1;
+        try handler.transport.writeRequest(
+            handler.io,
+            arena,
+            .{ .number = id },
+            "client/registerCapability",
+            lsp.types.Registration.Params,
+            .{ .registrations = &.{.{
+                .id = embeds_registration,
+                .method = "workspace/didChangeWatchedFiles",
+                .registerOptions = .{ .object = options },
+            }} },
+            .{ .emit_null_optional_fields = false },
+        );
+        handler.sent = id;
+        try handler.embeds_watched.ensureTotalCapacity(handler.gpa, paths.items.len);
+        for (paths.items) |path| handler.embeds_watched.appendAssumeCapacity(try handler.gpa.dupe(u8, path));
+    }
+
     /// Releases the held analysis, so the next request checks again.
     fn drop(handler: *Handler) void {
         if (handler.cached) |*held| {
@@ -879,6 +984,17 @@ pub const Handler = struct {
         const held = if (handler.cached) |*cached| &cached.of else return false;
         const file = held.fileNamed(path) orelse return false;
         return std.mem.eql(u8, held.table.get(file).text, text);
+    }
+
+    /// The entry of the held program when it embeds `path`, read or not, or
+    /// null. Copied into `arena`, since invalidating releases the analysis.
+    fn embeddedBy(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !?[]const u8 {
+        const held = handler.cached orelse return null;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        for (held.of.program.embeds.watched) |watched| {
+            if (std.mem.eql(u8, watched, named)) return try arena.dupe(u8, held.entry);
+        }
+        return null;
     }
 
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
@@ -898,6 +1014,14 @@ pub const Handler = struct {
         if (held.of.fileNamed(named) != null) {
             handler.drop();
             return;
+        }
+        // A file the program embeds is as much its input as a source is, and
+        // so is one it names that could not be read.
+        for (held.of.program.embeds.watched) |watched| {
+            if (std.mem.eql(u8, watched, named)) {
+                handler.drop();
+                return;
+            }
         }
         const directory = std.fs.path.dirname(named) orelse ".";
         for (held.of.program.modules) |module| {

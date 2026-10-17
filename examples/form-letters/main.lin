@@ -5,24 +5,14 @@ import std.json
 import std.mem
 import std.testing
 
-// The letter is a multi-line literal: each `\\` line holds the rest of its
-// line exactly as written, and the lines are joined with line breaks. An empty
-// `\\` line is an empty line of the letter. Its `{name}` placeholders are for
-// this program to fill, not Linea interpolations.
-let letter_form =
-    \\Dear {name},
-    \\
-    \\Your {count} {item} will ship to {city} on Monday.
-    \\
-    \\Kind regards,
-    \\The stationery shop
+// `embed` reads `letter.txt`, beside this file, when the program is compiled,
+// so the letter is edited as the text file it is and the program needs nothing
+// beside it when it runs. The letter's `{name}` placeholders are for this
+// program to fill: a file's braces are text, not Linea interpolations.
+let letter_form = embed("letter.txt")
 
-// Quotes are text in a `\\` line too, so the JSON reads as it would in a file.
-let orders =
-    \\[
-    \\  {"name": "Ada", "count": 3, "item": "notebooks", "city": "London"},
-    \\  {"name": "Grace", "count": 1, "item": "stapler", "city": "Arlington"}
-    \\]
+// The orders are a JSON file of their own, embedded the same way.
+let orders = embed("orders.json")
 
 // `Order` is one order in the list. `json.Decode[A]` builds each order in
 // the list and refuses one with a field missing, a field of the wrong kind,
@@ -164,12 +154,14 @@ fn write_letters() -> Result[(), LetterError] {
     var first = true
     for read order in list {
         defer let letter = fill(letter_form, order)?
-        // A blank line separates each letter from the one before it.
+        // A blank line separates each letter from the one before it. The
+        // letter's file ends with a line break, so the letter is printed as
+        // it is.
         if !first {
             io.println("")?
         }
         first = false
-        io.println(letter.view())?
+        io.print(letter.view())?
     }
     .Ok(())
 }

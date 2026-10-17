@@ -58,6 +58,7 @@ comptime {
     _ = @import("sema/instantiate.zig");
     _ = @import("driver/loader.zig");
     _ = @import("driver/dependencies.zig");
+    _ = @import("driver/embedded.zig");
     _ = @import("driver/runner.zig");
     _ = @import("ownership/cfg.zig");
     _ = @import("ownership/build.zig");

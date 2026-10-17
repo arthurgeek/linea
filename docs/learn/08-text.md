@@ -14,7 +14,8 @@ a `String` owns memory, so it is released like any other owner
 prelude.
 
 This chapter covers both kinds, then the ways to write text in source:
-interpolation, format specs, raw literals and multi-line literals.
+interpolation, format specs, raw literals, multi-line literals and text kept in
+a file the program embeds.
 
 ## Views and owned text
 
@@ -706,9 +707,141 @@ ordinary literal, and let `Display.fmt` write both into one `String`, as the
 letter above does. `{advice}` interpolates the whole constant.
 
 A multi-line literal is an ordinary `Str`, and it can be a module constant, as
-`usage` and `advice` are. The [form letters example](../../examples/form_letters.lin)
-fills a `\\` template from a JSON list of orders, and the
-[TCP echo example](../../examples/tcp_echo.lin) keeps its usage text this way.
+`usage` and `advice` are. The [TCP echo example](../../examples/tcp_echo.lin)
+keeps its usage text this way. Text longer than a few lines can also live in a
+file of its own, as the next section shows, and the
+[form letters example](../../examples/form-letters/main.lin) keeps its letter
+and its orders that way.
+
+## Text from a file the program carries
+
+Text that is long, or that is something other than Linea, reads better in a
+file of its own: a page template, a SQL schema, the help a command prints.
+`embed("path")` reads such a file when the program is compiled and keeps its
+text in the program:
+
+`usage.txt`:
+
+```text
+usage: forecast CITY [DAYS]
+  CITY  the city to forecast, such as "Lisbon"
+  DAYS  how many days ahead, 1 to 7
+```
+
+```linea
+import std.io
+
+// `embed` reads `usage.txt`, which sits beside this file, when the program is
+// compiled. The text is part of the program from then on.
+let usage = embed("usage.txt")
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.print(usage)?
+    .Ok(0)
+}
+```
+
+```
+usage: forecast CITY [DAYS]
+  CITY  the city to forecast, such as "Lisbon"
+  DAYS  how many days ahead, 1 to 7
+```
+
+The value is a `Str`, exactly as if the text had been written as a literal:
+every byte of the file, its last line break included, and nothing in it is an
+escape or an interpolation. It lives as long as the program, so it needs no
+allocator and can be returned from any function, even one whose result
+`carries()` nothing. The program needs nothing beside it when it runs: edit
+`usage.txt` and the change shows the next time you compile.
+
+`embed_bytes("path")` reads a file of any bytes, an image or a font, as a
+`mem.Slice[UInt8]`. Each element is a byte, a number, and nothing promises the
+file is text:
+
+`stations.csv`:
+
+```text
+Lisbon,38.72
+Porto,41.15
+Faro,37.02
+```
+
+```linea
+import std.io
+
+// `embed_bytes` holds the file as bytes. A walk over them borrows each one,
+// and `*byte` reads its value; 10 is the line break.
+let stations = embed_bytes("stations.csv")
+
+fn main() -> Result[UInt8, io.IoError] {
+    var lines: UInt64 = 0
+    for byte in stations {
+        if *byte == 10 {
+            lines = lines + 1
+        }
+    }
+    io.println("{stations.length()} bytes in {lines} lines")?
+    .Ok(0)
+}
+```
+
+```
+36 bytes in 3 lines
+```
+
+The [site icon example](../../examples/site-icon/main.lin) serves an icon this
+way, from a CGI program that answers its bytes with `http.bytes`.
+
+`embed` checks that the file is UTF-8, because a `Str` always is. Here
+`price.txt` was saved with its last character, a euro sign, cut off after two of
+its three bytes:
+
+<!-- guide: unchecked a file that is not UTF-8 cannot be pasted into this page -->
+```linea
+fn main() -> UInt8 {
+    UInt8(embed("price.txt").length())
+}
+```
+
+```
+error[M-EmbedText]: "price.txt" is not UTF-8 text
+ --> main.lin:2:17
+  |
+2 |     UInt8(embed("price.txt").length())
+  |                 ^^^^^^^^^^^ byte 9 is 0xE2, which begins a character the file ends before completing
+  |
+  = note: that byte is at line 1, column 10 of the file
+  = help: `embed_bytes("price.txt")` embeds a file of any bytes as a `mem.Slice[UInt8]`
+```
+
+The note says where in the file to look, and the help names the form that takes
+the file as it is.
+
+The path is a string literal written right there, never a variable, because the
+file is read before the program runs. It is relative to the file that writes
+it, so a module carries the files beside it wherever it moves. It may climb
+with `..` as far as the directory holding the program's `linea.json`, so a
+program whose source sits in `src/` reaches `../templates/page.html`, and no
+further: a path that leaves the program is refused, as is an absolute one or one
+that goes through a symbolic link. This file belongs to no program, so it may
+not climb at all:
+
+```linea
+fn main() -> UInt8 {
+    UInt8(embed("../secret.txt").length())
+}
+```
+
+```
+error[M-Embed]: "../secret.txt" climbs above the directory of the file that writes it
+ --> main.lin:2:17
+  |
+2 |     UInt8(embed("../secret.txt").length())
+  |                 ^^^^^^^^^^^^^^^ a file that no program holds embeds only what sits beside it or below it
+```
+
+In Rust, `embed` is `include_str!` and `embed_bytes` is `include_bytes!`; Rust's
+paths are also relative to the file that writes them.
 
 ## Escaping text for HTML
 
@@ -805,6 +938,7 @@ server](../../examples/welcome_back.lin) escapes a name taken from the address.
 | a number or your own type from text | `"80".parse[UInt16]()`, `impl text.Parse for T` |
 | braces or backslashes as text | `r"…"`, or `r#"…"#` when the text has a `"` |
 | several lines | a run of `\\` lines |
+| a file's text or bytes, read when compiling | `embed("usage.txt")`, `embed_bytes("logo.png")` |
 | untrusted text in HTML | `"<p>{html.escaped(text)}</p>"`, or `html.escape(&writer, text)` |
 
 Next: [Networking](09-networking.md) — TCP connections and HTTP servers.

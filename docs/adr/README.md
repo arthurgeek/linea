@@ -107,7 +107,7 @@ true of a different implementation.
 | [0072](0072-a-declaration-only-generated-code-calls-is-named-by-its-module.md) | A declaration only generated code calls is named by its module | Accepted; refines 0060, refined by 0106 |
 | [0073](0073-a-scope-exit-names-a-stretch-of-the-live-stack.md) | A scope exit names a stretch of the live stack | Accepted; refines 0066 |
 | [0074](0074-a-module-is-emitted-as-several-compilation-units.md) | A module is emitted as several compilation units | Superseded by 0094 |
-| [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171 |
+| [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171; extended by 0227 |
 | [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198 and 0207 |
 | [0062](0062-an-indexed-place-is-a-place-and-every-index-is-checked.md) | An indexed place is a place, and every index is checked | Accepted; bracket clause, never implemented, replaced by 0181 |
 | [0063](0063-disposal-is-scheduled-never-inserted.md) | Disposal is scheduled, never inserted | Accepted; extends 0034, extended by 0104 and 0208, refined by 0114 |
@@ -130,7 +130,7 @@ true of a different implementation.
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
 | [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113 and 0213; default tier superseded by 0139; coherence partition superseded by 0148 |
-| [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171 and 0229 |
+| [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096 |
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
@@ -149,10 +149,10 @@ true of a different implementation.
 | [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md) | `Owned` admits a type that can carry no borrow | Accepted; extends 0123 and 0124 |
 | [0126](0126-observations-project-referent-places-transparently.md) | Observations project referent places transparently | Accepted; supersedes projection syntax of 0123; extends 0088 |
 | [0127](0127-constants-retain-distinct-values-and-infer-their-types.md) | Constants infer initializer types and retain distinct integer, boolean and text values | Accepted; extends 0020 and 0059, supersedes the representation decision in 0078; extended by 0140, 0146 and 0157 |
-| [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157 and 0183; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
+| [0140](0140-aggregate-constants-retain-checked-construction-plans.md) | Aggregate constants retain shared data and checked construction plans | Accepted; extends 0020, 0059 and 0127; extended by 0157, 0183 and 0227; materialization clause superseded by 0178; unit-expression clause superseded by 0188 |
 | [0188](0188-the-unit-value-is-written-as-its-type.md) | The unit value is written as its type is, `()` | Accepted; supersedes the unit-expression clause of 0140 |
 | [0223](0223-a-function-returning-nothing-writes-no-result.md) | A function returning nothing writes no result | Accepted |
-| [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147 |
+| [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147; extended by 0227 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted |
 | [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
@@ -172,6 +172,7 @@ true of a different implementation.
 | [0163](0163-a-raw-string-literal-holds-its-bytes.md) | A raw string literal holds its bytes: `r"…"`, with hashes for embedded quotes | Accepted |
 | [0167](0167-a-binding-handles-its-failure-with-else.md) | A binding handles its failure with `else` | Accepted; builds on 0070 and 0106; refines 0041 |
 | [0168](0168-multi-line-text-is-a-run-of-backslash-lines.md) | Multi-line text is a run of `\\` lines, raw, joined with line breaks | Accepted |
+| [0227](0227-a-program-embeds-a-files-bytes.md) | A program embeds a file's text or bytes, read when it is compiled: `embed` and `embed_bytes` | Accepted; extends 0075, 0096, 0140 and 0178 |
 | [0169](0169-an-interpolation-lays-out-its-value-through-a-format-spec.md) | An interpolation lays out its value through a format spec checked against its type and applied by `std.fmt` | Accepted |
 | [0170](0170-a-marked-postfix-call-lends-its-receiver.md) | A marked postfix call lends its receiver | Accepted; extended by 0195 |
 | [0195](0195-a-walk-may-borrow-the-iterator-it-advances.md) | A walk may borrow the iterator it advances | Accepted; extends 0170 |

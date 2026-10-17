@@ -1,0 +1,5 @@
+error[M-Embed]: no file "missing.txt" beside `a_missing_file.lin`
+ --> tests/embed/a_missing_file.lin:2:17
+  |
+2 |     UInt8(embed("missing.txt").length())
+  |                 ^^^^^^^^^^^^^ the path is relative to the directory of `a_missing_file.lin`, so this names `missing.txt` there

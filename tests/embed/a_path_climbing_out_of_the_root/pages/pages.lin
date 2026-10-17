@@ -1,0 +1,3 @@
+pub fn size() -> UInt64 {
+    embed("../../x.txt").length()
+}

@@ -86,6 +86,9 @@
 ; -- Duplication is explicit, so it reads as an operation ------------------
 "copy" @keyword.operator
 
+; -- A file read when the program is compiled -------------------------------
+["embed" "embed_bytes"] @function.builtin
+
 ; -- Types and literals ----------------------------------------------------
 (self_type) @type.builtin
 (array_type length: "_" @constant.builtin)

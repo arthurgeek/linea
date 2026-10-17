@@ -1,0 +1,14 @@
+import std.io
+
+let pixel = embed_bytes("pixel.bin")
+
+fn main() -> Result[UInt8, io.IoError] {
+    var total: UInt64 = 0
+    var i: UInt64 = 0
+    while i < pixel.length() {
+        total = total + UInt64(pixel[i])
+        i = i + 1
+    }
+    io.println("{pixel.length()} bytes, adding up to {total}")?
+    .Ok(0)
+}

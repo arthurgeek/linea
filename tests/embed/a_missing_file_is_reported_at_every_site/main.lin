@@ -1,0 +1,7 @@
+import pages
+
+fn main() -> UInt8 {
+    let first = embed("none.txt").length()
+    let again = embed("none.txt").length()
+    UInt8(first + again + pages.size())
+}

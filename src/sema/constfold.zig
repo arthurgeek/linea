@@ -87,6 +87,10 @@ pub const Names = struct {
     /// to, so a constant read by position and one read by field name are one
     /// value.
     tuple_component: *const fn (ctx: *const anyopaque, ast: *const Ast, arity: usize, position: usize) ?[]const u8,
+    /// The bytes an `embed` or `embed_bytes` read, or `null` where the loader
+    /// refused it. A refused embed is still a constant expression, one whose
+    /// value does not exist, so the refusal is reported once.
+    embedded: *const fn (ctx: *const anyopaque, expression: ExprId) ?[]const u8,
 
     fn of(self: Names, id: ExprId) Reach {
         return self.reaches(self.ctx, id);
@@ -425,6 +429,9 @@ fn step(
             };
         },
         .str_literal => return .{ .done = try memo.note(gpa, id, .{ .string = try memo.literalText(gpa, ast, id) }) },
+        // The bytes are the program's, held as long as its sources, so the
+        // value borrows them rather than copying a file into the memo.
+        .embed, .embed_bytes => return .{ .done = try memo.note(gpa, id, if (names.embedded(names.ctx, id)) |bytes| .{ .string = bytes } else .absent) },
         .bool_literal => return .{ .done = try memo.note(gpa, id, .{ .truth = ast.boolIsTrue(id) }) },
         .unit_literal => return .{ .done = try memo.note(gpa, id, .{ .aggregate = try memo.pool.intern(gpa, .unit) }) },
         .struct_literal, .array_literal, .tuple_literal => return aggregate(gpa, ast, names, memo, id, null),
@@ -780,7 +787,12 @@ const Spelled = struct {
     }
 
     fn names(self: *const Spelled) Names {
-        return .{ .ctx = self, .reaches = reaches, .constant_call = constantCall, .integer_property = integerProperty, .variant = spelledVariant, .tuple_component = spelledTupleComponent };
+        return .{ .ctx = self, .reaches = reaches, .constant_call = constantCall, .integer_property = integerProperty, .variant = spelledVariant, .tuple_component = spelledTupleComponent, .embedded = noEmbeds };
+    }
+
+    /// The tests fold source alone, which no loader read a file for.
+    fn noEmbeds(_: *const anyopaque, _: ExprId) ?[]const u8 {
+        return null;
     }
 
     /// The field the source's own `Tuple<arity>` declaration names at

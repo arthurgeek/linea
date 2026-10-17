@@ -1,0 +1,15 @@
+error[M-Embed]: no file "none.txt" beside `main.lin`
+ --> tests/embed/a_missing_file_is_reported_at_every_site/main.lin:4:23
+  |
+4 |     let first = embed("none.txt").length()
+  |                       ^^^^^^^^^^ the path is relative to the directory of `main.lin`, so this names `none.txt` there
+error[M-Embed]: no file "none.txt" beside `main.lin`
+ --> tests/embed/a_missing_file_is_reported_at_every_site/main.lin:5:23
+  |
+5 |     let again = embed("none.txt").length()
+  |                       ^^^^^^^^^^ the path is relative to the directory of `main.lin`, so this names `none.txt` there
+error[M-Embed]: no file "../none.txt" beside `pages.lin`
+ --> tests/embed/a_missing_file_is_reported_at_every_site/pages/pages.lin:2:11
+  |
+2 |     embed("../none.txt").length()
+  |           ^^^^^^^^^^^^^ the path is relative to `pages`, so this names `none.txt`

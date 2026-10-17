@@ -31,6 +31,12 @@ const Program = program_mod.Program;
 const RootId = program_mod.RootId;
 const RootFacts = program_mod.RootFacts;
 const standard_root = RootId.standard;
+const Embedded = program_mod.Embedded;
+const EmbedSite = program_mod.EmbedSite;
+const EmbedId = program_mod.EmbedId;
+const embedded = @import("embedded.zig");
+const firstInvalidUtf8 = @import("../support/text.zig").firstInvalidUtf8;
+const lineColumnOf = @import("../support/text.zig").lineColumnOf;
 const Modules = @import("../parser/parser.zig").Modules;
 const ParsedFile = @import("../parser/parser.zig").ParsedFile;
 const instantiate = @import("../sema/instantiate.zig").instantiate;
@@ -62,6 +68,38 @@ fn dirOf(path: []const u8) []const u8 {
     return path[0..slash];
 }
 
+/// A directory as a prefix of the paths beneath it, in `canonical` spelling,
+/// with the working directory written as nothing. The root's manifest may be
+/// spelled `./site/linea.json` or `/abs//site/linea.json` while the sources
+/// beneath it are spelled `site/src/main.lin`, and an embed compares the two.
+/// The caller owns the result.
+fn rootDir(gpa: std.mem.Allocator, dir: []const u8) std.mem.Allocator.Error![]u8 {
+    if (dir.len == 0) return gpa.dupe(u8, "");
+    const spelled = try canonical(gpa, dir);
+    if (std.mem.eql(u8, spelled, ".")) {
+        gpa.free(spelled);
+        return gpa.dupe(u8, "");
+    }
+    return spelled;
+}
+
+test "a directory is compared in one spelling" {
+    const gpa = testing.allocator;
+    for ([_][2][]const u8{
+        .{ ".", "" },
+        .{ "./", "" },
+        .{ "./site", "site" },
+        .{ "site/.", "site" },
+        .{ "./site/./", "site" },
+        .{ "/abs/dot//site", "/abs/dot/site" },
+        .{ "/abs/dot/./site", "/abs/dot/site" },
+    }) |pair| {
+        const got = try rootDir(gpa, pair[0]);
+        defer gpa.free(got);
+        try testing.expectEqualStrings(pair[1], got);
+    }
+}
+
 /// The last element of a path, which for a directory is the module's name.
 pub fn nameOf(dir: []const u8) []const u8 {
     if (dir.len == 0) return "";
@@ -72,7 +110,16 @@ pub fn nameOf(dir: []const u8) []const u8 {
 /// Whether source paths and text borrow the input buffers or are copied into
 /// a source allocator. Copied buffers have that allocator's lifetime; module
 /// metadata uses the allocator supplied to loading and is owned by the program.
-pub const MemoryOwnership = union(enum) { borrow, copy: std.mem.Allocator };
+pub const MemoryOwnership = union(enum) {
+    borrow,
+    copy: std.mem.Allocator,
+    /// The sources are copied, and the files an `embed` names are read from
+    /// disk rather than looked for among them: an editor holds the program's
+    /// own buffers, and never a template or an image the program embeds.
+    copy_reading_disk: CopyReadingDisk,
+
+    pub const CopyReadingDisk = struct { allocator: std.mem.Allocator, io: std.Io };
+};
 
 const Input = union(enum) { disk: std.Io, memory: MemoryOwnership };
 
@@ -138,6 +185,7 @@ pub const LibraryPrefix = struct {
                 .primary = loader.prelude,
                 .prelude = loader.prelude,
                 .kind = .library,
+                .embeds = try loader.takeEmbeds(),
                 .ast = try loader.trees.finish(),
             };
         };
@@ -326,6 +374,13 @@ fn loadInputs(
     // program depends on -- never from where the root sits or how it is named.
     const declared = try declaredGiven(gpa, sorted, dir);
     l.program_is_library = declared.standard;
+    if (rootManifestOf(sorted, dir)) |manifest| {
+        l.bound = try rootDir(gpa, dirOf(manifest.path));
+        l.bound_kind = if (declared.kind == .library) .library else .program;
+    } else {
+        l.bound = try rootDir(gpa, dir);
+        l.bound_kind = .alone;
+    }
 
     // Which libraries the root depends on, read from every manifest the graph
     // reaches before the first import is followed: an import's first element
@@ -452,10 +507,12 @@ fn loadInputs(
         gpa.free(modules);
     }
     const routes = try l.routes.toOwnedSlice(gpa);
+    const embeds = try l.takeEmbeds();
     return .{
         .modules = modules,
         .primary = primary,
         .import_routes = routes,
+        .embeds = embeds,
         .prelude = l.prelude,
         .named_module = module != null,
         // Read from the files in hand, because a manifest among them is what
@@ -500,7 +557,7 @@ pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMem
         if (!std.mem.eql(u8, std.fs.path.basename(f.path), manifest_name)) continue;
         const at = std.mem.count(u8, f.path, "/");
         if (root_dir) |root| {
-            if (!within(withoutDot(root), withoutDot(dirOf(f.path)))) continue;
+            if (!spelledWithin(root, dirOf(f.path))) continue;
             if (chosen == null or at > depth) {
                 chosen = f;
                 depth = at;
@@ -513,13 +570,35 @@ pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMem
     return chosen;
 }
 
-/// A path without the `./` a walk from `.` writes before it, so `./std` and
-/// `std` compare as the one directory they name.
-fn withoutDot(path: []const u8) []const u8 {
-    var rest = path;
-    while (std.mem.startsWith(u8, rest, "./")) rest = rest[2..];
-    if (std.mem.eql(u8, rest, ".")) return "";
-    return rest;
+/// Whether `dir` is `bound` or beneath it, read the way `canonical` spells a
+/// path: a `.` part and an empty one, as in `./site/./` or `/abs//site`, name
+/// nothing, so every spelling of one directory compares as that directory.
+fn spelledWithin(dir: []const u8, bound: []const u8) bool {
+    if ((dir.len > 0 and dir[0] == '/') != (bound.len > 0 and bound[0] == '/')) return false;
+    var outer = std.mem.tokenizeScalar(u8, bound, '/');
+    var inner = std.mem.tokenizeScalar(u8, dir, '/');
+    while (nextNamed(&outer)) |part| {
+        const against = nextNamed(&inner) orelse return false;
+        if (!std.mem.eql(u8, part, against)) return false;
+    }
+    return true;
+}
+
+fn nextNamed(parts: *std.mem.TokenIterator(u8, .scalar)) ?[]const u8 {
+    while (parts.next()) |part| {
+        if (!std.mem.eql(u8, part, ".")) return part;
+    }
+    return null;
+}
+
+test "a directory lies within another however either is spelled" {
+    try testing.expect(spelledWithin("site/.", "./site"));
+    try testing.expect(spelledWithin("./site/./src", "site"));
+    try testing.expect(spelledWithin("/abs/dot//site", "/abs/dot/./site"));
+    try testing.expect(spelledWithin("site", "."));
+    try testing.expect(!spelledWithin("sites", "site"));
+    try testing.expect(!spelledWithin("site", "site/src"));
+    try testing.expect(!spelledWithin("/site", "site"));
 }
 
 test "the manifest at or above the root declares it, and one below it does not" {
@@ -612,6 +691,27 @@ pub fn loadFromDisk(
     }
 
     return loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose, with_library, null);
+}
+
+test "an embed reads a file supplied beside the source, once however often it is named" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(gpa, &table, &sink, &interner, "app", &.{
+        .{ .path = "app/linea.json", .text = "{}" },
+        .{ .path = "app/main.lin", .text = "let a = embed(\"pages/page.txt\")\nlet b = embed_bytes(\"pages/page.txt\")\nlet c = embed(\"none.txt\")\n" },
+        .{ .path = "app/pages/page.txt", .text = "page" },
+    }, .program, false, .borrow);
+    try testing.expectEqual(@as(usize, 1), program.embeds.files.len);
+    try testing.expectEqual(@as(usize, 3), program.embeds.sites.len);
+    try testing.expectEqualStrings("app/pages/page.txt", program.embeds.files[0].path);
+    try testing.expectEqualStrings("page", program.embeds.bytesOf(program.embeds.sites[1].expr).?);
+    try testing.expectEqual(EmbedId.none, program.embeds.sites[2].embed);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
 }
 
 test "a path naming no file is refused as that path" {
@@ -1209,6 +1309,9 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     defer parsed.deinit();
 
     const declared = try declaredFrom(parsed.value);
+    // A `source` leaving the directory holding the manifest is refused here,
+    // for a root and for a library alike: the one check either takes.
+    if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
     const source: ?[]const u8 = if (parsed.value.source) |named| (if (named.len == 0) null else try gpa.dupe(u8, named)) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
@@ -1225,6 +1328,27 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
 fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
     const named = source orelse return dir;
     return joinedDir(gpa, dir, named);
+}
+
+/// Whether a manifest's `source`, read from the directory holding the
+/// manifest, names a directory inside that one. Decided by spelling, so a
+/// root read from disk and one read from memory agree: an absolute path, and
+/// one whose `..` climbs past the directory, name another directory's files.
+pub fn sourceStaysInside(gpa: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!bool {
+    if (source.len > 0 and source[0] == '/') return false;
+    const resolved = try std.fs.path.resolvePosix(gpa, &.{source});
+    defer gpa.free(resolved);
+    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
+}
+
+test "a manifest's source stays inside the directory holding it" {
+    const gpa = testing.allocator;
+    try testing.expect(try sourceStaysInside(gpa, "src"));
+    try testing.expect(try sourceStaysInside(gpa, "./src/"));
+    try testing.expect(try sourceStaysInside(gpa, "src/../lib"));
+    try testing.expect(!try sourceStaysInside(gpa, "../elsewhere/src"));
+    try testing.expect(!try sourceStaysInside(gpa, "src/../../x"));
+    try testing.expect(!try sourceStaysInside(gpa, "/tmp"));
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
@@ -1595,6 +1719,24 @@ const Loader = struct {
     manifest_files: std.StringHashMapUnmanaged(FileId) = .empty,
     /// What reading the graph allocates and the program does not keep.
     scratch: std.heap.ArenaAllocator,
+    /// The directory an embedded path may climb to, and what marks it: the
+    /// program's or library's manifest, or nothing, for a file alone. The
+    /// library's own embeds are bounded by its directory instead.
+    bound: []const u8 = "",
+    bound_kind: BoundKind = .alone,
+    /// Every file an embed read, and which expression read which, in the
+    /// order the modules were parsed, so the sites ascend.
+    embed_files: std.ArrayList(Embedded) = .empty,
+    embed_sites: std.ArrayList(EmbedSite) = .empty,
+    /// What each path named so far gave, by the path it was read from, so a
+    /// file named from two directories or twice is read once, and a refusal
+    /// is reported at every site naming it. The library's apart from the
+    /// program's.
+    embed_states: std.StringHashMapUnmanaged(EmbedState) = .empty,
+    library_embed_states: std.StringHashMapUnmanaged(EmbedState) = .empty,
+    /// Every path the program's embeds resolved to, read or refused, which an
+    /// editor watches. Owned until handed to the program.
+    embed_watched: std.ArrayList([]const u8) = .empty,
 
     const GraphRoot = struct {
         /// The name imports of it start with; empty for the primary root.
@@ -1620,6 +1762,8 @@ const Loader = struct {
         /// primary root depends on.
         primary_key: ?Span = null,
     };
+    const BoundKind = enum { program, library, alone };
+    const EmbedState = union(enum) { read: EmbedId, unread: embedded.Unread };
 
     fn seedLibrary(self: *Loader, prefix: *const LibraryPrefix) !void {
         try self.modules.ensureTotalCapacity(self.gpa, prefix.program.modules.len);
@@ -1647,10 +1791,31 @@ const Loader = struct {
             self.library_dirs.putAssumeCapacity(dir, .from(i));
         }
         self.prelude = prefix.program.prelude;
+        try self.embed_files.appendSlice(self.gpa, prefix.program.embeds.files);
+        try self.embed_sites.appendSlice(self.gpa, prefix.program.embeds.sites);
+    }
+
+    /// The embeds the loader recorded, handed to the program that owns them.
+    fn takeEmbeds(self: *Loader) std.mem.Allocator.Error!program_mod.Embeds {
+        const files = try self.embed_files.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(files);
+        const sites = try self.embed_sites.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(sites);
+        return .{ .files = files, .sites = sites, .watched = try self.embed_watched.toOwnedSlice(self.gpa) };
     }
 
     fn deinit(self: *Loader) void {
         self.scratch.deinit();
+        self.gpa.free(self.bound);
+        self.embed_files.deinit(self.gpa);
+        self.embed_sites.deinit(self.gpa);
+        for ([_]*std.StringHashMapUnmanaged(EmbedState){ &self.embed_states, &self.library_embed_states }) |states| {
+            var read_paths = states.keyIterator();
+            while (read_paths.next()) |path| self.gpa.free(path.*);
+            states.deinit(self.gpa);
+        }
+        for (self.embed_watched.items) |path| self.gpa.free(path);
+        self.embed_watched.deinit(self.gpa);
         self.by_dir.deinit(self.gpa);
         var held = self.in_dir.valueIterator();
         while (held.next()) |v| v.deinit(self.gpa);
@@ -1773,6 +1938,7 @@ const Loader = struct {
             .memory => |ownership| switch (ownership) {
                 .borrow => return .{ .path = file.path, .text = file.text },
                 .copy => |allocator| allocator,
+                .copy_reading_disk => |reading| reading.allocator,
             },
             .disk => self.gpa,
         };
@@ -1832,7 +1998,9 @@ const Loader = struct {
 
         const file_ids = try ids.toOwnedSlice(self.gpa);
         errdefer if (!transferred) self.gpa.free(file_ids);
+        const first_expr = self.trees.view().exprCount();
         const decls = try self.trees.add(parsed.items);
+        try self.readEmbeds(first_expr, root);
 
         const id: ModuleId = .from(self.modules.items.len);
         try self.by_dir.put(self.gpa, owned_dir, id);
@@ -1875,6 +2043,224 @@ const Loader = struct {
         self.modules.items[id.index()].imports = try imports.toOwnedSlice(self.gpa);
 
         return id;
+    }
+
+    /// Reads every file the expressions from `first` onwards embed: the module
+    /// just parsed, which owns the run of the tree from there to its end.
+    ///
+    /// **Bound:** one visit per expression of that module, and one read per
+    /// file it embeds that no earlier module read.
+    fn readEmbeds(self: *Loader, first: u32, root: RootId) LoadError!void {
+        const ast = self.trees.view();
+        var i = first;
+        while (i < ast.exprCount()) : (i += 1) {
+            const id = node.ExprId.at(i);
+            switch (ast.exprTag(id)) {
+                .embed, .embed_bytes => try self.embedSite(id, root),
+                else => {},
+            }
+        }
+    }
+
+    fn embedSite(self: *Loader, id: node.ExprId, root: RootId) LoadError!void {
+        const read = try self.readEmbed(id, root);
+        try self.embed_sites.append(self.gpa, .{ .expr = id, .embed = read });
+    }
+
+    /// The file one embed names, read once for the compilation, or `.none`
+    /// once the reason it names none is reported.
+    fn readEmbed(self: *Loader, id: node.ExprId, owner: RootId) LoadError!EmbedId {
+        const ast = self.trees.view();
+        const file = ast.fileOfExpr(id);
+        var written: std.ArrayList(u8) = .empty;
+        defer written.deinit(self.gpa);
+        // An escape that names nothing was reported by the lexer, and a path
+        // decoded around it would name some other file.
+        if (!try ast.embeddedPath(self.gpa, &written, id)) return .none;
+
+        // A module's root bounds its embeds: the standard library's directory,
+        // the directory holding a dependency's manifest, or the primary root's.
+        const library_bound = self.in_library;
+        const dependency: ?[]const u8 = if (!library_bound and owner != .primary and owner != standard_root and owner.index() < self.graph.items.len)
+            self.graph.items[owner.index()].manifest_dir
+        else
+            null;
+        const bound = try rootDir(self.gpa, if (library_bound) library.prelude_dir else dependency orelse self.bound);
+        defer self.gpa.free(bound);
+        const kind: BoundKind = if (library_bound or dependency != null) .library else self.bound_kind;
+        const source_dir = try rootDir(self.gpa, dirOf(self.table.get(file).path));
+        defer self.gpa.free(source_dir);
+        const relative_dir = if (bound.len == 0)
+            source_dir
+        else if (std.mem.eql(u8, source_dir, bound))
+            ""
+        else if (source_dir.len > bound.len and std.mem.startsWith(u8, source_dir, bound) and source_dir[bound.len] == '/')
+            source_dir[bound.len + 1 ..]
+        else
+            null;
+        // A file outside the root it was loaded with stands alone, as a file
+        // no program's source holds does.
+        const root = if (relative_dir == null) source_dir else bound;
+        const root_kind: BoundKind = if (relative_dir == null) .alone else kind;
+
+        const rel = switch (try embedded.resolve(self.gpa, relative_dir orelse "", written.items)) {
+            .path => |p| p,
+            .refused => |why| {
+                try self.refuseSpelling(id, why, root_kind);
+                return .none;
+            },
+        };
+        defer self.gpa.free(rel);
+        const full = if (root.len == 0) try self.gpa.dupe(u8, rel) else try std.mem.concat(self.gpa, u8, &.{ root, "/", rel });
+        var full_owned = true;
+        defer if (full_owned) self.gpa.free(full);
+        const where: Where = .{ .dir = relative_dir orelse "", .rel = rel };
+
+        // The library's files and the program's are read apart, so a program
+        // file spelled `std/x.txt` from a root in the working directory is
+        // never the library's `std/x.txt`.
+        const states = if (library_bound) &self.library_embed_states else &self.embed_states;
+        if (states.get(full)) |known| switch (known) {
+            .read => |already| {
+                if (ast.exprTag(id) == .embed and !try self.isText(id, self.embed_files.items[already.index()].bytes)) return .none;
+                return already;
+            },
+            .unread => |why| {
+                try self.refuseRead(id, why, where);
+                return .none;
+            },
+        };
+
+        // Where the bytes come from, and whose lifetime they share: the same
+        // answer `sourceFor` gives a source.
+        const disk_io: ?std.Io, const storage: ?std.mem.Allocator = if (library_bound) .{ null, null } else switch (self.input) {
+            .disk => |io| .{ io, self.gpa },
+            .memory => |ownership| switch (ownership) {
+                .borrow => .{ null, null },
+                .copy => |allocator| .{ null, allocator },
+                .copy_reading_disk => |reading| .{ reading.io, reading.allocator },
+            },
+        };
+        // A file the program names is one a change to which changes the
+        // program, whether or not it could be read: an editor watches it.
+        if (!library_bound) try self.embed_watched.append(self.gpa, try self.gpa.dupe(u8, full));
+        const read: embedded.Read = if (disk_io) |io|
+            try embedded.readFromDisk(storage orelse self.gpa, io, root, rel)
+        else
+            embedded.readFromFiles(InMemoryFile, self.files, full);
+        const bytes: []const u8 = switch (read) {
+            .bytes => |b| if (disk_io == null) if (storage) |a| try a.dupe(u8, b) else b else b,
+            .unread => |why| {
+                try states.put(self.gpa, full, .{ .unread = why });
+                full_owned = false;
+                try self.refuseRead(id, why, where);
+                return .none;
+            },
+        };
+        // The path the bytes were read from, with the bytes' lifetime: the
+        // supplied file's own where the bytes are borrowed from it.
+        const path = if (storage) |a| try a.dupe(u8, full) else for (self.files) |f| {
+            if (std.mem.eql(u8, f.path, full)) break f.path;
+        } else unreachable;
+        const embed_id: EmbedId = .from(self.embed_files.items.len);
+        try self.embed_files.append(self.gpa, .{ .path = path, .bytes = bytes });
+        try states.put(self.gpa, full, .{ .read = embed_id });
+        full_owned = false;
+        if (ast.exprTag(id) == .embed and !try self.isText(id, bytes)) return .none;
+        return embed_id;
+    }
+
+    /// Where a site's path resolved to, relative to its root: the directory of
+    /// the file writing it, and the file it names. What a refusal says to
+    /// place the path, and the same wherever the program sits.
+    const Where = struct { dir: []const u8, rel: []const u8 };
+
+    /// Whether a file embedded as text is UTF-8, reporting [M-EmbedText] where
+    /// it is not: a `Str`'s bytes are text by construction, as a literal's are
+    /// because the file holding it is.
+    ///
+    /// Every embed diagnostic names the path as the literal wrote it, which is
+    /// what the reader has in front of them and what reads the same wherever
+    /// the program sits.
+    fn isText(self: *Loader, id: node.ExprId, bytes: []const u8) LoadError!bool {
+        const at = firstInvalidUtf8(bytes) orelse return true;
+        const ast = self.trees.view();
+        const place = lineColumnOf(bytes, at);
+        const arena = self.sink.arena;
+        const written = ast.tokenText(ast.exprMain(id));
+        const remarks = try arena.alloc([]const u8, 1);
+        remarks[0] = try std.fmt.allocPrint(arena, "that byte is at line {d}, column {d} of the file", .{ place.line, place.column });
+        const notes = try arena.alloc([]const u8, 1);
+        notes[0] = try std.fmt.allocPrint(arena, "`embed_bytes({s})` embeds a file of any bytes as a `mem.Slice[UInt8]`", .{written});
+        const byte = bytes[at];
+        // What is wrong at the byte: one that only continues a character, one
+        // no character begins with, or one beginning a character the bytes
+        // after it do not complete or that UTF-8 does not allow.
+        const why: []const u8 = if (byte >= 0x80 and byte < 0xc0)
+            "which continues a character none began"
+        else if (std.unicode.utf8ByteSequenceLength(byte)) |len| blk: {
+            if (at + len > bytes.len) break :blk "which begins a character the file ends before completing";
+            for (bytes[at + 1 .. at + len]) |next| {
+                if (next & 0xc0 != 0x80) break :blk "which begins a character the bytes after it do not continue";
+            }
+            break :blk "which begins a character written in more bytes than it needs, or one Unicode does not have";
+        } else |_| "which begins no UTF-8 character";
+        try self.reportEmbedWith(.m_embed_text, id, try std.fmt.allocPrint(arena, "{s} is not UTF-8 text", .{written}), try std.fmt.allocPrint(arena, "byte {d} is 0x{X:0>2}, {s}", .{ at, byte, why }), notes, remarks);
+        return false;
+    }
+
+    fn reportEmbed(self: *Loader, code: Code, id: node.ExprId, message: []const u8, label: []const u8, notes: []const []const u8) LoadError!void {
+        return self.reportEmbedWith(code, id, message, label, notes, &.{});
+    }
+
+    fn reportEmbedWith(self: *Loader, code: Code, id: node.ExprId, message: []const u8, label: []const u8, notes: []const []const u8, remarks: []const []const u8) LoadError!void {
+        const ast = self.trees.view();
+        const labels = try self.sink.arena.alloc(@import("../diagnostics/diagnostic.zig").Label, 1);
+        labels[0] = .{ .file = ast.fileOfExpr(id), .span = ast.tokenSpan(ast.exprMain(id)), .message = label };
+        try self.sink.add(.{ .severity = .err, .code = code, .message = message, .labels = labels, .notes = notes, .remarks = remarks });
+    }
+
+    fn refuseSpelling(self: *Loader, id: node.ExprId, why: embedded.Spelling, kind: BoundKind) LoadError!void {
+        const arena = self.sink.arena;
+        const ast = self.trees.view();
+        const written = ast.tokenText(ast.exprMain(id));
+        const message: []const u8, const label: []const u8 = switch (why) {
+            .empty => .{ "an embedded path names a file", "write the file's path here" },
+            .absolute => .{ "an embedded path is relative to the file that writes it", "remove the leading `/`" },
+            .empty_component => .{ "an embedded path has an empty part", "write one `/` between two names, and none at the end" },
+            .dot => .{ "a `.` in an embedded path names nothing", "remove it" },
+            .inner_parent => .{ "`..` may only begin an embedded path", "write the path without stepping back out of a directory it named" },
+            .backslash => .{ "`\\` is not a path separator", "write `/` between directories" },
+            .nul => .{ "an embedded path cannot hold a NUL byte", "remove it" },
+            .colon => .{ "an embedded path cannot hold `:`", "a `:` names a drive or a stream on some systems" },
+            .leaves_root => switch (kind) {
+                .program => .{ try std.fmt.allocPrint(arena, "{s} climbs above the program's root", .{written}), "an embedded file is inside the directory holding the program's `linea.json`" },
+                .library => .{ try std.fmt.allocPrint(arena, "{s} climbs above the library's root", .{written}), "an embedded file is inside the directory holding the library's `linea.json`" },
+                .alone => .{ try std.fmt.allocPrint(arena, "{s} climbs above the directory of the file that writes it", .{written}), "a file that no program holds embeds only what sits beside it or below it" },
+            },
+        };
+        try self.reportEmbed(.m_embed, id, message, label, &.{});
+    }
+
+    fn refuseRead(self: *Loader, id: node.ExprId, why: embedded.Unread, where: Where) LoadError!void {
+        const arena = self.sink.arena;
+        const ast = self.trees.view();
+        const written = ast.tokenText(ast.exprMain(id));
+        const beside = std.fs.path.basename(self.table.get(ast.fileOfExpr(id)).path);
+        const message: []const u8, const label: []const u8 = switch (why) {
+            .missing => .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), if (where.dir.len == 0)
+                try std.fmt.allocPrint(arena, "the path is relative to the directory of `{s}`, so this names `{s}` there", .{ beside, where.rel })
+            else
+                try std.fmt.allocPrint(arena, "the path is relative to `{s}`, so this names `{s}`", .{ where.dir, where.rel }) },
+            .other_form => |spelled| .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), try std.fmt.allocPrint(arena, "the directory holds `{s}`, which looks alike but is written with other Unicode characters", .{spelled}) },
+            .other_case => |spelled| .{ try std.fmt.allocPrint(arena, "no file {s} beside `{s}`", .{ written, beside }), try std.fmt.allocPrint(arena, "the directory holds `{s}`, spelled differently", .{spelled}) },
+            .directory => .{ try std.fmt.allocPrint(arena, "{s} is a directory", .{written}), "an embedded path names a file" },
+            .symlink => |link| .{ try std.fmt.allocPrint(arena, "{s} goes through a symbolic link", .{written}), try std.fmt.allocPrint(arena, "`{s}` is a link, and an embedded path names files and directories themselves", .{std.fs.path.basename(link)}) },
+            .special => .{ try std.fmt.allocPrint(arena, "{s} is not a regular file", .{written}), "an embedded path names a file" },
+            .too_large => |size| .{ try std.fmt.allocPrint(arena, "{s} holds {d} bytes, and a file embeds at most {d}", .{ written, size, embedded.max_bytes }), "a file embeds at most 16 MiB" },
+            .unreadable => |err| .{ try std.fmt.allocPrint(arena, "cannot read {s}: {s}", .{ written, err }), "the file named here" },
+        };
+        try self.reportEmbed(.m_embed, id, message, label, &.{});
     }
 
     /// Whether an import can name the loaded directory `dir`. The embedded
@@ -2398,6 +2784,10 @@ const Loader = struct {
                 return true;
             },
             error.ManifestNamesTheLibrary => Manifest{ .source = null, .declared = .{} },
+            error.ManifestSourceLeavesRoot => {
+                try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest", "the source of `{s}` leaves the directory that holds its manifest", .{entry.name}, &.{});
+                return true;
+            },
         };
         if (parsed.declared.kind != .library) {
             try self.reportManifest(manifest_path, text, entry.key, "a dependency is entered through what it publishes, so its manifest says `\"kind\": \"library\"`", "`{s}` is a program, not a library", .{entry.name}, &.{});
@@ -2422,11 +2812,8 @@ const Loader = struct {
         // which sits inside the directory holding its manifest and shares no
         // module with another root.
         const source_dir = try librarySourceDir(a, dir, parsed.source);
+        // `parseManifest` refused a `source` leaving the library's directory.
         const source_identity = try librarySourceDir(a, identity, parsed.source);
-        if (!within(source_identity, identity)) {
-            try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest", "the source of `{s}` leaves the directory that holds its manifest", .{name}, &.{});
-            return true;
-        }
         if (self.sourceOverlapping(source_identity, identity)) |other| {
             const note = try std.fmt.allocPrint(self.sink.arena, "keep each library's source apart; `{s}` reads modules from `{s}`", .{ self.rootLabel(other), self.graph.items[other.index()].source_dir });
             try self.reportManifest(manifest_path, text, entry.key, "two roots may not read the same modules", "the source of `{s}` overlaps the source of `{s}`", .{ name, self.rootLabel(other) }, &.{note});
@@ -2522,6 +2909,7 @@ const Loader = struct {
                 .memory => |ownership| switch (ownership) {
                     .borrow => null,
                     .copy => |allocator| allocator,
+                    .copy_reading_disk => |reading| reading.allocator,
                 },
                 .disk => self.gpa,
             };

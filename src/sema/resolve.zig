@@ -638,6 +638,9 @@ pub const Resolution = struct {
     /// names these by identity, so a module declaring its own `Tuple2`
     /// shadows the name and not the syntax. Read through `tupleDecl`.
     tuple_decls: TupleDecls = no_tuple_decls,
+    /// The files the program embeds, borrowed from the program, so folding a
+    /// constant reads what an `embed` read without reaching for the loader.
+    embeds: program_mod.Embeds = .{},
     /// The token that declares each binding: the `let`'s name, the parameter's
     /// name, the declaration's name, the binder in its pattern.
     ///
@@ -2063,7 +2066,12 @@ pub const Resolution = struct {
     }
 
     pub fn nameSites(self: *const Resolution) constfold.Names {
-        return .{ .ctx = self, .reaches = reachedFrom, .constant_call = constantCallFrom, .integer_property = integerPropertyFrom, .variant = variantFrom, .tuple_component = tupleComponentFrom };
+        return .{ .ctx = self, .reaches = reachedFrom, .constant_call = constantCallFrom, .integer_property = integerPropertyFrom, .variant = variantFrom, .tuple_component = tupleComponentFrom, .embedded = embeddedFrom };
+    }
+
+    fn embeddedFrom(ctx: *const anyopaque, id: ExprId) ?[]const u8 {
+        const self: *const Resolution = @ptrCast(@alignCast(ctx));
+        return self.embeds.bytesOf(id);
     }
 
     fn tupleComponentFrom(ctx: *const anyopaque, ast: *const Ast, arity: usize, position: usize) ?[]const u8 {
@@ -4690,6 +4698,7 @@ fn resolveInternal(
         .builtins = builtins,
         .prelude = ambient_decls,
         .tuple_decls = r.tuple_decls,
+        .embeds = r.program.embeds,
         .type_names = type_names,
         .named = named,
         .traits_seen = trait_index.traits_seen,
@@ -8728,7 +8737,12 @@ const Resolver = struct {
     /// What a fold reads about the names written in a constant expression, from
     /// what the walk has settled so far.
     fn nameSites(self: *const Resolver) constfold.Names {
-        return .{ .ctx = self, .reaches = reachedBy, .constant_call = constantCallBy, .integer_property = integerPropertyBy, .variant = variantBy, .tuple_component = tupleComponentBy };
+        return .{ .ctx = self, .reaches = reachedBy, .constant_call = constantCallBy, .integer_property = integerPropertyBy, .variant = variantBy, .tuple_component = tupleComponentBy, .embedded = embeddedBy };
+    }
+
+    fn embeddedBy(ctx: *const anyopaque, id: ExprId) ?[]const u8 {
+        const self: *const Resolver = @ptrCast(@alignCast(ctx));
+        return self.program.embeds.bytesOf(id);
     }
 
     fn tupleComponentBy(ctx: *const anyopaque, ast: *const Ast, arity: usize, position: usize) ?[]const u8 {
@@ -14163,7 +14177,7 @@ const Resolver = struct {
             // mistake a second time.
             .err => {},
 
-            .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal => {},
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal => {},
 
             .reflection_root => try self.reportReflection(
                 id,
@@ -14799,7 +14813,7 @@ const Resolver = struct {
         if (id == ExprId.none) return true;
         return switch (self.ast.exprTag(id)) {
             .err => true,
-            .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .struct_pattern, .tuple_pattern => false,
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .struct_pattern, .tuple_pattern => false,
             .lambda => blk: {
                 const lambda = self.ast.lambda(id);
                 for (lambda.captures) |capture| if (self.containsErr(capture.source)) break :blk true;

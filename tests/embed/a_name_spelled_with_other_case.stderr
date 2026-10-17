@@ -1,0 +1,5 @@
+error[M-Embed]: no file "page.txt" beside `main.lin`
+ --> tests/embed/a_name_spelled_with_other_case/main.lin:2:17
+  |
+2 |     UInt8(embed("page.txt").length())
+  |                 ^^^^^^^^^^ the directory holds `Page.txt`, spelled differently

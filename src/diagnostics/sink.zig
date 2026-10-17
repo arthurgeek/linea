@@ -62,6 +62,7 @@ pub const Sink = struct {
         bounded.message = try cut(self.arena, d.message);
         bounded.labels = try cutLabels(self.arena, d.labels);
         bounded.notes = try cutNotes(self.arena, d.notes);
+        bounded.remarks = try cutNotes(self.arena, d.remarks);
         try self.list.append(self.arena, bounded);
     }
 
@@ -222,12 +223,13 @@ test "a text built from the source is cut on the way in, and says that it was" {
         .message = long,
         .labels = &.{.{ .file = .from(0), .span = .{ .start = 0, .end = 1 }, .message = long }},
         .notes = &.{long},
+        .remarks = &.{long},
     });
 
-    // Three places one message can be written, and the sink is upstream of all
+    // Four places one message can be written, and the sink is upstream of all
     // of them, so each is bounded before any renderer sees it.
     const d = sink.items()[0];
-    for ([_][]const u8{ d.message, d.labels[0].message, d.notes[0] }) |text| {
+    for ([_][]const u8{ d.message, d.labels[0].message, d.notes[0], d.remarks[0] }) |text| {
         try testing.expectEqual(max_text_bytes + truncated.len, text.len);
         try testing.expect(std.mem.endsWith(u8, text, truncated));
     }
@@ -305,7 +307,7 @@ test "every text a diagnostic carries is one the sink cuts" {
     // A file's path is not among them and is deliberately not cut: it is
     // bounded by what the filesystem will open, never by the source, and a cut
     // one would leave a diagnostic naming a place that cannot be found.
-    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes" };
+    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks" };
     const expected_label = [_][]const u8{ "file", "span", "message", "style" };
 
     const d_fields = @typeInfo(Diagnostic).@"struct".fields;

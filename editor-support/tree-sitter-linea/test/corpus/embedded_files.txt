@@ -1,0 +1,29 @@
+===================
+An embedded file names its path with one string literal, quoted or raw
+===================
+
+let page = embed("templates/page.html")
+
+fn icon() -> UInt64 {
+    embed_bytes(r"icon.png").length()
+}
+
+---
+
+(source_file
+  (constant_declaration
+    (identifier)
+    (embed_expression
+      (string_literal)))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (expression_statement
+        (call_expression
+          (field_expression
+            (embed_expression
+              (string_literal))
+            (identifier))
+          (argument_list))))))

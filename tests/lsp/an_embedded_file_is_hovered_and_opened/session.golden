@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1},"completionProvider":{"resolveProvider":false},"hoverProvider":true,"definitionProvider":true,"referencesProvider":true,"documentHighlightProvider":true,"documentSymbolProvider":true,"codeActionProvider":{"codeActionKinds":["quickfix"]},"documentFormattingProvider":true,"renameProvider":true,"foldingRangeProvider":true,"semanticTokensProvider":{"legend":{"tokenTypes":["keyword","variable","number","string","comment","operator"],"tokenModifiers":["declaration","readonly","defaultLibrary","linear"]},"full":true},"inlayHintProvider":{"resolveProvider":false}}}}
+{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[]}}
+{"jsonrpc":"2.0","id":2,"result":{"contents":{"kind":"plaintext","value":"Str, 10 bytes of \"page.html\""},"range":{"start":{"line":2,"character":11},"end":{"line":2,"character":29}}}}
+{"jsonrpc":"2.0","id":3,"result":{"uri":"page.html","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}}}}
+{"jsonrpc":"2.0","id":4,"result":null}

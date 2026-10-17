@@ -82,6 +82,11 @@ pub fn forPosition(
             const e = calledThrough(ast, written, &chain);
             if (reachesNoValue(checked, e) and typing.call_index.functionValueOf(typing, e) == null) return null;
             if (typing.exprType(e) == .poison) return null;
+            // What an embed read: its type, and how many bytes of which file.
+            if (checked.program.embeds.of(e)) |read| if (read != .none) {
+                const embedded = checked.program.embeds.files[read.index()];
+                break :blk .{ try std.fmt.allocPrint(gpa, "{s}, {d} bytes of {s}", .{ typing.nameOf(typing.exprType(e)), embedded.bytes.len, ast.tokenText(ast.exprMain(e)) }), ast.exprSpan(e) };
+            };
             break :blk .{ try saidOfExpr(gpa, checked, e), ast.exprSpan(e) };
         },
 

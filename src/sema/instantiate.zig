@@ -1277,6 +1277,8 @@ const Discovery = struct {
             .int_literal,
             .float_literal,
             .str_literal,
+            .embed,
+            .embed_bytes,
             .bool_literal,
             .unit_literal,
             .name_ref,

@@ -39,7 +39,7 @@ Strings, collections, parsing, and files.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.
 - [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; reading `lines()`, counting with a `Map`, and sorting with `Vec.sort_by`.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
-- [form_letters.lin](form_letters.lin): fills a letter template per order; JSON decoding and string building.
+- [form-letters](form-letters/main.lin): fills a letter template per order; files embedded with `embed`, `split_once`, JSON decoding and string building.
 - [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode`, `json.decode_file`, and `json.encode`.
 - [json_inventory.lin](json_inventory.lin): totals an inventory and adds a summary; loading with `json.read_file` and editing a `json.Value` document.
 - [discounts](discounts/main.lin): applies a validated discount; newtypes with `where` checks and opaque types.
@@ -83,6 +83,7 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
 - [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
+- [site-icon](site-icon/main.lin): serves a page and the icon a browser shows on its tab, as a CGI program; files embedded with `embed` and `embed_bytes`, and bytes answered with `http.bytes`.
 - [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values and streamed responses.
 - [welcome_back.lin](welcome_back.lin): greets a visitor by name and counts visits in a cookie; reading and setting cookies, and escaping user text in HTML.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.

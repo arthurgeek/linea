@@ -7027,14 +7027,20 @@ pub const Typing = struct {
     };
 
     /// Resolve the stored byte span once for text construction and runtime ABI.
-    /// Offsets are relative to the complete text descriptor, including its slice.
+    /// Offsets are relative to the complete descriptor: a `Str`'s, through its
+    /// `bytes` slice, or a byte slice's own, which is what `embed_bytes` and a
+    /// constant holding it lay out over the same pool of bytes.
     pub fn textFields(self: *const Typing, t: TypeId) ?TextFields {
-        const bytes = self.lookupField(t, "bytes") orelse return null;
-        const at = self.lookupField(bytes.ty, "at") orelse return null;
-        const len = self.lookupField(bytes.ty, "len") orelse return null;
+        const bytes = self.lookupField(t, "bytes") orelse return self.spanFields(t, 0);
+        return self.spanFields(bytes.ty, bytes.offset);
+    }
+
+    fn spanFields(self: *const Typing, slice: TypeId, base: u32) ?TextFields {
+        const at = self.lookupField(slice, "at") orelse return null;
+        const len = self.lookupField(slice, "len") orelse return null;
         return .{
-            .at = .{ .ty = at.ty, .offset = bytes.offset + at.offset },
-            .len = .{ .ty = len.ty, .offset = bytes.offset + len.offset },
+            .at = .{ .ty = at.ty, .offset = base + at.offset },
+            .len = .{ .ty = len.ty, .offset = base + len.offset },
         };
     }
 

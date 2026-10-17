@@ -80,6 +80,10 @@ pub const Analysis = struct {
 /// The library is checked once for a session and each module resumes from it,
 /// so an edit costs a check of the module rather than of the library as well.
 /// The analysis borrows the library's sources and must end before it does.
+///
+/// A file the program embeds is found among `files`, as a test or the corpus
+/// supplies it. `onDisk` is the editor's form, which reads embedded files from
+/// the disk instead.
 pub fn of(
     gpa: std.mem.Allocator,
     /// Backing for retained semantic and source arenas. General scratch uses
@@ -88,6 +92,31 @@ pub fn of(
     library: *const loader.CheckedLibrary,
     files: []const loader.InMemoryFile,
     entry: []const u8,
+) !Analysis {
+    return analyze(gpa, region_backing, library, files, entry, null);
+}
+
+/// As `of`, reading every file the program embeds from disk through `io`. An
+/// editor holds the program's own buffers and never a template or an image the
+/// program embeds, so this is how a server checks what a command line would.
+pub fn onDisk(
+    gpa: std.mem.Allocator,
+    region_backing: std.mem.Allocator,
+    library: *const loader.CheckedLibrary,
+    files: []const loader.InMemoryFile,
+    entry: []const u8,
+    io: std.Io,
+) !Analysis {
+    return analyze(gpa, region_backing, library, files, entry, io);
+}
+
+fn analyze(
+    gpa: std.mem.Allocator,
+    region_backing: std.mem.Allocator,
+    library: *const loader.CheckedLibrary,
+    files: []const loader.InMemoryFile,
+    entry: []const u8,
+    embeds_from: ?std.Io,
 ) !Analysis {
     var arena = std.heap.ArenaAllocator.init(region_backing);
     errdefer arena.deinit();
@@ -107,7 +136,11 @@ pub fn of(
     // first would copy files the module never reaches.
     const z_load = tracy.beginZone(@src(), "load");
     const source_program = try a.create(Program);
-    source_program.* = try library.loadFromMemory(a, &table, &sink, &interner, entry, files, .program, .{ .copy = source_arena.allocator() });
+    const ownership: loader.MemoryOwnership = if (embeds_from) |io|
+        .{ .copy_reading_disk = .{ .allocator = source_arena.allocator(), .io = io } }
+    else
+        .{ .copy = source_arena.allocator() };
+    source_program.* = try library.loadFromMemory(a, &table, &sink, &interner, entry, files, .program, ownership);
     const program = source_program.*;
     z_load.end();
     const z_check = tracy.beginZone(@src(), "check");

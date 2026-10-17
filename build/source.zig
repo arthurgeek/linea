@@ -903,14 +903,35 @@ const GuideFence = struct {
     line: usize,
     info: []const u8,
     body: []const u8,
-    /// The path in a `` `path.lin`: `` line directly above the fence.
+    /// The path in a `` `path.lin`: `` or `` `page.txt`: `` line directly
+    /// above the fence.
     label: ?[]const u8,
     unchecked: bool,
     /// The N of a `<!-- guide: first N diagnostics -->` line directly above.
     first: ?usize,
 
+    /// A block that could be a program's output. One directly after a
+    /// program is its output whatever line stands above it.
     fn isOutput(self: GuideFence) bool {
         return self.info.len == 0 or std.mem.eql(u8, self.info, "text");
+    }
+
+    /// A block that is not Linea, labelled with a file that is not Linea
+    /// source, and that no program before it claimed as output: a file
+    /// written beside the next program, which it may `embed`.
+    fn isData(self: GuideFence) bool {
+        const path = self.label orelse return false;
+        // A labelled manifest is a file of the project it sits in.
+        if (std.mem.eql(u8, self.info, "json") and isManifestPath(path)) return false;
+        return !std.mem.eql(u8, self.info, "linea") and !std.mem.endsWith(u8, path, ".lin");
+    }
+
+    /// The `.lin` file a Linea block's label names, or null. A line above a
+    /// Linea block naming anything else, such as `` `str.split_once`: `` at
+    /// the end of a sentence, is prose.
+    fn sourceLabel(self: GuideFence) ?[]const u8 {
+        const path = self.label orelse return null;
+        return if (std.mem.endsWith(u8, path, ".lin")) path else null;
     }
 
     fn hasEntryPoint(self: GuideFence) bool {
@@ -949,13 +970,15 @@ fn guideMarker(bare: []const u8) ?Marker {
     return .{ .first = count };
 }
 
-/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or
-/// null for any other line.
+/// The path a `` `path.lin`: `` or `` `path/linea.json`: `` line labels, or a
+/// data file's such as `` `usage.txt`: ``, or null for any other line. A data
+/// file's name carries an extension, so a line naming a word, `` `defer`: ``,
+/// labels nothing.
 fn guideLabel(line: []const u8) ?[]const u8 {
     const bare = std.mem.trim(u8, line, " \t");
-    if (bare.len < 8 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
+    if (bare.len < 4 or bare[0] != '`' or !std.mem.endsWith(u8, bare, "`:")) return null;
     const path = bare[1 .. bare.len - 2];
-    if (!std.mem.endsWith(u8, path, ".lin") and !isManifestPath(path)) return null;
+    if (std.mem.indexOfScalar(u8, std.fs.path.basename(path), '.') == null) return null;
     for (path) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '/' and c != '.' and c != '-') return null;
     }
@@ -1102,6 +1125,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
     const fences = guideFences(gpa, chapter, &problems);
     var programs: std.ArrayList(GuideProgram) = .empty;
     var project: std.ArrayList(GuideFile) = .empty;
+    // Files written beside the next program, which it may embed, and the line
+    // of the first of them.
+    var data: std.ArrayList(GuideFile) = .empty;
+    var data_line: usize = 0;
     var fragments: usize = 0;
     var excluded: usize = 0;
     var unrun_output: std.ArrayList(GuideBlock) = .empty;
@@ -1110,6 +1137,12 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         const fence = fences[i];
         i += 1;
         const is_linea = std.mem.eql(u8, fence.info, "linea");
+        // A data block belongs to the program directly after it, past other
+        // data blocks and the files of a labelled project; anything else
+        // strands it, and a fragment does below.
+        const is_manifest = std.mem.eql(u8, fence.info, "json") and if (fence.label) |path| isManifestPath(path) else false;
+        const continues_data = fence.isData() or is_linea or is_manifest;
+        if (!continues_data) strandData(gpa, chapter, &problems, &data, data_line);
         if (fence.first != null and !fence.isOutput()) {
             problems.append(gpa, .{
                 .chapter = chapter.file,
@@ -1119,6 +1152,8 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         }
         if (fence.unchecked) {
             excluded += 1;
+            // An excluded program takes the data above it with it.
+            if (is_linea) data.clearRetainingCapacity();
             if (fence.isOutput()) {
                 unrun_output.append(gpa, .{ .chapter = chapter.file, .line = fence.line, .body = fence.body }) catch @panic("out of memory");
             }
@@ -1126,6 +1161,11 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 unrun_output.append(gpa, .{ .chapter = chapter.file, .line = fences[i].line, .body = fences[i].body }) catch @panic("out of memory");
                 i += 1;
             }
+            continue;
+        }
+        if (fence.isData()) {
+            if (data.items.len == 0) data_line = fence.line;
+            data.append(gpa, .{ .path = fence.label.?, .text = fence.body }) catch @panic("out of memory");
             continue;
         }
         if (fence.isOutput()) {
@@ -1146,19 +1186,21 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
         if (!is_linea) continue;
-        if (fence.label == null) project.clearRetainingCapacity();
+        const label = fence.sourceLabel();
+        if (label == null) project.clearRetainingCapacity();
         const has_entry = fence.hasEntryPoint();
-        if (fence.label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
-        const is_main_file = if (fence.label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
+        if (label) |path| project.append(gpa, .{ .path = path, .text = fence.body }) catch @panic("out of memory");
+        const is_main_file = if (label) |path| std.mem.eql(u8, std.fs.path.basename(path), "main.lin") else false;
         var sources: usize = 0;
         for (project.items) |file| sources += @intFromBool(std.mem.endsWith(u8, file.path, ".lin"));
-        const alone = fence.label != null and sources == 1 and has_entry;
-        if (fence.label != null and !is_main_file and !alone) {
+        const alone = label != null and sources == 1 and has_entry;
+        if (label != null and !is_main_file and !alone) {
             fragments += @intFromBool(!has_entry);
             continue;
         }
-        if (fence.label == null and !has_entry) {
+        if (label == null and !has_entry) {
             fragments += 1;
+            strandData(gpa, chapter, &problems, &data, data_line);
             continue;
         }
 
@@ -1196,12 +1238,14 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             if (isTestSummary(last)) command = .@"test";
         }
 
-        if (fence.label != null) {
+        if (label != null) {
             var root: []const u8 = ".";
             if (is_main_file) {
-                const dir = std.fs.path.dirname(fence.label.?) orelse "";
+                const dir = std.fs.path.dirname(label.?) orelse "";
                 if (dir.len > 0) root = dir;
-            } else root = fence.label.?;
+            } else root = label.?;
+            project.appendSlice(gpa, data.items) catch @panic("out of memory");
+            data.clearRetainingCapacity();
             programs.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
@@ -1216,8 +1260,10 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             continue;
         }
         const name = if (command_block) |shown| shown.path else if (expected) |text| guideNamedFile(text) orelse "main.lin" else "main.lin";
-        const files = gpa.alloc(GuideFile, 1) catch @panic("out of memory");
+        const files = gpa.alloc(GuideFile, 1 + data.items.len) catch @panic("out of memory");
         files[0] = .{ .path = name, .text = fence.body };
+        @memcpy(files[1..], data.items);
+        data.clearRetainingCapacity();
         programs.append(gpa, .{
             .chapter = chapter.file,
             .line = fence.line,
@@ -1229,6 +1275,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             .expected_first = expected_first,
         }) catch @panic("out of memory");
     }
+    strandData(gpa, chapter, &problems, &data, data_line);
     return .{
         .programs = programs.toOwnedSlice(gpa) catch @panic("out of memory"),
         .problems = problems.toOwnedSlice(gpa) catch @panic("out of memory"),
@@ -1236,6 +1283,24 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         .excluded = excluded,
         .unrun_output = unrun_output.toOwnedSlice(gpa) catch @panic("out of memory"),
     };
+}
+
+/// Reports data blocks no program took, and forgets them: a file written beside
+/// nothing that runs is a block the gate never checked.
+fn strandData(
+    gpa: std.mem.Allocator,
+    chapter: GuideChapter,
+    problems: *std.ArrayList(GuideProblem),
+    data: *std.ArrayList(GuideFile),
+    line: usize,
+) void {
+    if (data.items.len == 0) return;
+    problems.append(gpa, .{
+        .chapter = chapter.file,
+        .line = line,
+        .message = "a labelled data block is written beside the program directly after it, and none follows; put the program after it, or write `<!-- guide: unchecked REASON -->` above the block",
+    }) catch @panic("out of memory");
+    data.clearRetainingCapacity();
 }
 
 /// Why what the compiler printed is not what the guide pasted, or null when it

@@ -3208,6 +3208,14 @@ const Printer = struct {
                 try self.write(")");
             },
 
+            // The literal naming the file is written back as it was spelled,
+            // raw or quoted, between the word and its parentheses.
+            .embed, .embed_bytes => {
+                try self.write(if (tag == .embed) "embed(" else "embed_bytes(");
+                try self.write(self.ast.tokenText(self.ast.exprMain(e)));
+                try self.write(")");
+            },
+
             .try_ => {
                 try self.writeExpr(self.ast.unaryOperand(e));
                 try self.write("?");

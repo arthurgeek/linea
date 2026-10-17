@@ -6156,6 +6156,73 @@ const Parser = struct {
         return self.builder.addUnary(.panic, start, self.rangeFrom(start), message);
     }
 
+    /// `embed("path")` or `embed_bytes("path")`: a file the loader reads when
+    /// the program is compiled. The loader reads the path before any name is
+    /// resolved, so the argument is one quoted or raw string literal and
+    /// nothing a name or a computation could stand for ([S-Embed]).
+    ///
+    /// The node is a leaf whose main token is that literal. A refused argument
+    /// is skipped to its closing `)` without building nodes for it, so no
+    /// expression the program cannot reach is left in the tree.
+    fn parseEmbed(self: *Parser) std.mem.Allocator.Error!ExprId {
+        const start = self.cursor.current();
+        const bytes = self.cursor.peek() == .keyword_embed_bytes;
+        const word = if (bytes) "embed_bytes" else "embed";
+        _ = self.cursor.advance();
+
+        if (self.cursor.eat(.l_paren) == null) {
+            // The word alone is the error node, and whatever follows it is read
+            // as what follows any operand, so one missing `(` is one report.
+            try self.reportAt(.s_paren, self.cursor.current(), "expected `(`", "the file is named in parentheses");
+            return self.builder.addLiteral(.err, start, self.rangeFrom(start));
+        }
+
+        const argument = self.cursor.current();
+        if (self.cursor.peek() == .string_literal and self.cursor.peekAt(1) == .r_paren) {
+            _ = self.cursor.advance();
+            _ = self.cursor.advance();
+            return self.builder.addLiteral(if (bytes) .embed_bytes else .embed, argument, self.rangeFrom(start));
+        }
+
+        const compiled = "the file is read when the program is compiled, so its path is written here";
+        const label: []const u8 = switch (self.cursor.peek()) {
+            .r_paren => "name the file here, as a string literal",
+            .str_open => "an interpolated path is computed when the program runs, and the file is read before",
+            .string_line => "a path is one line, written as a quoted string literal",
+            .string_literal => if (self.cursor.peekAt(1) != .comma)
+                compiled
+            else if (self.cursor.peekAt(2) == .r_paren)
+                "remove the comma after the path"
+            else
+                "one file is embedded at a time",
+            else => compiled,
+        };
+        const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` takes one string literal naming the file", .{word});
+
+        // Past what was written, to the `)` that closes it.
+        var depth: u32 = 0;
+        var last = argument;
+        while (true) {
+            switch (self.cursor.peek()) {
+                .eof => break,
+                .l_paren, .l_bracket, .l_brace => depth += 1,
+                .r_paren, .r_bracket, .r_brace => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                },
+                else => {},
+            }
+            last = self.cursor.advance();
+        }
+        const written: TokenRange = .{ .start = argument, .end = if (last == argument and self.cursor.current() == argument) argument else TokenId.at(last.index() + 1) };
+        const span = self.cursor.spanOf(written);
+        try self.sink.addError(.s_embed, self.file, if (span.start == span.end) self.cursor.spanAt(self.cursor.current()) else span, message, label);
+        if (self.cursor.eat(.r_paren) == null) {
+            try self.reportAt(.s_paren, self.cursor.current(), "expected `)`", "this embed is never closed");
+        }
+        return self.builder.addLiteral(.err, start, self.rangeFrom(start));
+    }
+
     /// `match e { P => body, … }`.
     ///
     /// A pattern is a name — a variant, or `_` — so it is parsed as one and
@@ -6296,6 +6363,9 @@ const Parser = struct {
             // reaches into one the same way. `copy(x)` closes at its `)` like
             // a call, so `copy(x).length()` applies the operation to the copy.
             .str_literal, .interp, .name_ref, .reflection_root, .field, .call, .lambda, .variant_ref, .struct_literal, .grouped, .index, .array_literal, .copy_, .tuple_literal => true,
+            // `embed("x")` closes at its `)` like a call, so
+            // `embed("x").length()` measures the file's text.
+            .embed, .embed_bytes => true,
             .block,
             .conditional,
             .while_,
@@ -6504,6 +6574,7 @@ const Parser = struct {
             .keyword_match => return self.parseMatch(),
             .keyword_copy => return self.parseCopy(),
             .keyword_panic => return self.parsePanic(),
+            .keyword_embed, .keyword_embed_bytes => return self.parseEmbed(),
             .keyword_loop => return self.parseLoop(),
             .keyword_break => return self.parseJump(.break_),
             .keyword_return => return self.parseJump(.return_),

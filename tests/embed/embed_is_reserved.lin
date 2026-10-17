@@ -1,0 +1,8 @@
+fn embed_bytes() -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    let embed = 2
+    embed + embed_bytes()
+}

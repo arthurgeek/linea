@@ -1,0 +1,10 @@
+// A file the program embeds is read from disk and checked, and a client that
+// can watch files is asked to watch every file the program names, read or
+// not. A change to one of them checks the program again.
+let motd = embed("motd.txt")
+
+let banner = embed("banner.txt")
+
+fn main() -> UInt8 {
+    UInt8(motd.length() + banner.length())
+}

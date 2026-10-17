@@ -1,0 +1,8 @@
+error[M-EmbedText]: "price.txt" is not UTF-8 text
+ --> tests/embed/text_cut_short_is_not_utf8/main.lin:2:17
+  |
+2 |     UInt8(embed("price.txt").length())
+  |                 ^^^^^^^^^^^ byte 9 is 0xE2, which begins a character the file ends before completing
+  |
+  = note: that byte is at line 1, column 10 of the file
+  = help: `embed_bytes("price.txt")` embeds a file of any bytes as a `mem.Slice[UInt8]`

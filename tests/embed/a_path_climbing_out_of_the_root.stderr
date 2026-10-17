@@ -1,0 +1,10 @@
+error[M-Embed]: "../x.txt" climbs above the program's root
+ --> tests/embed/a_path_climbing_out_of_the_root/main.lin:4:17
+  |
+4 |     UInt8(embed("../x.txt").length() + pages.size())
+  |                 ^^^^^^^^^^ an embedded file is inside the directory holding the program's `linea.json`
+error[M-Embed]: "../../x.txt" climbs above the program's root
+ --> tests/embed/a_path_climbing_out_of_the_root/pages/pages.lin:2:11
+  |
+2 |     embed("../../x.txt").length()
+  |           ^^^^^^^^^^^^^ an embedded file is inside the directory holding the program's `linea.json`

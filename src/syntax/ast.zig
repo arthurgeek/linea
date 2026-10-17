@@ -1685,6 +1685,15 @@ pub const Ast = struct {
         return true;
     }
 
+    /// Appends the path an `embed` or `embed_bytes` names to `out`, decoded
+    /// as its string literal is, and returns whether every escape in it could
+    /// be read. The parser admits only a quoted or raw literal there, so the
+    /// path is the literal's one token.
+    pub fn embeddedPath(self: *const Ast, gpa: std.mem.Allocator, out: *std.ArrayList(u8), id: ExprId) std.mem.Allocator.Error!bool {
+        std.debug.assert(self.exprTag(id) == .embed or self.exprTag(id) == .embed_bytes);
+        return try literal_text.decode(gpa, out, self.tokenText(self.exprMain(id))) == null;
+    }
+
     /// The first file of the module, which is where a diagnostic about the
     /// module as a whole -- rather than about anything written in it -- points.
     pub fn firstFile(self: *const Ast) FileId {

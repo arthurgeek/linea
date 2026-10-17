@@ -3749,7 +3749,7 @@ fn conditionalDepth(ast: *const Ast, id: ExprId) u32 {
             const b = ast.binary(id);
             break :blk @max(conditionalDepth(ast, b.lhs), conditionalDepth(ast, b.rhs));
         },
-        .int_literal, .float_literal, .str_literal, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .continue_, .err => 0,
+        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .continue_, .err => 0,
         // A generated range's ends are literals, so nothing nests inside one
         // for this to find.
         .range => 0,

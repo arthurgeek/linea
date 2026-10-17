@@ -1,0 +1,10 @@
+import std.io
+
+// The file's braces and backslash are text: nothing in it is interpolated or
+// escaped.
+let greeting = embed("greeting.txt")
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.print(greeting)?
+    .Ok(0)
+}

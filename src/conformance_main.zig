@@ -172,19 +172,35 @@ const Case = struct {
     /// about a library -- whether something outside can call it -- and the
     /// answer is what the program prints.
     driver: ?InMemoryFile = null,
+    /// Every other regular file beneath a directory case: the files its
+    /// program may embed with `embed` or `embed_bytes`.
+    ///
+    /// Kept out of `files` for the reason the manifest is: they are not Linea
+    /// source, and a walk over a case's documents must not be handed a
+    /// template or an image. The loader reads them only through an embed.
+    data: []const InMemoryFile = &.{},
 };
 
-/// A case's source together with the manifest marking its root.
-///
-/// The loader reads the kind from the files it is given, so this is what it is
-/// given. The caller owns the result.
-fn withManifest(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
-    const marking = case.manifest orelse return case.files;
-    const all = try gpa.alloc(InMemoryFile, case.files.len + 1 + case.libraries.len);
-    @memcpy(all[0..case.files.len], case.files);
-    all[case.files.len] = marking;
-    @memcpy(all[case.files.len + 1 ..], case.libraries);
+/// What the loader reads beside a case's source: the manifest marking its
+/// root, where it has one, the manifests of the libraries it holds, and the
+/// files its program may embed. Every recompilation of a case, rewritten or
+/// not, is given these, so it is the same root holding the same files. The
+/// caller owns the result.
+fn besideOf(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
+    const marking = case.manifest orelse return case.data;
+    const all = try gpa.alloc(InMemoryFile, 1 + case.libraries.len + case.data.len);
+    all[0] = marking;
+    @memcpy(all[1..][0..case.libraries.len], case.libraries);
+    @memcpy(all[1 + case.libraries.len ..], case.data);
     return all;
+}
+
+/// A case's source followed by what the loader reads beside it. The caller
+/// owns the result.
+fn inputsOf(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
+    const beside = try besideOf(gpa, case);
+    if (beside.len == 0) return case.files;
+    return std.mem.concat(gpa, InMemoryFile, &.{ case.files, beside });
 }
 
 fn lessByPath(_: void, a: []const u8, b: []const u8) bool {
@@ -839,6 +855,17 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
         drivers[owner] = try readCase(gpa, io, root, p);
     }
 
+    // Every other file beneath a directory case is one its program may embed.
+    // A golden is the case's record rather than its input, so one beneath the
+    // directory is left to the orphan check, which reports it.
+    const data_of = try gpa.alloc(std.ArrayList(InMemoryFile), roots.items.len);
+    @memset(data_of, .empty);
+    for (all) |p| {
+        if (!isCaseData(p)) continue;
+        const owner = ownerOf(roots.items, p) orelse continue;
+        try data_of[owner].append(gpa, try readCase(gpa, io, root, p));
+    }
+
     for (roots.items, 0..) |d, i| {
         const entry = try displayPath(gpa, root, d);
         try cases.append(gpa, .{
@@ -849,10 +876,52 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
             .manifest = manifests[i],
             .libraries = try libraries[i].toOwnedSlice(gpa),
             .driver = drivers[i],
+            .data = try data_of[i].toOwnedSlice(gpa),
         });
     }
 
     return cases.toOwnedSlice(gpa);
+}
+
+/// Whether a file beneath a directory case is a file the case's program may
+/// embed: anything but its source, its manifest, its driver and a golden.
+fn isCaseData(path: []const u8) bool {
+    const base = std.fs.path.basename(path);
+    if (std.mem.endsWith(u8, base, ".lin")) return false;
+    if (std.mem.eql(u8, base, loader.manifest_name) or std.mem.eql(u8, base, driver_name)) return false;
+    for (golden_extensions) |ext| if (std.mem.endsWith(u8, base, ext)) return false;
+    return true;
+}
+
+test "a directory case carries every other file beneath it as data its program may embed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io, "tree/site/nested");
+    try tmp.dir.createDirPath(io, "tree/site/templates");
+    for ([_][]const u8{ "tree/site/main.lin", "tree/site/linea.json", "tree/site/page.txt", "tree/site/nested/x.sql", "tree/site/templates/card.html", "tree/site/stale.out", "tree/alone.lin" }) |path| {
+        try tmp.dir.writeFile(io, .{ .sub_path = path, .data = "fn main() -> UInt8 { 0 }\n" });
+    }
+    const root = try tmp.dir.realPathFileAlloc(io, "tree", gpa);
+    const cases = try collectCases(gpa, io, root, try collectPaths(gpa, io, root));
+
+    try testing.expectEqual(@as(usize, 2), cases.len);
+    const alone, const site = if (std.mem.endsWith(u8, cases[0].entry, "alone.lin")) .{ cases[0], cases[1] } else .{ cases[1], cases[0] };
+    try testing.expectEqual(@as(usize, 0), alone.data.len);
+    try testing.expectEqual(@as(usize, 3), site.data.len);
+    var names: [3][]const u8 = undefined;
+    for (site.data, &names) |d, *n| n.* = std.fs.path.basename(d.path);
+    std.mem.sort([]const u8, &names, {}, lessByPath);
+    try testing.expectEqualStrings("card.html", names[0]);
+    try testing.expectEqualStrings("page.txt", names[1]);
+    try testing.expectEqualStrings("x.sql", names[2]);
+    // The manifest goes first, then the data, and the source keeps its place.
+    const inputs = try inputsOf(gpa, site);
+    try testing.expectEqual(site.files.len + 4, inputs.len);
+    try testing.expectEqualStrings("linea.json", std.fs.path.basename(inputs[site.files.len].path));
 }
 
 /// The stem every golden of the case anchored at `rel` is opened under.
@@ -10778,17 +10847,11 @@ fn renameHolds(
         return true;
     }
 
-    // One more than the source, where the case carries a manifest: a renamed
-    // program is the same root as the one it was renamed from, and reloading it
-    // without what marks that root reads a library as a program.
-    const extra: usize = if (case.manifest == null) 0 else 1 + case.libraries.len;
-    const after = try gpa.alloc(InMemoryFile, case.files.len + extra);
+    // The source and what the loader reads beside it: a renamed program is the
+    // same root as the one it was renamed from, holding the same files, and
+    // reloading it without what marks that root reads a library as a program.
+    const after = try gpa.dupe(InMemoryFile, try inputsOf(gpa, case));
     defer gpa.free(after);
-    @memcpy(after[0..case.files.len], case.files);
-    if (case.manifest) |marking| {
-        after[case.files.len] = marking;
-        @memcpy(after[case.files.len + 1 ..], case.libraries);
-    }
 
     var rewritten: std.ArrayList([]u8) = .empty;
     defer {
@@ -17231,13 +17294,15 @@ const Checked = struct {
     /// The code this program generated, for a rewrite that claims to be the
     /// same program rather than merely to answer the same.
     ir: []const u8,
-    /// The manifest marking the root, where the case carries one.
+    /// The manifest marking the root, where the case carries one, and the
+    /// files its program may embed.
     ///
     /// A rewrite is compiled the way the case was, and what kind of root it is
-    /// is part of that: loaded without this, a library is read as a program and
-    /// refused for declaring no `main` -- a disagreement invented by the
-    /// property rather than found by it.
-    manifest: ?loader.InMemoryFile = null,
+    /// is part of that: loaded without the manifest, a library is read as a
+    /// program and refused for declaring no `main`, and without the data files
+    /// an embed names nothing -- disagreements invented by the property rather
+    /// than found by it.
+    beside: []const loader.InMemoryFile = &.{},
     /// The C driver the case is reached through, where it has one. A rewrite
     /// that cannot change what a program means cannot change what its caller
     /// prints, so the rewrite is run through the same driver.
@@ -17645,7 +17710,8 @@ fn checkMaterializedDerives(
     original_answer: []const u8,
     original_output: []const u8,
     original_errors: []const u8,
-    manifest: ?loader.InMemoryFile,
+    /// The manifest and data files the case carries, as `besideOf` gives them.
+    beside: []const loader.InMemoryFile,
     driver_source: ?[]const u8,
 ) !void {
     var materialized = (try transform_mod.materializeDerives(gpa, program, expanded, resolution)) orelse return;
@@ -17653,7 +17719,7 @@ fn checkMaterializedDerives(
 
     var files: std.ArrayList(loader.InMemoryFile) = .empty;
     try files.appendSlice(gpa, materialized.files);
-    if (manifest) |file| try files.append(gpa, file);
+    try files.appendSlice(gpa, beside);
 
     var table: FileTable = .empty;
     var sink = Sink.init(gpa);
@@ -17789,7 +17855,7 @@ fn checkRewrites(
         // `.lin` files rather than out of whatever the case is called.
         var one: std.ArrayList(loader.InMemoryFile) = .empty;
         try one.append(scratch, .{ .path = program.source.path, .text = variant.text });
-        if (program.manifest) |m| try one.append(scratch, m);
+        try one.appendSlice(scratch, program.beside);
         var loaded = try loadFromMemory(scratch, &table, &sink, &interner, program.source.path, one.items, .program, true, .borrow);
         try table.buildMaps(scratch);
         var settled = try checkProgram(scratch, per_rewrite.child_allocator, &loaded, &interner, &sink, .program);
@@ -18012,7 +18078,8 @@ const WalkSubject = struct {
     files: []const loader.InMemoryFile,
     /// The file each of `files` is in `semantics`, where it was loaded.
     file_ids: []const ?FileId,
-    manifest: ?loader.InMemoryFile = null,
+    /// The manifest and data files the case carries, as `besideOf` gives them.
+    beside: []const loader.InMemoryFile = &.{},
     /// What the original compilation settled; its `file` is set per rewrite.
     semantics: TransformSemantics,
     /// `rulesNamedBy` of the original compilation, through lowering.
@@ -18078,7 +18145,7 @@ fn compareWalkLoops(
 
     var inputs: std.ArrayList(loader.InMemoryFile) = .empty;
     for (subject.files, 0..) |other, j| try inputs.append(scratch, if (j == k) .{ .path = other.path, .text = rewritten } else other);
-    if (subject.manifest) |m| try inputs.append(scratch, m);
+    try inputs.appendSlice(scratch, subject.beside);
     const loaded = try generate.checkLoaded(scratch, subject.entry, inputs.items, checked_library);
     const table = &loaded.table;
     const sink = &loaded.sink;
@@ -18416,12 +18483,42 @@ const BuildRunOptions = struct {
 };
 
 /// What one outcome is filed under beside the salt: the module, the driver
-/// linked against it, and the level it was compiled at.
+/// linked against it, and the level it was compiled at. Everything a program's
+/// behaviour depends on reaches its IR, the bytes of every file it embeds
+/// included, so a program whose embedded file changed is a different key and
+/// never reads the outcome recorded for the old bytes.
 const OutcomeKey = struct {
     ir: []const u8,
     driver: ?[]const u8 = null,
     opt: []const u8 = toolchain.default_level,
 };
+
+test "a program is filed under the bytes it embeds" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const checked = test_library.get();
+    var irs: [2][]const u8 = undefined;
+    // Two files of one length, so only the bytes differ.
+    for ([_][]const u8{ "first", "fresh" }, &irs) |motd, *ir| {
+        var table: FileTable = .empty;
+        var sink = Sink.init(a);
+        var interner: Interner = .empty;
+        const files = [_]InMemoryFile{
+            .{ .path = "app/main.lin", .text = "fn main() -> UInt8 {\n    UInt8(embed(\"motd.txt\").length())\n}\n" },
+            .{ .path = "app/motd.txt", .text = motd },
+        };
+        var loaded = try checked.loadFromMemory(a, &table, &sink, &interner, "app", &files, .program, .borrow);
+        var settled = try checked.checkProgram(a, a, &loaded, &interner, &sink, .program);
+        const module = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)).?;
+        var written: std.Io.Writer.Allocating = .init(a);
+        try testing.expect(try emitMlir(a, &written.writer, &module, &table, &sink));
+        ir.* = written.written();
+        try testing.expect(std.mem.indexOf(u8, ir.*, motd) != null);
+    }
+    const cache: OutcomeCache = .{ .dir = "outcomes", .salt = 7 };
+    try testing.expect(!std.mem.eql(u8, try cache.pathFor(a, .{ .ir = irs[0] }), try cache.pathFor(a, .{ .ir = irs[1] })));
+}
 
 test "one module built at two levels is filed as two outcomes" {
     const cache: OutcomeCache = .{ .dir = "outcomes", .salt = 7 };
@@ -19377,7 +19474,7 @@ fn checkCase(
     const program = loaded: {
         const load_zone = tracy.beginZone(@src(), "frontend");
         defer load_zone.end();
-        const inputs = try withManifest(gpa, case);
+        const inputs = try inputsOf(gpa, case);
         break :loaded try env.library.loadFromMemory(gpa, &table, &sink, &interner, case.entry, inputs, .program, .borrow);
     };
     try table.buildMaps(gpa);
@@ -19473,8 +19570,10 @@ fn checkCase(
     // tree -- and a loader that numbered by discovery would pass every
     // other case here and fail this one.
     if (env.properties and case.files.len > 1) {
-        const flipped = try gpa.alloc(InMemoryFile, case.files.len);
+        const beside = try besideOf(gpa, case);
+        const flipped = try gpa.alloc(InMemoryFile, case.files.len + beside.len);
         for (case.files, 0..) |f, k| flipped[case.files.len - 1 - k] = f;
+        @memcpy(flipped[case.files.len..], beside);
 
         var other_table: FileTable = .empty;
         var other_sink = Sink.init(gpa);
@@ -19839,7 +19938,7 @@ fn checkCase(
         // is a program or library. This remains a second load and check, independent
         // of the compiler answers above; publication and rename only share that
         // independent answer with each other.
-        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try withManifest(gpa, case), case.entry);
+        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try inputsOf(gpa, case), case.entry);
         defer lsp_checked.deinit();
 
         tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
@@ -20051,7 +20150,7 @@ fn checkCase(
                                 ran.text,
                                 ran.output,
                                 ran.errors,
-                                case.manifest,
+                                try besideOf(gpa, case),
                                 if (case.driver) |d| d.text else null,
                             );
                         }
@@ -20101,7 +20200,7 @@ fn checkCase(
                                 .output = ran.output,
                                 .errors = ran.errors,
                                 .ir = ir.written(),
-                                .manifest = case.manifest,
+                                .beside = try besideOf(gpa, case),
                                 .driver = if (case.driver) |d| d.text else null,
                             });
                             rewrites_zone.end();
@@ -20214,7 +20313,7 @@ fn checkCase(
             .entry = case.entry,
             .files = case.files,
             .file_ids = file_ids,
-            .manifest = case.manifest,
+            .beside = try besideOf(gpa, case),
             .semantics = .{
                 .ast = &settled.expanded.ast,
                 .program = &program,

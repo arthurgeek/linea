@@ -1670,6 +1670,7 @@ const Lowerer = struct {
                 self.literal(id, ty)
             else
                 self.strLiteral(id, ty, span, dest),
+            .embed, .embed_bytes => self.embedded(id, ty, span, dest),
 
             .loop_ => self.loopExpr(id, ty, span),
 
@@ -2900,6 +2901,15 @@ const Lowerer = struct {
         // lexer already ran to decide the escapes could be read. A literal that
         // reaches here has been through that, so it cannot fail differently.
         return self.strValue(try self.mono.internLiteral(self.ast, id), ty, span, dest);
+    }
+
+    /// The `Str` or byte slice over a file the loader read. Its bytes join the
+    /// pool every literal is interned in, so a file and a literal holding the
+    /// same bytes are one blob, and every embedded byte reaches the emitted
+    /// code.
+    fn embedded(self: *Lowerer, id: ExprId, ty: TypeId, span: Span, dest: ?*Dest) std.mem.Allocator.Error!InstId {
+        const bytes = self.res.embeds.bytesOf(id) orelse return self.poison(span);
+        return self.strValue(try self.mono.internBytes(bytes), ty, span, dest);
     }
 
     /// A `Str` over a blob already in the pool.

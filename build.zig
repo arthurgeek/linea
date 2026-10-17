@@ -118,9 +118,11 @@ fn libraryManifest(b: *std.Build) std.Build.LazyPath {
     var found: std.ArrayList([]const u8) = .empty;
     while (walker.next(io) catch @panic("cannot read the standard library")) |entry| {
         if (entry.kind != .file) continue;
-        // The manifest travels with the sources: it is what says this root is
-        // the library named `std`, for the embedded copy as for the directory.
-        if (!std.mem.endsWith(u8, entry.basename, ".lin") and !std.mem.eql(u8, entry.path, "linea.json")) continue;
+        // Every file but the library's documentation travels with the
+        // sources: the manifest says this root is the library named `std`, for
+        // the copy compiled in as for the directory, and any other file is one
+        // a library module may `embed`, which the copy must hold to read.
+        if (std.mem.endsWith(u8, entry.basename, ".md")) continue;
         found.append(b.allocator, b.dupe(entry.path)) catch @panic("OOM");
     }
     std.mem.sort([]const u8, found.items, {}, lessThanSlice);
@@ -2285,6 +2287,8 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/structs/a_field_pattern_is_no_range.lin",
     "tests/decl/a_unit_result_is_not_written/main.lin",
     "tests/testing_signatures/a_written_unit_result_says_what_a_test_and_main_answer.lin",
+    "tests/embed/embed_is_reserved.lin",
+    "tests/embed/the_path_is_a_literal.lin",
 };
 
 /// Every corpus file the grammar is asked to derive.

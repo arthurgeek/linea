@@ -1,0 +1,9 @@
+let first = embed("word.txt")
+
+let second = embed("word.txt")
+
+let written = "word"
+
+fn main() -> UInt8 {
+    UInt8(first.length() + second.length() + written.length())
+}
