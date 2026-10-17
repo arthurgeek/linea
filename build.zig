@@ -876,7 +876,7 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig" },
         .imported_by = "build.zig",
         .layered = false,
         .test_manifests = &.{"source_test.zig"},
@@ -1104,6 +1104,7 @@ const HeavySteps = struct {
     runtime_installs: [2]*std.Build.Step,
     generate_grammar: *std.Build.Step,
     guide_gate: *std.Build.Step.Compile,
+    example_tests: *std.Build.Step.Compile,
     checked_runtime_archive: std.Build.LazyPath,
     test_filters: []const []const u8,
     scratch: []const u8,
@@ -1253,6 +1254,23 @@ const HeavySteps = struct {
         return run;
     }
 
+    /// `linea test` on every root beneath `examples/` that declares a test,
+    /// including a library nested under an application, which the application's
+    /// own run does not reach. The suite runs some of these as cases and
+    /// compares a transcript, which `-Dupdate` can rewrite to hold a failure;
+    /// this step asserts the exit status, which cannot be accepted.
+    fn exampleTests(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
+        const b = self.b;
+        const run = b.addRunArtifact(self.example_tests);
+        run.addArg(b.pathFromRoot("examples"));
+        run.addArg(b.getInstallPath(.bin, "linea"));
+        run.step.dependOn(installed);
+        if (toolchain.sanitizeVariable(self.sanitize.flag())) |variable| run.setEnvironmentVariable(variable.name, variable.value);
+        if (self.walkers) |n| run.addArg(b.fmt("{d}", .{n}));
+        run.has_side_effects = true;
+        return run;
+    }
+
     /// Fresh copies of the heavy steps `order` names, each waiting for the
     /// one before it; returns the last, or null when there are none.
     fn sequence(self: *const HeavySteps, order: []const test_roots.Heavy) ?*std.Build.Step {
@@ -1334,7 +1352,7 @@ pub fn build(b: *std.Build) void {
     // jobs on one machine, so a run that takes every core makes the other jobs
     // wait for it. It is also the only way to measure what the parallelism is
     // actually buying, by asking for one.
-    const walkers = b.option(u32, "walkers", "How many workers walk the corpus (default: one per core)");
+    const walkers = b.option(u32, "walkers", "How many workers walk the corpus (default: one per core), or run the examples' tests (default: 2)");
 
     const scratch = b.option(
         []const u8,
@@ -1770,6 +1788,7 @@ pub fn build(b: *std.Build) void {
         .unit_module = undefined,
         .generate_grammar = undefined,
         .guide_gate = undefined,
+        .example_tests = undefined,
     };
     const exe = heavy.compiler();
     b.installArtifact(exe);
@@ -1963,6 +1982,18 @@ pub fn build(b: *std.Build) void {
     const run_guide = heavy.guide(b.getInstallStep());
     const guide_step = b.step("guide", "Compile the guide's programs and hold their pasted output to what the compiler prints");
     guide_step.dependOn(&run_guide.step);
+
+    heavy.example_tests = b.addExecutable(.{
+        .name = "example-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("build/example_tests.zig"),
+            .target = b.graph.host,
+            .optimize = .Debug,
+        }),
+    });
+    heavy.example_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/ that declares a test");
+    example_tests_step.dependOn(&heavy.exampleTests(b.getInstallStep()).step);
 
     // Fidelity, as a checked claim rather than an impression. Reserved-word
     // parity only reaches the surface: a grammar can mangle impl blocks or

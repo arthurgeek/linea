@@ -1860,3 +1860,87 @@ fn sortedKeys(gpa: std.mem.Allocator, keys: []const []const u8) []const []const 
     }.less);
     return copy;
 }
+
+/// The `.lin` sources and `linea.json` manifests beneath `sub_path`, with their
+/// text, ordered by path. Paths are relative to `sub_path` and use `/`.
+///
+/// `iterate` is what makes the walk legal: a directory opened without it can
+/// still be iterated on some hosts and not on others.
+pub fn exampleSource(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    sub_path: []const u8,
+) ![]const SourceFile {
+    var dir = try root.openDir(io, sub_path, .{ .iterate = true });
+    defer dir.close(io);
+
+    var walker = try dir.walk(gpa);
+    defer walker.deinit();
+
+    var found: std.ArrayList(SourceFile) = .empty;
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const is_source = std.mem.endsWith(u8, entry.basename, ".lin");
+        if (!is_source and !std.mem.eql(u8, entry.basename, manifest_name)) continue;
+        const text = try dir.readFileAlloc(io, entry.path, gpa, .limited(1 << 22));
+        try found.append(gpa, .{ .path = try gpa.dupe(u8, entry.path), .text = text });
+    }
+    std.mem.sort(SourceFile, found.items, {}, lessThanPath);
+    return found.items;
+}
+
+const manifest_name = "linea.json";
+
+/// The roots under `examples/` whose tests CI runs, and the sources that
+/// declare a test but belong to no root.
+pub const ExampleRoots = struct {
+    roots: []const []const u8,
+    unowned: []const []const u8,
+};
+
+/// Which paths to hand to `linea test`, from the files beneath `examples/`.
+///
+/// A root is a `.lin` file directly in `examples/`, or any directory holding a
+/// `linea.json`, at any depth. `linea test` runs only the tests of the root it
+/// names (ADR 0229), so a library nested under an application is a root of its
+/// own, and a test it declares does not make the application a root. Roots with
+/// no `test fn` are left out. A test in a nested `.lin` that no manifest
+/// encloses would never run, so it is reported as unowned.
+pub fn exampleTestRoots(gpa: std.mem.Allocator, files: []const SourceFile) ExampleRoots {
+    var manifests: std.ArrayList([]const u8) = .empty;
+    for (files) |file| {
+        if (!std.mem.endsWith(u8, file.path, manifest_name)) continue;
+        const directory = std.fs.path.dirnamePosix(file.path) orelse continue;
+        if (!std.mem.eql(u8, std.fs.path.basenamePosix(file.path), manifest_name)) continue;
+        manifests.append(gpa, directory) catch @panic("out of memory");
+    }
+
+    var roots: std.StringArrayHashMapUnmanaged(void) = .empty;
+    var unowned: std.ArrayList([]const u8) = .empty;
+    for (files) |file| {
+        if (!std.mem.endsWith(u8, file.path, ".lin") or !declaresTest(file.text)) continue;
+        var owner: ?[]const u8 = null;
+        for (manifests.items) |directory| {
+            const encloses = file.path.len > directory.len and
+                file.path[directory.len] == '/' and std.mem.startsWith(u8, file.path, directory);
+            if (encloses and (owner == null or directory.len > owner.?.len)) owner = directory;
+        }
+        if (owner) |directory| {
+            roots.put(gpa, directory, {}) catch @panic("out of memory");
+        } else if (std.mem.indexOfScalar(u8, file.path, '/') == null) {
+            roots.put(gpa, file.path, {}) catch @panic("out of memory");
+        } else {
+            unowned.append(gpa, file.path) catch @panic("out of memory");
+        }
+    }
+    return .{ .roots = sortedKeys(gpa, roots.keys()), .unowned = unowned.items };
+}
+
+fn declaresTest(text: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "test fn ")) return true;
+    }
+    return false;
+}

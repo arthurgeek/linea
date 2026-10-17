@@ -815,6 +815,71 @@ test "the source of a tree is every zig file beneath it, in one order" {
     try testing.expectEqualStrings("const b = 2;\n", files[1].text);
 }
 
+test "example test roots: a nested library is a root of its own" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const with_test = "fn helper() {}\ntest fn holds() -> Result[(), IoError] {\n}\n";
+    const without_test = "fn main() {}\n";
+    const found = source.exampleTestRoots(gpa, &.{
+        .{ .path = "hello.lin", .text = without_test },
+        .{ .path = "script.lin", .text = with_test },
+        .{ .path = "discounts/linea.json", .text = "{}" },
+        .{ .path = "discounts/main.lin", .text = with_test },
+        .{ .path = "discounts/mail/send.lin", .text = with_test },
+        .{ .path = "guest-book/linea.json", .text = "{}" },
+        .{ .path = "guest-book/main.lin", .text = without_test },
+        .{ .path = "guest-book/sqlite/linea.json", .text = "{}" },
+        .{ .path = "guest-book/sqlite/lib.lin", .text = with_test },
+        .{ .path = "guest-book/sqlite/deep/rows.lin", .text = "test fn rows() {}\n" },
+    });
+    try testing.expectEqual(@as(usize, 0), found.unowned.len);
+    try testing.expectEqual(@as(usize, 3), found.roots.len);
+    try testing.expectEqualStrings("discounts", found.roots[0]);
+    try testing.expectEqualStrings("guest-book/sqlite", found.roots[1]);
+    try testing.expectEqualStrings("script.lin", found.roots[2]);
+}
+
+test "example test roots: a test no manifest encloses is reported, and an indented one is not a test" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const found = source.exampleTestRoots(gpa, &.{
+        .{ .path = "loose/main.lin", .text = "test fn orphan() {}\n" },
+        .{ .path = "notes.lin", .text = "// test fn commented() {}\n  test fn indented() {}\n" },
+        .{ .path = "app/linea.json", .text = "{}" },
+        .{ .path = "app/main.lin", .text = "fn main() {}\n" },
+    });
+    try testing.expectEqual(@as(usize, 0), found.roots.len);
+    try testing.expectEqual(@as(usize, 1), found.unowned.len);
+    try testing.expectEqualStrings("loose/main.lin", found.unowned[0]);
+}
+
+test "example sources: the walk reads nested manifests and sources and nothing else" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "examples/guest-book/sqlite");
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/hello.lin", .data = "fn main() {}\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/README.md", .data = "notes\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/guest-book/linea.json", .data = "{}" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/guest-book/sqlite/linea.json", .data = "{}" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/guest-book/sqlite/lib.lin", .data = "test fn rows() {}\n" });
+
+    const files = try source.exampleSource(gpa, io, tmp.dir, "examples");
+    try testing.expectEqual(@as(usize, 4), files.len);
+    const found = source.exampleTestRoots(gpa, files);
+    try testing.expectEqual(@as(usize, 1), found.roots.len);
+    try testing.expectEqualStrings("guest-book/sqlite", found.roots[0]);
+}
+
 test "the quoted strings of a text are read in order" {
     const gpa = testing.allocator;
     const rows =
