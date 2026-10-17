@@ -1,0 +1,5 @@
+error[T-CoverLimit]: this `match` is too intricate to check
+  --> tests/patterns/a_match_too_intricate_to_check_is_refused.lin:14:5
+   |
+14 |     match (a0, a1, a2, a3, a4, a5, a6, a7) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ split it into nested `match`es, each covering one part
