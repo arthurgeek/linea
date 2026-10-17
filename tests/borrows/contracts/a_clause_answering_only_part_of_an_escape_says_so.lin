@@ -1,0 +1,18 @@
+// The result may be a view of `b`, of the consumed `a`, or a copy of `c`.
+// A clause can permit `b` and `c` but nothing can permit `a`, so the report
+// says the clause answers only part of the escape.
+fn pick(sink a: String, b: String, c: Str, w: UInt8) -> Str where borrows(b) {
+    if w == 0 {
+        b.view()
+    } else if w == 1 {
+        let v = a.view()
+        v
+    } else {
+        copy(c)
+    }
+}
+
+fn main() -> UInt8 {
+    defer let b = String.new()
+    UInt8(pick(String.new(), b, "c", 1).length())
+}

@@ -11,5 +11,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 13 |     let a = inner.handle()
    |             ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `outer`; write `where borrows(outer)` to say so
+   = help: part of the value comes from `outer`, which `where borrows(outer)` would permit; the rest no clause can
    = help: `inner` belongs to `scratch` and ends when it returns, so nothing returned may observe it
