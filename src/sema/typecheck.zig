@@ -95,8 +95,6 @@ const Fold = union(enum) {
     }
 };
 
-/// The most variants an enum may declare.
-///
 /// Checks a tree against its declared types.
 ///
 /// A type flows *inward* from an annotation or the return type, and *outward*

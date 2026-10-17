@@ -64,8 +64,9 @@ The check counts the matrix cells it builds and refuses a `match` past
 
 **An enum declares any number of variants.** The limit of 64 ([T-Variants])
 existed because coverage kept one bit per variant in a machine word. The
-usefulness pass records the variants a column names in a set sized by the enum,
-so the rule and its diagnostic are removed.
+usefulness pass splits a column by the variants its rows name, sorted, so what
+it holds is sized by those rows and not by the enum; the rule and its diagnostic
+are removed.
 
 **`let … else` stays a test of its initializer.** Its pattern binds the success
 payload and must be irrefutable; `else` still means only that the `Option` or
