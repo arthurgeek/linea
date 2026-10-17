@@ -1363,7 +1363,10 @@ const Analysis = struct {
             .returned => |result| result,
             .retained => null,
         };
-        if (later) |at| if (self.borrowSite(at, owner)) |site| try labels.append(arena, .{
+        // A derive's generated body is reported at the derive, where the
+        // exit is already labelled, so a borrow inside it adds nothing to
+        // point at.
+        if (later) |at| if (self.borrowSite(at, owner)) |site| if (self.program.generatedOriginAt(self.ast.fileOfExpr(site), self.ast.exprSpan(site)) == null) try labels.append(arena, .{
             .file = self.ast.fileOfExpr(site),
             .span = self.ast.exprSpan(site),
             .message = "borrowed here",

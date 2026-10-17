@@ -18,7 +18,6 @@ error[O-Borrow]: `View.value` ends while a value borrowing it is still used
    |               ----- the code was generated for this field
 21 | derive Build for View
    |        ^^^^^ `View.value` ends here
-   |        ----- borrowed here
    |        ----- the observation is returned here
    |
    = help: keep the borrowing value inside the scope, or declare what it borrows outside it
