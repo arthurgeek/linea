@@ -730,12 +730,7 @@ pub fn run(process: std.process.Init) !u8 {
                         // the reasons the test build is: nothing lands beside
                         // anything the user wrote, and two dumps at once do
                         // not overwrite each other.
-                        const at = std.Io.Clock.awake.now(io);
-                        const target = try std.fmt.allocPrint(
-                            gpa,
-                            "{s}/linea-asm-{d}",
-                            .{ scratchDir(process.minimal.environ), at.nanoseconds },
-                        );
+                        const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-asm");
                         const mid = try toolchain.Intermediates.of(gpa, target);
                         defer mid.deinit(gpa);
                         const asm_path = try std.fmt.allocPrint(gpa, "{s}.s", .{target});
@@ -793,12 +788,7 @@ pub fn run(process: std.process.Init) !u8 {
                             // report the loss as tests that could not be run --
                             // a watch loop and a sharded CI job are both two at
                             // once.
-                            const at = std.Io.Clock.awake.now(io);
-                            const target = try std.fmt.allocPrint(
-                                gpa,
-                                "{s}/linea-test-{d}",
-                                .{ scratchDir(process.minimal.environ), at.nanoseconds },
-                            );
+                            const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-test");
 
                             const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,

@@ -215,6 +215,16 @@ pub const RunOutput = struct {
     }
 };
 
+/// A path under `scratch_root` that no other build names: `prefix`, a dash and
+/// sixty-four random bits in hex. A clock reading is not unique, since two
+/// builds that start in the same tick would write and then delete each other's
+/// intermediates, and a sharded CI job or a watch loop starts builds together.
+pub fn uniqueTarget(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, prefix: []const u8) std.mem.Allocator.Error![]const u8 {
+    var random: u64 = undefined;
+    io.random(@ptrCast(&random));
+    return std.fmt.allocPrint(gpa, "{s}/{s}-{s}", .{ scratch_root, prefix, std.fmt.hex(random) });
+}
+
 /// The files a build writes between the module and the executable, named in
 /// one place from the executable's own name. One routine, because whoever
 /// removes them must spell them the way the build did -- a cleanup keeping an
@@ -695,6 +705,16 @@ test "overlapping runs keep their own directories under the scratch root" {
     for ([_][]const u8{ second.path, second_mid.ir, second_mid.lowered, second_mid.assembly }) |path| {
         try std.Io.Dir.cwd().access(io, path, .{});
     }
+}
+
+test "builds started in the same clock tick get different target names" {
+    const gpa = testing.allocator;
+    const first = try uniqueTarget(gpa, testing.io, "/tmp", "linea-test");
+    defer gpa.free(first);
+    const second = try uniqueTarget(gpa, testing.io, "/tmp", "linea-test");
+    defer gpa.free(second);
+    try testing.expect(std.mem.startsWith(u8, first, "/tmp/linea-test-"));
+    try testing.expect(!std.mem.eql(u8, first, second));
 }
 
 test "a run's directory is deleted when the process that made it ends" {
