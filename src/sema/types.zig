@@ -5232,8 +5232,8 @@ pub const Typing = struct {
     /// does not fit its context is absent, though its recorded type is
     /// poison too.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
-    /// Written types whose arguments break a bound their declaration's
-    /// parameters carry, each reported by [T-Bound]. Such a type promises
+    /// Written types whose arguments lack a capability a bound of their
+    /// declaration asks for, each reported by [T-Bound]. Such a type promises
     /// nothing about its capabilities, so a value of it is not reported for
     /// owing a settlement.
     broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,

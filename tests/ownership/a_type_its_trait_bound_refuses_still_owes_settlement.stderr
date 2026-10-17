@@ -1,0 +1,19 @@
+error[T-Bound]: `R` requires `Equatable`, and `Session` does not implement it
+  --> tests/ownership/a_type_its_trait_bound_refuses_still_owes_settlement.lin:12:17
+   |
+12 |     let opened: Box[Session] = .{ value = Session { id = 1 } }
+   |                 ^^^ implement it for that type, or drop the bound
+error[T-Bound]: `R` requires `Equatable`, and `Session` does not implement it
+  --> tests/ownership/a_type_its_trait_bound_refuses_still_owes_settlement.lin:13:16
+   |
+13 |     let _held: Box[Session] = opened
+   |                ^^^ implement it for that type, or drop the bound
+error[O-Leak]: `_held` (a linear `Box[Session]`) is still owned when this path leaves
+  --> tests/ownership/a_type_its_trait_bound_refuses_still_owes_settlement.lin:13:9
+   |
+13 |     let _held: Box[Session] = opened
+   |         ^^^^^ never settled on the path that reaches the end of this block
+15 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it

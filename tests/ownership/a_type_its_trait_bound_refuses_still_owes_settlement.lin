@@ -1,0 +1,15 @@
+import std.cmp
+
+// `Box` asks for an equatable value, and `Session` is not one. The bound it
+// breaks says nothing about settlement: `Session` is linear whatever `Box`
+// asks of it, so leaving `held` unsettled is reported too.
+struct Box[R: cmp.Equatable] { value: R }
+
+@linear
+struct Session { id: UInt64 }
+
+fn main() -> UInt8 {
+    let opened: Box[Session] = .{ value = Session { id = 1 } }
+    let _held: Box[Session] = opened
+    0
+}

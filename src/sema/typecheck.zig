@@ -9844,6 +9844,19 @@ const Checker = struct {
     /// the one being walked -- and without it a parameter cannot discharge a
     /// bound it carries, which would make a bounded generic type writable and
     /// unusable from any generic function.
+    /// Whether one of `args` was refused for lacking a capability a bound
+    /// asks of it: a type whose argument lacks the capability its bound asks
+    /// promises no capability, while one lacking only a trait keeps the
+    /// capabilities its arguments give it.
+    fn lacksRefusedCapability(self: *const Checker, args: []const TypeId) bool {
+        for (args) |arg| {
+            for ([_]types_mod.CapabilityRequirement{ .copyable, .discardable }) |requirement| {
+                if (self.refused_demands.contains(.{ .ty = arg, .lacks = .{ .capability = requirement } })) return true;
+            }
+        }
+        return false;
+    }
+
     fn reportBrokenBounds(self: *Checker) std.mem.Allocator.Error!void {
         const outer = self.generic;
         const outer_module = self.current;
@@ -9868,7 +9881,8 @@ const Checker = struct {
             }
             const inst = self.builder.instanceOf(site.ty) orelse continue;
             if (self.refusedBefore(site.at)) continue;
-            if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report))
+            if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report) and
+                self.lacksRefusedCapability(self.builder.argsOf(inst)))
                 try self.broken_types.put(self.gpa, site.ty, {});
         }
         try self.reportBrokenTraitBounds();
