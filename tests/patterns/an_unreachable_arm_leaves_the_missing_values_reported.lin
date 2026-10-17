@@ -1,0 +1,27 @@
+// An arm written twice is unreachable, and the values no arm takes are a
+// second mistake: both are reported, at the top of a match and inside a
+// variant.
+enum Signal {
+    Red,
+    Amber,
+    Green,
+}
+
+fn wait(sink signal: Signal) -> UInt8 {
+    match signal {
+        Red => 2,
+        Red => 3,
+    }
+}
+
+fn wait_for(sink seen: Option[Signal]) -> UInt8 {
+    match seen {
+        Some(Amber) => 1,
+        Some(Amber) => 2,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    wait(.Red) + wait_for(.None) - 2
+}

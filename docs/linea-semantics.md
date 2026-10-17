@@ -3733,7 +3733,8 @@ in more than one step.
 value it matches is taken by the arms before it. This includes an already
 covered variant, `_` after coverage is complete, an arm after a pattern that
 takes the whole subject apart, `Some(Some(x))` after `Some(_)`, and a range
-written backwards, which matches nothing.
+written backwards, which matches nothing. An unreachable arm and a value no arm
+takes are separate mistakes, so a `match` with both reports both ([T-Cover]).
 
 **[T-Bind]** Variant payloads are accessible only by matching. A pattern must
 name all payload values or none; a partial prefix is rejected as a miscount.

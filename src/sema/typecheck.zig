@@ -31100,12 +31100,15 @@ const Checker = struct {
                 },
             };
             if (outcome) |o| {
+                // An unreachable arm and a value no arm takes are two
+                // mistakes, so the one does not hide the other.
+                const sound = !poisoned;
                 for (o.reached, row_patterns.items) |reached, pattern| {
                     if (reached) continue;
                     _ = self.report(.t_unreachable, pattern, "no value reaches this arm", .{}, "the arms before it take every value it would");
                     poisoned = true;
                 }
-                if (!poisoned and o.missing.len > 0) {
+                if (sound and o.missing.len > 0) {
                     const missing = try self.witnessList(o.missing);
                     defer self.gpa.free(missing);
                     _ = if (missing.len == 0)
