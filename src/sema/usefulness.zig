@@ -200,6 +200,8 @@ pub fn Coverage(comptime Context: type) type {
             query: ?u32,
             missing: std.ArrayList(Witness) = .empty,
             path: std.ArrayList(Step) = .empty,
+            /// How many witnesses the subtree being walked may keep.
+            room: usize = max_witnesses,
         };
 
         /// Answers, in one pass, which of `rows` are useful after the rows
@@ -220,10 +222,6 @@ pub fn Coverage(comptime Context: type) type {
             };
             @memset(pass.reached, false);
             try self.walk(&pass, refs);
-            // The walk takes each named constructor's branch before the one
-            // for the constructors no row names, so the witnesses are put in
-            // declaration order here. At most `max_witnesses` are sorted.
-            std.sort.insertion(Witness, pass.missing.items, {}, Witness.before);
             return .{ .reached = pass.reached[0..rows.len], .missing = pass.missing.items };
         }
 
@@ -245,7 +243,7 @@ pub fn Coverage(comptime Context: type) type {
                 if (rows[0].cells.len == 0) {
                     const first = rows[0].id;
                     pass.reached[first] = true;
-                    if (pass.query == first and pass.missing.items.len < max_witnesses) try self.record(pass);
+                    if (pass.query == first and pass.room > 0) try self.record(pass);
                     return;
                 }
                 const branches = try self.split_column(rows);
@@ -254,11 +252,30 @@ pub fn Coverage(comptime Context: type) type {
                     rows = branches[0].rows;
                     continue;
                 }
+                // The branch for the constructors no row names is walked last,
+                // but one of them may come before a named constructor in
+                // declaration order. So the named branches together keep up to
+                // this column's room, the last branch keeps up to the same room
+                // apart from them, and the two runs are sorted together and cut
+                // back to the room. Each run is already in declaration order:
+                // the named branches are walked by constructor, and the last
+                // branch lists its constructors by index. A column holds at
+                // most twice its room, and sizes nothing by the type.
+                const room = pass.room;
+                defer pass.room = room;
+                const from = pass.missing.items.len;
                 for (branches) |b| {
+                    pass.room = switch (b.step.choice) {
+                        .absent => room,
+                        .ctor => room -| (pass.missing.items.len - from),
+                    };
                     try pass.path.append(self.arena, b.step);
                     try self.walk(pass, b.rows);
                     _ = pass.path.pop();
                 }
+                const kept = pass.missing.items[from..];
+                std.sort.insertion(Witness, kept, {}, Witness.before);
+                if (kept.len > room) pass.missing.shrinkRetainingCapacity(from + room);
                 return;
             }
         }
@@ -502,14 +519,15 @@ pub fn Coverage(comptime Context: type) type {
         }
 
         /// Adds the values the path to the query row describes, as witnesses:
-        /// one per choice where a step stands for several absent values.
+        /// one per choice where a step stands for several absent values, up to
+        /// the room the walk gives this leaf.
         fn record(self: *Self, pass: *Pass) Error!void {
+            // Reading the path is work the cell budget answers for, since
+            // every split may record its own witnesses.
+            try self.charge(pass.path.items.len);
             var at: usize = 0;
             const built = try self.build(pass.path.items, &at);
-            for (built) |w| {
-                if (pass.missing.items.len == max_witnesses) break;
-                try pass.missing.append(self.arena, w);
-            }
+            try pass.missing.appendSlice(self.arena, built[0..@min(built.len, pass.room)]);
         }
 
         /// The witnesses the steps from `at.*` describe, reading the path in
