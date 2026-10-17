@@ -1,0 +1,36 @@
+// A `Lamp` is `@linear`. Inside the loop it is given away on both paths
+// through the inner `if`: before `continue` on one, after the `if` on the
+// other. The two paths reach the loop head from different places, and both
+// have settled the lamp.
+import std.io
+
+use io.print
+
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+fn give(sink lamp: Lamp) {
+    let Lamp { id } = lamp
+    match print("g{id} ") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    while total < 3 {
+        total = total + 1
+        if total >= 2 {
+            let lamp = Lamp { id = total }
+            if total == 2 {
+                give(lamp)
+                continue
+            }
+            give(lamp)
+        }
+    }
+    total
+}
