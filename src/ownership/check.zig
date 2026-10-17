@@ -2111,27 +2111,62 @@ const Checker = struct {
         }
         slots.shrinkRetainingCapacity(kept);
 
+        // Each predecessor after the first joins in only the slots its own
+        // path edits; in every other slot it holds what the dominator held,
+        // which joins in once after the walk. The join is a maximum and the
+        // site the one written first, so the order they arrive in changes
+        // nothing. The work is the edits each path makes, each found among
+        // the slots by binary search, plus the slots once -- never the
+        // predecessors times the slots, which a `match` of n binding arms
+        // made quadratic.
+        try flow.windToBase(self.gpa, b);
+        const base_state = try self.gpa.alloc(State, slots.items.len);
+        defer self.gpa.free(base_state);
+        const base_at = try self.gpa.alloc(ExprId, slots.items.len);
+        defer self.gpa.free(base_at);
+        const stamp = try self.gpa.alloc(u32, slots.items.len);
+        defer self.gpa.free(stamp);
+        const edited_by = try self.gpa.alloc(u32, slots.items.len);
+        defer self.gpa.free(edited_by);
+        for (slots.items, base_state, base_at) |s, *state, *at| {
+            state.* = flow.state[s];
+            at.* = flow.state_at[s];
+        }
+        @memset(stamp, 0);
+        @memset(edited_by, 0);
+
         merged.clearRetainingCapacity();
         merged_at.clearRetainingCapacity();
-        var first = true;
+        var later: u32 = 0;
         for (preds.of(b)) |p| {
             if (!flow.computed[p]) continue;
             try flow.wind(self.gpa, p);
-            if (first) {
+            if (merged.items.len == 0) {
                 for (slots.items) |s| {
                     try merged.append(self.gpa, flow.state[s]);
                     try merged_at.append(self.gpa, flow.state_at[s]);
                 }
-                first = false;
                 continue;
             }
-            for (slots.items, 0..) |s, k| {
-                merged.items[k] = State.join(merged.items[k], flow.state[s]);
-                // The site does not drive the sweep, so which of two survives
-                // is settled by where they are written rather than by the order
-                // the blocks were walked in.
-                merged_at.items[k] = self.writtenFirst(merged_at.items[k], flow.state_at[s]);
+            later += 1;
+            for (flow.path.items[base..]) |q| {
+                for (flow.editsOf(q)) |e| {
+                    const k = std.sort.binarySearch(u32, slots.items, e.slot, orderSlot) orelse continue;
+                    if (stamp[k] == later) continue;
+                    stamp[k] = later;
+                    edited_by[k] += 1;
+                    merged.items[k] = State.join(merged.items[k], flow.state[e.slot]);
+                    // The site does not drive the sweep, so which of two
+                    // survives is settled by where they are written rather
+                    // than by the order the blocks were walked in.
+                    merged_at.items[k] = self.writtenFirst(merged_at.items[k], flow.state_at[e.slot]);
+                }
             }
+        }
+        for (slots.items, 0..) |_, k| {
+            if (edited_by[k] == later) continue;
+            merged.items[k] = State.join(merged.items[k], base_state[k]);
+            merged_at.items[k] = self.writtenFirst(merged_at.items[k], base_at[k]);
         }
 
         // A slot is asked about because some predecessor's edits named it, or
@@ -2833,8 +2868,39 @@ const Checker = struct {
         }
         asked.shrinkRetainingCapacity(kept);
 
+        // What the dominator holds in each asked slot: the value of every
+        // predecessor whose path does not edit that slot.
+        try flow.windToBase(self.gpa, b);
+        const base_state = try self.gpa.alloc(State, asked.items.len);
+        defer self.gpa.free(base_state);
+        const base_at = try self.gpa.alloc(ExprId, asked.items.len);
+        defer self.gpa.free(base_at);
+        for (asked.items, base_state, base_at) |s, *state, *at| {
+            state.* = flow.state[s];
+            at.* = flow.state_at[s];
+        }
+        // Per asked slot: the last predecessor whose path edited it, how many
+        // after the first did, and whether a disagreement is to be reported.
+        const stamp = try self.gpa.alloc(u32, asked.items.len);
+        defer self.gpa.free(stamp);
+        const edited_by = try self.gpa.alloc(u32, asked.items.len);
+        defer self.gpa.free(edited_by);
+        const disagrees = try self.gpa.alloc(bool, asked.items.len);
+        defer self.gpa.free(disagrees);
+        @memset(stamp, 0);
+        @memset(edited_by, 0);
+        @memset(disagrees, false);
+
+        // Each predecessor after the first is compared with it only in the
+        // slots its own path edits; in every other slot it holds what the
+        // dominator held, which is compared once after the walk. So the work
+        // is the edits each path makes, each found among the asked slots by
+        // binary search, plus the asked slots once -- the predecessors times
+        // the asked slots, which a `match` of n binding arms made quadratic,
+        // is never paid.
         first.clearRetainingCapacity();
         first_at.clearRetainingCapacity();
+        var later: u32 = 0;
         for (preds.of(b)) |p| {
             if (!flow.computed[p]) continue;
             try flow.wind(self.gpa, p);
@@ -2845,51 +2911,82 @@ const Checker = struct {
                 }
                 continue;
             }
-
-            for (asked.items, first.items, first_at.items) |s, *was_slot, *was_at_slot| {
-                // A path through a refused construct holds an unknown state,
-                // which agrees and disagrees with nothing: it is left out, and
-                // every other path is compared with the first known one.
-                if (flow.state[s] == .unknown) continue;
-                if (was_slot.* == .unknown) {
-                    was_slot.* = flow.state[s];
-                    was_at_slot.* = flow.state_at[s];
-                    continue;
-                }
-                const was = was_slot.*;
-                const was_at = was_at_slot.*;
-                if (was == flow.state[s]) continue;
-                const binding = roots[s];
-                if (!self.isTracked(binding, b)) continue;
-
-                switch (action) {
-                    .mark_origins => {
-                        for ([_]ExprId{ was_at, flow.state_at[s] }) |at| {
-                            if (at == .none) continue;
-                            const origin = try self.merge_origins.getOrPut(self.gpa, .{ .at = at, .binding = binding });
-                            if (!origin.found_existing) origin.value_ptr.* = b;
-                        }
-                    },
-                    .report => {
-                        // A path that holds the value as moved only because an
-                        // earlier join merged it pessimistically carries that
-                        // join's disagreement here, and it was said there.
-                        const moved_at = if (was == .moved) was_at else if (flow.state[s] == .moved) flow.state_at[s] else ExprId.none;
-                        if (moved_at != .none) {
-                            if (self.merge_origins.get(.{ .at = moved_at, .binding = binding })) |join| {
-                                if (join != b) continue;
-                            }
-                        }
-                        try self.report(
-                            .o_merge,
-                            self.cfg.blocks[f.blocks.start + b].at,
-                            "consume it on the other path too, or on neither",
-                            "the paths here disagree about `{s}`",
-                            .{try self.nameOf(binding)},
-                        );
-                    },
+            later += 1;
+            for (flow.path.items[base..]) |q| {
+                for (flow.editsOf(q)) |e| {
+                    const i = std.sort.binarySearch(u32, asked.items, e.slot, orderSlot) orelse continue;
+                    if (stamp[i] == later) continue;
+                    stamp[i] = later;
+                    edited_by[i] += 1;
+                    try self.compareAtMerge(b, roots[asked.items[i]], &first.items[i], &first_at.items[i], flow.state[e.slot], flow.state_at[e.slot], &disagrees[i], action);
                 }
             }
+        }
+        for (asked.items, 0..) |s, i| {
+            if (edited_by[i] < later) {
+                try self.compareAtMerge(b, roots[s], &first.items[i], &first_at.items[i], base_state[i], base_at[i], &disagrees[i], action);
+            }
+            if (!disagrees[i]) continue;
+            try self.report(
+                .o_merge,
+                self.cfg.blocks[f.blocks.start + b].at,
+                "consume it on the other path too, or on neither",
+                "the paths here disagree about `{s}`",
+                .{try self.nameOf(roots[s])},
+            );
+        }
+    }
+
+    fn orderSlot(key: u32, item: u32) std.math.Order {
+        return std.math.order(key, item);
+    }
+
+    /// One predecessor's value of a slot against the first known one, at the
+    /// start of block `join`. A path through a refused construct holds an
+    /// unknown state, which agrees and disagrees with nothing: it is left
+    /// out, and every other path is compared with the first known one. Only a
+    /// binding tracked at `join` is compared (`isTracked`).
+    fn compareAtMerge(
+        self: *Checker,
+        join: u32,
+        binding: BindingId,
+        was_slot: *State,
+        was_at_slot: *ExprId,
+        now: State,
+        now_at: ExprId,
+        disagrees: *bool,
+        action: MergeAction,
+    ) std.mem.Allocator.Error!void {
+        if (now == .unknown) return;
+        if (was_slot.* == .unknown) {
+            was_slot.* = now;
+            was_at_slot.* = now_at;
+            return;
+        }
+        const was = was_slot.*;
+        const was_at = was_at_slot.*;
+        if (was == now) return;
+        if (!self.isTracked(binding, join)) return;
+        switch (action) {
+            .mark_origins => {
+                for ([_]ExprId{ was_at, now_at }) |at| {
+                    if (at == .none) continue;
+                    const origin = try self.merge_origins.getOrPut(self.gpa, .{ .at = at, .binding = binding });
+                    if (!origin.found_existing) origin.value_ptr.* = join;
+                }
+            },
+            .report => {
+                // A path that holds the value as moved only because an
+                // earlier join merged it pessimistically carries that join's
+                // disagreement here, and it was said there.
+                const moved_at = if (was == .moved) was_at else if (now == .moved) now_at else ExprId.none;
+                if (moved_at != .none) {
+                    if (self.merge_origins.get(.{ .at = moved_at, .binding = binding })) |origin| {
+                        if (origin != join) return;
+                    }
+                }
+                disagrees.* = true;
+            },
         }
     }
 

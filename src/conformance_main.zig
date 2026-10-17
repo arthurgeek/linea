@@ -2586,6 +2586,33 @@ fn matchArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One `match` of n arms, each binding a name: the arms' paths meet at the
+/// join after the `match`, each holding a binding the others never had.
+fn bindingArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Found { Pair(UInt64, UInt8), Missing }\nfn pick(sink found: Found) -> UInt8 {\n    match found {\n");
+    for (0..n) |i| try w.print("        Pair({d}, value) => value,\n", .{i});
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    pick(.Missing)\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// One enum of n variants, each carrying a number, and one `match` taking
+/// every variant's number in an arm of its own: the enum's width meets
+/// coverage, the arms' tag tests and every payload read the verifier places.
+fn wideEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Wide {\n");
+    for (0..n) |i| try w.print("    V{d}(UInt8),\n", .{i});
+    try w.writeAll("}\nfn number(sink w: Wide) -> UInt8 {\n    match w {\n");
+    for (0..n) |i| try w.print("        V{d}(value) => value,\n", .{i});
+    try w.writeAll("    }\n}\nfn main() -> UInt8 {\n    number(.V0(0))\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// A pattern n variants deep, over n enums each carrying the one before it,
 /// so resolving, checking, coverage and ownership each walk a pattern of
 /// depth n. Checked rather than emitted: every tag test reads at an offset
@@ -6184,6 +6211,8 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "editor qualified completion", .n = 500, .cost = qualifiedCompletionCost },
     .{ .name = "callable enum payloads", .n = 4000, .cost = throughTheTree(callableEnumModule) },
     .{ .name = "match arms", .n = 4000, .cost = throughTheTree(matchArmsModule) },
+    .{ .name = "variants in one enum", .n = 1000, .cost = throughTheTree(wideEnumModule) },
+    .{ .name = "arms that each bind", .n = 2000, .cost = throughTheTree(bindingArmsModule) },
     .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
