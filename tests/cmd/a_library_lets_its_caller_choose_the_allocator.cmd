@@ -10,7 +10,7 @@ on the library chooses one per call.
   > import std.mem
   > import std.testing
   > 
-  > use mem.Owner
+  > use mem.Lender
   > 
   > // `shout_in` builds the shouted word in the allocator its caller passes.
   > pub fn shout_in[A: Allocator](allocator: A, word: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
@@ -51,7 +51,7 @@ on the library chooses one per call.
   > import std.io
   > import std.mem
   > 
-  > use mem.Owner
+  > use mem.Lender
   > 
   > fn main() -> Result[UInt8, io.IoError] {
   >     let arena = mem.Arena.open(mem.system(), size: 256)

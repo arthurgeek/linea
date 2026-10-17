@@ -882,7 +882,7 @@ import shout
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     let arena = mem.Arena.open(mem.system(), size: 256)

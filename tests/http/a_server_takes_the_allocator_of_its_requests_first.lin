@@ -2,7 +2,7 @@ import std.http
 import std.mem
 import std.net
 
-use mem.Owner
+use mem.Lender
 
 // `listen_and_serve_in` takes the allocator each request's memory is carved
 // from first. This server is told to serve no connection, so it returns as
