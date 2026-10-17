@@ -5322,9 +5322,9 @@ offers the owned copy, which observes nothing and needs no clause, naming the
 type that holds it and the failure copying can report: `Result[String, mem.Oom]`
 for a result that was the view, `String` where a part of the result or an
 `inout` parameter held it. Where a local owner of that type supplied the view,
-it offers the owner itself instead, unless a `defer` releases the owner and this
-exit is the only way out, where moving it would leave the `defer` nothing to
-release. Under a
+it offers the owner itself instead, unless a `defer` releases the owner and runs
+at no other exit of the function, where moving it would leave the `defer`
+nothing to release. Under a
 fixed signature the result type is fixed too, so a returned view is offered no
 copy; a stored view still is, which is the fix for a route handler that keeps a
 request's text in its state.

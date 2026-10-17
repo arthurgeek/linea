@@ -2191,7 +2191,7 @@ const Analysis = struct {
                 else => false,
             } else false;
             const local_owns = if (local) |owner|
-                self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
+                self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !try self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
             else
                 false;
             try notes.append(arena, if (leaving == .returned and local_owns)
@@ -2312,36 +2312,34 @@ const Analysis = struct {
         return null;
     }
 
-    /// Whether putting `owner` where its view was leaves its `defer` with
-    /// nothing to do: a `defer` releases it (it was bound by `defer let` or
-    /// `defer var`, or the function writes `defer owner.release()`), and the
-    /// exit at `exit` is the function's only way out, so moving it there
-    /// leaves no path for the schedule. With another `return` or `?`, the
-    /// `defer` still releases it on those paths.
+    /// Whether putting `owner` where its view was would leave the `defer`
+    /// that releases it with nothing to do: some schedule of this function
+    /// consumes `owner`, and it is placed at no exit other than `exit` except
+    /// where a move already cancelled it. Read from the schedules and
+    /// cancellations ownership decided, which [O-DeferDead] is reported from,
+    /// so a `return` or `?` inside a closure is not counted as this
+    /// function's exit.
     ///
-    /// **Bound:** the function's tokens, once per report.
-    fn deferWouldDie(self: *const Analysis, owner: BindingId, exit: ExprId) bool {
-        if (self.function.decl == .none) return false;
-        const range = self.ast.declTokens(self.function.decl);
-        const statement = self.res.stmtOf(owner);
-        var released = statement != node.StmtId.none and self.ast.stmtTag(statement) == .let_decl and self.ast.stmtIsDeferredBinding(statement);
-        const name = self.ast.tokenText(self.res.declaringToken(owner));
-        // The exit itself is one `return` or `?` where it is written, and
-        // none where the body reaches its end.
-        const explicit = exit != .none and switch (self.ast.exprTag(exit)) {
-            .return_, .try_ => true,
-            else => false,
-        };
-        var written_exits: usize = 0;
-        var at = range.start.index();
-        while (at < range.end.index()) : (at += 1) {
-            const tag = self.ast.tokenTag(TokenId.at(at));
-            if (tag == .keyword_return or tag == .question) written_exits += 1;
-            if (tag != .keyword_defer or at + 3 >= range.end.index()) continue;
-            if (std.mem.eql(u8, self.ast.tokenText(TokenId.at(at + 1)), name) and std.mem.eql(u8, self.ast.tokenText(TokenId.at(at + 3)), "release")) released = true;
+    /// **Bound:** the function's operations, then the program's placements,
+    /// once per report.
+    fn deferWouldDie(self: *const Analysis, owner: BindingId, exit: ExprId) std.mem.Allocator.Error!bool {
+        var schedules: std.ArrayList(ExprId) = .empty;
+        defer schedules.deinit(self.gpa);
+        for (0..self.function.blocks.end - self.function.blocks.start) |index| {
+            var ops = self.cfg.opsOf(self.cfg.blocks[self.function.blocks.start + index]);
+            while (ops.next()) |op| {
+                const schedule = self.cfg.opSchedule(op);
+                if (schedule == .none or self.cfg.opTag(op) != .consume or self.cfg.opPlace(op).root != owner) continue;
+                if (std.mem.indexOfScalar(ExprId, schedules.items, schedule) == null) try schedules.append(self.gpa, schedule);
+            }
         }
-        const other_exit = written_exits > @intFromBool(explicit);
-        return released and !other_exit;
+        if (schedules.items.len == 0) return false;
+        for (self.cfg.placements) |placement| {
+            if (std.mem.indexOfScalar(ExprId, schedules.items, placement.schedule) == null) continue;
+            if (placement.exit == exit or self.cancelled.contains(placement)) continue;
+            return false;
+        }
+        return true;
     }
 
     /// What `held`, the type holding the escaping observation, copies itself
