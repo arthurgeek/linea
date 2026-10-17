@@ -2269,24 +2269,17 @@ const Analysis = struct {
                 if (leaving == .returned) "return" else "keep only",
                 widen,
             });
-        } else for (self.typing.function_values) |named_value| switch (named_value.target) {
-            // A value received by a written callable type or a bound
-            // answers to that type's signature, whether or not it reads the
-            // same as the function's own.
-            .declared => |target| if (target == decl and named_value.fixed) {
-                fixed = named_value.signature;
-                why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit `{s}`, so it cannot be added here: {s} what that type permits{s}", .{
-                    name,
-                    clause,
-                    if (leaving == .returned) "return" else "keep only",
-                    // The program can widen a callable type it wrote, and only
-                    // that one.
-                    if (named_value.fixed_in_library) "" else ", or write the source into that type where it is written and into this signature alike",
-                });
-                break;
-            },
-            else => {},
-        };
+        } else if (self.typing.fixed_functions.get(decl)) |received| {
+            fixed = received.signature;
+            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit `{s}`, so it cannot be added here: {s} what that type permits{s}", .{
+                name,
+                clause,
+                if (leaving == .returned) "return" else "keep only",
+                // The program can widen a callable type it wrote, and only
+                // that one.
+                if (received.in_library) "" else ", or write the source into that type where it is written and into this signature alike",
+            });
+        }
         const contracts = switch (self.typing.get(fixed)) {
             .callable => |callable| callable.contracts,
             else => return null,

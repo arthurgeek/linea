@@ -1,0 +1,16 @@
+// The field type of `Picker.f` refuses `second` and fixes its signature.
+struct Picker {
+    f: fn(read a: String, read b: String) -> Str where borrows(a),
+}
+
+fn second(_a: String, b: String) -> Str {
+    b.view()
+}
+
+fn main() -> UInt8 {
+    let p = Picker { f = second }
+    defer let a = String.new()
+    defer let b = String.new()
+    let f = p.f
+    UInt8(f(a, b).length())
+}

@@ -2299,6 +2299,10 @@ pub const ConstructorBody = struct {
 };
 
 /// A function named as a value of one exact structural callable signature.
+/// The callable type a function value was received by, and whether that
+/// type is written in the library, where the program cannot change it.
+pub const FixedFunction = struct { signature: TypeId, in_library: bool };
+
 pub const FunctionValue = struct {
     at: ExprId,
     target: FunctionTarget,
@@ -2313,13 +2317,6 @@ pub const FunctionValue = struct {
     /// trait's operation was settled at. Null for a target that names its
     /// body outright.
     implementation: ?CallImpl = null,
-    /// Whether a written callable type or a callable bound received the
-    /// value, which then answers to that type's signature: its own cannot
-    /// gain a clause the type does not have.
-    fixed: bool = false,
-    /// Whether that callable type is written in the library, where the
-    /// program cannot change it.
-    fixed_in_library: bool = false,
 
     pub fn deinit(self: FunctionValue, gpa: std.mem.Allocator) void {
         if (self.type_args.len > 0) gpa.free(self.type_args);
@@ -5521,6 +5518,11 @@ pub const Typing = struct {
     /// Each implementation member written without a clause, with the trait
     /// signature whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
+    /// Each function a written callable type or a callable bound received as
+    /// a value, with that type, whether or not the function fit it: the
+    /// function answers to that type's signature, so its own cannot gain a
+    /// clause the type does not have.
+    fixed_functions: std.AutoHashMapUnmanaged(DeclId, FixedFunction) = .empty,
     /// Each function that wrote no clause and took its contract from its one
     /// carrier parameter, with that parameter's position.
     defaulted_contracts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
@@ -5874,6 +5876,7 @@ pub const Typing = struct {
         self.contract_parameters.deinit(gpa);
         self.declined_contracts.deinit(gpa);
         self.adopted_contracts.deinit(gpa);
+        self.fixed_functions.deinit(gpa);
         self.defaulted_contracts.deinit(gpa);
         self.aliased.deinit(gpa);
         self.defaults.deinit(gpa);

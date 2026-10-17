@@ -542,6 +542,7 @@ fn typecheckInternal(
     defer c.refused_owned_promises.deinit(gpa);
     defer c.refused_owned_subjects.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
+    defer c.fixed_functions.deinit(gpa);
     defer c.defaulted_contracts.deinit(gpa);
     defer {
         for (c.closure_descriptors) |descriptor| gpa.free(descriptor.owned_fields);
@@ -1632,6 +1633,8 @@ fn typecheckInternal(
     c.declined_contracts = .empty;
     typing.adopted_contracts = c.adopted_contracts;
     c.adopted_contracts = .empty;
+    typing.fixed_functions = c.fixed_functions;
+    c.fixed_functions = .empty;
     typing.defaulted_contracts = c.defaulted_contracts;
     c.defaulted_contracts = .empty;
     typing.aliased = c.alias_types;
@@ -5327,6 +5330,7 @@ const Checker = struct {
     /// Each implementation member without a clause, with the trait signature
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
+    fixed_functions: std.AutoHashMapUnmanaged(DeclId, types_mod.FixedFunction) = .empty,
     /// Each function without a clause whose contract is its carrier
     /// parameter's, with that parameter's position.
     defaulted_contracts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
@@ -22258,6 +22262,12 @@ const Checker = struct {
             if (self.builder.get(want.ty) == .callable) want else null
         else
             null;
+        // The type that received the value fixes its signature, recorded
+        // before anything below refuses the value for not fitting it.
+        if (context) |want| try self.fixed_functions.put(self.gpa, d, .{
+            .signature = want.ty,
+            .in_library = self.program.get(self.res.moduleOfFile(want.at.file)).library,
+        });
 
         var found: [3][]TypeId = undefined;
         var allocated: usize = 0;
@@ -22334,8 +22344,6 @@ const Checker = struct {
             .signature = converted,
             .type_args = type_args,
             .implementation = implementation,
-            .fixed = context != null,
-            .fixed_in_library = if (context) |want| self.program.get(self.res.moduleOfFile(want.at.file)).library else false,
         });
 
         if (open) {
