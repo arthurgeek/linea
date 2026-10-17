@@ -97,9 +97,6 @@ const Fold = union(enum) {
 
 /// The most variants an enum may declare.
 ///
-/// How many variants an enum may declare ([T-Variants]).
-pub const max_variants = 64;
-
 /// Checks a tree against its declared types.
 ///
 /// A type flows *inward* from an annotation or the return type, and *outward*
@@ -761,18 +758,6 @@ fn typecheckInternal(
         if (ast.declTag(d) != .enum_) continue;
 
         const variants = ast.declVariants(d);
-        // [T-Variants] is a rule about the declaration, so it is reported
-        // where the enum is declared.
-        if (variants.len > max_variants) {
-            try c.sink.addErrorFmt(
-                .t_variants,
-                ast.fileOf(ast.declName(d)),
-                ast.tokenSpan(ast.declName(d)),
-                "split it, or use a structure with a field per case",
-                "an enum has at most {d} variants, and this has {d}",
-                .{ max_variants, variants.len },
-            );
-        }
 
         const entries = try gpa.alloc(types_mod.Variant, variants.len);
         defer gpa.free(entries);
@@ -34456,20 +34441,20 @@ test "diagnostic detail: an enum match names every uncovered variant" {
     try testing.expect(diagnosticSays(&sink, .t_cover, "`Paused`, `Closed`"));
 }
 
-test "diagnostic detail: an oversized enum does not invent a missing variant" {
+test "diagnostic detail: a wide enum names the variant past the sixty-fourth that no arm takes" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
     var source: std.ArrayList(u8) = .empty;
     try source.appendSlice(gpa, "enum Wide {\n");
-    for (0..65) |i| try source.appendSlice(gpa, try std.fmt.allocPrint(gpa, "V{d},\n", .{i}));
+    for (0..70) |i| try source.appendSlice(gpa, try std.fmt.allocPrint(gpa, "V{d},\n", .{i}));
     try source.appendSlice(gpa, "}\nfn main() -> UInt8 { match Wide.V0 {\n");
-    for (0..65) |i| try source.appendSlice(gpa, try std.fmt.allocPrint(gpa, "V{d} => 0,\n", .{i}));
+    for (0..70) |i| if (i != 66) try source.appendSlice(gpa, try std.fmt.allocPrint(gpa, "V{d} => 0,\n", .{i}));
     try source.appendSlice(gpa, "} }\n");
     var sink = Sink.init(gpa);
-    _ = try checkSourceInto(gpa, source.items, &sink);
-    try testing.expect(diagnosticSays(&sink, .t_variants, "at most 64 variants"));
-    try testing.expect(!diagnosticSays(&sink, .t_cover, "`V64`"));
+    const errors = try checkSourceInto(gpa, source.items, &sink);
+    try testing.expectEqual(@as(u32, 1), errors);
+    try testing.expect(diagnosticSays(&sink, .t_cover, "`V66`"));
 }
 
 test "match arms agree by the rule that already exists" {

@@ -1,5 +1,0 @@
-error[T-Variants]: an enum has at most 64 variants, and this has 65
- --> tests/enums/an_enum_has_at_most_sixty_four_variants.lin:4:6
-  |
-4 | enum Wide {
-  |      ^^^^ split it, or use a structure with a field per case

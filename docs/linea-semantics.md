@@ -3725,8 +3725,6 @@ NP-complete, so without a ceiling the cost of checking one `match` could grow
 exponentially with the width of its patterns. A `match` refused this way is
 split into nested `match`es, each covering one part.
 
-**[T-Variants]** An enum declares at most 64 variants.
-
 **[T-Unreachable]** A match arm that no value can reach is ill-formed: every
 value it matches is taken by the arms before it. This includes an already
 covered variant, `_` after coverage is complete, an arm after a pattern that

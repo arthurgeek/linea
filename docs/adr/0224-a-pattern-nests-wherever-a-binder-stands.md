@@ -62,6 +62,11 @@ that value as a pattern, and a pattern in a `let`, `let read`, `let … else`,
 The check counts the matrix cells it builds and refuses a `match` past
 2^20 of them ([T-CoverLimit]).
 
+**An enum declares any number of variants.** The limit of 64 ([T-Variants])
+existed because coverage kept one bit per variant in a machine word. The
+usefulness pass records the variants a column names in a set sized by the enum,
+so the rule and its diagnostic are removed.
+
 **`let … else` stays a test of its initializer.** Its pattern binds the success
 payload and must be irrefutable; `else` still means only that the `Option` or
 `Result` failed.
@@ -86,7 +91,8 @@ tested, then binds.
 are written in one step, and a lent value's parts are lent in one step. The
 three coverage mechanisms of one `match` (the variant word, the closing product
 arm and the integer intervals) become one. `let Some(n) = found` is reported as
-refutable rather than as naming a different type.
+refutable rather than as naming a different type. An enum with more than 64
+variants, refused before, is accepted.
 
 Struct patterns as a `for` head stay out: a `for` takes a name or a tuple.
 

@@ -233,18 +233,15 @@ pub fn Coverage(comptime Context: type) type {
                         .variant => |v| if (v.index < count) named.set(v.index),
                         else => {},
                     };
-                    var k: u32 = 0;
-                    while (k < count) : (k += 1) {
-                        if (named.isSet(k)) try out.append(self.arena, try self.branch(rows, ty, .{ .variant = k }));
-                    }
+                    try self.variantBranches(&out, rows, ty, count, &named);
                     if (named.count() == count) return out.items;
+                    var k: u32 = 0;
                     // The variants no row names: any of them, carrying
                     // anything; with none named, any value at all.
                     var absent: std.ArrayList(Witness) = .empty;
                     if (named.count() == 0) {
                         try absent.append(self.arena, .{ .ty = ty, .shape = .wild });
                     } else {
-                        k = 0;
                         while (k < count and absent.items.len < max_witnesses) : (k += 1) {
                             if (!named.isSet(k)) try absent.append(self.arena, try self.applied(ty, .{ .variant = k }, null));
                         }
@@ -255,6 +252,50 @@ pub fn Coverage(comptime Context: type) type {
                 .opaque_ => try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }})),
             }
             return out.items;
+        }
+
+        /// One branch per variant a row names, in variant order, built in one
+        /// pass over the rows: a row naming a variant joins that variant's
+        /// branch alone, and a row with a wildcard joins every one. So the
+        /// work is the rows plus one entry per wildcard row and named variant,
+        /// not the rows once per variant.
+        fn variantBranches(
+            self: *Self,
+            out: *std.ArrayList(Branch),
+            rows: []const Ref,
+            ty: Ty,
+            count: u32,
+            named: *const std.DynamicBitSetUnmanaged,
+        ) Error!void {
+            // Where each named variant's branch sits among the branches.
+            const slot = try self.arena.alloc(u32, count);
+            const buckets = try self.arena.alloc(std.ArrayList(Ref), named.count());
+            for (buckets) |*b| b.* = .empty;
+            var order: std.ArrayList(u32) = .empty;
+            {
+                var it = named.iterator(.{});
+                var n: u32 = 0;
+                while (it.next()) |k| : (n += 1) {
+                    slot[k] = n;
+                    try order.append(self.arena, @intCast(k));
+                }
+            }
+            for (rows) |r| {
+                switch (r.cells[0].pattern.*) {
+                    .variant => |v| {
+                        const arity = self.context.arity(ty, .{ .variant = v.index });
+                        const s = (try self.specialise(r, .{ .variant = v.index }, arity)).?;
+                        try buckets[slot[v.index]].append(self.arena, s);
+                    },
+                    else => for (order.items, buckets) |k, *b| {
+                        const arity = self.context.arity(ty, .{ .variant = k });
+                        try b.append(self.arena, (try self.specialise(r, .{ .variant = k }, arity)).?);
+                    },
+                }
+            }
+            for (order.items, buckets) |k, b| {
+                try out.append(self.arena, .{ .step = .{ .ty = ty, .choice = .{ .ctor = .{ .variant = k } } }, .rows = b.items });
+            }
         }
 
         /// The branch for constructor `c`: each row naming it, with its head

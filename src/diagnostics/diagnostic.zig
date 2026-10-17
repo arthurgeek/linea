@@ -286,7 +286,6 @@ pub const Code = enum {
     /// budget allows. Nested patterns make exhaustiveness NP-complete, so the
     /// budget is what bounds the cost of checking one `match`.
     t_cover_limit,
-    t_variants,
     t_unreachable,
     /// A pattern that must match every value of its type, in a `let`, a
     /// `let read`, a `let … else`, a `for` or a lambda parameter, misses one.
@@ -484,7 +483,6 @@ pub const Code = enum {
             .t_defaulted_allocator => "T-DefaultedAllocator",
             .t_cover => "T-Cover",
             .t_cover_limit => "T-CoverLimit",
-            .t_variants => "T-Variants",
             .t_unreachable => "T-Unreachable",
             .t_refutable => "T-Refutable",
             .t_infinite_layout => "T-InfiniteLayout",
