@@ -1,0 +1,21 @@
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/diag/a_closure_return_is_range_checked.lin:20:9
+   |
+18 |             return true
+   |             ----------- expected because of this `return`
+20 |         1
+   |         ^ expected `Bool`, found `Int64`
+error[T-Literal]: `UInt8` cannot hold 300
+ --> tests/diag/a_closure_return_is_range_checked.lin:4:20
+  |
+4 |             return 300
+  |                    ^^^ literal is out of range for its type
+8 |     let byte: UInt8 = count(true)
+  |                       ----------- settled to `UInt8` here
+error[T-Literal]: `Float32` cannot hold 3e39
+  --> tests/diag/a_closure_return_is_range_checked.lin:11:20
+   |
+11 |             return 3e39
+   |                    ^^^^ literal is out of range for its type
+15 |     let narrow: Float32 = scale(true)
+   |                           ----------- settled to `Float32` here

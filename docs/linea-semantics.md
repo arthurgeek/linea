@@ -609,7 +609,11 @@ help also says that an entry point writes `-> UInt8`
 the unit type written as such is refused: `-> Result[(), E]` and `-> ((), T)`
 are results that hold a Unit, and a name standing for `()`, such as an alias, is
 not looked through. A lambda that writes no result takes its body's
-type, Unit included, so `-> ()` is refused on a lambda too; one that writes
+type, Unit included, so `-> ()` is refused on a lambda too. Where neither a
+written result nor its context gives it a type, its first `return` carrying a
+value settles the result, as a loop's first `break` does: every later `return`
+and the body's own value must have that type, and an open literal in any of
+them settles with the rest. One that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
 A `test fn` that writes no result answers `Result[(), testing.Failure]`
 ([S-Test]). A projection names a place and always writes its type.

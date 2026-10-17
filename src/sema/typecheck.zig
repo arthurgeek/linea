@@ -4797,6 +4797,9 @@ const Expected = struct {
         assignment,
         /// A `break` that settled the loop's type before this one.
         break_site,
+        /// A `return` that settled the result of a closure writing none
+        /// before this one.
+        return_site,
         /// The `while` this `break` leaves, which is always Unit.
         while_loop,
         /// The parameter an argument is passed to.
@@ -4846,6 +4849,7 @@ const Expected = struct {
                 .operand => "expected because of this operand",
                 .assignment => "expected because of this binding",
                 .break_site => "expected because of this `break`",
+                .return_site => "expected because of this `return`",
                 .while_loop => "a `while` yields `()`, whatever its body",
                 .parameter => "expected because of this parameter",
                 .payload => "expected because of what this variant carries",
@@ -5479,6 +5483,11 @@ const Checker = struct {
     /// What the function being checked declares it returns, so a `return`
     /// answers to that rather than to its surroundings.
     current_return: ?Expected = null,
+    /// In a closure that writes no result type and has none from its context,
+    /// what its first `return` carrying a value settled the result to. Each
+    /// later `return` and the body's own value answer to it, as a loop's
+    /// `break`s answer to the first. Null outside such a closure.
+    inferred_return: ?*?Expected = null,
     default_test_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
@@ -16599,16 +16608,23 @@ const Checker = struct {
             }
             break :blk TypeId.unit;
         } else blk: {
-            var return_expected = self.current_return;
+            var return_expected = if (self.current_return == null and self.inferred_return != null) self.inferred_return.?.* else self.current_return;
             if (return_expected) |*want| want.unit_test_success = false;
             break :blk try self.check(value, return_expected);
         };
-        _ = t;
 
         // A value that does not complete leaves before `return` itself can.
         if (value != ExprId.none and !self.completionReaches(value)) {
             return self.record(id, .never);
         }
+
+        if (self.current_return == null) if (self.inferred_return) |inferred| if (inferred.* == null and t != .poison) {
+            inferred.* = .{
+                .ty = t,
+                .at = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) },
+                .reason = .return_site,
+            };
+        };
 
         self.unwindsEveryLoop();
 
@@ -18600,12 +18616,18 @@ const Checker = struct {
             .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
         } else null;
         const written_before_body = self.written.items.len;
+        // With no result type written or given, the closure's `return`s and
+        // its body's value settle it together.
+        var inferred_return: ?Expected = null;
         const body_result = checked: {
             const previous_return = self.current_return;
+            const previous_inferred = self.inferred_return;
             const previous_failure = self.failure_expected;
             self.current_return = result_expected;
+            self.inferred_return = if (result_expected == null) &inferred_return else null;
             self.failure_expected = null;
             defer self.current_return = previous_return;
+            defer self.inferred_return = previous_inferred;
             defer self.failure_expected = previous_failure;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
@@ -18627,7 +18649,13 @@ const Checker = struct {
         // the places the checker recorded as written; ownership reports the
         // refusal, since what the body takes is decided by position there.
         const uncaptured_changed = free != .none and self.writesBinding(self.res.targetOf(free), self.written.items[written_before_body..]);
-        const result = if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
+        const settled_by_return = if (inferred_return) |returned| tied: {
+            if (body_result != .never and body_result != .poison) {
+                if (try self.expect(self.resultOf(lambda.body), body_result, returned) == .poison) refused = true;
+            }
+            break :tied try self.builder.resolveOpen(returned.ty, &self.open_types);
+        } else null;
+        const result = settled_by_return orelse if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
                 .ty = contextual.?.result,
