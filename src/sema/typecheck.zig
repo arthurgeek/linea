@@ -19214,7 +19214,7 @@ const Checker = struct {
                 .t_extern_runtime,
                 file,
                 span,
-                "reach it through the standard library's checked storage operations",
+                try std.fmt.allocPrint(self.sink.arena, "reach it through {s}", .{expected.reached_through}),
                 "`{s}` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against",
                 .{name},
             );

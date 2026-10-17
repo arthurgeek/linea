@@ -1,0 +1,20 @@
+error[T-ExternRuntime]: `linea_float64_to_bits` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against
+ --> tests/library/a_float_bit_cast_has_no_runtime_definition/main.lin:1:11
+  |
+1 | extern fn linea_float64_to_bits(value: Float64) -> UInt64
+  |           ^^^^^^^^^^^^^^^^^^^^^ reach it through `Float64.to_bits`
+error[T-Extern]: `Float64` may not cross the foreign boundary: only an integer's representation is the language's to fix
+ --> tests/library/a_float_bit_cast_has_no_runtime_definition/main.lin:1:33
+  |
+1 | extern fn linea_float64_to_bits(value: Float64) -> UInt64
+  |                                 ^^^^^ pass what it is made of, as integers
+error[T-ExternRuntime]: `linea_float32_from_bits` is replaced by the compiler where the standard library declares it, so the runtime defines nothing to link against
+ --> tests/library/a_float_bit_cast_has_no_runtime_definition/main.lin:3:11
+  |
+3 | extern fn linea_float32_from_bits(bits: UInt32) -> Float32
+  |           ^^^^^^^^^^^^^^^^^^^^^^^ reach it through `Float32.from_bits`
+error[T-Extern]: `Float32` may not cross the foreign boundary: only an integer's representation is the language's to fix
+ --> tests/library/a_float_bit_cast_has_no_runtime_definition/main.lin:3:11
+  |
+3 | extern fn linea_float32_from_bits(bits: UInt32) -> Float32
+  |           ^^^^^^^^^^^^^^^^^^^^^^^ pass what it is made of, as integers

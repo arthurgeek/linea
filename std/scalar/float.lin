@@ -260,9 +260,14 @@ impl Float64 {
     }
 
     // Negate negative values and return positive zero for either zero, so
-    // the result never carries a sign; NaN stays NaN.
+    // the result never carries a sign. A NaN stays a NaN with its payload,
+    // and its sign bit is cleared, as IEEE 754's `abs` and Rust's
+    // `f64::abs` clear it.
     pub fn abs(self: Self) -> Float64 {
-        if self < 0.0 {
+        if self.is_nan() {
+            let sign_bit: UInt64 = 9223372036854775808
+            Float64.from_bits(self.to_bits() % sign_bit)
+        } else if self < 0.0 {
             -self
         } else if self == 0.0 {
             0.0
@@ -280,6 +285,11 @@ impl Float64 {
 
         let nan = 0.0 / 0.0
         testing.assert(nan.abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+        // A negative quiet NaN with a payload loses its sign and keeps the rest.
+        let negative_nan: UInt64 = 18444492273895866369
+        let positive_nan: UInt64 = 9221120237041090561
+        testing.assert_eq(Float64.from_bits(negative_nan).abs().to_bits(), positive_nan, "the magnitude of a NaN kept its sign")?
+        testing.assert_eq(Float64.from_bits(positive_nan).abs().to_bits(), positive_nan, "the magnitude of a positive NaN changed")?
 
         .Ok(())
     }
@@ -303,9 +313,14 @@ test fn a_float32_nan_is_equal_to_nothing_including_itself() {
 
 impl Float32 {
     // Negate negative values and return positive zero for either zero, so
-    // the result never carries a sign; NaN stays NaN.
+    // the result never carries a sign. A NaN stays a NaN with its payload,
+    // and its sign bit is cleared, as IEEE 754's `abs` and Rust's
+    // `f32::abs` clear it.
     pub fn abs(self: Self) -> Float32 {
-        if self < 0.0 {
+        if self.is_nan() {
+            let sign_bit: UInt32 = 2147483648
+            Float32.from_bits(self.to_bits() % sign_bit)
+        } else if self < 0.0 {
             -self
         } else if self == 0.0 {
             0.0
@@ -321,6 +336,10 @@ test fn a_float32_absolute_value_drops_the_sign_and_keeps_everything_else() {
     let zero: Float32 = 0.0
     testing.assert(1.0 / Float32.abs(-zero) > 0.0, "absolute value of negative zero keeps its sign")?
     testing.assert((zero / zero).abs().is_nan(), "the magnitude of a NaN is not a NaN")?
+    let negative_nan: UInt32 = 4290772993
+    let positive_nan: UInt32 = 2143289345
+    testing.assert_eq(Float32.from_bits(negative_nan).abs().to_bits(), positive_nan, "the magnitude of a NaN kept its sign")?
+    testing.assert_eq(Float32.from_bits(positive_nan).abs().to_bits(), positive_nan, "the magnitude of a positive NaN changed")?
     .Ok(())
 }
 
@@ -513,6 +532,19 @@ test fn float32_total_order_ranks_every_class() {
             testing.assert(left.total_less(right) && !right.total_less(left), "the total order misplaced a pair")?
         }
     }
-    testing.assert(Float32.total_less(-0.0, 0.0), "negative zero did not come before zero")?
+    let nan_bits: UInt32 = 2143289345
+    let nan = Float32.from_bits(nan_bits)
+    let same_nan = Float32.from_bits(nan_bits)
+    testing.assert(!nan.total_less(same_nan) && !same_nan.total_less(nan), "two NaNs with equal bits did not tie")?
+    let zero: Float32 = 0.0
+    testing.assert(Float32.total_less(-0.0, 0.0) && -zero == zero, "signed zeros are equal yet not ordered")?
+    let numbers: [Float32; _] = [-3.5, -1.0, 0.5, 2.0, 3e38]
+    for i in 0..numbers.length() {
+        for j in 0..numbers.length() {
+            let left = numbers[i]
+            let right = numbers[j]
+            testing.assert_eq(left.total_less(right), left < right, "the total order disagrees with < on numbers")?
+        }
+    }
     .Ok(())
 }
