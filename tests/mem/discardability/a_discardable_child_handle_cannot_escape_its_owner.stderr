@@ -5,4 +5,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: part of the value comes from `outer`, which `where borrows(outer)` would permit; the rest no clause can
-   = help: `child` belongs to `child_handle` and ends when it returns, so nothing returned may observe it
+   = help: `child` is an allocator `child_handle` opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `child_handle_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives

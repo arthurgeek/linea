@@ -7,10 +7,3 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    = help: `line` belongs to `greeting` and ends when it returns, so nothing returned may observe it
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
    = help: the types this names are reached with `import std.mem`
-error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/borrows/contracts/a_closures_return_is_not_an_exit_of_the_function.lin:17:11
-   |
-17 |     defer line.release()
-   |           ^^^^ keep this place available until the last use of its observation
-24 |     line.view()
-   |     ----------- the observation is returned here

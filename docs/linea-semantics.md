@@ -2319,8 +2319,10 @@ included, name the trait's parameters, and read the types an implementation
 settles, `Self.Iter`, but nothing a particular implementation holds. A body
 provided by a trait with parameters, `Scale[K]`, runs at the arguments of the
 implementation it was reached through. An implementation does not supply a
-provided operation, and one that does is refused under this rule. `Sequence`
-provides `map` this way:
+provided operation, and one that does is refused under this rule. A member
+refused for being there at all is dropped by the fix, so its body is not checked
+for ownership: what it would return or keep is not a mistake of its own.
+`Sequence` provides `map` this way:
 
 ```linea
 pub trait Sequence {
@@ -5305,10 +5307,22 @@ the one clause listing every parameter the value comes from (`where
 borrows(first, second)`), the retention clause for a value an `inout` parameter
 keeps (`where retains(seen: field)`), or, for a local owner, that it ends when the
 function returns. Each further place the value took a dependency is pointed at
-as well. The clause named is the whole clause to write: one the signature wrote
-keeps its sources, and one written where the signature wrote none replaces the
-contract it inferred, so it also lists the sources that contract covered for
-this exit: `where borrows(self), carries(other)`.
+as well. The clause named is the whole clause to write, and a function has one:
+every report of one function names the same clause, listing every source its
+escapes return and every retention its `inout` parameters keep, so writing the
+clause any report names answers them all. One the signature wrote keeps its
+sources, with a `borrows` written for a consumed parameter, which
+[T-BorrowContract] refuses, named `carries`; one written where the signature
+wrote none replaces the contract it inferred, so it also lists the sources that
+contract covered at any exit: `where borrows(self), carries(other)`.
+
+An observation of a local owner leaving the function is one mistake: the owner
+ending, or a `defer` releasing it, before the observation's use outside is that
+escape's consequence, and [O-Borrow] does not report it again. Where the local is
+an allocator the function opens and what leaves was built in it, the report names
+the form that takes the allocator as a parameter, `load_in` with `A: Allocator`
+and `allocator: A` first, so the caller's allocator decides how long the result
+lives, and the owned copy in the system allocator.
 
 A member of a trait implementation answers to its trait's signature, and a
 function received by a written callable type or a callable bound answers to that

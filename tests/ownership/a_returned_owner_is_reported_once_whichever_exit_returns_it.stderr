@@ -13,7 +13,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 16 |     copy(second)
    |     ^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `second`; write `where carries(_first, second)` to say so
+   = help: the value comes from `second`; write `where carries(_first, second, third)` to say so, which also names what `either`'s other escapes need
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
    = help: the types this names are reached with `import std.mem`
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
@@ -22,6 +22,6 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 14 |         return copy(third)
    |                ^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `third`; write `where carries(_first, third)` to say so
+   = help: the value comes from `third`; write `where carries(_first, second, third)` to say so, which also names what `either`'s other escapes need
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
    = help: the types this names are reached with `import std.mem`

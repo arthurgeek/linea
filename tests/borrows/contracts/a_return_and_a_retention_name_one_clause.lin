@@ -1,6 +1,6 @@
 // `note` returns a view of `b` and keeps one in `seen`, and its clause says
-// neither. Each report names the whole clause, keeping what the other adds,
-// so following them in turn reaches one clause that says both.
+// neither. Each report names the one whole clause that says both, so the
+// clause either report offers answers the other too.
 struct Seen {
     last: Str,
 }

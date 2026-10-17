@@ -1,18 +1,18 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> tests/borrows/contracts/a_return_and_a_retention_each_keep_the_others_clause.lin:13:13
+  --> tests/borrows/contracts/a_return_and_a_retention_name_one_clause.lin:13:13
    |
 13 |     let v = b.view()
    |             ^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `b`; write `where borrows(_a, b)` to say so
+   = help: the value comes from `b`; write `where borrows(_a, b), retains(seen: borrow b)` to say so, which also names what `note`'s other escapes need
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
    = help: the types this names are reached with `import std.mem`
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/borrows/contracts/a_return_and_a_retention_each_keep_the_others_clause.lin:9:17
+ --> tests/borrows/contracts/a_return_and_a_retention_name_one_clause.lin:9:17
   |
 9 |     seen.last = b.view()
   |                 ^^^^^^^^ escape observations only from the signature's declared sources
   |
-  = help: `seen` keeps a value that comes from `b`; write `where borrows(_a), retains(seen: borrow b)` to say so
+  = help: `seen` keeps a value that comes from `b`; write `where borrows(_a, b), retains(seen: borrow b)` to say so, which also names what `note`'s other escapes need
   = help: an owned copy observes nothing and needs no clause: declare `String` where `seen` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `mem.Oom`
   = help: the types this names are reached with `import std.mem`

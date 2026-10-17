@@ -1,0 +1,32 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/every_escape_of_a_function_names_its_one_clause.lin:12:5
+   |
+12 |     c.view()
+   |     ^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `c`; write `where borrows(a, b, c)` to say so, which also names what `pick`'s other escapes need
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/every_escape_of_a_function_names_its_one_clause.lin:10:16
+   |
+10 |         return b.view()
+   |                ^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `b`; write `where borrows(a, b, c)` to say so, which also names what `pick`'s other escapes need
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/every_escape_of_a_function_names_its_one_clause.lin:16:5
+   |
+16 |     &first.push(copy(left)).unwrap()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `first` keeps a value that comes from `left`; write `where retains(first: left), retains(second: right)` to say so, which also names what `keep`'s other escapes need
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/every_escape_of_a_function_names_its_one_clause.lin:17:5
+   |
+17 |     &second.push(copy(right)).unwrap()
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `second` keeps a value that comes from `right`; write `where retains(first: left), retains(second: right)` to say so, which also names what `keep`'s other escapes need

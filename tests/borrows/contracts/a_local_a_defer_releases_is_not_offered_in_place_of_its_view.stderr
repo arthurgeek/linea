@@ -7,10 +7,3 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    = help: `local` belongs to `make` and ends when it returns, so nothing returned may observe it
    = help: an owned copy observes nothing and needs no clause: declare `String` where the result holds the view, and store `….to_owned()` there, which copies the text and can fail with `mem.Oom`
    = help: the types this names are reached with `import std.mem`
-error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/borrows/contracts/a_local_a_defer_releases_is_not_offered_in_place_of_its_view.lin:9:11
-   |
-9  |     defer local.release()
-   |           ^^^^^ keep this place available until the last use of its observation
-10 |     Contact { name = local.view() }
-   |     ------------------------------- the observation is returned here

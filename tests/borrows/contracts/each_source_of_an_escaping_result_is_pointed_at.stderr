@@ -10,10 +10,3 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   = help: `local` belongs to `pick` and ends when it returns, so nothing returned may observe it
   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
   = help: the types this names are reached with `import std.mem`
-error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/borrows/contracts/each_source_of_an_escaping_result_is_pointed_at.lin:5:11
-  |
-5 |     defer local.release()
-  |           ^^^^^ keep this place available until the last use of its observation
-7 |         local.view()
-  |         ------------ the observation is returned here
