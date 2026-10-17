@@ -1,0 +1,13 @@
+// `second` is assigned to a callable type that says the result borrows
+// `a`, and its body returns a view of `b`. That type fixes its signature, so
+// the report names the clause it would need and where else it must be written.
+fn second(_a: String, b: String) -> Str where borrows(_a) {
+    b.view()
+}
+
+fn main() -> UInt8 {
+    let f: fn(read a: String, read b: String) -> Str where borrows(a) = second
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(f(a, b).length())
+}

@@ -22186,6 +22186,8 @@ const Checker = struct {
             .signature = converted,
             .type_args = type_args,
             .implementation = implementation,
+            .fixed = context != null,
+            .fixed_in_library = if (context) |want| self.program.get(self.res.moduleOfFile(want.at.file)).library else false,
         });
 
         if (open) {

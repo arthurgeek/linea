@@ -1971,9 +1971,10 @@ const Analysis = struct {
         return self.res.captureConvention(binding) == .inout;
     }
 
-    /// Where an escaping observation leaves: the function's result, or an
+    /// Where an escaping observation leaves: the function's result, with the
+    /// owners the signature's contract already covered at that exit, or an
     /// `inout` parameter that keeps it.
-    const Leaving = union(enum) { returned, retained: BindingId };
+    const Leaving = union(enum) { returned: []const BindingId, retained: BindingId };
 
     /// `held` is the type of the part of the result or parameter that holds
     /// the escaping observation, where its path names one.
@@ -2111,22 +2112,53 @@ const Analysis = struct {
             const joiner = if (i == 0) "" else if (i + 1 == sources.items.len) " and " else ", ";
             try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
         }
-        const fixed = if (sources.items.len > 0) try self.fixedSignatureRefusing(leaving, sources.items, positions.items) else null;
-        if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else switch (leaving) {
-            .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so", .{ named.items, try types.sourceClause(arena, sources.items) })),
-            .retained => |destination| {
-                var clause: std.ArrayList(u8) = .empty;
-                try clause.appendSlice(arena, "where ");
+        // A clause written where none was replaces the contract the
+        // signature inferred, so it names the sources that contract covered
+        // for a value this exit returns.
+        var written_sources = std.ArrayList(types.ClauseSource).fromOwnedSlice(try arena.dupe(types.ClauseSource, sources.items));
+        if (leaving == .returned and self.function.decl != .none and self.ast.declContracts(self.function.decl).len == 0 and
+            self.typing.adopted_contracts.get(self.function.decl) == null)
+        {
+            if (switch (self.typing.get(self.function.signature)) {
+                .callable => |callable| callable,
+                else => null,
+            }) |signature| for (signature.contracts) |contract| {
+                if (contract.kind == .retains) continue;
+                const at = switch (contract.source.root) {
+                    .parameter => |index| index,
+                    else => continue,
+                };
+                const reached = for (leaving.returned) |owner| {
+                    if (owner == self.function.parameters[at]) break true;
+                } else false;
+                if (!reached) continue;
+                const spelling = self.ast.tokenText(self.res.declaringToken(self.function.parameters[at]));
+                const listed = for (written_sources.items) |source| {
+                    if (std.mem.eql(u8, source.spelling, spelling)) break true;
+                } else false;
+                if (!listed) try written_sources.append(arena, .{ .spelling = spelling, .borrows = contract.kind == .borrows });
+            };
+        }
+        const clause: []const u8 = switch (leaving) {
+            .returned => try types.sourceClause(arena, written_sources.items),
+            .retained => |destination| retained: {
+                var text: std.ArrayList(u8) = .empty;
+                try text.appendSlice(arena, "where ");
                 for (sources.items, 0..) |source, i| {
-                    try clause.print(arena, "{s}retains({s}: {s}{s})", .{
+                    try text.print(arena, "{s}retains({s}: {s}{s})", .{
                         if (i == 0) "" else ", ",
                         self.ast.tokenText(self.res.declaringToken(destination)),
                         if (source.borrows) "borrow " else "",
                         source.spelling,
                     });
                 }
-                try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause.items }));
+                break :retained text.items;
             },
+        };
+        const fixed = if (sources.items.len > 0) try self.fixedSignatureRefusing(leaving, sources.items, positions.items, clause) else null;
+        if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else switch (leaving) {
+            .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so", .{ named.items, clause })),
+            .retained => |destination| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause })),
         };
         if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
             self.ast.tokenText(self.res.declaringToken(owner)),
@@ -2145,7 +2177,10 @@ const Analysis = struct {
         // A clause is not always the fix, and the owned copy needs none. It
         // names the type that owns the text and the failure making it can
         // report, so the edit can be written as read.
-        if (sources.items.len > 0 or local != null or consumed != null) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file))) |owned| {
+        // Under a fixed signature the result type is fixed with it, so a
+        // returned view has no owned copy to become.
+        const result_fixed = leaving == .returned and fixed != null;
+        if (!result_fixed and (sources.items.len > 0 or local != null or consumed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file))) |owned| {
             const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
                 .callable => |callable| held != null and held.? == callable.result,
                 else => false,
@@ -2186,7 +2221,7 @@ const Analysis = struct {
     /// **Bound:** one lookup of the signature a member supplies, one pass
     /// over the program's function values, and the fixed signature's
     /// contracts once per source, once per report.
-    fn fixedSignatureRefusing(self: *const Analysis, leaving: Leaving, sources: []const types.ClauseSource, positions: []const u32) std.mem.Allocator.Error!?[]const u8 {
+    fn fixedSignatureRefusing(self: *const Analysis, leaving: Leaving, sources: []const types.ClauseSource, positions: []const u32, clause: []const u8) std.mem.Allocator.Error!?[]const u8 {
         const decl = self.function.decl;
         if (decl == .none) return null;
         const name = self.ast.tokenText(self.ast.declName(decl));
@@ -2197,13 +2232,26 @@ const Analysis = struct {
             const trait = self.ast.declOwner(sig);
             const module = self.program.moduleOf(sig);
             const qualifier = if (module == self.program.moduleOf(decl)) "" else try std.fmt.allocPrint(self.sink.arena, "{s}.", .{self.program.get(module).name});
-            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` implements `{s}{s}`, whose signature does not permit that clause, so it cannot be added", .{ name, qualifier, self.ast.tokenText(trait) });
+            // The program can widen a trait it declares, and only that one.
+            const widen = if (self.program.get(module).library) "" else try std.fmt.allocPrint(self.sink.arena, ", or write the source into `{s}{s}.{s}`'s clause and this one alike", .{ qualifier, self.ast.tokenText(trait), self.ast.tokenText(self.ast.declName(sig)) });
+            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` implements `{s}{s}`, whose signature does not permit `{s}`, so it cannot be added here: {s} what that signature permits{s}", .{
+                name,                                                qualifier,                       self.ast.tokenText(trait),                                               clause,
+                if (leaving == .returned) "return" else "keep only", widen,
+            });
         } else for (self.typing.function_values) |named_value| switch (named_value.target) {
-            // A value passed to a generic bound keeps its own signature,
-            // which fixes nothing beyond what the function already wrote.
-            .declared => |target| if (target == decl and named_value.signature != self.typing.declSignature(decl)) {
+            // A value received by a written callable type or a bound
+            // answers to that type's signature, whether or not it reads the
+            // same as the function's own.
+            .declared => |target| if (target == decl and named_value.fixed) {
                 fixed = named_value.signature;
-                why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit that clause, so it cannot be added", .{name});
+                why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit `{s}`, so it cannot be added here: {s} what that type permits{s}", .{
+                    name,
+                    clause,
+                    if (leaving == .returned) "return" else "keep only",
+                    // The program can widen a callable type it wrote, and only
+                    // that one.
+                    if (named_value.fixed_in_library) "" else ", or write the source into that type where it is written and into this signature alike",
+                });
                 break;
             },
             else => {},
@@ -2442,6 +2490,8 @@ const Analysis = struct {
         var uncovered: std.ArrayList(Origin) = .empty;
         defer uncovered.deinit(self.gpa);
         var first_escape: ?struct { site: EscapeSite, escaped: Escaped, held: ?types.TypeId } = null;
+        var covered: std.ArrayList(BindingId) = .empty;
+        defer covered.deinit(self.gpa);
         if (!self.function.contract_declined) for (self.store.facts(result)) |fact| {
             // A temporary ends with its statement, before the caller could
             // read what the function returns.
@@ -2458,20 +2508,23 @@ const Analysis = struct {
                     try targets.append(self.gpa, try self.resultPath(contract.target));
                 }
             }
-            if (try self.coveredFact(signature.result, fact, &targets)) continue;
+            if (try self.coveredFact(signature.result, fact, &targets)) {
+                try covered.append(self.gpa, fact.origin.place.root);
+                continue;
+            }
             const site = self.exprSite(self.escapeSite(returned_value, fact.origin.place.root));
             const held = self.typeAtPath(signature.result, fact.path);
             const escaped: Escaped = if (fact.origin.lent != .none)
                 .{ .lend = fact.origin.lent }
             else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation;
             if (escaped != .observation) {
-                try self.escape(at, site, escaped, .returned, &.{fact.origin}, held);
+                try self.escape(at, site, escaped, .{ .returned = &.{} }, &.{fact.origin}, held);
                 continue;
             }
             if (first_escape == null) first_escape = .{ .site = site, .escaped = escaped, .held = held };
             try uncovered.append(self.gpa, fact.origin);
         };
-        if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .returned, uncovered.items, escaping.held);
+        if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .{ .returned = covered.items }, uncovered.items, escaping.held);
         try self.stale(result, .{ .returned = returned_value }, report);
         for (self.function.inouts) |parameter| {
             const retained = try self.carriedBy(state.get(Cell.binding(parameter)) orelse .empty, self.typing.bindingType(parameter));

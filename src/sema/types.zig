@@ -2208,6 +2208,13 @@ pub const FunctionValue = struct {
     /// trait's operation was settled at. Null for a target that names its
     /// body outright.
     implementation: ?CallImpl = null,
+    /// Whether a written callable type or a callable bound received the
+    /// value, which then answers to that type's signature: its own cannot
+    /// gain a clause the type does not have.
+    fixed: bool = false,
+    /// Whether that callable type is written in the library, where the
+    /// program cannot change it.
+    fixed_in_library: bool = false,
 
     pub fn deinit(self: FunctionValue, gpa: std.mem.Allocator) void {
         if (self.type_args.len > 0) gpa.free(self.type_args);

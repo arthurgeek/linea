@@ -1,0 +1,24 @@
+// The clause the report on `pick` names: it borrows `u` and keeps what the
+// consumed `t` carries, which the inferred contract covered.
+@derive(Release)
+struct Doc {
+    text: String,
+}
+
+struct Box {
+    v: Str,
+}
+
+fn pick(sink t: Box, u: Doc, first: Bool) -> Box where borrows(u), carries(t) {
+    if first {
+        t
+    } else {
+        Box { v = u.text.view() }
+    }
+}
+
+fn main() -> UInt8 {
+    defer let d = Doc { text = String.new() }
+    let b = pick(Box { v = "a" }, d, true)
+    UInt8(b.v.length())
+}

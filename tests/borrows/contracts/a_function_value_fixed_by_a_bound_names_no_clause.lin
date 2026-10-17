@@ -1,0 +1,15 @@
+// `second` is passed to `apply`, whose bound says the result borrows `a`, and
+// its body returns a view of `b`. The bound fixes its signature.
+fn apply[F: fn(read a: String, read b: String) -> Str where borrows(a)](a: String, b: String, f: F) -> UInt8 {
+    UInt8(f(a, b).length())
+}
+
+fn second(_a: String, b: String) -> Str where borrows(_a) {
+    b.view()
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    apply(a, b, second)
+}

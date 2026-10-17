@@ -5296,23 +5296,33 @@ parameters. Deferred owner disposal still occurs before the recipient can use a
 returned observation, so returning a view into a local owner is rejected. An
 independent owned value may leave its scope through the ordinary move rules.
 
-A report is made once per exit and is placed where the escaping value took its
-dependency, following a block to its tail and a local binding back to the value
-written into it. It names
-the edit each source calls for, spelled as [T-BorrowContract] spells it: the one
-clause listing every parameter the value comes from (`where borrows(first,
-second)`), the retention clause for a value an `inout` parameter keeps (`where
-retains(seen: field)`), or, for a local owner, that it ends when the function
-returns. A member of a trait implementation answers to its trait's signature,
-and a function passed as a value of a callable type to that type; where that
-fixed signature does not permit the clause, the report says so instead of naming
-it. Where the type holding the observation declares `to_owned`, the report also
-offers the owned copy, which observes nothing and needs no clause, naming the type
-that holds it and the failure copying can report: `Result[String, mem.Oom]` for
-a result that was the view, `String` where a part of the result or an `inout`
-parameter held it. Where a local owner of that type supplied the view, it offers
-the owner itself instead. The owned copy is the fix where the signature is
-fixed, as a route handler's is.
+A report is made once per exit for the observations leaving there, and once per
+lend; it is placed where the escaping value took its dependency, following a
+block to its tail and a local binding back to the value written into it. It
+names the edit each source calls for, spelled as [T-BorrowContract] spells it:
+the one clause listing every parameter the value comes from (`where
+borrows(first, second)`), the retention clause for a value an `inout` parameter
+keeps (`where retains(seen: field)`), or, for a local owner, that it ends when the
+function returns. A clause written where the signature wrote none replaces the
+contract it inferred, so the clause named also lists the sources that contract
+covered: `where borrows(self), carries(other)`.
+
+A member of a trait implementation answers to its trait's signature, and a
+function received by a written callable type or a callable bound answers to that
+type. Where that fixed signature does not permit the clause, the report names
+the clause, says it cannot be added there, and offers what the program can
+change: returning or keeping what the fixed signature permits, or widening the
+trait or callable type where the program wrote it, and this signature with it.
+
+Where the type holding the observation declares `to_owned`, the report also
+offers the owned copy, which observes nothing and needs no clause, naming the
+type that holds it and the failure copying can report: `Result[String, mem.Oom]`
+for a result that was the view, `String` where a part of the result or an
+`inout` parameter held it. Where a local owner of that type supplied the view,
+and no `defer` already releases it, it offers the owner itself instead. Under a
+fixed signature the result type is fixed too, so a returned view is offered no
+copy; a stored view still is, which is the fix for a route handler that keeps a
+request's text in its state.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a
