@@ -8,6 +8,7 @@ for the code in brackets to reach the rule itself.
 
 | Code | Kind | First shown in | Rule |
 | --- | --- | --- | --- |
+| `M-Dependency` | error | Calling C: [A library that wraps C](11-calling-c.md#a-library-that-wraps-c) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Dependency]` |
 | `M-Embed` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Embed]` |
 | `M-EmbedText` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-EmbedText]` |
 | `M-Extern` | error | Calling C: [Only a trusted module declares C](11-calling-c.md#only-a-trusted-module-declares-c) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Extern]` |
