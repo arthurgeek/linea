@@ -2458,10 +2458,13 @@ written first. A definition that reads back to itself through such references,
 `Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
 inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
 once per cycle at the definition on it written first, naming each definition
-and what it reads. A definition that only reads into such a cycle is that
-report's consequence. A type applied to a definition read this way is a type,
-`type Iter = S[Box]` with a field of `S[T]` reading `T.Iter`, and is held to
-[T-InfiniteLayout] instead.
+and the type it is written as. The reference may sit inside an argument:
+`type D = Option[B.D]` with `type D = Option[A.D]` is the same cycle. A
+definition that only reads into such a cycle is that report's consequence. A
+cycle that passes through a type's field rather than through definitions,
+`type Iter = S[Box]` where `S[T]` has a field of type `T.Iter`, defines `Iter` as
+an ordinary type; it is the layout of `S[Box]` that contains itself, and
+[T-InfiniteLayout] reports it.
 
 An implementation supplies the trait's type arguments, as in
 `impl Holds[UInt8] for Coins` for `Holds[T]`. A wrong argument count is rejected

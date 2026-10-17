@@ -24987,7 +24987,7 @@ const Checker = struct {
             try chain.print(self.gpa, "{s}`{s}` is `{s}`", .{
                 if (count == 0) "" else ", ",
                 try self.definitionName(step),
-                try self.definitionName(next),
+                try spellWrittenOwned(self.sink.arena, self.ast, self.ast.declReturnRef(step)),
             });
             step = next;
             if (step == first or count > reads.count()) break;
@@ -24996,7 +24996,7 @@ const Checker = struct {
         try self.sink.addErrorFmt(
             .t_impl,
             self.ast.fileOf(written.at),
-            self.ast.writtenSpan(written),
+            self.ast.wholeWrittenSpan(written),
             "define it as a type that does not read back to itself",
             "this associated type is defined through itself: {s}",
             .{chain.items},

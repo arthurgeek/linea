@@ -893,6 +893,13 @@ pub const Ast = struct {
 
     /// From `start` through the bracket closing the first one opened at or
     /// after it. Bound: the written type's own tokens.
+    /// The whole of a written type, its arguments' brackets included:
+    /// `Option[B.D]` rather than `writtenSpan`'s `Option`.
+    pub fn wholeWrittenSpan(self: *const Ast, ref: node.TypeRef) Span {
+        if (ref.kind == .named and ref.name != TokenId.none and ref.args.len() > 0) return self.firstBracketsSpan(ref.name);
+        return self.writtenSpan(ref);
+    }
+
     fn firstBracketsSpan(self: *const Ast, start: TokenId) Span {
         const open = self.tokenSpan(start);
         var depth: u32 = 0;
