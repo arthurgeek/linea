@@ -4359,9 +4359,14 @@ const Parser = struct {
         var refused = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
+            // A keyword part is reported and its token taken, so the
+            // components after it parse as written and their binders are
+            // declared. A token no pattern begins with is left where it
+            // stands, and the list ends there.
+            const keyword = self.atKeywordName();
             const component = try self.parseSubPattern();
             try binders.append(self.gpa, component);
-            if (self.builder.exprTag(component) == .err) {
+            if (!keyword and self.builder.exprTag(component) == .err) {
                 refused = true;
                 break;
             }
@@ -4370,7 +4375,8 @@ const Parser = struct {
 
         // A pattern missing a comma or its `)` may hold more than was read,
         // and a component that is no pattern has already been reported, so
-        // none of them has its arity judged.
+        // none of them has its arity judged. A keyword part is one
+        // component, so a pattern holding one is judged.
         if (self.cursor.eat(.r_paren) != null) {
             if (!refused) try self.checkTupleArity(open, binders.items.len, switch (binders.items.len) {
                 0 => "`()` has nothing to take apart",
