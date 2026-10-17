@@ -5296,7 +5296,8 @@ returned observation, so returning a view into a local owner is rejected. An
 independent owned value may leave its scope through the ordinary move rules.
 
 A report is made once per exit and is placed where the escaping value took its
-dependency, following a local binding back to the value written into it. It names
+dependency, following a block to its tail and a local binding back to the value
+written into it. It names
 the edit each source calls for, spelled as [T-BorrowContract] spells it: the one
 clause listing every parameter the value comes from (`where borrows(first,
 second)`), the retention clause for a value an `inout` parameter keeps (`where
