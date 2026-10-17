@@ -2138,7 +2138,12 @@ test "the guide gate: a labelled manifest and C source join the project" {
     try testing.expectEqual(@as(usize, 1), reading.programs.len);
     try testing.expectEqual(@as(usize, 4), reading.programs[0].files.len);
     try testing.expectEqualStrings("tally/linea.json", reading.programs[0].files[0].path);
-    try testing.expectEqualStrings("tally/counter/counter.c", reading.programs[0].files[1].path);
+    // A labelled C source is a data file of the program after it, written
+    // beside the project's sources wherever it sits among them.
+    const carries_c = for (reading.programs[0].files) |file| {
+        if (std.mem.eql(u8, file.path, "tally/counter/counter.c")) break true;
+    } else false;
+    try testing.expect(carries_c);
     try testing.expectEqualStrings("tally", reading.programs[0].target);
 }
 
