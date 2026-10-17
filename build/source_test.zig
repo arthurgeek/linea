@@ -883,6 +883,33 @@ test "example roots: the walk lists nested directories and files and nothing els
     try testing.expectEqualStrings("hello.lin", roots[2]);
 }
 
+test "example roots: a source no root reaches belongs to no example root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The same manifest text and directories as the loader's test "a manifest's
+    // source key narrows the files a root reaches", which must agree.
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "hello.lin", .directory = false },
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"./src/\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/src/deep/part.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+        .{ .path = "app/lib", .directory = true },
+        .{ .path = "app/lib/linea.json", .directory = false, .text = "{}" },
+        .{ .path = "app/lib/main.lin", .directory = false },
+        .{ .path = "flat", .directory = true },
+        .{ .path = "flat/main.lin", .directory = false },
+        .{ .path = "flat/mail/send.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 1), stray.len);
+    try testing.expectEqualStrings("app/stray.lin", stray[0]);
+}
+
 test "example roots: the tests a run reported are read from its closing line" {
     try testing.expectEqual(@as(?usize, 3), source.testsReported("ok    a\n\n3 passed, 0 failed\n"));
     try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));

@@ -4,8 +4,12 @@
 //! Choosing the roots and reading a run's test count are `source.zig`'s job;
 //! this file only runs the compiler and reports. Which of a root's files
 //! declare tests is the compiler's answer, so this file counts what the runs
-//! report and fails when that is none, when any root fails, and when a root's
-//! run ends without a count.
+//! report and fails when that is none, when any root fails, when a root's run
+//! ends without a count, and when a `.lin` file lies outside every root's reach.
+//!
+//! A root with no test is not a failure: most examples teach a program rather
+//! than test one, and requiring a test of each would make the gate a list of
+//! exemptions. The floor is the sum, and the per-root counts are printed.
 
 const std = @import("std");
 const source = @import("source.zig");
@@ -40,6 +44,9 @@ const Walk = struct {
             const command = try std.fmt.allocPrint(gpa, "linea test {s}", .{path});
             return .{ .failure = try pool.timeoutMessage(gpa, command, root_timeout_seconds, finished.output) };
         }
+        // The count is the closing line `Transcript.finish` prints in
+        // `src/driver/runner.zig`, which build/ cannot import; a change to that
+        // line fails every root here with the message below.
         const tests = source.testsReported(finished.output);
         const failure: ?[]const u8 = if (!finished.succeeded)
             finished.output
@@ -69,6 +76,8 @@ pub fn main(init: std.process.Init) !u8 {
         },
     };
     const roots = source.exampleRoots(gpa, entries);
+    const unreached = source.unreachedSources(gpa, entries, roots);
+    for (unreached) |path| std.debug.print("{s}/{s} belongs to no example root\n", .{ args[1], path });
     const outcomes = try gpa.alloc(Outcome, roots.len);
     @memset(outcomes, .{});
     try pool.forEach(gpa, roots.len, wanted, Walk{
@@ -91,6 +100,7 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print(">>> {s}: FAILED\n{s}\n", .{ root, failure });
     }
     std.debug.print("examples: {d} root(s), {d} test(s), {d} root(s) failed\n", .{ roots.len, tests, failed });
+    if (unreached.len > 0) return 1;
     if (tests == 0) {
         std.debug.print("no example root ran a test\n", .{});
         return 1;

@@ -83,5 +83,8 @@ pub fn runMerged(
 /// The sentence both gates report for a run killed at its deadline, followed
 /// by what it had written.
 pub fn timeoutMessage(gpa: std.mem.Allocator, command: []const u8, timeout_seconds: u32, output: []const u8) ![]const u8 {
+    if (output.len == 0) {
+        return std.fmt.allocPrint(gpa, "`{s}` did not finish in {d} seconds; it wrote nothing before the deadline\n", .{ command, timeout_seconds });
+    }
     return std.fmt.allocPrint(gpa, "`{s}` did not finish in {d} seconds; it had written:\n{s}\n", .{ command, timeout_seconds, output });
 }

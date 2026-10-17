@@ -1256,9 +1256,9 @@ const HeavySteps = struct {
 
     /// `linea test` on every root beneath `examples/`, including a library
     /// nested under an application, which the application's own run does not
-    /// reach. The suite runs some of these as cases and
-    /// compares a transcript, which `-Dupdate` can rewrite to hold a failure;
-    /// this step asserts the exit status, which cannot be accepted.
+    /// reach. The suite runs some of these as cases and compares a transcript,
+    /// which `-Dupdate` can rewrite to hold a failure; this step asserts the
+    /// exit status, which cannot be accepted.
     fn exampleTests(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
         const b = self.b;
         const run = b.addRunArtifact(self.example_tests);

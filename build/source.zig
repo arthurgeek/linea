@@ -1865,6 +1865,8 @@ fn sortedKeys(gpa: std.mem.Allocator, keys: []const []const u8) []const []const 
 pub const ExampleEntry = struct {
     path: []const u8,
     directory: bool,
+    /// A manifest's text; empty for everything else.
+    text: []const u8 = "",
 };
 
 pub const ExampleLayout = union(enum) {
@@ -1897,7 +1899,13 @@ pub fn exampleLayout(
         switch (entry.kind) {
             .sym_link => return .{ .symlink = path },
             .directory => try found.append(gpa, .{ .path = path, .directory = true }),
-            .file => try found.append(gpa, .{ .path = path, .directory = false }),
+            .file => {
+                const text: []const u8 = if (std.mem.eql(u8, entry.basename, manifest_name))
+                    try dir.readFileAlloc(io, entry.path, gpa, .limited(1 << 20))
+                else
+                    "";
+                try found.append(gpa, .{ .path = path, .directory = false, .text = text });
+            },
             else => {},
         }
     }
@@ -1950,4 +1958,52 @@ pub fn testsReported(output: []const u8) ?usize {
     const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
     if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
     return passed + failed;
+}
+
+/// The directory, relative to `examples/`, whose files `root` reaches: the
+/// root itself, or its manifest's `source` directory.
+///
+/// This is the rule `sourceRootOf` in `src/driver/loader.zig` applies to a
+/// manifest, spelled by joining and removing `.` segments. The compiler cannot
+/// be imported here, so the loader's test "a manifest's source key narrows the
+/// files a root reaches" and the case "a source no root reaches belongs to no
+/// example root" in `build/source_test.zig` use the same manifest text and fail
+/// when the two disagree.
+fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry) []const u8 {
+    const named: ?[]const u8 = for (entries) |entry| {
+        if (entry.directory or !std.mem.endsWith(u8, entry.path, manifest_name)) continue;
+        const directory = std.fs.path.dirnamePosix(entry.path) orelse continue;
+        if (!std.mem.eql(u8, directory, root)) continue;
+        const Written = struct { source: ?[]const u8 = null };
+        const parsed = std.json.parseFromSliceLeaky(Written, gpa, entry.text, .{ .ignore_unknown_fields = true }) catch break null;
+        break parsed.source;
+    } else null;
+    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named orelse "." }) catch @panic("out of memory");
+    return resolved[1..];
+}
+
+/// The `.lin` files beneath `examples/` that no root reaches, so that no run of
+/// `linea test` would load them. A file belongs to the deepest root enclosing
+/// it, and is reached when it lies inside that root's source directory.
+pub fn unreachedSources(gpa: std.mem.Allocator, entries: []const ExampleEntry, roots: []const []const u8) []const []const u8 {
+    var unreached: std.ArrayList([]const u8) = .empty;
+    for (entries) |entry| {
+        if (entry.directory or !std.mem.endsWith(u8, entry.path, ".lin")) continue;
+        var owner: ?[]const u8 = null;
+        for (roots) |root| {
+            const encloses = std.mem.eql(u8, entry.path, root) or
+                (entry.path.len > root.len and entry.path[root.len] == '/' and std.mem.startsWith(u8, entry.path, root));
+            if (encloses and (owner == null or root.len > owner.?.len)) owner = root;
+        }
+        const root = owner orelse {
+            unreached.append(gpa, entry.path) catch @panic("out of memory");
+            continue;
+        };
+        if (std.mem.eql(u8, entry.path, root)) continue;
+        const reach = reachOf(gpa, root, entries);
+        const inside = reach.len == 0 or
+            (entry.path.len > reach.len and entry.path[reach.len] == '/' and std.mem.startsWith(u8, entry.path, reach));
+        if (!inside) unreached.append(gpa, entry.path) catch @panic("out of memory");
+    }
+    return unreached.items;
 }

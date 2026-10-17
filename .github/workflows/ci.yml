@@ -206,8 +206,9 @@ jobs:
       # tests alone and a library nested under it needs a run of its own.
       #
       # `zig build example-tests` runs `linea test` on each root and counts the
-      # tests the runs report. It fails when any root fails, when the runs
-      # report no test at all, and when examples/ holds a symlink.
+      # tests the runs report. It fails when any root fails, when a run ends
+      # without a count, when the runs report no test at all, when a `.lin` file
+      # lies outside every root's reach, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         if: ${{ github.event_name == 'push' }}
         run: nix develop --command zig build example-tests -Dwalkers=1
@@ -442,8 +443,9 @@ jobs:
       # tests alone and a library nested under it needs a run of its own.
       #
       # `zig build example-tests` runs `linea test` on each root and counts the
-      # tests the runs report. It fails when any root fails, when the runs
-      # report no test at all, and when examples/ holds a symlink.
+      # tests the runs report. It fails when any root fails, when a run ends
+      # without a count, when the runs report no test at all, when a `.lin` file
+      # lies outside every root's reach, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         run: nix develop --command zig build example-tests -Dwalkers=2
 
