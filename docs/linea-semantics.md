@@ -1256,7 +1256,10 @@ it stands for.
 **[N-Variant]** A variant is named through its enum: `Colour.Red`, or `.Red`
 when context supplies the type. A bare `Red` cannot name a variant. A leading
 `.` means that context supplies the type; this holds beyond enums, always
-refers to a named type, and creates no unnamed type.
+refers to a named type, and creates no unnamed type. A name at a `match` arm's
+head names a variant of the subject's enum, so over a subject whose type is not
+an enum, or not known to be one, it names nothing and is refused here; the
+report suggests `_`, or the pattern that takes the value apart.
 
 A postfix call can access **a type's inherent operations or operations of
 traits it satisfies**. For example, `s.length()` calls an operation in

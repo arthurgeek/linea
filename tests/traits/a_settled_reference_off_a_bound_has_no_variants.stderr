@@ -1,10 +1,14 @@
-error[N-Variant]: the enum has no such variant
+error[N-Variant]: `W.Item` is not known to be an enum, so `Dark` names no variant of it
   --> tests/traits/a_settled_reference_off_a_bound_has_no_variants.lin:24:9
    |
 24 |         Dark => 0,
-   |         ^^^^ not a variant of what is matched
-error[N-Variant]: the enum has no such variant
+   |         ^^^^ a name at an arm's head names a variant
+   |
+   = help: write `_` to match any value
+error[N-Variant]: `W.Item` is not known to be an enum, so `Light` names no variant of it
   --> tests/traits/a_settled_reference_off_a_bound_has_no_variants.lin:25:9
    |
 25 |         Light => 1,
-   |         ^^^^^ not a variant of what is matched
+   |         ^^^^^ a name at an arm's head names a variant
+   |
+   = help: write `_` to match any value

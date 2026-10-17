@@ -13384,6 +13384,37 @@ const Checker = struct {
             return fail(self, parts);
         }
 
+        // A name at an arm's head names a variant, and a type that is no enum
+        // has none. What the arm can be written as instead depends on how
+        // the type is built.
+        if (self.builder.get(of) != .enum_) {
+            const shown = try self.typeName(of);
+            const tuple = if (self.builder.instanceOf(of)) |inst| self.builder.isTupleDecl(inst.decl) else false;
+            const help = if (self.builder.get(of) == .newtype)
+                try std.fmt.allocPrint(self.sink.arena, "write `{s}(…)` to read the value it wraps, or `_` to match any value", .{shown})
+            else if (tuple)
+                "write `(…)` to take its components apart, or `_` to match any value"
+            else if (self.builder.get(of) == .struct_)
+                try std.fmt.allocPrint(self.sink.arena, "write `{s} {{ … }}` to take its fields apart, or `_` to match any value", .{shown})
+            else
+                "write `_` to match any value";
+            // A type parameter may be settled by an enum, but nothing the
+            // body is checked against says which.
+            const symbolic = switch (self.builder.get(of)) {
+                .parameter, .open_type => true,
+                else => false,
+            };
+            _ = self.reportWithOriginNotes(
+                .n_variant,
+                pattern,
+                try std.fmt.allocPrint(self.sink.arena, "`{s}` is not {s}an enum, so `{s}` names no variant of it", .{ shown, if (symbolic) "known to be " else "", name }),
+                "a name at an arm's head names a variant",
+                null,
+                try self.sink.arena.dupe([]const u8, &.{help}),
+            );
+            return fail(self, parts);
+        }
+
         const k = (try self.variantNamed(of, name)) orelse {
             _ = self.report(.n_variant, pattern, "the enum has no such variant", .{}, "not a variant of what is matched");
             return fail(self, parts);
