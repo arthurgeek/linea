@@ -4261,8 +4261,8 @@ fn add_square(inout tally: Tally, square: Int32) -> Int32 {
 call C makes to `add_square` receives it.
 
 **[T-ExternHandle]** An `extern` parameter whose type is a sealed (`@opaque`)
-newtype declared in a module of the `extern`'s root that its manifest grants
-`extern` is a handle to an object C holds. Written `read`, the parameter
+newtype declared in a module its root's manifest grants `extern`, in any root,
+is a handle to an object C holds, whichever root's `extern` takes it. Written `read`, the parameter
 promises that C only reads the object. Only an `extern` may write `read` on a
 parameter, and only on a handle; on any other parameter it is redundant
 ([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C

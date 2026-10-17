@@ -1,0 +1,30 @@
+import std.ffi
+
+// A handle to a named object C holds.
+@(opaque)
+type Named = UInt64
+
+extern fn n_open() -> Named
+
+extern fn n_name(read h: Named) -> ffi.CText where borrows(h)
+
+pub fn open() -> Named {
+    n_open()
+}
+
+// The name C keeps inside an object, sealed so other modules see only `first`.
+@(opaque, copyable)
+struct Name { text: ffi.CText }
+
+impl Name {
+    pub fn of(h: Named) -> Name where borrows(h) {
+        Name { text = n_name(h) }
+    }
+
+    pub fn first(self: Self) -> UInt8 {
+        let got = self.text.copy_bytes(length: 6).unwrap()
+        let first = got[0]
+        got.release()
+        first
+    }
+}

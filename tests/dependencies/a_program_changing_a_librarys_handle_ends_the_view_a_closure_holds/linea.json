@@ -1,0 +1,1 @@
+{ "extern": ["."], "dependencies": { "c": { "path": "c", "extern": true } } }

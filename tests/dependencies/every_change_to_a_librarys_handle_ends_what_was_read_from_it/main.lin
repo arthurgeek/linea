@@ -1,0 +1,7 @@
+import named
+
+// Each reads the name after C changed the object it lives in.
+fn main() -> UInt8 {
+    let total = named.self_reset() + named.self_replace() + named.local_reset() + named.local_replace() + named.local_close() + named.field_reset() + named.param_reset() + named.field_replace() + named.param_replace()
+    UInt8(total)
+}

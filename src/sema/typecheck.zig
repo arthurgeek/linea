@@ -18372,7 +18372,7 @@ const Checker = struct {
             for (self.ast.declParams(d), 0..) |p, k| {
                 const t = try self.declaredParamType(d, k);
                 const marked = p.convention == .read and self.ast.paramConventionToken(p) != .none;
-                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t)) {
+                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
                     const token = self.ast.paramConventionToken(p);
                     try self.sink.addError(
                         .s_entry,
@@ -18382,7 +18382,7 @@ const Checker = struct {
                         "omit `read`; parameters are read by default",
                     );
                 }
-                if (!marked and intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t) and
+                if (!marked and intrinsics.isForeignHandle(self.program, self.ast, &pool, t) and
                     try self.builder.capabilityOf(t) == .copyable)
                 {
                     const help = try std.fmt.allocPrint(
@@ -18711,7 +18711,7 @@ const Checker = struct {
             const t = try self.declaredParamType(d, k);
             if (t == .poison) continue;
             if (self.isForeignView(t)) continue;
-            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t) and
+            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, t) and
                 try self.builder.capabilityOf(t) != .copyable) continue;
             try self.sink.addErrorFmt(
                 .t_extern,

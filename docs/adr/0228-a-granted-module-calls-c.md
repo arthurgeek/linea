@@ -127,8 +127,10 @@ after free.
 
 **A view borrows from a handle, and a handle C may change is lent whole**
 ([T-Extern], [T-ExternHandle], [N-Aliased]). A handle is a sealed newtype
-declared in a module of the root that the manifest grants `extern`, so only
-trusted code makes one from an address. The rules hold for every parameter
+declared in a module its root's manifest grants `extern`, in any root, so only
+trusted code makes one from an address. A library's handle is a handle in the
+program's own `extern` declarations too: one predicate decides it, with no
+condition on which root the `extern` sits in. The rules hold for every parameter
 of every `extern`, whatever shape the program gives the place it passes:
 
 - An `extern` answering memory a parameter lends, `borrows(p)`, takes `p` as a
