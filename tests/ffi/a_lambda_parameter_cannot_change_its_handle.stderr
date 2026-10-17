@@ -1,0 +1,5 @@
+error[T-ExternHandle]: `named_reset` may change the object this handle holds, so the handle is lent from a place that may change
+  --> tests/ffi/a_lambda_parameter_cannot_change_its_handle/named/named.lin:29:25
+   |
+29 |             named_reset(held.handle)
+   |                         ^^^^^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `handle` `read` if C only reads it

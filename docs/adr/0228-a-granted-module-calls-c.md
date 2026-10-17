@@ -109,13 +109,20 @@ after free.
 
 **An `extern` says which calls only read the object** ([T-ExternHandle]). A
 handle parameter, a sealed newtype of the `extern`'s own module, written
-`read` promises that C only reads the object. Without `read` (a plain lend,
-`inout` or `sink`) C may change or free it, and the `extern` is called only
-from a method whose receiver is `inout self` or `sink self`. That receiver
-lends the whole object to the method, so a `CText` read from the object before
-the call is refused by [O-Borrow] wherever it is used after. C takes the
-handle by value either way, so the marker is the only thing that can tell the
-compiler a call leaves the object as it was.
+`read` promises that C only reads the object. Without `read`, a plain lend
+lets C change or free it, and the call lends the argument's place as an
+`inout` argument would, although C receives the handle by value. The place
+must be one that may change (a `var`, an `inout` parameter, or a field of
+one), and ownership ends every earlier observation of it at the call, so a
+`CText` read from the object before the call is refused by [O-Borrow]
+wherever it is used after. A handle type such a call takes may not be
+`copyable`, because a copy would still name the object and keep what was read
+through it alive. `inout` and `sink` already lend or give the place whole. C
+takes the handle by value either way, so the marker is the only thing that
+can tell the compiler a call leaves the object as it was, and a `read` written
+on a function that changes the object is believed: text read before the call
+is then read after it is freed. `read` on a parameter that is not a handle is
+refused, because it promises nothing.
 
 **`errno` is captured with the call that set it, and read only once the call
 has failed.** An `extern` declared to answer `ffi.Errno[R]` returns `R` from C,

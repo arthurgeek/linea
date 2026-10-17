@@ -13,6 +13,7 @@ const BindingId = @import("../sema/ids.zig").BindingId;
 const resolve_mod = @import("../sema/resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
+const intrinsics = @import("../sema/intrinsics.zig");
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const diagnostics = @import("../diagnostics/diagnostic.zig");
@@ -1854,8 +1855,17 @@ const Analysis = struct {
                     if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
                 }
             }
-            for (self.typing.callableParams(signature), normalized.args) |param, arg| {
-                if (arg == .none or param.convention != .inout) continue;
+            // An `extern` taking a handle without `read` may change the object
+            // it holds, so the call lends the argument's place as `inout`
+            // would although C receives the handle by value.
+            const foreign: ?node.DeclId = switch (normalized.target) {
+                .declared => |d| if (self.ast.declIsExtern(d)) d else null,
+                else => null,
+            };
+            for (self.typing.callableParams(signature), normalized.args, 0..) |param, arg, k| {
+                if (arg == .none) continue;
+                const changes = if (foreign) |d| intrinsics.changesForeignHandle(self.program, self.ast, self.typing, d, k, param.ty) else false;
+                if (param.convention != .inout and !changes) continue;
                 for (self.store.facts(try self.actualPlace(state, arg))) |fact| {
                     if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
                 }

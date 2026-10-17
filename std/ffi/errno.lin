@@ -6,8 +6,11 @@ import std.testing
 // change it. C sets `errno` only when a call fails, so the code is reachable
 // only through `failed_at` or `failed_when`, once the caller has said what
 // failure looks like.
+//
+// `R` is copyable because an `Errno` is: a value that must not be duplicated,
+// such as a linear handle, is made from `R` once the call has succeeded.
 @(opaque, copyable)
-struct Errno[R] {
+struct Errno[R: Copyable] {
     value: R,
     code: Int32,
 }

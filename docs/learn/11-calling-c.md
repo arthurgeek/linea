@@ -179,12 +179,13 @@ itself. How the `extern` takes the handle says what C does with the object:
 
 - `read` lends it to C for the call, and promises C only reads it.
 - A parameter written without a convention lends it too, and C may change
-  it. Such a function is called only from a method that takes the wrapper
-  `inout self` or `sink self`, so nothing read from the object earlier can
-  still be in use.
+  it. The call then lends the handle's place as an `inout` argument would,
+  although C receives the handle by value: the place must be one that may
+  change, such as a `var` or a field of an `inout self`, and nothing read
+  from the object earlier can still be in use after the call. A handle C may
+  change cannot be `copyable`, since a copy would still name the object.
 - `sink` gives it to C for good, which is how the function that frees it is
-  declared. It too is called from a method taking `sink self` or
-  `inout self`.
+  declared.
 
 `ledger/linea.json`:
 
@@ -751,7 +752,8 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 ```
 
 A method that took the greeter as a plain `self` could not call
-`greeter_rename` at all:
+`greeter_rename` at all, because `self.handle` is then a place that may not
+change:
 
 ```linea
 impl Greeter {
@@ -767,11 +769,11 @@ impl Greeter {
 
 <!-- guide: unchecked a fragment added to the end of the greeter module above, shown for the error it gets -->
 ```
-error[T-ExternHandle]: `greeter_rename` may change the object its handle holds, so the call needs that object lent whole
-  --> greeting/greeter/greeter.lin:77:9
+error[T-ExternHandle]: `greeter_rename` may change the object this handle holds, so the handle is lent from a place that may change
+  --> greeting/greeter/greeter.lin:77:24
    |
 77 |         greeter_rename(self.handle, copied.text())
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call it from a method taking `inout self` or `sink self`, or mark `greeter` `read` if C only reads it
+   |                        ^^^^^^^^^^^ pass a handle held in a `var` or an `inout` parameter, or mark `greeter` `read` if C only reads it
 ```
 
 ### `std.ffi` stays inside the trusted module
@@ -838,7 +840,7 @@ extern fn unlink(path: ffi.CText) -> ffi.Errno[Int32]
 // Remove the file at `path`, reporting why C could not.
 pub fn remove(path: Str) -> Result[Int32, io.IoError] {
     let named = ffi.CString.open(path) else |_| {
-        // `EINVAL` is 22 on every POSIX system: C cannot be handed text
+        // `EINVAL` is 22 on Linux and macOS: C cannot be handed text
         // holding a NUL.
         return .Err(io.IoError.from_os(.Remove, 22))
     }
@@ -1454,9 +1456,11 @@ against the C library's documentation:
    `Bytes`, not a `CText` from a `CString`, not a context.
 4. A `CText` answer whose text lives inside a C object says so with
    `borrows`, and an `extern` marks its handle `read` only where C truly only
-   reads the object. The compiler holds every other call to a method taking
-   the wrapper `inout` or `sink`, so a `read` written on a function that
-   changes the object is the one way to defeat it.
+   reads the object. The compiler believes the marker: a `read` written on a
+   function that changes or frees the object lets text read from it before
+   the call be read after, which is a read of freed memory. Without `read`,
+   the compiler treats the call as changing the handle's place, as it treats
+   an `inout` argument.
 5. C calls a callback only during the call that passed it.
 6. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.

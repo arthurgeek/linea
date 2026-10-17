@@ -1,0 +1,7 @@
+// `read` promises that C leaves a handle's object as it was. An integer is
+// passed by value and has no object, so the marker says nothing here.
+extern fn labs(read value: Int64) -> Int64
+
+fn main() -> UInt8 {
+    UInt8(labs(-3))
+}

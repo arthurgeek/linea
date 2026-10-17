@@ -15,17 +15,24 @@ type Descriptor = Int32
 // Each of these answers -1 and sets `errno` when it fails. Declaring the result
 // as `ffi.Errno[...]` keeps the `errno` of that call beside the value C
 // returned, read before any other code can change it.
+//
+// C declares `open` variadic, `int open(const char *, int, ...)`, taking a
+// mode only when it creates a file. Calling it with the two fixed arguments
+// alone is what C does too, so this declaration names only those.
 extern fn open(path: ffi.CText, flags: Int32) -> ffi.Errno[Int32]
 
 // `lseek` moves the descriptor's position, so it takes the descriptor without
-// `read` and is called only from a method that takes `inout self`.
+// `read`, and the descriptor is passed from a place that may change: a field
+// of `inout self`.
 extern fn lseek(descriptor: Descriptor, offset: Int64, whence: Int32) -> ffi.Errno[Int64]
 
 // `sink` hands the descriptor to C, which closes it whatever it answers.
 extern fn close(sink descriptor: Descriptor) -> ffi.Errno[Int32]
 
 // `strerror` answers C's own sentence for an `errno` code, in storage the C
-// library keeps for the program's life, which `carries()` states.
+// library owns rather than any value here, which `carries()` states. The next
+// call to `strerror` may overwrite that storage, so the sentence is copied
+// into a `String` straight away.
 extern fn strerror(code: Int32) -> ffi.CText where carries()
 
 // Why a file could not be measured.
@@ -57,13 +64,13 @@ fn system_failure(code: Int32) -> Failure {
     .System(category, message)
 }
 
-// `O_RDONLY` opens for reading, and is 0 on every POSIX system.
+// `O_RDONLY` opens for reading, and is 0 on Linux and macOS.
 fn read_only() -> Int32 {
     0
 }
 
-// `SEEK_END` measures an offset from the end of the file, and is 2 on every
-// POSIX system.
+// `SEEK_END` measures an offset from the end of the file, and is 2 on Linux
+// and macOS.
 fn from_end() -> Int32 {
     2
 }

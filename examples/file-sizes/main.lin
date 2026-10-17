@@ -1,6 +1,10 @@
 // Print how many bytes each file named on the command line holds, by asking
 // the C library through the `posix` module. `linea.json` lists that module
 // under "extern", which is what lets it call C.
+//
+// The size is the offset of the file's end. A pipe or FIFO has no end to
+// seek to, so it is reported as C's reason; a directory answers whatever
+// number its file system gives.
 import std.env
 import std.io
 import std.testing
@@ -28,7 +32,7 @@ fn report[W: Writer](path: Str, inout w: W) -> Result[(), W.Error] where carries
     }
 }
 
-// `/dev/null` exists on every POSIX system and is always empty.
+// `/dev/null` exists on Linux and macOS and is always empty.
 test fn an_empty_file_measures_zero_bytes() {
     defer var written = String.new()
     report("/dev/null", &written).unwrap()

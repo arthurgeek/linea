@@ -43,6 +43,26 @@ pub const FloatMath = struct {
     }
 };
 
+/// Whether `t`, the type of a parameter of the `extern` `d`, is a handle to an
+/// object C holds ([T-ExternHandle]): a sealed newtype declared in `d`'s own
+/// module. Asked of a pool being built or of a finished typing.
+pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, d: DeclId, t: TypeId) bool {
+    if (t == .poison or pool.get(t) != .newtype) return false;
+    const declared = pool.declOfType(t) orelse return false;
+    if (ast.declVisibility(declared) != .opaque_) return false;
+    return program.moduleOf(declared) == program.moduleOf(d);
+}
+
+/// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle
+/// it may change: a handle taken by a plain lend, without `read`. C receives
+/// the handle by value, so the call lends the argument's place as `inout`
+/// would, and only a place that may change can be lent so.
+pub fn changesForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, d: DeclId, k: usize, t: TypeId) bool {
+    const param = ast.declParams(d)[k];
+    if (param.convention != .read or ast.paramConventionToken(param) != .none) return false;
+    return isForeignHandle(program, ast, pool, d, t);
+}
+
 pub const RawAccesses = struct {
     storage: DeclId = .none,
     buffer: DeclId = .none,

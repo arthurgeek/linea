@@ -18324,6 +18324,46 @@ const Checker = struct {
             }
         }
 
+        // `read` says C leaves a handle's object as it was, which is a promise
+        // only about a handle. A handle C may change is lent from a place as
+        // `inout` would lend it, which a copy would bypass: changing the
+        // object through one copy leaves what was read through another
+        // dangling ([T-ExternHandle]).
+        if (category == .t_extern) {
+            const pool = self.builder.view();
+            for (self.ast.declParams(d), 0..) |p, k| {
+                const t = try self.declaredParamType(d, k);
+                const marked = p.convention == .read and self.ast.paramConventionToken(p) != .none;
+                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t)) {
+                    const token = self.ast.paramConventionToken(p);
+                    try self.sink.addError(
+                        .s_entry,
+                        self.ast.fileOf(token),
+                        self.ast.tokenSpan(token),
+                        "`read` on an `extern` parameter marks a handle, a sealed newtype of this module, whose object C only reads",
+                        "omit `read`; parameters are read by default",
+                    );
+                }
+                if (intrinsics.changesForeignHandle(self.program, self.ast, &pool, d, k, t) and
+                    try self.builder.capabilityOf(t) == .copyable)
+                {
+                    const help = try std.fmt.allocPrint(
+                        self.sink.arena,
+                        "drop `copyable` from the handle's type, or mark `{s}` `read` if C only reads it",
+                        .{self.ast.tokenText(p.name)},
+                    );
+                    try self.sink.addErrorFmt(
+                        .t_extern_handle,
+                        self.ast.fileOf(p.name),
+                        self.ast.tokenSpan(p.name),
+                        help,
+                        "`{s}` may change the object a copyable handle holds, and a copy of the handle would still name it",
+                        .{self.ast.tokenText(self.ast.declName(d))},
+                    );
+                }
+            }
+        }
+
         // What may cross is decided by what both sides of a boundary agree a
         // value's bits mean, not by what an operator accepts: `Bool` takes
         // every logical operator and no C ABI fixes its byte.
@@ -18612,58 +18652,40 @@ const Checker = struct {
         );
     }
 
-    /// [T-ExternHandle]: an `extern` that takes a sealed handle of its own
-    /// module without marking the parameter `read` may change the object the
-    /// handle holds, so it is called only from a method whose receiver is
-    /// `inout` or `sink`. That receiver is what ends a `CText` borrowed from
-    /// the object before the call. One walk over the calls.
+    /// [T-ExternHandle] at a call: an `extern` that takes a handle without
+    /// `read` may change the object it holds, so the call lends the
+    /// argument's place as `inout` would, and the place must be one that may
+    /// change. Ownership ends the place's earlier observations at the call.
+    /// One walk over the calls.
     fn checkHandleChanges(self: *Checker) std.mem.Allocator.Error!void {
+        const pool = self.builder.view();
         for (self.calls.items) |call| {
             const callee = switch (call.target) {
                 .declared => |decl| decl,
                 else => continue,
             };
             if (!self.ast.declIsExtern(callee)) continue;
-            const changed = (try self.changedHandle(callee)) orelse continue;
-            const owner = self.expression_owners[call.at.index()];
-            if (owner != .none and self.holdsReceiverWhole(owner)) continue;
-            const label = try std.fmt.allocPrint(
-                self.sink.arena,
-                "call it from a method taking `inout self` or `sink self`, or mark `{s}` `read` if C only reads it",
-                .{self.ast.tokenText(changed.name)},
-            );
-            try self.sink.addErrorFmt(
-                .t_extern_handle,
-                self.ast.fileOfExpr(call.at),
-                self.ast.exprSpan(call.at),
-                label,
-                "`{s}` may change the object its handle holds, so the call needs that object lent whole",
-                .{self.ast.tokenText(self.ast.declName(callee))},
-            );
+            const declared = self.ast.declParams(callee);
+            for (call.args, 0..) |arg, k| {
+                if (arg == ExprId.none or k >= declared.len) continue;
+                const t = try self.declaredParamType(callee, k);
+                if (!intrinsics.changesForeignHandle(self.program, self.ast, &pool, callee, k, t)) continue;
+                if (self.res.placeIsMutable(self.ast, arg)) continue;
+                const label = try std.fmt.allocPrint(
+                    self.sink.arena,
+                    "pass a handle held in a `var` or an `inout` parameter, or mark `{s}` `read` if C only reads it",
+                    .{self.ast.tokenText(declared[k].name)},
+                );
+                try self.sink.addErrorFmt(
+                    .t_extern_handle,
+                    self.ast.fileOfExpr(arg),
+                    self.ast.exprSpan(arg),
+                    label,
+                    "`{s}` may change the object this handle holds, so the handle is lent from a place that may change",
+                    .{self.ast.tokenText(self.ast.declName(callee))},
+                );
+            }
         }
-    }
-
-    /// The first parameter of the `extern` `d` that takes a sealed newtype
-    /// declared in `d`'s own module without saying `read`, or null.
-    fn changedHandle(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!?node.Param {
-        for (self.ast.declParams(d), 0..) |param, k| {
-            if (param.convention == .read and self.ast.paramConventionToken(param) != .none) continue;
-            const t = try self.declaredParamType(d, k);
-            if (t == .poison or self.builder.get(t) != .newtype) continue;
-            const declared = self.builder.view().declOfType(t) orelse continue;
-            if (self.ast.declVisibility(declared) != .opaque_) continue;
-            if (self.program.moduleOf(declared) != self.program.moduleOf(d)) continue;
-            return param;
-        }
-        return null;
-    }
-
-    /// Whether `d` is a method whose receiver, `self`, is `inout` or `sink`.
-    fn holdsReceiverWhole(self: *const Checker, d: node.DeclId) bool {
-        const params = self.ast.declParams(d);
-        if (params.len == 0 or params[0].name == .none) return false;
-        if (!std.mem.eql(u8, self.ast.tokenText(params[0].name), "self")) return false;
-        return params[0].convention == .inout or params[0].convention == .sink;
     }
 
     /// [T-ExternCallback] at a call: C calls a callback through an entry made

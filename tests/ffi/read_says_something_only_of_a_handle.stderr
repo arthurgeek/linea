@@ -1,0 +1,5 @@
+error[S-Entry]: `read` on an `extern` parameter marks a handle, a sealed newtype of this module, whose object C only reads
+ --> tests/ffi/read_says_something_only_of_a_handle/main.lin:3:16
+  |
+3 | extern fn labs(read value: Int64) -> Int64
+  |                ^^^^ omit `read`; parameters are read by default

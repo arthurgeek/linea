@@ -12,8 +12,8 @@ extern fn access(path: ffi.CText, mode: Int32) -> ffi.Errno[Int32]
 // Remove the file at `path`.
 pub fn remove(path: Str) -> Result[Int32, io.IoError] {
     let named = ffi.CString.open(path) else |_| {
-        // 22 is `EINVAL`, the code for an argument C cannot use, on every
-        // POSIX system.
+        // 22 is `EINVAL`, the code for an argument C cannot use, on Linux
+        // and macOS.
         return .Err(io.IoError.from_os(.Remove, 22))
     }
     let answer = unlink(named.text())

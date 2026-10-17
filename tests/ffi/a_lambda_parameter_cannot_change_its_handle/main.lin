@@ -1,0 +1,9 @@
+import named
+
+fn main() -> UInt8 {
+    var held = named.Named.open()
+    let reset = &held.resetter()
+    reset(held)
+    held.close()
+    0
+}

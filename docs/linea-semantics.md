@@ -4253,13 +4253,18 @@ call C makes to `add_square` receives it.
 
 **[T-ExternHandle]** An `extern` parameter whose type is a sealed (`@opaque`)
 newtype declared in the `extern`'s own module is a handle to an object C
-holds. Written `read`, the parameter promises that C only reads the object, and
-only an `extern` may write `read` on a parameter. A handle parameter without
-`read` (a plain lend, `inout` or `sink`) lets C change or free the object, so a
-call to that `extern` appears only in a method whose receiver `self` is
-`inout` or `sink`. That receiver lends the whole object to the method, so an
-observation read from the object before the call, such as a `CText`, is
-refused by [O-Borrow] wherever it would still be used.
+holds. Written `read`, the parameter promises that C only reads the object.
+Only an `extern` may write `read` on a parameter, and only on a handle; on any
+other parameter it is redundant ([S-Entry]). A handle parameter taken by a
+plain lend, without `read`, lets C change or free the object, so a call lends
+its argument's place exclusively, as an `inout` argument is lent, although C
+receives the handle by value. The argument must be a place that may change: a
+mutable binding, an `inout` parameter, a mutable capture, or a field of one.
+Every observation of the place made before the call, such as a `CText` read
+from the object, ends at the call, and a later use of it is [O-Borrow]. The
+handle's type may not be `copyable` for such a parameter, because a copy
+would name the same object. A handle taken `inout` is lent so already, and
+one taken `sink` is moved. The compiler believes a written `read`.
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the

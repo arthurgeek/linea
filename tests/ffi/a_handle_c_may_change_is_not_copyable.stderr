@@ -1,0 +1,5 @@
+error[T-ExternHandle]: `named_reset` may change the object a copyable handle holds, and a copy of the handle would still name it
+  --> tests/ffi/a_handle_c_may_change_is_not_copyable/named/named.lin:12:23
+   |
+12 | extern fn named_reset(handle: Name)
+   |                       ^^^^^^ drop `copyable` from the handle's type, or mark `handle` `read` if C only reads it
