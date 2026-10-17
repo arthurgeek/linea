@@ -134,6 +134,41 @@ pub fn Coverage(comptime Context: type) type {
                     else => false,
                 };
             }
+
+            /// Whether `a` comes before `b`, two witnesses of one type: by
+            /// variant in declaration order, by an interval's lower end, and
+            /// part by part from the first. A wildcard comes after anything
+            /// it would take.
+            pub fn before(_: void, a: Witness, b: Witness) bool {
+                return order(a, b) == .lt;
+            }
+
+            fn order(a: Witness, b: Witness) std.math.Order {
+                if (a.isWild() or b.isWild()) return std.math.order(@intFromBool(a.isWild()), @intFromBool(b.isWild()));
+                return switch (a.shape) {
+                    .variant => |va| switch (b.shape) {
+                        .variant => |vb| if (va.index != vb.index) std.math.order(va.index, vb.index) else orderParts(va.args, vb.args),
+                        else => .eq,
+                    },
+                    .integers => |ia| switch (b.shape) {
+                        .integers => |ib| std.math.order(ia.lo, ib.lo),
+                        else => .eq,
+                    },
+                    .product => |pa| switch (b.shape) {
+                        .product => |pb| orderParts(pa, pb),
+                        else => .eq,
+                    },
+                    .wild => .eq,
+                };
+            }
+
+            fn orderParts(a: []const Witness, b: []const Witness) std.math.Order {
+                for (a[0..@min(a.len, b.len)], b[0..@min(a.len, b.len)]) |x, y| {
+                    const o = order(x, y);
+                    if (o != .eq) return o;
+                }
+                return .eq;
+            }
         };
 
         /// What one pass answers.
@@ -185,6 +220,10 @@ pub fn Coverage(comptime Context: type) type {
             };
             @memset(pass.reached, false);
             try self.walk(&pass, refs);
+            // The walk takes each named constructor's branch before the one
+            // for the constructors no row names, so the witnesses are put in
+            // declaration order here. At most `max_witnesses` are sorted.
+            std.sort.insertion(Witness, pass.missing.items, {}, Witness.before);
             return .{ .reached = pass.reached[0..rows.len], .missing = pass.missing.items };
         }
 
@@ -688,6 +727,20 @@ test "a match whose check outgrows its budget is refused" {
         try rowOf(arena, try pairOf(arena, &wild, try some(arena, &wild)), .pair),
     };
     try testing.expectError(error.TooIntricate, c.check(&rows, .pair));
+}
+
+test "witnesses are ordered by variant, then by what each part holds" {
+    const W = TestCoverage.Witness;
+    const low: W = .{ .ty = .byte, .shape = .{ .integers = .{ .lo = 0, .hi = 1 } } };
+    const high: W = .{ .ty = .byte, .shape = .{ .integers = .{ .lo = 2, .hi = 3 } } };
+    const some_high: W = .{ .ty = .opt, .shape = .{ .variant = .{ .index = 0, .args = &.{high} } } };
+    const some_low: W = .{ .ty = .opt, .shape = .{ .variant = .{ .index = 0, .args = &.{low} } } };
+    const nothing: W = .{ .ty = .opt, .shape = .{ .variant = .{ .index = 1, .args = &.{} } } };
+    var found = [_]W{ nothing, some_high, some_low };
+    std.sort.insertion(W, &found, {}, W.before);
+    try testing.expectEqual(some_low.shape.variant.args[0].shape.integers.lo, found[0].shape.variant.args[0].shape.integers.lo);
+    try testing.expectEqual(some_high.shape.variant.args[0].shape.integers.lo, found[1].shape.variant.args[0].shape.integers.lo);
+    try testing.expectEqual(@as(u32, 1), found[2].shape.variant.index);
 }
 
 test "a column of a refused type answers nothing" {
