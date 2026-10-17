@@ -339,20 +339,21 @@ Convert one side by writing the type as a function. `Float64(x)` of a
 import std.io
 
 fn main() -> Result[UInt8, io.IoError] {
-    let tenth = 0.1
-    let rounded = Float32(tenth)
+    let pi = 3.141592653589793
+    let rounded = Float32(pi)
     // Widening the rounded value back shows what it holds exactly.
-    io.println("{tenth} became {rounded}, which is exactly {Float64(rounded)}.")?
+    io.println("{pi} became {rounded}, which is exactly {Float64(rounded)}.")?
     .Ok(0)
 }
 ```
 
 ```
-0.1 became 0.1, which is exactly 0.10000000149011612.
+3.141592653589793 became 3.1415927, which is exactly 3.1415927410125732.
 ```
 
+`pi` has no annotation, so it is a `Float64`, and converting it leaves it one.
 Each type prints the shortest decimal that reads back as the same value, which
-is why `rounded` prints as `0.1` although it is not exactly one tenth.
+is why `rounded` prints as `3.1415927` although it holds more digits than that.
 
 Float arithmetic never stops the program. Dividing by zero gives an infinity,
 and a result with no numeric answer, like zero divided by zero, is NaN, which

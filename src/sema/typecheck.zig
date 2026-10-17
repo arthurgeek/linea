@@ -5387,6 +5387,10 @@ const Checker = struct {
     /// built value that does not fit its context, so `checkInner` does not
     /// count it a refusal.
     mismatched: ExprId = .none,
+    /// The negation written around the float literal being checked, which
+    /// its range error reports as the value that does not fit. `.none` while
+    /// any other expression is checked.
+    negated_float: ExprId = .none,
     /// The numbers accepted brackets' index operands fold to; `Typing.folded_indices`
     /// holds them.
     folded_indices: std.AutoHashMapUnmanaged(ExprId, u64) = .empty,
@@ -12075,12 +12079,13 @@ const Checker = struct {
         for (self.open_types.pending.items) |waiting| {
             const t = self.open_types.settled(waiting.v).?;
             if (waiting.rule == .float_literal) {
-                const text = self.ast.tokenText(self.ast.exprMain(waiting.expr));
+                const literal = self.literalSpelling(waiting.expr, .float_literal).?.literal;
+                const text = self.ast.tokenText(self.ast.exprMain(literal));
                 const rounded = roundFloatLiteral(text, t.floatBits().?).?;
                 if (rounded.refusal) |refusal| {
                     if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
                     _ = try self.reportFloatLiteralRange(waiting.expr, t, refusal, try self.chosenLabel(waiting.v));
-                } else try self.literal_values.put(self.gpa, waiting.expr, .{ .float = rounded.value });
+                } else try self.literal_values.put(self.gpa, literal, .{ .float = rounded.value });
                 continue;
             }
             if (self.integerLiteralFits(t, waiting.value)) continue;
@@ -12102,6 +12107,38 @@ const Checker = struct {
                 .float_literal => unreachable,
             }
         }
+        try self.orderRangeErrors();
+    }
+
+    /// Puts the range errors in the order their values are written. A value
+    /// whose type was known is checked where it is written, and one whose type
+    /// was open only here, once every type is final, so the two kinds would
+    /// otherwise arrive as two runs. Only the slots range errors occupy are
+    /// reordered, and every other diagnostic keeps its place.
+    ///
+    /// **Bound:** one pass over the sink and a sort of the range errors in it.
+    fn orderRangeErrors(self: *Checker) std.mem.Allocator.Error!void {
+        const items = self.sink.mutableItems();
+        var slots: std.ArrayList(usize) = .empty;
+        defer slots.deinit(self.gpa);
+        for (items, 0..) |d, at| {
+            const code = d.code orelse continue;
+            if ((code == .t_literal or code == .t_overflow) and d.primaryLabel() != null) try slots.append(self.gpa, at);
+        }
+        if (slots.items.len < 2) return;
+        const errors = try self.gpa.alloc(Diagnostic, slots.items.len);
+        defer self.gpa.free(errors);
+        for (slots.items, errors) |at, *d| d.* = items[at];
+        const SourceOrder = struct {
+            fn before(_: void, a: Diagnostic, b: Diagnostic) bool {
+                const left = a.primaryLabel().?;
+                const right = b.primaryLabel().?;
+                if (left.file != right.file) return @intFromEnum(left.file) < @intFromEnum(right.file);
+                return left.span.start < right.span.start;
+            }
+        };
+        std.mem.sort(Diagnostic, errors, {}, SourceOrder.before);
+        for (slots.items, errors) |at, d| items[at] = d;
     }
 
     /// Where an open integer's type was chosen: the use that settled it, or
@@ -14730,6 +14767,8 @@ const Checker = struct {
     /// retained for emission without admitting floats as constant expressions.
     fn checkFloatLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         self.folds.set(id, .not_constant);
+        const written = if (self.negated_float != ExprId.none) self.negated_float else id;
+        self.negated_float = .none;
 
         const text = self.ast.tokenText(self.ast.exprMain(id));
         if (Expected.typeOf(expected)) |want| if (want.isFloat()) {
@@ -14737,12 +14776,15 @@ const Checker = struct {
             // already reported it where it was written; a second message
             // here would describe one mistake twice.
             const rounded = roundFloatLiteral(text, want.floatBits().?) orelse return self.record(id, .poison);
-            if (rounded.refusal) |refusal| return self.reportFloatLiteralRange(id, want, refusal, .{
-                .file = expected.?.at.file,
-                .span = expected.?.at.span,
-                .message = try self.expectationSource(expected.?),
-                .style = .secondary,
-            });
+            if (rounded.refusal) |refusal| {
+                _ = try self.reportFloatLiteralRange(written, want, refusal, .{
+                    .file = expected.?.at.file,
+                    .span = expected.?.at.span,
+                    .message = try self.expectationSource(expected.?),
+                    .style = .secondary,
+                });
+                return self.record(id, .poison);
+            }
             try self.literal_values.put(self.gpa, id, .{ .float = rounded.value });
             return self.record(id, want);
         };
@@ -14761,21 +14803,25 @@ const Checker = struct {
         // The binary64 value stands until the type is final, when the text is
         // rounded again at that width.
         try self.literal_values.put(self.gpa, id, .{ .float = wide.value });
-        try self.open_types.awaitRange(self.gpa, .{ .v = self.builder.get(t).open_float, .expr = id, .value = 0, .rule = .float_literal });
+        try self.open_types.awaitRange(self.gpa, .{ .v = self.builder.get(t).open_float, .expr = written, .value = 0, .rule = .float_literal });
         return self.expect(id, t, expected);
     }
 
     /// Refuses a float literal its type cannot hold: one that rounds to an
-    /// infinity, or a nonzero one that rounds to zero.
-    fn reportFloatLiteralRange(self: *Checker, id: ExprId, t: TypeId, refusal: FloatLiteralRefusal, origin: ?Label) std.mem.Allocator.Error!TypeId {
-        const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {s}", .{
-            (try self.typeName(t)), self.ast.tokenText(self.ast.exprMain(id)),
+    /// infinity, or a nonzero one that rounds to zero. `written` is the
+    /// literal or a negation of it, and the report names the signed value.
+    fn reportFloatLiteralRange(self: *Checker, written: ExprId, t: TypeId, refusal: FloatLiteralRefusal, origin: ?Label) std.mem.Allocator.Error!TypeId {
+        const spelling = self.literalSpelling(written, .float_literal).?;
+        const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {s}{s}", .{
+            (try self.typeName(t)),
+            if (spelling.negated) "-" else "",
+            self.ast.tokenText(self.ast.exprMain(spelling.literal)),
         });
         const primary = switch (refusal) {
             .too_large => "literal is out of range for its type",
             .rounds_to_zero => "a nonzero literal that rounds to zero in this type",
         };
-        return self.reportWithOrigin(.t_literal, id, message, primary, origin);
+        return self.reportWithOrigin(.t_literal, written, message, primary, origin);
     }
 
     fn checkLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
@@ -14926,7 +14972,7 @@ const Checker = struct {
         // The operand is checked without a range test, because -128 is a value
         // i8 holds even though 128 is a literal it does not. Folding therefore
         // has to happen before the range check, not after.
-        const inner = try self.checkForNegation(operand, expected);
+        const inner = try self.checkForNegation(operand, expected, id);
         if (inner == .poison) {
             self.foldFailed(id, &.{operand});
             return self.record(id, .poison);
@@ -14980,16 +15026,22 @@ const Checker = struct {
     }
 
     /// A literal under a negation is range-checked against the negated value,
-    /// so the literal itself is folded without testing it.
-    fn checkForNegation(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+    /// so the literal itself is folded without testing it. A float literal
+    /// is range-checked as the `negation` around it.
+    fn checkForNegation(self: *Checker, id: ExprId, expected: ?Expected, negation: ExprId) std.mem.Allocator.Error!TypeId {
         // Parentheses do not change what is negated, so `-(128)` is checked
         // as `-128`. The group keeps its own record and fold, as `check` does.
         if (self.ast.exprTag(id) == .grouped) {
             const operand = self.ast.unaryOperand(id);
-            const t = try self.checkForNegation(operand, expected);
+            const t = try self.checkForNegation(operand, expected, negation);
             self.folds.set(id, self.folds.get(operand));
             if (!self.folds.get(operand).isConstant()) try self.markNotConstant(id);
             return self.record(id, t);
+        }
+        if (self.ast.exprTag(id) == .float_literal) {
+            self.negated_float = negation;
+            defer self.negated_float = .none;
+            return self.check(id, expected);
         }
         if (self.ast.exprTag(id) != .int_literal) return self.check(id, expected);
 
@@ -15046,14 +15098,20 @@ const Checker = struct {
         }
         const operand = args[0];
 
-        // No expectation flows inward: a conversion takes whatever it is given.
-        // The operand is checked before the target constrains it, so an open
-        // literal takes the default here, where the conversion needs a type.
-        // An open float converted to a float type settles on that type
-        // instead, so a literal is rounded once, to the type it is written
-        // for, rather than to `Float64` and again to the target.
-        const checked = try self.check(operand, null);
-        if (target.isFloat() and self.builder.get(checked) == .open_float) _ = try self.meet(checked, target, self.literalSite(operand));
+        // A conversion takes whatever it is given, so the operand is checked
+        // before the target constrains it and an open literal takes the
+        // default here, where the conversion needs a type. A float literal
+        // converted to a float type is the exception: it is written for that
+        // type and rounds once, to the target, rather than to `Float64` and
+        // again to the target. Any other operand keeps its own type, so a
+        // binding or a sum of literals converted to `Float32` is a `Float64`
+        // narrowed.
+        const literal_target: ?Expected = if (target.isFloat() and self.literalSpelling(operand, .float_literal) != null) .{
+            .ty = target,
+            .at = .{ .file = self.ast.fileOfExpr(self.ast.call(id).callee), .span = self.ast.exprSpan(self.ast.call(id).callee) },
+            .reason = .conversion,
+        } else null;
+        const checked = try self.check(operand, literal_target);
         const from = try self.forceInteger(checked, self.literalSite(operand));
 
         if (from == .poison or target == .poison) {
@@ -23622,20 +23680,21 @@ const Checker = struct {
         return true;
     }
 
-    const LiteralSpelling = enum { not_literal, nonnegative, negated };
+    const LiteralSpelling = struct { literal: ExprId, negated: bool };
 
-    /// Whether an expression is an integer literal under any parentheses and
-    /// negations, which the literal and negation checks type from the position
-    /// alone, and whether an odd number of negations applies to it.
-    fn integerLiteralSpelling(self: *const Checker, id: ExprId) LiteralSpelling {
+    /// The literal of the kind `literal` names that an expression is under
+    /// any parentheses and negations, which the literal and negation checks
+    /// type from the position alone, and whether an odd number of negations
+    /// applies to it. Null where the expression is not one.
+    fn literalSpelling(self: *const Checker, id: ExprId, literal: node.Expr.Tag) ?LiteralSpelling {
         var at = self.ast.withoutGroups(id);
         var negated = false;
         while (self.ast.exprTag(at) == .negate) {
             negated = !negated;
             at = self.ast.withoutGroups(self.ast.unaryOperand(at));
         }
-        if (self.ast.exprTag(at) != .int_literal) return .not_literal;
-        return if (negated) .negated else .nonnegative;
+        if (self.ast.exprTag(at) != literal) return null;
+        return .{ .literal = at, .negated = negated };
     }
 
     /// A bracket over a container: the place that type's `Index` implementation
@@ -23670,15 +23729,15 @@ const Checker = struct {
         // none the literal keeps `UInt64`, and the missing implementation is
         // reported as for any other key. Anything else settles on its own,
         // and what it settled to is the key.
-        const spelling = self.integerLiteralSpelling(b.rhs);
-        const literal_key: ?Expected = if (spelling != .not_literal) blk: {
+        const spelling = self.literalSpelling(b.rhs, .int_literal);
+        const literal_key: ?Expected = if (spelling != null) blk: {
             const inferred = try self.integerIndexKey(self.generic, head);
             const key: TypeId = switch (inferred) {
                 .one => |key| key,
                 // With no key, a nonnegative literal keeps the counting type,
                 // and a negated one its own, so the missing implementation is
                 // what is reported rather than the literal's range.
-                .none => if (spelling == .negated) break :blk null else .u64,
+                .none => if (spelling.?.negated) break :blk null else .u64,
                 .many => |keys| {
                     _ = try self.check(b.rhs, null);
                     _ = self.report(
@@ -23710,7 +23769,7 @@ const Checker = struct {
             },
             // With no key the counting type, except for a negated literal,
             // which keeps the type a negative value has.
-            .none => if (spelling == .negated)
+            .none => if (spelling != null and spelling.?.negated)
                 try self.forceInteger(checked_index, self.literalSite(b.rhs))
             else settled: {
                 _ = try self.meet(checked_index, .u64, self.literalSite(b.rhs));

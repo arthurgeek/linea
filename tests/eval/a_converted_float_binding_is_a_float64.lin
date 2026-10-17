@@ -1,0 +1,28 @@
+fn takes_float64(value: Float64) -> Float64 {
+    value
+}
+
+fn main() -> UInt8 {
+    // `wide` has no annotation, so it is a Float64. Its literal rounds once,
+    // to the binary64 halfway point 1 + 2^-24, and `Float32(wide)` rounds that
+    // to the even 1.0.
+    let wide = 1.00000005960464477539062500000000001
+    let halfway = Float32(wide) == 1.0
+    // 1e39 fits a Float64, and narrowing it past binary32's range gives
+    // infinity.
+    let big = 1e39
+    let infinite = Float32(big) > 3.4028235e38
+    // A conversion leaves its operand's type alone, so `tenth` is still the
+    // Float64 that `takes_float64` asks for.
+    let tenth = 0.1
+    let narrowed = Float32(tenth)
+    let kept = takes_float64(tenth) == 0.1 && Float64(narrowed) != tenth
+    // The sum is a Float64: 16777218.0 is exact there and in binary32, where
+    // adding 1.0 to 16777216.0 alone would round back to 16777216.0.
+    let sum = Float32(16777216.0 + 1.0 + 1.0) == 16777218.0
+    if halfway && infinite && kept && sum {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,7 @@
+fn main() -> UInt8 {
+    let huge: Float32 = -1e39
+    let tiny = -1e-400
+    let grouped: Float32 = -(1e39)
+    let _unused = Float64(huge + grouped) + tiny
+    0
+}

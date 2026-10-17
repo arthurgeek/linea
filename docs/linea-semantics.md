@@ -2163,7 +2163,11 @@ a float type at the same sites an open integer settles, and `Float64` when
 nothing settles it. The same operations that give an open integer `Int64` give
 an open float `Float64`. An open float and an open integer never settle as one:
 `1 + 1.5` is refused by [T-Operands]. A float literal converted to a float
-type, `Float32(0.1)`, settles on that type.
+type, `Float32(0.1)` or `Float32(-0.1)`, settles on that type. Any other
+operand of a conversion is typed before the conversion applies, so an open
+float there falls back to `Float64`: after `let tenth = 0.1`, `tenth` is a
+`Float64` and `Float32(tenth)` narrows it, as `Float32(0.1 + 0.2)` narrows a
+`Float64` sum.
 
 A float literal is rounded once, to nearest with ties to even, at the type it
 finally has. The type must hold it: a literal that rounds to an infinity, or a

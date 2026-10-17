@@ -1,0 +1,10 @@
+fn main() -> UInt8 {
+    let late = 3.5e38
+    let huge: Float32 = 1e39
+    let narrow: Float32 = late
+    let wide = 300
+    let byte: UInt8 = 256
+    let small: UInt8 = wide
+    let _unused = UInt8(huge + narrow) + byte + small
+    0
+}

@@ -38,7 +38,9 @@ With no expected type a float literal has an open float type, settled where it
 must equal a float type and falling back to `Float64`. An open float and an
 open integer never become one: no type is both. A float literal converted to a
 float type, `Float32(0.1)`, settles on the conversion's target, so it is
-rounded once.
+rounded once. Only a literal does: a binding or an expression over literals
+converted to `Float32` is a `Float64` first, so the conversion narrows a value
+and never changes the type of a binding or the width of arithmetic.
 
 **A literal must be representable in the type it finally has.** Rounding to
 nearest is admitted, since `0.1` is inexact in every binary format, but a
