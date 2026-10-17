@@ -1,0 +1,22 @@
+// The annotation's `UInt8` misses `P`'s bound, which is reported where it is
+// written. The argument's `UInt16` misses `Q`'s bound, a separate mistake the
+// annotation did not cause, so it is reported at the call as well.
+trait Protocol {}
+
+struct End {}
+
+impl Protocol for End {}
+
+struct Chan[phantom P: Protocol] {
+    endpoint: UInt64,
+}
+
+fn open[Q: Protocol, P: Protocol](_q: Q) -> Chan[P] {
+    .{ endpoint = 7 }
+}
+
+fn main() -> UInt8 {
+    let ended: Chan[End] = open(End {})
+    let _wrong: Chan[UInt8] = open(UInt16(4))
+    UInt8(ended.endpoint)
+}

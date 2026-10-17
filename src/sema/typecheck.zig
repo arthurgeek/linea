@@ -9964,18 +9964,21 @@ const Checker = struct {
         _ = try self.argumentBoundsUnmet(d, args, enclosing, at, &.{}, .report);
     }
 
-    /// Whether `expected` is a written annotation or result whose own type
-    /// arguments miss their parameters' bounds. That type is refused where it
-    /// is written, and a call it settled the parameters of would only repeat
-    /// the refusal at the call.
-    fn writtenExpectationRefused(self: *Checker, expected: ?Expected) std.mem.Allocator.Error!bool {
-        const want = expected orelse return false;
+    /// The type arguments of `expected`, where it is a written annotation or
+    /// result whose own arguments miss their parameters' bounds. That type is
+    /// refused where it is written, and a call parameter it settled would only
+    /// repeat the refusal at the call; a parameter it did not settle is a
+    /// mistake of its own. Null for any other expectation.
+    fn refusedExpectationArguments(self: *Checker, expected: ?Expected) std.mem.Allocator.Error!?[]const TypeId {
+        const want = expected orelse return null;
         switch (want.reason) {
             .annotation, .return_type => {},
-            else => return false,
+            else => return null,
         }
-        const inst = self.builder.instanceOf(want.ty) orelse return false;
-        return !try self.argumentsMeetBounds(inst.decl, self.builder.argsOf(inst));
+        const inst = self.builder.instanceOf(want.ty) orelse return null;
+        const args = self.builder.argsOf(inst);
+        if (try self.argumentsMeetBounds(inst.decl, args)) return null;
+        return try self.sink.arena.dupe(TypeId, args);
     }
 
     /// Whether `args` meet every bound `d` declares on its parameters, asked
@@ -10019,6 +10022,9 @@ const Checker = struct {
             const held, const source: ?OwnBound = switch (constraint.subject) {
                 .parameter => |i| value: {
                     if (i >= args.len) continue;
+                    // A poison argument was reported where it failed to settle
+                    // or where the type that settled it is written.
+                    if (args[i] == .poison) continue;
                     break :value .{
                         args[i],
                         if (i < own.len) .{
@@ -20302,7 +20308,16 @@ const Checker = struct {
                 // where it was written.
                 if (!self.refusedBefore(named))
                     _ = try self.argumentBoundsUnmet(d, bounded, enclosing, named, self.ast.typeArgs(self.ast.bracketTypes(c.callee).?), .report);
-            } else if (!try self.writtenExpectationRefused(expected)) try self.checkArgumentBounds(d, bounded, enclosing, named);
+            } else if (try self.refusedExpectationArguments(expected)) |refused| {
+                // The arguments the refused type supplied were reported where
+                // it is written; every other parameter is still checked here.
+                const rest = try self.gpa.dupe(TypeId, bounded);
+                defer self.gpa.free(rest);
+                for (rest) |*arg| for (refused) |written_arg| {
+                    if (arg.* == written_arg) arg.* = .poison;
+                };
+                try self.checkArgumentBounds(d, rest, enclosing, named);
+            } else try self.checkArgumentBounds(d, bounded, enclosing, named);
         }
         if (settled.head.len > 0) {
             // The bounds an implementation writes on its own parameters say
