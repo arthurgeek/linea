@@ -1790,6 +1790,7 @@ pub const Phase = struct {
             .float_to_int,
             .float_extend,
             .float_truncate,
+            .bit_cast,
             .float_math,
             .function_addr,
             .foreign_function_addr,

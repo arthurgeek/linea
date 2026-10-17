@@ -106,6 +106,16 @@ fn floatConstantBits(value: f64, bits: u8) u64 {
     };
 }
 
+/// The positive quiet NaN of a float of `bits` bits: the exponent all ones
+/// and only the top fraction bit set.
+fn canonicalNanBits(bits: u8) u64 {
+    return switch (bits) {
+        32 => 0x7FC00000,
+        64 => 0x7FF8000000000000,
+        else => std.debug.panic("compiler defect: a float is {d} bits wide", .{bits}),
+    };
+}
+
 /// The width of a float computation, or null for any other.
 fn floatBitsOf(computation: mir_mod.ComputationRepresentation) ?u8 {
     return switch (computation) {
@@ -295,8 +305,9 @@ pub fn emit(
 fn mlirType(scalar: runtime_symbols.Scalar) []const u8 {
     return switch (scalar) {
         .u8 => "i8",
-        .i32 => "i32",
+        .i32, .u32 => "i32",
         .i64, .u64 => "i64",
+        .f32 => "f32",
         .f64 => "f64",
         .ptr => "!llvm.ptr",
         .unit => unreachable,
@@ -1091,7 +1102,7 @@ const FunctionEmitter = struct {
             // narrowing rounds to nearest with ties to even.
             .float_extend, .float_truncate => {
                 const v = mir.unaryOf(id);
-                try self.w.print("    %v{d} = arith.{s} %v{d} : {s} to {s}", .{
+                try self.w.print("    %nr{d} = arith.{s} %v{d} : {s} to {s}", .{
                     id.index(),
                     if (mir.tagOf(id) == .float_extend) "extf" else "truncf",
                     v.index(),
@@ -1099,14 +1110,43 @@ const FunctionEmitter = struct {
                     computationType(self.computationOf(id)),
                 });
                 try self.here(span);
+                try self.canonicalNan(id, floatBitsOf(self.computationOf(id)).?, span);
+            },
+            // Every bit is kept: a bit cast is not arithmetic, so it neither
+            // quiets nor canonicalises a NaN. An integer is computed in the
+            // word, so a 32-bit one is narrowed to its width first or widened
+            // after.
+            .bit_cast => {
+                const v = mir.unaryOf(id);
+                const from = self.module.representationOf(mir.typeOf(v)).computation;
+                if (floatBitsOf(from)) |bits| {
+                    if (bits == 64) {
+                        try self.w.print("    %v{d} = arith.bitcast %v{d} : f64 to {s}", .{ id.index(), v.index(), int_type });
+                    } else {
+                        try self.w.print("    %bc{d} = arith.bitcast %v{d} : f32 to i32", .{ id.index(), v.index() });
+                        try self.here(span);
+                        try self.w.print("    %v{d} = arith.extui %bc{d} : i32 to {s}", .{ id.index(), id.index(), int_type });
+                    }
+                } else {
+                    const bits = floatBitsOf(self.computationOf(id)).?;
+                    if (bits == 64) {
+                        try self.w.print("    %v{d} = arith.bitcast %v{d} : {s} to f64", .{ id.index(), v.index(), int_type });
+                    } else {
+                        try self.w.print("    %bc{d} = arith.trunci %v{d} : {s} to i32", .{ id.index(), v.index(), int_type });
+                        try self.here(span);
+                        try self.w.print("    %v{d} = arith.bitcast %bc{d} : i32 to f32", .{ id.index(), id.index() });
+                    }
+                }
+                try self.here(span);
             },
             .float_math => {
                 const math = mir.floatMathOf(id);
-                try self.w.print("    %v{d} = func.call @{s}(%v{d}", .{ id.index(), math.operation.symbol(), math.lhs.index() });
+                try self.w.print("    %nr{d} = func.call @{s}(%v{d}", .{ id.index(), math.operation.symbol(), math.lhs.index() });
                 if (math.operation.arity() == 2) try self.w.print(", %v{d}", .{math.rhs.index()});
                 try self.w.writeAll(")");
                 try writeOwnedCallType(self.w, runtime_symbols.math_functions[@intFromEnum(math.operation)]);
                 try self.here(span);
+                try self.canonicalNan(id, 64, span);
             },
 
             .ret => {
@@ -1571,7 +1611,9 @@ const FunctionEmitter = struct {
                 @tagName(std.meta.activeTag(representation)),
             }),
         };
-        try self.w.print("    %v{d} = arith.{s} %v{d}, %v{d} : {s}", .{
+        const float = floatBitsOf(computation);
+        try self.w.print("    %{s}{d} = arith.{s} %v{d}, %v{d} : {s}", .{
+            if (float != null) "nr" else "v",
             id.index(),
             op,
             p.lhs.index(),
@@ -1579,6 +1621,25 @@ const FunctionEmitter = struct {
             computationType(computation),
         });
         try self.here(self.mir.spanOf(id));
+        if (float) |bits| try self.canonicalNan(id, bits, self.mir.spanOf(id));
+    }
+
+    /// Defines `%v{id}` from the float result `%nr{id}`, with every NaN made
+    /// the positive quiet NaN. LLVM leaves which NaN an arithmetic operation
+    /// produces to the target and to constant folding -- x86's is negative,
+    /// AArch64's positive -- and a NaN's bits are observable through
+    /// `to_bits`, so a program's result would depend on where and how it was
+    /// built. A select is not arithmetic, so it keeps the bits it chooses, and
+    /// folding it can only produce the canonical NaN.
+    fn canonicalNan(self: *FunctionEmitter, id: InstId, bits: u8, span: Span) std.Io.Writer.Error!void {
+        const n = id.index();
+        const t = floatType(bits);
+        try self.w.print("    %nu{d} = arith.cmpf uno, %nr{d}, %nr{d} : {s}", .{ n, n, n, t });
+        try self.here(span);
+        try self.w.print("    %nq{d} = arith.constant 0x{X} : {s}", .{ n, canonicalNanBits(bits), t });
+        try self.here(span);
+        try self.w.print("    %v{d} = arith.select %nu{d}, %nq{d}, %nr{d} : {s}", .{ n, n, n, n, t });
+        try self.here(span);
     }
 
     fn multiply(self: *FunctionEmitter, id: InstId) std.Io.Writer.Error!void {
@@ -1623,10 +1684,11 @@ const FunctionEmitter = struct {
         const computation = self.computationOf(id);
 
         if (floatBitsOf(computation)) |bits| {
-            try self.w.print("    %v{d} = arith.{s} %v{d}, %v{d} : {s}", .{
+            try self.w.print("    %nr{d} = arith.{s} %v{d}, %v{d} : {s}", .{
                 n, if (is_rem) "remf" else "divf", p.lhs.index(), p.rhs.index(), floatType(bits),
             });
             try self.here(span);
+            try self.canonicalNan(id, bits, span);
             return;
         }
 

@@ -1,38 +1,6 @@
 import std.mem
 import std.testing
 
-// Build the Float64 whose IEEE 754 bits are `bits`: a sign bit, an 11-bit
-// biased exponent, and a 52-bit fraction. The significand fits exactly in
-// Float64, and scaling by powers of two stays exact through the final normal
-// or subnormal value the runtime chose.
-fn parsed_float64(bits: UInt64) -> Float64 {
-    // Bit 63 holds the sign; 2^52 is one past the largest fraction field.
-    let sign_bit: UInt64 = 9223372036854775808
-    let fraction_scale: UInt64 = 4503599627370496
-    let magnitude = bits % sign_bit
-    let biased_exponent = magnitude / fraction_scale
-    var significand = magnitude % fraction_scale
-    var exponent: Int64 = -1074
-    if biased_exponent != 0 {
-        significand += fraction_scale
-        exponent = Int64(biased_exponent) - 1075
-    }
-    var value = Float64(significand)
-    while exponent < 0 {
-        value /= 2.0
-        exponent += 1
-    }
-    while exponent > 0 {
-        value *= 2.0
-        exponent -= 1
-    }
-    if bits >= sign_bit {
-        -value
-    } else {
-        value
-    }
-}
-
 // Parse one decimal token with optional sign, fraction and exponent. Leading
 // zeroes are allowed; whitespace, separators and nonfinite names are refused.
 // Tokens have at most 65,536 bytes. Syntax offsets count bytes, including EOF.
@@ -48,7 +16,7 @@ pub fn parse_float64(input: Str) -> Result[Float64, ParseError] where carries() 
 // are those of the Float64 holding it.
 fn parsed_status(status: UInt64, bits: UInt64, offset: UInt64) -> Result[Float64, ParseError] where carries() {
     match read status {
-        0 => .Ok(parsed_float64(bits)),
+        0 => .Ok(Float64.from_bits(bits)),
         1 => .Err(.Syntax(offset)),
         2 => .Err(.OutOfRange),
         3 => .Err(.TokenLimit),

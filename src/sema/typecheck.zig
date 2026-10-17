@@ -19172,6 +19172,10 @@ const Checker = struct {
             if (self.float_math.operationOf(d) != null) return;
             return self.sink.addError(.t_extern, self.ast.fileOf(self.ast.declName(d)), self.ast.tokenSpan(self.ast.declName(d)), "a scalar math primitive must have its compiler-defined signature", "restore the private scalar declaration with read Float64 parameters and result");
         }
+        // A float bit cast is held to the runtime table above, which gives it
+        // a float parameter or result; floats cross no foreign boundary, and
+        // lowering replaces the call, so the foreign ABI does not apply.
+        if (library and RawAccesses.floatBitsCandidate(self.program, self.ast, d)) return;
         if (library and self.raw_accesses.typed(d)) {
             const saved = self.generic;
             self.generic = d;
@@ -39694,8 +39698,10 @@ fn runtimeScalarName(scalar: runtime_symbols.Scalar) []const u8 {
     return switch (scalar) {
         .u8 => "UInt8",
         .i32 => "Int32",
+        .u32 => "UInt32",
         .i64 => "Int64",
         .u64 => "UInt64",
+        .f32 => "Float32",
         .f64 => "Float64",
         .unit => "()",
         .ptr => unreachable,

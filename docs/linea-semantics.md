@@ -2340,7 +2340,9 @@ under [T-Const]; arithmetic over float literals runs where it is written.
 The `Float64` math methods are library operations and are not constant
 expressions; their results, including the special values, are defined with the
 standard library ([scalar/float.lin](../std/scalar/float.lin)). `Float32` has
-no math methods.
+no math methods. Both float types have `to_bits` and `from_bits`, which
+reinterpret a float as the unsigned integer of its width and back, keeping
+every bit, and `total_less`.
 
 **[T-Convert]** `T(e)` explicitly converts its single argument `e` to the
 primitive type named by `T`
@@ -2388,7 +2390,12 @@ arithmetic rules.
 Floats support `+`, `-`, `*` and `/`, but not `%`. Each operation is rounded
 to nearest, ties to even, in its operands' type: `Float32` arithmetic is
 binary32 arithmetic, with no wider intermediate. `Float32` and `Float64` do
-not mix. Integer `/` truncates toward
+not mix. Every NaN that arithmetic, a conversion between the float types or a
+math method produces is the positive quiet NaN, whatever NaN went in, on every
+target and at every optimisation level
+([ADR 0249](adr/0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md)).
+Negation flips the sign bit and nothing else, and copies keep every bit, so a
+NaN's sign and payload are what the program made them. Integer `/` truncates toward
 zero, and `%` is the remainder of that division, `a - (a / b) * b`, so a nonzero
 remainder has the sign of the dividend. Floating-point remainder is a different
 operation and does not share the operator. Float arithmetic requires no
@@ -2436,6 +2443,12 @@ or after nothing: `less` and `equals` return false when either operand is NaN,
 including when both operands are the same NaN. Thus `!=`, defined by negating
 equality, is the only comparison that returns true for NaN. `Ordered` adds the
 stronger requirements of a total order.
+
+`total_less` is IEEE 754's `totalOrder` and is not `Comparable.less`: it orders
+bit patterns, so `-0.0` comes before `0.0`, NaNs of one sign order by payload,
+and the order runs from the negative NaNs through `-inf`, the negative numbers,
+`-0.0`, `0.0`, the positive numbers and `inf` to the positive NaNs. Two values
+tie only when their bits are equal.
 
 The compiler provides primitive comparison implementations, which use the same
 lookup and bound discharge as written implementations. A primitive belongs to

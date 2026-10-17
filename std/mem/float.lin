@@ -15,3 +15,31 @@ extern fn linea_float32_parse(address: UInt64, length: UInt64, inout bits: UInt6
 internal fn parse_float32_bits(bytes: Slice[UInt8], inout bits: UInt64, inout offset: UInt64) -> UInt64 where carries() {
     linea_float32_parse(bytes.at, bytes.len, &bits, &offset)
 }
+
+// A float's IEEE 754 bits as the unsigned integer of its width, and back. The
+// compiler replaces each call with a reinterpretation that keeps every bit,
+// so these are declared here, where the library's trusted primitives live,
+// and reached through the `to_bits` and `from_bits` methods.
+extern fn linea_float64_to_bits(value: Float64) -> UInt64
+
+extern fn linea_float64_from_bits(bits: UInt64) -> Float64
+
+extern fn linea_float32_to_bits(value: Float32) -> UInt32
+
+extern fn linea_float32_from_bits(bits: UInt32) -> Float32
+
+internal fn float64_to_bits(value: Float64) -> UInt64 {
+    linea_float64_to_bits(value)
+}
+
+internal fn float64_from_bits(bits: UInt64) -> Float64 {
+    linea_float64_from_bits(bits)
+}
+
+internal fn float32_to_bits(value: Float32) -> UInt32 {
+    linea_float32_to_bits(value)
+}
+
+internal fn float32_from_bits(bits: UInt32) -> Float32 {
+    linea_float32_from_bits(bits)
+}

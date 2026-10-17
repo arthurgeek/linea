@@ -1,0 +1,38 @@
+fn quotient(left: Float64, right: Float64) -> Float64 {
+    left / right
+}
+
+fn sum(left: Float64, right: Float64) -> Float64 {
+    left + right
+}
+
+fn narrow(value: Float64) -> Float32 {
+    Float32(value)
+}
+
+fn widen(value: Float32) -> Float64 {
+    Float64(value)
+}
+
+fn main() -> UInt8 {
+    let positive_quiet_nan: UInt64 = 9221120237041090560
+    let negative_quiet_nan: UInt64 = 18444492273895866368
+    let nan = quotient(0.0, 0.0)
+    // A NaN arithmetic produces is the positive quiet NaN on every target,
+    // whichever NaN went in; negation flips only its sign.
+    let computed = nan.to_bits() == positive_quiet_nan
+    let negated = (-nan).to_bits() == negative_quiet_nan
+    let propagated = sum(-nan, 1.0).to_bits() == positive_quiet_nan
+    let infinite = sum(1.0 / 0.0, -1.0 / 0.0).to_bits() == positive_quiet_nan
+    let root = Float64.sqrt(-1.0).to_bits() == positive_quiet_nan
+    let narrowed = narrow(-nan).to_bits() == UInt32(2143289344)
+    let widened = widen(narrow(-nan)).to_bits() == positive_quiet_nan
+    // `from_bits` keeps every bit, a NaN's payload included.
+    let payload: UInt64 = 18442240474082181121
+    let kept = Float64.from_bits(payload).to_bits() == payload
+    if computed && negated && propagated && infinite && root && narrowed && widened && kept {
+        0
+    } else {
+        1
+    }
+}

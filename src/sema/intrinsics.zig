@@ -103,6 +103,10 @@ pub const RawAccesses = struct {
     load: DeclId = DeclId.none,
     store8: DeclId = DeclId.none,
     load8: DeclId = DeclId.none,
+    /// `linea_float64_to_bits`, `linea_float64_from_bits` and their Float32
+    /// forms: a float's bits reinterpreted as the unsigned integer of its
+    /// width, and back. Each lowers to one bit cast.
+    float_bits: [4]DeclId = @splat(DeclId.none),
     /// `mem.Closure`, the type every erased callable is kept behind, and
     /// `mem.ClosureEntry`, whose instance for a callable `S` is `S` with the
     /// stored callable's address and length appended.
@@ -172,6 +176,7 @@ pub const RawAccesses = struct {
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
         checked.store8 = libraryExternDecl(program, ast, typing, "linea_raw_store8");
         checked.load8 = libraryExternDecl(program, ast, typing, "linea_raw_load8");
+        for (float_bits_symbols, &checked.float_bits) |symbol, *d| d.* = libraryExternDecl(program, ast, typing, symbol);
         return checked;
     }
 
@@ -211,6 +216,24 @@ pub const RawAccesses = struct {
         return try pool.internCallable(params, value, contracts, declared.invocation);
     }
 
+    /// The standard library's declarations of the float bit casts, by name
+    /// before their signatures are checked, so the checker can hold each to
+    /// the runtime table instead of to the foreign ABI floats do not cross.
+    pub fn floatBitsCandidate(program: *const ExpandedProgram, ast: *const Ast, d: DeclId) bool {
+        if (d == DeclId.none or !ast.declIsExtern(d)) return false;
+        for (float_bits_symbols) |symbol| {
+            if (program.libraryDeclIn("mem", symbol) == d) return true;
+        }
+        return false;
+    }
+
+    /// Whether `d` is a checked float bit cast.
+    pub fn floatBits(self: RawAccesses, d: DeclId) bool {
+        if (d == DeclId.none) return false;
+        for (self.float_bits) |bits| if (bits == d) return true;
+        return false;
+    }
+
     /// Whether `d` opens a closure: its first type parameter is the callback,
     /// which must be callable as the closure's `S`.
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
@@ -219,7 +242,7 @@ pub const RawAccesses = struct {
 
     pub fn contains(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and
-            (d == self.store or d == self.load or d == self.store8 or d == self.load8 or self.typed(d));
+            (d == self.store or d == self.load or d == self.store8 or d == self.load8 or self.floatBits(d) or self.typed(d));
     }
     pub fn typed(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or self.processText(d) != null or self.erasure(d));
@@ -291,6 +314,8 @@ fn closureOpenDecl(program: *const ExpandedProgram, ast: *const Ast, member: []c
 /// A private library extern by its name and its number of parameters. The
 /// checker holds each to its whole signature, so a parameter's name decides
 /// nothing: a name is a label.
+const float_bits_symbols = [_][]const u8{ "linea_float64_to_bits", "linea_float64_from_bits", "linea_float32_to_bits", "linea_float32_from_bits" };
+
 fn rawAccessDecl(program: *const ExpandedProgram, ast: *const Ast, name: []const u8, arity: usize) DeclId {
     const d = program.libraryDeclIn("mem", name) orelse return DeclId.none;
     if (!ast.declIsExtern(d) or ast.declParams(d).len != arity) return DeclId.none;
@@ -349,8 +374,10 @@ pub fn runtimeScalarType(scalar: runtime_symbols.Scalar) TypeId {
     return switch (scalar) {
         .u8 => .u8,
         .i32 => .i32,
+        .u32 => .u32,
         .i64 => .i64,
         .u64 => .u64,
+        .f32 => .f32,
         .f64 => .f64,
         .unit => .unit,
         // Only the symbols the compiler owns take a pointer, and none of them

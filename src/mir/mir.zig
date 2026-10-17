@@ -222,6 +222,10 @@ pub const Inst = struct {
         /// ties to even; a finite value beyond binary32's range becomes the
         /// infinity of its sign, and NaN stays NaN.
         float_truncate,
+        /// A float's IEEE 754 bits as the unsigned integer of the same width,
+        /// or such an integer's bits as the float. Every bit is kept, a NaN's
+        /// sign and payload included.
+        bit_cast,
         /// A checked runtime math operation over one or two Float64 values.
         float_math,
 
@@ -277,7 +281,7 @@ pub const Inst = struct {
                 .store => .store,
                 .add, .sub, .mul, .div, .rem => .binary,
                 .cmp_eq, .cmp_ne, .cmp_lt, .cmp_le, .cmp_gt, .cmp_ge => .binary,
-                .neg, .ret, .int_to_float, .float_to_int, .float_extend, .float_truncate => .unary,
+                .neg, .ret, .int_to_float, .float_to_int, .float_extend, .float_truncate, .bit_cast => .unary,
                 .float_math => .float_math,
                 .check => .check,
                 .call => .call,
@@ -1332,6 +1336,7 @@ pub const Mir = struct {
             .float_to_int,
             .float_extend,
             .float_truncate,
+            .bit_cast,
             .float_math,
             .check,
             .call,

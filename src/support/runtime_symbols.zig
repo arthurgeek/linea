@@ -79,7 +79,7 @@ test "a runtime symbol is refused and an ordinary name is not" {
 /// A scalar a runtime function's signature names, as C and Linea agree on it.
 /// `ptr` is an address the compiler passes as a pointer: no Linea declaration
 /// spells it, so only the symbols the compiler owns use it.
-pub const Scalar = enum { u8, i32, i64, u64, f64, ptr, unit };
+pub const Scalar = enum { u8, i32, u32, i64, u64, f32, f64, ptr, unit };
 
 /// How a runtime function takes a parameter: by value, or through a pointer
 /// the callee writes, which a Linea declaration spells `inout`.
@@ -231,6 +231,12 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_raw_load8", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .u8, .provider = .lowering },
     .{ .symbol = "linea_raw_store", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering },
     .{ .symbol = "linea_raw_store8", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .unit, .provider = .lowering },
+    // A float's IEEE 754 bits as the unsigned integer of its width, and back.
+    // Lowering replaces each with a bit-for-bit reinterpretation.
+    .{ .symbol = "linea_float64_to_bits", .parameters = &.{p(.f64)}, .result = .u64, .provider = .lowering },
+    .{ .symbol = "linea_float64_from_bits", .parameters = &.{p(.u64)}, .result = .f64, .provider = .lowering },
+    .{ .symbol = "linea_float32_to_bits", .parameters = &.{p(.f32)}, .result = .u32, .provider = .lowering },
+    .{ .symbol = "linea_float32_from_bits", .parameters = &.{p(.u32)}, .result = .f32, .provider = .lowering },
 };
 
 /// The prefix that marks a symbol as the runtime's.

@@ -13,6 +13,7 @@ extern fn linea_float32_debug(bits: UInt64, inout first: UInt64, inout second: U
 // Which float type's digits a value is written with. A Float32 is carried as
 // the Float64 holding the same value, which widening gives exactly, so the
 // two types share one writer and differ only in how many digits read back.
+// The runtime receives the value's bits and prints every NaN as `NaN`.
 @copyable
 enum FloatWidth {
     Binary32,
@@ -24,65 +25,6 @@ enum FloatWidth {
 // NaN is never negative.
 fn is_negative(value: Float64) -> Bool {
     value < 0.0 || (value == 0.0 && 1.0 / value < 0.0)
-}
-
-// Recover the IEEE representation using exact powers of two. The foreign
-// interface accepts integers, so the float itself stays in Linea.
-fn float64_bits(value: Float64) -> UInt64 {
-    // IEEE 754 stores a sign bit (2^63), an 11-bit exponent biased by 1023,
-    // and a 52-bit fraction scaled by 2^52.
-    let sign_bit: UInt64 = 9223372036854775808
-    let fraction_scale: UInt64 = 4503599627370496
-    let exponent_bias = 1023
-    // An all-ones exponent denotes infinity or NaN. infinity_bits is that
-    // exponent with a zero fraction (0x7FF0000000000000); quiet_nan_bits also
-    // sets the top fraction bit (0x7FF8000000000000). Every NaN payload prints
-    // as "NaN", so one canonical NaN stands for all of them.
-    let infinity_bits: UInt64 = 9218868437227405312
-    let quiet_nan_bits: UInt64 = 9221120237041090560
-    if value != value {
-        return quiet_nan_bits
-    }
-    let sign = if is_negative(value) {
-        sign_bit
-    } else {
-        0
-    }
-    var magnitude = if value < 0.0 {
-        -value
-    } else {
-        value
-    }
-    if magnitude == 0.0 {
-        return sign
-    }
-    let positive_infinity = 1.0 / 0.0
-    if magnitude == positive_infinity {
-        return sign + infinity_bits
-    }
-
-    // The normal range starts at 2^-1022. Subnormals are integer multiples
-    // of 2^-1074, the smallest positive Float64.
-    let smallest_normal = 2.2250738585072014e-308
-    let smallest_subnormal = 5e-324
-    if magnitude < smallest_normal {
-        return sign + UInt64(magnitude / smallest_subnormal)
-    }
-
-    // Normalize to [1, 2). Powers of two preserve every significant bit.
-    var exponent = exponent_bias
-    while magnitude >= 2.0 {
-        magnitude /= 2.0
-        exponent += 1
-    }
-    while magnitude < 1.0 {
-        magnitude *= 2.0
-        exponent -= 1
-    }
-    // Remove the implicit leading 1, then shift the fraction into 52 bits.
-    // The biased exponent occupies the bits immediately above that fraction.
-    let fraction = UInt64((magnitude - 1.0) * Float64(fraction_scale))
-    sign + UInt64(exponent) * fraction_scale + fraction
 }
 
 // Return the one-character text for an ASCII byte the runtime emitted.
@@ -118,7 +60,7 @@ fn write_float_text[W: Writer](value: Float64, width: FloatWidth, inout w: W) ->
     var second: UInt64 = 0
     var third: UInt64 = 0
     var fourth: UInt64 = 0
-    let bits = float64_bits(value)
+    let bits = value.to_bits()
     var remaining = match read width {
         Binary32 => linea_float32_debug(bits, &first, &second, &third, &fourth),
         Binary64 => linea_float64_debug(bits, &first, &second, &third, &fourth),
@@ -398,7 +340,7 @@ fn write_float_magnitude[W: Writer](magnitude: Float64, width: FloatWidth, preci
         return write_fixed(0, 0, places, &w)
     }
     var exponent: Int64 = 0
-    let bits = float64_bits(magnitude)
+    let bits = magnitude.to_bits()
     let significand = match read width {
         Binary32 => linea_float32_shortest(bits, &exponent),
         Binary64 => linea_float64_shortest(bits, &exponent),

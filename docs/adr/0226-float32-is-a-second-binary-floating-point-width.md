@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-10-15. Extends [0018](0018-the-integer-model.md) and
 [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md); admits the
-second width the float design declined until a program needed it.
+second width the float design declined until a program needed it. Extended by
+[0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md),
+which canonicalises the NaN an operation produces.
 
 ## Context
 

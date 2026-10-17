@@ -10,6 +10,8 @@ Builds on [0013](0013-no-undefined-behaviour.md),
 [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md).
 Supports the explicit numeric access contract in
 [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md).
+Extended by [0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md),
+which builds the parsed value from its bits with a bit cast.
 No compiler or foreign-ABI language rule changes.
 
 ## Context

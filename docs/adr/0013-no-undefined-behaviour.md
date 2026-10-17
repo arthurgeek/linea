@@ -1,6 +1,8 @@
 # 13. No operation has undefined behaviour
 
-Status: Accepted — 2026-07-25. Extended by [0228](0228-a-granted-module-calls-c.md), the boundary with C.
+Status: Accepted — 2026-07-25. Extended by [0228](0228-a-granted-module-calls-c.md), the boundary with C, and by
+[0249](0249-a-float-has-a-total-order-and-a-computed-nan-is-canonical.md),
+which makes a computed NaN's bits the same on every target.
 
 ## Context
 

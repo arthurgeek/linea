@@ -8,7 +8,7 @@ impl[T: Ordered, A: Allocator] Vec[T, A] {
     // relative order. `T` must be `Ordered`, a total order, so that the result
     // is defined for every input; `Float64` is only `Comparable`, because NaN
     // is ordered against nothing, so a vector of floats is sorted with
-    // `sort_by` and a comparison that decides where NaN goes. Costs are those of
+    // `sort_by(Float64.total_less)`, IEEE 754's total order. Costs are those of
     // `sort_by`.
     pub fn sort(inout self: Self) {
         &self.sort_by(|left, right| left < right)
@@ -184,6 +184,9 @@ impl[T, A: Allocator] Vec[T, A] {
         &readings.sort_by(|left, right| !left.is_nan() && (right.is_nan() || left < right))
         testing.assert(readings[0] == -1.0 && readings[1] == 0.5 && readings[2] == 2.5, "the numbers were not ascending")?
         testing.assert(readings[3].is_nan() && readings[4].is_nan(), "NaN did not sort last")?
+        // IEEE 754's total order places every value, so it is a strict weak order.
+        &readings.sort_by(Float64.total_less)
+        testing.assert(readings[0] == -1.0 && readings[2] == 2.5 && readings[4].is_nan(), "the total order did not sort the readings")?
         // `<` orders NaN against nothing, so it is not a strict weak order here;
         // the sort still returns the same five readings.
         &readings.sort_by(|left, right| left < right)

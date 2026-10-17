@@ -76,9 +76,15 @@ module {
   ^b0:
     %v0 = llvm.load %s0 : !llvm.ptr -> f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
     %v1 = arith.constant 0x3F000000 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:12)
-    %v2 = arith.mulf %v0, %v1 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nr2 = arith.mulf %v0, %v1 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nu2 = arith.cmpf uno, %nr2, %nr2 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nq2 = arith.constant 0x7FC00000 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %v2 = arith.select %nu2, %nq2, %nr2 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
     %v3 = llvm.load %s1 : !llvm.ptr -> f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:18)
-    %v4 = arith.addf %v2, %v3 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nr4 = arith.addf %v2, %v3 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nu4 = arith.cmpf uno, %nr4, %nr4 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %nq4 = arith.constant 0x7FC00000 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
+    %v4 = arith.select %nu4, %nq4, %nr4 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
     func.return %v4 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":2:5)
   }
   func.func private @"lin.;widen"(%a0: f32) -> f64 attributes {llvm.linkage = #llvm.linkage<internal>} {
@@ -88,7 +94,10 @@ module {
     cf.br ^b0
   ^b0:
     %v0 = llvm.load %s0 : !llvm.ptr -> f32 loc("tests/codegen/float32_lowers_to_f32.lin":6:13)
-    %v1 = arith.extf %v0 : f32 to f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
+    %nr1 = arith.extf %v0 : f32 to f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
+    %nu1 = arith.cmpf uno, %nr1, %nr1 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
+    %nq1 = arith.constant 0x7FF8000000000000 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
+    %v1 = arith.select %nu1, %nq1, %nr1 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
     func.return %v1 : f64 loc("tests/codegen/float32_lowers_to_f32.lin":6:5)
   }
   func.func private @"lin.;narrow"(%a0: f64) -> f32 attributes {llvm.linkage = #llvm.linkage<internal>} {
@@ -98,7 +107,10 @@ module {
     cf.br ^b0
   ^b0:
     %v0 = llvm.load %s0 : !llvm.ptr -> f64 loc("tests/codegen/float32_lowers_to_f32.lin":10:13)
-    %v1 = arith.truncf %v0 : f64 to f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
+    %nr1 = arith.truncf %v0 : f64 to f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
+    %nu1 = arith.cmpf uno, %nr1, %nr1 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
+    %nq1 = arith.constant 0x7FC00000 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
+    %v1 = arith.select %nu1, %nq1, %nr1 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
     func.return %v1 : f32 loc("tests/codegen/float32_lowers_to_f32.lin":10:5)
   }
   func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {
