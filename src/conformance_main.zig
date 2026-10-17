@@ -17466,22 +17466,79 @@ fn checkMutations(
     try retainFrom(gpa, failures, retained_upto);
 }
 
-/// How many edits one case is followed through before what remains is
+/// How many fixes one case is followed through before what remains is
 /// reported as two helps that undo each other.
 const help_edit_rounds = 8;
 
-/// One error a help's edit answered: its rule and the line it was reported
-/// at, moved with every later edit.
+/// One error a help's fix answered: its rule and the line it was reported
+/// at, moved with every later fix.
 const HelpAnswered = struct { code: diagnostic.Code, line: usize };
 
-/// Property `help_edits`: the edits the case's diagnostics carry are applied
-/// to `text`, the case's one file, one at a time, the program checked again
-/// after each, until no error carries one. An error an edit answered must
-/// not be reported at its line again, whichever later edit brought it back,
-/// and the edits must run out within `help_edit_rounds`. Whether any
-/// diagnostic carried an edit.
+/// `text` with a fix applied, every edit at once, or why it cannot be: an
+/// edit outside `text`, two edits overlapping, or one into another file.
+const Applied = union(enum) { text: []const u8, refused: []const u8 };
+
+fn applyFix(scratch: std.mem.Allocator, text: []const u8, file: FileId, fix: diagnostic.Fix) !Applied {
+    const edits = try scratch.dupe(diagnostic.Edit, fix.edits);
+    std.mem.sortUnstable(diagnostic.Edit, edits, {}, struct {
+        fn later(_: void, a: diagnostic.Edit, b: diagnostic.Edit) bool {
+            return a.span.start > b.span.start;
+        }
+    }.later);
+    var current = text;
+    var floor: u32 = @intCast(text.len);
+    for (edits) |edit| {
+        if (edit.file != file) return .{ .refused = "an edit into another file" };
+        if (edit.span.start > edit.span.end or edit.span.end > text.len) return .{ .refused = "an edit outside the text" };
+        if (edit.span.end > floor) return .{ .refused = "two edits of one fix overlap" };
+        floor = edit.span.start;
+        current = try std.mem.concat(scratch, u8, &.{ current[0..edit.span.start], edit.text, current[edit.span.end..] });
+    }
+    return .{ .text = current };
+}
+
+/// Where `line` of `text` sits once `fix` is applied: moved by the lines
+/// each edit starting above it adds or removes.
+fn movedLine(text: []const u8, fix: diagnostic.Fix, line: usize) usize {
+    var moved = line;
+    for (fix.edits) |edit| {
+        if (lineAt(text, edit.span.start) >= line) continue;
+        const removed = std.mem.count(u8, text[edit.span.start..@min(edit.span.end, text.len)], "\n");
+        const added = std.mem.count(u8, edit.text, "\n");
+        moved = (moved + added) -| removed;
+    }
+    return moved;
+}
+
+/// What a fix writes, for a failure to show: each edit's text, joined.
+fn fixText(gpa: std.mem.Allocator, fix: diagnostic.Fix) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (fix.edits, 0..) |edit, i| try out.print(gpa, "{s}`{s}`", .{ if (i == 0) "" else " and ", std.mem.trim(u8, edit.text, " \n") });
+    return out.items;
+}
+
+/// Whether `diagnostics` hold an error under `code` at `line` of `text`.
+fn errorAtLine(diagnostics: []const Diagnostic, file: FileId, text: []const u8, code: diagnostic.Code, line: usize) ?Diagnostic {
+    for (diagnostics) |d| {
+        if (d.severity != .err or d.code != code) continue;
+        const label = d.primaryLabel() orelse continue;
+        if (label.file != file) continue;
+        if (lineAt(text, label.span.start) == line) return d;
+    }
+    return null;
+}
+
+/// Property `help_edits`: every fix a diagnostic of the case carries,
+/// applied alone to `text`, the case's one file, must leave no error under
+/// that diagnostic's rule at its line. Then the fixes are followed in turn,
+/// the first one each round, until no error carries one: an error a fix
+/// answered must not come back at its line, whichever later fix brings it
+/// back, and the fixes must run out within `help_edit_rounds`. A new error
+/// elsewhere is the program's next mistake. Whether any diagnostic carried
+/// a fix.
 ///
-/// **Bound:** one compilation per edit applied, at most `help_edit_rounds`.
+/// **Bound:** one compilation per fix the case's diagnostics carry, and one
+/// per round, at most `help_edit_rounds`.
 fn checkHelpEdits(
     gpa: std.mem.Allocator,
     failures: *std.ArrayList(Failure),
@@ -17494,6 +17551,37 @@ fn checkHelpEdits(
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
+    var carried = false;
+
+    // Each fix alone.
+    for (reported) |d| {
+        if (d.severity != .err) continue;
+        const code = d.code orelse continue;
+        const label = d.primaryLabel() orelse continue;
+        if (label.file != file) continue;
+        for (d.fixes) |fix| {
+            carried = true;
+            const help = if (fix.note) |at| d.notes[at] else label.message;
+            const failure: ?[]const u8 = switch (try applyFix(scratch, text, file, fix)) {
+                .refused => |why| why,
+                .text => |edited| failure: {
+                    const again = try mutate.diagnose(scratch, edited, kind);
+                    const line = movedLine(text, fix, lineAt(text, label.span.start));
+                    const left = errorAtLine(again.sink.list.items, again.file, edited, code, line) orelse break :failure null;
+                    break :failure try std.fmt.allocPrint(scratch, "{s} at line {d} is still reported: {s}", .{ code.ruleName(), line, left.message });
+                },
+            };
+            if (failure) |what| try failures.append(gpa, .{
+                .path = display_path,
+                .what = "a help's edit, applied, leaves the error it was written for",
+                .expected = try std.fmt.allocPrint(gpa, "no {s} at line {d} after writing {s}, as the help \"{s}\" says", .{ code.ruleName(), lineAt(text, label.span.start), try fixText(scratch, fix), help }),
+                .actual = try gpa.dupe(u8, what),
+            });
+        }
+    }
+    if (!carried) return false;
+
+    // The fixes in turn.
     var answered: std.ArrayList(HelpAnswered) = .empty;
     var applied: std.ArrayList([]const u8) = .empty;
     var current = text;
@@ -17501,7 +17589,6 @@ fn checkHelpEdits(
     var diagnostics_now: []const Diagnostic = reported;
     var round: usize = 0;
     const failure: ?[]const u8 = failure: while (true) : (round += 1) {
-        // An error an earlier edit answered, reported again at its line.
         for (diagnostics_now) |d| {
             if (d.severity != .err) continue;
             const code = d.code orelse continue;
@@ -17509,43 +17596,35 @@ fn checkHelpEdits(
             if (label.file != current_file) continue;
             const line = lineAt(current, label.span.start);
             for (answered.items) |earlier| if (earlier.code == code and earlier.line == line)
-                break :failure try std.fmt.allocPrint(scratch, "{s} at line {d}, answered by an earlier edit, reported again: {s}", .{ code.ruleName(), line, d.message });
+                break :failure try std.fmt.allocPrint(scratch, "{s} at line {d}, answered by an earlier fix, reported again: {s}", .{ code.ruleName(), line, d.message });
         }
         const next: Diagnostic = for (diagnostics_now) |d| {
-            if (d.severity != .err or d.code == null) continue;
-            const edit = d.edit orelse continue;
+            if (d.severity != .err or d.code == null or d.fixes.len == 0) continue;
             const label = d.primaryLabel() orelse continue;
-            if (edit.file != current_file or label.file != current_file) continue;
+            if (label.file != current_file) continue;
             break d;
         } else break null;
         if (round >= help_edit_rounds) break try std.fmt.allocPrint(scratch, "helps still offer edits after {d}", .{help_edit_rounds});
-        const edit = next.edit.?;
-        if (edit.span.end > current.len or edit.span.start > edit.span.end) break "an edit outside the text";
-        const edited = try std.mem.concat(scratch, u8, &.{ current[0..edit.span.start], edit.text, current[edit.span.end..] });
-        // Lines past the edit move by the lines it added.
-        const removed = std.mem.count(u8, current[edit.span.start..edit.span.end], "\n");
-        const added = std.mem.count(u8, edit.text, "\n");
-        const edit_line = lineAt(current, edit.span.start);
-        for (answered.items) |*earlier| if (earlier.line > edit_line) {
-            earlier.line = (earlier.line + added) -| removed;
+        const fix = next.fixes[0];
+        const edited = switch (try applyFix(scratch, current, current_file, fix)) {
+            .refused => |why| break why,
+            .text => |t| t,
         };
-        var line = lineAt(current, next.primaryLabel().?.span.start);
-        if (line > edit_line) line = (line + added) -| removed;
-        try answered.append(scratch, .{ .code = next.code.?, .line = line });
-        try applied.append(scratch, edit.text);
+        for (answered.items) |*earlier| earlier.line = movedLine(current, fix, earlier.line);
+        try answered.append(scratch, .{ .code = next.code.?, .line = movedLine(current, fix, lineAt(current, next.primaryLabel().?.span.start)) });
+        try applied.append(scratch, try fixText(scratch, fix));
         const again = try mutate.diagnose(scratch, edited, kind);
         current = edited;
         current_file = again.file;
         diagnostics_now = again.sink.list.items;
     };
-    if (round == 0 and failure == null) return false;
     if (failure) |what| {
         var edits: std.ArrayList(u8) = .empty;
-        for (applied.items, 0..) |t, i| try edits.print(gpa, "{s}`{s}`", .{ if (i == 0) "" else ", then ", std.mem.trim(u8, t, " ") });
+        for (applied.items, 0..) |t, i| try edits.print(gpa, "{s}{s}", .{ if (i == 0) "" else ", then ", t });
         try failures.append(gpa, .{
             .path = display_path,
             .what = "a help's edit, applied, leaves the error it was written for",
-            .expected = try std.fmt.allocPrint(gpa, "each error a help's edit answers gone for good, after writing {s}", .{edits.items}),
+            .expected = try std.fmt.allocPrint(gpa, "each error a help's fix answers gone for good, after writing {s}", .{edits.items}),
             .actual = try gpa.dupe(u8, what),
         });
     }
@@ -20503,8 +20582,8 @@ fn checkCase(
     }
     tally(&w.properties, &w.passed_over, .walk_loops, walks_written_out);
 
-    // Every case, counted where one of its diagnostics carried an edit. A case
-    // of several files is passed over: the edit is written into one file's
+    // Every case, counted where one of its diagnostics carried a fix. A case
+    // of several files is passed over: the fix is written into one file's
     // text and recompiled alone.
     var edits_applied = false;
     if (env.corpus_properties and case.files.len == 1 and sink.hasErrors()) {

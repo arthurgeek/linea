@@ -12,6 +12,7 @@ const Loc = span_mod.Loc;
 const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
 const HelpEdit = @import("../diagnostics/diagnostic.zig").Edit;
+const HelpFix = @import("../diagnostics/diagnostic.zig").Fix;
 const LabelStyle = @import("../diagnostics/diagnostic.zig").LabelStyle;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Interner = @import("../support/interner.zig").Interner;
@@ -7794,9 +7795,8 @@ const Checker = struct {
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source", help, null);
                     // The clause naming every candidate is the one edit that
                     // answers whichever the body uses.
-                    if (outcome) |out| if (try clauseEdit(self.sink.arena, self.ast, out.decl, every_clause)) |edit| if (self.sink.items().len > reported) {
-                        self.sink.mutableItems()[reported].edit = edit;
-                    };
+                    if (outcome) |out| if (try clauseEdit(self.sink.arena, self.ast, out.decl, every_clause)) |edit|
+                        try self.addFix(reported, null, &.{edit});
                 }
                 // The body has no contract to be checked against, so the
                 // ambiguity is the only error it reports.
@@ -10405,9 +10405,9 @@ const Checker = struct {
     /// `where` predicate whose subject is `subject`. The predicate sits on the
     /// callee, often in another module, and is what the call failed to meet.
     fn citeWhereClause(self: *Checker, reported: usize, subject: node.TypeRef) std.mem.Allocator.Error!void {
-        const items = self.sink.mutableItems();
+        const items = self.sink.items();
         if (items.len <= reported) return;
-        const last = &items[items.len - 1];
+        var last = items[items.len - 1];
         const labels = try self.sink.arena.alloc(Label, last.labels.len + 1);
         @memcpy(labels[0..last.labels.len], last.labels);
         labels[last.labels.len] = .{
@@ -10417,6 +10417,7 @@ const Checker = struct {
             .style = .secondary,
         };
         last.labels = labels;
+        try self.sink.revise(items.len - 1, last);
     }
 
     /// Whether a `Closure` at these arguments must be released wherever it is
@@ -12477,9 +12478,9 @@ const Checker = struct {
     /// module, which an alias reaches.
     fn explainShadowedHead(self: *Checker, id: ExprId, before: usize) std.mem.Allocator.Error!void {
         if (!self.res.headShadowsAnImport(id)) return;
-        const items = self.sink.mutableItems();
+        const items = self.sink.items();
         if (items.len != before + 1) return;
-        const reported = &items[before];
+        var reported = items[before];
 
         const base = self.ast.unaryOperand(id);
         const head = self.ast.exprMain(base);
@@ -12512,6 +12513,7 @@ const Checker = struct {
             .{ name, kind, path },
         );
         reported.notes = notes;
+        try self.sink.revise(before, reported);
     }
 
     /// What a diagnostic calls a binding that shadows an import.
@@ -15867,14 +15869,28 @@ const Checker = struct {
     }
 
     /// Adds a note to the diagnostic the sink holds at `at`.
-    fn addNote(self: *Checker, at: usize, note: []const u8) std.mem.Allocator.Error!void {
-        const items = self.sink.mutableItems();
+    /// The fix writing the help at `note` of the diagnostic at `at`, or its
+    /// primary label's where `note` is null: `edits`, applied together.
+    fn addFix(self: *Checker, at: usize, note: ?u32, edits: []const HelpEdit) std.mem.Allocator.Error!void {
+        const items = self.sink.items();
         if (at >= items.len) return;
-        const reported = &items[at];
+        var reported = items[at];
+        const fixes = try self.sink.arena.alloc(HelpFix, reported.fixes.len + 1);
+        @memcpy(fixes[0..reported.fixes.len], reported.fixes);
+        fixes[reported.fixes.len] = .{ .note = note, .edits = try self.sink.arena.dupe(HelpEdit, edits) };
+        reported.fixes = fixes;
+        try self.sink.revise(at, reported);
+    }
+
+    fn addNote(self: *Checker, at: usize, note: []const u8) std.mem.Allocator.Error!void {
+        const items = self.sink.items();
+        if (at >= items.len) return;
+        var reported = items[at];
         const notes = try self.sink.arena.alloc([]const u8, reported.notes.len + 1);
         @memcpy(notes[0..reported.notes.len], reported.notes);
         notes[reported.notes.len] = note;
         reported.notes = notes;
+        try self.sink.revise(at, reported);
     }
 
     /// Whether an iterator a walk ends holding is one it may end holding.
@@ -22542,9 +22558,11 @@ const Checker = struct {
             });
         };
         if (added.items.len == 0) return;
-        for (self.sink.mutableItems()[first..]) |*diagnostic| {
-            if (diagnostic.severity != .err) continue;
+        for (self.sink.items()[first..], first..) |reported, at| {
+            if (reported.severity != .err) continue;
+            var diagnostic = reported;
             diagnostic.labels = try std.mem.concat(self.sink.arena, Label, &.{ diagnostic.labels, added.items });
+            try self.sink.revise(at, diagnostic);
         }
     }
 

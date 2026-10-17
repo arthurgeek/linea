@@ -2172,6 +2172,8 @@ const Analysis = struct {
             try clauseEdit(arena, self.ast, self.function.decl, clause)
         else
             null;
+        var fixes: std.ArrayList(diagnostics.Fix) = .empty;
+        if (edit) |clause_edit| try fixes.append(arena, .{ .note = @intCast(notes.items.len), .edits = try arena.dupe(diagnostics.Edit, &.{clause_edit}) });
         if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else if (partial) {
             try notes.append(arena, try std.fmt.allocPrint(arena, "part of the value comes from {s}, which `{s}` would permit; the rest no clause can", .{ named.items, clause }));
         } else switch (leaving) {
@@ -2249,7 +2251,7 @@ const Analysis = struct {
                 break :labels labels.items;
             },
             .notes = try notes.toOwnedSlice(arena),
-            .edit = edit,
+            .fixes = fixes.items,
         });
     }
 

@@ -7,6 +7,7 @@ const Code = diagnostic.Code;
 const Diagnostic = diagnostic.Diagnostic;
 const Label = diagnostic.Label;
 const Edit = diagnostic.Edit;
+const Fix = diagnostic.Fix;
 const FileId = @import("../support/source.zig").FileId;
 
 /// The most of one text a diagnostic carries.
@@ -32,7 +33,7 @@ pub const truncated = " ... (truncated)";
 /// between passes.
 ///
 /// Every text a diagnostic carries is cut to `max_text_bytes` on the way in,
-/// except an edit's, which is kept whole or dropped.
+/// except a fix's edits, each fix kept whole or dropped.
 /// The bound sits here rather than in a renderer because a renderer is not the
 /// only one: the human form and the JSON form are two writers of the same
 /// text, and a bound written into one of them says nothing about the other. A
@@ -60,18 +61,37 @@ pub const Sink = struct {
             .note => {},
         }
 
-        var bounded = d;
-        bounded.message = try cut(self.arena, d.message);
-        bounded.labels = try cutLabels(self.arena, d.labels);
-        bounded.notes = try cutNotes(self.arena, d.notes);
-        bounded.remarks = try cutNotes(self.arena, d.remarks);
-        // An edit is source a tool writes, and half a clause does not parse,
-        // so one over the bound is dropped rather than cut. Its help is a
-        // note, and stays.
-        if (d.edit) |e| if (e.text.len > max_text_bytes) {
-            bounded.edit = null;
-        };
-        try self.list.append(self.arena, bounded);
+        try self.list.append(self.arena, try self.bounded(d));
+    }
+
+    /// `d` with every text it carries within the bound.
+    fn bounded(self: *Sink, d: Diagnostic) !Diagnostic {
+        var within = d;
+        within.message = try cut(self.arena, d.message);
+        within.labels = try cutLabels(self.arena, d.labels);
+        within.notes = try cutNotes(self.arena, d.notes);
+        within.remarks = try cutNotes(self.arena, d.remarks);
+        within.fixes = try boundFixes(self.arena, d.fixes);
+        return within;
+    }
+
+    /// Replaces the diagnostic at `at` with `d`, a revision of it that a
+    /// pass amended with a label, a note or a fix: cut as `add` cuts, so an
+    /// amendment is held to the bound too. The severity is the one it had,
+    /// so the totals stand.
+    pub fn revise(self: *Sink, at: usize, d: Diagnostic) !void {
+        std.debug.assert(d.severity == self.list.items[at].severity);
+        self.list.items[at] = try self.bounded(d);
+    }
+
+    /// Replaces every diagnostic with `kept`, counted and cut as `add`
+    /// counts and cuts them. `kept` may be a slice of `items()`.
+    pub fn replaceAll(self: *Sink, kept: []const Diagnostic) !void {
+        const copied = try self.arena.dupe(Diagnostic, kept);
+        self.list.clearRetainingCapacity();
+        self.error_count = 0;
+        self.warning_count = 0;
+        for (copied) |d| try self.add(d);
     }
 
     /// One error with a single primary label, which is the common shape.
@@ -131,10 +151,6 @@ pub const Sink = struct {
         return self.list.items;
     }
 
-    pub fn mutableItems(self: *Sink) []Diagnostic {
-        return self.list.items;
-    }
-
     pub fn hasErrors(self: *const Sink) bool {
         return self.error_count > 0;
     }
@@ -152,6 +168,26 @@ fn cut(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
     while (end > 0 and text[end] & 0xC0 == 0x80) end -= 1;
 
     return std.mem.concat(arena, u8, &.{ text[0..end], truncated });
+}
+
+/// The fixes, without each one an edit of which is over the bound.
+///
+/// An edit is source a tool writes, and half a clause does not parse, so a
+/// fix is kept whole or dropped rather than cut; its help is a note, and is
+/// cut as any note is. The array is rebuilt only when a fix is dropped.
+fn boundFixes(arena: std.mem.Allocator, fixes: []const Fix) ![]const Fix {
+    const within = struct {
+        fn check(fix: Fix) bool {
+            for (fix.edits) |e| if (e.text.len > max_text_bytes) return false;
+            return true;
+        }
+    }.check;
+    var over = false;
+    for (fixes) |fix| over = over or !within(fix);
+    if (!over) return fixes;
+    var kept: std.ArrayList(Fix) = .empty;
+    for (fixes) |fix| if (within(fix)) try kept.append(arena, fix);
+    return kept.items;
 }
 
 /// The labels, with every message within the bound.
@@ -315,46 +351,84 @@ test "every text a diagnostic carries is one the sink cuts" {
     // A file's path is not among them and is deliberately not cut: it is
     // bounded by what the filesystem will open, never by the source, and a cut
     // one would leave a diagnostic naming a place that cannot be found.
-    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks", "edit" };
+    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks", "fixes" };
     const expected_label = [_][]const u8{ "file", "span", "message", "style" };
+    const expected_fix = [_][]const u8{ "note", "edits" };
     const expected_edit = [_][]const u8{ "file", "span", "text" };
 
     const d_fields = @typeInfo(Diagnostic).@"struct".fields;
     const l_fields = @typeInfo(Label).@"struct".fields;
+    const f_fields = @typeInfo(Fix).@"struct".fields;
     const e_fields = @typeInfo(Edit).@"struct".fields;
 
     try testing.expectEqual(expected_diagnostic.len, d_fields.len);
     try testing.expectEqual(expected_label.len, l_fields.len);
+    try testing.expectEqual(expected_fix.len, f_fields.len);
     try testing.expectEqual(expected_edit.len, e_fields.len);
     inline for (d_fields, expected_diagnostic) |f, name| try testing.expectEqualStrings(name, f.name);
     inline for (l_fields, expected_label) |f, name| try testing.expectEqualStrings(name, f.name);
+    inline for (f_fields, expected_fix) |f, name| try testing.expectEqualStrings(name, f.name);
     inline for (e_fields, expected_edit) |f, name| try testing.expectEqualStrings(name, f.name);
 }
 
-test "an edit whose text is over the bound is dropped, and its help kept" {
-    // A cut edit would write half a clause into the source, so an edit is
+test "a fix with an edit over the bound is dropped whole, and its help kept" {
+    // A cut edit would write half a clause into the source, so a fix is
     // carried whole or not at all; the help's prose is cut like any note.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
+    const a = arena.allocator();
 
     const span: Span = .{ .start = 0, .end = 0 };
-    var sink = Sink.init(arena.allocator());
-    for ([_]usize{ max_text_bytes, max_text_bytes + 1 }) |len| {
-        const text = try arena.allocator().alloc(u8, len);
-        @memset(text, 'a');
-        try sink.add(.{
-            .severity = .err,
-            .message = "boom",
-            .notes = &.{"write the clause"},
-            .edit = .{ .file = .from(0), .span = span, .text = text },
-        });
-    }
+    const long = try a.alloc(u8, max_text_bytes + 1);
+    @memset(long, 'a');
+    const short = "a" ** max_text_bytes;
+    const kept: []const Edit = &.{.{ .file = .from(0), .span = span, .text = short }};
+    const over: []const Edit = &.{ .{ .file = .from(0), .span = span, .text = short }, .{ .file = .from(0), .span = span, .text = long } };
 
-    const kept = sink.items()[0];
-    try testing.expectEqual(max_text_bytes, kept.edit.?.text.len);
-    const dropped = sink.items()[1];
-    try testing.expect(dropped.edit == null);
-    try testing.expectEqual(@as(usize, 1), dropped.notes.len);
+    var sink = Sink.init(a);
+    try sink.add(.{
+        .severity = .err,
+        .message = "boom",
+        .notes = &.{ "write the clause", "write the other clause" },
+        .fixes = &.{ .{ .note = 0, .edits = kept }, .{ .note = 1, .edits = over } },
+    });
+
+    const d = sink.items()[0];
+    try testing.expectEqual(@as(usize, 1), d.fixes.len);
+    try testing.expectEqual(@as(?u32, 0), d.fixes[0].note);
+    try testing.expectEqual(@as(usize, 2), d.notes.len);
+}
+
+test "a revised diagnostic is cut as an added one is, and keeps the totals" {
+    // A pass that adds a label or a note to a report it already made writes
+    // text quoting the source, which the bound holds to as it holds `add`.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var sink = Sink.init(arena.allocator());
+    try sink.add(.{ .severity = .err, .message = "boom" });
+    var revised = sink.items()[0];
+    revised.notes = &.{"Z" ** (max_text_bytes + 1)};
+    try sink.revise(0, revised);
+
+    try testing.expectEqual(max_text_bytes + truncated.len, sink.items()[0].notes[0].len);
+    try testing.expectEqual(@as(u32, 1), sink.error_count);
+}
+
+test "replacing every diagnostic recounts and cuts them" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var sink = Sink.init(arena.allocator());
+    try sink.add(.{ .severity = .err, .message = "one" });
+    try sink.add(.{ .severity = .warning, .message = "two" });
+    try sink.add(.{ .severity = .err, .message = "three" });
+    try sink.replaceAll(&.{ .{ .severity = .err, .message = "Z" ** (max_text_bytes + 1) }, sink.items()[1] });
+
+    try testing.expectEqual(@as(usize, 2), sink.items().len);
+    try testing.expectEqual(@as(u32, 1), sink.error_count);
+    try testing.expectEqual(@as(u32, 1), sink.warning_count);
+    try testing.expectEqual(max_text_bytes + truncated.len, sink.items()[0].message.len);
 }
 
 test "empty sink has no errors" {
