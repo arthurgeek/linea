@@ -2436,8 +2436,9 @@ const Analysis = struct {
             result = try self.store.prefixed(result, try self.store.prepend(payloadHead(variant, 0), .root));
         };
         result = try self.carriedBy(result, signature.result);
-        // Every origin the result may not carry is one mistake at this exit,
-        // reported once with every source it names.
+        // Every observation the result may not carry is one mistake at this
+        // exit, reported once with every source it names. A lend, or a place
+        // lent to a closure, is a mistake of its own and is reported per lend.
         var uncovered: std.ArrayList(Origin) = .empty;
         defer uncovered.deinit(self.gpa);
         var first_escape: ?struct { site: EscapeSite, escaped: Escaped, held: ?types.TypeId } = null;
@@ -2458,13 +2459,16 @@ const Analysis = struct {
                 }
             }
             if (try self.coveredFact(signature.result, fact, &targets)) continue;
-            if (first_escape == null) first_escape = .{
-                .site = self.exprSite(self.escapeSite(returned_value, fact.origin.place.root)),
-                .escaped = if (fact.origin.lent != .none)
-                    .{ .lend = fact.origin.lent }
-                else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation,
-                .held = self.typeAtPath(signature.result, fact.path),
-            };
+            const site = self.exprSite(self.escapeSite(returned_value, fact.origin.place.root));
+            const held = self.typeAtPath(signature.result, fact.path);
+            const escaped: Escaped = if (fact.origin.lent != .none)
+                .{ .lend = fact.origin.lent }
+            else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation;
+            if (escaped != .observation) {
+                try self.escape(at, site, escaped, .returned, &.{fact.origin}, held);
+                continue;
+            }
+            if (first_escape == null) first_escape = .{ .site = site, .escaped = escaped, .held = held };
             try uncovered.append(self.gpa, fact.origin);
         };
         if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .returned, uncovered.items, escaping.held);
