@@ -212,7 +212,7 @@ const Foreign = struct {
 /// where the manifest names none or will not parse.
 fn nativeOf(gpa: std.mem.Allocator, manifest: ?InMemoryFile, c_files: []const InMemoryFile) !Native {
     const marking = manifest orelse return .{};
-    const declared = try loader.declaredGiven(gpa, &.{marking});
+    const declared = try loader.declaredGiven(gpa, &.{marking}, null);
     if (declared.native.len + declared.link.len == 0) return .{};
     return .{ .files = c_files, .compile = declared.native, .link = declared.link };
 }

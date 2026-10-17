@@ -107,7 +107,7 @@ test fn text_is_copied_into_the_given_allocator() {
 
 impl CText {
     // Copy the text, checking it is UTF-8, into the system allocator.
-    pub fn to_owned(self: Self) -> Result[String, CTextError] where carries() {
+    pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], CTextError] where carries() {
         self.to_owned_in(mem.system())
     }
 }
@@ -150,7 +150,7 @@ test fn bytes_past_a_nul_are_copied_by_length() {
 
 impl CText {
     // Copy exactly `length` bytes, NULs included, into the system allocator.
-    pub fn copy_bytes(self: Self, length: UInt64) -> Result[mem.Vec[UInt8], CTextError] where carries() {
+    pub fn copy_bytes(self: Self, length: UInt64) -> Result[mem.Vec[UInt8, mem.SystemAllocator], CTextError] where carries() {
         self.copy_bytes_in(mem.system(), length: length)
     }
 }

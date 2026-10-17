@@ -44,9 +44,9 @@ test fn text_is_copied_with_a_terminator() {
     .Ok(())
 }
 
-impl CString {
+impl CString[mem.SystemAllocator] {
     // Copy `text` and a terminating NUL into the system allocator.
-    pub fn open(text: Str) -> Result[CString, CStringError] where carries() {
+    pub fn open(text: Str) -> Result[CString[mem.SystemAllocator], CStringError] where carries() {
         CString.open_in(mem.system(), text)
     }
 }
