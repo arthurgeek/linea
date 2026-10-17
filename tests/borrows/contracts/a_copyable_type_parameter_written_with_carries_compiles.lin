@@ -1,0 +1,15 @@
+// The clause the report on `pick` names, applied, called with views.
+fn pick[T: Copyable](a: T, b: T, c: T, w: UInt8) -> T where carries(a, b, c) {
+    if w == 0 {
+        copy(a)
+    } else if w == 1 {
+        copy(b)
+    } else {
+        copy(c)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Str = "a"
+    UInt8(pick(a, "b", "c", 1).length())
+}

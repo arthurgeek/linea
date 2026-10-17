@@ -5253,9 +5253,9 @@ inferred source requires an explicit `borrows` or `carries` clause; the ambiguit
 is the only error reported, and the body is not checked against a contract nobody
 declared. The report names each candidate's clause and the one clause listing them
 all: `borrows` for a parameter it does not consume whose place the result may
-observe or that may hold storage of its own a view would point into, and
-`carries` for one that holds only views, such as a `Str` or a struct of them, or
-that it consumes. A consumed parameter ends with
+observe, or that may hold storage of its own a view would point into and holds
+no view; `carries` for one that holds a view, such as a `Str` or a struct with
+one, for a type parameter its bounds make copyable, and for one it consumes. A consumed parameter ends with
 the function, so no clause lets anything observe its place past the return, and
 [O-Escapes] says so instead of naming one. Where several of the sources are carriers the report says so and
 names them. A clause whose source, destination or target is refused is likewise the only

@@ -1467,14 +1467,15 @@ pub fn suppliesEscapingPlace(convention: Convention) bool {
 /// Whether the clause naming `parameter` as a source of `result` is
 /// `borrows`: the parameter can supply an escaping place, and it lends the
 /// place the result observes or may hold storage of its own a view of it
-/// would point into. A parameter that holds only views, such as a `Str` or a
-/// struct of them, has nothing of its own to observe: a result taken from it
-/// carries what it observes, which is what the body's [O-Escapes] names too.
+/// would point into and holds no view. A parameter that holds a view, such as
+/// a `Str` or a struct with one, may hand on what it observes: `carries` says
+/// that and holds a caller to no more, which is what the body's [O-Escapes]
+/// names for such a body too.
 pub fn borrowsFrom(builder: *Typing.Builder, gpa: std.mem.Allocator, parameter: CallableParam, result: TypeId) !bool {
     if (!suppliesEscapingPlace(parameter.convention)) return false;
     if (lendsPlace(builder, parameter, result)) return true;
     const pool = builder.view();
-    return pool.mayHoldStorage(gpa, parameter.ty);
+    return try pool.mayHoldStorage(gpa, parameter.ty) and !try pool.holdsView(gpa, parameter.ty);
 }
 
 /// The `where` clause naming `sources`, the `borrows` sources first:
@@ -6705,8 +6706,9 @@ pub const Typing = struct {
 
     /// Whether a value of `t` may hold storage of its own, a buffer somewhere
     /// in its fields, payloads or elements, which a view of it would point
-    /// into. A view and a scalar hold none; a type parameter may be anything,
-    /// so it may.
+    /// into. A view and a scalar hold none; a type parameter may be anything
+    /// its bounds admit, so it may unless they make it copyable, which no
+    /// value holding storage is.
     ///
     /// **Bound:** each distinct type reached once.
     pub fn mayHoldStorage(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) std.mem.Allocator.Error!bool {
@@ -6719,7 +6721,7 @@ pub const Typing = struct {
         if ((try seen.getOrPut(gpa, t)).found_existing) return false;
         switch (self.get(t)) {
             .borrow => return false,
-            .parameter => return true,
+            .parameter => |p| return p.requirement != .copyable,
             .array => |a| return self.holdsStorageWalk(gpa, seen, a.element),
             .struct_, .closure => {
                 if (self.declOfType(t)) |declaration| {
@@ -6737,6 +6739,42 @@ pub const Typing = struct {
                 return false;
             },
             .newtype => |named| return self.holdsStorageWalk(gpa, seen, named.base),
+            else => return false,
+        }
+    }
+
+    /// Whether a value of `t` holds a view somewhere in its fields, payloads
+    /// or elements: an observation, or a slice of storage it does not own. A
+    /// type parameter is not known to.
+    ///
+    /// **Bound:** each distinct type reached once.
+    pub fn holdsView(self: *const Typing, gpa: std.mem.Allocator, t: TypeId) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(gpa);
+        return self.holdsViewWalk(gpa, &seen, t);
+    }
+
+    fn holdsViewWalk(self: *const Typing, gpa: std.mem.Allocator, seen: *std.AutoHashMapUnmanaged(TypeId, void), t: TypeId) std.mem.Allocator.Error!bool {
+        if ((try seen.getOrPut(gpa, t)).found_existing) return false;
+        switch (self.get(t)) {
+            .borrow => return true,
+            .array => |a| return self.holdsViewWalk(gpa, seen, a.element),
+            .struct_, .closure => {
+                if (self.declOfType(t)) |declaration| {
+                    if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
+                    if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return false;
+                    if (self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage) return false;
+                }
+                for (0..self.fieldCount(t)) |i| if (try self.holdsViewWalk(gpa, seen, self.fieldType(t, @intCast(i)))) return true;
+                return false;
+            },
+            .enum_ => {
+                for (0..self.variantCount(t)) |v| for (0..self.variantFieldCount(t, @intCast(v))) |f| {
+                    if (try self.holdsViewWalk(gpa, seen, self.variantFieldType(t, @intCast(v), @intCast(f)))) return true;
+                };
+                return false;
+            },
+            .newtype => |named| return self.holdsViewWalk(gpa, seen, named.base),
             else => return false,
         }
     }
