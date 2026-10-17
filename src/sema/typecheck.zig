@@ -19808,7 +19808,7 @@ const Checker = struct {
             differing = i;
         }
         const at = differing orelse return null;
-        if (!self.isBoundedBy(parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
+        if (!self.isAllocatorParameter(want.decl, parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
         // An argument that is no allocator was refused for its bound, and
         // the two do not differ in allocator.
         if (!try self.answersTrait(wanted[at], allocator) or !try self.answersTrait(had[at], allocator)) return null;
