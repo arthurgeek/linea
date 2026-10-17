@@ -1,0 +1,5 @@
+error[T-Bound]: `R` requires `Copyable`, and `Session` does not have that capability
+  --> tests/ownership/a_type_its_bound_refuses_owes_no_settlement.lin:10:14
+   |
+10 | fn make() -> Pair[Session] {
+   |              ^^^^ use a type meeting the capability requirement, or relax the bound

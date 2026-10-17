@@ -5232,6 +5232,11 @@ pub const Typing = struct {
     /// does not fit its context is absent, though its recorded type is
     /// poison too.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Written types whose arguments break a bound their declaration's
+    /// parameters carry, each reported by [T-Bound]. Such a type promises
+    /// nothing about its capabilities, so a value of it is not reported for
+    /// owing a settlement.
+    broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
     /// The whole number each accepted bracket's index operand folds to, keyed
     /// by the operand, or by the count under a `^`. An operand that folds to
     /// nothing, or to a negative number, is absent.
@@ -5641,6 +5646,7 @@ pub const Typing = struct {
         self.borrowed_temporaries.deinit(gpa);
         self.interpolation_positions.deinit(gpa);
         self.refused.deinit(gpa);
+        self.broken_types.deinit(gpa);
         self.folded_indices.deinit(gpa);
         gpa.free(self.dependency_containment);
         gpa.free(self.writer_containment);

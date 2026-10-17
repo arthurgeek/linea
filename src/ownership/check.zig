@@ -469,6 +469,8 @@ const Checker = struct {
     /// failures, so all three read this and differ only in which type they
     /// hand it -- a binding's, a written place's, or a discarded value's.
     fn owes(self: *const Checker, t: TypeId) bool {
+        // A type [T-Bound] refused promises no capability to judge a value by.
+        if (self.typing.broken_types.contains(t)) return false;
         return self.typing.mustConsumeWithin(self.current_owner, t);
     }
 

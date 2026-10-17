@@ -483,6 +483,7 @@ fn typecheckInternal(
     defer c.receivers_checked.deinit(gpa);
     defer c.array_lengths.deinit(gpa);
     defer c.refused.deinit(gpa);
+    defer c.broken_types.deinit(gpa);
     defer c.folded_indices.deinit(gpa);
     defer c.constant_values.deinit(gpa);
     defer c.constant_groundness.deinit(gpa);
@@ -1593,6 +1594,8 @@ fn typecheckInternal(
     c.interpolation_positions = .empty;
     typing.refused = c.refused;
     c.refused = .empty;
+    typing.broken_types = c.broken_types;
+    c.broken_types = .empty;
     typing.folded_indices = c.folded_indices;
     c.folded_indices = .empty;
     typing.selected_places = c.selected_places;
@@ -5343,6 +5346,9 @@ const Checker = struct {
     array_lengths: std.AutoHashMapUnmanaged(ExprId, ?u32) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The written types `reportBrokenBounds` refused; `Typing.broken_types`
+    /// holds them.
+    broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
     /// The expression the last mismatch report poisoned. That poison is a
     /// built value that does not fit its context, so `checkInner` does not
     /// count it a refusal.
@@ -9861,12 +9867,9 @@ const Checker = struct {
                 continue;
             }
             const inst = self.builder.instanceOf(site.ty) orelse continue;
-            try self.checkArgumentBounds(
-                inst.decl,
-                self.builder.argsOf(inst),
-                null,
-                site.at,
-            );
+            if (self.refusedBefore(site.at)) continue;
+            if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report))
+                try self.broken_types.put(self.gpa, site.ty, {});
         }
         try self.reportBrokenTraitBounds();
     }

@@ -13,12 +13,3 @@ error[T-Bound]: `R` requires `Copyable`, and `Session` does not have that capabi
    |
 15 | extern fn session_open() -> ffi.Errno[Session]
    |                                 ^^^^^ use a type meeting the capability requirement, or relax the bound
-error[O-Leak]: `_session` (a linear `ffi.Errno[Session]`) is still owned when this path leaves
-  --> tests/ffi/errno_holds_only_what_crosses/names/names.lin:18:9
-   |
-18 |     let _session = session_open()
-   |         ^^^^^^^^ never settled on the path that reaches the end of this block
-21 | }
-   | - the block ends here
-   |
-   = help: give it to something that takes it
