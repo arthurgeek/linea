@@ -1,4 +1,5 @@
 const std = @import("std");
+const module_route = @import("../support/module_route.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
@@ -1335,14 +1336,7 @@ pub const Declared = struct {
 /// library's name, `root_name`, which its own manifest does not write, so it
 /// is stripped; a program's root has no name.
 fn grantedTo(externs: []const []const u8, route: []const u8, root_name: []const u8) bool {
-    const relative = if (root_name.len == 0)
-        route
-    else if (std.mem.eql(u8, route, root_name))
-        ""
-    else if (std.mem.startsWith(u8, route, root_name) and route.len > root_name.len and route[root_name.len] == '.')
-        route[root_name.len + 1 ..]
-    else
-        route;
+    const relative = module_route.withinRoot(route, root_name);
     for (externs) |granted| {
         if (std.mem.eql(u8, granted, ".") and relative.len == 0) return true;
         if (std.mem.eql(u8, granted, relative)) return true;
@@ -2930,17 +2924,29 @@ const Loader = struct {
     /// which it reaches the library is refused.
     fn refuseUnconsentedExterns(self: *Loader, manifest_path: []const u8, text: []const u8) LoadError!void {
         const a = self.scratch.allocator();
-        for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
-            if (held.externs.len == 0) continue;
-            const root: RootId = .from(i);
-            if (self.dependencyNamed(.primary, held.name) == root or self.refusedBy(.primary, held.name)) continue;
-            // Every entry of the program's manifest through which the library
-            // is reached is refused, so each path a reader must fix is named.
-            const entries = try a.dupe(RootId, self.graph.items[0].dependencies.items);
-            for (entries) |via| {
-                const through = self.graph.items[via.index()];
-                if (self.refusedBy(.primary, through.name)) continue;
-                if (!try self.reaches(via, root)) continue;
+        // One walk from each entry of the program's manifest, so every entry
+        // through which an unconsented library is reached is refused and each
+        // path a reader must fix is named.
+        //
+        // **Bound:** the program's entries times the graph's roots and edges,
+        // each root visited once per entry.
+        const entries = try a.dupe(RootId, self.graph.items[0].dependencies.items);
+        var seen = try std.DynamicBitSetUnmanaged.initEmpty(a, self.graph.items.len);
+        var pending: std.ArrayList(RootId) = .empty;
+        for (entries) |via| {
+            const through = self.graph.items[via.index()];
+            if (self.refusedBy(.primary, through.name)) continue;
+            seen.unsetAll();
+            pending.clearRetainingCapacity();
+            try pending.append(a, via);
+            var refused = false;
+            while (pending.pop()) |at| {
+                if (seen.isSet(at.index())) continue;
+                seen.set(at.index());
+                try pending.appendSlice(a, self.graph.items[at.index()].dependencies.items);
+                const held = self.graph.items[at.index()];
+                if (held.externs.len == 0) continue;
+                if (self.dependencyNamed(.primary, held.name) == at or self.refusedBy(.primary, held.name)) continue;
                 try self.reportManifest(
                     manifest_path,
                     text,
@@ -2950,31 +2956,16 @@ const Loader = struct {
                     .{ through.name, held.name },
                     &.{},
                 );
-                const edges = &self.graph.items[0].dependencies;
-                for (edges.items, 0..) |edge, k| if (edge == via) {
-                    _ = edges.orderedRemove(k);
-                    break;
-                };
-                try self.graph.items[0].refused.append(a, through.name);
+                refused = true;
             }
+            if (!refused) continue;
+            const edges = &self.graph.items[0].dependencies;
+            for (edges.items, 0..) |edge, k| if (edge == via) {
+                _ = edges.orderedRemove(k);
+                break;
+            };
+            try self.graph.items[0].refused.append(a, through.name);
         }
-    }
-
-    /// Whether `to` is `from` or a dependency `from` reaches.
-    ///
-    /// **Bound:** the graph's roots and edges, each visited once.
-    fn reaches(self: *Loader, from: RootId, to: RootId) LoadError!bool {
-        const a = self.scratch.allocator();
-        var seen = try std.DynamicBitSetUnmanaged.initEmpty(a, self.graph.items.len);
-        var pending: std.ArrayList(RootId) = .empty;
-        try pending.append(a, from);
-        while (pending.pop()) |at| {
-            if (at == to) return true;
-            if (seen.isSet(at.index())) continue;
-            seen.set(at.index());
-            try pending.appendSlice(a, self.graph.items[at.index()].dependencies.items);
-        }
-        return false;
     }
 
     /// The text of the manifest in `dir`, or null where there is none.

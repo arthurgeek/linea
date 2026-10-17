@@ -1,4 +1,5 @@
 const std = @import("std");
+const module_route = @import("../support/module_route.zig");
 const builtin = @import("builtin");
 const tracy = @import("../support/tracy.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
@@ -17929,15 +17930,7 @@ const Checker = struct {
                 roots[module.root.index()].name
             else
                 "";
-            const route = self.program.modulePath(self.current);
-            const relative = if (root_name.len == 0)
-                route
-            else if (std.mem.eql(u8, route, root_name))
-                ""
-            else if (std.mem.startsWith(u8, route, root_name) and route.len > root_name.len and route[root_name.len] == '.')
-                route[root_name.len + 1 ..]
-            else
-                route;
+            const relative = module_route.withinRoot(self.program.modulePath(self.current), root_name);
             const shown = if (relative.len == 0) "." else relative;
             const manifest = if (root_name.len == 0)
                 "linea.json"

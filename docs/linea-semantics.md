@@ -4271,8 +4271,8 @@ as an `inout` argument is lent, although C receives the handle by value. The
 argument must be a place that may change: a mutable binding, an `inout`
 parameter, a mutable capture, the binder of a `for inout` walk, or a field of
 one. Every observation of the place made before the call, such as a `CText`
-read from the object, ends at the call, and a later use of it is [O-Borrow]; another argument of the same
-call naming the place is [N-Aliased]. A handle taken `inout` is lent as any
+read from the object, ends at the call, and a later use of it is [O-Borrow];
+another argument of the same call naming the place is [N-Aliased]. A handle taken `inout` is lent as any
 `inout` argument is, and one taken `sink` is moved. A handle type taken by any
 convention but `read` may not be `copyable`, because a copy would name the
 same object and outlive what changing it frees. The compiler believes a
