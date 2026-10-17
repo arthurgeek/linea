@@ -600,6 +600,11 @@ fn typecheckInternal(
     defer c.lent_now.deinit(gpa);
     defer c.aliased.deinit(gpa);
     defer c.pattern_places.deinit(gpa);
+    defer {
+        var names = c.variant_names.valueIterator();
+        while (names.next()) |index| index.deinit(gpa);
+        c.variant_names.deinit(gpa);
+    }
     defer gpa.free(c.binding_value_locs);
     errdefer c.builder.deinit();
     // Guarded rather than deferred: the binding types leave with the caller,
@@ -5380,6 +5385,10 @@ const Checker = struct {
     /// a parameter, a local, and the names a consuming destructuring `let`
     /// binds, which own what they hold because the `let` took the value apart.
     binder_places: []?BinderPlace,
+    /// Each enum's variants by name, for the enums a pattern or a contextual
+    /// variant reached with more variants than a scan is worth. Sized by those
+    /// enums' variants, and freed with the checker.
+    variant_names: std.AutoHashMapUnmanaged(TypeId, std.StringHashMapUnmanaged(u32)) = .empty,
     /// The place each pattern nested inside a lending or matched pattern
     /// stands for: the place of the pattern around it and the step that
     /// selects it. Keyed by the nested pattern's node, and written only for
@@ -7380,7 +7389,7 @@ const Checker = struct {
             const text = self.ast.tokenText(name);
             if (self.sealedHere(ty)) self.reportSealedAtToken(name, ty);
             if (self.builder.get(ty) == .enum_) {
-                const variant = self.builder.variantIndexOf(ty, text) orelse {
+                const variant = (try self.variantNamed(ty, text)) orelse {
                     self.reportAtToken(.t_borrow_contract, name, "a result target must name an existing variant", "this variant is not part of the result", null);
                     return null;
                 };
@@ -13364,7 +13373,7 @@ const Checker = struct {
             return fail(self, parts);
         }
 
-        const k = self.builder.variantIndexOf(of, name) orelse {
+        const k = (try self.variantNamed(of, name)) orelse {
             _ = self.report(.n_variant, pattern, "the enum has no such variant", .{}, "not a variant of what is matched");
             return fail(self, parts);
         };
@@ -13743,6 +13752,25 @@ const Checker = struct {
         return self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) });
     }
 
+    /// The variant of `t` named `name`, or null. An enum of a few variants is
+    /// scanned; a wider one is indexed by name the first time it is asked
+    /// about, so a `match` naming each of n variants costs n lookups rather
+    /// than n scans of n names.
+    fn variantNamed(self: *Checker, t: TypeId, name: []const u8) std.mem.Allocator.Error!?u32 {
+        const count = switch (self.builder.get(t)) {
+            .enum_ => |e| e.variant_count,
+            else => return self.builder.variantIndexOf(t, name),
+        };
+        if (count <= 16) return self.builder.variantIndexOf(t, name);
+        const found = try self.variant_names.getOrPut(self.gpa, t);
+        if (!found.found_existing) {
+            found.value_ptr.* = .empty;
+            const pool = self.view();
+            for (0..count) |i| try found.value_ptr.put(self.gpa, pool.variantName(t, @intCast(i)), @intCast(i));
+        }
+        return found.value_ptr.get(name);
+    }
+
     /// Refuses a pattern that misses a value of its type, where nothing else
     /// would take that value: the pattern of a `let`, a `let read`, a
     /// `let ... else`, a walk or a lambda's parameter ([T-Refutable]).
@@ -14048,7 +14076,7 @@ const Checker = struct {
             // [T-Refutable] says once it is checked. Any other spelling is
             // the newtype check's to refuse.
             const sound = if (self.ast.exprTag(d.pattern) == .call and
-                self.builder.variantIndexOf(of, self.ast.tokenText(self.ast.exprMain(d.pattern))) == null)
+                (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(d.pattern)))) == null)
                 try self.checkNewtypePattern(d.pattern, of, taken)
             else
                 try self.checkPattern(d.pattern, of, taken);
@@ -14455,7 +14483,7 @@ const Checker = struct {
             },
             .variant => |variant| {
                 if (shape != .enum_) return .refused;
-                const ordinal = self.builder.variantIndexOf(ty, variant.name) orelse return .refused;
+                const ordinal = (try self.variantNamed(ty, variant.name)) orelse return .refused;
                 const declared = self.builder.variantFieldCount(ty, ordinal);
                 if (declared != variant.payloads.len) return .refused;
                 // A variant the enum declares without fields stores nothing, so
@@ -14849,7 +14877,7 @@ const Checker = struct {
                     // The qualified form has always looked the name up; this
                     // is the same question asked of the type context supplies.
                     const spelling = self.ast.tokenText(self.ast.exprMain(id));
-                    const ordinal = self.builder.variantIndexOf(want, spelling) orelse {
+                    const ordinal = (try self.variantNamed(want, spelling)) orelse {
                         break :blk self.report(
                             .n_variant,
                             id,
@@ -22450,7 +22478,8 @@ const Checker = struct {
         const declaration = self.declaringType(result) orelse return null;
         if (self.ast.declTag(declaration) != .enum_) return null;
         const spelling = self.ast.tokenText(self.ast.exprMain(id));
-        const ordinal = self.builder.variantIndexOf(result, spelling) orelse {
+        // Out of memory for the index, the variants are scanned instead.
+        const ordinal = (self.variantNamed(result, spelling) catch self.builder.variantIndexOf(result, spelling)) orelse {
             if (!report_missing) return null;
             _ = self.report(.n_variant, id, "`{s}` is not a variant of `{s}`", .{ spelling, self.typeName(result) catch return .{ .declaration = declaration, .result = .poison, .ordinal = 0, .qualified = false } }, "not a variant of the expected constructor result");
             return .{ .declaration = declaration, .result = .poison, .ordinal = 0, .qualified = false };
