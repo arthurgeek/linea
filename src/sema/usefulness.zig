@@ -660,5 +660,3 @@ test "usefulness agrees with checking every value of a small type" {
         try testing.expectEqual(expected, found);
     };
 }
-
-

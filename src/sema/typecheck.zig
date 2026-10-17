@@ -13957,7 +13957,6 @@ const Checker = struct {
         }
     }
 
-
     /// Exhaustive on purpose. A statement kind added later has to be given an
     /// answer here rather than falling through a chain of tests and reaching
     /// none -- which is a statement whose expression is never checked, so
@@ -37049,4 +37048,3 @@ test "a runtime scalar is spelled as the Linea type written for it" {
     try testing.expectEqualStrings("UInt64", runtimeScalarName(.u64));
     try testing.expectEqualStrings("()", runtimeScalarName(.unit));
 }
-
