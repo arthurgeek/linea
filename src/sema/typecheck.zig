@@ -13,6 +13,7 @@ const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
 const HelpEdit = @import("../diagnostics/diagnostic.zig").Edit;
 const HelpFix = @import("../diagnostics/diagnostic.zig").Fix;
+const placement = @import("../syntax/placement.zig");
 const LabelStyle = @import("../diagnostics/diagnostic.zig").LabelStyle;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Interner = @import("../support/interner.zig").Interner;
@@ -545,6 +546,7 @@ fn typecheckInternal(
     defer c.refused_owned_subjects.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
     defer c.fixed_functions.deinit(gpa);
+    defer c.refused_members.deinit(gpa);
     defer c.defaulted_contracts.deinit(gpa);
     defer {
         for (c.closure_descriptors) |descriptor| gpa.free(descriptor.owned_fields);
@@ -1637,6 +1639,8 @@ fn typecheckInternal(
     c.adopted_contracts = .empty;
     typing.fixed_functions = c.fixed_functions;
     c.fixed_functions = .empty;
+    typing.refused_members = c.refused_members;
+    c.refused_members = .empty;
     typing.defaulted_contracts = c.defaulted_contracts;
     c.defaulted_contracts = .empty;
     typing.aliased = c.alias_types;
@@ -5355,6 +5359,8 @@ const Checker = struct {
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
     fixed_functions: std.AutoHashMapUnmanaged(DeclId, types_mod.FixedFunction) = .empty,
+    /// Each member of a trait implementation refused for being there at all.
+    refused_members: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Each function without a clause whose contract is its carrier
     /// parameter's, with that parameter's position.
     defaulted_contracts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
@@ -25489,6 +25495,7 @@ const Checker = struct {
                 if (self.ast.declTrait(mem) != trait_token) continue;
 
                 if (provided_names.contains(self.ast.tokenName(self.ast.declName(mem)))) {
+                    try self.refused_members.put(self.gpa, mem, {});
                     try self.sink.addErrorFmt(
                         .t_impl,
                         self.ast.fileOf(self.ast.declName(mem)),
@@ -25497,9 +25504,11 @@ const Checker = struct {
                         "`{s}` provides `{s}`, and an implementation does not supply it",
                         .{ self.ast.tokenText(trait_token), self.ast.tokenText(self.ast.declName(mem)) },
                     );
+                    try self.addDropFix(mem);
                     continue;
                 }
                 if (!required_names.contains(self.ast.tokenName(self.ast.declName(mem)))) {
+                    try self.refused_members.put(self.gpa, mem, {});
                     const kind = memberKind(self.ast, mem);
                     try self.sink.addErrorFmt(
                         // An implementation may not introduce a projection its
@@ -25520,9 +25529,20 @@ const Checker = struct {
                         "`{s}` declares no `{s}`",
                         .{ self.ast.tokenText(trait_token), self.ast.tokenText(self.ast.declName(mem)) },
                     );
+                    if (kind != .operation) try self.addDropFix(mem);
                 }
             }
         }
+    }
+
+    /// The fix removing `member`, refused by the [T-Impl] just reported,
+    /// whose label says to drop it: its lines and the comments written about
+    /// it, as `placement.removal` measures them.
+    fn addDropFix(self: *Checker, member: node.DeclId) std.mem.Allocator.Error!void {
+        const name = self.ast.declName(member);
+        const part = self.ast.partOf(name);
+        const gone = placement.removal(part.source, self.ast.declSpan(member));
+        try self.addFix(self.sink.items().len - 1, null, &.{.{ .file = self.ast.fileOf(name), .span = gone, .text = "" }});
     }
 
     /// Whether `member`'s body is exactly a call of `own` -- written

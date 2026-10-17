@@ -5523,6 +5523,10 @@ pub const Typing = struct {
     /// function answers to that type's signature, so its own cannot gain a
     /// clause the type does not have.
     fixed_functions: std.AutoHashMapUnmanaged(DeclId, FixedFunction) = .empty,
+    /// Each member of a trait implementation the checker refused for being
+    /// there at all: one the trait provides, or one it does not declare. The
+    /// member is to be dropped, so its body is not checked for ownership.
+    refused_members: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Each function that wrote no clause and took its contract from its one
     /// carrier parameter, with that parameter's position.
     defaulted_contracts: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
@@ -5877,6 +5881,7 @@ pub const Typing = struct {
         self.declined_contracts.deinit(gpa);
         self.adopted_contracts.deinit(gpa);
         self.fixed_functions.deinit(gpa);
+        self.refused_members.deinit(gpa);
         self.defaulted_contracts.deinit(gpa);
         self.aliased.deinit(gpa);
         self.defaults.deinit(gpa);

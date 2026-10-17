@@ -1,0 +1,32 @@
+// `Named` provides `label`, so `Station` may not supply it, and its `label`
+// is refused. Dropping it is the fix, so what its body would return is not
+// reported as a mistake of its own.
+trait Named {
+    fn name(self: Self) -> Str where borrows(self)
+
+    fn label(self: Self, _other: String) -> Str where borrows(self) {
+        self.name()
+    }
+}
+
+@derive(Release)
+struct Station {
+    title: String,
+}
+
+impl Named for Station {
+    fn name(self: Self) -> Str where borrows(self) {
+        self.title.view()
+    }
+
+    // `Station` would label itself with the other text.
+    fn label(_self: Self, other: String) -> Str where borrows(_self) {
+        other.view()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let s = Station { title = String.new() }
+    defer let o = String.new()
+    UInt8(s.label(o).length())
+}

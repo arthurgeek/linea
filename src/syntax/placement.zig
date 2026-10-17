@@ -6,6 +6,7 @@ const std = @import("std");
 const ast_mod = @import("ast.zig");
 const Ast = ast_mod.Ast;
 const DeclId = @import("node.zig").DeclId;
+const Span = @import("../support/span.zig").Span;
 
 /// Where an import is written into a file, and what surrounds it there.
 pub const Placement = struct {
@@ -110,4 +111,40 @@ fn aboveComments(text: []const u8, line: u32) u32 {
         at = previous;
     }
     return at;
+}
+
+/// The bytes that removing the declaration written at `span` takes out of
+/// `text`: its whole lines, the comment lines directly above it, which are
+/// written about it, and one blank line above those where one separates it
+/// from what precedes, so what is left reads as if it had never been written.
+pub fn removal(text: []const u8, span: Span) Span {
+    var start = aboveComments(text, lineStart(text, span.start));
+    if (start > 0) {
+        const previous = lineStart(text, start - 1);
+        if (std.mem.trim(u8, text[previous .. start - 1], " \t\r").len == 0) start = previous;
+    }
+    return .{ .start = start, .end = lineAfter(text, span.end) };
+}
+
+test removal {
+    const text =
+        \\impl Named for Station {
+        \\    fn name(self: Self) -> Str { "" }
+        \\
+        \\    // Written about `label`.
+        \\    fn label(self: Self) -> Str { "" }
+        \\}
+        \\
+    ;
+    const at: u32 = @intCast(std.mem.indexOf(u8, text, "fn label").?);
+    const end: u32 = @intCast(std.mem.indexOf(u8, text, "\"\" }\n}").? + 4);
+    const gone = removal(text, .{ .start = at, .end = end });
+    const left = try std.mem.concat(std.testing.allocator, u8, &.{ text[0..gone.start], text[gone.end..] });
+    defer std.testing.allocator.free(left);
+    try std.testing.expectEqualStrings(
+        \\impl Named for Station {
+        \\    fn name(self: Self) -> Str { "" }
+        \\}
+        \\
+    , left);
 }

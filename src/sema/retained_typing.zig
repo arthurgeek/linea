@@ -38,7 +38,7 @@ fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, sav
         "carried_places",          "borrowed_temporaries", "constant_values",    "contract_parameters",  "variant_uses",
         "interpolation_positions", "refused",              "folded_indices",     "field_name_spellings", "traversal_positions",
         "expansion_of_impl",       "try_conversions",      "declined_contracts", "adopted_contracts",    "binding_labels",
-        "aliased",                 "defaulted_contracts",  "fixed_functions",
+        "aliased",                 "defaulted_contracts",  "fixed_functions",    "refused_members",
     })) {
         @field(result, name) = try mapMap(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{
