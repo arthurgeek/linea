@@ -7606,7 +7606,7 @@ const Checker = struct {
                 for (params) |parameter| {
                     if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
                     const separator = if (listed == 0) "" else if (listed + 1 == eligible) " or " else ", ";
-                    const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = try types_mod.borrowsFrom(&self.builder, parameter, result) };
+                    const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = try types_mod.borrowsFrom(&self.builder, self.gpa, parameter, result) };
                     try every.append(self.gpa, source);
                     try sources.print(self.gpa, "{s}`{s}`", .{ separator, parameter.spelling });
                     try clauses.print(self.gpa, "{s}`{s}`", .{ separator, try types_mod.sourceClause(self.sink.arena, &.{source}) });

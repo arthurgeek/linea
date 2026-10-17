@@ -2,4 +2,4 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
  --> tests/borrows/contracts/an_ambiguous_source_names_its_candidates.lin:8:8
   |
 8 |     fn lookup(self: Self, key: Str) -> Option[Str] {
-  |        ^^^^^^ the result may come from `self` or `key`; add `where borrows(self)` or `where carries(key)`, or `where borrows(self), carries(key)` where it may come from either
+  |        ^^^^^^ the result may come from `self` or `key`; add `where carries(self)` or `where carries(key)`, or `where carries(self, key)` where it may come from either
