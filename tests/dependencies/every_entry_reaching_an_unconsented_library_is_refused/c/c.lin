@@ -1,0 +1,5 @@
+extern fn c_squares(count: Int32) -> Int64
+
+pub fn squares(n: Int32) -> Int64 {
+    c_squares(n)
+}

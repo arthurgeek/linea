@@ -18850,7 +18850,7 @@ fn buildAndRun(gpa: std.mem.Allocator, io: std.Io, opts: BuildRunOptions) !Build
             try w.interface.flush();
         }
 
-        if (try toolchain.linkDriver(gpa, io, exe_path, driver_path, object_path, opts.runtime, opts.sanitize)) |f| {
+        if (try toolchain.linkDriver(gpa, io, exe_path, driver_path, object_path, opts.runtime, opts.sanitize, opts.foreign.native.link)) |f| {
             return .{ .tool_failed = f };
         }
     }

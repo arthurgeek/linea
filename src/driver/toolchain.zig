@@ -389,9 +389,19 @@ pub fn build(
     // nothing here starts.
     if (opts.artifact == .object) try argv.append(gpa, "-c");
 
+    // An object built with C of its own is the module's object and the C's
+    // joined into one by a relocatable link, so whoever links the library's
+    // object finds every symbol its `extern` declarations name.
+    const joins = opts.artifact == .object and objects.len > 0;
+    const module_object = if (joins) try std.fmt.allocPrint(gpa, "{s}.module.o", .{opts.mid.assembly}) else opts.out_path;
+    defer if (joins) {
+        std.Io.Dir.cwd().deleteFile(io, module_object) catch {};
+        gpa.free(module_object);
+    };
+
     try argv.appendSlice(gpa, &.{
         "-o",
-        opts.out_path,
+        module_object,
         "-x",
         "ir",
         opts.mid.assembly,
@@ -409,7 +419,14 @@ pub fn build(
 
     try appendSanitizeLink(gpa, &argv, opts.sanitize);
 
-    return runTool(gpa, io, .cc, argv.items);
+    if (try runTool(gpa, io, .cc, argv.items)) |f| return f;
+    if (!joins) return null;
+
+    var join: std.ArrayList([]const u8) = .empty;
+    defer join.deinit(gpa);
+    try join.appendSlice(gpa, &.{ Tool.cc.command(), "-r", "-o", opts.out_path, module_object });
+    try join.appendSlice(gpa, objects);
+    return runTool(gpa, io, .cc, join.items);
 }
 
 /// Links a C driver against a module already compiled to an object.
@@ -430,6 +447,8 @@ pub fn linkDriver(
     object_path: []const u8,
     runtime_path: []const u8,
     sanitize: ?[]const u8,
+    /// The libraries the object's manifests name under `link`.
+    link: []const []const u8,
 ) !?Failure {
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(gpa);
@@ -442,6 +461,7 @@ pub fn linkDriver(
         object_path,
     });
     try argv.append(gpa, runtime_path);
+    for (link) |name| try argv.append(gpa, try std.fmt.allocPrint(gpa, "-l{s}", .{name}));
     try appendSystemLink(gpa, &argv);
 
     try appendSanitizeLink(gpa, &argv, sanitize);

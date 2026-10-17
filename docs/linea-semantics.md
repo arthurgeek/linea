@@ -1763,7 +1763,8 @@ lists libraries the build links, each a name `cc` takes after `-l`
 module can call what they build. A library may name both, its sources relative
 to its own manifest: a program builds and links the C of every root it loads,
 its own first and then each dependency's in the order the dependency graph
-numbers them, and a source or library named twice is built or linked once. A
+numbers them; a source named twice is built once, and a library named twice
+is linked once, after everything that names it. A
 dependency granted `extern` is loaded, and its C built, only where its
 consumers consent ([M-Dependency]).
 Whether a

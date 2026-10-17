@@ -1,0 +1,7 @@
+// The library's object holds the C its manifest builds, so a program written
+// in C links the object alone and finds `tally_sum_of_squares` in it.
+extern fn tally_sum_of_squares(count: Int32) -> Int64
+
+export fn sum_of_squares(count: Int32) -> Int64 {
+    tally_sum_of_squares(count)
+}

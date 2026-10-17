@@ -949,6 +949,13 @@ pub fn run(process: std.process.Init) !u8 {
                                     .{target},
                                 );
                                 return exit_io;
+                            } else if (program.kind == .library and program.link.len > 0) {
+                                // The object holds the library's C, but a
+                                // library it links is the linking program's to
+                                // name, so the line it needs is printed.
+                                try stderr_w.print("note: link '{s}' with", .{target});
+                                for (program.link) |name| try stderr_w.print(" -l{s}", .{name});
+                                try stderr_w.writeAll("\n");
                             }
                         }
                     }

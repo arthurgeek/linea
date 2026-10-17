@@ -17909,15 +17909,36 @@ const Checker = struct {
 
     fn checkExtern(self: *Checker, d: node.DeclId, granted: bool, library: bool) std.mem.Allocator.Error!void {
         if (!granted) {
+            // Spelled as the root's own manifest writes it: a library's module
+            // is reached through the library's name, which its manifest omits.
+            const module = self.program.get(self.current);
+            const roots = self.program.source.roots;
+            const root_name = if (module.root.isDependency() and module.root.index() < roots.len)
+                roots[module.root.index()].name
+            else
+                "";
             const route = self.program.modulePath(self.current);
-            const shown = if (route.len == 0) "." else route;
+            const relative = if (root_name.len == 0)
+                route
+            else if (std.mem.eql(u8, route, root_name))
+                ""
+            else if (std.mem.startsWith(u8, route, root_name) and route.len > root_name.len and route[root_name.len] == '.')
+                route[root_name.len + 1 ..]
+            else
+                route;
+            const shown = if (relative.len == 0) "." else relative;
+            const manifest = if (root_name.len == 0)
+                "linea.json"
+            else
+                try std.fmt.allocPrint(self.sink.arena, "the linea.json of `{s}`", .{root_name});
+            const help = try std.fmt.allocPrint(self.sink.arena, "list this module under \"extern\" in {s} to trust it with C, or call a module that is granted", .{manifest});
             try self.sink.addErrorFmt(
                 .m_extern,
                 self.ast.fileOf(self.ast.declName(d)),
                 self.ast.tokenSpan(self.ast.declName(d)),
-                "list this module under \"extern\" in linea.json to trust it with C, or call a module that is granted",
-                "an `extern` is declared only in a module its root's manifest grants, and linea.json does not list \"{s}\"",
-                .{shown},
+                help,
+                "an `extern` is declared only in a module its root's manifest grants, and {s} does not list \"{s}\"",
+                .{ manifest, shown },
             );
         }
         // Another module calling C directly would be trusted with it too, so

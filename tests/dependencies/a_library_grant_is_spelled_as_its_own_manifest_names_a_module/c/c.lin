@@ -1,0 +1,5 @@
+import inner
+
+pub fn squares(n: Int32) -> Int64 {
+    inner.squares(n)
+}

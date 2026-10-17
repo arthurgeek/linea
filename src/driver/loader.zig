@@ -1604,16 +1604,19 @@ test "a dependency's C is built from its own directory and linked once, after th
         .{ .path = "app/main.lin", .text = "import alpha\nimport zeta\n" },
         .{ .path = "app/alpha/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"alpha\", \"extern\": [\".\"], \"native\": [\"c/alpha.c\"], \"link\": [\"sqlite3\", \"m\"] }" },
         .{ .path = "app/alpha/alpha.lin", .text = "" },
-        .{ .path = "app/zeta/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"zeta\", \"extern\": [\".\"], \"native\": [\"zeta.c\"], \"link\": [\"sqlite3\"] }" },
+        .{ .path = "app/zeta/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"zeta\", \"extern\": [\".\"], \"native\": [\"zeta.c\"], \"link\": [\"z\"] }" },
         .{ .path = "app/zeta/zeta.lin", .text = "" },
     }, .program, false, .borrow);
     try testing.expect(!sink.hasErrors());
     try testing.expectEqual(@as(usize, 2), program.native.len);
     try testing.expectEqualStrings("app/alpha/c/alpha.c", program.native[0]);
     try testing.expectEqualStrings("app/zeta/zeta.c", program.native[1]);
-    try testing.expectEqual(@as(usize, 2), program.link.len);
-    try testing.expectEqualStrings("m", program.link[0]);
-    try testing.expectEqualStrings("sqlite3", program.link[1]);
+    // `m` is named by the program and again by `alpha`, so it is linked after
+    // `alpha`'s `sqlite3`: a library goes after everything that names it.
+    try testing.expectEqual(@as(usize, 3), program.link.len);
+    try testing.expectEqualStrings("sqlite3", program.link[0]);
+    try testing.expectEqualStrings("m", program.link[1]);
+    try testing.expectEqualStrings("z", program.link[2]);
 }
 
 test "a library two manifests name is one root, numbered by name whatever the order written" {
@@ -2035,10 +2038,6 @@ const Loader = struct {
         identity: []const u8 = "",
         /// The same for its source directory.
         source_identity: []const u8 = "",
-        /// The primary root's dependency through which the library is first
-        /// reached, so a refusal that is the primary root's to resolve is
-        /// reported at that entry.
-        via: ?RootId = null,
         /// Where the primary root's manifest names it, for a library the
         /// primary root depends on.
         primary_key: ?Span = null,
@@ -2928,33 +2927,55 @@ const Loader = struct {
     /// [M-Dependency] for a library whose manifest grants it `extern` and
     /// that the primary root's manifest does not name with `"extern": true`.
     /// The program links every root's `extern` declarations, so it consents
-    /// to each however deep in the graph it sits, and the entry through which
-    /// it reaches the library is refused.
+    /// to each however deep in the graph it sits, and every entry through
+    /// which it reaches the library is refused.
     fn refuseUnconsentedExterns(self: *Loader, manifest_path: []const u8, text: []const u8) LoadError!void {
         const a = self.scratch.allocator();
         for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
             if (held.externs.len == 0) continue;
             const root: RootId = .from(i);
             if (self.dependencyNamed(.primary, held.name) == root or self.refusedBy(.primary, held.name)) continue;
-            const via = held.via orelse continue;
-            const through = self.graph.items[via.index()];
-            if (self.refusedBy(.primary, through.name)) continue;
-            try self.reportManifest(
-                manifest_path,
-                text,
-                through.primary_key.?,
-                try std.fmt.allocPrint(self.sink.arena, "name `{s}` under `dependencies` here with `\"extern\": true` to trust the signatures it declares", .{held.name}),
-                "`{s}` reaches `{s}`, whose manifest grants it `extern`, and this manifest does not consent to it",
-                .{ through.name, held.name },
-                &.{},
-            );
-            const edges = &self.graph.items[0].dependencies;
-            for (edges.items, 0..) |edge, k| if (edge == via) {
-                _ = edges.orderedRemove(k);
-                break;
-            };
-            try self.graph.items[0].refused.append(a, through.name);
+            // Every entry of the program's manifest through which the library
+            // is reached is refused, so each path a reader must fix is named.
+            const entries = try a.dupe(RootId, self.graph.items[0].dependencies.items);
+            for (entries) |via| {
+                const through = self.graph.items[via.index()];
+                if (self.refusedBy(.primary, through.name)) continue;
+                if (!try self.reaches(via, root)) continue;
+                try self.reportManifest(
+                    manifest_path,
+                    text,
+                    through.primary_key.?,
+                    try std.fmt.allocPrint(self.sink.arena, "name `{s}` under `dependencies` here with `\"extern\": true` to trust the signatures it declares", .{held.name}),
+                    "`{s}` reaches `{s}`, whose manifest grants it `extern`, and this manifest does not consent to it",
+                    .{ through.name, held.name },
+                    &.{},
+                );
+                const edges = &self.graph.items[0].dependencies;
+                for (edges.items, 0..) |edge, k| if (edge == via) {
+                    _ = edges.orderedRemove(k);
+                    break;
+                };
+                try self.graph.items[0].refused.append(a, through.name);
+            }
         }
+    }
+
+    /// Whether `to` is `from` or a dependency `from` reaches.
+    ///
+    /// **Bound:** the graph's roots and edges, each visited once.
+    fn reaches(self: *Loader, from: RootId, to: RootId) LoadError!bool {
+        const a = self.scratch.allocator();
+        var seen = try std.DynamicBitSetUnmanaged.initEmpty(a, self.graph.items.len);
+        var pending: std.ArrayList(RootId) = .empty;
+        try pending.append(a, from);
+        while (pending.pop()) |at| {
+            if (at == to) return true;
+            if (seen.isSet(at.index())) continue;
+            seen.set(at.index());
+            try pending.appendSlice(a, self.graph.items[at.index()].dependencies.items);
+        }
+        return false;
     }
 
     /// The text of the manifest in `dir`, or null where there is none.
@@ -3106,21 +3127,28 @@ const Loader = struct {
             return true;
         }
 
+        // A source the library names is built from its own directory, and one
+        // that is not there is the library manifest's mistake, reported where
+        // the consumer names the library.
+        const native = try a.alloc([]const u8, parsed.declared.native.len);
+        for (parsed.declared.native, native) |path, *out| out.* = try joinedDir(a, dir, path);
+        if (self.input == .disk) for (parsed.declared.native, native) |written, path| {
+            std.Io.Dir.cwd().access(self.input.disk, path, .{}) catch {
+                try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest, or add the source it names", "the {s} in `{s}` names `{s}` under `native`, and `{s}` holds no such file", .{ manifest_name, entry.path.?, written, entry.path.? }, &.{});
+                return true;
+            };
+        };
+
         const id: RootId = .from(self.graph.items.len);
         try self.graph.append(a, .{
             .name = name,
             .manifest_dir = dir,
             .source_dir = source_dir,
             .externs = parsed.declared.externs,
-            .native = native: {
-                const joined = try a.alloc([]const u8, parsed.declared.native.len);
-                for (parsed.declared.native, joined) |path, *out| out.* = try joinedDir(a, dir, path);
-                break :native joined;
-            },
+            .native = native,
             .link = parsed.declared.link,
             .identity = identity,
             .source_identity = source_identity,
-            .via = if (consumer == .primary) id else self.graph.items[consumer.index()].via,
             .primary_key = if (consumer == .primary) entry.key else null,
         });
         try self.graph_dirs.put(a, identity, id);
@@ -3224,12 +3252,14 @@ const Loader = struct {
         });
     }
 
-    /// One row per root for the program, from the graph read before loading.
     /// The C the program builds and links: the primary root's, then each
     /// dependency's in the graph's order, for a dependency at least one of
     /// whose modules was loaded -- one its consumers consented to, since a
-    /// refused one is never loaded. A source or library named twice is built
-    /// or linked once, where it was first named. The caller owns the lists.
+    /// refused one is never loaded. A source named twice is built once, where
+    /// it was first named. A library named twice is linked once, where it was
+    /// last named: a static archive resolves only what the objects and
+    /// libraries before it need, so it goes after everything that names it.
+    /// The caller owns the lists.
     fn foreignOf(self: *Loader, primary: Declared, modules: []const Module) !struct { native: []const []const u8, link: []const []const u8 } {
         var loaded = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, self.graph.items.len);
         defer loaded.deinit(self.gpa);
@@ -3246,9 +3276,6 @@ const Loader = struct {
         try self.appendForeign(&native, &link, primary.native, primary.link);
         for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
             if (!loaded.isSet(i)) continue;
-            if (self.input == .disk) for (held.native) |path| {
-                std.Io.Dir.cwd().access(self.input.disk, path, .{}) catch return error.ManifestNativeMissing;
-            };
             try self.appendForeign(&native, &link, held.native, held.link);
         }
         const owned_native = try native.toOwnedSlice(self.gpa);
@@ -3265,13 +3292,18 @@ const Loader = struct {
             errdefer self.gpa.free(copy);
             try native.append(self.gpa, copy);
         };
-        for (names) |name| if (!containsString(link.items, name)) {
+        for (names) |name| {
+            for (link.items, 0..) |held, at| if (std.mem.eql(u8, held, name)) {
+                self.gpa.free(link.orderedRemove(at));
+                break;
+            };
             const copy = try self.gpa.dupe(u8, name);
             errdefer self.gpa.free(copy);
             try link.append(self.gpa, copy);
-        };
+        }
     }
 
+    /// One row per root for the program, from the graph read before loading.
     fn rootFacts(self: *Loader) std.mem.Allocator.Error![]const RootFacts {
         const out = try self.gpa.alloc(RootFacts, self.graph.items.len);
         var made: usize = 0;
