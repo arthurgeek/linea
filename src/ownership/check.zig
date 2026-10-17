@@ -216,8 +216,8 @@ fn checkBodies(
     @memset(slot_of, Checker.no_slot);
 
     // One entry per scope in the program, filled once below.
-    const owing = try gpa.alloc(cfg_mod.ScopeId, cfg.scopes.len);
-    defer gpa.free(owing);
+    const tracked = try gpa.alloc(cfg_mod.ScopeId, cfg.scopes.len);
+    defer gpa.free(tracked);
 
     var c: Checker = .{
         .gpa = gpa,
@@ -228,7 +228,7 @@ fn checkBodies(
         .sink = sink,
         .cfg = &cfg,
         .slot_of = slot_of,
-        .owing = owing,
+        .tracked = tracked,
     };
     defer c.seen.deinit(gpa);
     defer c.reached.deinit(gpa);
@@ -266,15 +266,15 @@ const Checker = struct {
     /// puts back, so the next one finds it as it was.
     seen: std.ArrayList(bool) = .empty,
     reached: std.ArrayList(u32) = .empty,
-    /// For each scope, the innermost scope at or beneath it whose binding owes
-    /// something, and `.none` where no scope beneath it does.
+    /// For each scope, the innermost scope at or beneath it whose binding
+    /// `isTracked` answers for, and `.none` where no scope beneath it has one.
     ///
-    /// What a scope end does to a binding that owes nothing cannot be
-    /// observed, so this is the whole of what a scope exit has to visit. It is
-    /// a chain rather than a scan because a scope exit ends every scope down
-    /// to a mark, and an exit written inside n live bindings would otherwise
-    /// read all n to find the none of them that could leak.
-    owing: []cfg_mod.ScopeId,
+    /// What a scope end does to any other binding cannot be observed, so this
+    /// is the whole of what a scope exit has to visit. It is a chain rather
+    /// than a scan because a scope exit ends every scope down to a mark, and
+    /// an exit written inside n live bindings would otherwise read all n to
+    /// find the none of them that could leak or disagree at a join.
+    tracked: []cfg_mod.ScopeId,
     /// Binding-state changes whose pessimistic state reached a diagnosed merge.
     /// Safety still reads that state; diagnostics use this provenance to avoid
     /// restating the same disagreement as a later failure about that binding.
@@ -465,28 +465,43 @@ const Checker = struct {
         return self.owes(self.typing.bindingType(b));
     }
 
-    /// Threads the chain of scopes whose bindings owe something.
+    /// Whether paths that rejoin must agree about this binding's state.
+    ///
+    /// A Linear binding must because it has to be consumed exactly once. A
+    /// binding a `defer` consumes must because its schedule runs or is skipped
+    /// at each exit by what is true there. No other binding's state is
+    /// observed after it changes, so `checkMerges` compares these bindings
+    /// and no other, and a scope end resets these and no other: a binding
+    /// whose scope ended on one path and that was never declared on the other
+    /// is `.uninit` on both.
+    ///
+    /// Reads `scheduled`, so it answers only once `rootsOf` has filled it.
+    fn isTracked(self: *const Checker, b: BindingId) bool {
+        return self.isLinear(b) or self.scheduled.contains(b);
+    }
+
+    /// Threads the chain of scopes whose bindings `isTracked` answers for.
     ///
     /// One forward pass over the whole tree, because a scope is minted after
     /// the one it sits inside: by the time this reaches a scope, the answer
     /// for everything beneath it is already written.
-    fn findOwing(self: *Checker, f: *const Function) void {
+    fn findTracked(self: *Checker, f: *const Function) void {
         for (self.cfg.scopes[f.scopes.start..f.scopes.end], f.scopes.start..) |s, i| {
-            self.owing[i] = if (self.isLinear(s.binding))
+            self.tracked[i] = if (self.isTracked(s.binding))
                 cfg_mod.ScopeId.at(i)
             else if (s.outer == cfg_mod.ScopeId.none)
                 cfg_mod.ScopeId.none
             else
-                self.owing[s.outer.index()];
+                self.tracked[s.outer.index()];
         }
     }
 
-    /// The bindings a scope exit ends that owe something, innermost first --
-    /// the order a reader expects to be told.
+    /// The tracked bindings a scope exit ends, innermost first -- the order a
+    /// reader expects to be told.
     ///
-    /// Every scope in the stretch that could leak and no other, which is
-    /// normally none of them: a body of `UInt8` locals has nothing here to
-    /// visit however many of them the exit ends.
+    /// Every scope in the stretch that could leak or disagree at a join and
+    /// no other, which is normally none of them: a body of `UInt8` locals has
+    /// nothing here to visit however many of them the exit ends.
     const Dying = struct {
         c: *const Checker,
         at: cfg_mod.ScopeId,
@@ -500,7 +515,7 @@ const Checker = struct {
             self.at = if (s.outer == cfg_mod.ScopeId.none)
                 cfg_mod.ScopeId.none
             else
-                self.c.owing[s.outer.index()];
+                self.c.tracked[s.outer.index()];
             return s.binding;
         }
     };
@@ -512,7 +527,7 @@ const Checker = struct {
             .at = if (run.top == cfg_mod.ScopeId.none)
                 cfg_mod.ScopeId.none
             else
-                self.owing[run.top.index()],
+                self.tracked[run.top.index()],
             .mark = run.mark,
         };
     }
@@ -2019,7 +2034,6 @@ const Checker = struct {
         if (count == 0) return;
         self.current_owner = f.owner;
         defer self.current_owner = .none;
-        self.findOwing(f);
         self.merge_origins.clearRetainingCapacity();
         self.scheduled.clearRetainingCapacity();
 
@@ -2028,6 +2042,7 @@ const Checker = struct {
             self.releaseRoots(roots);
             self.gpa.free(roots);
         }
+        self.findTracked(f);
         const n = roots.len;
 
         // The transfers open at each block's entry.
@@ -2467,14 +2482,14 @@ const Checker = struct {
 
     /// Ends every scope a stretch of the live stack holds.
     ///
-    /// Only the bindings that owe something are visited, and what that leaves
-    /// out cannot be seen. Three things could see it and none does. A binding
-    /// that owes nothing is named again only where a loop redeclares it, and
+    /// Only the bindings `isTracked` answers for are visited, and what that
+    /// leaves out cannot be seen. Three things could see it and none does. An
+    /// untracked binding is named again only where a loop redeclares it, and
     /// the `let` that does writes the state before anything reads it -- and
     /// writing over a place that owes nothing loses nothing, so that write
-    /// reports nothing either. A merge reports a disagreement about a binding
-    /// that owes something and about no other. And where a value was taken is
-    /// quoted only for a place a consume moved, which writes its own.
+    /// reports nothing either. A merge reports a disagreement about a tracked
+    /// binding and about no other. And where a value was taken is quoted only
+    /// for a place a consume moved, which writes its own.
     ///
     /// Whether a place is read after a `copy` is a fourth reader and asks
     /// something else: it asks the graph where a scope ends, not the lattice
@@ -2495,7 +2510,9 @@ const Checker = struct {
         var each = self.dying(op);
         while (each.next()) |b| {
             const slot = self.slotOf(b) orelse continue;
-            if (state[slot] == .init and report_now) {
+            // [O-Leak] asks what the binding owes. One a `defer` consumes
+            // and that owes nothing is tracked for its merges alone.
+            if (state[slot] == .init and report_now and self.isLinear(b)) {
                 try self.leaks.append(self.gpa, .{ .binding = b, .exit = self.cfg.opAt(op) });
             }
             // Its scope has ended, so it no longer exists. Without this a
@@ -2625,8 +2642,8 @@ const Checker = struct {
         return at != .none and self.merge_origins.contains(.{ .at = at, .binding = binding });
     }
 
-    /// Reports a Linear binding, or one a `defer` consumes, whose state the
-    /// arms of a branch disagree on.
+    /// Reports a binding `isTracked` answers for whose state the arms of a
+    /// branch disagree on.
     ///
     /// Reported at the join because there is nothing to answer there and
     /// because the fix goes there: consume it on the other path too.
@@ -2701,7 +2718,7 @@ const Checker = struct {
                 const was_at = was_at_slot.*;
                 if (was == flow.state[s]) continue;
                 const binding = roots[s];
-                if (!self.isLinear(binding) and !self.scheduled.contains(binding)) continue;
+                if (!self.isTracked(binding)) continue;
 
                 switch (action) {
                     .mark_origins => {

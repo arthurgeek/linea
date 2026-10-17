@@ -1,0 +1,38 @@
+// A `Note` is not `@linear`, so dropping one is accepted and it owes nothing.
+// `defer let` still schedules its release, and inside an `if`, `while` or
+// `for` body that release runs when the body ends, so the path through the
+// body and the path around it agree that no `Note` is held after it.
+import std.io
+
+use io.print
+
+struct Note {
+    id: UInt8,
+}
+
+impl Release for Note {
+    fn release(sink self: Self) {
+        let Note { id } = self
+        match print("{id}") {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    if total == 0 {
+        defer let note = Note { id = 1 }
+        total = total + note.id
+    }
+    while total < 3 {
+        defer let note = Note { id = 2 }
+        total = total + 1
+    }
+    for id in [4, 5] {
+        defer let note = Note { id = id }
+        total = total + 1
+    }
+    total
+}
