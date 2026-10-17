@@ -12538,7 +12538,15 @@ const Checker = struct {
     /// checked: each argument by `typeName`, so `From[io.IoError]` reads as the
     /// headline beside it does.
     fn traitInstanceName(self: *Checker, trait: node.DeclId, args: []const TypeId) std.mem.Allocator.Error![]const u8 {
-        const name = self.ast.tokenText(self.ast.declName(trait));
+        const bare = self.ast.tokenText(self.ast.declName(trait));
+        // A declaration of the module's own that the name reaches instead is
+        // another trait, so this one is written through its module.
+        const shadowed = if (self.res.traitNamed(self.current, self.ast.tokenName(self.ast.declName(trait)))) |reached| reached != trait else false;
+        const module = self.program.moduleOf(trait);
+        const name = if (shadowed and module != .none)
+            try std.fmt.allocPrint(self.sink.arena, "{s}.{s}", .{ writableQualifier(self.ast, self.program, self.res, self.current, module, trait), bare })
+        else
+            bare;
         if (args.len == 0) return name;
         var out: std.ArrayList(u8) = .empty;
         try out.print(self.sink.arena, "{s}[", .{name});
@@ -16949,8 +16957,8 @@ const Checker = struct {
         const failure_name = try self.typeName(failure);
         const message = try std.fmt.allocPrint(
             self.sink.arena,
-            "this `?` may fail with `{s}`, and no `From[{s}] for {s}` implementation converts it to the function's error type",
-            .{ failure_name, failure_name, try self.typeName(answered) },
+            "this `?` may fail with `{s}`, and no `{s} for {s}` implementation converts it to the function's error type",
+            .{ failure_name, if (self.from_decl) |from| try self.traitInstanceName(from, &.{failure}) else try std.fmt.allocPrint(self.sink.arena, "From[{s}]", .{failure_name}), try self.typeName(answered) },
         );
         // The edit is `editFor`'s, the one a refused bound names: implementing
         // the conversion where this program owns a side of it, and otherwise
@@ -16963,7 +16971,8 @@ const Checker = struct {
         labels[0] = .{
             .file = self.ast.fileOfExpr(id),
             .span = self.ast.exprSpan(id),
-            .message = try std.fmt.allocPrint(self.sink.arena, "`?` converts a different error through `From`: {s}", .{
+            .message = try std.fmt.allocPrint(self.sink.arena, "`?` converts a different error through `{s}`: {s}", .{
+                if (self.from_decl) |from| try self.traitInstanceName(from, &.{}) else "From",
                 try self.unmetLabel(.{ .otherwise = "convert it before `?` with `.map_err(…)`", .another_value = null }, edit),
             }),
             .style = .primary,
