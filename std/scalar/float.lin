@@ -442,8 +442,15 @@ test fn float64_total_order_ranks_every_class() {
         }
     }
     testing.assert(Float64.total_less(-0.0, 0.0) && -0.0 == 0.0, "signed zeros are equal yet not ordered")?
-    for left in [-3.5, -1.0, 0.5, 2.0, 1e300] {
-        for right in [-3.5, -1.0, 0.5, 2.0, 1e300] {
+    // Away from the signed zeros the total order is `<`: infinities, the
+    // largest finite values, normals, the smallest normals, subnormals and
+    // positive zero.
+    let infinity = 1.0 / 0.0
+    let numbers = [-infinity, -1.7976931348623157e308, -3.5, -1.0, -2.2250738585072014e-308, -5e-324, 0.0, 5e-324, 2.2250738585072014e-308, 0.5, 2.0, 1e300, 1.7976931348623157e308, infinity]
+    for i in 0..numbers.length() {
+        for j in 0..numbers.length() {
+            let left = numbers[i]
+            let right = numbers[j]
             testing.assert_eq(left.total_less(right), left < right, "the total order disagrees with < on numbers")?
         }
     }
@@ -538,7 +545,9 @@ test fn float32_total_order_ranks_every_class() {
     testing.assert(!nan.total_less(same_nan) && !same_nan.total_less(nan), "two NaNs with equal bits did not tie")?
     let zero: Float32 = 0.0
     testing.assert(Float32.total_less(-0.0, 0.0) && -zero == zero, "signed zeros are equal yet not ordered")?
-    let numbers: [Float32; _] = [-3.5, -1.0, 0.5, 2.0, 3e38]
+    // Away from the signed zeros the total order is `<`, as for Float64.
+    let infinity = 1.0 / zero
+    let numbers: [Float32; _] = [-infinity, -3.4028235e38, -3.5, -1.0, -1.1754944e-38, -1e-45, 0.0, 1e-45, 1.1754944e-38, 0.5, 2.0, 3e38, 3.4028235e38, infinity]
     for i in 0..numbers.length() {
         for j in 0..numbers.length() {
             let left = numbers[i]
