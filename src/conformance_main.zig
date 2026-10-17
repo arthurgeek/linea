@@ -3460,6 +3460,65 @@ fn heavyOwnershipDeltasModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One body deferring `n` values at its top and then branching `n` times, so
+/// every join sits before every schedule and the function holds `n` deferred
+/// bindings over about `2n` blocks.
+fn deferredBindingsAcrossJoinsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll(deferredKeyPrelude);
+    for (0..n) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
+    for (0..n) |_| try w.writeAll("    if turns == 0 {\n        turns = turns + 1\n    }\n");
+    try w.writeAll(deferredKeyEnd);
+    return out.toOwnedSlice();
+}
+
+/// A fixed number of values deferred at the top of a body that then nests
+/// `n` loops, so what a schedule needs crosses `n` back edges.
+fn deferredBindingsUnderNestedLoopsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.writeAll(deferredKeyPrelude);
+    for (0..256) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
+    for (0..n) |_| try w.writeAll("    while turns < 1 {\n");
+    for (0..n) |_| try w.writeAll("    turns = turns + 1\n    }\n");
+    try w.writeAll(deferredKeyEnd);
+    return out.toOwnedSlice();
+}
+
+const deferredKeyPrelude =
+    "struct Key { n: UInt8 }\n\n" ++
+    "fn lock(sink k: Key) {\n" ++
+    "    let Key { n: _n } = k\n" ++
+    "}\n\n" ++
+    "fn work() -> UInt8 {\n" ++
+    "    var turns: UInt8 = 0\n";
+
+const deferredKeyEnd = "    turns\n}\n\nfn main() -> UInt8 { work() }\n";
+
+test "deferred binding modules are accepted" {
+    inline for (.{ deferredBindingsAcrossJoinsModule, deferredBindingsUnderNestedLoopsModule }) |make| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const text = try make(gpa, 16);
+        const source: Source = .{ .path = "deferred-bindings.lin", .text = text };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        var typing = try typecheckTree(gpa, &resolved, &sink);
+        var plan = try checkOwnershipTree(gpa, &resolved, &typing, &sink);
+        defer plan.deinit(gpa);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+    }
+}
+
 /// Distinct observations remain live across writes to unrelated owners.
 fn independentObservationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
@@ -6096,6 +6155,8 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
     .{ .name = "heavy ownership deltas", .n = 2000, .cost = throughTheTree(heavyOwnershipDeltasModule) },
+    .{ .name = "deferred bindings across joins", .n = 2000, .cost = throughTheTree(deferredBindingsAcrossJoinsModule) },
+    .{ .name = "deferred bindings under nested loops", .n = 200, .cost = throughTheTree(deferredBindingsUnderNestedLoopsModule) },
     .{ .name = "lending binders", .n = 1100, .cost = throughTheTree(lendingBindersModule) },
     .{ .name = "views taken and lent in one body", .n = 3000, .cost = throughTheTree(storage_mod.viewsProgram) },
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },

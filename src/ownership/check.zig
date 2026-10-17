@@ -480,9 +480,9 @@ const Checker = struct {
     ///
     /// A Linear binding must everywhere, because it has to be consumed exactly
     /// once. A binding a `defer` consumes must where one of its schedules can
-    /// still run, because a schedule runs or is cancelled by the state it
-    /// finds, and a pessimistic merge would cancel it on the path that still
-    /// holds the value. Past the last schedule that can run, a `defer` has
+    /// still run before the binding is written again, because a schedule runs
+    /// or is cancelled by the state it finds, and a pessimistic merge would
+    /// cancel it on the path that still holds the value. Past the last schedule that can run, a `defer` has
     /// consumed the value where it ran, exactly as a call written there
     /// would, and the binding merges like any other: pessimistically, with a
     /// use after the join reporting the move it reads.
@@ -504,15 +504,36 @@ const Checker = struct {
 
     /// Fills `awaiting`: which schedules each block can still reach.
     ///
-    /// A backward walk to a fixpoint. A block's row is what its successors'
+    /// A backward may-reach analysis. A block's row is what its successors'
     /// rows hold, with its operations applied last to first: a scheduled
-    /// consume of a binding sets its bit, and a scope end clears the bits of
-    /// the bindings it ends, so a back edge into the next iteration does not
-    /// carry the schedule of a binding the body declares into the previous
-    /// iteration. Rows only grow, so the sweeps settle. A sweep visits each
-    /// operation once and each scope end's tracked bindings once, as
-    /// `endScopes` does.
-    fn findAwaiting(self: *Checker, f: *const Function, order: []const u32) std.mem.Allocator.Error!void {
+    /// consume of a binding sets its bit; a scope end clears the bits of the
+    /// bindings it ends, so a back edge into the next iteration does not carry
+    /// the schedule of a binding the body declares into the previous
+    /// iteration; and a whole-binding `init` clears the binding's bit, because
+    /// a schedule after it reads what that `init` wrote whatever the state
+    /// before it was.
+    ///
+    /// Each block is evaluated once in postorder, which carries every bit
+    /// across every forward edge, and then only when a successor's row has
+    /// gained a bit: a changed row puts its block's predecessors on a
+    /// worklist. The transfer is monotone, so a row only grows and gains a
+    /// bit at most `s` times for the `s` bindings the function's `defer`s
+    /// consume; evaluations are therefore at most `blocks + edges * s`, and
+    /// in practice one more per loop that nests a block, since a bit that
+    /// crosses a back edge arrives once per enclosing loop.
+    ///
+    /// An evaluation reads the block's operations, the tracked bindings each
+    /// of its scope ends ends (as `endScopes` does), and one row per
+    /// successor. A row is `ceil(s / 64)` words, so the rows hold
+    /// `blocks * ceil(s / 64)` words: linear in the blocks of a function
+    /// whose `defer`s consume a bounded number of bindings, and a sixty-fourth
+    /// of `blocks * s` bits when they do not.
+    fn findAwaiting(
+        self: *Checker,
+        f: *const Function,
+        order: []const u32,
+        preds: *const Predecessors,
+    ) std.mem.Allocator.Error!void {
         const count = f.blocks.end - f.blocks.start;
         const words = (self.scheduled.count() + 63) / 64;
         self.awaiting_words = words;
@@ -522,47 +543,61 @@ const Checker = struct {
 
         const row = try self.gpa.alloc(u64, words);
         defer self.gpa.free(row);
+        const queued = try self.gpa.alloc(bool, count);
+        defer self.gpa.free(queued);
+        @memset(queued, false);
+        var pending: std.ArrayList(u32) = .empty;
+        defer pending.deinit(self.gpa);
 
-        var changed = true;
-        while (changed) {
-            changed = false;
-            var k = order.len;
-            while (k > 0) {
-                k -= 1;
-                const b = order[k];
-                const block = self.cfg.blocks[f.blocks.start + b];
-                @memset(row, 0);
-                for (self.cfg.edgesOf(block)) |e| {
-                    const to = e.index() -% f.blocks.start;
-                    if (to >= count) continue;
-                    for (row, self.awaiting[to * words ..][0..words]) |*w, from| w.* |= from;
-                }
+        // Popped last first, so the first pass runs in postorder.
+        try pending.ensureTotalCapacity(self.gpa, order.len);
+        for (order) |b| {
+            pending.appendAssumeCapacity(b);
+            queued[b] = true;
+        }
 
-                var at = block.ops.end;
-                while (at > block.ops.start) {
-                    at -= 1;
-                    const op = OpId.at(at);
-                    switch (self.cfg.opTag(op)) {
-                        .dies => {
-                            var each = self.dying(op);
-                            while (each.next()) |d| {
-                                const i = self.scheduled.get(d) orelse continue;
-                                row[i / 64] &= ~(@as(u64, 1) << @intCast(i % 64));
-                            }
-                        },
-                        .consume => if (self.cfg.opSchedule(op) != ExprId.none) {
-                            const i = self.scheduled.get(self.cfg.opPlace(op).root).?;
-                            row[i / 64] |= @as(u64, 1) << @intCast(i % 64);
-                        },
-                        else => {},
-                    }
-                }
+        while (pending.pop()) |b| {
+            queued[b] = false;
+            const block = self.cfg.blocks[f.blocks.start + b];
+            @memset(row, 0);
+            for (self.cfg.edgesOf(block)) |e| {
+                const to = e.index() -% f.blocks.start;
+                if (to >= count) continue;
+                for (row, self.awaiting[to * words ..][0..words]) |*w, from| w.* |= from;
+            }
 
-                const mine = self.awaiting[b * words ..][0..words];
-                if (!std.mem.eql(u64, mine, row)) {
-                    @memcpy(mine, row);
-                    changed = true;
+            var at = block.ops.end;
+            while (at > block.ops.start) {
+                at -= 1;
+                const op = OpId.at(at);
+                switch (self.cfg.opTag(op)) {
+                    .dies => {
+                        var each = self.dying(op);
+                        while (each.next()) |d| {
+                            const i = self.scheduled.get(d) orelse continue;
+                            row[i / 64] &= ~(@as(u64, 1) << @intCast(i % 64));
+                        }
+                    },
+                    .init => if (self.cfg.opPlace(op).depth == 0) {
+                        if (self.scheduled.get(self.cfg.opPlace(op).root)) |i| {
+                            row[i / 64] &= ~(@as(u64, 1) << @intCast(i % 64));
+                        }
+                    },
+                    .consume => if (self.cfg.opSchedule(op) != ExprId.none) {
+                        const i = self.scheduled.get(self.cfg.opPlace(op).root).?;
+                        row[i / 64] |= @as(u64, 1) << @intCast(i % 64);
+                    },
+                    else => {},
                 }
+            }
+
+            const mine = self.awaiting[b * words ..][0..words];
+            if (std.mem.eql(u64, mine, row)) continue;
+            @memcpy(mine, row);
+            for (preds.of(b)) |p| {
+                if (queued[p]) continue;
+                queued[p] = true;
+                try pending.append(self.gpa, p);
             }
         }
     }
@@ -2172,14 +2207,14 @@ const Checker = struct {
         const order = try self.cfg.reversePostorder(self.gpa, f);
         defer self.gpa.free(order);
 
-        try self.findAwaiting(f, order);
+        var preds = try self.predecessorsOf(f, count);
+        defer preds.deinit(self.gpa);
+
+        try self.findAwaiting(f, order, &preds);
         defer {
             self.gpa.free(self.awaiting);
             self.awaiting = &.{};
         }
-
-        var preds = try self.predecessorsOf(f, count);
-        defer preds.deinit(self.gpa);
 
         var doms = try self.dominatorsOf(order, count, &preds);
         defer doms.deinit(self.gpa);
