@@ -59,6 +59,10 @@ pub const Kind = union(enum) {
     integer: Interval,
     /// Nothing a pattern names: only a wildcard matches it.
     opaque_,
+    /// A type whose declaration was refused, so which values it holds is
+    /// not known. A column of it ends the check with `error.Refused`,
+    /// since any answer about its rows would rest on values nobody declared.
+    refused,
 };
 
 /// One constructor of a type.
@@ -101,7 +105,7 @@ pub fn Coverage(comptime Context: type) type {
         cells: usize = 0,
         limit: usize = max_cells,
 
-        pub const Error = error{ OutOfMemory, TooIntricate };
+        pub const Error = error{ OutOfMemory, TooIntricate, Refused };
 
         pub const Cell = struct { pattern: *const Pattern, ty: Ty };
         pub const Row = []const Cell;
@@ -270,6 +274,7 @@ pub fn Coverage(comptime Context: type) type {
                 },
                 .integer => |bounds| try self.integers(&out, rows, ty, bounds),
                 .opaque_ => try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }})),
+                .refused => return error.Refused,
             }
             return out.items;
         }
@@ -522,9 +527,10 @@ pub fn Coverage(comptime Context: type) type {
 
 /// A small type world for the tests: `Bit` is a two-variant enum, `Opt` an
 /// option of a `Byte` (an integer from 0 to 3), `Pair` a pair of options,
-/// `Nest` an option of an option, and `Text` matched only by a wildcard.
+/// `Nest` an option of an option, `Text` matched only by a wildcard, and
+/// `Refused` a type whose declaration was refused.
 const TestTypes = struct {
-    pub const Ty = enum { bit, byte, opt, pair, nest, text };
+    pub const Ty = enum { bit, byte, opt, pair, nest, text, refused };
 
     pub fn kind(_: TestTypes, ty: Ty) Kind {
         return switch (ty) {
@@ -533,6 +539,7 @@ const TestTypes = struct {
             .opt, .nest => .{ .variants = 2 },
             .pair => .{ .product = 2 },
             .text => .opaque_,
+            .refused => .refused,
         };
     }
 
@@ -681,6 +688,17 @@ test "a match whose check outgrows its budget is refused" {
         try rowOf(arena, try pairOf(arena, &wild, try some(arena, &wild)), .pair),
     };
     try testing.expectError(error.TooIntricate, c.check(&rows, .pair));
+}
+
+test "a column of a refused type answers nothing" {
+    var state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer state.deinit();
+    const arena = state.allocator();
+    var c: TestCoverage = .{ .context = .{}, .arena = arena };
+
+    const rows = [_]TestCoverage.Row{try rowOf(arena, &wild, .refused)};
+    try testing.expectError(error.Refused, c.check(&rows, .refused));
+    try testing.expectError(error.Refused, c.check(&.{}, .refused));
 }
 
 test "the cells a matrix with no overlapping wildcards builds grow with its rows" {

@@ -13771,7 +13771,7 @@ const Checker = struct {
             else => false,
         };
         if (compares and self.builder.isRefined(of)) {
-            const r = self.builder.refinementOf(of);
+            const r = self.refinedValues(of) orelse return true;
             if (self.foldedInterval(p.args[0])) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
                 _ = self.report(
                     .t_unreachable,
@@ -13784,6 +13784,20 @@ const Checker = struct {
             };
         }
         return true;
+    }
+
+    /// The values a refined newtype `t` admits, as its patterns are judged:
+    /// its clause's interval within what its base can hold. Null where the
+    /// declaration was refused for [T-Refine] with no value left to judge
+    /// against -- a base that is not an integer, or a clause admitting none
+    /// of the base's values -- since a judgement then would repeat the
+    /// declaration's mistake at every pattern.
+    fn refinedValues(self: *const Checker, t: TypeId) ?usefulness.Interval {
+        const base = self.builder.baseOf(t).bounds() orelse return null;
+        const r = self.builder.refinementOf(t);
+        const lo = @max(r.lo, base.min);
+        const hi = @min(r.hi, base.max);
+        return if (lo <= hi) .{ .lo = lo, .hi = hi } else null;
     }
 
     /// The variant of `t` named `name`, or null. An enum of a few variants is
@@ -13821,6 +13835,9 @@ const Checker = struct {
                 _ = self.report(.t_cover_limit, pattern, "this pattern is too intricate to check", .{}, "take it apart in more than one step");
                 return;
             },
+            // A refused refinement's values are unknown, and its declaration
+            // is where that was said.
+            error.Refused => return,
         };
         if (outcome.missing.len == 0) return;
         const missed = outcome.missing[0];
@@ -13960,12 +13977,14 @@ const Checker = struct {
             return switch (self.checker.builder.get(t)) {
                 .enum_ => |e| .{ .variants = e.variant_count },
                 .struct_ => .{ .product = self.checker.builder.fieldCount(t) },
-                // A refined newtype over an integer is the integers its
-                // refinement admits, so its pattern is read as its base's.
-                .newtype => |nt| if (nt.refined and nt.base.bounds() != null)
-                    .{ .integer = .{ .lo = nt.lo, .hi = nt.hi } }
+                // A refined newtype is the integers its refinement admits, so
+                // its pattern is read as its base's.
+                .newtype => |nt| if (!nt.refined)
+                    .{ .product = 1 }
+                else if (self.checker.refinedValues(t)) |values|
+                    .{ .integer = values }
                 else
-                    .{ .product = 1 },
+                    .refused,
                 else => .opaque_,
             };
         }
@@ -31070,9 +31089,17 @@ const Checker = struct {
         // the cover short as a consequence, and reporting that as well
         // describes one mistake twice.
         if (scrutinee != .poison) {
+            // A refused refinement's values are unknown, and its declaration
+            // is where that was said, so neither question has an answer to
+            // report.
+            var refused = false;
             const outcome: ?PatternCoverage.Outcome = coverage.check(rows.items, scrutinee) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 error.TooIntricate => null,
+                error.Refused => blk: {
+                    refused = true;
+                    break :blk null;
+                },
             };
             if (outcome) |o| {
                 for (o.reached, row_patterns.items) |reached, pattern| {
@@ -31089,7 +31116,7 @@ const Checker = struct {
                         self.report(.t_cover, id, "this `match` does not cover {s}", .{missing}, "add the missing arms, or a `_`");
                     poisoned = true;
                 }
-            } else {
+            } else if (!refused) {
                 self.reportTooIntricate(id);
                 poisoned = true;
             }

@@ -4291,7 +4291,14 @@ A refinement requires an integer base; non-integer refinement, such as
 `@opaque type Email = Str where ...`, is rejected here. `it` is the sole
 refinement value name, matched by identifier text as `Self` is. The `lo` and `hi`
 bounds must be integer literals. The lower bound is inclusive. `..` excludes the
-upper bound, while `..=` includes it.
+upper bound, while `..=` includes it. A range reaching past what the base can
+hold, such as `UInt8 where it in 0..=300`, is rejected at its declaration.
+
+A rejected refinement is reported once, at its declaration. Patterns of its type
+are judged by the values the range admits within what the base can hold, so
+`Level(0..=255)` covers the `UInt8` refinement above ([T-Cover]). Where no such
+value is left, because the range is empty or the base is not an integer, which
+arms a `match` needs and which pattern misses a value are not judged at all.
 
 ### §4.1 Constant expressions
 
