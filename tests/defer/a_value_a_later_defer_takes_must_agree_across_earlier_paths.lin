@@ -1,0 +1,22 @@
+// [O-Merge]. The second `defer lock(k)` runs at the end of `main`, after the
+// paths around the first `if` body meet. On one of them the first `defer`
+// already gave `k` away and on the other it did not, so the paths must agree
+// about `k` there, and they do not.
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key) {
+    let Key { n: _n } = k
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    let k: Key = .{ n = 1 }
+    if turns == 0 {
+        defer lock(k)
+        turns = turns + 1
+    }
+    defer lock(k)
+    turns
+}

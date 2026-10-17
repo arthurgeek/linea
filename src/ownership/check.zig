@@ -266,8 +266,9 @@ const Checker = struct {
     /// puts back, so the next one finds it as it was.
     seen: std.ArrayList(bool) = .empty,
     reached: std.ArrayList(u32) = .empty,
-    /// For each scope, the innermost scope at or beneath it whose binding
-    /// `isTracked` answers for, and `.none` where no scope beneath it has one.
+    /// For each scope, the innermost scope at or beneath it whose binding is
+    /// tracked at some block (`isTracked` with no block), and `.none` where no
+    /// scope beneath it has one.
     ///
     /// What a scope end does to any other binding cannot be observed, so this
     /// is the whole of what a scope exit has to visit. It is a chain rather
@@ -279,11 +280,17 @@ const Checker = struct {
     /// Safety still reads that state; diagnostics use this provenance to avoid
     /// restating the same disagreement as a later failure about that binding.
     merge_origins: std.AutoHashMapUnmanaged(MergeOrigin, void) = .empty,
-    /// The bindings a `defer` of the function being walked consumes. A schedule
-    /// runs or is skipped at each exit by what is true there, so paths that
-    /// rejoin must agree about such a binding as they must about a Linear one.
-    /// Sized by the function's own operations.
-    scheduled: std.AutoHashMapUnmanaged(BindingId, void) = .empty,
+    /// The bindings a `defer` of the function being walked consumes, each
+    /// numbered by the bit it holds in a row of `awaiting`. Sized by the
+    /// function's own operations.
+    scheduled: std.AutoHashMapUnmanaged(BindingId, u32) = .empty,
+    /// For each block of the function being walked, a row of bits over
+    /// `scheduled`: bit `i` is set when a schedule consuming binding `i` can
+    /// still run from the block's start before that binding's scope ends.
+    /// Rows are `awaiting_words` long. Sized by the function's blocks times
+    /// the bindings its `defer`s consume, and freed when the function is done.
+    awaiting: []u64 = &.{},
+    awaiting_words: usize = 0,
     /// The diagnostics already given, keyed by code, primary span and message.
     /// A `defer` body is walked once per exit that places it, so one mistake
     /// in it is met once per exit and is said once. Sized by the diagnostics
@@ -348,8 +355,10 @@ const Checker = struct {
             while (ops.next()) |op| {
                 const root = self.cfg.opPlace(op).root;
                 try self.claim(&roots, root);
-                if (self.cfg.opTag(op) == .consume and self.cfg.opSchedule(op) != ExprId.none)
-                    try self.scheduled.put(self.gpa, root, {});
+                if (self.cfg.opTag(op) == .consume and self.cfg.opSchedule(op) != ExprId.none) {
+                    const entry = try self.scheduled.getOrPut(self.gpa, root);
+                    if (!entry.found_existing) entry.value_ptr.* = @intCast(self.scheduled.count() - 1);
+                }
             }
         }
 
@@ -465,29 +474,107 @@ const Checker = struct {
         return self.owes(self.typing.bindingType(b));
     }
 
-    /// Whether paths that rejoin must agree about this binding's state.
+    /// Whether paths that meet at the start of block `join` must agree about
+    /// this binding's state, or, with `join` null, whether they must at some
+    /// block of the function.
     ///
-    /// A Linear binding must because it has to be consumed exactly once. A
-    /// binding a `defer` consumes must because its schedule runs or is skipped
-    /// at each exit by what is true there. Any other binding may merge
-    /// pessimistically, since a use after the join reports the move it reads,
-    /// so `checkMerges` compares these bindings and no other. A scope end
-    /// resets these and no other, so a binding whose scope ended on one path
-    /// and that was never declared on the other is `.uninit` on both.
+    /// A Linear binding must everywhere, because it has to be consumed exactly
+    /// once. A binding a `defer` consumes must where one of its schedules can
+    /// still run, because a schedule runs or is cancelled by the state it
+    /// finds, and a pessimistic merge would cancel it on the path that still
+    /// holds the value. Past the last schedule that can run, a `defer` has
+    /// consumed the value where it ran, exactly as a call written there
+    /// would, and the binding merges like any other: pessimistically, with a
+    /// use after the join reporting the move it reads.
     ///
-    /// Reads `scheduled`, so it answers only once `rootsOf` has filled it.
-    fn isTracked(self: *const Checker, b: BindingId) bool {
-        return self.isLinear(b) or self.scheduled.contains(b);
+    /// `checkMerges` compares exactly the bindings tracked at its join. A
+    /// scope end resets every binding tracked anywhere, so a binding whose
+    /// scope ended on one path and that was never declared on the other is
+    /// `.uninit` on both.
+    ///
+    /// Reads `scheduled`, so it answers only once `rootsOf` has filled it,
+    /// and with a block only once `findAwaiting` has filled `awaiting`.
+    fn isTracked(self: *const Checker, b: BindingId, join: ?u32) bool {
+        if (self.isLinear(b)) return true;
+        const i = self.scheduled.get(b) orelse return false;
+        const block = join orelse return true;
+        const word = self.awaiting[block * self.awaiting_words + i / 64];
+        return (word >> @intCast(i % 64)) & 1 != 0;
     }
 
-    /// Threads the chain of scopes whose bindings `isTracked` answers for.
+    /// Fills `awaiting`: which schedules each block can still reach.
+    ///
+    /// A backward walk to a fixpoint. A block's row is what its successors'
+    /// rows hold, with its operations applied last to first: a scheduled
+    /// consume of a binding sets its bit, and a scope end clears the bits of
+    /// the bindings it ends, so a back edge into the next iteration does not
+    /// carry the schedule of a binding the body declares into the previous
+    /// iteration. Rows only grow, so the sweeps settle. A sweep visits each
+    /// operation once and each scope end's tracked bindings once, as
+    /// `endScopes` does.
+    fn findAwaiting(self: *Checker, f: *const Function, order: []const u32) std.mem.Allocator.Error!void {
+        const count = f.blocks.end - f.blocks.start;
+        const words = (self.scheduled.count() + 63) / 64;
+        self.awaiting_words = words;
+        self.awaiting = try self.gpa.alloc(u64, count * words);
+        @memset(self.awaiting, 0);
+        if (words == 0) return;
+
+        const row = try self.gpa.alloc(u64, words);
+        defer self.gpa.free(row);
+
+        var changed = true;
+        while (changed) {
+            changed = false;
+            var k = order.len;
+            while (k > 0) {
+                k -= 1;
+                const b = order[k];
+                const block = self.cfg.blocks[f.blocks.start + b];
+                @memset(row, 0);
+                for (self.cfg.edgesOf(block)) |e| {
+                    const to = e.index() -% f.blocks.start;
+                    if (to >= count) continue;
+                    for (row, self.awaiting[to * words ..][0..words]) |*w, from| w.* |= from;
+                }
+
+                var at = block.ops.end;
+                while (at > block.ops.start) {
+                    at -= 1;
+                    const op = OpId.at(at);
+                    switch (self.cfg.opTag(op)) {
+                        .dies => {
+                            var each = self.dying(op);
+                            while (each.next()) |d| {
+                                const i = self.scheduled.get(d) orelse continue;
+                                row[i / 64] &= ~(@as(u64, 1) << @intCast(i % 64));
+                            }
+                        },
+                        .consume => if (self.cfg.opSchedule(op) != ExprId.none) {
+                            const i = self.scheduled.get(self.cfg.opPlace(op).root).?;
+                            row[i / 64] |= @as(u64, 1) << @intCast(i % 64);
+                        },
+                        else => {},
+                    }
+                }
+
+                const mine = self.awaiting[b * words ..][0..words];
+                if (!std.mem.eql(u64, mine, row)) {
+                    @memcpy(mine, row);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    /// Threads the chain of scopes whose bindings are tracked at some block.
     ///
     /// One forward pass over the whole tree, because a scope is minted after
     /// the one it sits inside: by the time this reaches a scope, the answer
     /// for everything beneath it is already written.
     fn findTracked(self: *Checker, f: *const Function) void {
         for (self.cfg.scopes[f.scopes.start..f.scopes.end], f.scopes.start..) |s, i| {
-            self.tracked[i] = if (self.isTracked(s.binding))
+            self.tracked[i] = if (self.isTracked(s.binding, null))
                 cfg_mod.ScopeId.at(i)
             else if (s.outer == cfg_mod.ScopeId.none)
                 cfg_mod.ScopeId.none
@@ -2085,6 +2172,12 @@ const Checker = struct {
         const order = try self.cfg.reversePostorder(self.gpa, f);
         defer self.gpa.free(order);
 
+        try self.findAwaiting(f, order);
+        defer {
+            self.gpa.free(self.awaiting);
+            self.awaiting = &.{};
+        }
+
         var preds = try self.predecessorsOf(f, count);
         defer preds.deinit(self.gpa);
 
@@ -2482,7 +2575,7 @@ const Checker = struct {
 
     /// Ends every scope a stretch of the live stack holds.
     ///
-    /// Only the bindings `isTracked` answers for are visited, and what that
+    /// Only the bindings tracked at some block are visited, and what that
     /// leaves out cannot be seen. Three things could see it and none does. An
     /// untracked binding is named again only where a loop redeclares it, and
     /// the `let` that does writes the state before anything reads it -- and
@@ -2643,8 +2736,8 @@ const Checker = struct {
         return at != .none and self.merge_origins.contains(.{ .at = at, .binding = binding });
     }
 
-    /// Reports a binding `isTracked` answers for whose state the arms of a
-    /// branch disagree on.
+    /// Reports a binding tracked at the join whose state the arms of a branch
+    /// disagree on.
     ///
     /// Reported at the join because there is nothing to answer there and
     /// because the fix goes there: consume it on the other path too.
@@ -2719,7 +2812,7 @@ const Checker = struct {
                 const was_at = was_at_slot.*;
                 if (was == flow.state[s]) continue;
                 const binding = roots[s];
-                if (!self.isTracked(binding)) continue;
+                if (!self.isTracked(binding, b)) continue;
 
                 switch (action) {
                     .mark_origins => {
