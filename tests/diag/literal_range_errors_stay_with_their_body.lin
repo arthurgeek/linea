@@ -9,7 +9,21 @@ fn second() -> UInt8 {
     0
 }
 
+fn third() -> UInt8 {
+    let open = 300
+    let _bad: UInt8 = true
+    open
+}
+
+fn fourth() -> UInt8 {
+    let _annotated: UInt8 = 400
+    let _wrong: UInt8 = true
+    0
+}
+
 fn main() -> UInt8 {
     let _a = first()
+    let _b = third()
+    let _c = fourth()
     second()
 }
