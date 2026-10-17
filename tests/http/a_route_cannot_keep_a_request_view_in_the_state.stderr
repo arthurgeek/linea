@@ -4,5 +4,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 12 |     app.last = request.path()
    |                ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: `remember` is passed where a callable type is expected, and that type does not permit `where retains(app: request)`, so it cannot be added here: keep only what that type permits
+   = help: `remember` is passed where a callable type is expected, and that type does not permit `where carries(request), retains(app: request)`, so it cannot be added here: keep only what that type permits
    = help: an owned copy observes nothing and needs no clause: declare `String[mem.SystemAllocator]` where `app` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `mem.Oom`

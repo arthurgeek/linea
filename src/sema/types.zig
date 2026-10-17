@@ -1503,6 +1503,110 @@ pub fn sourceClause(arena: std.mem.Allocator, sources: []const ClauseSource) std
     return out.items;
 }
 
+/// A retention a clause names: what the `inout` parameter `destination`
+/// keeps from `source`, and whether it keeps an observation of `source`'s
+/// place.
+pub const ClauseRetention = struct { destination: []const u8, source: []const u8, borrows: bool };
+
+/// The whole `where` clause a signature needs once it also says what
+/// `added` and `retained` name: every contract in `written` (the clause the
+/// declaration wrote, or the contract it inferred where `keep` is not null,
+/// keeping only the parameters `keep` lists), with the new sources and
+/// retentions beside them. The plain sources group as `sourceClause` writes
+/// them, `where borrows(a, b), carries(c)`, and any other contract follows as
+/// it is written. Every report that names a clause to write names this one,
+/// so writing it never drops a contract another report needs.
+pub fn wholeClause(
+    arena: std.mem.Allocator,
+    written: []const CallableContract,
+    names: []const []const u8,
+    keep: ?[]const u32,
+    added: []const ClauseSource,
+    retained: []const ClauseRetention,
+) std.mem.Allocator.Error![]const u8 {
+    var sources: std.ArrayList(ClauseSource) = .empty;
+    var rest: std.ArrayList(u8) = .empty;
+    var rests: usize = 0;
+    var kept_retentions: std.ArrayList(ClauseRetention) = .empty;
+    for (written) |contract| {
+        const at: ?u32 = switch (contract.source.root) {
+            .parameter => |index| if (index < names.len) index else null,
+            else => null,
+        };
+        const plain = at != null and contract.kind != .retains and contract.target.len == 0 and contract.source.fields.len == 0 and !contract.borrows_source;
+        if (plain) {
+            if (keep) |listed| if (std.mem.indexOfScalar(u32, listed, at.?) == null) continue;
+            try addClauseSource(arena, &sources, .{ .spelling = names[at.?], .borrows = contract.kind == .borrows });
+            continue;
+        }
+        // An inferred contract keeps only plain sources; anything else was
+        // written, and is kept whatever `keep` says.
+        if (keep != null) continue;
+        if (contract.kind == .retains) if (contract.destination) |dest| if (at != null and dest.fields.len == 0 and contract.source.fields.len == 0) {
+            switch (dest.root) {
+                .parameter => |d| if (d < names.len) {
+                    try kept_retentions.append(arena, .{ .destination = names[d], .source = names[at.?], .borrows = contract.borrows_source });
+                    continue;
+                },
+                else => {},
+            }
+        };
+        var one: std.ArrayList(u8) = .empty;
+        try appendContractText(arena, &one, &.{contract}, names, false);
+        try rest.print(arena, "{s}{s}", .{ if (rests == 0) "" else ", ", one.items[" where ".len..] });
+        rests += 1;
+    }
+    for (added) |source| try addClauseSource(arena, &sources, source);
+    for (retained) |retention| {
+        for (kept_retentions.items) |*existing| {
+            if (std.mem.eql(u8, existing.destination, retention.destination) and std.mem.eql(u8, existing.source, retention.source)) {
+                existing.borrows = existing.borrows or retention.borrows;
+                break;
+            }
+        } else try kept_retentions.append(arena, retention);
+    }
+    var out: std.ArrayList(u8) = .empty;
+    if (sources.items.len > 0) try out.appendSlice(arena, try sourceClause(arena, sources.items));
+    if (rests > 0) try out.print(arena, "{s}{s}", .{ if (out.items.len == 0) "where " else ", ", rest.items });
+    for (kept_retentions.items) |retention| try out.print(arena, "{s}retains({s}: {s}{s})", .{
+        if (out.items.len == 0) "where " else ", ",
+        retention.destination,
+        if (retention.borrows) "borrow " else "",
+        retention.source,
+    });
+    if (out.items.len == 0) try out.appendSlice(arena, "where carries()");
+    return out.items;
+}
+
+/// Adds `source` to a clause's plain sources, once: a source named both ways
+/// is named `borrows`, which keeps what `carries` keeps too.
+fn addClauseSource(arena: std.mem.Allocator, sources: *std.ArrayList(ClauseSource), source: ClauseSource) std.mem.Allocator.Error!void {
+    for (sources.items) |*existing| if (std.mem.eql(u8, existing.spelling, source.spelling)) {
+        existing.borrows = existing.borrows or source.borrows;
+        return;
+    };
+    try sources.append(arena, source);
+}
+
+test wholeClause {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const names: []const []const u8 = &.{ "seen", "a", "b" };
+    // The returned source and the retention each keep the other.
+    try testing.expectEqualStrings("where borrows(a, b), retains(seen: borrow b)", try wholeClause(a, &.{
+        .{ .kind = .retains, .source = .{ .root = .{ .parameter = 2 } }, .destination = .{ .root = .{ .parameter = 0 } }, .borrows_source = true },
+        .{ .kind = .borrows, .source = .{ .root = .{ .parameter = 1 } } },
+    }, names, null, &.{.{ .spelling = "b", .borrows = true }}, &.{}));
+    try testing.expectEqualStrings("where borrows(b), retains(seen: borrow b)", try wholeClause(a, &.{
+        .{ .kind = .borrows, .source = .{ .root = .{ .parameter = 2 } } },
+    }, names, null, &.{}, &.{.{ .destination = "seen", .source = "b", .borrows = true }}));
+    // An inferred contract keeps only the sources listed.
+    try testing.expectEqualStrings("where borrows(b)", try wholeClause(a, &.{
+        .{ .kind = .carries, .source = .{ .root = .{ .parameter = 1 } } },
+    }, names, &.{}, &.{.{ .spelling = "b", .borrows = true }}, &.{}));
+}
+
 test sourceClause {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

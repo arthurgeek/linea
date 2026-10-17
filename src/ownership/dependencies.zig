@@ -2121,51 +2121,41 @@ const Analysis = struct {
             const joiner = if (i == 0) "" else if (i + 1 == sources.items.len) " and " else ", ";
             try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
         }
-        // The clause named is the whole clause to write. One the signature
-        // already wrote keeps its sources. One written where none was
-        // replaces the contract the signature inferred, so it keeps the
-        // sources that contract covered for a value this exit returns.
-        var written_sources = std.ArrayList(types.ClauseSource).fromOwnedSlice(try arena.dupe(types.ClauseSource, sources.items));
-        const wrote_clause = self.function.decl != .none and self.ast.declContracts(self.function.decl).len != 0;
-        if (leaving == .returned and self.function.decl != .none and self.typing.adopted_contracts.get(self.function.decl) == null) {
-            if (switch (self.typing.get(self.function.signature)) {
+        // The clause named is the whole clause to write, from `wholeClause`.
+        // One the signature wrote keeps every contract it wrote, retentions
+        // included, so applying the return help and the retention help in
+        // turn reaches one clause. One written where none was replaces the
+        // contract the signature inferred, so it keeps the sources that
+        // contract covered: for a return, those this exit returns.
+        const clause: []const u8 = clause: {
+            const signature: ?types.CallableSignature = if (self.function.decl != .none and self.typing.adopted_contracts.get(self.function.decl) == null) switch (self.typing.get(self.function.signature)) {
                 .callable => |callable| callable,
                 else => null,
-            }) |signature| for (signature.contracts) |contract| {
-                if (contract.kind == .retains) continue;
-                const at = switch (contract.source.root) {
-                    .parameter => |index| index,
-                    else => continue,
+            } else null;
+            const names = try arena.alloc([]const u8, self.function.parameters.len);
+            for (self.function.parameters, names) |parameter, *name| name.* = self.ast.tokenText(self.res.declaringToken(parameter));
+            const wrote_clause = self.function.decl != .none and self.ast.declContracts(self.function.decl).len != 0;
+            var keep: std.ArrayList(u32) = .empty;
+            if (!wrote_clause and leaving == .returned) for (self.function.parameters, 0..) |parameter, index| {
+                for (leaving.returned.covered) |owner| if (owner == parameter) {
+                    try keep.append(arena, @intCast(index));
+                    break;
                 };
-                const reached = wrote_clause or for (leaving.returned.covered) |owner| {
-                    if (owner == self.function.parameters[at]) break true;
-                } else false;
-                if (!reached) continue;
-                const spelling = self.ast.tokenText(self.res.declaringToken(self.function.parameters[at]));
-                const listed = for (written_sources.items) |source| {
-                    if (std.mem.eql(u8, source.spelling, spelling)) break true;
-                } else false;
-                if (!listed) try written_sources.append(arena, .{ .spelling = spelling, .borrows = contract.kind == .borrows });
             };
-        }
-        // The sources the signature already had come first, so the clause
-        // reads as the one written with the new sources added.
-        std.mem.rotate(types.ClauseSource, written_sources.items, sources.items.len);
-        const clause: []const u8 = switch (leaving) {
-            .returned => try types.sourceClause(arena, written_sources.items),
-            .retained => |destination| retained: {
-                var text: std.ArrayList(u8) = .empty;
-                try text.appendSlice(arena, "where ");
-                for (sources.items, 0..) |source, i| {
-                    try text.print(arena, "{s}retains({s}: {s}{s})", .{
-                        if (i == 0) "" else ", ",
-                        self.ast.tokenText(self.res.declaringToken(destination)),
-                        if (source.borrows) "borrow " else "",
-                        source.spelling,
-                    });
-                }
-                break :retained text.items;
-            },
+            const written: []const types.CallableContract = if (signature) |callable| callable.contracts else &.{};
+            const kept: ?[]const u32 = if (wrote_clause) null else if (leaving == .returned) keep.items else null;
+            switch (leaving) {
+                .returned => break :clause try types.wholeClause(arena, written, names, kept, sources.items, &.{}),
+                .retained => |destination| {
+                    const retentions = try arena.alloc(types.ClauseRetention, sources.items.len);
+                    for (sources.items, retentions) |source, *retention| retention.* = .{
+                        .destination = self.ast.tokenText(self.res.declaringToken(destination)),
+                        .source = source.spelling,
+                        .borrows = source.borrows,
+                    };
+                    break :clause try types.wholeClause(arena, written, names, kept, &.{}, retentions);
+                },
+            }
         };
         const fixed = if (sources.items.len > 0) try self.fixedSignatureRefusing(leaving, sources.items, positions.items, clause) else null;
         if (sources.items.len > 0) if (fixed) |why| try notes.append(arena, why) else switch (leaving) {

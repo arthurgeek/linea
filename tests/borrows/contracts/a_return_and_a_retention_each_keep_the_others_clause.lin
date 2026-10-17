@@ -1,0 +1,22 @@
+// `note` returns a view of `b` and keeps one in `seen`, and its clause says
+// neither. Each report names the whole clause, keeping what the other adds,
+// so following them in turn reaches one clause that says both.
+struct Seen {
+    last: Str,
+}
+
+fn note(inout seen: Seen, _a: String, b: String, flag: Bool) -> Str where borrows(_a) {
+    seen.last = b.view()
+    if flag {
+        return b.view()
+    }
+    let v = b.view()
+    v
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    var seen = Seen { last = "" }
+    UInt8(note(&seen, a, b, true).length())
+}
