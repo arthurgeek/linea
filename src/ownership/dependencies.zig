@@ -2260,8 +2260,12 @@ const Analysis = struct {
             // The program can widen a trait it declares, and only that one.
             const widen = if (self.program.get(module).library) "" else try std.fmt.allocPrint(self.sink.arena, ", or write the source into `{s}{s}.{s}`'s clause and this one alike", .{ qualifier, self.ast.tokenText(trait), self.ast.tokenText(self.ast.declName(sig)) });
             why = try std.fmt.allocPrint(self.sink.arena, "`{s}` implements `{s}{s}`, whose signature does not permit `{s}`, so it cannot be added here: {s} what that signature permits{s}", .{
-                name,                                                qualifier,                       self.ast.tokenText(trait),                                               clause,
-                if (leaving == .returned) "return" else "keep only", widen,
+                name,
+                qualifier,
+                self.ast.tokenText(trait),
+                clause,
+                if (leaving == .returned) "return" else "keep only",
+                widen,
             });
         } else for (self.typing.function_values) |named_value| switch (named_value.target) {
             // A value received by a written callable type or a bound
