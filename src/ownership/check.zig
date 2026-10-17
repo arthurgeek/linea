@@ -1024,33 +1024,44 @@ const Checker = struct {
         return cfg_mod.exitSpan(self.ast, exit);
     }
 
-    /// Where a part a nested pattern stands at sits, from the part outwards:
-    /// "component `_0` of what `Some` carries". Bounded by the pattern's
+    /// Where a part a nested pattern stands at sits, from the outermost
+    /// pattern inwards: "component `_1`, then what `Some` carries". A
+    /// variant's step reads as it does alone, so `Some(_)` and `(n, Some(_))`
+    /// describe the payload in the same words. Bounded by the pattern's
     /// depth.
     fn partPlace(self: *Checker, part: ExprId) std.mem.Allocator.Error![]const u8 {
-        var text: std.ArrayList(u8) = .empty;
+        const arena = self.sink.arena;
+        // The walk runs from the part outwards, so each step is kept and the
+        // steps are written in the reverse order.
+        var steps: std.ArrayList([]const u8) = .empty;
         var at = part;
         while (self.cfg.pattern_parts.get(at)) |step| {
             const parent = step.holder;
             if (parent == ExprId.none) break;
-            if (text.items.len > 0) try text.appendSlice(self.sink.arena, " of ");
             const args = self.ast.call(parent).args;
             const index = for (args, 0..) |a, i| {
                 if (a == at) break i;
             } else 0;
-            switch (self.ast.exprTag(parent)) {
-                .tuple_pattern => try text.print(self.sink.arena, "component `_{d}`", .{index}),
-                .struct_pattern => try text.print(self.sink.arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(args[index - 1]))}),
-                else => {
+            try steps.append(arena, switch (self.ast.exprTag(parent)) {
+                .tuple_pattern => try std.fmt.allocPrint(arena, "component `_{d}`", .{index}),
+                .struct_pattern => try std.fmt.allocPrint(arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(args[index - 1]))}),
+                else => blk: {
                     const name = self.ast.tokenText(self.ast.exprMain(self.ast.call(parent).callee));
-                    if (args.len > 1)
-                        try text.print(self.sink.arena, "payload {d} of what `{s}` carries", .{ index, name })
+                    break :blk if (args.len > 1)
+                        try std.fmt.allocPrint(arena, "payload {d} of what `{s}` carries", .{ index, name })
                     else
-                        try text.print(self.sink.arena, "what `{s}` carries", .{name});
+                        try std.fmt.allocPrint(arena, "what `{s}` carries", .{name});
                 },
-            }
+            });
             if (step.within == ExprId.none) break;
             at = step.within;
+        }
+        var text: std.ArrayList(u8) = .empty;
+        var i = steps.items.len;
+        while (i > 0) {
+            i -= 1;
+            try text.appendSlice(arena, steps.items[i]);
+            if (i > 0) try text.appendSlice(arena, ", then ");
         }
         return text.items;
     }

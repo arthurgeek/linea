@@ -2,7 +2,7 @@ error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
   --> tests/patterns/a_linear_component_under_underscore_leaks.lin:17:15
    |
 17 |         Some((_, kept)) => kept,
-   |               ^ `_` does not settle component `_0` of what `Some` carries
+   |               ^ `_` does not settle what `Some` carries, then component `_0`
    |                            ---- its scope ends here
    |
    = help: give it to something that takes it

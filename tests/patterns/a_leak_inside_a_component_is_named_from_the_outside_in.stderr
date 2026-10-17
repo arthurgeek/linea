@@ -1,0 +1,16 @@
+error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/patterns/a_leak_inside_a_component_is_named_from_the_outside_in.lin:24:22
+   |
+24 |         (count, Some(_)) => count,
+   |                      ^ `_` does not settle component `_1`, then what `Some` carries
+   |                             ----- its scope ends here
+   |
+   = help: give it to something that takes it
+error[O-Leak]: `_` (a linear `Ticket`) is still owned when this path leaves
+  --> tests/patterns/a_leak_inside_a_component_is_named_from_the_outside_in.lin:31:39
+   |
+31 |         Holder { kept, slot: Some((_, _)) } => kept,
+   |                                       ^ `_` does not settle field `slot`, then what `Some` carries, then component `_1`
+   |                                                ---- its scope ends here
+   |
+   = help: give it to something that takes it
