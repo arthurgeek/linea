@@ -1234,7 +1234,8 @@ error[M-Dependency]: the manifest of `pallets` grants it `extern`, and this entr
 ```
 
 When two libraries link the same C library, or a program and its library
-both name it, the program links it once.
+both name it, the link names it in each place it is asked for, so a static
+archive is found after everything that needs it.
 
 ## Callbacks: C calling Linea
 

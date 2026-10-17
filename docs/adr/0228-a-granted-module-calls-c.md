@@ -66,9 +66,10 @@ loader gathers the C once, into the program's own two lists: the primary
 root's first, then each dependency's in the order the graph numbers them, for
 each dependency some module of which was loaded. A dependency granted `extern`
 is loaded only where its consumers consented, so its C is built only after
-that consent. A source named twice is built once, where it was first named,
-and a library named twice is linked once, where it was last named, since a
-static archive resolves only what comes before it. ADR 0229 had left this to
+that consent. A source named twice is built once, where it was first named.
+Libraries keep each manifest's order and are named again wherever another
+manifest names them, since a static archive resolves only what comes before
+it and naming it at each place satisfies every order. ADR 0229 had left this to
 a list per root in `RootFacts` collected by the link step; gathering it in the
 loader instead means the order and the duplicate rule live in one place, and
 the driver and the conformance runner both read the lists the loader made.

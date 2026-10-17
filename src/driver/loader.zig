@@ -1592,7 +1592,7 @@ pub fn joinedDir(gpa: std.mem.Allocator, base: []const u8, path: []const u8) std
     return std.fs.path.resolvePosix(gpa, &.{ base, path });
 }
 
-test "a dependency's C is built from its own directory and linked once, after the program's" {
+test "a dependency's C is built once from its own directory, and its libraries keep each manifest's order" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1602,21 +1602,20 @@ test "a dependency's C is built from its own directory and linked once, after th
     const program = try loadFromMemory(a, &table, &sink, &interner, "app", &.{
         .{ .path = "app/linea.json", .text = "{ \"extern\": [\".\"], \"link\": [\"m\"], \"dependencies\": { \"zeta\": { \"path\": \"zeta\", \"extern\": true }, \"alpha\": { \"path\": \"alpha\", \"extern\": true } } }" },
         .{ .path = "app/main.lin", .text = "import alpha\nimport zeta\n" },
-        .{ .path = "app/alpha/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"alpha\", \"extern\": [\".\"], \"native\": [\"c/alpha.c\"], \"link\": [\"sqlite3\", \"m\"] }" },
+        .{ .path = "app/alpha/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"alpha\", \"extern\": [\".\"], \"native\": [\"c/alpha.c\"], \"link\": [\"ssl\", \"crypto\"] }" },
         .{ .path = "app/alpha/alpha.lin", .text = "" },
-        .{ .path = "app/zeta/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"zeta\", \"extern\": [\".\"], \"native\": [\"zeta.c\"], \"link\": [\"z\"] }" },
+        .{ .path = "app/zeta/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"zeta\", \"extern\": [\".\"], \"native\": [\"zeta.c\"], \"link\": [\"ssl\"] }" },
         .{ .path = "app/zeta/zeta.lin", .text = "" },
     }, .program, false, .borrow);
     try testing.expect(!sink.hasErrors());
     try testing.expectEqual(@as(usize, 2), program.native.len);
     try testing.expectEqualStrings("app/alpha/c/alpha.c", program.native[0]);
     try testing.expectEqualStrings("app/zeta/zeta.c", program.native[1]);
-    // `m` is named by the program and again by `alpha`, so it is linked after
-    // `alpha`'s `sqlite3`: a library goes after everything that names it.
-    try testing.expectEqual(@as(usize, 3), program.link.len);
-    try testing.expectEqualStrings("sqlite3", program.link[0]);
-    try testing.expectEqualStrings("m", program.link[1]);
-    try testing.expectEqualStrings("z", program.link[2]);
+    // Each manifest's libraries keep their order, and one named by two
+    // manifests is named twice, so a static archive meets everything that
+    // needs it whichever order the manifests are read in.
+    try testing.expectEqual(@as(usize, 4), program.link.len);
+    for ([_][]const u8{ "m", "ssl", "crypto", "ssl" }, program.link) |want, got| try testing.expectEqualStrings(want, got);
 }
 
 test "a library two manifests name is one root, numbered by name whatever the order written" {
@@ -3256,9 +3255,10 @@ const Loader = struct {
     /// dependency's in the graph's order, for a dependency at least one of
     /// whose modules was loaded -- one its consumers consented to, since a
     /// refused one is never loaded. A source named twice is built once, where
-    /// it was first named. A library named twice is linked once, where it was
-    /// last named: a static archive resolves only what the objects and
-    /// libraries before it need, so it goes after everything that names it.
+    /// it was first named. Libraries keep each manifest's order and are named
+    /// again wherever another manifest names them: a static archive resolves
+    /// only what the objects and libraries before it need, and naming it at
+    /// each place a manifest asks for it satisfies every order at once.
     /// The caller owns the lists.
     fn foreignOf(self: *Loader, primary: Declared, modules: []const Module) !struct { native: []const []const u8, link: []const []const u8 } {
         var loaded = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, self.graph.items.len);
@@ -3293,10 +3293,6 @@ const Loader = struct {
             try native.append(self.gpa, copy);
         };
         for (names) |name| {
-            for (link.items, 0..) |held, at| if (std.mem.eql(u8, held, name)) {
-                self.gpa.free(link.orderedRemove(at));
-                break;
-            };
             const copy = try self.gpa.dupe(u8, name);
             errdefer self.gpa.free(copy);
             try link.append(self.gpa, copy);
