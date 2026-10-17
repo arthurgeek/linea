@@ -424,7 +424,7 @@ it to the router with a state of its own, which reads the extractors a
 handler's parameters name and calls it. These tests are for the station
 server of [Networking](09-networking.md#reading-inputs-sharing-state-and-logging);
 add them to the end of `stations.lin`, with `import std.testing`,
-`use http.Handler` and `use mem.Owner` at the top:
+`use http.Handler` and `use mem.Lender` at the top:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea

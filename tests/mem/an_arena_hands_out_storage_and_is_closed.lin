@@ -13,7 +13,7 @@ import std.mem
 
 use mem.Arena
 use mem.Oom
-use mem.Owner
+use mem.Lender
 use mem.system
 
 fn work() -> Result[UInt64, Oom] {

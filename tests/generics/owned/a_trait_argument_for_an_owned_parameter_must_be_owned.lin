@@ -1,0 +1,23 @@
+// `Conv`'s parameter is bounded `Owned`, so a bound naming `Conv[U]` needs `U`
+// to be `Owned` too, as a type naming `Pool[U]` does.
+trait Conv[T: Owned] {
+    fn conv(self: Self, count: UInt8) -> T
+}
+
+struct Plain {
+    n: UInt8,
+}
+
+impl Conv[UInt8] for Plain {
+    fn conv(self: Self, count: UInt8) -> UInt8 {
+        self.n + count
+    }
+}
+
+fn through[C: Conv[U], U](converter: C, count: UInt8) -> U {
+    converter.conv(count)
+}
+
+fn main() -> UInt8 {
+    through(Plain { n = 1 }, 2)
+}

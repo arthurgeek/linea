@@ -1,0 +1,33 @@
+import std.mem
+
+struct Cell[T] {
+    value: T,
+}
+
+impl[T] Cell[T] {
+    // `T` belongs to the implementation, not to `take`.
+    fn take(sink self: Self) -> T where T: Owned {
+        let Cell { value } = self
+        value
+    }
+}
+
+trait Key: Owned {
+    fn key(self: Self) -> UInt64
+}
+
+trait Store {
+    type Item: Owned
+}
+
+fn _first[K: Key, S: Store](keys: mem.Slice[K], _store: S) -> UInt64 {
+    match keys.get(0) {
+        Some(key) => key.key(),
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let cell: Cell[UInt8] = .{ value = 1 }
+    cell.take()
+}

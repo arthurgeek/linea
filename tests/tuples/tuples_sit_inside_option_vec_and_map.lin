@@ -1,7 +1,7 @@
 import std.collections
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // A tuple is a value like any other, so an option, a vector and a map each
 // hold one as they would hold a struct.

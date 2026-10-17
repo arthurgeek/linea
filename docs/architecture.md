@@ -940,6 +940,17 @@ replacement of an existing type's fields invalidates their answers before the
 next query. Construction and queries take O(types + containment edges) expected
 time between invalidations, with O(1) frozen queries.
 
+A type parameter seeds both tables unless its record says it is bounded `Owned`
+or `Integer`, which is the whole of what those bounds change in a generic body;
+the checker refuses an `Owned` argument by asking `mayCarryDependencies` of it.
+The edges come from one walk, `BorrowContainment.eachChild`, which both builds
+the tables and finds the path a [T-Bound] refusal names (`dependencyWitness`),
+so the explanation cannot disagree with the answer it explains. Storage
+lowering's `mayCarry` reads the frozen `dependency_containment`, the same table,
+so a type the checker admits as `Owned` is one storage never follows a
+dependency through; its `holdsDependencies` adds only values whose
+representation is an integer, because the address bits of an array are one.
+
 For an instantiated certified `Storage[T, A]`, containment follows its logical
 element T and separate allocator field A instead of following the optional raw
 backing Buffer field. This lets a system-allocated scalar Vec remain independent

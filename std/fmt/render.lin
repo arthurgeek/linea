@@ -7,7 +7,7 @@ use text.SplitError
 use text.Utf8Error
 use text.Utf8Failure
 use text.TextError
-use mem.Owner
+use mem.Lender
 
 // Render `value` with Display into a new String allocated from `allocator`.
 // The result owns its text, so it outlives any storage `value` borrows. When

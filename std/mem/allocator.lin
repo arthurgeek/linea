@@ -72,9 +72,10 @@ pub trait Allocator: Copyable {
     fn dispose(sink b: Buffer[Self])
 }
 
-// An owner provides a non-owning allocator handle. For an arena, the handle
-// borrows its storage and cannot outlive it; a system handle has no such owner.
-pub trait Owner {
+// A lender provides an allocator handle that owns none of the memory it hands
+// out. An arena's handle borrows the arena and cannot outlive it; the system's
+// handle borrows nothing.
+pub trait Lender {
     type Handle: Allocator
 
     fn handle(self: Self) -> Self.Handle where borrows(self)
@@ -119,7 +120,7 @@ impl Allocator for SystemAllocator {
 @linear
 struct SystemAllocation {}
 
-impl Owner for SystemAllocator {
+impl Lender for SystemAllocator {
     type Handle = SystemAllocator
 
     fn handle(self: Self) -> SystemAllocator where carries() {

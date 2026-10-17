@@ -1,0 +1,15 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/a_returned_owner_is_reported_once_whichever_exit_returns_it.lin:9:5
+  |
+9 |     kept
+  |     ^^^^ escape observations only from the signature's declared sources
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/a_returned_owner_is_reported_once_whichever_exit_returns_it.lin:16:5
+   |
+16 |     copy(second)
+   |     ^^^^^^^^^^^^ escape observations only from the signature's declared sources
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/a_returned_owner_is_reported_once_whichever_exit_returns_it.lin:14:16
+   |
+14 |         return copy(third)
+   |                ^^^^^^^^^^^ escape observations only from the signature's declared sources

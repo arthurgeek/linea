@@ -1,0 +1,31 @@
+import std.mem
+
+use mem.Lender
+
+// The items `iterator` yields are Owned, so the vector keeps nothing of the
+// iterator or of what it walks. `I.Item` is read through this function's own
+// parameter `I`, so its own `where` clause may bound it.
+fn append_items[I: Iterator, A: mem.Allocator](inout values: Vec[I.Item, A], inout iterator: I) where I.Item: Owned {
+    while true {
+        match &iterator.next() {
+            None => break,
+            Some(item) => match &values.push(item) {
+                Ok(_) => {},
+                Err(_) => panic("the arena is full"),
+            },
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var values: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
+    var bytes = [UInt8(1), 2, 3]
+    var walking = bytes.as_slice().map(|sink byte| *byte * 2)
+    append_items(&values, &walking)
+    // The vector holds copies, so the array can change while it is live.
+    bytes[0] = 0
+    let total = values[0] + values[1] + values[2]
+    arena.release()
+    total + bytes[0]
+}

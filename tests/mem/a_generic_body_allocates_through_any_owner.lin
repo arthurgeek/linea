@@ -1,14 +1,14 @@
-// Owner supplies a reusable allocator handle. The generic body borrows its
+// Lender supplies a reusable allocator handle. The generic body borrows its
 // owner only while allocating and using the buffer; its numeric answer has
 // no remaining owner dependency.
 import std.mem
 
 use mem.Arena
 use mem.Oom
-use mem.Owner
+use mem.Lender
 use mem.system
 
-fn scratch[O: Owner](o: O) -> Result[UInt64, Oom] {
+fn scratch[O: Lender](o: O) -> Result[UInt64, Oom] {
     let h = o.handle()
 
     var b = h.acquire(64)?

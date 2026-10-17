@@ -539,6 +539,8 @@ fn typecheckInternal(
     defer gpa.free(c.declared_results);
     defer c.template_signatures.deinit(gpa);
     defer c.declined_contracts.deinit(gpa);
+    defer c.refused_owned_promises.deinit(gpa);
+    defer c.refused_owned_subjects.deinit(gpa);
     defer c.adopted_contracts.deinit(gpa);
     defer c.defaulted_contracts.deinit(gpa);
     defer {
@@ -993,6 +995,7 @@ fn typecheckInternal(
                 &.{},
             );
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
+            c.builder.pool.items[row[k].index()].parameter.owned = ownedBound(ast, resolution, bounds) != null;
         }
     }
 
@@ -1772,7 +1775,7 @@ fn capabilityDemand(
                 .discardable => &discardable,
                 .unrestricted => &unrestricted,
             },
-            .trait, .integer, .unknown => continue,
+            .trait, .integer, .owned, .unknown => continue,
         };
         if (source.written == .none) {
             source.written = b.named.name;
@@ -1793,7 +1796,7 @@ fn capabilityDemand(
                     .discardable => &discardable,
                     .unrestricted => &unrestricted,
                 },
-                .trait, .integer, .unknown => continue,
+                .trait, .integer, .owned, .unknown => continue,
             };
             if (source.through == node.DeclId.none) source.through = trait;
         }
@@ -1819,6 +1822,31 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
         }
     }
     return false;
+}
+
+/// The bound in a run that demands a capability: the first that names
+/// `Copyable`, `Discardable` or `Linear`, or else the first named bound, a
+/// trait that requires the capability. Null where the run names nothing.
+fn capabilityToken(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
+    var first: ?TokenId = null;
+    for (bounds) |bound| {
+        if (bound.kind != .named) continue;
+        if (first == null) first = bound.named.name;
+        switch (resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name))) {
+            .capability => return bound.named.name,
+            else => {},
+        }
+    }
+    return first;
+}
+
+/// The first bound in a run that names `Owned`. Only the run itself is read:
+/// a trait cannot require `Owned`, so no trait it reaches adds the demand.
+fn ownedBound(ast: *const Ast, res: *const Resolution, bounds: []const node.TraitBound) ?TokenId {
+    for (bounds) |bound| {
+        if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .owned) return bound.named.name;
+    }
+    return null;
 }
 
 /// A written type spelled as the program wrote it, appended to `out`.
@@ -5162,6 +5190,13 @@ const Checker = struct {
     /// Declarations whose result contract was left undecided: inference found
     /// several sources, or the trait signature a member adopts from did.
     declined_contracts: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Declarations whose `where` clause promised `Owned` for a subject that
+    /// is not theirs to bound. Their contract is not inferred.
+    refused_owned_promises: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Each subject a refused `Owned` promise named, with the declaration
+    /// that wrote it. A use inside that declaration that needs the subject
+    /// `Owned` is the refused promise's consequence and is not reported again.
+    refused_owned_subjects: std.AutoHashMapUnmanaged(struct { decl: DeclId, subject: TypeId }, void) = .empty,
     /// Each implementation member without a clause, with the trait signature
     /// whose contract it adopts.
     adopted_contracts: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
@@ -5726,9 +5761,12 @@ const Checker = struct {
             }
         }
 
+        var promised: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer promised.deinit(self.gpa);
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             starts[i] = @intCast(contextual.items.len);
+            promised.clearRetainingCapacity();
             const enclosing = self.res.implEnclosing(d);
             parents[i] = if (enclosing != .none and enclosing != d)
                 enclosing
@@ -5743,6 +5781,17 @@ const Checker = struct {
                 const constraint = self.constraints.records[at];
                 const requirements = self.constraints.requirementsOf(constraint);
                 if (requirements.len == 0) continue;
+                switch (constraint.subject) {
+                    // Each `Owned` the clause writes is a promise, so one
+                    // written twice in a list is refused as one written in
+                    // two clauses is.
+                    .written => |written| for (requirements) |requirement| {
+                        if (requirement.kind != .named) continue;
+                        if (resolve_mod.boundNames(self.ast, requirement.named.name, traitAt(self.ast, self.res, requirement.named.name)) != .owned) continue;
+                        try self.promiseWrittenOwned(d, written, resolved, requirement.named.name, &promised);
+                    },
+                    .parameter => {},
+                }
                 const context: BoundInterning = .{ .module = self.program.moduleOf(d), .owner = d };
                 const traits = try self.traitsBounding(context, requirements);
                 errdefer types_mod.freeBoundTraits(self.gpa, traits);
@@ -5755,6 +5804,7 @@ const Checker = struct {
                         .callables = callables,
                         .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                         .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
+                        .owned = ownedBound(self.ast, self.res, requirements) != null,
                     },
                 });
             }
@@ -5817,6 +5867,9 @@ const Checker = struct {
                 self.constraint_subjects[at] = settled;
                 items[item].subject = settled;
                 changed = true;
+                // A promise holds for what the subject now reads as.
+                if (ownedBound(self.ast, self.res, self.constraints.requirementsOf(constraint)) != null and self.ownsSubject(d, settled))
+                    self.builder.promiseOwned(settled);
             }
         }
         if (changed) self.builder.setContextualConstraints(self.contextual_constraints);
@@ -7755,6 +7808,10 @@ const Checker = struct {
             defer types_mod.freeContracts(self.gpa, adopted);
             return self.builder.internCallable(callable_params, result, adopted, .read);
         };
+        if (written.len == 0 and self.refused_owned_promises.contains(d)) {
+            try self.declined_contracts.put(self.gpa, d, {});
+            return self.builder.internCallable(callable_params, result, &.{}, .read);
+        }
         var outcome: ContractOutcome = .{};
         const contracts = try self.normalizeContracts(callable_params, params, result, written, self.ast.declName(d), null, &outcome);
         defer types_mod.freeContracts(self.gpa, contracts);
@@ -9798,6 +9855,44 @@ const Checker = struct {
                 site.at,
             );
         }
+        try self.reportBrokenTraitBounds();
+    }
+
+    /// Refuses every trait a bound names at arguments its own parameters'
+    /// bounds do not admit: `C: Conv[U]` where `trait Conv[T: Owned]` needs
+    /// `U` to be `Owned`, as a written `Pool[U]` does. Asked of every place a
+    /// bound is written: a parameter's or `where` clause's bounds, a trait's
+    /// supertrait list and an associated type's bounds. Checked inside the
+    /// declaration whose bound it is, so its parameters discharge what they
+    /// promise, and with a trait signature's `Self` read as that signature
+    /// reads it.
+    ///
+    /// **Bound:** each written bound is read once, and its arguments are
+    /// checked through the one routine a written type's are.
+    fn reportBrokenTraitBounds(self: *Checker) std.mem.Allocator.Error!void {
+        const outer_self = self.self_at_call;
+        defer self.self_at_call = outer_self;
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            self.generic = d;
+            self.current = self.program.moduleOf(d);
+            self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
+            const range = self.constraints.rangeOfDeclaration(d);
+            for (range.start..range.end) |at| {
+                try self.reportBrokenBoundList(d, self.constraints.requirementsOf(self.constraints.records[at]));
+            }
+            try self.reportBrokenBoundList(d, self.ast.declBounds(d));
+        }
+    }
+
+    fn reportBrokenBoundList(self: *Checker, d: node.DeclId, bounds: []const node.TraitBound) std.mem.Allocator.Error!void {
+        for (bounds) |bound| {
+            if (bound.kind != .named or bound.named.args.len() == 0) continue;
+            const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
+            const args = try self.internedBoundArgs(.{ .module = self.current, .owner = d }, bound);
+            defer if (args.len > 0) self.gpa.free(args);
+            try self.checkArgumentBounds(trait, args, null, bound.named.name);
+        }
     }
 
     /// Refuses a type argument its parameter's bounds do not admit.
@@ -10357,6 +10452,129 @@ const Checker = struct {
         reason: ?[]const u8,
     };
 
+    /// Refuses `held` for the `Owned` bound written at `bound`, naming the
+    /// parts walked from it to what carries the dependency. The path is found
+    /// over the edges the containment answer was computed from, so it names
+    /// the reason that answer gave, and it stops at the outermost part whose
+    /// inside the reader cannot select: a sealed type's fields or a newtype's
+    /// base. The label is the edit `editForOwned` finds, with dropping the
+    /// bound offered only where the program wrote it.
+    fn reportNotOwned(self: *Checker, subject: []const u8, held: TypeId, bound: TokenId, at: TokenId, span: Span) std.mem.Allocator.Error!void {
+        const witness = (try self.builder.dependencyWitness(self.gpa, held)) orelse unreachable;
+        defer witness.deinit(self.gpa);
+        if (self.refused_owned_subjects.contains(.{ .decl = self.generic, .subject = witness.seed })) return;
+        const held_name = try self.typeName(held);
+        const seed_name = try self.typeName(witness.seed);
+        var help = self.unmetBoundHelp(bound);
+        help.another_value = "pass a value whose type owns everything it holds";
+        const label = try self.unmetLabel(help, try self.editForOwned(held, witness.seed));
+        const file = self.ast.fileOf(at);
+
+        const visible = self.selectableSteps(held, witness);
+        const path = try self.witnessPath(witness.steps[0..visible]);
+        const truncated = visible < witness.steps.len;
+        const part_name = if (visible == 0) held_name else try self.typeName(witness.parts[visible - 1]);
+        const what: []const u8 = if (self.builder.get(witness.seed) == .parameter)
+            try std.fmt.allocPrint(self.sink.arena, "`{s}`, which may stand for a type that carries one", .{seed_name})
+        else if (self.builder.get(witness.seed) == .borrow)
+            "an observation of another value"
+        else if (self.builder.view().declOfType(witness.seed) == self.raw_accesses.slice)
+            "a view of storage it does not own"
+        else
+            "raw storage another value owns";
+
+        if (truncated) {
+            if (visible == 0) return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: it holds {s}",
+                .{ subject, held_name, what },
+            );
+            return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, which holds {s}",
+                .{ subject, held_name, path, article.before(part_name), part_name, what },
+            );
+        }
+        if (self.builder.get(witness.seed) == .parameter) {
+            if (visible == 0) return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` may stand for a type that carries a borrow",
+                .{ subject, held_name },
+            );
+            return self.sink.addErrorFmt(
+                .t_bound,
+                file,
+                span,
+                label,
+                "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s}",
+                .{ subject, held_name, path, what },
+            );
+        }
+        if (visible == 0) return self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            label,
+            "`{s}` requires `Owned`, and `{s}` is {s}",
+            .{ subject, held_name, what },
+        );
+        try self.sink.addErrorFmt(
+            .t_bound,
+            file,
+            span,
+            label,
+            "`{s}` requires `Owned`, and `{s}` can carry a borrow: `{s}` is {s} `{s}`, {s}",
+            .{ subject, held_name, path, article.before(seed_name), seed_name, what },
+        );
+    }
+
+    /// How many leading steps of `witness` name parts this module can
+    /// select. A sealed type's fields and a newtype's base are reached by no
+    /// selection here, and neither are the elements certified storage holds
+    /// or a type argument, so the path stops before each of them.
+    fn selectableSteps(self: *const Checker, held: TypeId, witness: types_mod.DependencyWitness) usize {
+        var owner = held;
+        for (witness.steps, witness.parts, 0..) |step, part, index| {
+            switch (step) {
+                .base, .stored, .argument => return index,
+                .field, .variant, .element, .environment => {},
+            }
+            if (self.sealedHere(owner)) return index;
+            owner = part;
+        }
+        return witness.steps.len;
+    }
+
+    /// A witness path as the parts a reader would select: fields and
+    /// variants by name, elements as `[_]`.
+    fn witnessPath(self: *Checker, steps: []const types_mod.ContainmentStep) std.mem.Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        for (steps) |step| {
+            const name: []const u8 = switch (step) {
+                .field => |field| field,
+                .variant => |variant| variant,
+                .element => {
+                    try out.appendSlice(self.sink.arena, "[_]");
+                    continue;
+                },
+                .environment => continue,
+                .base, .stored, .argument => unreachable,
+            };
+            if (out.items.len > 0) try out.append(self.sink.arena, '.');
+            try out.appendSlice(self.sink.arena, name);
+        }
+        return out.items;
+    }
+
     /// The reason a library operation disposes of a value, where the trait that
     /// provides it records one.
     fn disposalReason(self: *Checker, d: node.DeclId) ?[]const u8 {
@@ -10467,6 +10685,13 @@ const Checker = struct {
             try self.sink.addErrorFmt(.t_bound, self.ast.fileOf(at), span, "supply a built-in integer type or an Integer-constrained parameter", "`{s}` requires `Integer`, and `{s}` is not a built-in integer type", .{ subject, (try self.typeName(held)) });
             return true;
         }
+        if (ownedBound(self.ast, self.res, bounds)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
+            if (mode == .ask) return true;
+            if (self.builder.view().mentionsOpenType(held)) return true;
+            try self.noteRefused(at);
+            try self.reportNotOwned(subject, held, bound, at, span);
+            return true;
+        };
         if (try self.builder.meetsCapabilityWithin(self.generic, held, requirement)) return false;
         const demanded: []const u8 = switch (requirement) {
             .copyable => "Copyable",
@@ -10505,7 +10730,15 @@ const Checker = struct {
                 try std.fmt.allocPrint(self.sink.arena, "{s}. {s}", .{ general, reason })
             else
                 general;
-        } else "use a type meeting the capability requirement, or relax the bound";
+        } else help: {
+            // The edit a capability bound offers is the one every other unmet
+            // bound's help is built from: through the parameter's bounds, a
+            // declaration this program can mark, or another value, and the
+            // bound dropped only where the program wrote it.
+            var offered = self.unmetBoundHelp(capabilityToken(self.ast, self.res, bounds) orelse at);
+            offered.another_value = try std.fmt.allocPrint(self.sink.arena, "pass a value whose type is `{s}`", .{demanded});
+            break :help try self.unmetLabel(offered, try self.editForCapability(requirement, held));
+        };
         try self.sink.addErrorFmt(
             .t_bound,
             self.ast.fileOf(at),
@@ -10578,7 +10811,7 @@ const Checker = struct {
     fn namesATrait(self: *const Checker, bound: TokenId) bool {
         return switch (resolve_mod.boundNames(self.ast, bound, traitAt(self.ast, self.res, bound))) {
             .trait => true,
-            .capability, .integer, .unknown => false,
+            .capability, .integer, .owned, .unknown => false,
         };
     }
 
@@ -10594,7 +10827,7 @@ const Checker = struct {
             const ast = self.checker.ast;
             return switch (resolve_mod.boundNames(ast, tok, traitAt(ast, self.checker.res, tok))) {
                 .trait => |d| d,
-                .capability, .integer, .unknown => null,
+                .capability, .integer, .owned, .unknown => null,
             };
         }
 
@@ -12188,10 +12421,7 @@ const Checker = struct {
         defer self.gpa.free(spelled);
         const trait_name = try self.sink.arena.dupe(u8, spelled);
         const type_name = try self.typeName(held);
-        // Inside a generic body a parameter implements what its bounds
-        // promise and nothing else.
-        if (self.builder.get(held) == .parameter)
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ trait_name, type_name }) };
+        if (self.builder.get(held) == .parameter) return self.boundsEdit(trait_name, held);
         // A closure releases what it captures, so the edit is the one its
         // first capture that does not release needs.
         if (self.builder.closure_release) |release| if (release.trait == trait and depth < max_capture_depth) {
@@ -12252,12 +12482,73 @@ const Checker = struct {
             .discardable => "Discardable",
             .unrestricted => unreachable,
         };
+        if (self.builder.get(held) == .parameter) return self.boundsEdit(required, held);
         const type_name = try self.typeName(held);
-        if (self.builder.get(held) == .parameter)
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, type_name }) };
-        if (capability == .copyable) if (self.declaringType(held)) |d| if (!self.declaredInLibrary(d))
-            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "mark `{s}` `@copyable`", .{type_name}) };
+        // The attribute is written on the declaration, so it is named there,
+        // without the arguments an instantiation supplies.
+        // A declaration already marked is not `Copyable` here because of what
+        // it was given, which marking it again does not change.
+        if (capability == .copyable) if (self.declaringType(held)) |d| if (!self.declaredInLibrary(d) and self.ast.declOwnershipPolicy(d) != .copyable)
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "mark `{s}` `@copyable`", .{self.ast.tokenText(self.ast.declName(d))}) };
         return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `{s}`", .{ type_name, required }), .instead = null } };
+    }
+
+    /// The edit that would make `held` `Owned`, where `seed` is the part its
+    /// carrying path ends at. A parameter gains it through its bounds. No
+    /// implementation can make a type `Owned`, because the bound is decided
+    /// by what the type holds.
+    fn editForOwned(self: *Checker, held: TypeId, seed: TypeId) std.mem.Allocator.Error!Edit {
+        if (self.builder.get(seed) == .parameter) return self.boundsEdit("Owned", seed);
+        return .{ .refused = .{ .reason = try std.fmt.allocPrint(self.sink.arena, "`{s}` is not `Owned`", .{try self.typeName(held)}), .instead = null } };
+    }
+
+    /// Inside a generic body a parameter meets what its bounds promise and
+    /// nothing else, so the edit adds `required` to them. An associated type
+    /// read through a parameter, `I.Item`, has no bound list of its own, and
+    /// its declaration promises it in a `where` clause.
+    fn boundsEdit(self: *Checker, required: []const u8, parameter: TypeId) std.mem.Allocator.Error!Edit {
+        const name = try self.typeName(parameter);
+        // A trait signature's `Self` is bounded by the trait's supertrait
+        // list, which may not name `Owned`.
+        if (self.builder.standinOf(parameter) == null and std.mem.eql(u8, name, "Self")) {
+            if (std.mem.eql(u8, required, "Owned")) return .{ .refused = .{ .reason = "a trait's `Self` cannot be bounded `Owned`", .instead = null } };
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to the trait's supertraits", .{required}) };
+        }
+        if (self.builder.standinOf(parameter) == null)
+            return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "add `{s}` to `{s}`'s bounds", .{ required, name }) };
+        // The clause that can promise it is the one of the declaration whose
+        // parameter it is read through: an implementation's, for its own
+        // parameter, which no member's clause may bound. A clause already
+        // there takes one more predicate; a second `where` would not parse.
+        const implementation = self.implementationOwning(parameter);
+        const clause_of = implementation orelse self.generic;
+        const has_clause = clause_of != .none and self.ast.declWhereToken(clause_of) != .none;
+        const text = if (implementation != null)
+            (if (has_clause)
+                try std.fmt.allocPrint(self.sink.arena, "add `{s}: {s}` to the implementation's `where` clause", .{ name, required })
+            else
+                try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}` to the implementation", .{ name, required }))
+        else if (has_clause)
+            try std.fmt.allocPrint(self.sink.arena, "add `{s}: {s}` to the `where` clause", .{ name, required })
+        else
+            try std.fmt.allocPrint(self.sink.arena, "add `where {s}: {s}`", .{ name, required });
+        return .{ .edit = text };
+    }
+
+    /// The implementation whose parameter `subject`, an associated type read
+    /// through a parameter, is read through; null where that parameter is
+    /// not an implementation's.
+    fn implementationOwning(self: *const Checker, subject: TypeId) ?node.DeclId {
+        if (self.builder.standinOf(subject) == null) return null;
+        var root = subject;
+        while (self.builder.standinOf(root)) |standin| root = standin.held;
+        const owner = switch (self.builder.get(root)) {
+            .parameter => |p| p.owner,
+            else => return null,
+        };
+        if (owner >= self.ast.declCount()) return null;
+        const d = node.DeclId.at(@intCast(owner));
+        return if (self.ast.declTag(d) == .impl_) d else null;
     }
 
     /// The first capture `held`, a closure, owns whose type does not
@@ -26025,6 +26316,7 @@ const Checker = struct {
                     .callables = callables,
                     .requirement = capabilityDemandedBy(self.ast, self.res, requirements, traits),
                     .integer = integerDemandedBy(self.ast, self.res, requirements, traits),
+                    .owned = ownedBound(self.ast, self.res, requirements) != null,
                 },
             };
             filled += 1;
@@ -26758,12 +27050,87 @@ const Checker = struct {
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
             const own = self.ast.declBounds(d);
-            if (own.len > 0) try self.reportCapabilityDemand(own, self.ast.declName(d));
+            if (own.len > 0) {
+                try self.reportCapabilityDemand(own, self.ast.declName(d));
+                if (ownedBound(self.ast, self.res, own)) |bound| try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(bound),
+                    self.ast.tokenSpan(bound),
+                    "write `Owned` on the type parameter that needs it",
+                    "`Owned` bounds a type parameter, and `{s}` is not one",
+                    .{self.ast.tokenText(self.ast.declName(d))},
+                );
+            }
             for (self.ast.declTypeParams(d), 0..) |p, k| {
                 try self.reportCapabilityDemand(self.parameterBounds(d, k), p.name);
             }
         }
     }
+
+    /// Whether `subject` is a parameter of `d`, or the stand-in for an
+    /// associated type read through one.
+    fn ownsSubject(self: *const Checker, d: node.DeclId, subject: TypeId) bool {
+        if (self.builder.get(subject) != .parameter) return false;
+        var root = subject;
+        while (self.builder.standinOf(root)) |standin| root = standin.held;
+        return switch (self.builder.get(root)) {
+            .parameter => |p| self.builder.standinOf(root) == null and p.owner == d.index(),
+            else => false,
+        };
+    }
+
+    /// Records an `Owned` promise a declaration's `where` clause makes about a
+    /// written subject, or refuses it.
+    ///
+    /// The seed reads `Owned` from the record of the parameter a type stands
+    /// for, so a promise holds only for a subject whose record belongs to the
+    /// declaration that writes it: one of its own parameters, or an associated
+    /// type read through one, `I.Item` under `[I: Iterator]` or `Self.Item`
+    /// under a trait signature's own `Self`, whose stand-in no other
+    /// declaration can name. An enclosing implementation's parameter is
+    /// shared with that implementation's other members, and a promise there
+    /// would be relied on where nothing checked it.
+    fn promiseWrittenOwned(
+        self: *Checker,
+        d: node.DeclId,
+        written: node.TypeRef,
+        subject: TypeId,
+        bound: TokenId,
+        /// The subjects `d`'s clauses have promised so far.
+        promised: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!void {
+        if (self.ownsSubject(d, subject)) {
+            if ((try promised.getOrPut(self.gpa, subject)).found_existing) return self.sink.addErrorFmt(
+                .t_bound,
+                self.ast.fileOf(bound),
+                self.ast.tokenSpan(bound),
+                "drop one of the two bounds",
+                "`{s}` is bounded `Owned` twice",
+                .{self.ast.writtenText(written)},
+            );
+            return self.builder.promiseOwned(subject);
+        }
+        // The signature's contract would be inferred as if the promise held
+        // for some instantiations and not others; the refusal is the mistake,
+        // so the contract is left undecided and nothing is reported against it.
+        try self.refused_owned_promises.put(self.gpa, d, {});
+        try self.refused_owned_subjects.put(self.gpa, .{ .decl = d, .subject = subject }, {});
+        // An implementation's parameter is promised in the implementation's
+        // own clause, which every member then relies on.
+        const help = if (self.implementationOwning(subject) != null)
+            (try self.boundsEdit("Owned", subject)).edit
+        else
+            "write `Owned` where the type parameter is declared";
+        try self.sink.addErrorFmt(
+            .t_bound,
+            self.ast.fileOf(bound),
+            self.ast.tokenSpan(bound),
+            help,
+            "`Owned` bounds a type parameter of the declaration that writes it, and `{s}` is not one of `{s}`'s",
+            .{ self.ast.writtenText(written), self.ast.tokenText(self.ast.declName(d)) },
+        );
+    }
+
     /// Rejects repeated or redundant capability bounds, preserving the trait
     /// bounds that also provide operations.
     fn reportCapabilityDemand(
@@ -26778,6 +27145,24 @@ const Checker = struct {
         // A declaration whose name the parser never read still wrote a list,
         // and a bound on that list is a token that is there.
         const at = if (named != .none) named else bounds[0].named.name;
+
+        if (ownedBound(self.ast, self.res, bounds)) |first| {
+            for (bounds) |bound| {
+                if (bound.kind != .named or bound.named.name == first) continue;
+                if (resolve_mod.boundNames(self.ast, bound.named.name, traitAt(self.ast, self.res, bound.named.name)) != .owned) continue;
+                return self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(at),
+                    self.ast.tokenSpan(at),
+                    "drop one of the two bounds",
+                    "`{s}` is bounded `Owned` twice",
+                    .{self.ast.tokenText(at)},
+                );
+            }
+            if (integerDemandedBy(self.ast, self.res, bounds, through)) {
+                return self.sink.addError(.t_bound, self.ast.fileOf(at), self.ast.tokenSpan(at), "Integer already includes Owned", "drop the redundant Owned bound");
+            }
+        }
 
         if (demand.copyable.demanded() and demand.discardable.written != .none) {
             return self.sink.addError(.t_bound, self.ast.fileOf(at), self.ast.tokenSpan(at), "Copyable already includes Discardable", "drop the redundant Discardable bound");
@@ -27095,6 +27480,7 @@ const Checker = struct {
         switch (wanted_name) {
             .capability => return false,
             .integer => if (got_name != .integer) return false,
+            .owned => if (got_name != .owned) return false,
             .trait => |wanted| switch (got_name) {
                 .trait => |got| if (wanted != got) return false,
                 else => return false,

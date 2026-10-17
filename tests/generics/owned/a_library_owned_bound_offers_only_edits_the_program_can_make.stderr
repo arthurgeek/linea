@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Owned`, and `U` may stand for a type that carries a borrow
+ --> tests/generics/owned/a_library_owned_bound_offers_only_edits_the_program_can_make.lin:7:19
+  |
+7 |     match &values.append_slice(items) {
+  |                   ^^^^^^^^^^^^ add `Owned` to `U`'s bounds
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/generics/owned/a_library_owned_bound_offers_only_edits_the_program_can_make.lin:16:18
+   |
+16 |     match &names.append_slice(first.as_slice()) {
+   |                  ^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds

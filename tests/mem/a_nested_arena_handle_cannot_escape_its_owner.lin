@@ -4,7 +4,7 @@ import std.mem
 
 use mem.Arena
 use mem.Handle
-use mem.Owner
+use mem.Lender
 use mem.SystemAllocator
 use mem.system
 

@@ -161,7 +161,7 @@ impl[H: Allocator] Release for Arena[H] {
 // allocation. Reservations use the same eight-byte alignment as Buffer.
 let arena_header: UInt64 = 8
 
-impl[H: Allocator] Owner for Arena[H] {
+impl[H: Allocator] Lender for Arena[H] {
     type Handle = Handle[H]
 
     fn handle(self: Self) -> Handle[H] {

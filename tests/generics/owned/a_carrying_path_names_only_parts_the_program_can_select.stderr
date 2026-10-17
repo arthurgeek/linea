@@ -1,0 +1,20 @@
+error[T-Bound]: `T` requires `Owned`, and `Name` can carry a borrow: it holds a view of storage it does not own
+  --> tests/generics/owned/a_carrying_path_names_only_parts_the_program_can_select.lin:25:16
+   |
+25 |     let name = keep(Name("ada"))
+   |                ^^^^ `Name` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Shelf` can carry a borrow: `owner` is a `Name`, which holds a view of storage it does not own
+  --> tests/generics/owned/a_carrying_path_names_only_parts_the_program_can_select.lin:26:17
+   |
+26 |     let shelf = keep(Shelf { owner = Name("lin") })
+   |                 ^^^^ `Shelf` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Label` can carry a borrow: `text` is a `Str`, which holds a view of storage it does not own
+  --> tests/generics/owned/a_carrying_path_names_only_parts_the_program_can_select.lin:27:17
+   |
+27 |     let label = keep(Label { text = "bench" })
+   |                 ^^^^ `Label` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` can carry a borrow: it holds an observation of another value
+  --> tests/generics/owned/a_carrying_path_names_only_parts_the_program_can_select.lin:30:18
+   |
+30 |     let values = keep(empty)
+   |                  ^^^^ `Vec[UInt8, mem.Handle[mem.SystemAllocator]]` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound

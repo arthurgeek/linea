@@ -12587,7 +12587,7 @@ fn whichBoundDeclares(
             // and a count it cannot complete says nothing about which bound the
             // reference was read through.
             switch (resolve_mod.boundNames(ast, b.named.name, null)) {
-                .capability, .integer => continue,
+                .capability, .integer, .owned => continue,
                 .trait, .unknown => return .unresolved,
             }
         };

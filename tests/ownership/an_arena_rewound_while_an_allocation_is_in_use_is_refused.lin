@@ -2,7 +2,7 @@
 // buffer from the arena is still in use.
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> UInt8 {
     var arena = mem.Arena.open(mem.system(), 64)

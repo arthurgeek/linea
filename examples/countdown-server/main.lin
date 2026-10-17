@@ -19,7 +19,7 @@ import std.time
 // needs no `use`.
 use http.Handler
 use io.ByteWriter
-use mem.Owner
+use mem.Lender
 
 // A countdown runs for at most ten seconds.
 let longest_countdown: UInt64 = 10

@@ -3,7 +3,7 @@ import std.fmt
 import std.release
 import std.testing
 
-use mem.Owner
+use mem.Lender
 use mem.PushFailure
 
 // hard_depth bounds how deeply containers nest, and with it the stack that

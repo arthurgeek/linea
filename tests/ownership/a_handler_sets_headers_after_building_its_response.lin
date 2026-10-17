@@ -5,7 +5,7 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn cached[P: Allocator](request: http.Request[P]) -> Result[http.Response[P], http.Error[P]] {
     var response = http.text(request, "hello")?

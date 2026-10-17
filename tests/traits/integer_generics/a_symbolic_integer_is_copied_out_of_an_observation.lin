@@ -1,0 +1,23 @@
+import std.mem
+
+// A symbolic Integer is not a built-in scalar, so reading one out of an
+// observation takes no snapshot: `copy(*item)` duplicates it.
+fn total[T: Integer](items: mem.Slice[T]) -> T where carries() {
+    var sum: T = 0
+    for item in copy(items) {
+        sum = sum + *item
+    }
+    sum
+}
+
+fn first[T: Integer](items: mem.Slice[T]) -> T where carries() {
+    match items.get(0) {
+        Some(item) => *item,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let bytes = [UInt8(1), 2]
+    total(bytes.as_slice()) + first(bytes.as_slice())
+}

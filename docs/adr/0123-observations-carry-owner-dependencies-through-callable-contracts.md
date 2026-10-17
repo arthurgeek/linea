@@ -1,7 +1,7 @@
 # 123. Observations carry owner dependencies through callable contracts
 
 Status: Accepted — 2026-09-08
-Extended by [0137](0137-arrays-expose-checked-borrowed-slices.md).
+Extended by [0137](0137-arrays-expose-checked-borrowed-slices.md) and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md).
 Mandatory backing-buffer shape superseded by [0133](0133-empty-typed-storage-needs-no-allocation.md).
 Source-clause spelling superseded by [0132](0132-callable-results-separate-types-from-dependencies.md).
 

@@ -1,0 +1,31 @@
+trait Source {
+    type Item
+
+    // Every implementation's `take` hands out an item that carries nothing,
+    // and a caller holding a `Source` proves it for the type it holds.
+    fn take(inout self: Self, label: Str) -> Self.Item where Self.Item: Owned
+}
+
+struct Counter {
+    next: UInt8,
+}
+
+impl Source for Counter {
+    type Item = UInt8
+
+    fn take(inout self: Self, label: Str) -> UInt8 {
+        self.next += UInt8(label.length())
+        self.next
+    }
+}
+
+// `S.Item` is read through this function's own parameter `S`, so its `where`
+// clause may bound it, and the item it returns carries nothing of `label`.
+fn drain[S: Source](inout source: S, label: Str) -> S.Item where S.Item: Owned {
+    &source.take(label)
+}
+
+fn main() -> UInt8 {
+    var counter = Counter { next = 1 }
+    drain(&counter, "ab")
+}

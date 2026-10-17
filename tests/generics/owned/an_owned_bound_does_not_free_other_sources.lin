@@ -1,0 +1,26 @@
+import std.mem
+
+use mem.Lender
+
+struct Entry[T] {
+    value: T,
+    label: Str,
+}
+
+// `T` is Owned, but `label` is a `Str`: storing it in `entries` keeps the text
+// it views, which the signature does not declare.
+fn record[T: Owned, A: mem.Allocator](inout entries: Vec[Entry[T], A], sink value: T, label: Str) {
+    match &entries.push(.{ value, label = copy(label) }) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 256)
+    var entries: Vec[Entry[UInt8], mem.Handle] = Vec.new_in(arena.handle())
+    record(&entries, 1, "one")
+    let length = entries.length()
+    arena.release()
+    UInt8(length)
+}

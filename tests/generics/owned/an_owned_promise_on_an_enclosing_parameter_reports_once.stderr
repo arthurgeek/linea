@@ -1,0 +1,5 @@
+error[T-Bound]: `Owned` bounds a type parameter of the declaration that writes it, and `I.Item` is not one of `first`'s
+ --> tests/generics/owned/an_owned_promise_on_an_enclosing_parameter_reports_once.lin:9:76
+  |
+9 |     fn first(inout self: Self, label: Str) -> Option[I.Item] where I.Item: Owned {
+  |                                                                            ^^^^^ add `where I.Item: Owned` to the implementation

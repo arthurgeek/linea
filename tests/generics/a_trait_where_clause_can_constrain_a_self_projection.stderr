@@ -2,4 +2,4 @@ error[T-Bound]: `Item` requires `Discardable`, and `Token` does not have that ca
   --> tests/generics/a_trait_where_clause_can_constrain_a_self_projection.lin:15:6
    |
 15 | impl HasItem for Source {
-   |      ^^^^^^^ use a type meeting the capability requirement, or relax the bound
+   |      ^^^^^^^ `Token` is not `Discardable`; pass a value whose type is `Discardable`, or drop the bound

@@ -16,7 +16,7 @@ import std.testing
 // `&router.serve_http(&app, request)` on a router directly. `Writer` is in
 // the prelude, so `write_days` calls `&body.write_str(text)` without a `use`.
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // `weekday` numbers the days from Sunday, and this array names them in that
 // order. `_` in `[Str; _]` takes the length from the literal, here 7.

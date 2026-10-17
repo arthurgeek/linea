@@ -861,11 +861,8 @@ fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: 
 // Append `bytes` to `stored` and return the range they occupy.
 fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PathValueError] where carries() {
     let start = stored.length()
-    for byte in copy(bytes) {
-        match &stored.push(*byte) {
-            Ok(_) => {},
-            Err(_) => return .Err(.Allocation),
-        }
+    if &stored.append_slice(bytes).is_err() {
+        return .Err(.Allocation)
     }
     .Ok(.{ start, end = stored.length() })
 }

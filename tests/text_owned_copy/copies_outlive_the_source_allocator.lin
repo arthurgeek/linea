@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> UInt8 {
     let copied = {

@@ -180,9 +180,7 @@ test fn sort_by_reorders_linear_elements() {
 test fn floats_sort_with_a_comparison_that_places_nan() {
     let nan = Float64(0.0) / 0.0
     defer var readings: Vec[Float64] = Vec.new()
-    for reading in [Float64(2.5), nan, -1.0, 0.5, nan] {
-        &readings.push(reading).unwrap()
-    }
+    &readings.append_slice([Float64(2.5), nan, -1.0, 0.5, nan].as_slice()).unwrap()
     // Put NaN after every number; two NaNs are equal for the sort.
     &readings.sort_by(|left, right| !left.is_nan() && (right.is_nan() || left < right))
     testing.assert(readings[0] == -1.0 && readings[1] == 0.5 && readings[2] == 2.5, "the numbers were not ascending")?
@@ -358,9 +356,7 @@ fn swap_elements[T, A: Allocator](inout values: Vec[T, A], first: UInt64, second
 // Build a vector of the given integers, in order.
 fn sort_test_values(values: Slice[UInt64]) -> Vec[UInt64] {
     var built: Vec[UInt64] = Vec.new()
-    for value in copy(values) {
-        &built.push(*value).unwrap()
-    }
+    &built.append_slice(values).unwrap()
     built
 }
 

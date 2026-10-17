@@ -1,0 +1,26 @@
+import std.mem
+
+// `Vec.append_slice` bounds its elements `Owned` in the library, so the
+// program cannot drop that bound: it can bound its own `U`, or pass elements
+// that own what they hold.
+fn gather[U: Copyable](inout values: Vec[U], items: mem.Slice[U]) -> UInt64 {
+    match &values.append_slice(items) {
+        Ok(_) => values.length(),
+        Err(_) => panic("full"),
+    }
+}
+
+fn main() -> UInt8 {
+    var names: Vec[Str] = Vec.new()
+    let first = ["ada", "lin"]
+    match &names.append_slice(first.as_slice()) {
+        Ok(_) => {},
+        Err(_) => panic("full"),
+    }
+    var bytes: Vec[UInt8] = Vec.new()
+    let more = [UInt8(1), 2]
+    let total = names.length() + gather(&bytes, more.as_slice())
+    names.release()
+    bytes.release()
+    UInt8(total)
+}

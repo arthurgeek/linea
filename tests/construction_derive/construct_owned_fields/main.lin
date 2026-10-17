@@ -4,7 +4,7 @@ import model
 import std.mem
 import std.io
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> UInt8 {
     for stage in UInt8(0)..5 {

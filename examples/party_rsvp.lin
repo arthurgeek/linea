@@ -17,7 +17,7 @@ import std.mem
 import std.testing
 
 use http.Handler
-use mem.Owner
+use mem.Lender
 
 // The most guests one reply may bring.
 let most_guests: UInt32 = 4

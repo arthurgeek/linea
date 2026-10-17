@@ -2,7 +2,7 @@
 
 Status: Accepted — 2026-09-09
 
-Extended by [0125](0125-scalar-value-positions-take-snapshots.md).
+Extended by [0125](0125-scalar-value-positions-take-snapshots.md) and [0221](0221-owned-admits-a-type-that-can-carry-no-borrow.md).
 
 Supersedes the declaration/universe classification decisions in
 [0046](0046-the-universe-of-an-instantiation-is-computed.md) and

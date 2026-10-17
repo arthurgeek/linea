@@ -1,0 +1,13 @@
+error[T-Bound]: `Owned` bounds a type parameter of the declaration that writes it, and `I.Item` is not one of `pour`'s
+  --> tests/generics/owned/an_owned_projection_of_an_implementations_parameter_is_promised_there.lin:23:103
+   |
+23 |     fn pour(inout self: Self, inout values: Vec[I.Item]) -> UInt64 where I.Item: Discardable, I.Item: Owned {
+   |                                                                                                       ^^^^^ add `where I.Item: Owned` to the implementation
+error[T-Bound]: `I.Item` requires `Owned`, and `I.Item` may stand for a type that carries a borrow
+  --> tests/generics/owned/an_owned_projection_of_an_implementations_parameter_is_promised_there.lin:11:20
+   |
+11 |         match iter.extend_owned(&values, &self.items) {
+   |                    ^^^^^^^^^^^^ add `where I.Item: Owned` to the implementation
+  ::: std/iter/collection.lin
+L  | ) -> Result[(), mem.PushFailure[I.Item]] where I.Item: Owned {
+   |                                                ------ required by this `where` clause

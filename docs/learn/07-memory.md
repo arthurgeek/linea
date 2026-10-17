@@ -174,7 +174,7 @@ of memory, handed out piece by piece and taken back in one go.
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // The caller passes the allocator, so the caller decides where the banner lives.
 fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
@@ -216,12 +216,12 @@ allocator. `arena.handle()` answers a `mem.Handle`, an allocator that hands out
 pieces of those bytes, so `banner_in(arena.handle(), title)` builds its string
 inside the arena.
 
-`handle` is the one operation of the `Owner` trait, which is why the program
-has `use mem.Owner`. A **memory owner** holds memory and lends out allocators
-that take from it without owning any of it. An arena is one. `mem.SystemAllocator`
+`handle` is the one operation of the `Lender` trait, which is why the program
+has `use mem.Lender`. A **lender** holds memory and lends out allocators that
+take from it without owning any of it. An arena is one. `mem.SystemAllocator`
 is another, whose handle is the system allocator itself, since the system's
-memory belongs to no value in your program. "Memory owner" names what a value
-does with bytes. It is not a third kind of ownership: who must give a value
+memory belongs to no value in your program. "Lender" names what a value does
+with bytes. It is not a third kind of ownership: who must give a value
 back is a separate question, answered in [Who owns it, and what it points
 into](#who-owns-it-and-what-it-points-into).
 
@@ -271,7 +271,7 @@ This program builds one vector with `new` and one with `new_in`:
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     // `Vec.new()` takes its memory from the system, so `defer var` releases it.
@@ -315,7 +315,7 @@ import std.fmt
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     // `to_owned` copies the text into memory from the system allocator.
@@ -446,7 +446,7 @@ first, rewinding the scratch arena between sections:
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // The caller passes the allocator, so the caller decides where the banner lives.
 fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
@@ -633,7 +633,7 @@ depends on where its memory came from.
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     let fee = 499
@@ -882,7 +882,7 @@ import shout
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
     let arena = mem.Arena.open(mem.system(), size: 256)

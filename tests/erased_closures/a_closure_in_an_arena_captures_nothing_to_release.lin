@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // A closure in an arena may be dropped when the arena is released, so it
 // cannot own a vector from the system allocator, which must be released.

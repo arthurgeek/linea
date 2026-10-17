@@ -5,7 +5,7 @@ import std.testing
 
 use io.ByteWriter
 use log.Sink
-use mem.Owner
+use mem.Lender
 
 // File owns one descriptor. Explicit close reports failure and consumes it;
 // release makes one best-effort close and never flushes buffered output.

@@ -1150,64 +1150,75 @@ impl[T, A: Allocator] Vec[T, A] {
     trav positions(self: Self) = 0..self.len
 }
 
-impl[A: Allocator] Vec[UInt8, A] {
-    // Append a copy of each byte of `bytes` after the live ones, reserving
+impl[T: Copyable + Owned, A: Allocator] Vec[T, A] {
+    // Append a copy of each element of `items` after the live ones, reserving
     // room for all of them first. A refused allocation leaves the vector
-    // unchanged. Bytes carry no observations, so the vector retains nothing
-    // of `bytes`.
-    pub fn append_bytes(inout self: Self, bytes: Slice[UInt8]) -> Result[(), Oom] where carries() {
-        &self.reserve(bytes.length())?
-        let shape: SlotType[UInt8] = .Type
+    // unchanged. The elements are Owned, so the vector keeps nothing of
+    // `items`: the slice's owner may change or go away while the vector lives.
+    pub fn append_slice(inout self: Self, items: Slice[T]) -> Result[(), Oom] {
+        &self.reserve(items.length())?
+        let shape: SlotType[T] = .Type
         let stride = slot_stride(shape)
         let at = self.storage.at
         let extent = self.storage.len
-        for byte in copy(bytes) {
-            slot_put(&self.storage, at, extent, self.len * stride, *byte)
+        for item in copy(items) {
+            slot_put(&self.storage, at, extent, self.len * stride, copy(*item))
             self.len += 1
         }
         .Ok(())
     }
 }
 
-test fn vec_append_bytes_copies_the_elements_after_the_live_ones() {
+test fn vec_append_slice_copies_the_elements_after_the_live_ones() {
     defer var values: Vec[UInt8] = Vec.new()
     &values.push(1).unwrap()
-    &values.append_bytes([UInt8(2), 3, 4].as_slice()).unwrap()
+    &values.append_slice([UInt8(2), 3, 4].as_slice()).unwrap()
     testing.assert_eq(values.as_slice(), [UInt8(1), 2, 3, 4].as_slice(), "the appended elements did not follow the live ones")?
 }
 
-test fn vec_append_bytes_of_nothing_changes_nothing_and_allocates_nothing() {
+test fn vec_append_slice_of_nothing_changes_nothing_and_allocates_nothing() {
     defer var values: Vec[UInt8] = Vec.new()
     let none: [UInt8; 0] = []
-    &values.append_bytes(none.as_slice()).unwrap()
+    &values.append_slice(none.as_slice()).unwrap()
     testing.assert_eq(values.length(), UInt64(0), "an empty append added elements")?
     testing.assert_eq(values.storage.len, UInt64(0), "an empty append allocated")?
 }
 
-test fn vec_append_bytes_keeps_every_byte_across_growth() {
-    defer var source: Vec[UInt8] = Vec.new()
-    for number in UInt8(0)..40 {
-        &source.push(number).unwrap()
+test fn vec_append_slice_keeps_every_element_across_growth() {
+    defer var source: Vec[Int64] = Vec.new()
+    for number in Int64(0)..40 {
+        &source.push(number * -3).unwrap()
     }
-    defer var values: Vec[UInt8] = Vec.new()
+    defer var values: Vec[Int64] = Vec.new()
     &values.push(99).unwrap()
-    &values.append_bytes(source.as_slice()).unwrap()
+    &values.append_slice(source.as_slice()).unwrap()
     testing.assert_eq(values.length(), UInt64(41), "growth changed the length")?
     var intact = values[0] == 99
     for position in UInt64(0)..40 {
-        intact = intact && values[position + 1] == UInt8(position)
+        intact = intact && values[position + 1] == Int64(position) * -3
     }
     testing.assert(intact, "growth changed an element")?
 }
 
-test fn each_allocation_failure_covers_every_growth_step_in_an_append_bytes_sequence() -> Result[(), testing.Failure] {
+// A vector in an arena can carry the arena's borrow, and still keeps nothing
+// of the slice it copied from: the source changes while the vector is live.
+test fn vec_append_slice_in_an_arena_keeps_nothing_of_its_source() {
+    defer let arena = Arena.open(system(), 256)
+    var values: Vec[UInt16, Handle] = Vec.new_in(arena.handle())
+    var readings = [UInt16(410), 415]
+    &values.append_slice(readings.as_slice()).unwrap()
+    readings[0] = 0
+    testing.assert_eq(values.as_slice(), [UInt16(410), 415].as_slice(), "the copies followed their source")?
+}
+
+test fn each_allocation_failure_covers_every_growth_step_in_an_append_slice_sequence() -> Result[(), testing.Failure] {
     let items = [UInt8(1), 2, 3, 4, 5, 6, 7, 8, 9, 10]
     let checked = testing.each_allocation_failure(
         system(),
         [items] |allocator| -> Result[(), Oom] {
             defer var values: Vec[UInt8, RefusingAllocator[SystemAllocator]] = Vec.new_in(allocator)
-            &values.append_bytes(items.as_slice())?
-            &values.append_bytes(items.as_slice())?
+            &values.append_slice(items.as_slice())?
+            &values.append_slice(items.as_slice())?
             return .Ok(())
         },
         Oom.is_refusal,

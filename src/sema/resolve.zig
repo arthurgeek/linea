@@ -2700,6 +2700,10 @@ pub const Bound = union(enum) {
     capability: node.CapabilityRequirement,
     /// The closed family of built-in integer types.
     integer,
+    /// The types whose values can carry no dependency, decided from their
+    /// representation by the same containment answer every ownership check
+    /// reads.
+    owned,
     /// A trait the program declares.
     trait: DeclId,
     /// Neither. A capability that does not exist is not something a program can
@@ -2728,6 +2732,7 @@ pub fn boundNames(ast: *const Ast, tok: TokenId, declared: ?DeclId) Bound {
     if (std.mem.eql(u8, text, "Copyable")) return .{ .capability = .copyable };
     if (std.mem.eql(u8, text, "Discardable")) return .{ .capability = .discardable };
     if (std.mem.eql(u8, text, "Linear")) return .{ .capability = .unrestricted };
+    if (std.mem.eql(u8, text, "Owned")) return .owned;
     return .unknown;
 }
 
@@ -8965,6 +8970,20 @@ const Resolver = struct {
             return DeclId.none;
         }
 
+        // A built-in bound is decided from a type's representation, so no
+        // implementation can declare that a type meets it.
+        if (boundNames(self.ast, tok, null) != .unknown) {
+            try self.sink.addErrorFmt(
+                .t_bound,
+                self.ast.fileOf(tok),
+                self.ast.tokenSpan(tok),
+                "the compiler decides which types meet it; drop this implementation",
+                "`{s}` is a built-in bound, and no implementation can declare it",
+                .{self.ast.tokenText(tok)},
+            );
+            return DeclId.none;
+        }
+
         try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOf(tok),
@@ -9295,7 +9314,7 @@ const Resolver = struct {
                         self.bindings.items[named.index()].used = true;
                         self.reached(bound.named.name, named);
                     },
-                    .capability, .integer => invalid_shape = true,
+                    .capability, .integer, .owned => invalid_shape = true,
                     .unknown => _ = try self.implTraitToken(bound.named.name),
                 }
 
@@ -11256,7 +11275,7 @@ const Resolver = struct {
                 continue;
             }
             switch (boundNames(self.ast, b.named.name, self.traitBound(b.named.name))) {
-                .capability => if (b.named.args.len() != 0) try self.sink.addErrorFmt(
+                .capability, .owned => if (b.named.args.len() != 0) try self.sink.addErrorFmt(
                     .t_bound,
                     self.ast.fileOf(b.named.name),
                     self.ast.tokenSpan(b.named.name),
@@ -12107,7 +12126,7 @@ const Resolver = struct {
                 null;
             return switch (boundNames(self.res.ast, tok, declared)) {
                 .trait => |d| d,
-                .capability, .integer, .unknown => null,
+                .capability, .integer, .owned, .unknown => null,
             };
         }
 

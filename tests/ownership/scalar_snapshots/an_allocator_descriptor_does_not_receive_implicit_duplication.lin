@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn inspect[A: Allocator](_allocator: A) -> UInt8 {
     0

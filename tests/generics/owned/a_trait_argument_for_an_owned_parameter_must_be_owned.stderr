@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Owned`, and `U` may stand for a type that carries a borrow
+  --> tests/generics/owned/a_trait_argument_for_an_owned_parameter_must_be_owned.lin:17:15
+   |
+17 | fn through[C: Conv[U], U](converter: C, count: UInt8) -> U {
+   |               ^^^^ add `Owned` to `U`'s bounds, or drop the bound

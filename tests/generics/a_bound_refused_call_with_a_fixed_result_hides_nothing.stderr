@@ -2,7 +2,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:20:18
    |
 20 |     for _step in count(first) {}
-   |                  ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                  ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-For]: `UInt8` implements no `Sequence`
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:20:18
    |
@@ -12,7 +12,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:22:16
    |
 22 |     let name = label(second)
-   |                ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-UnknownOperation]: `Str` has no operation `shout`
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:23:5
    |
@@ -22,7 +22,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:25:24
    |
 25 |     let total: UInt8 = count(third)
-   |                        ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                        ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-For]: `UInt8` implements no `Sequence`
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:26:18
    |
@@ -32,7 +32,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:28:19
    |
 28 |     var renamed = label(fourth)
-   |                   ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                   ^^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-UnknownOperation]: `Str` has no operation `shout`
   --> tests/generics/a_bound_refused_call_with_a_fixed_result_hides_nothing.lin:30:5
    |

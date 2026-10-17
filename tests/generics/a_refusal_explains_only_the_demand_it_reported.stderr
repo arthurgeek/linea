@@ -7,7 +7,7 @@ error[T-Bound]: `T` requires `Copyable`, and `Pair` does not have that capabilit
   --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:82:35
    |
 82 |     let Pair { left, right: _ } = keep(pair)
-   |                                   ^^^^ use a type meeting the capability requirement, or relax the bound
+   |                                   ^^^^ mark `Pair` `@copyable`, or drop the bound
 error[T-Bound]: `N` requires `Integer`, and `Pair` is not a built-in integer type
   --> tests/generics/a_refusal_explains_only_the_demand_it_reported.lin:84:19
    |

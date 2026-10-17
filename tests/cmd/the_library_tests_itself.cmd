@@ -662,6 +662,8 @@ The library tests itself.
   ok    iter.extend_appends_items_in_source_order
   ok    iter.extend_at_exact_capacity_does_not_allocate_after_exhaustion
   ok    iter.extend_fills_exact_remaining_capacity_before_exhaustion
+  ok    iter.extend_owned_keeps_nothing_of_what_the_iterator_walks
+  ok    iter.extend_owned_returns_the_refused_item_and_keeps_the_prefix
   ok    iter.extend_returns_the_rejected_item_and_resumes_without_recomputing
   ok    iter.filter_into_inner_returns_the_advanced_iterator
   ok    iter.filter_map_changes_the_item_type
@@ -941,7 +943,7 @@ The library tests itself.
   ok    mem.derived_system_allocator_debug_renders_its_case
   ok    mem.derived_system_allocator_equality_compares_its_case
   ok    mem.each_allocation_failure_covers_every_growth_step_in_a_push_sequence
-  ok    mem.each_allocation_failure_covers_every_growth_step_in_an_append_bytes_sequence
+  ok    mem.each_allocation_failure_covers_every_growth_step_in_an_append_slice_sequence
   ok    mem.empty_fd_requests_do_not_access_a_descriptor
   ok    mem.equal_slices_hash_equally
   ok    mem.fd_reads_reject_a_count_past_the_remaining_buffer
@@ -987,9 +989,10 @@ The library tests itself.
   ok    mem.store_traps_past_the_end
   ok    mem.take_leaves_the_default_behind
   ok    mem.typed_slots_move_an_aggregate_to_independent_storage
-  ok    mem.vec_append_bytes_copies_the_elements_after_the_live_ones
-  ok    mem.vec_append_bytes_keeps_every_byte_across_growth
-  ok    mem.vec_append_bytes_of_nothing_changes_nothing_and_allocates_nothing
+  ok    mem.vec_append_slice_copies_the_elements_after_the_live_ones
+  ok    mem.vec_append_slice_in_an_arena_keeps_nothing_of_its_source
+  ok    mem.vec_append_slice_keeps_every_element_across_growth
+  ok    mem.vec_append_slice_of_nothing_changes_nothing_and_allocates_nothing
   ok    mem.vec_byte_buffer_transfer_rejects_a_prefix_past_the_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_an_empty_prefix_and_an_empty_buffer
   ok    mem.vec_byte_buffer_transfers_preserve_storage_without_allocator_headroom
@@ -1292,4 +1295,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1289 passed, 0 failed
+  1292 passed, 0 failed

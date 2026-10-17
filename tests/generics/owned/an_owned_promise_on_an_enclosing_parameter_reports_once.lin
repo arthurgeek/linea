@@ -1,0 +1,22 @@
+// A method cannot promise `Owned` for its implementation's `I.Item`; the
+// refused promise is the one mistake, so the body is not checked again as if
+// the promise held.
+struct Wrapper[I] {
+    it: I,
+}
+
+impl[I: Iterator] Wrapper[I] {
+    fn first(inout self: Self, label: Str) -> Option[I.Item] where I.Item: Owned {
+        if label.length() > 0 {
+            &self.it.next()
+        } else {
+            &self.it.next()
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var wrapper: Wrapper[Range[UInt8]] = .{ it = UInt8(0)..3 }
+    let first = &wrapper.first("x")
+    first.unwrap()
+}

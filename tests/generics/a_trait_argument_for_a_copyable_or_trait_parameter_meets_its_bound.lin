@@ -1,0 +1,48 @@
+// A trait's parameter bounded by a capability or a trait is checked at a
+// bound's arguments as a type's is, and its help names the same edit.
+trait Dup[T: Copyable] {
+    fn dup(self: Self, value: T) -> T where borrows(value)
+}
+
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+trait Render[T: Show] {
+    fn render(self: Self, value: T) -> UInt8
+}
+
+struct Plain {
+    n: UInt8,
+}
+
+impl Show for UInt8 {
+    fn show(self: Self) -> UInt8 {
+        self
+    }
+}
+
+impl Dup[UInt8] for Plain {
+    fn dup(self: Self, value: UInt8) -> UInt8 where borrows(value) {
+        value + self.n
+    }
+}
+
+impl Render[UInt8] for Plain {
+    fn render(self: Self, value: UInt8) -> UInt8 {
+        value.show() + self.n
+    }
+}
+
+fn twice[D: Dup[U], U](chooser: D, value: U) -> U where borrows(value) {
+    chooser.dup(value)
+}
+
+fn drawn[X: Render[U], U](renderer: X, value: U) -> UInt8 {
+    renderer.render(value)
+}
+
+fn main() -> UInt8 {
+    let plain = Plain { n = 1 }
+    twice(plain, UInt8(2)) + drawn(plain, UInt8(3))
+}

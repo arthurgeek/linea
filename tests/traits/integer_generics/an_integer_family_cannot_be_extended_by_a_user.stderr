@@ -1,8 +1,8 @@
-error[N-Undefined]: undefined name `Integer`
+error[T-Bound]: `Integer` is a built-in bound, and no implementation can declare it
  --> tests/traits/integer_generics/an_integer_family_cannot_be_extended_by_a_user.lin:3:6
   |
 3 | impl Integer for Number {}
-  |      ^^^^^^^ no trait with this name is declared here
+  |      ^^^^^^^ the compiler decides which types meet it; drop this implementation
 error[N-Unused]: `Number` is never used
  --> tests/traits/integer_generics/an_integer_family_cannot_be_extended_by_a_user.lin:1:8
   |

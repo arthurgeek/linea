@@ -2,7 +2,7 @@ import std.mem
 
 use mem.Arena
 use mem.Buffer
-use mem.Owner
+use mem.Lender
 use mem.system
 
 fn abandon[A: Allocator](sink bytes: Buffer[A]) -> UInt8 where Buffer[A]: Discardable {

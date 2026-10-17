@@ -3,7 +3,7 @@ import std.hash
 import std.release
 import std.testing
 
-use mem.Owner
+use mem.Lender
 use hash.Hash
 use hash.Key
 

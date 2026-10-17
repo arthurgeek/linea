@@ -1,7 +1,7 @@
 import std.mem
 
 use mem.Allocator
-use mem.Owner
+use mem.Lender
 
 // `with` is generic over where its memory comes from and takes the system
 // allocator when a call passes none.

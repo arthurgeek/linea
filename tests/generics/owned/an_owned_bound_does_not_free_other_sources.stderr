@@ -1,0 +1,5 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/generics/owned/an_owned_bound_does_not_free_other_sources.lin:13:11
+   |
+13 |     match &entries.push(.{ value, label = copy(label) }) {
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources

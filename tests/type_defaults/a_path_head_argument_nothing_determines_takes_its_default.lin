@@ -1,7 +1,7 @@
 import std.mem
 
 use mem.Allocator
-use mem.Owner
+use mem.Lender
 
 @derive(Release)
 struct Shelf[S = UInt8, A: Allocator = mem.SystemAllocator] {

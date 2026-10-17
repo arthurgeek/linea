@@ -1,0 +1,38 @@
+import std.iter
+
+// `I` belongs to the implementation, so `I.Item` is promised `Owned` in the
+// implementation's `where` clause, where every member relies on it.
+struct Filler[I] {
+    items: I,
+}
+
+impl[I: Iterator] Filler[I] {
+    fn fill(inout self: Self, inout values: Vec[I.Item]) -> UInt64 where I.Item: Discardable {
+        match iter.extend_owned(&values, &self.items) {
+            Ok(_) => values.length(),
+            Err(_) => 0,
+        }
+    }
+}
+
+struct Pourer[I] {
+    items: I,
+}
+
+impl[I: Iterator] Pourer[I] {
+    fn pour(inout self: Self, inout values: Vec[I.Item]) -> UInt64 where I.Item: Discardable, I.Item: Owned {
+        match iter.extend_owned(&values, &self.items) {
+            Ok(_) => values.length(),
+            Err(_) => 0,
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    var filler: Filler[Range[UInt8]] = .{ items = UInt8(0)..3 }
+    var pourer: Pourer[Range[UInt8]] = .{ items = UInt8(0)..3 }
+    var values: Vec[UInt8] = Vec.new()
+    let filled = &filler.fill(&values) + &pourer.pour(&values)
+    values.release()
+    UInt8(filled)
+}

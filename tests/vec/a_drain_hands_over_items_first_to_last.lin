@@ -1,7 +1,7 @@
 import std.io
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // Items hand over first to last. A `break` abandons the rest of the drain,
 // which is allowed because arena-held numbers need no settling.

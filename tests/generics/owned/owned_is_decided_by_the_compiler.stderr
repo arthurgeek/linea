@@ -1,0 +1,5 @@
+error[T-Bound]: `Owned` is a built-in bound, and no implementation can declare it
+ --> tests/generics/owned/owned_is_decided_by_the_compiler.lin:5:6
+  |
+5 | impl Owned for Label {}
+  |      ^^^^^ the compiler decides which types meet it; drop this implementation

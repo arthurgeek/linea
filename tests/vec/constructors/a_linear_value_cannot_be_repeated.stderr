@@ -2,4 +2,4 @@ error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capabil
   --> tests/vec/constructors/a_linear_value_cannot_be_repeated.lin:10:24
    |
 10 |     let repeated = Vec.filled(count: 2, value: ticket).unwrap()
-   |                        ^^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                        ^^^^^^ mark `Ticket` `@copyable`

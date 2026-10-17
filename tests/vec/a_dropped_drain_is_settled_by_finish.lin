@@ -1,6 +1,6 @@
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // A drain that still owns linear tickets must be finished; handing it to
 // `iterate` gives the same drain back and settles nothing.
