@@ -1,7 +1,7 @@
 import std.mem
 import std.testing
 
-use mem.Owner
+use mem.Lender
 
 // Text copied into storage of its own with a NUL after it, which is what a C
 // function taking a `const char *` reads. `text()` lends it to C.

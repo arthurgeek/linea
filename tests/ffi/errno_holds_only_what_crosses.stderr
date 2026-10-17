@@ -12,4 +12,4 @@ error[T-Bound]: `R` requires `Copyable`, and `Session` does not have that capabi
   --> tests/ffi/errno_holds_only_what_crosses/names/names.lin:15:33
    |
 15 | extern fn session_open() -> ffi.Errno[Session]
-   |                                 ^^^^^ use a type meeting the capability requirement, or relax the bound
+   |                                 ^^^^^ mark `Session` `@copyable`

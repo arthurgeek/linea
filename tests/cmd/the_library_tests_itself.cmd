@@ -1314,4 +1314,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1292 passed, 0 failed
+  1311 passed, 0 failed

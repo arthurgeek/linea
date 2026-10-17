@@ -1,7 +1,7 @@
 import std.ffi
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 // C reads a NUL-terminated string, which `ffi.CString` holds.
 extern fn measure_length(text: ffi.CText) -> UInt64

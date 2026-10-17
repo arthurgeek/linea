@@ -3,10 +3,3 @@ error[T-Bound]: `T` requires `Discardable`, and `Mid[Key]` does not have that ca
    |
 20 | fn take(_h: Held[Mid[Key]]) -> UInt8 {
    |             ^^^^ `Mid[Key]` is not `Discardable`; pass a value whose type is `Discardable`, or drop the bound
-error[O-Leak]: this linear `Held[Mid[Key]]` is never settled
-  --> tests/generics/a_discardable_bound_reads_nested_component_obligations.lin:25:10
-   |
-25 |     take(.{ h = .{ b = .{ v = Key.Forged(1) } } })
-   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ nothing can take what this yields
-   |
-   = help: bind it with `let`, or give it to something that takes it
