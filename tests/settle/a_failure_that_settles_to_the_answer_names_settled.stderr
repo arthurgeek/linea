@@ -2,7 +2,7 @@ error[T-TryAnswer]: this `?` may fail with `mem.PushFailure[Alarm]`, and no `Fro
   --> tests/settle/a_failure_that_settles_to_the_answer_names_settled.lin:26:5
    |
 26 |     &alarms.push(Alarm { minute })?
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: implement `From[mem.PushFailure[Alarm]]` for `Hour`, or convert it before `?` with `.map_err(…)`
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `?` converts what an error says through `From`, and this failure also holds a value it would give up
    |
    = help: call `.settled()` before `?`: it releases what `mem.PushFailure[Alarm]` hands back and keeps its reason, `mem.Oom`
 error[T-TryAnswer]: this `?` may fail with `mem.PushFailure[Alarm]`, and no `From[mem.PushFailure[Alarm]] for Day` implementation converts it to the function's error type

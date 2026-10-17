@@ -2,6 +2,6 @@ error[T-TryAnswer]: this `?` may fail with `mem.PushFailure[String[mem.SystemAll
  --> tests/settle/a_refused_push_is_not_given_up_in_a_handler.lin:7:5
   |
 7 |     &items.push(item)?
-  |     ^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `http.Error[mem.SystemAllocator]` and `From[mem.PushFailure[String[mem.SystemAllocator]]]`; wrap it in a type this program declares that implements `From[mem.PushFailure[String[mem.SystemAllocator]]]`, or convert it before `?` with `.map_err(…)`
+  |     ^^^^^^^^^^^^^^^^^^ `?` converts what an error says through `From`, and this failure also holds a value it would give up
   |
   = help: call `.settled()` before `?`: it releases what `mem.PushFailure[String[mem.SystemAllocator]]` hands back and keeps its reason, `mem.Oom`

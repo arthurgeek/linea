@@ -16960,32 +16960,37 @@ const Checker = struct {
             "this `?` may fail with `{s}`, and no `{s} for {s}` implementation converts it to the function's error type",
             .{ failure_name, if (self.from_decl) |from| try self.traitInstanceName(from, &.{failure}) else try std.fmt.allocPrint(self.sink.arena, "From[{s}]", .{failure_name}), try self.typeName(answered) },
         );
-        // The edit is `editFor`'s, the one a refused bound names: implementing
-        // the conversion where this program owns a side of it, and otherwise
-        // why it cannot and the wrapper it can declare instead.
-        const edit: Edit = if (self.from_decl) |from|
-            try self.editFor(from, &.{failure}, answered, false, 0)
+        // A failure that settles to a reason `?` can hand on is fixed by
+        // settling it, and that is the one answer: wrapping or mapping it
+        // would keep or drop what it holds without saying so.
+        const settles_to: ?TypeId = if (try self.settledReason(failure)) |reason|
+            if (reason == answered or try self.errorConversion(reason, answered) != null) reason else null
         else
-            .{ .edit = "implement the conversion" };
-        const labels = try self.sink.arena.alloc(Label, 1);
-        labels[0] = .{
-            .file = self.ast.fileOfExpr(id),
-            .span = self.ast.exprSpan(id),
-            .message = try std.fmt.allocPrint(self.sink.arena, "`?` converts a different error through `{s}`: {s}", .{
-                if (self.from_decl) |from| try self.traitInstanceName(from, &.{}) else "From",
-                try self.unmetLabel(.{ .otherwise = "convert it before `?` with `.map_err(…)`", .another_value = null }, edit),
-            }),
-            .style = .primary,
-        };
-        const notes: []const []const u8 = if (try self.settledReason(failure)) |reason|
-            if (reason == answered or try self.errorConversion(reason, answered) != null)
-                try self.sink.arena.dupe([]const u8, &.{try std.fmt.allocPrint(
-                    self.sink.arena,
-                    "call `.settled()` before `?`: it releases what `{s}` hands back and keeps its reason, `{s}`",
-                    .{ failure_name, try self.typeName(reason) },
-                )})
+            null;
+        const trait_name = if (self.from_decl) |from| try self.traitInstanceName(from, &.{}) else "From";
+        const label = if (settles_to != null)
+            try std.fmt.allocPrint(self.sink.arena, "`?` converts what an error says through `{s}`, and this failure also holds a value it would give up", .{trait_name})
+        else label: {
+            // The edit is `editFor`'s, the one a refused bound names:
+            // implementing the conversion where this program owns a side of
+            // it, and otherwise why it cannot and the wrapper it can declare.
+            const edit: Edit = if (self.from_decl) |from|
+                try self.editFor(from, &.{failure}, answered, false, 0)
             else
-                &.{}
+                .{ .edit = "implement the conversion" };
+            break :label try std.fmt.allocPrint(self.sink.arena, "`?` converts a different error through `{s}`: {s}", .{
+                trait_name,
+                try self.unmetLabel(.{ .otherwise = "convert it before `?` with `.map_err(…)`", .another_value = null }, edit),
+            });
+        };
+        const labels = try self.sink.arena.alloc(Label, 1);
+        labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = label, .style = .primary };
+        const notes: []const []const u8 = if (settles_to) |reason|
+            try self.sink.arena.dupe([]const u8, &.{try std.fmt.allocPrint(
+                self.sink.arena,
+                "call `.settled()` before `?`: it releases what `{s}` hands back and keeps its reason, `{s}`",
+                .{ failure_name, try self.typeName(reason) },
+            )})
         else
             &.{};
         self.sink.add(.{ .severity = .err, .code = .t_try_answer, .message = message, .labels = labels, .notes = notes }) catch {};

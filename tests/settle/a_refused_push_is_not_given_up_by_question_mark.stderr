@@ -2,6 +2,6 @@ error[T-TryAnswer]: this `?` may fail with `mem.PushFailure[String[mem.SystemAll
  --> tests/settle/a_refused_push_is_not_given_up_by_question_mark.lin:7:5
   |
 7 |     &names.push(name)?
-  |     ^^^^^^^^^^^^^^^^^^ `?` converts a different error through `From`: the library declares both `mem.Oom` and `From[mem.PushFailure[String[mem.SystemAllocator]]]`; wrap it in a type this program declares that implements `From[mem.PushFailure[String[mem.SystemAllocator]]]`, or convert it before `?` with `.map_err(…)`
+  |     ^^^^^^^^^^^^^^^^^^ `?` converts what an error says through `From`, and this failure also holds a value it would give up
   |
   = help: call `.settled()` before `?`: it releases what `mem.PushFailure[String[mem.SystemAllocator]]` hands back and keeps its reason, `mem.Oom`
