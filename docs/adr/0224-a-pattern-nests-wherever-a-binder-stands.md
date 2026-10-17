@@ -53,8 +53,9 @@ selects. A `match read`, `let read` or lending walk lends each binder exactly
 that part: nothing is copied, a scalar still snapshots, other duplication still
 needs `copy`. There are no partial moves and no per-binder modes.
 
-**One usefulness check answers every coverage question.** A `match` is checked
-with the usefulness algorithm over its arms' pattern rows: an arm no value
+**One usefulness pass answers every coverage question.** A `match` is checked
+with the usefulness algorithm over its arms' pattern rows, answered for every
+arm in one pass: an arm no value
 reaches is [T-Unreachable], a `match` some value escapes is [T-Cover] and names
 that value as a pattern, and a pattern in a `let`, `let read`, `let … else`,
 `for` or lambda parameter must match every value of its type ([T-Refutable]).

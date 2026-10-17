@@ -97,11 +97,7 @@ const Fold = union(enum) {
 
 /// The most variants an enum may declare.
 ///
-/// Exhaustiveness is decided with a bit per variant in one machine word, and
-/// that word is what fixes the number. A limit discovered by a shift running
-/// off the end is a crash on well-formed source; stated, it is a rule with a
-/// diagnostic, and the number is in one place rather than in each of the three
-/// that read the mask.
+/// How many variants an enum may declare ([T-Variants]).
 pub const max_variants = 64;
 
 /// Checks a tree against its declared types.
@@ -765,10 +761,8 @@ fn typecheckInternal(
         if (ast.declTag(d) != .enum_) continue;
 
         const variants = ast.declVariants(d);
-        // Exhaustiveness is decided with a bit per variant in one machine
-        // word, so a sixty-fifth has nowhere to be recorded. Reported here,
-        // where the enum is declared, rather than discovered by a shift
-        // running off the end of the word at the `match` that reads it.
+        // [T-Variants] is a rule about the declaration, so it is reported
+        // where the enum is declared.
         if (variants.len > max_variants) {
             try c.sink.addErrorFmt(
                 .t_variants,
@@ -13426,7 +13420,9 @@ const Checker = struct {
     fn checkLiteralPattern(self: *Checker, pattern: ExprId, of: TypeId) std.mem.Allocator.Error!bool {
         _ = self.record(pattern, of);
         if (of == .poison) return false;
-        const settled = try self.receiverType(of, self.literalSite(pattern));
+        // A column whose type is already an integer compares as it is; only
+        // an open one is settled here, where the literal compares it.
+        const settled = if (of.bounds() != null) of else try self.receiverType(of, self.literalSite(pattern));
         _ = self.record(pattern, settled);
         switch (self.ast.exprTag(pattern)) {
             .int_literal, .negate, .range => {},
@@ -13772,13 +13768,15 @@ const Checker = struct {
         var coverage: PatternCoverage = .{ .context = .{ .checker = self }, .arena = state.allocator() };
         const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
         row[0] = .{ .pattern = try self.coveragePattern(coverage.arena, pattern, of), .ty = of };
-        const missed = coverage.missing(&.{row}, of) catch |err| switch (err) {
+        const outcome = coverage.check(&.{row}, of) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.TooIntricate => {
                 _ = self.report(.t_cover_limit, pattern, "this pattern is too intricate to check", .{}, "take it apart in more than one step");
                 return;
             },
-        } orelse return;
+        };
+        if (outcome.missing.len == 0) return;
+        const missed = outcome.missing[0];
         var text: std.ArrayList(u8) = .empty;
         defer text.deinit(self.gpa);
         try self.witnessText(missed, &text);
@@ -13801,11 +13799,20 @@ const Checker = struct {
         checker: *Checker,
         pub const Ty = TypeId;
 
+        /// The type coverage splits a column of `ty` by: an observation's
+        /// referent, and an open type's settlement. Only the head is
+        /// settled, since each part is asked about where its own column is
+        /// split, so a column costs the same at every depth.
         fn settled(self: PatternTypes, ty: TypeId) TypeId {
-            var t = self.checker.builder.resolveOpen(ty, &self.checker.open_types) catch ty;
+            var t = ty;
             while (true) switch (self.checker.builder.get(t)) {
                 .borrow => |observation| t = observation.referent,
                 .open_integer => return TypeId.literal_default,
+                .open_type => {
+                    const resolved = self.checker.builder.resolveOpen(t, &self.checker.open_types) catch return t;
+                    if (resolved == t) return t;
+                    t = resolved;
+                },
                 else => return t,
             };
         }
@@ -13814,7 +13821,7 @@ const Checker = struct {
             const t = self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
             return switch (self.checker.builder.get(t)) {
-                .enum_ => |e| if (e.variant_count > max_variants) .opaque_ else .{ .variants = e.variant_count },
+                .enum_ => |e| .{ .variants = e.variant_count },
                 .struct_ => .{ .product = self.checker.builder.fieldCount(t) },
                 .newtype => .{ .product = 1 },
                 else => .opaque_,
@@ -13950,26 +13957,6 @@ const Checker = struct {
         }
     }
 
-    /// A witness as a pattern, so a question asked again can be told a value
-    /// was already named.
-    fn witnessPattern(arena: std.mem.Allocator, w: PatternCoverage.Witness) std.mem.Allocator.Error!*const usefulness.Pattern {
-        const out = try arena.create(usefulness.Pattern);
-        out.* = switch (w.shape) {
-            .wild => return &usefulness.wild,
-            .integers => |iv| .{ .integers = iv },
-            .variant => |v| blk: {
-                const args = try arena.alloc(*const usefulness.Pattern, v.args.len);
-                for (v.args, 0..) |a, i| args[i] = try witnessPattern(arena, a);
-                break :blk .{ .variant = .{ .index = v.index, .args = args } };
-            },
-            .product => |parts| blk: {
-                const args = try arena.alloc(*const usefulness.Pattern, parts.len);
-                for (parts, 0..) |a, i| args[i] = try witnessPattern(arena, a);
-                break :blk .{ .product = args };
-            },
-        };
-        return out;
-    }
 
     /// Exhaustive on purpose. A statement kind added later has to be given an
     /// answer here rather than falling through a chain of tests and reaching
@@ -30882,13 +30869,14 @@ const Checker = struct {
         defer arms.waiting.deinit(self.gpa);
         var poisoned = scrutinee == .poison;
 
-        // The arms checked so far, as coverage reads them. Built in an arena
-        // sized by this match's patterns and freed with it.
+        // The sound arms, as coverage reads them, and the patterns they came
+        // from. Built in an arena sized by this match's patterns and freed
+        // with it.
         var state = std.heap.ArenaAllocator.init(self.gpa);
         defer state.deinit();
         var coverage: PatternCoverage = .{ .context = .{ .checker = self }, .arena = state.allocator() };
         var rows: std.ArrayList(PatternCoverage.Row) = .empty;
-        var coverable = scrutinee != .poison;
+        var row_patterns: std.ArrayList(ExprId) = .empty;
 
         var i: usize = 0;
         while (i + 1 < m.args.len) : (i += 2) {
@@ -30903,23 +30891,11 @@ const Checker = struct {
 
             if (!sound) {
                 if (self.ast.exprTag(pattern) != .err) poisoned = true;
-            } else if (coverable) {
+            } else if (scrutinee != .poison) {
                 const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
                 row[0] = .{ .pattern = try self.coveragePattern(coverage.arena, pattern, scrutinee), .ty = scrutinee };
-                if (coverage.useful(rows.items, row)) |reached| {
-                    if (reached == null) {
-                        _ = self.report(.t_unreachable, pattern, "no value reaches this arm", .{}, "the arms before it take every value it would");
-                        poisoned = true;
-                    }
-                    try rows.append(coverage.arena, row);
-                } else |err| switch (err) {
-                    error.OutOfMemory => return error.OutOfMemory,
-                    error.TooIntricate => {
-                        self.reportTooIntricate(id);
-                        coverable = false;
-                        poisoned = true;
-                    },
-                }
+                try rows.append(coverage.arena, row);
+                try row_patterns.append(coverage.arena, pattern);
             }
 
             if (try self.matchArmBody(id, &arms, pattern, m.args[i + 1], lends)) |body| {
@@ -30933,24 +30909,36 @@ const Checker = struct {
         try self.checkWaitingArms(id, &arms, lends);
         if (arms.poisoned) poisoned = true;
 
-        // Only where the arms themselves were sound: a pattern that named no
-        // variant leaves the cover short as a consequence, and reporting that
-        // as well describes one mistake twice.
-        if (!poisoned and coverable) switch (try self.uncovered(&coverage, &rows, scrutinee)) {
-            .covered => {},
-            .too_intricate => {
+        // One pass answers both questions: which arms some value reaches, and
+        // which values no arm takes. The second is reported only where the
+        // arms themselves were sound: a pattern that named no variant leaves
+        // the cover short as a consequence, and reporting that as well
+        // describes one mistake twice.
+        if (scrutinee != .poison) {
+            const outcome: ?PatternCoverage.Outcome = coverage.check(rows.items, scrutinee) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.TooIntricate => null,
+            };
+            if (outcome) |o| {
+                for (o.reached, row_patterns.items) |reached, pattern| {
+                    if (reached) continue;
+                    _ = self.report(.t_unreachable, pattern, "no value reaches this arm", .{}, "the arms before it take every value it would");
+                    poisoned = true;
+                }
+                if (!poisoned and o.missing.len > 0) {
+                    const missing = try self.witnessList(o.missing);
+                    defer self.gpa.free(missing);
+                    _ = if (missing.len == 0)
+                        self.report(.t_cover, id, "this `match` does not cover every variant", .{}, "add the missing arms, or a `_`")
+                    else
+                        self.report(.t_cover, id, "this `match` does not cover {s}", .{missing}, "add the missing arms, or a `_`");
+                    poisoned = true;
+                }
+            } else {
                 self.reportTooIntricate(id);
                 poisoned = true;
-            },
-            .missing => |missing| {
-                defer self.gpa.free(missing);
-                _ = if (missing.len == 0)
-                    self.report(.t_cover, id, "this `match` does not cover every variant", .{}, "add the missing arms, or a `_`")
-                else
-                    self.report(.t_cover, id, "this `match` does not cover {s}", .{missing}, "add the missing arms, or a `_`");
-                poisoned = true;
-            },
-        };
+            }
+        }
 
         if (poisoned) return self.record(id, .poison);
         var completes = false;
@@ -30972,54 +30960,24 @@ const Checker = struct {
     /// are more.
     const max_named_witnesses = 8;
 
-    /// What a `match`'s arms leave untaken.
-    const Uncovered = union(enum) {
-        covered,
-        /// The question outgrew the budget before it was answered.
-        too_intricate,
-        /// The values untaken, as patterns quoted and separated for a report.
-        /// Empty where the one value untaken is anything at all, which names
-        /// no variant.
-        missing: []u8,
-    };
-
-    /// What the arms leave untaken. Each value found is added as an arm, so
-    /// the next question finds a different one.
-    fn uncovered(
-        self: *Checker,
-        coverage: *PatternCoverage,
-        rows: *std.ArrayList(PatternCoverage.Row),
-        scrutinee: TypeId,
-    ) std.mem.Allocator.Error!Uncovered {
+    /// The values no arm takes, as patterns quoted and separated for a
+    /// report. Empty where the one value untaken is anything at all, which
+    /// names no variant.
+    fn witnessList(self: *Checker, missing: []const PatternCoverage.Witness) std.mem.Allocator.Error![]u8 {
         var text: std.ArrayList(u8) = .empty;
         errdefer text.deinit(self.gpa);
-        var named: usize = 0;
-        while (true) {
-            const missed = (coverage.missing(rows.items, scrutinee) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                // Once a value is named the report stands; a later question
-                // past the budget only means no further value is named.
-                error.TooIntricate => if (named == 0) return .too_intricate else break,
-            }) orelse break;
-            if (named == 0 and missed.isWild()) return .{ .missing = try text.toOwnedSlice(self.gpa) };
-            if (named == max_named_witnesses) {
+        if (missing[0].isWild()) return text.toOwnedSlice(self.gpa);
+        for (missing, 0..) |w, n| {
+            if (n == max_named_witnesses) {
                 try text.appendSlice(self.gpa, ", and more");
                 break;
             }
-            if (named > 0) try text.appendSlice(self.gpa, ", ");
+            if (n > 0) try text.appendSlice(self.gpa, ", ");
             try text.append(self.gpa, '`');
-            try self.witnessText(missed, &text);
+            try self.witnessText(w, &text);
             try text.append(self.gpa, '`');
-            named += 1;
-            const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
-            row[0] = .{ .pattern = try witnessPattern(coverage.arena, missed), .ty = scrutinee };
-            try rows.append(coverage.arena, row);
         }
-        if (named == 0) {
-            text.deinit(self.gpa);
-            return .covered;
-        }
-        return .{ .missing = try text.toOwnedSlice(self.gpa) };
+        return text.toOwnedSlice(self.gpa);
     }
 
     fn reportTooIntricate(self: *Checker, id: ExprId) void {
@@ -37091,3 +37049,4 @@ test "a runtime scalar is spelled as the Linea type written for it" {
     try testing.expectEqualStrings("UInt64", runtimeScalarName(.u64));
     try testing.expectEqualStrings("()", runtimeScalarName(.unit));
 }
+

@@ -1,28 +1,35 @@
-//! Which values a list of patterns leaves untaken.
+//! Which values a list of patterns leaves untaken, and which of them no value
+//! reaches.
 //!
-//! One question answers every coverage rule: whether a row of patterns is
-//! *useful* after a matrix of earlier rows, meaning some value matches the row
-//! and no earlier one. A `match` arm that is not useful after the arms before
-//! it is [T-Unreachable]; a wildcard that is useful after every arm names a
-//! value the `match` leaves untaken ([T-Cover]); and a pattern a wildcard is
-//! useful after misses a value ([T-Refutable]). The answer carries a witness,
-//! a pattern for such a value, which is what a diagnostic prints.
+//! Every coverage rule asks about *usefulness*: a row of patterns is useful
+//! when some value matches it and no row before it. A `match` arm that is not
+//! useful is [T-Unreachable]; a wildcard row after every arm is useful exactly
+//! when some value no arm takes exists ([T-Cover]); and a wildcard after a
+//! single pattern is useful when that pattern misses a value ([T-Refutable]).
+//! The answer for the wildcard row carries witnesses, patterns for such
+//! values, which is what a diagnostic prints.
 //!
-//! The algorithm is Maranget's ("Warnings for pattern matching", 2007). A
-//! column is split by the constructors its type has: an enum's variants, the
-//! one constructor of a struct, tuple or newtype, and for an integer the
-//! intervals the column's literals and ranges cut its range into. A type with
-//! no constructors a pattern can name -- text, a type parameter -- is matched
-//! only by a wildcard.
+//! The algorithm is Maranget's ("Warnings for pattern matching", 2007),
+//! answered for every row in one pass, as rustc does. A column is split by the
+//! constructors its type has: an enum's variants, the one constructor of a
+//! struct, tuple or newtype, and for an integer the intervals its rows'
+//! literals and ranges cut its range into. Each constructor a row names gets a
+//! branch holding the rows that match it, a row with a wildcard there going to
+//! every branch; constructors no row names share one branch of the wildcard
+//! rows. A type with no constructors a pattern can name -- text, a type
+//! parameter -- is matched only by a wildcard. A row is useful when, in some
+//! branch, it is the first row left once every column is consumed.
 //!
-//! Deciding whether nested patterns cover a type is NP-complete, so the work
-//! of one question is bounded by a budget of matrix cells rather than by an
-//! argument about the patterns written. A matrix whose rows never put a
-//! wildcard where another row names a constructor follows one path per row,
-//! and costs the size of its patterns per question. A wildcard over a column
-//! whose constructors are all named branches once per constructor; a column
-//! naming only some of them does not branch, because every absent constructor
-//! answers alike. What is left is bounded by `max_cells`.
+//! **Cost.** A row whose head names a constructor goes to that constructor's
+//! branch alone, and a row with a wildcard there goes to every branch of the
+//! column; the cells copied into branches are the work. So a matrix whose rows
+//! never put a wildcard where another row names a constructor costs the size
+//! of its patterns, and each wildcard row adds one copy per constructor its
+//! column splits into. Integer rows are bucketed by binary search over the
+//! sorted cut points, so an integer column costs its rows times the logarithm
+//! of its cut points plus the copies. Deciding whether nested patterns cover a
+//! type is NP-complete, so the copies are bounded by a budget, `max_cells`,
+//! rather than by an argument about the patterns written.
 
 const std = @import("std");
 const testing = std.testing;
@@ -87,10 +94,10 @@ pub fn Coverage(comptime Context: type) type {
         pub const Ty = Context.Ty;
 
         context: Context,
-        /// Where every matrix and witness is built; freed by the caller when
+        /// Where every branch and witness is built; freed by the caller when
         /// the construct is checked.
         arena: std.mem.Allocator,
-        /// The cells built so far, held against `max_cells`.
+        /// The cells built so far, held against `limit`.
         cells: usize = 0,
         limit: usize = max_cells,
 
@@ -98,6 +105,10 @@ pub fn Coverage(comptime Context: type) type {
 
         pub const Cell = struct { pattern: *const Pattern, ty: Ty };
         pub const Row = []const Cell;
+
+        /// The most values the wildcard row's witnesses name; past them a
+        /// report says there are more.
+        pub const max_witnesses = 9;
 
         /// A value the rows leave untaken, as a pattern.
         pub const Witness = struct {
@@ -121,121 +132,194 @@ pub fn Coverage(comptime Context: type) type {
             }
         };
 
-        /// A value `row` matches and no row of `rows` does, or null where
-        /// there is none.
-        pub fn useful(self: *Self, rows: []const Row, row: Row) Error!?[]const Witness {
-            return self.usefulAt(rows, row);
-        }
+        /// What one pass answers.
+        pub const Outcome = struct {
+            /// Whether each row is useful after the rows before it.
+            reached: []const bool,
+            /// Values of the queried type no row matches, at most
+            /// `max_witnesses`, or none where there was no query or every
+            /// value is matched.
+            missing: []const Witness,
+        };
 
-        /// A value of `ty` no row of `rows`, each a single pattern, matches.
-        pub fn missing(self: *Self, rows: []const Row, ty: Ty) Error!?Witness {
-            const q = try self.arena.alloc(Cell, 1);
-            q[0] = .{ .pattern = &wild, .ty = ty };
-            const found = try self.usefulAt(rows, q) orelse return null;
-            return found[0];
-        }
+        const Ref = struct { cells: []const Cell, id: u32 };
 
-        fn usefulAt(self: *Self, rows: []const Row, q: Row) Error!?[]const Witness {
-            if (q.len == 0) return if (rows.len == 0) &.{} else null;
-            const head = q[0];
-            switch (head.pattern.*) {
-                .wild => return self.usefulWild(rows, q),
-                .variant => |v| return self.usefulCtor(rows, q, .{ .variant = v.index }),
-                .product => return self.usefulCtor(rows, q, .product),
-                .integers => |range| {
-                    const atoms = try self.split(rows, head.ty, range);
-                    for (atoms) |atom| {
-                        if (!range.contains(atom)) continue;
-                        if (try self.usefulCtor(rows, q, .{ .integers = atom })) |w| return w;
-                    }
-                    return null;
-                },
+        /// One step down the column the pass is splitting: the constructor a
+        /// branch matched, or the values no row names, which the wildcard rows
+        /// alone take.
+        const Step = struct {
+            ty: Ty,
+            choice: union(enum) {
+                ctor: Ctor,
+                /// What a value the rows name none of may be, as witnesses.
+                absent: []const Witness,
+            },
+        };
+
+        const Pass = struct {
+            reached: []bool,
+            query: ?u32,
+            missing: std.ArrayList(Witness) = .empty,
+            path: std.ArrayList(Step) = .empty,
+        };
+
+        /// Answers, in one pass, which of `rows` are useful after the rows
+        /// before them and, where `query` is a type, which of its values no
+        /// row matches.
+        pub fn check(self: *Self, rows: []const Row, query: ?Ty) Error!Outcome {
+            const count = rows.len + @intFromBool(query != null);
+            const refs = try self.arena.alloc(Ref, count);
+            for (rows, 0..) |r, i| refs[i] = .{ .cells = r, .id = @intCast(i) };
+            if (query) |ty| {
+                const cell = try self.take(1);
+                cell[0] = .{ .pattern = &wild, .ty = ty };
+                refs[rows.len] = .{ .cells = cell, .id = @intCast(rows.len) };
             }
+            var pass: Pass = .{
+                .reached = try self.arena.alloc(bool, count),
+                .query = if (query != null) @intCast(rows.len) else null,
+            };
+            @memset(pass.reached, false);
+            try self.walk(&pass, refs);
+            return .{ .reached = pass.reached[0..rows.len], .missing = pass.missing.items };
         }
 
-        fn usefulWild(self: *Self, rows: []const Row, q: Row) Error!?[]const Witness {
-            const ty = q[0].ty;
-            const kind = self.context.kind(ty);
-            switch (kind) {
-                .opaque_ => {},
+        fn walk(self: *Self, pass: *Pass, rows: []const Ref) Error!void {
+            if (rows.len == 0) return;
+            // Every column consumed: the first row left matches what the path
+            // describes, and every row after it is behind it.
+            if (rows[0].cells.len == 0) {
+                const first = rows[0].id;
+                pass.reached[first] = true;
+                if (pass.query == first and pass.missing.items.len < max_witnesses) try self.record(pass);
+                return;
+            }
+            const ty = rows[0].cells[0].ty;
+            switch (self.context.kind(ty)) {
+                .product => try self.branch(pass, rows, ty, .product),
                 .variants => |count| {
                     var named = try std.DynamicBitSetUnmanaged.initEmpty(self.arena, count);
-                    for (rows) |r| switch (r[0].pattern.*) {
+                    for (rows) |r| switch (r.cells[0].pattern.*) {
                         .variant => |v| if (v.index < count) named.set(v.index),
                         else => {},
                     };
-                    if (named.count() == count) {
-                        for (0..count) |k| {
-                            if (try self.usefulCtor(rows, q, .{ .variant = @intCast(k) })) |w| return w;
+                    var k: u32 = 0;
+                    while (k < count) : (k += 1) {
+                        if (named.isSet(k)) try self.branch(pass, rows, ty, .{ .variant = k });
+                    }
+                    if (named.count() == count) return;
+                    // The variants no row names: any of them, carrying
+                    // anything; with none named, any value at all.
+                    var absent: std.ArrayList(Witness) = .empty;
+                    if (named.count() == 0) {
+                        try absent.append(self.arena, .{ .ty = ty, .shape = .wild });
+                    } else {
+                        k = 0;
+                        while (k < count and absent.items.len < max_witnesses) : (k += 1) {
+                            if (!named.isSet(k)) try absent.append(self.arena, try self.applied(ty, .{ .variant = k }, null));
                         }
-                        return null;
                     }
-                    const rest = try self.usefulAt(try self.defaultRows(rows), q[1..]) orelse return null;
-                    // The first variant no row names, carrying anything; with
-                    // none named, the value is any value at all.
-                    const absent: Witness = if (named.count() == 0)
-                        .{ .ty = ty, .shape = .wild }
-                    else blk: {
-                        var k: u32 = 0;
-                        while (named.isSet(k)) k += 1;
-                        break :blk try self.applied(ty, .{ .variant = k }, null);
-                    };
-                    return try self.prepend(absent, rest);
+                    try self.rest(pass, rows, ty, absent.items);
                 },
-                .product => {
-                    for (rows) |r| {
-                        if (r[0].pattern.* == .product) return self.usefulCtor(rows, q, .product);
-                    }
-                },
-                .integer => |bounds| {
-                    const atoms = try self.split(rows, ty, bounds);
-                    const gap: ?Interval = for (atoms) |atom| {
-                        if (!self.columnCovers(rows, atom)) break atom;
-                    } else null;
-                    if (gap) |g| {
-                        const rest = try self.usefulAt(try self.defaultRows(rows), q[1..]) orelse return null;
-                        // A gap that is the whole range is any value at all.
-                        const whole = g.lo == bounds.lo and g.hi == bounds.hi;
-                        return try self.prepend(if (whole) .{ .ty = ty, .shape = .wild } else .{ .ty = ty, .shape = .{ .integers = g } }, rest);
-                    }
-                    for (atoms) |atom| {
-                        if (try self.usefulCtor(rows, q, .{ .integers = atom })) |w| return w;
-                    }
-                    return null;
-                },
+                .integer => |bounds| try self.integers(pass, rows, ty, bounds),
+                .opaque_ => try self.rest(pass, rows, ty, &.{.{ .ty = ty, .shape = .wild }}),
             }
-            const rest = try self.usefulAt(try self.defaultRows(rows), q[1..]) orelse return null;
-            return try self.prepend(.{ .ty = ty, .shape = .wild }, rest);
         }
 
-        /// Whether some row's head takes every integer of `atom`.
-        fn columnCovers(_: *const Self, rows: []const Row, atom: Interval) bool {
-            for (rows) |r| switch (r[0].pattern.*) {
-                .integers => |range| if (range.contains(atom)) return true,
-                else => {},
-            };
-            return false;
-        }
-
-        fn usefulCtor(self: *Self, rows: []const Row, q: Row, c: Ctor) Error!?[]const Witness {
-            const ty = q[0].ty;
+        /// The branch for constructor `c`: each row naming it, with its head
+        /// replaced by the constructor's parts, and each row with a wildcard
+        /// there, in their order.
+        fn branch(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, c: Ctor) Error!void {
             const arity = self.context.arity(ty, c);
-            var specialised: std.ArrayList(Row) = .empty;
+            var kept: std.ArrayList(Ref) = .empty;
             for (rows) |r| {
-                if (try self.specialise(r, c, arity)) |s| try specialised.append(self.arena, s);
+                if (try self.specialise(r, c, arity)) |s| try kept.append(self.arena, s);
             }
-            const sq = try self.specialise(q, c, arity) orelse return null;
-            const inner = try self.usefulAt(specialised.items, sq) orelse return null;
-            const out = try self.arena.alloc(Witness, inner.len - arity + 1);
-            out[0] = try self.applied(ty, c, inner[0..arity]);
-            @memcpy(out[1..], inner[arity..]);
-            return out;
+            try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .ctor = c } });
+            defer _ = pass.path.pop();
+            try self.walk(pass, kept.items);
+        }
+
+        /// The branch for the values no row's head names: the rows with a
+        /// wildcard there, without it.
+        fn rest(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, absent: []const Witness) Error!void {
+            var kept: std.ArrayList(Ref) = .empty;
+            for (rows) |r| {
+                if (r.cells[0].pattern.* != .wild) continue;
+                const cells = try self.take(r.cells.len - 1);
+                @memcpy(cells, r.cells[1..]);
+                try kept.append(self.arena, .{ .cells = cells, .id = r.id });
+            }
+            try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .absent = absent } });
+            defer _ = pass.path.pop();
+            try self.walk(pass, kept.items);
+        }
+
+        /// An integer column, cut at every boundary its rows' literals and
+        /// ranges write. Each interval a row names gets a branch; the
+        /// intervals none names share one branch of the wildcard rows.
+        fn integers(self: *Self, pass: *Pass, rows: []const Ref, ty: Ty, bounds: Interval) Error!void {
+            const atoms = try self.split(rows, bounds);
+            // Which rows each interval holds, in row order: a range's rows by
+            // binary search over the cut points, a wildcard's in all.
+            const buckets = try self.arena.alloc(std.ArrayList(Ref), atoms.len);
+            const named = try self.arena.alloc(bool, atoms.len);
+            for (buckets) |*b| b.* = .empty;
+            @memset(named, false);
+            for (rows) |r| {
+                const rest_cells = r.cells[1..];
+                switch (r.cells[0].pattern.*) {
+                    .integers => |range| {
+                        const first = atomAt(atoms, range.lo);
+                        var a = first;
+                        while (a < atoms.len and atoms[a].lo <= range.hi) : (a += 1) {
+                            named[a] = true;
+                            const cells = try self.take(rest_cells.len);
+                            @memcpy(cells, rest_cells);
+                            try buckets[a].append(self.arena, .{ .cells = cells, .id = r.id });
+                        }
+                    },
+                    else => for (buckets) |*b| {
+                        const cells = try self.take(rest_cells.len);
+                        @memcpy(cells, rest_cells);
+                        try b.append(self.arena, .{ .cells = cells, .id = r.id });
+                    },
+                }
+            }
+            var gaps: std.ArrayList(Witness) = .empty;
+            for (atoms, 0..) |atom, a| {
+                if (!named[a]) {
+                    if (gaps.items.len < max_witnesses) try gaps.append(self.arena, .{ .ty = ty, .shape = .{ .integers = atom } });
+                    continue;
+                }
+                try pass.path.append(self.arena, .{ .ty = ty, .choice = .{ .ctor = .{ .integers = atom } } });
+                defer _ = pass.path.pop();
+                try self.walk(pass, buckets[a].items);
+            }
+            if (gaps.items.len == 0) return;
+            // A gap that is the whole range is any value at all.
+            if (gaps.items.len == 1 and gaps.items[0].shape.integers.lo == bounds.lo and gaps.items[0].shape.integers.hi == bounds.hi) {
+                gaps.items[0] = .{ .ty = ty, .shape = .wild };
+            }
+            try self.rest(pass, rows, ty, gaps.items);
+        }
+
+        /// The interval holding `value`. `atoms` is sorted and covers the
+        /// type's range without gaps.
+        fn atomAt(atoms: []const Interval, value: i128) usize {
+            var lo: usize = 0;
+            var hi: usize = atoms.len;
+            while (lo < hi) {
+                const mid = (lo + hi) / 2;
+                if (atoms[mid].hi < value) lo = mid + 1 else hi = mid;
+            }
+            return lo;
         }
 
         /// The row with its head replaced by the parts of constructor `c`, or
         /// null where its head is another constructor.
-        fn specialise(self: *Self, r: Row, c: Ctor, arity: u32) Error!?Row {
-            const head = r[0];
+        fn specialise(self: *Self, r: Ref, c: Ctor, arity: u32) Error!?Ref {
+            const head = r.cells[0];
             const parts: []const *const Pattern = switch (head.pattern.*) {
                 .wild => &.{},
                 .variant => |v| switch (c) {
@@ -243,32 +327,17 @@ pub fn Coverage(comptime Context: type) type {
                     else => return null,
                 },
                 .product => |args| args,
-                .integers => |range| switch (c) {
-                    .integers => |atom| if (range.contains(atom)) &.{} else return null,
-                    else => return null,
-                },
+                .integers => return null,
             };
-            const out = try self.take(arity + r.len - 1);
+            const out = try self.take(arity + r.cells.len - 1);
             for (0..arity) |i| {
                 out[i] = .{
                     .pattern = if (parts.len == arity) parts[i] else &wild,
                     .ty = self.context.part(head.ty, c, @intCast(i)),
                 };
             }
-            @memcpy(out[arity..], r[1..]);
-            return out;
-        }
-
-        /// The rows whose head is a wildcard, without it.
-        fn defaultRows(self: *Self, rows: []const Row) Error![]const Row {
-            var out: std.ArrayList(Row) = .empty;
-            for (rows) |r| {
-                if (r[0].pattern.* != .wild) continue;
-                const rest = try self.take(r.len - 1);
-                @memcpy(rest, r[1..]);
-                try out.append(self.arena, rest);
-            }
-            return out.items;
+            @memcpy(out[arity..], r.cells[1..]);
+            return .{ .cells = out, .id = r.id };
         }
 
         /// Room for `n` cells, held against the budget.
@@ -281,23 +350,17 @@ pub fn Coverage(comptime Context: type) type {
         /// The intervals `bounds` is cut into by every boundary of the
         /// column's integer patterns: each one is taken whole or not at all by
         /// every row. At most twice the rows, plus one.
-        fn split(self: *Self, rows: []const Row, ty: Ty, bounds: Interval) Error![]const Interval {
-            const whole = switch (self.context.kind(ty)) {
-                .integer => |b| b,
-                else => bounds,
-            };
+        fn split(self: *Self, rows: []const Ref, bounds: Interval) Error![]const Interval {
             var points: std.ArrayList(i128) = .empty;
-            try points.append(self.arena, whole.lo);
-            try points.append(self.arena, whole.hi + 1);
-            for (rows) |r| switch (r[0].pattern.*) {
+            try points.append(self.arena, bounds.lo);
+            try points.append(self.arena, bounds.hi + 1);
+            for (rows) |r| switch (r.cells[0].pattern.*) {
                 .integers => |range| {
-                    if (range.lo > whole.lo and range.lo <= whole.hi) try points.append(self.arena, range.lo);
-                    if (range.hi >= whole.lo and range.hi < whole.hi) try points.append(self.arena, range.hi + 1);
+                    if (range.lo > bounds.lo and range.lo <= bounds.hi) try points.append(self.arena, range.lo);
+                    if (range.hi >= bounds.lo and range.hi < bounds.hi) try points.append(self.arena, range.hi + 1);
                 },
                 else => {},
             };
-            if (bounds.lo > whole.lo and bounds.lo <= whole.hi) try points.append(self.arena, bounds.lo);
-            if (bounds.hi >= whole.lo and bounds.hi < whole.hi) try points.append(self.arena, bounds.hi + 1);
             std.mem.sort(i128, points.items, {}, std.sort.asc(i128));
             var atoms: std.ArrayList(Interval) = .empty;
             var i: usize = 0;
@@ -306,6 +369,52 @@ pub fn Coverage(comptime Context: type) type {
                 try atoms.append(self.arena, .{ .lo = points.items[i], .hi = points.items[i + 1] - 1 });
             }
             return atoms.items;
+        }
+
+        /// Adds the values the path to the query row describes, as witnesses:
+        /// one per choice where a step stands for several absent values.
+        fn record(self: *Self, pass: *Pass) Error!void {
+            var at: usize = 0;
+            const built = try self.build(pass.path.items, &at);
+            for (built) |w| {
+                if (pass.missing.items.len == max_witnesses) break;
+                try pass.missing.append(self.arena, w);
+            }
+        }
+
+        /// The witnesses the steps from `at.*` describe, reading the path in
+        /// preorder: a constructor step takes as many witnesses after it as
+        /// the constructor has parts. Several choices at one step multiply,
+        /// up to `max_witnesses`.
+        fn build(self: *Self, path: []const Step, at: *usize) Error![]const Witness {
+            const step = path[at.*];
+            at.* += 1;
+            switch (step.choice) {
+                .absent => |choices| return choices,
+                .ctor => |c| {
+                    const arity = self.context.arity(step.ty, c);
+                    var combos: std.ArrayList([]Witness) = .empty;
+                    try combos.append(self.arena, try self.arena.alloc(Witness, arity));
+                    for (0..arity) |i| {
+                        const options = try self.build(path, at);
+                        var next: std.ArrayList([]Witness) = .empty;
+                        for (combos.items) |combo| for (options) |o| {
+                            if (next.items.len == max_witnesses) break;
+                            const copy = try self.arena.dupe(Witness, combo);
+                            copy[i] = o;
+                            try next.append(self.arena, copy);
+                        };
+                        combos = next;
+                    }
+                    const out = try self.arena.alloc(Witness, combos.items.len);
+                    for (combos.items, 0..) |parts, n| out[n] = .{ .ty = step.ty, .shape = switch (c) {
+                        .variant => |k| .{ .variant = .{ .index = k, .args = parts } },
+                        .product => .{ .product = parts },
+                        .integers => |atom| .{ .integers = atom },
+                    } };
+                    return out;
+                },
+            }
         }
 
         /// The witness for constructor `c` of `ty`, its parts given or each
@@ -321,13 +430,6 @@ pub fn Coverage(comptime Context: type) type {
                 .product => .{ .product = args },
                 .integers => |atom| .{ .integers = atom },
             } };
-        }
-
-        fn prepend(self: *Self, first: Witness, rest: []const Witness) Error![]const Witness {
-            const out = try self.arena.alloc(Witness, rest.len + 1);
-            out[0] = first;
-            @memcpy(out[1..], rest);
-            return out;
         }
     };
 }
@@ -402,6 +504,20 @@ fn rowOf(arena: std.mem.Allocator, p: *const Pattern, ty: TestTypes.Ty) !TestCov
     return r;
 }
 
+/// The first value of `ty` the rows leave untaken, or null.
+fn firstMissing(c: *TestCoverage, rows: []const TestCoverage.Row, ty: TestTypes.Ty) !?TestCoverage.Witness {
+    const outcome = try c.check(rows, ty);
+    return if (outcome.missing.len == 0) null else outcome.missing[0];
+}
+
+/// Whether `row` is useful after `rows`.
+fn usefulAfter(c: *TestCoverage, rows: []const TestCoverage.Row, row: TestCoverage.Row) !bool {
+    const all = try c.arena.alloc(TestCoverage.Row, rows.len + 1);
+    @memcpy(all[0..rows.len], rows);
+    all[rows.len] = row;
+    return (try c.check(all, null)).reached[rows.len];
+}
+
 test "a pair of options is covered by its four shapes, and the missing one is named" {
     var state = std.heap.ArenaAllocator.init(testing.allocator);
     defer state.deinit();
@@ -413,14 +529,14 @@ test "a pair of options is covered by its four shapes, and the missing one is na
         try rowOf(arena, try pairOf(arena, try some(arena, &wild), &none), .pair),
         try rowOf(arena, try pairOf(arena, &none, &none), .pair),
     };
-    const missing = (try c.missing(&rows, .pair)).?;
+    const missing = (try firstMissing(&c, &rows, .pair)).?;
     // `(None, Some)`: a pair whose first part is `None` and whose second is
     // `Some` of anything.
     try testing.expectEqual(@as(u32, 1), missing.shape.product[0].shape.variant.index);
     try testing.expectEqual(@as(u32, 0), missing.shape.product[1].shape.variant.index);
 
     const all = rows ++ [_]TestCoverage.Row{try rowOf(arena, try pairOf(arena, &none, try some(arena, &wild)), .pair)};
-    try testing.expectEqual(@as(?TestCoverage.Witness, null), try c.missing(&all, .pair));
+    try testing.expect(try firstMissing(&c, &all, .pair) == null);
 }
 
 test "an arm inside an earlier one is not useful, and an arm beside it is" {
@@ -431,8 +547,8 @@ test "an arm inside an earlier one is not useful, and an arm beside it is" {
 
     const earlier = [_]TestCoverage.Row{try rowOf(arena, try some(arena, &wild), .nest)};
     const inside = try rowOf(arena, try some(arena, try some(arena, &wild)), .nest);
-    try testing.expect(try c.useful(&earlier, inside) == null);
-    try testing.expect(try c.useful(&earlier, try rowOf(arena, &none, .nest)) != null);
+    try testing.expect(!try usefulAfter(&c, &earlier, inside));
+    try testing.expect(try usefulAfter(&c, &earlier, try rowOf(arena, &none, .nest)));
 }
 
 test "integer patterns leave the interval between them, which is named whole" {
@@ -445,7 +561,7 @@ test "integer patterns leave the interval between them, which is named whole" {
         try rowOf(arena, try some(arena, try integers(arena, 0, 0)), .opt),
         try rowOf(arena, &none, .opt),
     };
-    const gap = (try c.missing(&rows, .opt)).?;
+    const gap = (try firstMissing(&c, &rows, .opt)).?;
     const inner = gap.shape.variant.args[0].shape.integers;
     try testing.expectEqual(@as(i128, 1), inner.lo);
     try testing.expectEqual(@as(i128, 3), inner.hi);
@@ -453,8 +569,8 @@ test "integer patterns leave the interval between them, which is named whole" {
     // A range taking part of what an earlier one took is still useful for the
     // rest, and one inside it is not.
     const covered = [_]TestCoverage.Row{try rowOf(arena, try integers(arena, 0, 2), .byte)};
-    try testing.expect(try c.useful(&covered, try rowOf(arena, try integers(arena, 2, 3), .byte)) != null);
-    try testing.expect(try c.useful(&covered, try rowOf(arena, try integers(arena, 1, 2), .byte)) == null);
+    try testing.expect(try usefulAfter(&c, &covered, try rowOf(arena, try integers(arena, 2, 3), .byte)));
+    try testing.expect(!try usefulAfter(&c, &covered, try rowOf(arena, try integers(arena, 1, 2), .byte)));
 }
 
 test "a type no pattern names is covered by a wildcard alone" {
@@ -463,9 +579,9 @@ test "a type no pattern names is covered by a wildcard alone" {
     const arena = state.allocator();
     var c: TestCoverage = .{ .context = .{}, .arena = arena };
 
-    try testing.expect(try c.missing(&.{}, .text) != null);
+    try testing.expect(try firstMissing(&c, &.{}, .text) != null);
     const rows = [_]TestCoverage.Row{try rowOf(arena, &wild, .text)};
-    try testing.expect(try c.missing(&rows, .text) == null);
+    try testing.expect(try firstMissing(&c, &rows, .text) == null);
 }
 
 test "a match whose check outgrows its budget is refused" {
@@ -478,7 +594,7 @@ test "a match whose check outgrows its budget is refused" {
         try rowOf(arena, try pairOf(arena, try some(arena, &wild), &wild), .pair),
         try rowOf(arena, try pairOf(arena, &wild, try some(arena, &wild)), .pair),
     };
-    try testing.expectError(error.TooIntricate, c.missing(&rows, .pair));
+    try testing.expectError(error.TooIntricate, c.check(&rows, .pair));
 }
 
 test "the cells a matrix with no overlapping wildcards builds grow with its rows" {
@@ -496,7 +612,7 @@ test "the cells a matrix with no overlapping wildcards builds grow with its rows
             const first = try some(arena, try integers(arena, @intCast(i % 4), @intCast(i % 4)));
             try rows.append(arena, try rowOf(arena, try pairOf(arena, first, try some(arena, &wild)), .pair));
         }
-        _ = try c.missing(rows.items, .pair);
+        _ = try c.check(rows.items, .pair);
         spent[at] = c.cells;
     }
     try testing.expect(spent[1] <= 3 * spent[0]);
@@ -540,7 +656,9 @@ test "usefulness agrees with checking every value of a small type" {
         for (values) |v| {
             if (matches(q, v) and !matches(a, v) and !matches(b, v)) expected = true;
         }
-        const found = try c.useful(&rows, try rowOf(arena, q, .opt));
-        try testing.expectEqual(expected, found != null);
+        const found = try usefulAfter(&c, &rows, try rowOf(arena, q, .opt));
+        try testing.expectEqual(expected, found);
     };
 }
+
+

@@ -1,11 +1,6 @@
-// Exhaustiveness is decided with a bit per variant in a machine word, so a
-// sixty-fifth has nowhere to be recorded. The limit was known where the mask
-// is read and absent where it is written, so the shift ran past the word and
-// the compiler panicked -- on well-formed source, in a debug build, and in a
-// release build it truncated instead and reported an arm as unreachable that
-// was nothing of the kind.
-//
-// A limit is a rule or it is a crash. This is the rule.
+// An enum declares at most sixty-four variants, so a sixty-fifth is refused
+// where the enum is declared, and a `match` naming every one of them is not
+// held against the rule a second time.
 enum Wide {
     V0,
     V1,

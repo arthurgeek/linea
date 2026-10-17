@@ -1679,12 +1679,17 @@ const Analysis = struct {
     }
 
     /// The path a nested pattern node selects: the path to the pattern
-    /// around it, then its own step. Bounded by the pattern's depth.
+    /// around it, then its own step. Built from the node outwards, each step
+    /// put in front of the path so far, so it costs the pattern's depth.
     fn partPath(self: *Analysis, nested: ExprId) std.mem.Allocator.Error!PathId {
-        const part = self.cfg.pattern_parts.get(nested) orelse return .root;
-        const step = try self.projectionPath(part.step);
-        if (part.within == .none) return step;
-        return self.store.concat(try self.partPath(part.within), step);
+        var out: PathId = .root;
+        var at = nested;
+        while (self.cfg.pattern_parts.get(at)) |part| {
+            out = try self.store.concat(try self.projectionPath(part.step), out);
+            if (part.within == .none) break;
+            at = part.within;
+        }
+        return out;
     }
 
     /// Whether a binder takes its part from the element an owning walk took.

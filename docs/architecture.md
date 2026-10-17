@@ -792,22 +792,21 @@ through injective key structure; associated projections cannot determine a
 binder by inversion. Selection, instantiation and retained queries consume the
 same declaration-ordered implementation arguments.
 
-Coverage is one question in `sema/usefulness.zig`: whether a row of patterns is
-useful after the rows before it (Maranget's algorithm), with a witness for a
-value that row alone matches. `checkMatch` asks it of each arm against the arms
-before it ([T-Unreachable]) and of a wildcard against every arm ([T-Cover]); the
+Coverage is one pass in `sema/usefulness.zig`: Maranget's usefulness, answered
+for every row at once as rustc does. `checkMatch` hands it the sound arms' rows
+and a wildcard row after them; the arms no value reaches are [T-Unreachable],
+and the values that reach the wildcard row are [T-Cover]'s witnesses. The
 irrefutable positions (`let`, `let read`, `let ... else`, a walk's binder and a
-lambda's parameter) ask it of a wildcard against their one pattern
-([T-Refutable]). The matrix is built per construct in an arena freed with it,
-sized by the construct's patterns; an enum column's signature is one 64-bit
-word, which is why an enum declares at most `max_variants` (64) variants
-([T-Variants]). A wildcard over a column whose constructors are all named
-branches once per constructor, so the worst case is exponential in a pattern's
-width -- the problem is NP-complete -- and each construct's questions together
-may build at most `usefulness.max_cells` (2^20) cells, past which it is
-[T-CoverLimit]. A matrix whose rows never put a wildcard where another row names
-a constructor follows one path per row, and costs the arms times the size of
-their patterns. A layout is rejected when its size exceeds `Layout.max_size`
+lambda's parameter) hand it their one pattern and a wildcard ([T-Refutable]).
+The pass splits each column by the constructors its type has; a row naming a
+constructor joins that branch alone and a row with a wildcard joins every
+branch, so the cells copied into branches are the cost: the size of the
+patterns where no row puts a wildcard beside another row's constructor, plus
+one copy of each wildcard row per constructor its column splits into. Integer
+rows are bucketed by binary search over the sorted cut points. Exhaustiveness of nested patterns
+is NP-complete, so the copies for one construct are capped at
+`usefulness.max_cells` (2^20), past which it is [T-CoverLimit]. The matrix is
+built in an arena per construct and freed with it. A layout is rejected when its size exceeds `Layout.max_size`
 ([L-Size]), and an array length is stored in 32 bits ([T-ArraySize]).
 
 `Checker.checkPolyRec` examines constructor-growing normalized calls before

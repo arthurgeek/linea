@@ -3713,10 +3713,10 @@ set when its payload contains `Never`; `Option[Never]` must still account for
 `Some`. Text, a type parameter and any other type no pattern takes apart are
 covered only by a binder or `_`.
 
-Coverage is decided by asking, for each arm in order, whether some value
-matches it and no arm before it (Maranget's usefulness), and finally whether
-some value matches no arm. Each question is answered by splitting the arms'
-patterns position by position along the constructors each position's type has.
+Coverage is decided in one pass over the arms (Maranget's usefulness): it
+answers, for each arm, whether some value matches it and no arm before it, and
+which values match no arm, by splitting the arms' patterns position by position
+along the constructors each position's type has.
 
 **[T-CoverLimit]** Checking a `match`'s coverage builds rows of its arms'
 patterns, one cell per pattern position, and a `match` whose check would build

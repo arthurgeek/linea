@@ -2574,20 +2574,24 @@ fn callableEnumModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
 }
 
 /// One `match` with n arms, each naming a key and a variant inside a struct
-/// pattern, then `_`. No arm puts a wildcard where another names a
-/// constructor, so coverage follows one path per arm and grows with n.
+/// pattern, then `_`. A row naming a constructor joins that constructor's
+/// branch alone, so coverage copies each arm once and grows with n.
 fn matchArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
     const w = &out.writer;
     try w.writeAll("enum Choice { Yes(UInt8), No }\nstruct Row { key: UInt64, choice: Choice }\nfn pick(sink row: Row) -> UInt64 {\n    match row {\n");
-    for (0..n) |i| try w.print("        Row {{ key: {d}, choice: Yes(_) }} => {d},\n", .{ i, i });
+    for (0..n) |i| try w.print("        Row {{ key: {d}, choice: No }} => {d},\n", .{ i, i });
     try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    UInt8(pick(Row { key = 1, choice = .No }))\n}\n");
     return out.toOwnedSlice();
 }
 
 /// A pattern n variants deep, over n enums each carrying the one before it,
-/// so checking, coverage and lowering each walk a pattern of depth n.
+/// so resolving, checking, coverage and ownership each walk a pattern of
+/// depth n. Checked rather than emitted: every tag test reads at an offset
+/// into the outermost value, and the MIR verifier finds which part an access
+/// lands on by descending the type from there, which is the type's depth per
+/// access whatever wrote it.
 fn patternDepthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
@@ -4625,7 +4629,16 @@ fn costOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8) !Cost {
 const TreeCostMode = union(enum) { emit, check, refused: diagnostic.Code };
 
 fn treeCost(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: TreeCostMode) !Cost {
-    var counting: Counting = .{ .under = gpa };
+    return treeCostGrowing(gpa, io, text, mode, true);
+}
+
+/// `treeCost`, with backing growth refused where `growth` is false. An arena
+/// grows its last node in place by just what each allocation needs when the
+/// backing allows it, and every such growth is charged its full size, so with
+/// growth allowed the allocation metric reads where the backing happened to
+/// place the arena rather than what the compilation asked for.
+fn treeCostGrowing(gpa: std.mem.Allocator, io: std.Io, text: []const u8, mode: TreeCostMode, growth: bool) !Cost {
+    var counting: Counting = .{ .under = gpa, .allow_growth = growth };
     const a = counting.allocator();
 
     const timer = CostTimer.start(io);
@@ -4759,12 +4772,15 @@ fn throughTreeBatch(
                 var measured: Cost = .{ .took = 0, .nanos = 0 };
                 for (0..if (runs == 0) 1 else batch) |_| {
                     const operation = try treeCost(backing, io, text, mode);
-                    measured.took += operation.took;
                     measured.nanos += operation.nanos;
                     measured.cpu_nanos += operation.cpu_nanos;
                 }
                 if (measured.nanos < best.nanos) best = measured;
             }
+            // The allocation metric is fixed with backing growth refused, as
+            // `fastestOf` fixes it.
+            const accounting = try treeCostGrowing(backing, io, text, mode, false);
+            best.took = accounting.took * (if (runs == 0) 1 else batch);
             return best;
         }
     }.cost;
@@ -6168,7 +6184,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "editor qualified completion", .n = 500, .cost = qualifiedCompletionCost },
     .{ .name = "callable enum payloads", .n = 4000, .cost = throughTheTree(callableEnumModule) },
     .{ .name = "match arms", .n = 4000, .cost = throughTheTree(matchArmsModule) },
-    .{ .name = "pattern depth", .n = 400, .cost = throughTheTree(patternDepthModule) },
+    .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },
     .{ .name = "constructor payload fields", .n = 2000, .cost = throughTheTree(constructorPayloadFieldsModule) },
@@ -7003,7 +7019,12 @@ fn settle(
 /// measured, and the smallest reading is the run that lost the least to
 /// whatever else the machine was doing.
 fn fastestOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8, runs: usize) !Cost {
+    // One compilation with backing growth refused fixes the allocation metric,
+    // as a file-based cost's accounting run does; timing keeps ordinary
+    // allocator policy.
+    const accounting = try treeCostGrowing(gpa, io, text, .emit, false);
     var best = try costOf(gpa, io, text);
+    best.took = accounting.took;
     for (1..@max(runs, 1)) |_| {
         const again = try costOf(gpa, io, text);
         if (again.nanos < best.nanos) {
