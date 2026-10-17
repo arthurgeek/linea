@@ -190,6 +190,15 @@ every `extern` signature:
 - C keeps no pointer into Linea memory after a call returns;
 - text living inside a C object is declared `borrows`, and `read` is written
   on a handle parameter only where C truly only reads the object;
+- each handle is the only one naming its C object: an `extern` answering a
+  handle answers a new or handed-over object, and the wrapper never builds a
+  handle from an address another handle holds. Ownership follows what is read
+  from an object through the handle it was read from, so a second handle to
+  the object would let a change through it free what the first lent. Refusing
+  a handle rebuilt from another's destructured address was weighed and left
+  out: telling that address from any other integer needs provenance through
+  every local and call in the wrapper, and the wrapper is the code the
+  reviewer reads;
 - C calls a callback only during the call that passed it, on the calling thread;
 - every length given to C or to `copy_bytes` is the length of its memory.
 

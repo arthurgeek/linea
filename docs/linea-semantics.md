@@ -4276,7 +4276,10 @@ call naming the place is [N-Aliased]. A handle taken `inout` is lent as any
 `inout` argument is, and one taken `sink` is moved. A handle type taken by any
 convention but `read` may not be `copyable`, because a copy would name the
 same object and outlive what changing it frees. The compiler believes a
-written `read`.
+written `read`, and believes that each handle is the only one naming its
+object: an `extern` answering a handle answers a new or handed-over object,
+and the module trusted with C never builds a handle from an address another
+handle holds.
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the

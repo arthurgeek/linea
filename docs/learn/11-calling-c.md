@@ -1556,8 +1556,14 @@ against the C library's documentation:
    the call be read after, which is a read of freed memory. Without `read`,
    the compiler treats the call as changing the handle's place, as it treats
    an `inout` argument.
-5. C calls a callback only during the call that passed it.
-6. Every length you pass to C, or to `copy_bytes`, is the length of the
+5. Each handle is the only one naming its C object. An `extern` that answers a
+   handle answers a new object, or one it hands over, never a second handle
+   to an object another handle already names; and the wrapper never builds a
+   handle from an address it took out of another. The compiler tracks what is
+   read from an object through the handle it was read from, so two handles to
+   one object let a change through one free what was read through the other.
+6. C calls a callback only during the call that passed it.
+7. Every length you pass to C, or to `copy_bytes`, is the length of the
    memory it describes.
 
 The compiler holds the rest: an `extern` is private to its module, an
