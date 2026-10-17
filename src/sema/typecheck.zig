@@ -18343,11 +18343,11 @@ const Checker = struct {
                         .s_entry,
                         self.ast.fileOf(token),
                         self.ast.tokenSpan(token),
-                        "`read` on an `extern` parameter marks a handle, a sealed newtype of this module, whose object C only reads",
+                        "`read` on an `extern` parameter marks a handle, a sealed newtype of a module trusted with C, whose object C only reads",
                         "omit `read`; parameters are read by default",
                     );
                 }
-                if (intrinsics.changesForeignHandle(self.program, self.ast, &pool, d, k, t) and
+                if (!marked and intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t) and
                     try self.builder.capabilityOf(t) == .copyable)
                 {
                     const help = try std.fmt.allocPrint(
@@ -18365,6 +18365,7 @@ const Checker = struct {
                     );
                 }
             }
+            try self.checkForeignViewSources(d);
         }
 
         // What may cross is decided by what both sides of a boundary agree a
@@ -18655,6 +18656,47 @@ const Checker = struct {
         );
     }
 
+    /// [T-Extern]: an `extern` answering memory a parameter lends, written
+    /// `borrows(p)`, takes that parameter as a handle -- a sealed, non-copyable
+    /// type of a module trusted with C -- or as a `std.ffi` view. Ownership
+    /// keeps the answer alive only while `p`'s place is, so `p` must be a value
+    /// nothing else can copy or rebuild to name the same memory.
+    fn checkForeignViewSources(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
+        const signature = self.decl_signatures.get(d);
+        if (signature == .poison or self.builder.get(signature) != .callable) return;
+        const pool = self.builder.view();
+        const params = self.ast.declParams(d);
+        for (self.builder.get(signature).callable.contracts) |contract| {
+            if (contract.kind != .borrows and !contract.borrows_source) continue;
+            const k = switch (contract.source.root) {
+                .parameter => |k| k,
+                else => continue,
+            };
+            if (k >= params.len) continue;
+            const t = try self.declaredParamType(d, k);
+            if (t == .poison) continue;
+            if (self.isForeignView(t)) continue;
+            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, d, t) and
+                try self.builder.capabilityOf(t) != .copyable) continue;
+            try self.sink.addErrorFmt(
+                .t_extern,
+                self.ast.fileOf(params[k].name),
+                self.ast.tokenSpan(params[k].name),
+                "give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life",
+                "`{s}` answers memory `{s}` lends, so `{s}` must be a handle or a `std.ffi` view, and `{s}` is neither",
+                .{ self.ast.tokenText(self.ast.declName(d)), self.ast.tokenText(params[k].name), self.ast.tokenText(params[k].name), try self.typeName(t) },
+            );
+        }
+    }
+
+    fn isForeignView(self: *const Checker, t: TypeId) bool {
+        const declared = self.builder.view().declOfType(t) orelse return false;
+        for (self.raw_accesses.foreign_views) |foreign| {
+            if (foreign != .none and declared == foreign) return true;
+        }
+        return false;
+    }
+
     /// [T-ExternHandle] at a call: an `extern` that takes a handle without
     /// `read` may change the object it holds, so the call lends the
     /// argument's place as `inout` would, and the place must be one that may
@@ -18673,7 +18715,27 @@ const Checker = struct {
                 if (arg == ExprId.none or k >= declared.len) continue;
                 const t = try self.declaredParamType(callee, k);
                 if (!intrinsics.changesForeignHandle(self.program, self.ast, &pool, callee, k, t)) continue;
-                if (self.res.placeIsMutable(self.ast, arg)) continue;
+                if (self.res.placeIsMutable(self.ast, arg)) {
+                    // Lent to change, the place is this call's only path to
+                    // the object, as an `&` argument's is ([N-Aliased]).
+                    for (call.args, 0..) |other, j| {
+                        if (j == k or other == ExprId.none) continue;
+                        if (!self.namesPlace(other, arg, false, BindingId.none)) continue;
+                        _ = self.reportWithOrigin(
+                            .n_aliased,
+                            other,
+                            "this names a handle another argument lends C to change",
+                            "pass two different handles, or mark the changing parameter `read` if C only reads it",
+                            .{
+                                .file = self.ast.fileOfExpr(arg),
+                                .span = self.ast.exprSpan(arg),
+                                .message = "lent to change here",
+                                .style = .secondary,
+                            },
+                        );
+                    }
+                    continue;
+                }
                 const label = try std.fmt.allocPrint(
                     self.sink.arena,
                     "pass a handle held in a `var` or an `inout` parameter, or mark `{s}` `read` if C only reads it",

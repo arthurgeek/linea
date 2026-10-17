@@ -122,18 +122,31 @@ dependencies, and taking one apart hands them to the binding. Before this
 record the construction dropped them, which for a view of C memory was a read
 after free.
 
-**An `extern` says which calls only read the object** ([T-ExternHandle]). A
-handle parameter, a sealed newtype of the `extern`'s own module, written
-`read` promises that C only reads the object. Without `read`, a plain lend
-lets C change or free it, and the call lends the argument's place as an
-`inout` argument would, although C receives the handle by value. The place
-must be one that may change (a `var`, an `inout` parameter, or a field of
-one), and ownership ends every earlier observation of it at the call, so a
-`CText` read from the object before the call is refused by [O-Borrow]
-wherever it is used after. A handle type such a call takes may not be
-`copyable`, because a copy would still name the object and keep what was read
-through it alive. `inout` and `sink` already lend or give the place whole. C
-takes the handle by value either way, so the marker is the only thing that
+**A view borrows from a handle, and a handle C may change is lent whole**
+([T-Extern], [T-ExternHandle], [N-Aliased]). A handle is a sealed newtype
+declared in a module of the root that the manifest grants `extern`, so only
+trusted code makes one from an address. The rules hold for every parameter
+of every `extern`, whatever shape the program gives the place it passes:
+
+- An `extern` answering memory a parameter lends, `borrows(p)`, takes `p` as a
+  handle that is not `copyable`, or as a `std.ffi` view. An integer, an
+  unsealed newtype or a type of an untrusted module could be copied or rebuilt
+  to name the same memory after the place it came from was changed, so it is
+  refused by [T-Extern].
+- A handle parameter written `read` promises that C only reads the object.
+  Every other convention lets C change or free it. A plain lend is checked as
+  an `inout` argument is, although C receives the handle by value: the place
+  must be one that may change, ownership ends every earlier observation of it
+  at the call, so a `CText` read from the object before is refused by
+  [O-Borrow] wherever it is used after, and no other argument of the call may
+  name it ([N-Aliased]). `inout` lends the place and `sink` moves it, as for
+  any Linea parameter.
+- A handle type taken by any convention but `read` may not be `copyable`. A
+  copy would still name the object, so changing or freeing it through one
+  copy, whether lent, `inout` or `sink`, would leave what was read through
+  another dangling.
+
+C takes the handle by value either way, so the marker is the only thing that
 can tell the compiler a call leaves the object as it was, and a `read` written
 on a function that changes the object is believed: text read before the call
 is then read after it is freed. `read` on a parameter that is not a handle is

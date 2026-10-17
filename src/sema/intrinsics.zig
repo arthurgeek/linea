@@ -44,13 +44,16 @@ pub const FloatMath = struct {
 };
 
 /// Whether `t`, the type of a parameter of the `extern` `d`, is a handle to an
-/// object C holds ([T-ExternHandle]): a sealed newtype declared in `d`'s own
-/// module. Asked of a pool being built or of a finished typing.
+/// object C holds ([T-ExternHandle]): a sealed newtype declared in a module
+/// of `d`'s root that the root's manifest grants `extern`. Only such a module
+/// can make one from an address, so a handle names the object C gave it.
+/// Asked of a pool being built or of a finished typing.
 pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, d: DeclId, t: TypeId) bool {
     if (t == .poison or pool.get(t) != .newtype) return false;
     const declared = pool.declOfType(t) orelse return false;
     if (ast.declVisibility(declared) != .opaque_) return false;
-    return program.moduleOf(declared) == program.moduleOf(d);
+    const home = program.get(program.moduleOf(declared));
+    return home.externs and home.root == program.get(program.moduleOf(d)).root;
 }
 
 /// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle

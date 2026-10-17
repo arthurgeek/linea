@@ -182,10 +182,16 @@ itself. How the `extern` takes the handle says what C does with the object:
   it. The call then lends the handle's place as an `inout` argument would,
   although C receives the handle by value: the place must be one that may
   change, such as a `var` or a field of an `inout self`, and nothing read
-  from the object earlier can still be in use after the call. A handle C may
-  change cannot be `copyable`, since a copy would still name the object.
+  from the object earlier can still be in use after the call, and the same
+  call cannot be handed the handle a second time.
 - `sink` gives it to C for good, which is how the function that frees it is
   declared.
+
+A handle type that any of these but `read` takes cannot be `copyable`: a copy
+would still name the object after C changed or freed it through another
+copy. And an `extern` whose answer lives inside an object, written
+`where borrows(handle)`, takes that object as a handle, never as a bare
+`UInt64`, which anything could copy.
 
 `ledger/linea.json`:
 

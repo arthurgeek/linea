@@ -1,3 +1,8 @@
+error[T-Extern]: `named_name` answers memory `handle` lends, so `handle` must be a handle or a `std.ffi` view, and `Name` is neither
+  --> tests/ffi/a_handle_c_may_change_is_not_copyable/named/named.lin:10:27
+   |
+10 | extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+   |                           ^^^^^^ give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life
 error[T-ExternHandle]: `named_reset` may change the object a copyable handle holds, and a copy of the handle would still name it
   --> tests/ffi/a_handle_c_may_change_is_not_copyable/named/named.lin:12:23
    |
