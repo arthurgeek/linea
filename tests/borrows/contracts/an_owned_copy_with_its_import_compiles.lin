@@ -1,0 +1,23 @@
+// The owned copy the report on `pick` names, with the import it says.
+import std.mem
+
+fn pick(a: String, b: String, first: Bool) -> Result[String, mem.Oom] {
+    if first {
+        a.to_owned()
+    } else {
+        b.to_owned()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    match pick(a, b, false) {
+        Ok(s) => {
+            let n = UInt8(s.length())
+            s.release()
+            n
+        },
+        Err(_) => 0,
+    }
+}

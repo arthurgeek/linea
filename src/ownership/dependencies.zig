@@ -12,7 +12,8 @@ const ExprId = node.ExprId;
 const BindingId = @import("../sema/ids.zig").BindingId;
 const Resolution = @import("../sema/resolve.zig").Resolution;
 const types = @import("../sema/types.zig");
-const writtenTypeName = @import("../sema/typecheck.zig").writtenTypeName;
+const helpTypeName = @import("../sema/typecheck.zig").helpTypeName;
+const importNote = @import("../sema/typecheck.zig").importNote;
 const ModuleId = @import("../syntax/program.zig").ModuleId;
 const TokenId = @import("../lexer/token.zig").TokenId;
 const Typing = types.Typing;
@@ -2182,7 +2183,9 @@ const Analysis = struct {
         // Under a fixed signature the result type is fixed with it, so a
         // returned view has no owned copy to become.
         const result_fixed = leaving == .returned and fixed != null;
-        if (!result_fixed and (sources.items.len > 0 or local != null or consumed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file))) |owned| {
+        var missing: std.ArrayList([]const u8) = .empty;
+        var failure_missing: std.ArrayList([]const u8) = .empty;
+        if (!result_fixed and (sources.items.len > 0 or local != null or consumed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file), &missing, &failure_missing)) |owned| {
             const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
                 .callable => |callable| held != null and held.? == callable.result,
                 else => false,
@@ -2205,6 +2208,15 @@ const Analysis = struct {
                     try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where the result holds the view, and store `….to_owned()` there, which copies the text and can fail with `{s}`", .{ owned.name, owned.failure }),
                 .retained => |destination| try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where `{s}` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `{s}`", .{ owned.name, self.ast.tokenText(self.res.declaringToken(destination)), owned.failure }),
             });
+            // The owner itself is written as its type alone; a copy's result
+            // also names the failure.
+            if (!(leaving == .returned and local_owns)) for (failure_missing.items) |route| {
+                const listed = for (missing.items) |earlier| {
+                    if (std.mem.eql(u8, earlier, route)) break true;
+                } else false;
+                if (!listed) try missing.append(arena, route);
+            };
+            if (try importNote(arena, missing.items)) |note| try notes.append(arena, note);
         };
         try self.sink.add(.{
             .severity = .err,
@@ -2342,11 +2354,13 @@ const Analysis = struct {
     /// What `held`, the type holding the escaping observation, copies itself
     /// into with `to_owned`, the library's name for the copy that owns what it
     /// holds: the success its result carries and the failure it may report,
-    /// each written as the module `from`, where the report is, writes it. Null where `held`
+    /// each written as a help writes a type for the module `from`, where the
+    /// report is, with the modules the success needs imported added to
+    /// `missing` and those the failure needs to `failure_missing`. Null where `held`
     /// declares no `to_owned` answering a `Result`.
     ///
     /// **Bound:** the members `held`'s declaration holds, once per report.
-    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
+    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId, missing: *std.ArrayList([]const u8), failure_missing: *std.ArrayList([]const u8)) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
         const declared = self.typing.declOfType(held orelse return null) orelse return null;
         var members = self.res.membersOfType(declared);
         while (members.next()) |member| {
@@ -2361,8 +2375,8 @@ const Analysis = struct {
             if (args.len != 2) return null;
             return .{
                 .ty = args[0],
-                .name = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[0]),
-                .failure = try writtenTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[1]),
+                .name = try helpTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[0], missing),
+                .failure = try helpTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[1], failure_missing),
             };
         }
         return null;

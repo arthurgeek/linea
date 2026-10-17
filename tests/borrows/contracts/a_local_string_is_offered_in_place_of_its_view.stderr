@@ -5,7 +5,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |     ^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
   |
   = help: `line` belongs to `titled` and ends when it returns, so nothing returned may observe it
-  = help: `line` owns the text already: put `line` itself where its view is, declaring `String[mem.SystemAllocator]` there
+  = help: `line` owns the text already: put `line` itself where its view is, declaring `String` there
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
  --> tests/borrows/contracts/a_local_string_is_offered_in_place_of_its_view.lin:6:15
   |

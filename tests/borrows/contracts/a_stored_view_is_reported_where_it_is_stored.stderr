@@ -12,4 +12,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
    = help: `full` belongs to `contact_for` and ends when it returns, so nothing returned may observe it
-   = help: `full` owns the text already: put `full` itself where its view is, declaring `String[mem.SystemAllocator]` there
+   = help: `full` owns the text already: put `full` itself where its view is, declaring `String` there

@@ -3757,6 +3757,120 @@ pub fn writtenTypeName(
     return out.toOwnedSlice() catch return error.OutOfMemory;
 }
 
+/// A type written into a help, for a reader in module `from` to copy into
+/// the program: as `writtenTypeName` writes it, with each trailing argument
+/// that is its parameter's written default left out (`String`, not
+/// `String[mem.SystemAllocator]`), and the import route of every module the
+/// spelling names that `from` does not import appended to `missing`, so the
+/// help can say what to import.
+///
+/// **Bound:** one walk over the type's arguments, as `writtenTypeName`.
+pub fn helpTypeName(
+    arena: std.mem.Allocator,
+    ast: *const Ast,
+    program: *const ExpandedProgram,
+    res: *const Resolution,
+    pool: *const Typing,
+    from: ModuleId,
+    t: TypeId,
+    missing: *std.ArrayList([]const u8),
+) std.mem.Allocator.Error![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(arena);
+    writeHelpTypeName(&out.writer, arena, ast, program, res, pool, from, t, missing) catch return error.OutOfMemory;
+    return out.toOwnedSlice() catch return error.OutOfMemory;
+}
+
+fn writeHelpTypeName(
+    w: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    ast: *const Ast,
+    program: *const ExpandedProgram,
+    res: *const Resolution,
+    pool: *const Typing,
+    from: ModuleId,
+    t: TypeId,
+    missing: *std.ArrayList([]const u8),
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    if (pool.instanceOf(t)) |instance| {
+        const args = pool.argsOf(instance);
+        const tuple = pool.isTupleDecl(instance.decl);
+        // Trailing arguments its declaration's written defaults name are
+        // left out, which is how a program writes them.
+        var shown = args.len;
+        if (!tuple) {
+            const parameters = ast.declTypeParams(instance.decl);
+            while (shown > 0 and shown <= parameters.len) : (shown -= 1) {
+                const default = parameters[shown - 1].default;
+                if (!default.wasWritten() or default.name == .none) break;
+                const named = res.writtenAt(default.name);
+                if (named == BindingId.none) break;
+                const argument = pool.declOfType(args[shown - 1]) orelse break;
+                if (res.declaredBy(named) != argument or pool.instanceOf(args[shown - 1]) != null) break;
+            }
+        }
+        if (tuple) try w.writeAll("(") else {
+            try writeHelpDeclaredName(w, arena, ast, program, res, from, instance.decl, missing);
+            if (shown == 0) return;
+            try w.writeAll("[");
+        }
+        for (args[0..shown], 0..) |arg, i| {
+            if (i > 0) try w.writeAll(", ");
+            try writeHelpTypeName(w, arena, ast, program, res, pool, from, arg, missing);
+        }
+        return w.writeAll(if (tuple) ")" else "]");
+    }
+    switch (pool.get(t)) {
+        .array => |a| {
+            try w.writeAll("[");
+            try writeHelpTypeName(w, arena, ast, program, res, pool, from, a.element, missing);
+            return w.print("; {d}]", .{a.count});
+        },
+        .borrow => |b| {
+            try w.writeAll("borrow ");
+            return writeHelpTypeName(w, arena, ast, program, res, pool, from, b.referent, missing);
+        },
+        .struct_, .enum_, .newtype => if (pool.declOfType(t)) |d| return writeHelpDeclaredName(w, arena, ast, program, res, from, d, missing),
+        else => {},
+    }
+    return w.writeAll(pool.nameOf(t));
+}
+
+fn writeHelpDeclaredName(
+    w: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    ast: *const Ast,
+    program: *const ExpandedProgram,
+    res: *const Resolution,
+    from: ModuleId,
+    d: node.DeclId,
+    missing: *std.ArrayList([]const u8),
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    try writeDeclaredName(w, ast, program, res, from, d);
+    if (from == .none) return;
+    if (res.typeNamed(from, ast.tokenName(ast.declName(d)))) |named| if (named == d) return;
+    const module = program.moduleOf(d);
+    if (module == .none or module == from) return;
+    const qualifier = writableQualifier(ast, program, res, from, module, d);
+    for (program.get(from).imports) |import| if (std.mem.eql(u8, ast.tokenText(ast.declName(import.decl)), qualifier)) return;
+    // Not imported: the module the qualifier names is reached by its route.
+    for (program.modules, 0..) |candidate, index| {
+        if (!std.mem.eql(u8, candidate.name, qualifier)) continue;
+        const route = program.modulePath(ModuleId.from(@intCast(index)));
+        for (missing.items) |listed| if (std.mem.eql(u8, listed, route)) return;
+        try missing.append(arena, route);
+        return;
+    }
+}
+
+/// The note a help adds where the types it writes need modules the reader
+/// has not imported, or null where they need none.
+pub fn importNote(arena: std.mem.Allocator, missing: []const []const u8) std.mem.Allocator.Error!?[]const u8 {
+    if (missing.len == 0) return null;
+    var out: std.ArrayList(u8) = .empty;
+    for (missing, 0..) |route, i| try out.print(arena, "{s}`import {s}`", .{ if (i == 0) "" else if (i + 1 == missing.len) " and " else ", ", route });
+    return try std.fmt.allocPrint(arena, "the types this names are reached with {s}", .{out.items});
+}
+
 fn writeTypeName(
     w: *std.Io.Writer,
     ast: *const Ast,
@@ -8020,6 +8134,13 @@ const Checker = struct {
     /// `writtenTypeName`: bare where the module names the type that way, and
     /// through its declaring module where it does not, so a report never
     /// writes two different types the same way.
+    /// How a help writes `t` for the reader to copy, by `helpTypeName`,
+    /// adding to `missing` the modules the spelling needs imported.
+    fn helpName(self: *const Checker, t: TypeId, missing: *std.ArrayList([]const u8)) std.mem.Allocator.Error![]const u8 {
+        const pool = self.builder.view();
+        return helpTypeName(self.sink.arena, self.ast, self.program, self.res, &pool, self.current, t, missing);
+    }
+
     fn typeName(self: *const Checker, t: TypeId) std.mem.Allocator.Error![]const u8 {
         const pool = self.builder.view();
         return writtenTypeName(self.sink.arena, self.ast, self.program, self.res, &pool, self.current, t);
@@ -16770,10 +16891,13 @@ const Checker = struct {
     fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId) std.mem.Allocator.Error!TypeId {
         const answered_name = try self.typeName(answered);
         const ending = if (answered == .unit) "()" else "…";
-        const signature = switch (carrier.kind) {
-            .result => try std.fmt.allocPrint(self.sink.arena, "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`", .{ answered_name, try self.typeName(self.errorTypeOf(carrier)), ending }),
-            .option => try std.fmt.allocPrint(self.sink.arena, "make the function return `Option[{s}]` and end it with `.Some({s})`", .{ answered_name, ending }),
+        var missing: std.ArrayList([]const u8) = .empty;
+        const written_answer = try self.helpName(answered, &missing);
+        const written_signature = switch (carrier.kind) {
+            .result => try std.fmt.allocPrint(self.sink.arena, "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`", .{ written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
+            .option => try std.fmt.allocPrint(self.sink.arena, "make the function return `Option[{s}]` and end it with `.Some({s})`", .{ written_answer, ending }),
         };
+        const signature = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "{s} ({s})", .{ written_signature, note }) else written_signature;
         // `else` handles a failure only as the whole of a statement: the
         // initialiser of a `let`, or a `let _` written for a value kept for
         // its effect.
@@ -19836,11 +19960,16 @@ const Checker = struct {
         const in_expected = try self.typeName(wanted[at]);
         const in_found = try self.typeName(had[at]);
         const default = if (parameters[at].default.wasWritten()) try self.defaultAt(want.decl, at) else .poison;
-        if (wanted[at] == default) return try std.fmt.allocPrint(
-            self.sink.arena,
-            "only their allocators differ: the `{s}` expected is in `{s}`, the default where a type leaves its allocator out, and this one is in `{s}`; build it with the system form of the call that made it, without `_in`, or write `{s}` where the `{s}` expected is declared",
-            .{ name, in_expected, in_found, try self.typeName(found), name },
-        );
+        if (wanted[at] == default) {
+            var missing: std.ArrayList([]const u8) = .empty;
+            const written = try self.helpName(found, &missing);
+            const imports = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
+            return try std.fmt.allocPrint(
+                self.sink.arena,
+                "only their allocators differ: the `{s}` expected is in `{s}`, the default where a type leaves its allocator out, and this one is in `{s}`; build it with the system form of the call that made it, without `_in`, or write `{s}` where the `{s}` expected is declared{s}",
+                .{ name, in_expected, in_found, written, name, imports },
+            );
+        }
         if (had[at] == default) return try std.fmt.allocPrint(
             self.sink.arena,
             "only their allocators differ: the `{s}` expected is in `{s}`, and this one is in `{s}`, the default; build it with the `_in` form of the call that made it, passing the allocator `{s}` stands for",
@@ -29545,7 +29674,8 @@ const Checker = struct {
         const with_open = try self.gpa.alloc(TypeId, s.found.len);
         defer self.gpa.free(with_open);
         for (s.found, own, with_open) |f, parameter, *slot| slot.* = if (f == .poison) parameter else f;
-        const annotation = try self.typeName(try self.builder.substitute(row.ty, s.owner.index(), with_open));
+        var missing: std.ArrayList([]const u8) = .empty;
+        const annotation = try self.helpName(try self.builder.substitute(row.ty, s.owner.index(), with_open), &missing);
         // Every parameter the call left open is named, since the annotation
         // has to say what each of them is.
         var open: std.ArrayList(u8) = .empty;
@@ -29558,7 +29688,8 @@ const Checker = struct {
             try open.print(self.sink.arena, "{s}`{s}`", .{ joiner, self.ast.tokenText(g.name) });
             listed += 1;
         }
-        return try std.fmt.allocPrint(self.sink.arena, "say what {s} {s} where `{s}` is declared: `{s} {s}: {s} = {s}`, with {s} in place of {s}", .{
+        const imports = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
+        return try std.fmt.allocPrint(self.sink.arena, "say what {s} {s} where `{s}` is declared: `{s} {s}: {s} = {s}`, with {s} in place of {s}{s}", .{
             open.items,
             if (count == 1) "is" else "are",
             self.ast.tokenText(self.ast.stmtData(stmt).name),
@@ -29568,6 +29699,7 @@ const Checker = struct {
             written,
             if (count == 1) "a type" else "types",
             open.items,
+            imports,
         });
     }
 

@@ -5,4 +5,4 @@ error[T-Mismatch]: expected `Shelf[UInt8, SystemAllocator]`, found `Shelf[UInt8,
    |                ----- expected because of this annotation
    |                               ^^^^^ expected `Shelf[UInt8, SystemAllocator]`, found `Shelf[UInt8, mem.Handle[SystemAllocator]]`
    |
-   = help: only their allocators differ: the `Shelf` expected is in `SystemAllocator`, the default where a type leaves its allocator out, and this one is in `mem.Handle[SystemAllocator]`; build it with the system form of the call that made it, without `_in`, or write `Shelf[UInt8, mem.Handle[SystemAllocator]]` where the `Shelf` expected is declared
+   = help: only their allocators differ: the `Shelf` expected is in `SystemAllocator`, the default where a type leaves its allocator out, and this one is in `mem.Handle[SystemAllocator]`; build it with the system form of the call that made it, without `_in`, or write `Shelf[UInt8, mem.Handle]` where the `Shelf` expected is declared

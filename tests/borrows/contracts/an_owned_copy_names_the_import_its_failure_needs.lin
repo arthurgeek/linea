@@ -1,0 +1,16 @@
+// This program imports nothing, and the owned copy's result names `mem.Oom`.
+// The report writes `String` as the program writes it and says which import
+// reaches `mem`.
+fn pick(a: String, b: String, first: Bool) -> Str where borrows(a) {
+    if first {
+        a.view()
+    } else {
+        b.view()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(pick(a, b, false).length())
+}

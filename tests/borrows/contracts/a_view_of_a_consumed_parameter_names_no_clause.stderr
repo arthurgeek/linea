@@ -14,4 +14,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |     ^^^^^^^^ escape observations only from the signature's declared sources
   |
   = help: `s` is consumed by `first` and ends when it returns, so no clause lets anything observe it past the return
-  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  = help: the types this names are reached with `import std.mem`
