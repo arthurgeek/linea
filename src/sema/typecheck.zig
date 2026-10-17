@@ -8926,17 +8926,18 @@ const Checker = struct {
             supplied[i] = try self.typeOfRefOf(m, owner, a);
             if (supplied[i] == .poison) refused = true;
         }
-        // An argument that was refused was reported where it is written, and
-        // a type applied to it is that refusal's consequence.
-        if (refused) return .poison;
         try self.fillDefaults(decl, supplied, written);
         for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, decl, i);
         const made = try self.builder.instantiate(head, decl, supplied);
 
         // Bound validation waits until representations and callable effects
         // are complete, so declaration order cannot change their evidence.
+        // The other arguments are still held to their bounds where one was
+        // refused: the bound walk passes over a poison argument.
         if (self.callable_effects_ready) try self.bound_sites.append(self.gpa, .{ .ty = made, .at = tok, .within = owner });
-        return made;
+        // An argument that was refused was reported where it is written, and
+        // the type applied to it is that refusal's consequence.
+        return if (refused) .poison else made;
     }
 
     /// The arguments a written type omitted, read from the defaults the
