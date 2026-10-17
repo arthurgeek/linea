@@ -1,0 +1,5 @@
+error[T-Mismatch]: `T` was already settled as `UInt8`, and this is a `Bool`
+  --> tests/aliases/an_alias_parameter_settled_twice_names_both_types.lin:17:16
+   |
+17 |     let twin = Twin.make(UInt8(1), true)
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^ one type parameter, two types

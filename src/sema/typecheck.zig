@@ -9668,15 +9668,7 @@ const Checker = struct {
             if (!self.writesParameter(heading, pattern)) continue;
             var clash: ?Clash = null;
             if (try self.settle(pattern, actual, heading.alias, heading.found, &clash)) continue;
-            const was = clash.?;
-            const got_name = try self.typeName(was.got);
-            _ = self.report(
-                .t_mismatch,
-                at,
-                "`{s}` was already settled as `{s}` here, and this is {s} `{s}`",
-                .{ self.ast.tokenText(generics[was.index].name), try self.typeName(was.was), article.before(got_name), got_name },
-                "one type parameter, two types",
-            );
+            try self.reportSettledTwice(at, self.ast.tokenText(generics[clash.?.index].name), clash.?, false);
             return false;
         }
         for (heading.written, got) |pattern, actual| {
@@ -19772,6 +19764,22 @@ const Checker = struct {
         return try self.allocatorFormNote(.{ .declaration = want.passed_to });
     }
 
+    /// [T-Mismatch] for a type parameter two types settle, at `at`: the one
+    /// sentence every inference site uses, naming the call's brackets where
+    /// `in_brackets` says they settled it first, with the allocator note
+    /// where the two differ only in their allocator.
+    fn reportSettledTwice(self: *Checker, at: ExprId, parameter: []const u8, clash: Clash, in_brackets: bool) std.mem.Allocator.Error!void {
+        const got_name = try self.typeName(clash.got);
+        const spelled = .{ parameter, try self.typeName(clash.was), article.before(got_name), got_name };
+        const reported_at = self.sink.items().len;
+        _ = if (in_brackets)
+            self.report(.t_mismatch, at, "the call names `{s}` as `{s}` in its brackets, and this is {s} `{s}`", spelled, "one type parameter, two types")
+        else
+            self.report(.t_mismatch, at, "`{s}` was already settled as `{s}`, and this is {s} `{s}`", spelled, "one type parameter, two types");
+        if (self.sink.items().len > reported_at) if (try self.allocatorMismatchNote(clash.was, clash.got)) |note|
+            try self.addNote(reported_at, note);
+    }
+
     /// Where `expected` and `found` are one declaration applied to arguments
     /// that differ only at a parameter bounded by `Allocator`, at any depth
     /// (`Vec[String]` against `Vec[String[mem.Handle]]`), the note saying so:
@@ -29696,21 +29704,7 @@ const Checker = struct {
                     var clash: ?Clash = null;
                     if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
 
-                    const at = clash.?;
-                    const got_name = try self.typeName(at.got);
-                    const spelled = .{
-                        self.ast.tokenText(s.generics[at.index].name),
-                        (try self.typeName(at.was)),
-                        article.before(got_name),
-                        got_name,
-                    };
-                    const reported_at = self.sink.items().len;
-                    _ = if (s.owner == d and written.len > 0)
-                        self.report(.t_mismatch, a, "the call names `{s}` as `{s}` in its brackets, and this is {s} `{s}`", spelled, "one type parameter, two types")
-                    else
-                        self.report(.t_mismatch, a, "`{s}` was already settled as `{s}`, and this is {s} `{s}`", spelled, "one type parameter, two types");
-                    if (self.sink.items().len > reported_at) if (try self.allocatorMismatchNote(at.was, at.got)) |note|
-                        try self.addNote(reported_at, note);
+                    try self.reportSettledTwice(a, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, s.owner == d and written.len > 0);
                     return null;
                 }
 
@@ -29902,19 +29896,7 @@ const Checker = struct {
             for (settling) |s| {
                 var clash: ?Clash = null;
                 if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
-                const at = clash.?;
-                _ = self.report(
-                    .t_mismatch,
-                    value,
-                    "`{s}` was already settled as `{s}` here, and this is {s} `{s}`",
-                    .{
-                        self.ast.tokenText(s.generics[at.index].name),
-                        (try self.typeName(at.was)),
-                        article.before(try self.typeName(at.got)),
-                        (try self.typeName(at.got)),
-                    },
-                    "one type parameter, two types",
-                );
+                try self.reportSettledTwice(value, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, false);
                 delayed_refused = true;
             }
         }
