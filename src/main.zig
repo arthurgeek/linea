@@ -27,6 +27,7 @@ comptime {
     _ = @import("syntax/ast.zig");
     _ = @import("syntax/program.zig");
     _ = @import("syntax/relocation.zig");
+    _ = @import("syntax/placement.zig");
     _ = @import("syntax/expanded_program.zig");
     _ = @import("syntax/dump.zig");
     _ = @import("syntax/expanded_dump.zig");

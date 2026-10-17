@@ -7,6 +7,7 @@ const test_library = @import("../driver/test_library.zig");
 const Analysis = analysis_mod.Analysis;
 const positions = @import("positions.zig");
 const fix = @import("fix.zig");
+const placement = @import("../syntax/placement.zig");
 const workspace = @import("workspace.zig");
 const exports = @import("exports.zig");
 const loader = @import("../driver/loader.zig");
@@ -1001,7 +1002,7 @@ fn appendOperationsElsewhere(
         .eachElsewhere(gpa, held, &applicable);
     if (applicable.items.len == 0) return;
 
-    const place = fix.placementForUse(ast, part, part.source);
+    const place = placement.placementForUse(ast, part, part.source);
     const replaced = replacedRange(ast, part, sel, offset, encoding);
 
     // One edit per trait rather than per operation: a trait declaring three
@@ -1351,7 +1352,7 @@ fn appendQualified(
     leaf: []const u8,
 ) !void {
     const part = program.ast.partOfFile(file) orelse return;
-    const place = fix.placementIn(&program.ast, part, part.source);
+    const place = placement.placementIn(&program.ast, part, part.source);
 
     // Each matching module supplies one import and its own export run. The
     // final sort touches only offered entries, restoring the index's order.
@@ -1693,7 +1694,7 @@ fn appendImportable(
 ) !void {
     const ast = &program.ast;
     const part = ast.partOfFile(file) orelse return;
-    const place = fix.placementIn(ast, part, part.source);
+    const place = placement.placementIn(ast, part, part.source);
 
     const taken = try fix.takenFromAnImportIn(gpa, program, file);
     defer gpa.free(taken);
