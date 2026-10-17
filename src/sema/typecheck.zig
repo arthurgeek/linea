@@ -13373,6 +13373,19 @@ const Checker = struct {
             return fail(self, parts);
         }
 
+        // A view is read through, and a pattern takes the value itself apart.
+        if (self.builder.get(of) == .borrow) {
+            const shown = try self.typeName(of);
+            _ = self.report(
+                .t_mismatch,
+                pattern,
+                "this takes `{s}` apart, and the value is {s} `{s}`",
+                .{ name, article.before(shown), shown },
+                "a pattern takes a value apart, not a view of one",
+            );
+            return fail(self, parts);
+        }
+
         const k = (try self.variantNamed(of, name)) orelse {
             _ = self.report(.n_variant, pattern, "the enum has no such variant", .{}, "not a variant of what is matched");
             return fail(self, parts);
@@ -13749,7 +13762,28 @@ const Checker = struct {
             return fail(self, p.args);
         }
 
-        return self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) });
+        if (!try self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) })) return false;
+
+        // A literal or range outside the refinement names a value the base
+        // never holds, so no value reaches the arm.
+        const compares = switch (self.ast.exprTag(p.args[0])) {
+            .int_literal, .negate, .range => true,
+            else => false,
+        };
+        if (compares and self.builder.isRefined(of)) {
+            const r = self.builder.refinementOf(of);
+            if (self.foldedInterval(p.args[0])) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
+                _ = self.report(
+                    .t_unreachable,
+                    p.args[0],
+                    "no value reaches this arm",
+                    .{},
+                    try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}),
+                );
+                return false;
+            };
+        }
+        return true;
     }
 
     /// The variant of `t` named `name`, or null. An enum of a few variants is
@@ -13800,7 +13834,97 @@ const Checker = struct {
         const unwraps = self.variant_uses.contains(pattern) and self.carrierOf(of) != null;
         const unwrap_help: []const []const u8 = &.{"bind what it carries with `let ... else`, or take it apart with `match`"};
         const match_help: []const []const u8 = &.{"take it apart with `match`, which has an arm for every case"};
-        _ = self.reportWithOriginNotes(.t_refutable, pattern, message, label, null, if (unwraps) unwrap_help else match_help);
+        _ = self.reportWithOriginNotes(.t_refutable, self.missedPart(pattern, missed, of), message, label, null, if (unwraps) unwrap_help else match_help);
+    }
+
+    /// The part of a pattern a missed value first fails to match, read along
+    /// the value: a variant naming another variant, or a literal leaving the
+    /// value out. The whole pattern where no part says so. Bounded by the
+    /// pattern's size.
+    fn missedPart(self: *Checker, pattern: ExprId, missed: PatternCoverage.Witness, of: TypeId) ExprId {
+        if (isCatchAll(self.ast, pattern) or self.ast.partBinds(pattern)) return pattern;
+        const types: PatternTypes = .{ .checker = self };
+        switch (self.ast.exprTag(pattern)) {
+            .name_ref, .call => if (self.variant_uses.get(pattern)) |use| {
+                const k: u32 = @intFromEnum(use.ordinal);
+                const parts = switch (missed.shape) {
+                    .variant => |v| if (v.index == k) v.args else return pattern,
+                    else => return pattern,
+                };
+                if (self.ast.exprTag(pattern) != .call) return pattern;
+                for (self.ast.call(pattern).args, 0..) |part, j| {
+                    if (j >= parts.len) break;
+                    if (self.partMisses(part, parts[j])) return self.missedPart(part, parts[j], types.part(of, .{ .variant = k }, @intCast(j)));
+                }
+                return pattern;
+            } else {
+                // A newtype: a refined one's value is its base's, read in place.
+                const inner = self.ast.call(pattern).args[0];
+                const base = switch (missed.shape) {
+                    .product => |parts| if (parts.len == 1) parts[0] else return pattern,
+                    .integers => return inner,
+                    else => return pattern,
+                };
+                return if (self.partMisses(inner, base)) self.missedPart(inner, base, types.part(of, .product, 0)) else pattern;
+            },
+            .tuple_pattern => {
+                const parts = switch (missed.shape) {
+                    .product => |p| p,
+                    else => return pattern,
+                };
+                for (self.ast.call(pattern).args, 0..) |part, i| {
+                    if (i >= parts.len) break;
+                    if (self.partMisses(part, parts[i])) return self.missedPart(part, parts[i], types.part(of, .product, @intCast(i)));
+                }
+                return pattern;
+            },
+            .struct_pattern => {
+                const parts = switch (missed.shape) {
+                    .product => |p| p,
+                    else => return pattern,
+                };
+                const written = self.ast.call(pattern).args;
+                var i: usize = 0;
+                while (i + 1 < written.len) : (i += 2) {
+                    const field = self.field_names.get(self.ast.exprMain(written[i])) orelse continue;
+                    const at = field.field.index();
+                    if (at >= parts.len) continue;
+                    if (self.partMisses(written[i + 1], parts[at])) return self.missedPart(written[i + 1], parts[at], types.part(of, .product, at));
+                }
+                return pattern;
+            },
+            else => return pattern,
+        }
+    }
+
+    /// Whether a part of a pattern leaves out a missed value: a binder or `_`
+    /// takes anything, and a pattern takes only what it names.
+    fn partMisses(self: *Checker, part: ExprId, missed: PatternCoverage.Witness) bool {
+        if (isCatchAll(self.ast, part) or self.ast.partBinds(part)) return false;
+        if (missed.isWild()) return false;
+        return switch (self.ast.exprTag(part)) {
+            .name_ref, .call => if (self.variant_uses.get(part)) |use| switch (missed.shape) {
+                .variant => |v| v.index != @intFromEnum(use.ordinal) or self.anyPartMisses(part, v.args),
+                else => true,
+            } else true,
+            .tuple_pattern => switch (missed.shape) {
+                .product => |parts| self.anyPartMisses(part, parts),
+                else => true,
+            },
+            .int_literal, .negate, .range => switch (missed.shape) {
+                .integers => |iv| if (self.foldedInterval(part)) |range| !(range.lo <= iv.lo and iv.hi <= range.hi) else true,
+                else => true,
+            },
+            else => true,
+        };
+    }
+
+    fn anyPartMisses(self: *Checker, pattern: ExprId, parts: []const PatternCoverage.Witness) bool {
+        if (self.ast.exprTag(pattern) != .call and self.ast.exprTag(pattern) != .tuple_pattern) return false;
+        for (self.ast.call(pattern).args, 0..) |part, i| {
+            if (i < parts.len and self.partMisses(part, parts[i])) return true;
+        }
+        return false;
     }
 
     /// Checks coverage questions with the checker's own types.
@@ -13836,7 +13960,12 @@ const Checker = struct {
             return switch (self.checker.builder.get(t)) {
                 .enum_ => |e| .{ .variants = e.variant_count },
                 .struct_ => .{ .product = self.checker.builder.fieldCount(t) },
-                .newtype => .{ .product = 1 },
+                // A refined newtype over an integer is the integers its
+                // refinement admits, so its pattern is read as its base's.
+                .newtype => |nt| if (nt.refined and nt.base.bounds() != null)
+                    .{ .integer = .{ .lo = nt.lo, .hi = nt.hi } }
+                else
+                    .{ .product = 1 },
                 else => .opaque_,
             };
         }
@@ -13874,6 +14003,10 @@ const Checker = struct {
                 const args = try arena.alloc(*const usefulness.Pattern, written.len);
                 for (written, 0..) |part, j| args[j] = try self.coveragePattern(arena, part, types.part(of, .{ .variant = k }, @intCast(j)));
                 out.* = .{ .variant = .{ .index = k, .args = args } };
+            } else if (self.builder.get(types.settled(of)) == .newtype and types.kind(of) == .integer) {
+                // A refined newtype's column is its base's integers, so the
+                // pattern is what it holds.
+                return self.coveragePattern(arena, self.ast.call(pattern).args[0], of);
             } else {
                 // A newtype's pattern: its one constructor, around its base.
                 const args = try arena.alloc(*const usefulness.Pattern, 1);
@@ -13925,10 +14058,16 @@ const Checker = struct {
         const t = types.settled(w.ty);
         switch (w.shape) {
             .wild => try out.append(self.gpa, '_'),
-            .integers => |iv| if (iv.lo == iv.hi)
-                try out.print(self.gpa, "{d}", .{iv.lo})
-            else
-                try out.print(self.gpa, "{d}..={d}", .{ iv.lo, iv.hi }),
+            .integers => |iv| {
+                // A refined newtype's integers are written inside its name.
+                const wrapped = self.builder.get(t) == .newtype;
+                if (wrapped) try out.print(self.gpa, "{s}(", .{self.ast.tokenText(self.ast.declName(self.declaringType(t).?))});
+                if (iv.lo == iv.hi)
+                    try out.print(self.gpa, "{d}", .{iv.lo})
+                else
+                    try out.print(self.gpa, "{d}..={d}", .{ iv.lo, iv.hi });
+                if (wrapped) try out.append(self.gpa, ')');
+            },
             .variant => |v| {
                 try out.appendSlice(self.gpa, self.view().variantName(t, v.index));
                 const named = for (v.args) |a| {
@@ -21057,7 +21196,7 @@ const Checker = struct {
         // by another path is a second view of what one path is changing --
         // the same answer `N-Aliased` gives an argument read beside one
         // passed `&`. A `read` lend shares, so nothing else is asked of it.
-        if (writable and self.mentions(body, binder, except)) {
+        if (writable and !self.aliased.contains(body) and self.mentions(body, binder, except)) {
             _ = self.report(
                 .o_lent,
                 body,
@@ -21065,6 +21204,9 @@ const Checker = struct {
                 .{},
                 "read it through the binder, or lend it with `for read`",
             );
+            // Every binder of one pattern ends over the same body, and the
+            // body is said once.
+            try self.aliased.put(self.gpa, body, {});
         }
     }
 

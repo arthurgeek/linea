@@ -1,0 +1,13 @@
+// A keyword cannot stand inside a pattern, and the arm holding it is refused
+// once: no arm after it is held unreachable on its account.
+fn class(sink choice: Option[Bool]) -> UInt8 {
+    match choice {
+        Some(true) => 1,
+        Some(false) => 2,
+        None => 3,
+    }
+}
+
+fn main() -> UInt8 {
+    class(.None) - 3
+}

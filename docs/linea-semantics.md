@@ -3723,7 +3723,11 @@ patterns, one cell per pattern position, and a `match` whose check would build
 more than 2^20 cells is refused. Deciding whether nested patterns cover a type is
 NP-complete, so without a ceiling the cost of checking one `match` could grow
 exponentially with the width of its patterns. A `match` refused this way is
-split into nested `match`es, each covering one part.
+split into nested `match`es, each covering one part. The pattern of a `let`,
+`let read`, `let ... else`, `for` or lambda parameter is checked the same way
+against a wildcard ([T-Refutable]); one pattern costs about its own size, so
+only a pattern of about a million parts reaches the limit, and it is taken apart
+in more than one step.
 
 **[T-Unreachable]** A match arm that no value can reach is ill-formed: every
 value it matches is taken by the arms before it. This includes an already
@@ -4272,7 +4276,8 @@ A pattern nested inside the head is held to the same rule, so
 `let (key, Some(value)) = pair else { … }` is refused too: the `else` of a
 binding runs when its `Option` or `Result` initializer fails, never when a part
 of the pattern does ([ADR 0224](adr/0224-a-pattern-nests-wherever-a-binder-stands.md)).
-The diagnostic names a value the pattern misses.
+The diagnostic names a value the pattern misses, at the part of the pattern
+that first leaves it out.
 
 **[T-Refine]** Every violation of a newtype's refinement contract is reported
 under this rule. An empty range is rejected at its declaration:

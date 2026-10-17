@@ -573,10 +573,10 @@ fn main() -> UInt8 {
 
 ```
 error[T-Refutable]: this pattern does not match every `(Str, Option[UInt16])`
-  --> letelse_part.lin:10:9
+  --> letelse_part.lin:10:13
    |
 10 |     let (_, Some(number)) = lookup(name) else {
-   |         ^^^^^^^^^^^^^^^^^ `(_, None)` is not matched
+   |             ^^^^^^^^^^^^ `(_, None)` is not matched
    |
    = help: take it apart with `match`, which has an arm for every case
 ```

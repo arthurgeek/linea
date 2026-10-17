@@ -113,6 +113,9 @@ pub const Projection = union(enum) {
 pub const PatternPart = struct {
     within: ExprId,
     step: Projection,
+    /// The pattern node whose parts this is one of: `within` where that is
+    /// set, and the outermost pattern where it is not.
+    holder: ExprId = .none,
 };
 
 /// One thing that happens to a place.
@@ -587,6 +590,10 @@ pub const Cfg = struct {
     /// The step each pattern node nested in another selects, keyed by the
     /// node. Sized by the program's nested patterns.
     pattern_parts: std.AutoHashMapUnmanaged(ExprId, PatternPart) = .empty,
+    /// The pattern node each binder nested inside another pattern stands at,
+    /// so a report can say where in the pattern it sits. Sized by the
+    /// program's nested binders.
+    binder_parts: std.AutoHashMapUnmanaged(BindingId, ExprId) = .empty,
     /// Closures refused for naming a binding they did not capture, in the
     /// order they were met, with what their bodies do with it. Sized by the
     /// refused closures, which is normally none.
@@ -612,6 +619,7 @@ pub const Cfg = struct {
         self.temporary_statements.deinit(gpa);
         self.static_reads.deinit(gpa);
         self.pattern_parts.deinit(gpa);
+        self.binder_parts.deinit(gpa);
         self.* = undefined;
     }
 

@@ -1,0 +1,10 @@
+error[S-Match]: `true` is a keyword, and a keyword cannot be a name
+ --> tests/patterns/a_keyword_inside_a_pattern_is_one_mistake.lin:5:14
+  |
+5 |         Some(true) => 1,
+  |              ^^^^ choose another name
+error[S-Match]: `false` is a keyword, and a keyword cannot be a name
+ --> tests/patterns/a_keyword_inside_a_pattern_is_one_mistake.lin:6:14
+  |
+6 |         Some(false) => 2,
+  |              ^^^^^ choose another name

@@ -4123,9 +4123,11 @@ const Parser = struct {
         if (self.cursor.at(.l_brace)) return self.parseStructPattern();
         // A keyword written where a binder belongs is a name that cannot be
         // one, which is the mistake to name rather than a missing pattern.
+        // The part is an error node, so what checks the pattern takes it for
+        // nothing rather than for a binder that matches everything.
         if (self.atKeywordName()) {
             _ = try self.expectName(.s_match, "expected a name", "a pattern binds what its variant carries");
-            return self.builder.addLiteral(.name_ref, at, self.rangeFrom(at));
+            return self.builder.addLiteral(.err, at, self.rangeFrom(at));
         }
         if (self.cursor.at(.keyword_reflect) or !self.atArmPattern()) {
             try self.reportNoPattern(at);

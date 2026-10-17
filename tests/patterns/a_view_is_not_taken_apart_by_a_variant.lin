@@ -1,0 +1,7 @@
+// A slice hands out views of its items, and a pattern takes a value apart, so a
+// variant's pattern does not stand over a view of an option.
+fn main() -> UInt8 {
+    let found: [Option[UInt8]; 2] = [.Some(1), .None]
+    let total = found.as_slice().enumerate().map(|sink (i, Some(x))| i + UInt64(x)).fold(0, |sink a, sink b| a + b)
+    UInt8(total)
+}

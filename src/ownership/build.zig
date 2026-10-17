@@ -191,6 +191,7 @@ pub fn buildRemaining(
         .temporary_statements = b.temporary_statements.move(),
         .static_reads = b.static_reads.move(),
         .pattern_parts = b.pattern_parts.move(),
+        .binder_parts = b.binder_parts.move(),
         .uncaptured = uncaptured,
     };
 }
@@ -265,6 +266,8 @@ const Builder = struct {
     temporary_statements: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty,
     /// See `Cfg.pattern_parts`.
     pattern_parts: std.AutoHashMapUnmanaged(ExprId, cfg_mod.PatternPart) = .empty,
+    /// See `Cfg.binder_parts`.
+    binder_parts: std.AutoHashMapUnmanaged(BindingId, ExprId) = .empty,
     /// See `Cfg.static_reads`.
     static_reads: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The closures refused for an uncaptured name; see `Cfg.uncaptured`.
@@ -335,6 +338,7 @@ const Builder = struct {
         self.temporary_statements.deinit(self.gpa);
         self.static_reads.deinit(self.gpa);
         self.pattern_parts.deinit(self.gpa);
+        self.binder_parts.deinit(self.gpa);
         self.uncaptured.deinit(self.gpa);
         self.uncaptured_unsettles.deinit(self.gpa);
     }
@@ -729,21 +733,22 @@ const Builder = struct {
         const args = self.ast.call(pattern).args;
         var i = stride - 1;
         while (i < args.len) : (i += stride) {
-            try self.bindPart(args[i], self.partStep(pattern, i), within, at, source, holding);
+            try self.bindPart(args[i], self.partStep(pattern, i), within, pattern, at, source, holding);
         }
     }
 
     /// One part of a pattern, selected from what `within` names by `step`: a
     /// binder takes it, and a pattern nested there takes it apart in turn.
     /// `at` is where the binding is written, or none to write it at the part.
-    fn bindPart(self: *Builder, part: ExprId, step: cfg_mod.Projection, within: ExprId, at: ExprId, source: ExprId, holding: Holding) !void {
+    fn bindPart(self: *Builder, part: ExprId, step: cfg_mod.Projection, within: ExprId, holder: ExprId, at: ExprId, source: ExprId, holding: Holding) !void {
         const projection: cfg_mod.Projection = if (within == ExprId.none) step else blk: {
-            try self.pattern_parts.put(self.gpa, part, .{ .within = within, .step = step });
+            try self.pattern_parts.put(self.gpa, part, .{ .within = within, .step = step, .holder = holder });
             break :blk .{ .part = part };
         };
         if (self.ast.partBinds(part)) {
             const binder = self.res.targetOf(part);
             if (binder == BindingId.none) return;
+            if (within != ExprId.none) try self.binder_parts.put(self.gpa, binder, part);
             return self.bindHolder(binder, if (at == ExprId.none) part else at, source, projection, holding);
         }
         switch (self.ast.exprTag(part)) {
@@ -755,7 +760,7 @@ const Builder = struct {
                 if (self.at != .none) self.ops.items(.source)[self.ops.len - 1] = part;
             },
             .struct_pattern, .tuple_pattern, .call => {
-                if (within == ExprId.none) try self.pattern_parts.put(self.gpa, part, .{ .within = ExprId.none, .step = step });
+                if (within == ExprId.none) try self.pattern_parts.put(self.gpa, part, .{ .within = ExprId.none, .step = step, .holder = holder });
                 try self.bindParts(part, part, at, source, holding);
             },
             // A literal or a range compares a scalar and holds nothing.
@@ -2150,7 +2155,7 @@ const Builder = struct {
                 try self.lendWalkedParts(binder_pattern, id, f.callee);
             } else for (self.ast.call(binder_pattern).args, 0..) |component, i| {
                 const step: cfg_mod.Projection = if (self.componentName(binder_pattern, i)) |field| .{ .element_component = field } else .element;
-                try self.bindPart(component, step, ExprId.none, ExprId.none, f.callee, .owned);
+                try self.bindPart(component, step, ExprId.none, binder_pattern, ExprId.none, f.callee, .owned);
             }
         } else {
             const binder = self.res.targetOf(binder_pattern);

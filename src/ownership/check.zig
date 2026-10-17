@@ -1024,6 +1024,37 @@ const Checker = struct {
         return cfg_mod.exitSpan(self.ast, exit);
     }
 
+    /// Where a part a nested pattern stands at sits, from the part outwards:
+    /// "component `_0` of what `Some` carries". Bounded by the pattern's
+    /// depth.
+    fn partPlace(self: *Checker, part: ExprId) std.mem.Allocator.Error![]const u8 {
+        var text: std.ArrayList(u8) = .empty;
+        var at = part;
+        while (self.cfg.pattern_parts.get(at)) |step| {
+            const parent = step.holder;
+            if (parent == ExprId.none) break;
+            if (text.items.len > 0) try text.appendSlice(self.sink.arena, " of ");
+            const args = self.ast.call(parent).args;
+            const index = for (args, 0..) |a, i| {
+                if (a == at) break i;
+            } else 0;
+            switch (self.ast.exprTag(parent)) {
+                .tuple_pattern => try text.print(self.sink.arena, "component `_{d}`", .{index}),
+                .struct_pattern => try text.print(self.sink.arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(args[index - 1]))}),
+                else => {
+                    const name = self.ast.tokenText(self.ast.exprMain(self.ast.call(parent).callee));
+                    if (args.len > 1)
+                        try text.print(self.sink.arena, "payload {d} of what `{s}` carries", .{ index, name })
+                    else
+                        try text.print(self.sink.arena, "what `{s}` carries", .{name});
+                },
+            }
+            if (step.within == ExprId.none) break;
+            at = step.within;
+        }
+        return text.items;
+    }
+
     fn reportLeak(self: *Checker, group: []const Leak) std.mem.Allocator.Error!void {
         const arena = self.sink.arena;
         const b = group[0].binding;
@@ -1032,8 +1063,9 @@ const Checker = struct {
         // A `_` in a tuple pattern stands at a component the tuple's
         // declaration names, and the label says which one it left unsettled.
         const component: ?[]const u8 = if (discard) blk: {
+            if (self.cfg.binder_parts.get(b)) |part| break :blk try self.partPlace(part);
             const selected = self.typing.fieldSelection(tok) orelse break :blk null;
-            break :blk self.typing.fieldName(selected.receiver, selected.field.index());
+            break :blk try std.fmt.allocPrint(arena, "`{s}`", .{self.typing.fieldName(selected.receiver, selected.field.index())});
         } else null;
         // A derive's generated body is reported at the derive, so every label
         // in it lands on one span and only the primary says anything.
@@ -1057,7 +1089,7 @@ const Checker = struct {
             .file = self.ast.fileOf(tok),
             .span = self.ast.tokenSpan(tok),
             .message = if (component) |name|
-                try std.fmt.allocPrint(arena, "`_` does not settle `{s}`", .{name})
+                try std.fmt.allocPrint(arena, "`_` does not settle {s}", .{name})
             else if (discard)
                 "`_` does not settle it"
             else if (primary != null)
