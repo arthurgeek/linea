@@ -5157,9 +5157,10 @@ would permit double consumption on the other; for a deferred binding the same tw
 choices skip the schedule where it should run, or run it where the value is gone.
 The disagreement is reported at the join. A path that leaves the join's scope
 keeps an answer of its own, so a value given away on a path that returns is not a
-disagreement. A binding ends with the block that declares it, so a join after an
-`if`, `while` or `for` body compares nothing about a binding declared inside it:
-a `defer` written there has run or been skipped before the paths meet.
+disagreement. A binding ends with the block that declares it, so a join after a
+block compares nothing about a binding declared inside it: a `defer` written in
+an `if`, `while` or `for` body, or in a `match` arm, has run or been skipped
+before the paths meet.
 
 **[O-Reinit]** An `inout` parameter must be initialised on every path to an exit.
 Moving from it is allowed, but each path to a `return` or the body's end must

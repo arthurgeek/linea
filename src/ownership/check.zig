@@ -469,11 +469,11 @@ const Checker = struct {
     ///
     /// A Linear binding must because it has to be consumed exactly once. A
     /// binding a `defer` consumes must because its schedule runs or is skipped
-    /// at each exit by what is true there. No other binding's state is
-    /// observed after it changes, so `checkMerges` compares these bindings
-    /// and no other, and a scope end resets these and no other: a binding
-    /// whose scope ended on one path and that was never declared on the other
-    /// is `.uninit` on both.
+    /// at each exit by what is true there. Any other binding may merge
+    /// pessimistically, since a use after the join reports the move it reads,
+    /// so `checkMerges` compares these bindings and no other. A scope end
+    /// resets these and no other, so a binding whose scope ended on one path
+    /// and that was never declared on the other is `.uninit` on both.
     ///
     /// Reads `scheduled`, so it answers only once `rootsOf` has filled it.
     fn isTracked(self: *const Checker, b: BindingId) bool {
@@ -2499,6 +2499,7 @@ const Checker = struct {
     ///
     /// So a body of `UInt8` locals ends a hundred scopes in constant work,
     /// where visiting each of them would put the graph's quadratic straight
+    /// back into every exit.
     fn endScopes(
         self: *Checker,
         op: OpId,

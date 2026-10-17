@@ -1,7 +1,8 @@
 // A `Note` is not `@linear`, so dropping one is accepted and it owes nothing.
 // `defer let` still schedules its release, and inside an `if`, `while` or
-// `for` body that release runs when the body ends, so the path through the
-// body and the path around it agree that no `Note` is held after it.
+// `for` body or a `match` arm that release runs when the body ends, so the
+// path through the body and the path around it agree that no `Note` is held
+// after it.
 import std.io
 
 use io.print
@@ -33,6 +34,14 @@ fn main() -> UInt8 {
     for id in [4, 5] {
         defer let note = Note { id = id }
         total = total + 1
+    }
+    let extra: Option[UInt8] = .Some(6)
+    match extra {
+        Some(id) => {
+            defer let note = Note { id = id }
+            total = total + 1
+        },
+        None => {},
     }
     total
 }
