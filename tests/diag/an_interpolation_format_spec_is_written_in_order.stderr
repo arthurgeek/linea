@@ -37,7 +37,7 @@ error[S-Format]: a precision is at most 65535
   --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:13:50
    |
 13 | fn _too_precise(x: Float64) { let _message = "{x:.70000}" }
-   |                                                  ^^^^^^ no Float64 has this many digits worth writing
+   |                                                  ^^^^^^ no float has this many digits worth writing
 error[S-Format]: a format spec is written `[[fill]align][+][0][width][.precision][?]`
   --> tests/diag/an_interpolation_format_spec_is_written_in_order.lin:14:48
    |

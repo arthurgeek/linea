@@ -155,7 +155,11 @@ pub fn resolveLibraryPrefix(
     const result = try resolveInternal(arena.allocator(), program, interner, sink, .program, &seed, null);
     if (sink.hasErrors()) return error.InvalidLibraryPrefix;
     const names = if (result.expanded.borrowed_source) interner else &result.expanded.interner;
-    return .{ .arena = arena, .result = result, .interner = try Interner.initPrefix(arena.allocator(), names), .seed = seed.? };
+    // Built before the arena is copied into the result: an allocation made
+    // after the copy would extend only the local arena, and the copy that
+    // `deinit` frees would never release it.
+    const prefix_names = try Interner.initPrefix(arena.allocator(), names);
+    return .{ .arena = arena, .result = result, .interner = prefix_names, .seed = seed.? };
 }
 
 /// Continue a clean library resolution, or run the complete pass when the
@@ -5670,12 +5674,12 @@ const integer_primitives = blk: {
     break :blk cut;
 };
 
-/// What promises a reflexive equality: the integers and `Bool`, and not
-/// `Float64`, whose NaN is the counterexample.
+/// What promises a reflexive equality: the integers and `Bool`, and not the
+/// floats, whose NaN is the counterexample.
 const equivalence_primitives = integer_primitives ++ [_]TypeId{.bool_};
 
-/// What compares at all: the integers totally, and `Float64` partially.
-const comparable_primitives = integer_primitives ++ [_]TypeId{.f64};
+/// What compares at all: the integers totally, and the floats partially.
+const comparable_primitives = integer_primitives ++ TypeId.floats;
 
 /// Which traits the compiler implements for the array constructor, and what
 /// each supplies for the trait's own parameters.
@@ -6062,7 +6066,7 @@ const Resolver = struct {
     /// Every binding the program declares, in declaration order. Append-only:
     /// a `BindingId` indexes it, and every later pass keys side tables by one.
     bindings: std.ArrayList(Binding) = .empty,
-    /// The nine primitives, as the bindings that name them. Every module's
+    /// The primitives, as the bindings that name them. Every module's
     /// scope opens with these, so a written `UInt8` reaches one wherever it is
     /// written and a declaration of that name collides with it.
     builtins: std.ArrayList(BindingId) = .empty,
@@ -6565,7 +6569,7 @@ const Resolver = struct {
 
     /// One binding per primitive, made once and shared by every module's scope.
     ///
-    /// The spelling comes from the type itself, so the nine names and the nine
+    /// The spelling comes from the type itself, so the names and the
     /// handles cannot come apart -- there is no second list to keep in step.
     ///
     /// Each name is the handle the program's own tokens carry for that word.
@@ -16341,7 +16345,7 @@ test "a reference resolves to its binding" {
         \\}
     );
     try testing.expectEqual(@as(u32, 0), r.errors);
-    // The function is a symbol too, so one binding makes two -- after the nine
+    // The function is a symbol too, so one binding makes two -- after the
     // primitives, which are bindings in every program whether it names them or
     // not.
     try testing.expectEqual(@as(u32, TypeId.primitives.len + 2), r.res.bindingCount());
@@ -16360,7 +16364,7 @@ test "the later of two bindings wins" {
         \\}
     );
     try testing.expectEqual(@as(u32, 1), r.errors);
-    // Two bindings and the function they sit in, after the nine primitives.
+    // Two bindings and the function they sit in, after the primitives.
     try testing.expectEqual(@as(u32, TypeId.primitives.len + 3), r.res.bindingCount());
 }
 

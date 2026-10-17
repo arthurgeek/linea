@@ -510,6 +510,7 @@ pub fn reachOfType(tag: TypeTag) Reach {
         => .generated,
         .poison => .{ .impossible = "generated programs are well typed by construction" },
         .open_integer => .{ .impossible = "an open integer is settled before checking finishes" },
+        .open_float => .{ .impossible = "an open float is settled before checking finishes" },
         .open_type => .{ .impossible = "an open type is settled before checking finishes" },
     };
 }
@@ -560,6 +561,7 @@ pub fn reachOfInst(tag: Inst.Tag) Reach {
         => .generated,
 
         .int_to_float, .float_to_int => .generated,
+        .float_extend, .float_truncate => .{ .impossible = "generated programs use no Float32" },
         .float_math => .{ .impossible = "generated programs declare no trusted scalar math primitives" },
 
         .function_addr, .call_indirect => .generated,
@@ -827,6 +829,7 @@ test "observations and callable signatures do not contain their referenced types
         const by_value = switch (t) {
             .integer,
             .open_integer,
+            .open_float,
             .open_type,
             .boolean,
             .float,

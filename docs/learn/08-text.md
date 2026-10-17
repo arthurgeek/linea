@@ -401,7 +401,7 @@ optional:
 | `:*^12` | centre, padding with `*` | `{"thanks":*^12}` |
 | `:02` | pad a number with zeros to 2 digits | `{day:02}` → `07` |
 | `:+` | write `+` before a number that is not negative | `{change:+}` → `+3` |
-| `:.2` | two digits after a `Float64`'s point | `{price:.2}` → `2.50` |
+| `:.2` | two digits after a float's point | `{price:.2}` → `2.50` |
 | `:?` | write through `Debug`; combines with the rest, as in `:>12?` | `{today:?}` |
 
 Width counts Unicode scalars, so `"café"` takes four columns. A value wider
@@ -420,16 +420,16 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-error[T-Format]: `Str` is not a Float64, so its format spec cannot ask for a precision
+error[T-Format]: `Str` is not a float, so its format spec cannot ask for a precision
  --> spec_bad.lin:6:18
   |
 6 |     io.println("{item:.3} x {quantity:.2}")?
-  |                  ^^^^ a precision counts the digits after a Float64's point
-error[T-Format]: `Int64` is not a Float64, so its format spec cannot ask for a precision
+  |                  ^^^^ a precision counts the digits after a float's point
+error[T-Format]: `Int64` is not a float, so its format spec cannot ask for a precision
  --> spec_bad.lin:6:30
   |
 6 |     io.println("{item:.3} x {quantity:.2}")?
-  |                              ^^^^^^^^ a precision counts the digits after a Float64's point
+  |                              ^^^^^^^^ a precision counts the digits after a float's point
 ```
 
 Rust would truncate the text to three characters; Linea asks you to say that
@@ -519,7 +519,7 @@ separator.
 
 `parse` goes the other way: `"8080".parse[UInt16]()` reads text as a number
 and answers a `Result` whose error, a `text.ParseError`, says which byte was
-wrong. Every integer type and `Float64` can be read this way, and
+wrong. Every integer type, `Float64` and `Float32` can be read this way, and
 [Errors](03-errors.md) uses `parse` throughout. A type of your own joins them
 by implementing the `text.Parse` trait:
 

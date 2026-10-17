@@ -1,0 +1,25 @@
+fn narrow(value: Float64) -> Float32 {
+    Float32(value)
+}
+
+fn main() -> UInt8 {
+    let tenth: Float32 = 0.1
+    // Widening is exact: the binary32 nearest 0.1 keeps every digit.
+    let widened = Float64(tenth) == 0.10000000149011612
+    // Narrowing rounds to nearest, and a value beyond binary32's range
+    // becomes an infinity of its sign.
+    let rounded = narrow(0.1) == tenth
+    let overflow = narrow(1.0e300) > 3.4028235e38 && narrow(-1.0e300) < -3.4028235e38
+    let nan = narrow(0.0 / 0.0)
+    let still_nan = nan != nan
+    let big: Int64 = 16777217
+    let integer = Float32(big) == 16777216.0
+    let truncated = Int32(Float32(-2.75)) == -2 && UInt8(Float32(255.9)) == 255
+    let lowest = Int32(Float32(-2147483648.0)) == -2147483648
+    let highest = Int32(Float32(2147483520.0)) == 2147483520
+    if widened && rounded && overflow && still_nan && integer && truncated && lowest && highest {
+        0
+    } else {
+        1
+    }
+}

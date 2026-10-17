@@ -1,0 +1,12 @@
+import std.io
+
+@(copyable, derive(Debug))
+struct Sample { level: Float32 }
+
+fn main() -> Result[UInt8, io.IoError] {
+    let sample = Sample { level = 0.1 }
+    io.println("{sample:?}")?
+    let maybe: Option[Float32] = .Some(-2.5)
+    io.println("{maybe:?}")?
+    .Ok(0)
+}

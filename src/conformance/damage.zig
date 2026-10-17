@@ -211,9 +211,9 @@ fn resultRole(module: *Module) ?Undo {
 fn typeRepresentation(module: *Module) ?Undo {
     if (TypeId.u8.index() >= module.representations.len()) return null;
     var row = module.representations.get(.u8);
-    if (row.storage == .float64) return null;
+    if (row.storage == .float) return null;
     const undo: Undo = .{ .representation = .{ .table = &module.representations, .original = row } };
-    row.storage = .float64;
+    row.storage = .{ .float = 64 };
     module.representations.set(.u8, row);
     return undo;
 }

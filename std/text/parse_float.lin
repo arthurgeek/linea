@@ -40,8 +40,13 @@ pub fn parse_float64(input: Str) -> Result[Float64, ParseError] where carries() 
     var bits: UInt64 = 0
     var offset: UInt64 = 0
     let status = mem.parse_float64_bits(input.as_bytes(), &bits, &offset)
-    // The runtime answers 0 for a value, 1 for a syntax error at `offset`, 2
-    // for a value out of range, and 3 for a token over the length limit.
+    parsed_status(status, bits, offset)
+}
+
+// The runtime answers 0 for a value, 1 for a syntax error at `offset`, 2 for a
+// value out of range, and 3 for a token over the length limit. A value's bits
+// are those of the Float64 holding it.
+fn parsed_status(status: UInt64, bits: UInt64, offset: UInt64) -> Result[Float64, ParseError] where carries() {
     match read status {
         0 => .Ok(parsed_float64(bits)),
         1 => .Err(.Syntax(offset)),
@@ -95,6 +100,34 @@ test fn float_parsing_bounds_token_work_before_conversion() {
     testing.assert(match parse_float64(input.view()) { Err(error) => error == ParseError.TokenLimit, Ok(_) => false }, "oversized decimal token was accepted")?
 }
 
+// Parse one decimal token as `parse_float64` does, rounding once to the
+// nearest Float32. A value beyond Float32's range, or a nonzero one that rounds
+// to zero there, is OutOfRange. Rounding to Float64 first and then to Float32
+// would round twice, which for some inputs gives the other neighbour.
+pub fn parse_float32(input: Str) -> Result[Float32, ParseError] where carries() {
+    var bits: UInt64 = 0
+    var offset: UInt64 = 0
+    let status = mem.parse_float32_bits(input.as_bytes(), &bits, &offset)
+    // The Float64 holds a Float32 value exactly, so narrowing it is exact.
+    parsed_status(status, bits, offset).map(|sink value| Float32(value))
+}
+
+test fn float32_parsing_rounds_once_to_binary32() {
+    let tenth: Float32 = 0.1
+    testing.assert_eq(parse_float32("0.1").unwrap(), tenth, "one tenth changed")?
+    testing.assert_eq(parse_float32("16777217").unwrap(), Float32(16777216.0), "halfway integer did not round to even")?
+    // Just above the halfway point 1 + 2^-24; rounding through Float64 would
+    // land on the halfway point and give 1.0.
+    testing.assert(parse_float32("1.0000000596046447753906250000000001").unwrap() > 1.0, "the input was rounded twice")?
+    testing.assert_eq(parse_float32("3.4028235e38").unwrap(), Float32(3.4028235e38), "largest finite value changed")?
+    testing.assert_eq(parse_float32("1e-45").unwrap(), Float32(1e-45), "smallest subnormal changed")?
+    testing.assert(Float32(1.0) / parse_float32("-0").unwrap() < 0.0, "negative zero lost its sign")?
+    for input in ["1e39", "-3.5e38", "1e-46", "-1e-50"] {
+        testing.assert(match parse_float32(input) { Err(error) => error == ParseError.OutOfRange, Ok(_) => false }, "range loss was accepted")?
+    }
+    testing.assert(match parse_float32("1.") { Err(error) => error == ParseError.Syntax(2), Ok(_) => false }, "a syntax error lost its offset")?
+}
+
 impl Parse for Float64 {
     fn parse(text: Str) -> Result[Float64, ParseError] where carries() {
         parse_float64(text)
@@ -104,5 +137,17 @@ impl Parse for Float64 {
 test fn float64_parses_through_the_parse_trait() {
     let value: Float64 = "3.5".parse().unwrap()
     testing.assert_eq(value, 3.5, "Float64's Parse implementation lost its value")?
+    .Ok(())
+}
+
+impl Parse for Float32 {
+    fn parse(text: Str) -> Result[Float32, ParseError] where carries() {
+        parse_float32(text)
+    }
+}
+
+test fn float32_parses_through_the_parse_trait() {
+    let value: Float32 = "0.1".parse().unwrap()
+    testing.assert_eq(value, 0.1, "Float32's Parse implementation lost its value")?
     .Ok(())
 }

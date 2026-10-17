@@ -1,0 +1,14 @@
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let zero: Float32 = 0.0
+    let tenth: Float32 = 0.1
+    let third: Float32 = 1.0 / 3.0
+    io.println("{tenth} {third} {Float32(0.2) + 0.1}")?
+    io.println("{Float32(16777216.0)} {Float32(-7.0)} {Float32(20.0)}")?
+    io.println("{Float32(1e-45)} {Float32(1.1754942e-38)} {Float32(1.1754944e-38)} {Float32(3.4028235e38)}")?
+    io.println("{-zero} {Float32(1.0) / zero} {Float32(-1.0) / zero} {zero / zero}")?
+    io.println("{Float32(1e-6)} {Float32(1e-7)} {Float32(9999999000000000.0)} {Float32(1e16)}")?
+    io.println("{tenth:.3} {third:>10.2} {Float32(2.5):+.0}")?
+    .Ok(0)
+}

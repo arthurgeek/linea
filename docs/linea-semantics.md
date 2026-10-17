@@ -66,6 +66,10 @@ Bool
 `Bool` has two values, written `true` and `false`, and no order. No conversion
 to or from it is allowed: a condition must be a `Bool`, not an integer.
 
+Two floating-point types, IEEE 754 binary floats: `Float64`, binary64, and
+`Float32`, binary32
+([ADR 0226](adr/0226-float32-is-a-second-binary-floating-point-width.md)).
+
 Each has exactly one name. A type's **representation** is its width in bits,
 and its **range** follows from the width and the signedness: `UInt8` holds
 `0 ..= 255`, `Int8` holds `-128 ..= 127`.
@@ -530,7 +534,7 @@ outside every parenthesis, bracket and brace of the value, so the colon in
 - The width, digits not beginning with `0`, is the fewest columns the value
   occupies, counted in Unicode scalars: `"café"` occupies four. A value wider
   than its width is written whole.
-- `.precision` is the number of digits after a Float64's point.
+- `.precision` is the number of digits after a float's point.
 
 A colon with no spec after it, a part out of order, an alignment or `0`
 without a width, a width or precision above 65535, and `0` beside an alignment
@@ -538,7 +542,7 @@ are refused. A width and a precision are literal numbers; a width chosen at run
 time is written through `std.fmt.Spec` instead.
 
 **[T-Format]** A spec's parts must suit the value's type. A sign and zero
-padding lay out integers and `Float64`, and a precision lays out `Float64`
+padding lay out integers and floats, and a precision lays out a float
 only; fill, alignment and width lay out any value. A generic value is a number
 when it has `Integer` evidence. `"{name:.2}"` on a `Str` and `"{count:.2}"` on
 an integer are refused.
@@ -1749,8 +1753,8 @@ Primitive integer namespaces expose the compiler-owned properties `min` and
 `UInt8.max` are constant expressions and require no standard-library
 declaration. A symbolic `T.min` or `T.max` requires Integer evidence and is
 evaluated from the instantiated type's range; while `T` is symbolic, these
-properties are not constant expressions or parameter defaults. Bool, Float64
-and nominal newtypes do not inherit integer range properties. Declaring an
+properties are not constant expressions or parameter defaults. Bool, the
+floats and nominal newtypes do not inherit integer range properties. Declaring an
 inherent member named `min` or `max` for a built-in integer violates
 [N-Duplicate].
 
@@ -2153,15 +2157,26 @@ When the expected type is a symbolic Integer parameter, the literal must fit
 every admitted type: 0 through 127, the intersection of the eight integer
 ranges. An explicit conversion supplies a runtime range check instead.
 
-A float literal takes its expected type, or `Float64` when none is supplied. A
-value that is not finite in that type is ill-formed and diagnosed at the
-literal. A float literal is not a constant expression under [T-Const];
-arithmetic over float literals runs where it is written.
+A float literal is typed the same way, among the float types: it takes its
+expected type, and with none supplied its type is open, settled where it meets
+a float type at the same sites an open integer settles, and `Float64` when
+nothing settles it. The same operations that give an open integer `Int64` give
+an open float `Float64`. An open float and an open integer never settle as one:
+`1 + 1.5` is refused by [T-Operands]. A float literal converted to a float
+type, `Float32(0.1)`, settles on that type.
+
+A float literal is rounded once, to nearest with ties to even, at the type it
+finally has. The type must hold it: a literal that rounds to an infinity, or a
+nonzero literal that rounds to zero, is refused at the literal, labelled where
+its type was settled. Inexact rounding of any other value is admitted. A
+literal too large for `Float64` is too large for every float type and is
+refused before its type is known. A float literal is not a constant expression
+under [T-Const]; arithmetic over float literals runs where it is written.
 
 The `Float64` math methods are library operations and are not constant
 expressions; their results, including the special values, are defined with the
-standard library ([scalar/float.lin](../std/scalar/float.lin)). `Float64` is the
-only floating-point type.
+standard library ([scalar/float.lin](../std/scalar/float.lin)). `Float32` has
+no math methods.
 
 **[T-Convert]** `T(e)` explicitly converts its single argument `e` to the
 primitive type named by `T`
@@ -2173,12 +2188,17 @@ A symbolic source or target with Integer evidence admits the same explicit
 numeric conversions. The conversion is not a constant expression while either
 numeric type is symbolic. `T(256)` is valid under `T: Integer` and traps when
 evaluated at UInt8, while directly written `UInt8(256)` is rejected at compile
-time. Explicit Float64 endpoints remain permitted; this does not make Float64 a
+time. Explicit float endpoints remain permitted; this does not make a float a
 member of Integer.
 
-A conversion to a float is defined for every value and may round. An `Int64`
-outside the exact representable values of `Float64` becomes the nearest
-representable value, with round-to-nearest, ties-to-even.
+A conversion to a float is defined for every value and may round. An integer
+outside the exact representable values of the target becomes the nearest
+representable value, with round-to-nearest, ties-to-even. `Float64(x)` of a
+`Float32` is exact. `Float32(x)` of a `Float64` rounds the same way; a finite
+value beyond `Float32`'s range becomes the infinity of its sign, and NaN stays
+NaN. A `Float64` value converted to `Float32` has been rounded once already,
+so a decimal reaches `Float32` through it by two roundings; a literal written
+in the conversion is rounded once.
 
 A conversion from a float truncates toward zero. It traps if the target cannot
 hold the truncated value, or if the input is NaN; NaN is diagnosed separately
@@ -2198,10 +2218,13 @@ numeric operand.
 
 A symbolic type needs Integer evidence at its declaration, including an
 associated type constrained by a `where` predicate; an unconstrained parameter
-does not defer that requirement to instantiation. Concrete Float64 retains its
+does not defer that requirement to instantiation. A concrete float retains its
 arithmetic rules.
 
-Floats support `+`, `-`, `*` and `/`, but not `%`. Integer `/` truncates toward
+Floats support `+`, `-`, `*` and `/`, but not `%`. Each operation is rounded
+to nearest, ties to even, in its operands' type: `Float32` arithmetic is
+binary32 arithmetic, with no wider intermediate. `Float32` and `Float64` do
+not mix. Integer `/` truncates toward
 zero, and `%` is the remainder of that division, `a - (a / b) * b`, so a nonzero
 remainder has the sign of the dividend. Floating-point remainder is a different
 operation and does not share the operator. Float arithmetic requires no
@@ -2244,7 +2267,7 @@ required: `Equivalent` adds that promise. An unequal pair that compares less in
 neither direction is incomparable, and lexicographic comparison does not
 consult later components after finding one.
 
-`Float64` uses this partial order. NaN is equal to nothing and ordered before
+Each float type uses this partial order. NaN is equal to nothing and ordered before
 or after nothing: `less` and `equals` return false when either operand is NaN,
 including when both operands are the same NaN. Thus `!=`, defined by negating
 equality, is the only comparison that returns true for NaN. `Ordered` adds the
@@ -3013,7 +3036,7 @@ neither can an implementation that would overlap one already matching the type,
 as when the requirements never end; the help then offers another value.
 
 The closed `Integer` bound admits exactly Int8, Int16, Int32, Int64, UInt8,
-UInt16, UInt32 and UInt64. It excludes Bool, Float64, nominal newtypes and
+UInt16, UInt32 and UInt64. It excludes Bool, the floats, nominal newtypes and
 user-defined types. It takes no arguments and cannot be implemented by a user. A
 declared trait named Integer shadows the built-in bound and supplies only that
 trait's ordinary promises. Inline, trailing and inherited Integer bounds provide

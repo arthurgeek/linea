@@ -86,9 +86,33 @@ comptime {
     if (register_bits != types_mod.Layout.tag_width * 8) @compileError("the register type is not as wide as an enum tag");
 }
 
-/// The type a `Float64` is computed in. One width, because the language has
-/// one float.
-const float_type = "f64";
+/// The MLIR type of an IEEE 754 binary float of `bits` bits.
+fn floatType(bits: u8) []const u8 {
+    return switch (bits) {
+        32 => "f32",
+        64 => "f64",
+        else => std.debug.panic("compiler defect: a float is {d} bits wide", .{bits}),
+    };
+}
+
+/// The bit pattern MLIR spells a float constant with, at the constant's own
+/// width. `value` is exact at that width: a `Float32` constant is carried as
+/// the double holding the same value.
+fn floatConstantBits(value: f64, bits: u8) u64 {
+    return switch (bits) {
+        32 => @as(u32, @bitCast(@as(f32, @floatCast(value)))),
+        64 => @bitCast(value),
+        else => std.debug.panic("compiler defect: a float is {d} bits wide", .{bits}),
+    };
+}
+
+/// The width of a float computation, or null for any other.
+fn floatBitsOf(computation: mir_mod.ComputationRepresentation) ?u8 {
+    return switch (computation) {
+        .float => |bits| bits,
+        else => null,
+    };
+}
 
 /// Answers whether anything was written. A refusal has already said why,
 /// through the sink.
@@ -567,7 +591,7 @@ fn emitFunction(
                     try w.print("    %pw{d} = arith.extui %a{d} : i1 to i8\n", .{ i, i });
                     try w.print("    llvm.store %pw{d}, %s{d} : i8, !llvm.ptr\n", .{ i, i });
                 },
-                .float64, .enum_tag, .unit, .code_pointer, .data_pointer => try w.print("    llvm.store %a{d}, %s{d} : {s}, !llvm.ptr\n", .{
+                .float, .enum_tag, .unit, .code_pointer, .data_pointer => try w.print("    llvm.store %a{d}, %s{d} : {s}, !llvm.ptr\n", .{
                     i, i, storageType(storage),
                 }),
                 .bytes, .no_value, .invalid => std.debug.panic("compiler defect: a scalar parameter has {s} storage", .{
@@ -788,11 +812,11 @@ const FunctionEmitter = struct {
         switch (mir.tagOf(id)) {
             .constant => {
                 const computation = self.module.representationOf(mir.typeOf(id)).computation;
-                if (computation == .float64) {
+                if (floatBitsOf(computation)) |width| {
                     // Spelled as the bits rather than as a decimal, because the
                     // bits are exact and a decimal is a rounding of them.
-                    const bits: u64 = @bitCast(mir.floatConstantOf(id));
-                    try self.w.print("    %v{d} = arith.constant 0x{X} : {s}", .{ id.index(), bits, float_type });
+                    const bits = floatConstantBits(mir.floatConstantOf(id), width);
+                    try self.w.print("    %v{d} = arith.constant 0x{X} : {s}", .{ id.index(), bits, floatType(width) });
                     try self.here(span);
                 } else {
                     // The word holding the same bits: a `UInt64` above the
@@ -827,7 +851,7 @@ const FunctionEmitter = struct {
                         try self.w.print("    llvm.store %sw{d}, %s{d} : i8, !llvm.ptr", .{ id.index(), s.local.index() });
                         try self.here(span);
                     },
-                    .float64, .enum_tag, .unit, .code_pointer, .data_pointer => {
+                    .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
                         try self.w.writeAll("    llvm.store ");
                         try self.writeValue(s.value);
                         try self.w.print(", %s{d} : {s}, !llvm.ptr", .{
@@ -868,7 +892,7 @@ const FunctionEmitter = struct {
                             try self.w.print("    %v{d} = arith.cmpi ne, %lw{d}, %lz{d} : i8", .{ id.index(), id.index(), id.index() });
                             try self.here(span);
                         },
-                        .float64, .enum_tag, .unit, .code_pointer, .data_pointer => {
+                        .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
                             try self.w.print("    %v{d} = llvm.load %s{d} : !llvm.ptr -> {s}", .{
                                 id.index(), local.index(), storageType(storage),
                             });
@@ -889,8 +913,8 @@ const FunctionEmitter = struct {
                 const n = id.index();
                 const v = mir.unaryOf(id);
                 switch (self.computationOf(id)) {
-                    .float64 => {
-                        try self.w.print("    %v{d} = arith.negf %v{d} : {s}", .{ n, v.index(), float_type });
+                    .float => |bits| {
+                        try self.w.print("    %v{d} = arith.negf %v{d} : {s}", .{ n, v.index(), floatType(bits) });
                         try self.here(span);
                     },
                     .integer => {
@@ -945,17 +969,31 @@ const FunctionEmitter = struct {
                     else => std.debug.panic("compiler defect: a non-integer reaches integer-to-float conversion", .{}),
                 };
                 const from = storageType(storage);
+                const to = computationType(self.computationOf(id));
                 const operation = if (integer.signedness == .signed) "sitofp" else "uitofp";
                 if (integer.bits < 64) {
                     try self.w.print("    %fw{d} = arith.trunci %v{d} : {s} to {s}", .{ id.index(), v.index(), int_type, from });
                     try self.here(span);
-                    try self.w.print("    %v{d} = arith.{s} %fw{d} : {s} to {s}", .{ id.index(), operation, id.index(), from, float_type });
+                    try self.w.print("    %v{d} = arith.{s} %fw{d} : {s} to {s}", .{ id.index(), operation, id.index(), from, to });
                 } else {
-                    try self.w.print("    %v{d} = arith.{s} %v{d} : {s} to {s}", .{ id.index(), operation, v.index(), from, float_type });
+                    try self.w.print("    %v{d} = arith.{s} %v{d} : {s} to {s}", .{ id.index(), operation, v.index(), from, to });
                 }
                 try self.here(span);
             },
             .float_to_int => try self.floatToInt(id),
+            // Neither carries a fast-math flag: widening is exact, and
+            // narrowing rounds to nearest with ties to even.
+            .float_extend, .float_truncate => {
+                const v = mir.unaryOf(id);
+                try self.w.print("    %v{d} = arith.{s} %v{d} : {s} to {s}", .{
+                    id.index(),
+                    if (mir.tagOf(id) == .float_extend) "extf" else "truncf",
+                    v.index(),
+                    computationType(self.module.representationOf(mir.typeOf(v)).computation),
+                    computationType(self.computationOf(id)),
+                });
+                try self.here(span);
+            },
             .float_math => {
                 const math = mir.floatMathOf(id);
                 try self.w.print("    %v{d} = func.call @{s}(%v{d}", .{ id.index(), math.operation.symbol(), math.lhs.index() });
@@ -1322,7 +1360,7 @@ const FunctionEmitter = struct {
                 try self.w.print("    %v{d} = arith.cmpi ne, %iw{d}, %iz{d} : i8", .{ n, n, n });
                 try self.here(span);
             },
-            .float64, .enum_tag, .unit, .code_pointer, .data_pointer => {
+            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
                 try self.w.print("    %v{d} = llvm.load ", .{n});
                 if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(address);
                 try self.w.print(" : !llvm.ptr -> {s}", .{storageType(storage)});
@@ -1376,7 +1414,7 @@ const FunctionEmitter = struct {
                 try self.w.writeAll(" : i8, !llvm.ptr");
                 try self.here(span);
             },
-            .float64, .enum_tag, .unit, .code_pointer, .data_pointer => {
+            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
                 try self.w.writeAll("    llvm.store ");
                 try self.writeValue(rhs);
                 try self.w.writeAll(", ");
@@ -1416,7 +1454,7 @@ const FunctionEmitter = struct {
         const computation = self.computationOf(id);
         const op = switch (computation) {
             .integer => int_op,
-            .float64 => float_op,
+            .float => float_op,
             else => |representation| std.debug.panic("compiler defect: cannot apply arithmetic to {s}", .{
                 @tagName(std.meta.activeTag(representation)),
             }),
@@ -1472,9 +1510,9 @@ const FunctionEmitter = struct {
         const is_rem = mir.tagOf(id) == .rem;
         const computation = self.computationOf(id);
 
-        if (computation == .float64) {
+        if (floatBitsOf(computation)) |bits| {
             try self.w.print("    %v{d} = arith.{s} %v{d}, %v{d} : {s}", .{
-                n, if (is_rem) "remf" else "divf", p.lhs.index(), p.rhs.index(), float_type,
+                n, if (is_rem) "remf" else "divf", p.lhs.index(), p.rhs.index(), floatType(bits),
             });
             try self.here(span);
             return;
@@ -1558,7 +1596,7 @@ const FunctionEmitter = struct {
         // false; `ne` is the unordered form, so a NaN operand yields true.
         // That pair is IEEE 754 read straight off. Float comparison carries no
         // signedness: a sign is part of the value, not of the reading.
-        if (computation == .float64) {
+        if (floatBitsOf(computation)) |bits| {
             const pred = switch (mir.tagOf(id)) {
                 .cmp_eq => "oeq",
                 .cmp_ne => "une",
@@ -1569,7 +1607,7 @@ const FunctionEmitter = struct {
                 else => |t| std.debug.panic("compiler defect: {s} is not a comparison", .{@tagName(t)}),
             };
             try self.w.print("    %v{d} = arith.cmpf {s}, %v{d}, %v{d} : {s}", .{
-                n, pred, p.lhs.index(), p.rhs.index(), float_type,
+                n, pred, p.lhs.index(), p.rhs.index(), floatType(bits),
             });
             try self.here(span);
         } else {
@@ -1830,12 +1868,14 @@ const FunctionEmitter = struct {
     /// that are the conversion's own meaning: a NaN is no number, and a value
     /// whose truncation the target cannot hold has no honest result.
     ///
-    /// The bounds are doubles, tested exclusively -- `v >= max + 1` and
-    /// `v <= min - 1` -- so a fractional value whose *truncation* fits is
-    /// admitted: `-0.5` becomes `0` in every integer type. Both bounds are
-    /// exactly representable at every width but one: `Int64`'s `min - 1`
-    /// rounds back to `min`, so that type alone tests `v < min`, which is the
-    /// same set because no double between the two exists at that magnitude.
+    /// The bounds are values of the source float type, tested exclusively --
+    /// `v >= max + 1` and `v <= min - 1` -- so a fractional value whose
+    /// *truncation* fits is admitted: `-0.5` becomes `0` in every integer
+    /// type. `max + 1` is a power of two, exact in either float type. `min - 1`
+    /// is not exact where the target is as wide as the source's significand or
+    /// wider -- `Int64` from either float, `Int32` from `Float32` -- and there
+    /// the test is `v < min` instead, which is the same set because no value of
+    /// the source type lies between the two.
     fn floatToInt(self: *FunctionEmitter, id: InstId) std.Io.Writer.Error!void {
         const w = self.w;
         const mir = self.mir;
@@ -1846,37 +1886,30 @@ const FunctionEmitter = struct {
             else => return,
         };
         const span = mir.spanOf(id);
-        const v = mir.unaryOf(id).index();
+        const operand = mir.unaryOf(id);
+        const v = operand.index();
+        const width = floatBitsOf(self.module.representationOf(mir.typeOf(operand)).computation) orelse return;
+        const float_type = floatType(width);
         const signed = info.signedness == .signed;
-        const limits = TypeId.boundsOf(signed, info.bits);
+        const bounds = FloatToIntBounds.of(signed, info.bits, width);
 
         const nan = self.fresh();
         try w.print("    %k{d} = arith.cmpf une, %v{d}, %v{d} : {s}", .{ nan, v, v, float_type });
         try self.here(span);
         try self.trapIf(nan, .not_a_number, span);
 
-        const upper: f64 = @as(f64, @floatFromInt(limits.max)) + 1.0;
         const hi = self.fresh();
-        try w.print("    %k{d}c = arith.constant 0x{X} : {s}", .{ hi, @as(u64, @bitCast(upper)), float_type });
+        try w.print("    %k{d}c = arith.constant 0x{X} : {s}", .{ hi, floatConstantBits(bounds.upper, width), float_type });
         try self.here(span);
         try w.print("    %k{d} = arith.cmpf oge, %v{d}, %k{d}c : {s}", .{ hi, v, hi, float_type });
         try self.here(span);
         try self.trapIf(hi, .conversion_out_of_range, span);
 
         const lo = self.fresh();
-        if (signed and info.bits == 64) {
-            const bound: f64 = @floatFromInt(limits.min);
-            try w.print("    %k{d}c = arith.constant 0x{X} : {s}", .{ lo, @as(u64, @bitCast(bound)), float_type });
-            try self.here(span);
-            try w.print("    %k{d} = arith.cmpf olt, %v{d}, %k{d}c : {s}", .{ lo, v, lo, float_type });
-            try self.here(span);
-        } else {
-            const below: f64 = @as(f64, @floatFromInt(limits.min)) - 1.0;
-            try w.print("    %k{d}c = arith.constant 0x{X} : {s}", .{ lo, @as(u64, @bitCast(below)), float_type });
-            try self.here(span);
-            try w.print("    %k{d} = arith.cmpf ole, %v{d}, %k{d}c : {s}", .{ lo, v, lo, float_type });
-            try self.here(span);
-        }
+        try w.print("    %k{d}c = arith.constant 0x{X} : {s}", .{ lo, floatConstantBits(bounds.lower, width), float_type });
+        try self.here(span);
+        try w.print("    %k{d} = arith.cmpf {s}, %v{d}, %k{d}c : {s}", .{ lo, if (bounds.lower_inclusive) "olt" else "ole", v, lo, float_type });
+        try self.here(span);
         try self.trapIf(lo, .conversion_out_of_range, span);
 
         try w.print("    %v{d} = arith.{s} %v{d} : {s} to {s}", .{
@@ -2026,11 +2059,57 @@ test "emitted locations follow repeated and reordered Unicode source spans" {
     );
 }
 
+/// The values a float of `float_bits` bits truncates into an integer type
+/// from, as two exclusive bounds: the conversion traps at or above `upper`, and
+/// below `lower` -- or at it, unless `lower_inclusive`, where `lower` is the
+/// type's minimum itself because the value one below it is not exact.
+const FloatToIntBounds = struct {
+    upper: f64,
+    lower: f64,
+    lower_inclusive: bool,
+
+    fn of(signed: bool, integer_bits: u8, float_bits: u8) FloatToIntBounds {
+        const limits = TypeId.boundsOf(signed, integer_bits);
+        // `max + 1` and `min` are powers of two (or zero), so both are exact.
+        const upper: f64 = @floatFromInt(limits.max + 1);
+        const min: f64 = @floatFromInt(limits.min);
+        const significand_bits: u8 = if (float_bits == 32) 24 else 53;
+        // `min - 1` needs as many significant bits as the integer's magnitude.
+        const below_is_exact = !signed or integer_bits <= significand_bits;
+        return if (below_is_exact)
+            .{ .upper = upper, .lower = min - 1.0, .lower_inclusive = false }
+        else
+            .{ .upper = upper, .lower = min, .lower_inclusive = true };
+    }
+};
+
+test "a float truncates into an integer between exact bounds" {
+    const int32_from_float32 = FloatToIntBounds.of(true, 32, 32);
+    try std.testing.expectEqual(@as(f64, 2147483648.0), int32_from_float32.upper);
+    try std.testing.expectEqual(@as(f64, -2147483648.0), int32_from_float32.lower);
+    try std.testing.expect(int32_from_float32.lower_inclusive);
+    const int32_from_float64 = FloatToIntBounds.of(true, 32, 64);
+    try std.testing.expectEqual(@as(f64, -2147483649.0), int32_from_float64.lower);
+    try std.testing.expect(!int32_from_float64.lower_inclusive);
+    try std.testing.expect(FloatToIntBounds.of(true, 64, 64).lower_inclusive);
+    const uint8 = FloatToIntBounds.of(false, 8, 32);
+    try std.testing.expectEqual(@as(f64, 256.0), uint8.upper);
+    try std.testing.expectEqual(@as(f64, -1.0), uint8.lower);
+    // Every bound is exact in the source width.
+    for ([_]u8{ 32, 64 }) |float_bits| for ([_]u8{ 8, 16, 32, 64 }) |integer_bits| for ([_]bool{ false, true }) |signed| {
+        const bounds = FloatToIntBounds.of(signed, integer_bits, float_bits);
+        if (float_bits == 32) {
+            try std.testing.expectEqual(bounds.upper, @as(f64, @as(f32, @floatCast(bounds.upper))));
+            try std.testing.expectEqual(bounds.lower, @as(f64, @as(f32, @floatCast(bounds.lower))));
+        }
+    };
+}
+
 fn computationType(representation: mir_mod.ComputationRepresentation) []const u8 {
     return switch (representation) {
         .integer, .enum_tag, .unit => int_type,
         .boolean => "i1",
-        .float64 => float_type,
+        .float => |bits| floatType(bits),
         .code_pointer, .data_pointer => "!llvm.ptr",
         .indirect, .no_value, .invalid => std.debug.panic(
             "compiler defect: {s} is not a scalar computation",
@@ -2049,7 +2128,7 @@ fn storageType(representation: mir_mod.StorageRepresentation) []const u8 {
             else => std.debug.panic("compiler defect: integer storage is {d} bits wide", .{integer.bits}),
         },
         .boolean => "i8",
-        .float64 => float_type,
+        .float => |bits| floatType(bits),
         .enum_tag, .unit => int_type,
         .code_pointer, .data_pointer => "!llvm.ptr",
         .bytes, .no_value, .invalid => std.debug.panic(
@@ -2310,11 +2389,13 @@ test "a byte outside printable ascii is a hex escape" {
 test "storage types follow recorded representations" {
     try testing.expectEqualStrings("i64", computationType(.{ .integer = .unsigned }));
     try testing.expectEqualStrings("i1", computationType(.boolean));
-    try testing.expectEqualStrings("f64", computationType(.float64));
+    try testing.expectEqualStrings("f64", computationType(.{ .float = 64 }));
+    try testing.expectEqualStrings("f32", computationType(.{ .float = 32 }));
     try testing.expectEqualStrings("i8", storageType(.{ .integer = .{ .signedness = .unsigned, .bits = 8 } }));
     try testing.expectEqualStrings("i16", storageType(.{ .integer = .{ .signedness = .signed, .bits = 16 } }));
     try testing.expectEqualStrings("i8", storageType(.boolean));
-    try testing.expectEqualStrings("f64", storageType(.float64));
+    try testing.expectEqualStrings("f64", storageType(.{ .float = 64 }));
+    try testing.expectEqualStrings("f32", storageType(.{ .float = 32 }));
 }
 
 test "an integer is computed wider than its type names" {
@@ -2372,6 +2453,7 @@ test "integer to float emission preserves the recorded source width" {
             .computation = .{ .integer = case.signedness },
             .storage = .{ .integer = .{ .signedness = case.signedness, .bits = case.width } },
         });
+        representations.set(.f64, .{ .computation = .{ .float = 64 }, .storage = .{ .float = 64 } });
         const module: Module = .{
             .functions = &.{},
             .external = &.{},

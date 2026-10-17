@@ -6,6 +6,19 @@ import std.testing
 // the call, and each byte reaches the caller's Writer through a literal.
 extern fn linea_float64_debug(bits: UInt64, inout first: UInt64, inout second: UInt64, inout third: UInt64, inout fourth: UInt64) -> UInt64
 
+// The same for a Float32, passed as the bits of the Float64 holding the same
+// value: the text is the shortest that reads back as the same Float32.
+extern fn linea_float32_debug(bits: UInt64, inout first: UInt64, inout second: UInt64, inout third: UInt64, inout fourth: UInt64) -> UInt64
+
+// Which float type's digits a value is written with. A Float32 is carried as
+// the Float64 holding the same value, which widening gives exactly, so the
+// two types share one writer and differ only in how many digits read back.
+@copyable
+enum FloatWidth {
+    Binary32,
+    Binary64,
+}
+
 // A value is negative when its sign is set: below zero, or negative zero,
 // which compares equal to zero and is told apart by the sign of 1 / value.
 // NaN is never negative.
@@ -98,34 +111,44 @@ fn float_character(byte: UInt64) -> Str {
     }
 }
 
+// Write the shortest text that reads back as `value` in the float type
+// `width` names.
+fn write_float_text[W: Writer](value: Float64, width: FloatWidth, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    var first: UInt64 = 0
+    var second: UInt64 = 0
+    var third: UInt64 = 0
+    var fourth: UInt64 = 0
+    let bits = float64_bits(value)
+    var remaining = match read width {
+        Binary32 => linea_float32_debug(bits, &first, &second, &third, &fourth),
+        Binary64 => linea_float64_debug(bits, &first, &second, &third, &fourth),
+    }
+    // Four UInt64 words hold at most 32 ASCII bytes, eight bytes per word.
+    if remaining == 0 || remaining > 32 {
+        panic("invalid float output length")
+    }
+    let words = [first, second, third, fourth]
+    for word in words {
+        var packed = word
+        var count = if remaining < 8 {
+            remaining
+        } else {
+            8
+        }
+        while count > 0 {
+            // Each base-256 digit is one byte, least-significant byte first.
+            &w.write_str(float_character(packed % 256))?
+            packed /= 256
+            count -= 1
+            remaining -= 1
+        }
+    }
+    .Ok(())
+}
+
 impl Debug for Float64 {
     fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        var first: UInt64 = 0
-        var second: UInt64 = 0
-        var third: UInt64 = 0
-        var fourth: UInt64 = 0
-        var remaining = linea_float64_debug(float64_bits(self), &first, &second, &third, &fourth)
-        // Four UInt64 words hold at most 32 ASCII bytes, eight bytes per word.
-        if remaining == 0 || remaining > 32 {
-            panic("invalid float output length")
-        }
-        let words = [first, second, third, fourth]
-        for word in words {
-            var packed = word
-            var count = if remaining < 8 {
-                remaining
-            } else {
-                8
-            }
-            while count > 0 {
-                // Each base-256 digit is one byte, least-significant byte first.
-                &w.write_str(float_character(packed % 256))?
-                packed /= 256
-                count -= 1
-                remaining -= 1
-            }
-        }
-        .Ok(())
+        write_float_text(self, .Binary64, &w)
     }
 }
 
@@ -308,27 +331,78 @@ test fn float_display_propagates_the_first_writer_failure() {
     .Ok(())
 }
 
+// Debug writes a Float32 as the shortest decimal that reads back as the same
+// Float32, with Float64's notation: `Float32(0.1)` prints as `0.1`, not as the
+// `0.10000000149011612` its exact Float64 value would.
+impl Debug for Float32 {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        write_float_text(Float64(self), .Binary32, &w)
+    }
+}
+
+test fn float32_debug_writes_the_shortest_binary32_decimal() {
+    let tenth: Float32 = 0.1
+    let third: Float32 = 1.0 / 3.0
+    testing.assert(debug_text_equals(tenth, "0.1"), "one tenth is not concise")?
+    testing.assert(debug_text_equals(third, "0.33333334"), "one third lost or gained digits")?
+    testing.assert(debug_text_equals(Float32(-0.0), "-0.0"), "negative zero lost its sign")?
+    testing.assert(debug_text_equals(Float32(16777216.0), "16777216.0"), "two to the 24th changed")?
+    testing.assert(debug_text_equals(Float32(1e-45), "1e-45"), "the smallest subnormal changed")?
+    testing.assert(debug_text_equals(Float32(3.4028235e38), "3.4028235e38"), "the largest finite value changed")?
+    let zero: Float32 = 0.0
+    testing.assert(debug_text_equals(zero / zero, "NaN"), "NaN spelling changed")?
+    testing.assert(debug_text_equals(-1.0 / zero, "-inf"), "negative infinity lost its sign")?
+    testing.assert(debug_preserves_writer_failure(tenth), "Debug lost a writer failure")?
+    .Ok(())
+}
+
+// Display writes the same digits as Debug, as for Float64.
+impl Display for Float32 {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.debug(&w)
+    }
+}
+
+test fn float32_display_renders_the_shortest_round_trip_decimal() {
+    let tenth: Float32 = 0.1
+    testing.assert(display_text_equals(tenth, "0.1"), "one tenth is not concise")?
+    testing.assert(display_text_equals(tenth + 0.2, "0.3"), "the binary32 sum of 0.1 and 0.2 changed")?
+    testing.assert(display_text_equals(Float32(20.0), "20.0"), "an integral value lost its decimal point")?
+    testing.assert(display_text_equals(Float32(1e-7), "1e-7"), "a magnitude below 1e-6 kept fixed notation")?
+    testing.assert(display_text_equals(Float32(1e16), "1e16"), "a magnitude of 1e16 kept fixed notation")?
+    testing.assert(display_preserves_writer_failure(tenth), "Display lost a writer failure")?
+    .Ok(())
+}
+
 // The runtime returns the shortest decimal that reads back as a finite
 // nonzero magnitude, as a significand and a power of ten: 0.125 is 125 with
 // exponent -3. These are the digits Display prints.
 extern fn linea_float64_shortest(bits: UInt64, inout exponent: Int64) -> UInt64
 
-// Write a non-negative Float64, or NaN, without a sign. With no precision the
-// digits are Display's. With one, Display's digits are rounded half away from
-// zero to `places` digits after the point; infinity and NaN keep their names.
-fn write_float_magnitude[W: Writer](magnitude: Float64, precision: Option[UInt64], inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+// The same for a Float32 passed as the bits of the Float64 holding its value.
+extern fn linea_float32_shortest(bits: UInt64, inout exponent: Int64) -> UInt64
+
+// Write a non-negative float, or NaN, without a sign, with the digits of the
+// float type `width` names. With no precision the digits are Display's. With
+// one, Display's digits are rounded half away from zero to `places` digits
+// after the point; infinity and NaN keep their names.
+fn write_float_magnitude[W: Writer](magnitude: Float64, width: FloatWidth, precision: Option[UInt64], inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     let places = match read precision {
         Some(places) => places,
-        None => return magnitude.fmt(&w),
+        None => return write_float_text(magnitude, width, &w),
     }
     if magnitude != magnitude || magnitude == 1.0 / 0.0 {
-        return magnitude.fmt(&w)
+        return write_float_text(magnitude, width, &w)
     }
     if magnitude == 0.0 {
         return write_fixed(0, 0, places, &w)
     }
     var exponent: Int64 = 0
-    let significand = linea_float64_shortest(float64_bits(magnitude), &exponent)
+    let bits = float64_bits(magnitude)
+    let significand = match read width {
+        Binary32 => linea_float32_shortest(bits, &exponent),
+        Binary64 => linea_float64_shortest(bits, &exponent),
+    }
     write_fixed(significand, exponent, places, &w)
 }
 

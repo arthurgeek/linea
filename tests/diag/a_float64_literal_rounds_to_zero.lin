@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let tiny = 1e-400
+    let _unused = tiny
+    0
+}

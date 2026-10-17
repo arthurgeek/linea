@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-09-23. Extends [0018](0018-the-integer-model.md);
 partially supersedes [0092](0092-a-settled-type-parameter-flows-inward.md).
-Extended by [0176](0176-a-function-name-is-a-value-its-uses-instantiate.md).
+Extended by [0176](0176-a-function-name-is-a-value-its-uses-instantiate.md)
+and by [0226](0226-float32-is-a-second-binary-floating-point-width.md), which
+settles float literals the same way.
 Method-call fallback clause refined by
 [0192](0192-iterator-operations-belong-to-every-sequence.md).
 

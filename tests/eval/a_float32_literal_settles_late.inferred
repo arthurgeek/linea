@@ -1,0 +1,11 @@
+fn main() -> UInt8 {
+    let gain: Float32 = 0.5
+    let sample: Float32 = 0.25
+    let louder: Float32 = sample * gain
+    let quiet: Float32 = 0.1
+    if louder > quiet {
+        0
+    } else {
+        1
+    }
+}

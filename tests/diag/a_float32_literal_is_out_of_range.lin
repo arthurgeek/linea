@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let huge: Float32 = 1e39
+    let tiny: Float32 = 1e-50
+    let late = 3.5e38
+    let narrow: Float32 = late
+    let _unused = huge + tiny + narrow
+    0
+}

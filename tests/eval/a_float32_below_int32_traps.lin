@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    // -2147483904 is the binary32 value just below Int32's minimum.
+    let below: Float32 = -2147483904.0
+    let _n = Int32(below)
+    0
+}

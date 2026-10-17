@@ -1,0 +1,20 @@
+fn mix(left: Float32, right: Float32) -> Float32 {
+    left * 0.5 + right
+}
+
+fn widen(value: Float32) -> Float64 {
+    Float64(value)
+}
+
+fn narrow(value: Float64) -> Float32 {
+    Float32(value)
+}
+
+fn main() -> UInt8 {
+    let mixed = mix(1.0, 2.0)
+    if widen(mixed) == 2.5 && narrow(2.5) == mixed {
+        0
+    } else {
+        1
+    }
+}

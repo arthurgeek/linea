@@ -4219,6 +4219,56 @@ fn asksForSomething(ast: *const Ast, d: node.DeclId) bool {
     return ast.declBody(d) == ExprId.none;
 }
 
+/// Why a float type cannot hold a literal.
+const FloatLiteralRefusal = enum {
+    /// The literal rounds to an infinity.
+    too_large,
+    /// The literal is not zero and rounds to zero.
+    rounds_to_zero,
+};
+
+/// A float literal rounded once, to nearest with ties to even, at the width
+/// of the type it has, and whether that type refuses it. Every binary32 value
+/// is exact in binary64, so the rounded value is carried as an `f64` either
+/// way. Null where the text is not a finished literal, which the lexer has
+/// already reported.
+///
+/// This is the one place a float literal is rounded. A type holds a literal
+/// when its rounded value is finite and is zero only if the literal is:
+/// inexact rounding is admitted, since `0.1` is inexact in every binary format.
+fn roundFloatLiteral(text: []const u8, bits: u8) ?struct { value: f64, refusal: ?FloatLiteralRefusal } {
+    const value: f64 = switch (bits) {
+        32 => std.fmt.parseFloat(f32, text) catch return null,
+        64 => std.fmt.parseFloat(f64, text) catch return null,
+        else => unreachable,
+    };
+    if (!std.math.isFinite(value)) return .{ .value = value, .refusal = .too_large };
+    if (value == 0 and writesNonzeroDigit(text)) return .{ .value = value, .refusal = .rounds_to_zero };
+    return .{ .value = value, .refusal = null };
+}
+
+/// Whether a float literal's significand has a nonzero digit, so that it
+/// denotes a value other than zero whatever its exponent.
+fn writesNonzeroDigit(text: []const u8) bool {
+    for (text) |c| {
+        if (c == 'e' or c == 'E') return false;
+        if (c >= '1' and c <= '9') return true;
+    }
+    return false;
+}
+
+test "a float literal rounds once at its own width" {
+    const halfway_above = "1.0000000596046447753906250000000001";
+    try std.testing.expectEqual(@as(f64, 1.00000011920928955078125), roundFloatLiteral(halfway_above, 32).?.value);
+    try std.testing.expectEqual(@as(f64, 1.0000000596046448), roundFloatLiteral(halfway_above, 64).?.value);
+    try std.testing.expectEqual(FloatLiteralRefusal.too_large, roundFloatLiteral("1e39", 32).?.refusal.?);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("1e38", 32).?.refusal);
+    try std.testing.expectEqual(FloatLiteralRefusal.rounds_to_zero, roundFloatLiteral("1e-50", 32).?.refusal.?);
+    try std.testing.expectEqual(FloatLiteralRefusal.rounds_to_zero, roundFloatLiteral("1e-400", 64).?.refusal.?);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("0e-400", 64).?.refusal);
+    try std.testing.expectEqual(@as(?FloatLiteralRefusal, null), roundFloatLiteral("1e-45", 32).?.refusal);
+}
+
 /// Whether a value of this type is reached by address rather than held in a
 /// register.
 ///
@@ -4228,12 +4278,6 @@ fn asksForSomething(ast: *const Ast, d: node.DeclId) bool {
 pub fn livesInMemoryIn(builder: *const Typing.Builder, t: TypeId) bool {
     if (t == .poison) return false;
     return builder.layoutOf(t).isAggregate();
-}
-
-/// Remainder excludes floating-point operands; other arithmetic checks use
-/// the same declaration-level integer evidence as conversions and literals.
-fn remainderHoldsIn(t: TypeId) bool {
-    return t != .f64;
 }
 
 /// The fix a reader needs where an operator's operand type refuses it.
@@ -11363,7 +11407,7 @@ const Checker = struct {
     fn receiverType(self: *Checker, t: TypeId, at: open_types_mod.Site) std.mem.Allocator.Error!TypeId {
         var head = t;
         while (true) switch (self.builder.get(head)) {
-            .open_integer, .open_type => return self.forceInteger(t, at),
+            .open_integer, .open_float, .open_type => return self.forceInteger(t, at),
             .borrow => |observation| head = observation.referent,
             else => return self.builder.resolveOpen(t, &self.open_types),
         };
@@ -11975,7 +12019,7 @@ const Checker = struct {
         // A value named outside every body is read here, once what named it
         // has been checked.
         try self.closeScope(.{ .open = .{ .start = 0 }, .values = 0 });
-        self.open_types.fallbackAll(TypeId.literal_default);
+        self.open_types.fallbackAll();
         try self.checkSettledRanges();
         // A closure's environment record is minted while its captures may be
         // open, and it is laid out from its fields, so their types are
@@ -12030,6 +12074,15 @@ const Checker = struct {
         defer reported.deinit(self.gpa);
         for (self.open_types.pending.items) |waiting| {
             const t = self.open_types.settled(waiting.v).?;
+            if (waiting.rule == .float_literal) {
+                const text = self.ast.tokenText(self.ast.exprMain(waiting.expr));
+                const rounded = roundFloatLiteral(text, t.floatBits().?).?;
+                if (rounded.refusal) |refusal| {
+                    if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
+                    _ = try self.reportFloatLiteralRange(waiting.expr, t, refusal, try self.chosenLabel(waiting.v));
+                } else try self.literal_values.put(self.gpa, waiting.expr, .{ .float = rounded.value });
+                continue;
+            }
             if (self.integerLiteralFits(t, waiting.value)) continue;
             if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
             self.folds.set(waiting.expr, .absent);
@@ -12046,6 +12099,7 @@ const Checker = struct {
                     .{(try self.typeName(t))},
                     "the result is not representable",
                 ),
+                .float_literal => unreachable,
             }
         }
     }
@@ -12076,16 +12130,16 @@ const Checker = struct {
         return self.builder.resolveOpen(t, &self.open_types);
     }
 
-    /// Falls back every open integer inside `t`, naming `at` as the reason
-    /// where there is one. An open type has no fallback and stays open, unless
-    /// it was joined with an open integer.
+    /// Falls back every open literal type inside `t`, naming `at` as the
+    /// reason where there is one. An open type has no fallback and stays open,
+    /// unless it was joined with an open literal's.
     fn forceLeaves(self: *Checker, t: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!void {
         if (!try self.builder.mentionsOpen(t)) return;
         switch (self.builder.get(t)) {
-            .open_integer, .open_type => |v| return if (at) |site|
-                self.open_types.forced(v, TypeId.literal_default, site)
+            .open_integer, .open_float, .open_type => |v| return if (at) |site|
+                self.open_types.forced(v, site)
             else
-                self.open_types.fallback(v, TypeId.literal_default),
+                self.open_types.fallback(v),
             else => {},
         }
         const Force = struct {
@@ -12102,6 +12156,14 @@ const Checker = struct {
     fn openLiteral(self: *Checker) std.mem.Allocator.Error!TypeId {
         const v = try self.open_types.create(self.gpa);
         const t = try self.builder.openInteger(v);
+        self.open_types.name(v, t);
+        return t;
+    }
+
+    /// A fresh open float type for a float literal no expected type reached.
+    fn openFloatLiteral(self: *Checker) std.mem.Allocator.Error!TypeId {
+        const v = try self.open_types.createFloat(self.gpa);
+        const t = try self.builder.openFloat(v);
         self.open_types.name(v, t);
         return t;
     }
@@ -12131,7 +12193,7 @@ const Checker = struct {
     /// The variable `t` stands for, where it is an open integer or open type.
     fn openVariable(self: *const Checker, t: TypeId) ?u32 {
         return switch (self.builder.get(t)) {
-            .open_integer, .open_type => |v| v,
+            .open_integer, .open_float, .open_type => |v| v,
             else => null,
         };
     }
@@ -12166,12 +12228,14 @@ const Checker = struct {
     }
 
     fn settleOpen(self: *Checker, v: u32, to: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!bool {
-        if (self.open_types.isInteger(v)) {
-            const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
-            if (!is_integer) return false;
-        } else if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) {
+        switch (self.open_types.familyOf(v)) {
+            .integer => {
+                const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
+                if (!is_integer) return false;
+            },
+            .float => if (!to.isFloat()) return false,
             // A type holding the variable it would settle is no type at all.
-            return false;
+            .any => if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) return false,
         }
         return self.open_types.settle(v, to, at) != .conflict;
     }
@@ -14659,19 +14723,32 @@ const Checker = struct {
         return if (bound.minus == TokenId.none) magnitude else -magnitude;
     }
 
-    /// Parses and range-checks the Float64 value once. Its rounded value is
+    /// Rounds a float literal to the float type it has and checks that the
+    /// type holds it. A literal an expected float type reaches is checked now;
+    /// any other is open, settled by its uses, and checked by
+    /// `checkSettledRanges` once its type is final. Its rounded value is
     /// retained for emission without admitting floats as constant expressions.
     fn checkFloatLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         self.folds.set(id, .not_constant);
 
         const text = self.ast.tokenText(self.ast.exprMain(id));
-        const v = std.fmt.parseFloat(f64, text) catch {
+        if (Expected.typeOf(expected)) |want| if (want.isFloat()) {
             // Only an unfinished literal fails to parse, and the lexer
             // already reported it where it was written; a second message
             // here would describe one mistake twice.
-            return self.record(id, .poison);
+            const rounded = roundFloatLiteral(text, want.floatBits().?) orelse return self.record(id, .poison);
+            if (rounded.refusal) |refusal| return self.reportFloatLiteralRange(id, want, refusal, .{
+                .file = expected.?.at.file,
+                .span = expected.?.at.span,
+                .message = try self.expectationSource(expected.?),
+                .style = .secondary,
+            });
+            try self.literal_values.put(self.gpa, id, .{ .float = rounded.value });
+            return self.record(id, want);
         };
-        if (!std.math.isFinite(v)) {
+
+        const wide = roundFloatLiteral(text, 64) orelse return self.record(id, .poison);
+        if (wide.refusal == .too_large) {
             return self.report(
                 .t_literal,
                 id,
@@ -14680,9 +14757,25 @@ const Checker = struct {
                 "no float type can hold this",
             );
         }
+        const t = try self.openFloatLiteral();
+        // The binary64 value stands until the type is final, when the text is
+        // rounded again at that width.
+        try self.literal_values.put(self.gpa, id, .{ .float = wide.value });
+        try self.open_types.awaitRange(self.gpa, .{ .v = self.builder.get(t).open_float, .expr = id, .value = 0, .rule = .float_literal });
+        return self.expect(id, t, expected);
+    }
 
-        try self.literal_values.put(self.gpa, id, .{ .float = v });
-        return self.expect(id, .f64, expected);
+    /// Refuses a float literal its type cannot hold: one that rounds to an
+    /// infinity, or a nonzero one that rounds to zero.
+    fn reportFloatLiteralRange(self: *Checker, id: ExprId, t: TypeId, refusal: FloatLiteralRefusal, origin: ?Label) std.mem.Allocator.Error!TypeId {
+        const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {s}", .{
+            (try self.typeName(t)), self.ast.tokenText(self.ast.exprMain(id)),
+        });
+        const primary = switch (refusal) {
+            .too_large => "literal is out of range for its type",
+            .rounds_to_zero => "a nonzero literal that rounds to zero in this type",
+        };
+        return self.reportWithOrigin(.t_literal, id, message, primary, origin);
     }
 
     fn checkLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
@@ -14956,7 +15049,12 @@ const Checker = struct {
         // No expectation flows inward: a conversion takes whatever it is given.
         // The operand is checked before the target constrains it, so an open
         // literal takes the default here, where the conversion needs a type.
-        const from = try self.forceInteger(try self.check(operand, null), self.literalSite(operand));
+        // An open float converted to a float type settles on that type
+        // instead, so a literal is rounded once, to the type it is written
+        // for, rather than to `Float64` and again to the target.
+        const checked = try self.check(operand, null);
+        if (target.isFloat() and self.builder.get(checked) == .open_float) _ = try self.meet(checked, target, self.literalSite(operand));
+        const from = try self.forceInteger(checked, self.literalSite(operand));
 
         if (from == .poison or target == .poison) {
             self.foldFailed(id, &.{operand});
@@ -14969,8 +15067,8 @@ const Checker = struct {
 
         // A conversion is between numeric domains. `Bool` is a pair of names,
         // so there is no value of it to convert and none to convert into one.
-        const from_numeric = self.builder.isIntegerWithin(self.generic, from) or from == .f64;
-        const target_numeric = self.builder.isIntegerWithin(self.generic, target) or target == .f64;
+        const from_numeric = self.builder.isIntegerWithin(self.generic, from) or from.isFloat();
+        const target_numeric = self.builder.isIntegerWithin(self.generic, target) or target.isFloat();
         if (!from_numeric or !target_numeric) {
             self.foldFailed(id, &.{operand});
             return self.report(
@@ -14990,7 +15088,7 @@ const Checker = struct {
         // A conversion to a float is defined for every value and may round,
         // so there is no range to test. It also never folds: the table holds
         // an integer, and the result is not one.
-        if (target == .f64) {
+        if (target.isFloat()) {
             self.foldFailed(id, &.{operand});
             return self.expect(id, target, expected);
         }
@@ -16921,8 +17019,8 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem_assign and !remainderHoldsIn(place)) {
-            return self.reportNoRemainder(id);
+        if (self.ast.exprTag(id) == .rem_assign and self.isFloatType(place)) {
+            return self.reportNoRemainder(id, place);
         }
 
         return self.expect(id, .unit, expected);
@@ -16933,12 +17031,12 @@ const Checker = struct {
     /// 754 supplies instead is a different one -- so the operator would mean
     /// two things depending on its operands' type. One reporter for the
     /// operator and its compound assignment, so the two spell one refusal.
-    fn reportNoRemainder(self: *Checker, id: ExprId) TypeId {
+    fn reportNoRemainder(self: *Checker, id: ExprId, operand: TypeId) std.mem.Allocator.Error!TypeId {
         return self.reportAtOp(
             .t_operands,
             id,
-            "`%` is not defined for `Float64`",
-            .{},
+            "`%` is not defined for `{s}`",
+            .{(try self.typeName(operand))},
             "a float division leaves no remainder to take",
         );
     }
@@ -22011,7 +22109,7 @@ const Checker = struct {
     /// Closes a body: its open integers fall back, and each function value it
     /// named without a written type is read through what its uses settled.
     fn closeScope(self: *Checker, scope: OpenScope) std.mem.Allocator.Error!void {
-        self.open_types.fallbackBody(scope.open, TypeId.literal_default);
+        self.open_types.fallbackBody(scope.open);
         for (self.pending_values.items[scope.values..]) |pending| {
             defer pending.deinit(self.gpa);
             try self.settleValue(pending);
@@ -22344,7 +22442,7 @@ const Checker = struct {
 
     /// Check that a value's format spec asks only for parts its type takes. A
     /// sign and zero padding lay out a number, and a precision counts the
-    /// digits after a Float64's point; fill, alignment and width lay out any
+    /// digits after a float's point; fill, alignment and width lay out any
     /// value. Reports the first part the type does not take.
     fn layoutFits(self: *Checker, piece: ExprId, t: TypeId, format: node.InterpolationFormat) bool {
         const shape = self.builder.view().layoutShape(self.generic, t);
@@ -22354,7 +22452,7 @@ const Checker = struct {
                 piece,
                 "`{s}` is not a number, so its format spec cannot ask for {s}",
                 .{ self.typeName(t) catch return false, if (format.plus) "a `+` sign" else "zero padding" },
-                "these lay out integers and Float64; pad other values with an alignment and a width, as in `>4`",
+                "these lay out integers and floats; pad other values with an alignment and a width, as in `>4`",
             );
             return false;
         }
@@ -22362,9 +22460,9 @@ const Checker = struct {
             _ = self.report(
                 .t_format,
                 piece,
-                "`{s}` is not a Float64, so its format spec cannot ask for a precision",
+                "`{s}` is not a float, so its format spec cannot ask for a precision",
                 .{self.typeName(t) catch return false},
-                "a precision counts the digits after a Float64's point",
+                "a precision counts the digits after a float's point",
             );
             return false;
         }
@@ -28657,7 +28755,7 @@ const Checker = struct {
                         if (pool.fieldCount(key.ty) < 2) try self.contribute(terms, closed_source, outer, 0);
                         return;
                     },
-                    .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                    .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
                 }
                 for (pool.appliedTo(key.ty)) |argument| try self.childHeight(terms, argument, key.substitute, outer);
                 if (pool.appliedTo(key.ty).len == 0) try self.contribute(terms, closed_source, outer, 0);
@@ -28916,7 +29014,7 @@ const Checker = struct {
                     var at: u32 = 1;
                     while (at < pool.fieldCount(ty)) : (at += 2) if (try self.visit(pool.fieldType(ty, at))) return true;
                 },
-                .integer, .open_integer, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
             }
             for (pool.appliedTo(ty)) |argument| if (try self.visit(argument)) return true;
             return false;
@@ -29497,7 +29595,7 @@ const Checker = struct {
                 // A literal nothing else typed meets the default as it meets
                 // the default of a written type: it takes it.
                 const open = self.openVariable(try self.builder.resolveOpen(f.*, &self.open_types)) orelse continue;
-                if (!self.open_types.isInteger(open)) continue;
+                if (self.open_types.familyOf(open) == .any) continue;
                 const default = try self.defaultAt(d, k);
                 if (default != .poison and try self.meet(f.*, default, self.literalSite(id))) {
                     f.* = try self.builder.resolveOpen(f.*, &self.open_types);
@@ -31025,7 +31123,13 @@ const Checker = struct {
     }
 
     fn arithmeticHolds(self: *const Checker, t: TypeId) bool {
-        return t == .poison or t == .f64 or self.builder.get(t) == .open_integer or self.builder.isIntegerWithin(self.generic, t);
+        return t == .poison or self.isFloatType(t) or self.builder.get(t) == .open_integer or self.builder.isIntegerWithin(self.generic, t);
+    }
+
+    /// Whether `t` is a float type, or a float literal's type its uses have
+    /// not settled yet.
+    fn isFloatType(self: *const Checker, t: TypeId) bool {
+        return t.isFloat() or self.builder.get(t) == .open_float;
     }
 
     /// Whether a type answers a trait the prelude declares, where the demand
@@ -31316,9 +31420,9 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem and !remainderHoldsIn(lhs)) {
+        if (self.ast.exprTag(id) == .rem and self.isFloatType(lhs)) {
             self.foldFailed(id, &.{ b.lhs, b.rhs });
-            return self.reportNoRemainder(id);
+            return self.reportNoRemainder(id, lhs);
         }
 
         if (self.isSymbolicInteger(lhs)) {
@@ -31400,9 +31504,9 @@ const Checker = struct {
                     var settled_want = want;
                     settled_want.ty = try self.builder.resolveOpen(want.ty, &self.open_types);
                     const chosen: ?Label = switch (self.builder.get(actual)) {
-                        .open_integer => |v| try self.chosenLabel(v),
+                        .open_integer, .open_float => |v| try self.chosenLabel(v),
                         else => switch (self.builder.get(want.ty)) {
-                            .open_integer => |v| try self.chosenLabel(v),
+                            .open_integer, .open_float => |v| try self.chosenLabel(v),
                             else => null,
                         },
                     };

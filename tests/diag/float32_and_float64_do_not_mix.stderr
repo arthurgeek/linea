@@ -1,0 +1,18 @@
+error[T-Operands]: expected `Float32`, found `Float64`
+ --> tests/diag/float32_and_float64_do_not_mix.lin:8:25
+  |
+8 |     let _sum = narrow + wide
+  |                ------ expected because of this operand
+  |                         ^^^^ expected `Float32`, found `Float64`
+error[T-Operands]: `%` is not defined for `Float32`
+ --> tests/diag/float32_and_float64_do_not_mix.lin:9:24
+  |
+9 |     let _rest = narrow % narrow
+  |                        ^ a float division leaves no remainder to take
+error[T-Mismatch]: expected `Float64`, found `Float32`
+  --> tests/diag/float32_and_float64_do_not_mix.lin:10:25
+   |
+1  | fn widen(value: Float64) -> Float64 {
+   |          ----- expected because of this parameter
+10 |     let _passed = widen(narrow)
+   |                         ^^^^^^ expected `Float64`, found `Float32`

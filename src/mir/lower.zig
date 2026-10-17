@@ -1530,6 +1530,8 @@ const Lowerer = struct {
             .cmp_ge,
             .int_to_float,
             .float_to_int,
+            .float_extend,
+            .float_truncate,
             .float_math,
             .check,
             .function_addr,
@@ -1776,7 +1778,7 @@ const Lowerer = struct {
                 // A float negation flips a sign bit and nothing can escape:
                 // IEEE 754 defines the result for every input, so there is no
                 // range to hold it to.
-                if (ty == .f64) break :blk r;
+                if (ty.isFloat()) break :blk r;
                 break :blk self.check(r, ty, self.opSpan(id), .overflow);
             },
 
@@ -4437,7 +4439,7 @@ const Lowerer = struct {
         // Not over floats: IEEE 754 defines a result for every input, a zero
         // divisor included, so a float operation carries no check at all and
         // there is no range for its result to escape.
-        if ((op == .div or op == .rem) and ty != .f64) {
+        if ((op == .div or op == .rem) and !ty.isFloat()) {
             rhs = try self.check(rhs, ty, checked_at, .division_by_zero);
         }
 
@@ -4450,7 +4452,7 @@ const Lowerer = struct {
             else => unreachable,
         };
         const r = try self.emit(tag, ty, span, .{ .binary = .{ .lhs = lhs, .rhs = rhs } });
-        if (ty == .f64) return r;
+        if (ty.isFloat()) return r;
         return self.check(r, ty, checked_at, .overflow);
     }
 
@@ -5102,13 +5104,13 @@ const Lowerer = struct {
             // carries travel with the instruction, because they are what the
             // conversion means and not a separate verification of its input.
             const source = try self.typeAt(c.args[0]);
-            if (ty == .f64 and source != .f64) {
-                return self.emit(.int_to_float, ty, span, .{ .unary = v });
+            if (ty.isFloat() or source.isFloat()) {
+                if (source == ty) return v;
+                if (ty.isFloat() and source.isFloat()) {
+                    return self.emit(if (ty == .f64) .float_extend else .float_truncate, ty, span, .{ .unary = v });
+                }
+                return self.emit(if (ty.isFloat()) .int_to_float else .float_to_int, ty, span, .{ .unary = v });
             }
-            if (source == .f64 and ty != .f64) {
-                return self.emit(.float_to_int, ty, span, .{ .unary = v });
-            }
-            if (source == .f64 and ty == .f64) return v;
 
             return self.check(v, ty, span, .conversion_out_of_range);
         }
@@ -6037,7 +6039,7 @@ const Lowerer = struct {
         str_ty: TypeId,
         span: Span,
     ) std.mem.Allocator.Error!InstId {
-        const layout = self.library.layouts.of(format, self.types().layoutShape(DeclId.none, piece));
+        const layout = self.library.layouts.of(format, self.types().layoutShape(DeclId.none, piece), piece);
         if (layout.decl == DeclId.none) return self.poison(span);
         const args = try layout.arguments(self.gpa, piece, settled);
         defer self.gpa.free(args);
@@ -6475,8 +6477,12 @@ test "type representations separate computation from storage and cover the seale
         module.representationOf(.bool_),
     );
     try testing.expectEqual(
-        mir_mod.TypeRepresentation{ .computation = .float64, .storage = .float64 },
+        mir_mod.TypeRepresentation{ .computation = .{ .float = 64 }, .storage = .{ .float = 64 } },
         module.representationOf(.f64),
+    );
+    try testing.expectEqual(
+        mir_mod.TypeRepresentation{ .computation = .{ .float = 32 }, .storage = .{ .float = 32 } },
+        module.representationOf(.f32),
     );
 
     var meters = TypeId.poison;

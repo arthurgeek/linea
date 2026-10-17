@@ -222,7 +222,7 @@ pub const Code = enum {
     t_bound,
     /// A format spec asks for a part the value's type does not take: a sign or
     /// zero padding on a value that is not a number, or a precision on one
-    /// that is not a Float64.
+    /// that is not a float.
     t_format,
     /// A trailing predicate must constrain a type that depends on an open
     /// parameter supplied by its declaration or enclosing generic scope.
