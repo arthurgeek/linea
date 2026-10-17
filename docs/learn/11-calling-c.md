@@ -1141,6 +1141,95 @@ Nothing in `main` can misuse SQLite: it never sees a pointer, every
 connection and statement it opens is linear or released by `defer`, and every
 error is a value it must handle.
 
+## A library that wraps C
+
+A wrapper is often worth sharing: one `sqlite` library, reviewed once, that
+every program can depend on. A library's manifest grants `extern` to its own
+modules and names its own C under `"native"` and `"link"`, relative to its own
+directory, exactly as a program's does. A program that depends on it builds
+and links that C with its own.
+
+This library wraps a small C function that counts how many pallets fit along
+a warehouse bay:
+
+`depot/pallets/linea.json`:
+
+```json
+{ "kind": "library", "name": "pallets", "extern": ["."], "native": ["pallets.c"] }
+```
+
+`depot/pallets/pallets.c`:
+
+```c
+#include <stdint.h>
+
+/* How many whole pallets of `width` fit across `length`. */
+int32_t pallets_across(int32_t length, int32_t width) { return length / width; }
+```
+
+`depot/pallets/pallets.lin`:
+
+```linea
+extern fn pallets_across(length: Int32, width: Int32) -> Int32
+
+// How many pallets of `width` fit along a floor `length` long. C divides
+// without checking, so a width of zero has no answer.
+pub fn across(length: Int32, width: Int32) -> Option[Int32] {
+    if width <= 0 {
+        return .None
+    }
+    .Some(pallets_across(length, width))
+}
+```
+
+The program names the library under `dependencies`. Because the library's
+manifest grants `extern`, the entry says `"extern": true`, which is the
+program agreeing to trust signatures the compiler cannot check:
+
+`depot/linea.json`:
+
+```json
+{
+    "dependencies": {
+        "pallets": { "path": "pallets", "extern": true }
+    }
+}
+```
+
+`depot/main.lin`:
+
+```linea
+import std.io
+import pallets
+
+fn main() -> Result[UInt8, io.IoError] {
+    let fitted = pallets.across(1200, 120).unwrap_or(0)
+    io.println("{fitted} pallets fit along the bay")?
+    .Ok(0)
+}
+```
+
+```
+10 pallets fit along the bay
+```
+
+The program never declares C itself: its own manifest grants no module
+`extern`, and `pallets_across` stays private to the library. Without
+`"extern": true` in the entry the dependency is refused, and its C is never
+built:
+
+<!-- guide: unchecked the program above with `"extern": true` taken out of its entry -->
+```
+error[M-Dependency]: the manifest of `pallets` grants it `extern`, and this entry does not consent to it
+ --> depot/linea.json:3:9
+  |
+3 |         "pallets": { "path": "pallets" }
+  |         ^^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
+```
+
+When two libraries link the same C library, or a program and its library
+both name it, the program links it once.
+
 ## Callbacks: C calling Linea
 
 Some C functions call back into your code: `qsort` calls a comparison,

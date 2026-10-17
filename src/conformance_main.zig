@@ -184,9 +184,14 @@ const Case = struct {
     /// Kept out of `files` for the reason the driver is.
     native: Native = .{},
 
-    /// The C outside the case's module that building it needs.
-    fn foreign(self: Case) Foreign {
-        return .{ .driver = if (self.driver) |d| d.text else null, .native = self.native };
+    /// The C outside the case's module that building it needs: the sources
+    /// and libraries the loader gathered from every manifest of the program,
+    /// its dependencies' included, built from the case's C files.
+    fn foreign(self: Case, program: *const Program) Foreign {
+        return .{
+            .driver = if (self.driver) |d| d.text else null,
+            .native = .{ .files = self.native.files, .compile = program.native, .link = program.link },
+        };
     }
 };
 
@@ -208,13 +213,10 @@ const Foreign = struct {
     native: Native = .{},
 };
 
-/// The C a case's manifest names, with every C file of the case, or nothing
-/// where the manifest names none or will not parse.
-fn nativeOf(gpa: std.mem.Allocator, manifest: ?InMemoryFile, c_files: []const InMemoryFile) !Native {
-    const marking = manifest orelse return .{};
-    const declared = try loader.declaredGiven(gpa, &.{marking}, null);
-    if (declared.native.len + declared.link.len == 0) return .{};
-    return .{ .files = c_files, .compile = declared.native, .link = declared.link };
+/// Every C file of the case, which the program's manifests name what to
+/// build from.
+fn nativeOf(c_files: []const InMemoryFile) Native {
+    return .{ .files = c_files };
 }
 
 /// What the loader reads beside a case's source: the manifest marking its
@@ -924,7 +926,7 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
             .libraries = try libraries[i].toOwnedSlice(gpa),
             .driver = drivers[i],
             .data = try data_of[i].toOwnedSlice(gpa),
-            .native = try nativeOf(gpa, manifests[i], try c_files[i].toOwnedSlice(gpa)),
+            .native = nativeOf(try c_files[i].toOwnedSlice(gpa)),
         });
     }
 
@@ -20310,7 +20312,7 @@ fn checkCase(
                             .ir = ir.written(),
                             .runtime = rt,
                             .sanitize = env.sanitize,
-                            .foreign = case.foreign(),
+                            .foreign = case.foreign(&program),
                         });
                         outcome_zone.end();
                         native_verified = !ran.tool_failed;
@@ -20321,7 +20323,7 @@ fn checkCase(
                                 .answer = ran.text,
                                 .output = ran.output,
                                 .errors = ran.errors,
-                                .foreign = case.foreign(),
+                                .foreign = case.foreign(&program),
                             };
                             answered_env = .{
                                 .scratch = env.scratch_dir,
@@ -20383,7 +20385,7 @@ fn checkCase(
                                 ran.output,
                                 ran.errors,
                                 try besideOf(gpa, case),
-                                case.foreign(),
+                                case.foreign(&program),
                             );
                         }
 
@@ -20397,7 +20399,7 @@ fn checkCase(
                                 .ir = ir.written(),
                                 .runtime = rt,
                                 .sanitize = env.sanitize,
-                                .foreign = case.foreign(),
+                                .foreign = case.foreign(&program),
                             }, ran, display_path, null)) {
                                 .agreed => w.levels_agreed += 1,
                                 .disagreed, .unbuilt => {},
@@ -20433,7 +20435,7 @@ fn checkCase(
                                 .errors = ran.errors,
                                 .ir = ir.written(),
                                 .beside = try besideOf(gpa, case),
-                                .foreign = case.foreign(),
+                                .foreign = case.foreign(&program),
                             });
                             rewrites_zone.end();
                         }
@@ -20470,7 +20472,7 @@ fn checkCase(
                                 .name = case_name,
                                 .answer = ran.text,
                                 .errors = ran.errors,
-                                .foreign = case.foreign(),
+                                .foreign = case.foreign(&program),
                             });
                             damage_zone.end();
                         }

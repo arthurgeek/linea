@@ -8,8 +8,10 @@ callables, and "Not an FFI" in
 "general Float64 foreign calls remain unsupported" in
 [0150](0150-float-math-crosses-a-checked-scalar-boundary.md). Extends
 [0013](0013-no-undefined-behaviour.md), which left the C boundary to a record of
-its own, and [0101](0101-a-library-publishes-what-it-exports.md), whose thunk
-and boundary predicate it shares.
+its own, [0101](0101-a-library-publishes-what-it-exports.md), whose thunk
+and boundary predicate it shares, and
+[0229](0229-an-application-depends-on-a-library-by-path.md), whose open
+question of a library's link line it answers.
 
 ## Context
 
@@ -52,10 +54,23 @@ cannot.
 relative to the manifest, compiled with the same `cc` at the build's level and
 with the runtime's sanitizer flags. `"link"` lists libraries passed as
 `-l<name>` after the runtime archive. A link entry must be a library name, so a
-manifest cannot pass the linker a flag. C named without a grant, or by a
-library, is refused. Libraries are found where the toolchain looks: in the
-development shell, Nix puts SQLite and its header on the compiler's paths. No
-header is read: declarations are written by hand.
+manifest cannot pass the linker a flag. C named without a grant is refused,
+since no module could call it. Libraries are found where the toolchain looks:
+in the development shell, Nix puts SQLite and its header on the compiler's
+paths. No header is read: declarations are written by hand.
+
+**A library's C travels with it** ([M-Dependency]). A library's manifest may
+name `"native"` and `"link"` as a program's does, its sources relative to its
+own directory. A program links every root it loads into one artefact, so the
+loader gathers the C once, into the program's own two lists: the primary
+root's first, then each dependency's in the order the graph numbers them, for
+each dependency some module of which was loaded. A dependency granted `extern`
+is loaded only where its consumers consented, so its C is built only after
+that consent. A source or library named twice is built or linked once, where it
+was first named. ADR 0229 had left this to a list per root in `RootFacts`
+collected by the link step; gathering it in the loader instead means the order
+and the duplicate rule live in one place, and the driver and the conformance
+runner both read the lists the loader made.
 
 **What crosses is what both sides agree a value's bits mean** ([T-Extern],
 [T-Export]): an integer of 8, 16, 32 or 64 bits, a `Float64`, or an unrefined
@@ -184,9 +199,6 @@ every `extern` signature:
   address of each declared function at the prototype the Linea declaration
   implies, so the C compiler compares them; or a tool that reads the header and
   reports each declaration that disagrees.
-- A library root cannot yet name C to link, because nothing carries its link
-  line to the program that links it. The `sqlite` library the guest book will
-  depend on waits for library dependencies.
 - **Future work, designed and not built:**
   - `extern struct` would pin [L-Layout] for a struct crossing by pointer. By
     value, the C ABI's per-target classification of aggregates would have to be

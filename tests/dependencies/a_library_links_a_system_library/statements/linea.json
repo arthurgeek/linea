@@ -1,0 +1,1 @@
+{ "kind": "library", "name": "statements", "extern": ["."], "link": ["sqlite3"] }

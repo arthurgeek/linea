@@ -372,7 +372,7 @@ fn loadInputs(
     // already be a rooted one and the answer decides what it names. Read from
     // the root's manifest, which is what says a root is the library every
     // program depends on -- never from where the root sits or how it is named.
-    var declared = try declaredGiven(gpa, sorted, dir);
+    const declared = try declaredGiven(gpa, sorted, dir);
     defer declared.deinit(gpa);
     l.program_is_library = declared.standard;
     if (rootManifestOf(sorted, dir)) |manifest| {
@@ -521,6 +521,7 @@ fn loadInputs(
         for (modules) |loaded| deinitModule(gpa, loaded);
         gpa.free(modules);
     }
+    const foreign = try l.foreignOf(declared, modules);
     const routes = try l.routes.toOwnedSlice(gpa);
     const embeds = try l.takeEmbeds();
     return .{
@@ -538,8 +539,8 @@ fn loadInputs(
         // tests it.
         .kind = kind,
         .roots = roots,
-        .native = takeList(&declared.native),
-        .link = takeList(&declared.link),
+        .native = foreign.native,
+        .link = foreign.link,
         .ast = ast,
     };
 }
@@ -1349,11 +1350,10 @@ fn grantedTo(externs: []const []const u8, route: []const u8, root_name: []const 
     return false;
 }
 
-/// Moves a list out of a `Declared` that is still released afterwards.
-fn takeList(list: *[]const []const u8) []const []const u8 {
-    const taken = list.*;
-    list.* = &.{};
-    return taken;
+/// Whether `list` holds `text`.
+fn containsString(list: []const []const u8, text: []const u8) bool {
+    for (list) |held| if (std.mem.eql(u8, held, text)) return true;
+    return false;
 }
 
 /// Whether `text` spells a module as an import inside its root does: `.` for
@@ -1436,14 +1436,9 @@ fn declaredFrom(gpa: std.mem.Allocator, written: Written) !Declared {
     declared.externs = try stringsOf(gpa, written.@"extern", spellsModule, error.ManifestExternNotModules);
     declared.native = try stringsOf(gpa, written.native, namesSource, error.ManifestNativeNotSource);
     declared.link = try stringsOf(gpa, written.link, namesLibrary, error.ManifestLinkNotLibrary);
-    if (declared.native.len + declared.link.len > 0) {
-        // Only a granted module can call what these build, so C named without
-        // a grant is C nothing reaches.
-        if (declared.externs.len == 0) return error.ManifestLinksWithoutExtern;
-        // A library is built to an object, and no dependency mechanism yet
-        // carries a link line to the program that links it.
-        if (kind == .library) return error.ManifestLibraryLinks;
-    }
+    // Only a granted module can call what these build, so C named without a
+    // grant is C nothing reaches.
+    if (declared.native.len + declared.link.len > 0 and declared.externs.len == 0) return error.ManifestLinksWithoutExtern;
     return declared;
 }
 
@@ -1495,7 +1490,6 @@ test "a manifest names the C a program builds and links" {
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"/abs.c\"] }"));
     try testing.expectError(error.ManifestNativeNotSource, declaredFromText(gpa, "{ \"extern\": [\".\"], \"native\": [\"shim.h\"] }"));
     try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"link\": [\"sqlite3\"] }"));
-    try testing.expectError(error.ManifestLibraryLinks, declaredFromText(gpa, "{ \"kind\": \"library\", \"extern\": [\".\"], \"link\": [\"sqlite3\"] }"));
 }
 
 fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest {
@@ -1596,6 +1590,30 @@ pub fn joinedDir(gpa: std.mem.Allocator, base: []const u8, path: []const u8) std
     if (path.len > 0 and path[0] == '/') return std.fs.path.resolvePosix(gpa, &.{path});
     if (base.len == 0) return std.fs.path.resolvePosix(gpa, &.{path});
     return std.fs.path.resolvePosix(gpa, &.{ base, path });
+}
+
+test "a dependency's C is built from its own directory and linked once, after the program's" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(a);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(a, &table, &sink, &interner, "app", &.{
+        .{ .path = "app/linea.json", .text = "{ \"extern\": [\".\"], \"link\": [\"m\"], \"dependencies\": { \"zeta\": { \"path\": \"zeta\", \"extern\": true }, \"alpha\": { \"path\": \"alpha\", \"extern\": true } } }" },
+        .{ .path = "app/main.lin", .text = "import alpha\nimport zeta\n" },
+        .{ .path = "app/alpha/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"alpha\", \"extern\": [\".\"], \"native\": [\"c/alpha.c\"], \"link\": [\"sqlite3\", \"m\"] }" },
+        .{ .path = "app/alpha/alpha.lin", .text = "" },
+        .{ .path = "app/zeta/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"zeta\", \"extern\": [\".\"], \"native\": [\"zeta.c\"], \"link\": [\"sqlite3\"] }" },
+        .{ .path = "app/zeta/zeta.lin", .text = "" },
+    }, .program, false, .borrow);
+    try testing.expect(!sink.hasErrors());
+    try testing.expectEqual(@as(usize, 2), program.native.len);
+    try testing.expectEqualStrings("app/alpha/c/alpha.c", program.native[0]);
+    try testing.expectEqualStrings("app/zeta/zeta.c", program.native[1]);
+    try testing.expectEqual(@as(usize, 2), program.link.len);
+    try testing.expectEqualStrings("m", program.link[0]);
+    try testing.expectEqualStrings("sqlite3", program.link[1]);
 }
 
 test "a library two manifests name is one root, numbered by name whatever the order written" {
@@ -2001,9 +2019,12 @@ const Loader = struct {
         name: []const u8,
         manifest_dir: []const u8,
         source_dir: []const u8,
-        /// The modules its manifest grants `extern`, owned by the scratch
-        /// arena the graph is read into.
+        /// The modules its manifest grants `extern`, the C sources it builds,
+        /// joined to its manifest's directory, and the libraries it links,
+        /// owned by the scratch arena the graph is read into.
         externs: []const []const u8 = &.{},
+        native: []const []const u8 = &.{},
+        link: []const []const u8 = &.{},
         dependencies: std.ArrayList(RootId) = .empty,
         /// The names its manifest wrote under `dependencies` and that were
         /// refused, so an import of one reports nothing beyond the refusal.
@@ -3044,7 +3065,7 @@ const Loader = struct {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` grants `extern` to something that is not a list of its modules", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
-            error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestLinksWithoutExtern, error.ManifestLibraryLinks => {
+            error.ManifestNativeNotSource, error.ManifestLinkNotLibrary, error.ManifestLinksWithoutExtern => {
                 try self.reportManifest(manifest_path, text, entry.path_at, "correct the library's manifest", "the {s} in `{s}` names C it cannot build or link", .{ manifest_name, entry.path.? }, &.{});
                 return true;
             },
@@ -3091,6 +3112,12 @@ const Loader = struct {
             .manifest_dir = dir,
             .source_dir = source_dir,
             .externs = parsed.declared.externs,
+            .native = native: {
+                const joined = try a.alloc([]const u8, parsed.declared.native.len);
+                for (parsed.declared.native, joined) |path, *out| out.* = try joinedDir(a, dir, path);
+                break :native joined;
+            },
+            .link = parsed.declared.link,
             .identity = identity,
             .source_identity = source_identity,
             .via = if (consumer == .primary) id else self.graph.items[consumer.index()].via,
@@ -3198,6 +3225,53 @@ const Loader = struct {
     }
 
     /// One row per root for the program, from the graph read before loading.
+    /// The C the program builds and links: the primary root's, then each
+    /// dependency's in the graph's order, for a dependency at least one of
+    /// whose modules was loaded -- one its consumers consented to, since a
+    /// refused one is never loaded. A source or library named twice is built
+    /// or linked once, where it was first named. The caller owns the lists.
+    fn foreignOf(self: *Loader, primary: Declared, modules: []const Module) !struct { native: []const []const u8, link: []const []const u8 } {
+        var loaded = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, self.graph.items.len);
+        defer loaded.deinit(self.gpa);
+        for (modules) |m| if (m.root.isDependency()) loaded.set(m.root.index());
+
+        var native: std.ArrayList([]const u8) = .empty;
+        var link: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (native.items) |path| self.gpa.free(path);
+            native.deinit(self.gpa);
+            for (link.items) |name| self.gpa.free(name);
+            link.deinit(self.gpa);
+        }
+        try self.appendForeign(&native, &link, primary.native, primary.link);
+        for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
+            if (!loaded.isSet(i)) continue;
+            if (self.input == .disk) for (held.native) |path| {
+                std.Io.Dir.cwd().access(self.input.disk, path, .{}) catch return error.ManifestNativeMissing;
+            };
+            try self.appendForeign(&native, &link, held.native, held.link);
+        }
+        const owned_native = try native.toOwnedSlice(self.gpa);
+        errdefer {
+            for (owned_native) |path| self.gpa.free(path);
+            self.gpa.free(owned_native);
+        }
+        return .{ .native = owned_native, .link = try link.toOwnedSlice(self.gpa) };
+    }
+
+    fn appendForeign(self: *Loader, native: *std.ArrayList([]const u8), link: *std.ArrayList([]const u8), sources: []const []const u8, names: []const []const u8) std.mem.Allocator.Error!void {
+        for (sources) |path| if (!containsString(native.items, path)) {
+            const copy = try self.gpa.dupe(u8, path);
+            errdefer self.gpa.free(copy);
+            try native.append(self.gpa, copy);
+        };
+        for (names) |name| if (!containsString(link.items, name)) {
+            const copy = try self.gpa.dupe(u8, name);
+            errdefer self.gpa.free(copy);
+            try link.append(self.gpa, copy);
+        };
+    }
+
     fn rootFacts(self: *Loader) std.mem.Allocator.Error![]const RootFacts {
         const out = try self.gpa.alloc(RootFacts, self.graph.items.len);
         var made: usize = 0;

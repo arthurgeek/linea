@@ -4,7 +4,9 @@ Status: Accepted — 2026-10-15. Extends
 [0096](0096-a-root-is-a-program-or-a-library.md),
 [0108](0108-an-internal-name-stops-at-its-root.md),
 [0111](0111-import-paths-are-root-relative.md) and
-[0171](0171-the-standard-library-is-an-ordinary-library.md).
+[0171](0171-the-standard-library-is-an-ordinary-library.md). Extended by
+[0228](0228-a-granted-module-calls-c.md), which carries a library's C to the
+program that links it.
 
 ## Context
 

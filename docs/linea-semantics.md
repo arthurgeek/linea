@@ -1760,8 +1760,12 @@ standard library's manifest is
 with the same `cc` at the same level and links into the program, and `"link"`
 lists libraries the build links, each a name `cc` takes after `-l`
 (`["sqlite3"]`). Either requires an `"extern"` grant, since only a granted
-module can call what they build, and a library names neither: it is built to
-an object, and nothing yet carries its link line to the program that links it.
+module can call what they build. A library may name both, its sources relative
+to its own manifest: a program builds and links the C of every root it loads,
+its own first and then each dependency's in the order the dependency graph
+numbers them, and a source or library named twice is built or linked once. A
+dependency granted `extern` is loaded, and its C built, only where its
+consumers consent ([M-Dependency]).
 Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.

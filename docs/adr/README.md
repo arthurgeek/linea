@@ -98,7 +98,7 @@ true of a different implementation.
 | [0068](0068-a-declaration-may-name-a-symbol-the-runtime-provides.md) | A declaration may name a symbol the runtime provides | Accepted; extended by 0150 and 0156; `std/` clause superseded by 0171; integer-only, linear and callable clauses superseded by 0228 |
 | [0150](0150-float-math-crosses-a-checked-scalar-boundary.md) | Float math crosses a checked scalar boundary | Accepted; extends 0068; general-Float64 clause superseded by 0228 |
 | [0156](0156-every-declaration-of-an-extern-symbol-is-one-function.md) | Every declaration of an extern symbol is one function | Accepted; extends 0068 |
-| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013 and 0101 |
+| [0228](0228-a-granted-module-calls-c.md) | A granted module calls C | Accepted; supersedes clauses of 0068, 0150 and 0171; extends 0013, 0101 and 0229 |
 | [0151](0151-a-named-structure-literal-carries-a-written-type.md) | A named structure literal carries a written type | Accepted; refines 0041; extended by 0183 |
 | [0183](0183-a-structure-literal-may-take-its-other-fields-from-a-base.md) | A structure literal may take its other fields from a base | Accepted; extends 0151 and 0140 |
 | [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md) | An integer literal's type is settled by its uses | Accepted; extends 0018, partially supersedes 0092; extended by 0176; method-call fallback refined by 0192 |
@@ -137,7 +137,7 @@ true of a different implementation.
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
 | [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
-| [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171 |
+| [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171; extended by 0228 |
 | [0109](0109-text-io-and-formatting-have-separate-modules.md) | Text, I/O and formatting have separate modules | Accepted |
 | [0110](0110-a-trait-reference-may-be-qualified.md) | A trait reference may be qualified | Accepted; supersedes ADR 0080's bare trait-slot clause |
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |

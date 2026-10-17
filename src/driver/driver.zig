@@ -646,10 +646,6 @@ pub fn run(process: std.process.Init) !u8 {
                 "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
                 .{loader.manifest_name},
             ),
-            error.ManifestLibraryLinks => try stderr_w.print(
-                "  the {s} of a library names C to build or link, which only a program's build does\n",
-                .{loader.manifest_name},
-            ),
             error.ManifestGrantsNoModule => try stderr_w.print(
                 "  the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it\n",
                 .{loader.manifest_name},
