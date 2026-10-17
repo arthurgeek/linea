@@ -1,0 +1,19 @@
+error[T-Literal]: `Float32` cannot hold 1e39
+ --> tests/diag/literal_range_errors_stay_with_their_body.lin:2:16
+  |
+2 |     let open = 1e39
+  |                ^^^^ literal is out of range for its type
+3 |     open
+  |     ---- settled to `Float32` here
+error[T-Literal]: `Float32` cannot hold 1e40
+ --> tests/diag/literal_range_errors_stay_with_their_body.lin:7:31
+  |
+7 |     let _annotated: Float32 = 1e40
+  |                     ------- expected because of this annotation
+  |                               ^^^^ literal is out of range for its type
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/diag/literal_range_errors_stay_with_their_body.lin:8:25
+  |
+8 |     let _wrong: UInt8 = true
+  |                 ----- expected because of this annotation
+  |                         ^^^^ expected `UInt8`, found `Bool`

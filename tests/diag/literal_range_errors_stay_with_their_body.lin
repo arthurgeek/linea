@@ -1,0 +1,15 @@
+fn first() -> Float32 {
+    let open = 1e39
+    open
+}
+
+fn second() -> UInt8 {
+    let _annotated: Float32 = 1e40
+    let _wrong: UInt8 = true
+    0
+}
+
+fn main() -> UInt8 {
+    let _a = first()
+    second()
+}

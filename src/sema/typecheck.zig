@@ -5387,9 +5387,9 @@ const Checker = struct {
     /// built value that does not fit its context, so `checkInner` does not
     /// count it a refusal.
     mismatched: ExprId = .none,
-    /// The negation written around the float literal being checked, which
-    /// its range error reports as the value that does not fit. `.none` while
-    /// any other expression is checked.
+    /// The outermost negation written around the float literal being
+    /// checked, which its range error reports as the value that does not fit.
+    /// `.none` while any other expression is checked.
     negated_float: ExprId = .none,
     /// The numbers accepted brackets' index operands fold to; `Typing.folded_indices`
     /// holds them.
@@ -12022,9 +12022,8 @@ const Checker = struct {
     fn resolveAllOpen(self: *Checker) std.mem.Allocator.Error!void {
         // A value named outside every body is read here, once what named it
         // has been checked.
-        try self.closeScope(.{ .open = .{ .start = 0 }, .values = 0 });
         self.open_types.fallbackAll();
-        try self.checkSettledRanges();
+        try self.closeScope(.{ .open = .{ .start = 0 }, .values = 0, .ranges = 0 });
         // A closure's environment record is minted while its captures may be
         // open, and it is laid out from its fields, so their types are
         // resolved where they are stored. Each record belongs to one closure
@@ -12067,16 +12066,18 @@ const Checker = struct {
         };
     }
 
-    /// Reports each value folded while its type was open that its final type
-    /// cannot hold, where the value was written and labelled where the type
-    /// was chosen. Checked once every variable has its final type, so
-    /// settling, joining and falling back all reach it.
-    fn checkSettledRanges(self: *Checker) std.mem.Allocator.Error!void {
+    /// Reports each value folded while its type was open, from the `start`th
+    /// on, that its final type cannot hold, where the value was written and
+    /// labelled where the type was chosen. Checked when the body that wrote
+    /// the values closes, once every variable it created has its final type,
+    /// so settling, joining and falling back all reach it and the reports
+    /// follow the body's other diagnostics rather than every other body's.
+    fn checkSettledRanges(self: *Checker, start: u32) std.mem.Allocator.Error!void {
         // An argument checked in both passes of a call queues its value twice;
         // one site is reported once.
         var reported: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
         defer reported.deinit(self.gpa);
-        for (self.open_types.pending.items) |waiting| {
+        for (self.open_types.pending.items[start..]) |waiting| {
             const t = self.open_types.settled(waiting.v).?;
             if (waiting.rule == .float_literal) {
                 const literal = self.literalSpelling(waiting.expr, .float_literal).?.literal;
@@ -12107,38 +12108,7 @@ const Checker = struct {
                 .float_literal => unreachable,
             }
         }
-        try self.orderRangeErrors();
-    }
-
-    /// Puts the range errors in the order their values are written. A value
-    /// whose type was known is checked where it is written, and one whose type
-    /// was open only here, once every type is final, so the two kinds would
-    /// otherwise arrive as two runs. Only the slots range errors occupy are
-    /// reordered, and every other diagnostic keeps its place.
-    ///
-    /// **Bound:** one pass over the sink and a sort of the range errors in it.
-    fn orderRangeErrors(self: *Checker) std.mem.Allocator.Error!void {
-        const items = self.sink.mutableItems();
-        var slots: std.ArrayList(usize) = .empty;
-        defer slots.deinit(self.gpa);
-        for (items, 0..) |d, at| {
-            const code = d.code orelse continue;
-            if ((code == .t_literal or code == .t_overflow) and d.primaryLabel() != null) try slots.append(self.gpa, at);
-        }
-        if (slots.items.len < 2) return;
-        const errors = try self.gpa.alloc(Diagnostic, slots.items.len);
-        defer self.gpa.free(errors);
-        for (slots.items, errors) |at, *d| d.* = items[at];
-        const SourceOrder = struct {
-            fn before(_: void, a: Diagnostic, b: Diagnostic) bool {
-                const left = a.primaryLabel().?;
-                const right = b.primaryLabel().?;
-                if (left.file != right.file) return @intFromEnum(left.file) < @intFromEnum(right.file);
-                return left.span.start < right.span.start;
-            }
-        };
-        std.mem.sort(Diagnostic, errors, {}, SourceOrder.before);
-        for (slots.items, errors) |at, d| items[at] = d;
+        self.open_types.pending.shrinkRetainingCapacity(start);
     }
 
     /// Where an open integer's type was chosen: the use that settled it, or
@@ -14972,7 +14942,14 @@ const Checker = struct {
         // The operand is checked without a range test, because -128 is a value
         // i8 holds even though 128 is a literal it does not. Folding therefore
         // has to happen before the range check, not after.
-        const inner = try self.checkForNegation(operand, expected, id);
+        // A float literal under negations is reported as the whole written
+        // value, so `--1e39` names 1e39 and spans both signs, as `--128` does.
+        const outermost = self.negated_float == ExprId.none and self.literalSpelling(id, .float_literal) != null;
+        if (outermost) self.negated_float = id;
+        defer if (outermost) {
+            self.negated_float = .none;
+        };
+        const inner = try self.checkForNegation(operand, expected);
         if (inner == .poison) {
             self.foldFailed(id, &.{operand});
             return self.record(id, .poison);
@@ -15026,22 +15003,16 @@ const Checker = struct {
     }
 
     /// A literal under a negation is range-checked against the negated value,
-    /// so the literal itself is folded without testing it. A float literal
-    /// is range-checked as the `negation` around it.
-    fn checkForNegation(self: *Checker, id: ExprId, expected: ?Expected, negation: ExprId) std.mem.Allocator.Error!TypeId {
+    /// so the literal itself is folded without testing it.
+    fn checkForNegation(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         // Parentheses do not change what is negated, so `-(128)` is checked
         // as `-128`. The group keeps its own record and fold, as `check` does.
         if (self.ast.exprTag(id) == .grouped) {
             const operand = self.ast.unaryOperand(id);
-            const t = try self.checkForNegation(operand, expected, negation);
+            const t = try self.checkForNegation(operand, expected);
             self.folds.set(id, self.folds.get(operand));
             if (!self.folds.get(operand).isConstant()) try self.markNotConstant(id);
             return self.record(id, t);
-        }
-        if (self.ast.exprTag(id) == .float_literal) {
-            self.negated_float = negation;
-            defer self.negated_float = .none;
-            return self.check(id, expected);
         }
         if (self.ast.exprTag(id) != .int_literal) return self.check(id, expected);
 
@@ -22158,14 +22129,22 @@ const Checker = struct {
     const OpenScope = struct {
         open: open_types_mod.Body,
         values: u32,
+        /// How many folded values awaited a range before the body opened.
+        ranges: u32,
     };
 
     fn openScope(self: *const Checker) OpenScope {
-        return .{ .open = self.open_types.pushBody(), .values = @intCast(self.pending_values.items.len) };
+        return .{
+            .open = self.open_types.pushBody(),
+            .values = @intCast(self.pending_values.items.len),
+            .ranges = @intCast(self.open_types.pending.items.len),
+        };
     }
 
-    /// Closes a body: its open integers fall back, and each function value it
-    /// named without a written type is read through what its uses settled.
+    /// Closes a body: its open integers fall back, each function value it
+    /// named without a written type is read through what its uses settled,
+    /// and each value it folded while its type was open is held to the range
+    /// of the type it settled on.
     fn closeScope(self: *Checker, scope: OpenScope) std.mem.Allocator.Error!void {
         self.open_types.fallbackBody(scope.open);
         for (self.pending_values.items[scope.values..]) |pending| {
@@ -22173,6 +22152,7 @@ const Checker = struct {
             try self.settleValue(pending);
         }
         self.pending_values.shrinkRetainingCapacity(scope.values);
+        try self.checkSettledRanges(scope.ranges);
     }
 
     /// Reads an open function value's parameters as its uses settled them.
