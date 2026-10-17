@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-10-12. Supersedes the clause of
 [0191](0191-the-caller-chooses-every-allocator.md) that every allocating
-standard-library API takes its allocator from its caller.
+standard-library API takes its allocator from its caller. The server's
+parent-allocator clause is superseded by
+[0225](0225-a-library-signature-states-its-allocator.md).
 
 ## Context
 

@@ -482,6 +482,7 @@ The library tests itself.
   ok    http.json_is_named_by_its_media_type
   ok    http.json_refuses_a_body_that_is_not_utf8
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
+  ok    http.listening_in_an_arena_carves_the_exchanges_from_it
   ok    http.no_match_is_404
   ok    http.non_ascii_values_are_returned_as_sent
   ok    http.one_connection_is_served_and_serve_returns
@@ -490,6 +491,7 @@ The library tests itself.
   ok    http.remove_header_drops_every_value_of_a_name
   ok    http.removing_a_header_drops_every_value
   ok    http.running_out_of_memory_answers_500
+  ok    http.serving_in_an_arena_carves_the_exchanges_from_it
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
   ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
   ok    http.set_header_replaces_every_value_of_a_name
@@ -1290,4 +1292,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1287 passed, 0 failed
+  1289 passed, 0 failed

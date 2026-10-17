@@ -1,0 +1,9 @@
+// `start` is public. `step` is internal: every module of this library may
+// call it, and a program that depends on the library may not.
+pub fn start() -> UInt8 {
+    step(0)
+}
+
+internal fn step(count: UInt8) -> UInt8 {
+    count + 1
+}

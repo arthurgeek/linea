@@ -33,7 +33,7 @@ pub fn read_file_in[A: Allocator](allocator: A, path: fs.Path, limits: ParseLimi
 
 // Read and parse the file at `path` into a document in the system allocator.
 // See `read_file_in`.
-pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result[Value, ParseFileError] where carries() {
+pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseFileError] where carries() {
     read_file_in(mem.system(), path, limits: limits)
 }
 
@@ -136,7 +136,7 @@ pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, l
 
 // Read and decode the file at `path` into a T in the system allocator. See
 // `decode_file_in`.
-pub fn decode_file[T: Decode[mem.SystemAllocator]](path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError] where carries() {
+pub fn decode_file[T: Decode[mem.SystemAllocator]](path: fs.Path, limits: ParseLimits = standard_limits) -> Result[T, DecodeFileError[mem.SystemAllocator]] where carries() {
     decode_file_in(mem.system(), path, limits: limits)
 }
 

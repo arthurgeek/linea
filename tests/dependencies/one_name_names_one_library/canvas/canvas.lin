@@ -1,0 +1,5 @@
+import shapes
+
+pub fn width() -> UInt8 {
+    shapes.side()
+}

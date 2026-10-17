@@ -1,0 +1,3 @@
+pub fn three() -> UInt8 {
+    3
+}

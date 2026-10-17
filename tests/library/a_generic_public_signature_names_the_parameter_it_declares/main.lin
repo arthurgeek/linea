@@ -1,0 +1,4 @@
+// A function generic over an allocator writes it wherever a type takes one.
+pub fn measure[A: Allocator](items: Vec[Str, A], extra: Vec[Str]) -> UInt64 {
+    items.length() + extra.length()
+}

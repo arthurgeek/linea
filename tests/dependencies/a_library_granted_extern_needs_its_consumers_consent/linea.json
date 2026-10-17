@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "descriptors": { "path": "descriptors" },
+        "plain": { "path": "plain", "extern": true }
+    }
+}

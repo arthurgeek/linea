@@ -1467,6 +1467,142 @@ Linea's rule about unused code applies across modules too: a declaration
 nobody uses is an error, not a warning. A name starting with `_` says you meant
 to leave it unused, as `_tiles` does in the next section.
 
+### Using a library project
+
+A module belongs to one program. Code that several programs share goes in a
+**library project**: a directory whose `linea.json` says it is a library and
+gives it the name programs import it by. Here a gardening almanac sits beside
+the program that uses it:
+
+<!-- guide: unchecked a directory tree, not program output -->
+```
+almanac/
+    linea.json
+    almanac.lin
+planner/
+    linea.json
+    main.lin
+```
+
+`almanac/linea.json`:
+
+```json
+{ "kind": "library", "name": "almanac" }
+```
+
+`almanac/almanac.lin`:
+
+```linea
+// `frost_free_day` is public, so a program that depends on the library can
+// call it.
+pub fn frost_free_day() -> UInt64 {
+    days_after_spring(40)
+}
+
+// `days_after_spring` is internal: every module of `almanac` may call it, and
+// a program that depends on the library may not.
+internal fn days_after_spring(days: UInt64) -> UInt64 {
+    80 + days
+}
+```
+
+The program names the library under `dependencies` in its own manifest, with
+the directory that holds it, relative to the manifest:
+
+`planner/linea.json`:
+
+```json
+{ "dependencies": { "almanac": { "path": "../almanac" } } }
+```
+
+`planner/main.lin`:
+
+```linea
+import almanac
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("Plant out after day {almanac.frost_free_day()}.")?
+    .Ok(0)
+}
+```
+
+Run the program with `linea run planner`:
+
+```
+Plant out after day 120.
+```
+
+`import almanac` starts with the library's name, so it reaches the library
+rather than a directory of `planner`. The library is a separate root, so its
+`internal` declarations stay inside it. Call `almanac.days_after_spring(10)`
+from `main` and the compiler refuses it:
+
+<!-- guide: unchecked the error an edit of the program above produces -->
+```
+error[M-Vis]: `days_after_spring` is internal to another root
+ --> planner/main.lin:5:46
+  |
+5 |     io.println("Plant out after day {almanac.days_after_spring(10)}.")?
+  |                                              ^^^^^^^^^^^^^^^^^ only modules in the same root may name it
+```
+
+A library that calls C functions through `extern` says `"extern": true` in its
+own manifest. A program that uses it, even through another library, names it
+under `dependencies` with `"extern": true` too, agreeing to trust signatures
+the compiler cannot check.
+
+A library may also offer functions to C with `export`, and that is the
+library's own business: an `export` reaches C only from the project being
+built, so a program that depends on the library gets no C symbol from it and
+calls the function like any other public one.
+
+`metric/linea.json`:
+
+```json
+{ "kind": "library", "name": "metric" }
+```
+
+`metric/metric.lin`:
+
+```linea
+// `to_centimetres` is exported to C when `metric` itself is built. A Linea
+// program that depends on `metric` calls it as an ordinary public function.
+pub export fn to_centimetres(inches: Int32) -> Int32 {
+    inches * 254 / 100
+}
+```
+
+`beds/linea.json`:
+
+```json
+{ "dependencies": { "metric": { "path": "../metric" } } }
+```
+
+`beds/main.lin`:
+
+```linea
+import metric
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("A 48-inch bed is {metric.to_centimetres(48)} cm long.")?
+    .Ok(0)
+}
+```
+
+Run the program with `linea run beds`:
+
+```
+A 48-inch bed is 121 cm long.
+```
+
+To publish `to_centimetres` as a C symbol, build `metric` on its own, or
+write an `export` in the program itself.
+
+If you know Rust: the entry is a path dependency, `almanac = { path =
+"../almanac" }` in `Cargo.toml`, and `internal` is `pub(crate)`.
+
 ## Tests
 
 Tests live beside the code they test. A `test fn` takes no arguments, and each

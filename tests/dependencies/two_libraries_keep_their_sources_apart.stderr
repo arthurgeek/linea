@@ -1,0 +1,5 @@
+error[M-Dependency]: the source of `c` leaves the directory that holds its manifest
+ --> tests/dependencies/two_libraries_keep_their_sources_apart/linea.json:5:9
+  |
+5 |         "c": { "path": "c" }
+  |         ^^^ a library's `source` names a directory inside the one holding its manifest

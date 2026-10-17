@@ -63,7 +63,7 @@ let request_id_header: Str = "X-Request-Id"
 // `with_request_ids` wraps `handler`, which may be a whole `Router`, so that
 // every request it answers is numbered. The buffers it keeps come from the
 // system allocator; `with_request_ids_in` takes them from another.
-pub fn with_request_ids[H](sink handler: H) -> RequestIds[H] where carries(handler) {
+pub fn with_request_ids[H](sink handler: H) -> RequestIds[H, mem.SystemAllocator] where carries(handler) {
     with_request_ids_in(mem.system(), handler)
 }
 

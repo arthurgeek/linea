@@ -1,0 +1,10 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_trait_and_its_settled_type_write_the_allocator/main.lin:19:17
+   |
+19 |     type Item = Vec[Str]
+   |                 ^^^ Specify `mem.SystemAllocator` to make this restriction intentional.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/library/a_trait_and_its_settled_type_write_the_allocator/main.lin:4:29
+  |
+4 |     fn names(self: Self) -> Vec[Str]
+  |                             ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

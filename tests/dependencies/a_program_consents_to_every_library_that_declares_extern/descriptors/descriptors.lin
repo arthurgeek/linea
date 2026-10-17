@@ -1,0 +1,7 @@
+// `linea_close` is a function the runtime provides; this library's manifest
+// grants it `extern`.
+extern fn linea_close(fd: Int32) -> Int64
+
+pub fn close_quietly(fd: Int32) -> Bool {
+    linea_close(fd) < 0
+}

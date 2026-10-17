@@ -21,7 +21,7 @@ pub fn render_owned_in[A: Allocator, T: Display](allocator: A, value: T) -> Resu
 
 // Render `value` with Display into a new String allocated from the system
 // allocator. See `render_owned_in`.
-pub fn render_owned[T: Display](value: T) -> Result[String, mem.Oom] where carries() {
+pub fn render_owned[T: Display](value: T) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
     render_owned_in(mem.system(), value)
 }
 

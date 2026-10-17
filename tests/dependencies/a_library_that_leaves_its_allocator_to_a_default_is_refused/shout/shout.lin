@@ -1,0 +1,12 @@
+import std.mem
+
+// `shout_in` copies a word into memory from the allocator its caller passes.
+pub fn shout_in[A: Allocator](allocator: A, word: Str) -> Result[String[A], mem.Oom] where carries(.Ok: allocator) {
+    word.to_owned_in(allocator)
+}
+
+// `shout` copies a word into memory from the system allocator, which its
+// signature names.
+pub fn shout(word: Str) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+    shout_in(mem.system(), word)
+}

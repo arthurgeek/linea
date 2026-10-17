@@ -1,0 +1,7 @@
+error[M-Dependency]: `eggs` closes a cycle of dependencies
+ --> tests/dependencies/a_dependency_cycle_is_refused/hens/linea.json:5:9
+  |
+5 |         "eggs": { "path": "../eggs" }
+  |         ^^^^^^ a library cannot depend on itself, through others or directly
+  |
+  = help: drop one dependency from the cycle eggs -> hens -> eggs

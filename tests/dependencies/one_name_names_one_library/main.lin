@@ -1,0 +1,6 @@
+import canvas
+import shapes
+
+fn main() -> UInt8 {
+    canvas.width() + shapes.side()
+}

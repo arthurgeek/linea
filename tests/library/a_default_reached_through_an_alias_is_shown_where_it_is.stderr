@@ -1,0 +1,7 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_default_reached_through_an_alias_is_shown_where_it_is/main.lin:10:11
+   |
+3  | struct Inner[T = Vec[Str]] {
+   |                  --- this default leaves the allocator to its default
+10 |     part: Hid,
+   |           ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

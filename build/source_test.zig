@@ -1704,6 +1704,84 @@ test "the guide gate: labelled files make one project that runs from its main fi
     try testing.expectEqualStrings("shop", reading.programs[0].target);
 }
 
+test "the guide gate: a labelled manifest joins the project it sits in" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`garden/plants/linea.json`:
+        \\
+        \\```json
+        \\{ "kind": "library", "name": "plants" }
+        \\```
+        \\
+        \\`garden/plants/plants.lin`:
+        \\
+        \\```linea
+        \\pub fn days() -> UInt8 {
+        \\    3
+        \\}
+        \\```
+        \\
+        \\`garden/linea.json`:
+        \\
+        \\```json
+        \\{ "dependencies": { "plants": { "path": "plants" } } }
+        \\```
+        \\
+        \\`garden/main.lin`:
+        \\
+        \\```linea
+        \\import plants
+        \\
+        \\fn main() -> UInt8 {
+        \\    plants.days()
+        \\}
+        \\```
+        \\
+        \\```json
+        \\{ "an": "unlabelled block, which is prose" }
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqual(@as(usize, 4), reading.programs[0].files.len);
+    try testing.expectEqualStrings("garden/plants/linea.json", reading.programs[0].files[0].path);
+    try testing.expectEqualStrings("garden", reading.programs[0].target);
+}
+
+test "the guide gate: a library's file with tests completes a project beside its manifest" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const reading = readFixture(gpa,
+        \\`plants/linea.json`:
+        \\
+        \\```json
+        \\{ "kind": "library", "name": "plants" }
+        \\```
+        \\
+        \\`plants/plants.lin`:
+        \\
+        \\```linea
+        \\pub fn days() -> UInt8 {
+        \\    3
+        \\}
+        \\
+        \\test fn three_days() {
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(@as(usize, 1), reading.programs.len);
+    try testing.expectEqual(@as(usize, 2), reading.programs[0].files.len);
+    try testing.expectEqualStrings("plants/plants.lin", reading.programs[0].target);
+}
+
 test "the guide gate: a fragment passes uncounted as a program, and a fragment with output is refused" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

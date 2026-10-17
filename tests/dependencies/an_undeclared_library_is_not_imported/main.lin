@@ -1,0 +1,7 @@
+// `tools` holds its own manifest, so it is a library of its own rather than a
+// module of this program, and this program does not name it as a dependency.
+import tools
+
+fn main() -> UInt8 {
+    tools.answer()
+}

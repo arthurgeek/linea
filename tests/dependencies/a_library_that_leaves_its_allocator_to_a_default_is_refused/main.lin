@@ -1,0 +1,21 @@
+import shelf
+import shout
+
+// A program's own signatures may leave the allocator out.
+fn count(titles: Vec[Str]) -> UInt64 {
+    titles.length()
+}
+
+fn main() -> UInt8 {
+    let titles = shelf.names()
+    let empty = count(titles) == 0
+    titles.release()
+    defer let word = shout.shout("hi") else |_| {
+        return 1
+    }
+    if empty && word.view().length() == 2 {
+        0
+    } else {
+        1
+    }
+}

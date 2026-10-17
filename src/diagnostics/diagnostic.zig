@@ -120,6 +120,11 @@ pub const Code = enum {
     /// An import names nothing that can be loaded, names the reserved root, or
     /// closes a cycle in the module graph.
     m_import,
+    /// A manifest's `dependencies` entry that names no library this root may
+    /// depend on: a path holding no library, a name its library does not
+    /// answer to, a cycle, one name for two libraries, or `extern` granted on
+    /// one side only.
+    m_dependency,
     /// An import nothing names. Its own rule rather than [N-Unused], because
     /// there is no `_` form to suggest: an import is removed.
     m_unused,
@@ -404,6 +409,7 @@ pub const Code = enum {
             .n_not_a_type => "N-NotAType",
             .n_type_alias => "N-TypeAlias",
             .m_import => "M-Import",
+            .m_dependency => "M-Dependency",
             .m_unused => "M-Unused",
             .m_vis => "M-Vis",
             .m_entry => "M-Entry",

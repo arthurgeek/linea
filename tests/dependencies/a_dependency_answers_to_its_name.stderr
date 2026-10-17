@@ -1,0 +1,15 @@
+error[M-Dependency]: the library at `colors` is named `colors`, not `colours`
+ --> tests/dependencies/a_dependency_answers_to_its_name/linea.json:3:9
+  |
+3 |         "colours": { "path": "colors" },
+  |         ^^^^^^^^^ name the dependency by the name its manifest gives it
+error[M-Dependency]: the library at `sizes` names itself nothing
+ --> tests/dependencies/a_dependency_answers_to_its_name/linea.json:4:9
+  |
+4 |         "sizes": { "path": "sizes" },
+  |         ^^^^^^^ give the library's manifest `"name"`, the name its imports start with
+error[M-Dependency]: `std` names the standard library, which every root depends on already
+ --> tests/dependencies/a_dependency_answers_to_its_name/linea.json:5:9
+  |
+5 |         "std": { "path": "mystd" }
+  |         ^^^^^ give the library another name

@@ -1,0 +1,6 @@
+import vendor.shout as early
+import shout
+
+fn main() -> UInt8 {
+    shout.loud() + early.loud()
+}

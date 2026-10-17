@@ -1,0 +1,5 @@
+// `names` leaves the vector's allocator to its default, which ties every
+// program that calls it to the system allocator without saying so.
+pub fn names() -> Vec[Str] {
+    Vec.new()
+}

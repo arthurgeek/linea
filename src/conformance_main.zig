@@ -160,6 +160,10 @@ const Case = struct {
     /// must not. Keeping it out of `files` is what makes both true without a
     /// rule every one of those walks has to remember.
     manifest: ?InMemoryFile = null,
+    /// The manifests of the libraries a case holds below its root, which its
+    /// own manifest may name as dependencies. Kept out of `files` for the
+    /// reason the root's manifest is.
+    libraries: []const InMemoryFile = &.{},
     /// The C driver linked against this case's object, where it has one.
     ///
     /// Kept out of `files` for the reason the manifest is: it is not Linea
@@ -176,9 +180,10 @@ const Case = struct {
 /// given. The caller owns the result.
 fn withManifest(gpa: std.mem.Allocator, case: Case) ![]const InMemoryFile {
     const marking = case.manifest orelse return case.files;
-    const all = try gpa.alloc(InMemoryFile, case.files.len + 1);
+    const all = try gpa.alloc(InMemoryFile, case.files.len + 1 + case.libraries.len);
     @memcpy(all[0..case.files.len], case.files);
     all[case.files.len] = marking;
+    @memcpy(all[case.files.len + 1 ..], case.libraries);
     return all;
 }
 
@@ -802,12 +807,25 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
     // loaded as a program whatever it says it is -- a library refused for
     // declaring no `main`, here and nowhere a person running the compiler would
     // ever see.
+    //
+    // The shallowest manifest marks the case's root; one deeper marks a
+    // library the case holds, which its root may name as a dependency.
     const manifests = try gpa.alloc(?InMemoryFile, roots.items.len);
     @memset(manifests, null);
+    const libraries = try gpa.alloc(std.ArrayList(InMemoryFile), roots.items.len);
+    @memset(libraries, .empty);
     for (all) |p| {
         if (!std.mem.eql(u8, std.fs.path.basename(p), loader.manifest_name)) continue;
         const owner = ownerOf(roots.items, p) orelse continue;
-        manifests[owner] = try readCase(gpa, io, root, p);
+        const read = try readCase(gpa, io, root, p);
+        if (manifests[owner]) |held| {
+            if (std.mem.count(u8, held.path, "/") <= std.mem.count(u8, p, "/")) {
+                try libraries[owner].append(gpa, read);
+                continue;
+            }
+            try libraries[owner].append(gpa, held);
+        }
+        manifests[owner] = read;
     }
 
     // A driver is read beside the source the same way, and for the same
@@ -829,6 +847,7 @@ fn collectCases(gpa: std.mem.Allocator, io: std.Io, root: []const u8, all: []con
             .entry = entry,
             .files = try files_of[i].toOwnedSlice(gpa),
             .manifest = manifests[i],
+            .libraries = try libraries[i].toOwnedSlice(gpa),
             .driver = drivers[i],
         });
     }
@@ -10762,11 +10781,14 @@ fn renameHolds(
     // One more than the source, where the case carries a manifest: a renamed
     // program is the same root as the one it was renamed from, and reloading it
     // without what marks that root reads a library as a program.
-    const extra: usize = if (case.manifest == null) 0 else 1;
+    const extra: usize = if (case.manifest == null) 0 else 1 + case.libraries.len;
     const after = try gpa.alloc(InMemoryFile, case.files.len + extra);
     defer gpa.free(after);
     @memcpy(after[0..case.files.len], case.files);
-    if (case.manifest) |marking| after[case.files.len] = marking;
+    if (case.manifest) |marking| {
+        after[case.files.len] = marking;
+        @memcpy(after[case.files.len + 1 ..], case.libraries);
+    }
 
     var rewritten: std.ArrayList([]u8) = .empty;
     defer {

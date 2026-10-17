@@ -1,0 +1,16 @@
+// A program's own functions are called by the program alone, so a public one
+// may leave the allocator to its default.
+pub fn names() -> Vec[Str] {
+    Vec.new()
+}
+
+fn main() -> UInt8 {
+    let held = names()
+    let empty = held.length() == 0
+    held.release()
+    if empty {
+        0
+    } else {
+        1
+    }
+}

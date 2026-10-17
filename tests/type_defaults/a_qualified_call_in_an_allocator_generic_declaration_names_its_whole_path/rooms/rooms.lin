@@ -1,0 +1,10 @@
+import std.mem
+
+// `reserve` takes the allocator its vector is built in, and the system
+// allocator where a caller leaves it out.
+pub fn reserve[A: Allocator = mem.SystemAllocator](size: UInt64, allocator: A = .System) -> UInt64 where carries(allocator) {
+    let items: Vec[UInt8, A] = Vec.new_in(allocator)
+    let held = items.length() + size
+    items.release()
+    held
+}

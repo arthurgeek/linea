@@ -1,0 +1,11 @@
+// `Hid` names `Inner` and leaves its parameter to the default, which is where
+// the vector's allocator is left out.
+struct Inner[T = Vec[Str]] {
+    value: T,
+}
+
+alias Hid = Inner
+
+pub struct Shown {
+    part: Hid,
+}

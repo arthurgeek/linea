@@ -1,0 +1,7 @@
+{
+    "dependencies": {
+        "colours": { "path": "colors" },
+        "sizes": { "path": "sizes" },
+        "std": { "path": "mystd" }
+    }
+}

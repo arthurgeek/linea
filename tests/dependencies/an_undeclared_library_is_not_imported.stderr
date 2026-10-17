@@ -1,0 +1,5 @@
+error[M-Import]: `tools` holds its own linea.json, so it is a library of its own rather than a module; name it under `dependencies` in this root's linea.json to import it
+ --> tests/dependencies/an_undeclared_library_is_not_imported/main.lin:3:8
+  |
+3 | import tools
+  |        ^^^^^ cannot import it

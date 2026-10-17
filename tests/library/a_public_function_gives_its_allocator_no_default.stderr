@@ -1,0 +1,15 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `chosen`.
+ --> tests/library/a_public_function_gives_its_allocator_no_default/main.lin:5:30
+  |
+5 | pub fn chosen[P: Allocator = mem.SystemAllocator](parent: P = .System) -> Vec[Str, P] where carries(parent) {
+  |                              ^^^^^^^^^^^^^^^^^^^ drop the default; offer `chosen` over `mem.SystemAllocator` beside `chosen_in`, which takes the allocator first
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `kept_in`.
+  --> tests/library/a_public_function_gives_its_allocator_no_default/main.lin:15:31
+   |
+15 | pub fn kept_in[P: Allocator = mem.SystemAllocator](parent: P) -> Vec[Str, P] where carries(parent) {
+   |                               ^^^^^^^^^^^^^^^^^^^ drop the default; offer `kept` over `mem.SystemAllocator` beside `kept_in`, which takes the allocator first
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `names`.
+  --> tests/library/a_public_function_gives_its_allocator_no_default/main.lin:25:33
+   |
+25 |     pub fn names[P: Allocator = mem.SystemAllocator](self: Self, parent: P) -> Vec[Str, P] where carries(parent) {
+   |                                 ^^^^^^^^^^^^^^^^^^^ drop the default; offer `names` over `mem.SystemAllocator` beside `names_in`, which takes the allocator first after the receiver

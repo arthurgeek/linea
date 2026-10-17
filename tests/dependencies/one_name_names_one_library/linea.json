@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "canvas": { "path": "canvas" },
+        "shapes": { "path": "shapes" }
+    }
+}

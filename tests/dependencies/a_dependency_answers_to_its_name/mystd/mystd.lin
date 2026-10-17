@@ -1,0 +1,3 @@
+pub fn mine() -> UInt8 {
+    2
+}

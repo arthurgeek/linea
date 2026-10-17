@@ -61,9 +61,9 @@ test fn empty_owned_text_needs_no_allocator_capacity() {
     testing.assert(opened_empty && copied_empty, "empty text required allocator capacity")?
 }
 
-impl String {
+impl String[mem.SystemAllocator] {
     // Start empty text in the system allocator. It allocates only when it grows.
-    pub fn new() -> String {
+    pub fn new() -> String[mem.SystemAllocator] {
         String.new_in(mem.system())
     }
 }

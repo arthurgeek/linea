@@ -1,0 +1,5 @@
+error[M-Import]: `vendor/shout` is the library `shout`, which this root depends on; import it as `shout`
+ --> tests/dependencies/a_nested_library_is_imported_by_its_name_before_it_is_loaded/main.lin:1:8
+  |
+1 | import vendor.shout as early
+  |        ^^^^^^^^^^^^ cannot import it

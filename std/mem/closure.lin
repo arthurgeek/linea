@@ -97,7 +97,7 @@ impl[S, A: Allocator] Closure[S, A] {
     }
 }
 
-impl[S] Closure[S] {
+impl[S] Closure[S, SystemAllocator] {
     // Move `callback` into bytes from the system allocator and return the
     // closure that calls it, as `open_in` does.
     pub fn open[F: Release](sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback) {

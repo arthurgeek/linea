@@ -1,0 +1,18 @@
+// A point on a grid.
+@copyable
+pub struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+impl Point {
+    // `at` builds a point from its two coordinates.
+    pub fn at(x: UInt8, y: UInt8) -> Point {
+        Point { x, y }
+    }
+
+    // `sum` adds the two coordinates.
+    pub fn sum(self: Self) -> UInt8 {
+        self.x + self.y
+    }
+}

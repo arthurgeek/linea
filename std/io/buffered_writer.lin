@@ -269,7 +269,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
     }
 }
 
-impl[W: ByteWriter] BufferedWriter[W] {
+impl[W: ByteWriter] BufferedWriter[W, mem.SystemAllocator] {
     // Buffer `writer` with `capacity` bytes from the system allocator, as
     // `open_in` does.
     pub fn open(capacity: UInt64, sink writer: W) -> Result[Self, BufferOpenFailure[W]] where carries(.Ok.writer: writer), carries(.Err.resource: writer) {

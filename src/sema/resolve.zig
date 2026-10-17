@@ -6865,13 +6865,13 @@ const Resolver = struct {
     fn recordTest(self: *Resolver, d: DeclId, spelled: []const u8) !void {
         const m = self.program.get(self.current);
 
-        // Somebody else's library, and not when it is the root. A program is
-        // compiled with the library beside it, so both are walked here, and
-        // running the library's tests as part of a program's would report
-        // failures nobody in that program asked for or can fix. Tested on its
-        // own terms it is not a dependency at all -- it is what was named --
-        // and its tests are the ones to run.
-        if (m.library and !self.program.root().library) return;
+        // Another root's: the standard library or a dependency. A program is
+        // compiled with its libraries beside it, so all of them are walked
+        // here, and running a library's tests as part of a program's would
+        // report failures nobody in that program asked for or can fix. Tested
+        // on its own terms a library is the root, and its tests are the ones
+        // to run.
+        if (m.root != self.program.root().root) return;
 
         const qualified = try qualifiedTestName(
             self.gpa,
@@ -6929,7 +6929,7 @@ const Resolver = struct {
         // the tests recorded below. Asked once: two calls could disagree only
         // by one of them being given a different module, and that is exactly
         // the mistake the argument exists to make visible.
-        const reached_without_a_call = reachedWithoutACall(self.ast, d, self.current == self.program.primary);
+        const reached_without_a_call = reachedWithoutACall(self.ast, d, self.program.isRootModule(self.current));
 
         const at: u32 = @intCast(self.top.items.len);
         try self.top.append(self.gpa, BindingId.at(@intCast(self.bindings.items.len)));
@@ -7344,12 +7344,43 @@ const Resolver = struct {
         return .none;
     }
 
+    /// [M-Entry] at every entry point the root module `m` of a library
+    /// declares, and whether it declared one.
+    ///
+    /// A library has nothing to run, so an entry point written in one is a
+    /// declaration the output cannot hold. Reported at the `main` rather than
+    /// at the root, because that is the line to delete or the manifest to
+    /// correct, and `namesTheEntryPoint` is what decides -- so `pub fn main`
+    /// is this and not an export.
+    fn refuseLibraryEntryPoints(self: *Resolver, m: ModuleId) !bool {
+        const root = self.program.get(m);
+        var found = false;
+        for (root.decls.start..root.decls.end) |i| {
+            const d = DeclId.at(@intCast(i));
+            if (!namesTheEntryPoint(self.ast, d)) continue;
+            found = true;
+            try self.sink.addError(
+                .m_entry,
+                self.ast.fileOfDecl(d),
+                self.ast.declNameSpan(d),
+                "a library declares no entry point",
+                "a library has nothing to run: drop it, or name this root a program",
+            );
+        }
+        return found;
+    }
+
     /// The root module declares exactly one `main`, and it is `main() -> u8`.
     ///
     /// Asked of the root alone: a module that is imported declares no entry
     /// point, and holding every module to the rule would make a library
     /// uncompilable on its own terms.
     fn checkEntryPoint(self: *Resolver) !void {
+        // A dependency is a library, and so is a root its manifest names one.
+        for (self.program.roots) |held| {
+            if (held.module != .none) _ = try self.refuseLibraryEntryPoints(held.module);
+        }
+
         // The entry point is the root module's, so the names its signature
         // writes are read from there. Whichever module the loops above ended
         // in is not it.
@@ -7367,21 +7398,7 @@ const Resolver = struct {
         // than making it: a program with no entry point or with two is
         // rejected here, and nothing downstream has to agree about which of
         // two it would have picked.
-        // A library has nothing to run, so an entry point written in one is a
-        // declaration the output cannot hold. Reported at the `main` rather
-        // than at the root, because that is the line to delete or the manifest
-        // to correct, and `namesTheEntryPoint` is what decides -- so `pub fn
-        // main` is this and not an export.
-        if (found >= 1 and self.program.kind == .library) {
-            try self.sink.addError(
-                .m_entry,
-                self.ast.fileOfDecl(entry),
-                self.ast.declNameSpan(entry),
-                "a library declares no entry point",
-                "a library has nothing to run: drop it, or name this root a program",
-            );
-            return;
-        }
+        if (self.program.kind == .library and try self.refuseLibraryEntryPoints(self.program.primary)) return;
 
         if (found == 1) {
             self.entry = entry;

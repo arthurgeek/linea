@@ -1,0 +1,8 @@
+// An import starting with `recipes` names the library, so this program's own
+// `recipes/drafts` directory is not what `recipes.drafts` reaches.
+import recipes
+import recipes.drafts
+
+fn main() -> UInt8 {
+    recipes.soup() + drafts.stew()
+}

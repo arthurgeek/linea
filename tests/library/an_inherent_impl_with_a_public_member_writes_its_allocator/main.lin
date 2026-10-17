@@ -1,0 +1,30 @@
+import std.mem
+
+pub struct Pool[T, A: Allocator = mem.SystemAllocator] {
+    items: Vec[T, A],
+}
+
+// Every member's `Self` is this head, so a head that leaves the allocator out
+// gives each public member a signature over the system allocator.
+impl[T] Pool[T] {
+    pub fn new() -> Self {
+        Self { items = Vec.new() }
+    }
+
+    fn held(self: Self) -> UInt64 {
+        self.items.length()
+    }
+}
+
+// Writing the allocator out, or keeping it a parameter, is accepted.
+impl[T] Pool[T, mem.SystemAllocator] {
+    pub fn size(self: Self) -> UInt64 {
+        self.held()
+    }
+}
+
+impl[T, A: Allocator] Pool[T, A] {
+    pub fn length(self: Self) -> UInt64 {
+        self.items.length()
+    }
+}

@@ -1,0 +1,5 @@
+error[T-DefaultedAllocator]: `Vec` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+ --> tests/library/a_generic_public_signature_names_the_parameter_it_declares/main.lin:2:57
+  |
+2 | pub fn measure[A: Allocator](items: Vec[Str, A], extra: Vec[Str]) -> UInt64 {
+  |                                                         ^^^ write the allocator: `A`, or `mem.SystemAllocator` where the system allocator is meant

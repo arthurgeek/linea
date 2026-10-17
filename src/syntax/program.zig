@@ -25,13 +25,23 @@ pub const ModuleId = enum(u32) {
 
 /// Which independently loaded source root owns a module.
 ///
-/// A compilation may contain the primary root, the standard library and, in
-/// future, dependency libraries. The loader assigns this identity; no pass
-/// infers it from paths or standard-library authority.
+/// A compilation contains the primary root, the standard library and the
+/// libraries the primary root's manifest names as dependencies, each of which
+/// may name more. The loader assigns this identity; no pass infers it from
+/// paths or standard-library authority.
 pub const RootId = enum(u32) {
     primary = 0,
+    standard = 1,
     none = std.math.maxInt(u32),
     _,
+
+    /// The first identity a dependency library takes. Every root from here on
+    /// is a library some manifest named under `dependencies`.
+    pub const first_dependency: RootId = @enumFromInt(2);
+
+    pub fn isDependency(self: RootId) bool {
+        return self != .none and @intFromEnum(self) >= @intFromEnum(first_dependency);
+    }
 
     pub fn from(i: usize) RootId {
         return @enumFromInt(i);
@@ -133,6 +143,31 @@ pub const Module = struct {
 /// the only thing that read the manifest.
 pub const Kind = enum { program, library };
 
+/// Whether `module` belongs to a library root, in a compilation whose primary
+/// root is built as `kind`: the standard library, a dependency, or a primary
+/// root built as a library. The one answer `Program` and `ExpandedProgram`
+/// both give.
+pub fn moduleInLibraryRoot(module: *const Module, kind: Kind) bool {
+    if (module.library or module.root.isDependency()) return true;
+    return module.root == .primary and kind == .library;
+}
+
+/// What the loader read about one dependency library from the manifests that
+/// name it: the name every import of it starts with, where its source sits,
+/// its root module once an import has reached it, and the libraries its own
+/// manifest names. Indexed by `RootId`; the rows of the primary root and the
+/// standard library carry only their dependencies.
+pub const RootFacts = struct {
+    name: []const u8 = "",
+    /// The directory its root module's files sit in.
+    dir: []const u8 = "",
+    /// The library's root module, or `.none` where no import reached it.
+    module: ModuleId = .none,
+    /// The roots an import written in this root may name, besides its own and
+    /// the standard library.
+    dependencies: []const RootId = &.{},
+};
+
 /// Ordered declaration runs chosen by the caller, without allocating ID lists.
 pub const DeclarationSelection = union(enum) {
     range: DeclRange,
@@ -216,6 +251,9 @@ pub const Program = struct {
     prelude: ModuleId = .none,
     /// What the root is built as, which its manifest names.
     kind: Kind = .program,
+    /// One row per loaded root, indexed by `RootId`; empty for a program
+    /// assembled without the loader, which holds no dependency.
+    roots: []const RootFacts = &.{},
     /// Whether the entry is a module a named file selected rather than the
     /// root's own module. Such a module need declare no `main` to be
     /// checked; running it needs one.
@@ -271,11 +309,40 @@ pub const Program = struct {
 
         const source = self.get(from);
         const target = self.get(to);
-        if (source.root != target.root and !target.library) return null;
+        if (source.root != target.root and !target.library and !self.dependsOn(source.root, target.root)) return null;
         if (!target.importable) return null;
         const syntax = self.import_routes[to.index()];
         if (syntax.len == 0) return null;
         return .{ .target = to, .syntax = syntax };
+    }
+
+    /// Whether the manifest of root `from` names root `to` under
+    /// `dependencies`, so an import written in `from` may reach it.
+    ///
+    /// **Bound:** the dependencies one manifest names.
+    pub fn dependsOn(self: *const Program, from: RootId, to: RootId) bool {
+        if (from.index() >= self.roots.len) return false;
+        for (self.roots[from.index()].dependencies) |held| if (held == to) return true;
+        return false;
+    }
+
+    /// Whether module `m` is a root's own module: the primary root's, or a
+    /// dependency's, where an entry point would be written.
+    ///
+    /// **Bound:** the roots the compilation holds.
+    pub fn isRootModule(self: *const Program, m: ModuleId) bool {
+        if (m == self.primary) return true;
+        if (m == .none) return false;
+        for (self.roots) |held| if (held.module == m) return true;
+        return false;
+    }
+
+    /// Whether module `m` belongs to a library root: the standard library, a
+    /// dependency, or a primary root its manifest declares a library. What a
+    /// library publishes is held to rules a program's declarations are not.
+    pub fn inLibraryRoot(self: *const Program, m: ModuleId) bool {
+        if (m == .none) return false;
+        return moduleInLibraryRoot(self.get(m), self.kind);
     }
 
     /// Which module a declaration belongs to.
@@ -337,6 +404,12 @@ pub const Program = struct {
         }
         for (self.import_routes) |route| gpa.free(route);
         gpa.free(self.import_routes);
+        for (self.roots) |r| {
+            gpa.free(r.name);
+            gpa.free(r.dir);
+            gpa.free(r.dependencies);
+        }
+        gpa.free(self.roots);
         gpa.free(self.modules);
         self.ast.deinit(gpa);
         self.* = undefined;

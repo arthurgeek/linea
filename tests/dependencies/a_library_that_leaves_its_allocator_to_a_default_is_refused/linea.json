@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+        "shelf": { "path": "shelf" },
+        "shout": { "path": "shout" }
+    }
+}

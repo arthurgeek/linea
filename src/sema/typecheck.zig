@@ -505,6 +505,8 @@ fn typecheckInternal(
     defer c.alias_shapes.deinit(gpa);
     defer c.aliases_reading.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
+    defer c.carried_omissions.deinit(gpa);
+    defer c.impls_publishing.deinit(gpa);
     defer c.defaulted_calls.deinit(gpa);
     defer c.defaulted_bindings.deinit(gpa);
     defer c.deinitCheckedTemplateRequirements();
@@ -1327,7 +1329,8 @@ fn typecheckInternal(
         for (program.declsOf(c.current)) |d| {
             if (c.isRetained(d)) continue;
             if (ast.declIsExtern(d)) try c.checkExtern(d, m.externs, m.library);
-            if (ast.declIsExport(d)) try c.checkExport(d);
+            if (c.program.publishesExport(d)) try c.checkExport(d);
+            if (ast.declTag(d) == .function) try c.checkLibraryFunctionDefaults(d);
 
             // Its own parameters answer for the whole declaration: the return
             // type, every annotation in the body, and every signature the body
@@ -5229,6 +5232,21 @@ const Checker = struct {
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
+    /// A non-public declaration in a library root that leaves an allocator to
+    /// its default where a public signature cannot see it, to the token that
+    /// leaves it: an alias's written type, keyed by the alias and
+    /// `alias_body`, or a type parameter's default, keyed by the declaration
+    /// and the parameter's position. A public signature naming the alias, or
+    /// leaving the parameter to its default, leaves the allocator to its
+    /// default too.
+    carried_omissions: std.AutoHashMapUnmanaged(u64, Carried) = .empty,
+    /// The default being settled, as `carried_omissions` keys it, while
+    /// `defaultAt` reads one.
+    reading_default: ?u64 = null,
+    /// The inherent implementations with a public member, filled on first
+    /// use by one pass over the declarations.
+    impls_publishing: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    impls_publishing_ready: bool = false,
     /// The parameter a call left to its type's default, by the call
     /// expression: what a later mismatch about the value the call made points
     /// back at. Holds one entry per call that took a default, so its size is
@@ -8809,6 +8827,7 @@ const Checker = struct {
             supplied[i] = try self.typeOfRefOf(m, owner, a);
         }
         try self.fillDefaults(decl, supplied, written);
+        for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, decl, i);
         const made = try self.builder.instantiate(head, decl, supplied);
 
         // Bound validation waits until representations and callable effects
@@ -8853,7 +8872,21 @@ const Checker = struct {
         const omitted = for (parameters[written..], written..) |parameter, i| {
             if (self.isBoundedBy(parameter, allocator)) break i;
         } else return false;
-        const declared = self.allocatorParameterOf(owner, allocator) orelse return false;
+        const declared = self.allocatorParameterOf(owner, allocator) orelse {
+            // A call takes its type's or its function's default wherever it
+            // is written; only a written type is held to a library's rule.
+            if (callee != ExprId.none) return false;
+            // The type is the system form all the same, so it settles as
+            // written and nothing downstream is refused because of it.
+            if (try self.publicLibrarySignature(owner, tok)) {
+                if (self.refusedBefore(tok)) return false;
+                try self.noteRefused(tok);
+                try self.reportLibraryDefault(owner, tok, self.ast.tokenText(tok), null);
+                return false;
+            }
+            try self.recordCarriedOmission(owner, null, tok);
+            return false;
+        };
         if (self.refusedBefore(tok)) return true;
         try self.noteRefused(tok);
         const default = try self.defaultAt(decl, omitted);
@@ -8866,6 +8899,190 @@ const Checker = struct {
             .{ if (callee == ExprId.none) self.ast.tokenText(tok) else self.ast.exprText(callee), self.ast.tokenText(parameters[omitted].name) },
         );
         return true;
+    }
+
+    /// Where a declaration carries an omission a public signature cannot
+    /// see: `inside`, explained by `why`.
+    const Carried = struct { inside: TokenId, why: []const u8 };
+
+    /// The key `carried_omissions` gives an alias's written type.
+    const alias_body: u64 = 0xffff_ffff;
+
+    fn carriedKey(decl: node.DeclId, slot: u64) u64 {
+        return (@as(u64, decl.index()) << 32) | slot;
+    }
+
+    /// Records that `owner`, a declaration of a library root that is not
+    /// public, leaves an allocator to its default: in the default of its type
+    /// parameter being read, or in an alias's written type. `reached` is what
+    /// a type `owner` wrote carries, where the omission sits further in;
+    /// otherwise it sits at `inside`, written in `owner` itself. A public
+    /// signature that reaches it is refused where it names `owner`. The one
+    /// place such an omission is recorded, whether `owner` wrote it or reached
+    /// it through another alias or default.
+    fn recordCarriedOmission(self: *Checker, owner: node.DeclId, reached: ?Carried, inside: TokenId) std.mem.Allocator.Error!void {
+        if (owner == node.DeclId.none or !self.program.inLibraryRoot(self.program.moduleOf(owner))) return;
+        const key = if (self.reading_default) |reading| (if (reading >> 32 == owner.index()) reading else null) else null;
+        if (key) |reading| {
+            // A default that names a parameter of its own list was refused
+            // where it is written, and carries nothing further.
+            const parameter = self.ast.declTypeParams(owner)[@intCast(reading & 0xffff_ffff)];
+            if (self.mentionsTypeParameter(owner, parameter.default)) return;
+        }
+        const slot = key orelse if (self.ast.declTag(owner) == .alias) carriedKey(owner, alias_body) else return;
+        const held = try self.carried_omissions.getOrPut(self.gpa, slot);
+        if (held.found_existing) return;
+        held.value_ptr.* = reached orelse .{
+            .inside = inside,
+            .why = if (key != null) "this default leaves the allocator to its default" else "the alias leaves the allocator to its default here",
+        };
+    }
+
+    /// [T-DefaultedAllocator] where a type written at `tok` in `owner` reaches
+    /// an omission `decl` carries in `slot`, or records it on `owner` when
+    /// that is not a public signature either.
+    fn checkCarriedOmission(self: *Checker, owner: node.DeclId, tok: TokenId, decl: node.DeclId, slot: u64) std.mem.Allocator.Error!void {
+        const carried = self.carried_omissions.get(carriedKey(decl, slot)) orelse return;
+        if (try self.publicLibrarySignature(owner, tok)) {
+            if (self.refusedBefore(tok)) return;
+            try self.noteRefused(tok);
+            try self.reportLibraryDefault(owner, tok, self.ast.tokenText(carried.inside), carried);
+            return;
+        }
+        try self.recordCarriedOmission(owner, carried, carried.inside);
+    }
+
+    /// [T-DefaultedAllocator] for a public signature of a library that leaves
+    /// an allocator to a default: `name` is the type whose allocator the
+    /// signature does not state, written at `at` in `owner`. `through` is
+    /// where an alias or a default the signature reaches left it, where it
+    /// did.
+    fn reportLibraryDefault(self: *Checker, owner: node.DeclId, at: TokenId, name: []const u8, through: ?Carried) std.mem.Allocator.Error!void {
+        // A type a trait implementation settles cannot take an allocator
+        // parameter, which nothing in the implementation's key would recover,
+        // so only the explicit spelling is offered there.
+        const label = if (self.ast.declTag(owner) == .associated_type)
+            "Specify `mem.SystemAllocator` to make this restriction intentional."
+        else
+            "Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.";
+        try self.reportLibraryDefaultAt(self.ast.fileOf(at), self.ast.tokenSpan(at), name, label, through);
+    }
+
+    fn reportLibraryDefaultAt(self: *Checker, file: FileId, span: Span, name: []const u8, label: []const u8, through: ?Carried) std.mem.Allocator.Error!void {
+        const labels = try self.sink.arena.alloc(Label, if (through == null) 1 else 2);
+        labels[0] = .{ .file = file, .span = span, .message = label };
+        if (through) |carried| labels[1] = .{
+            .file = self.ast.fileOf(carried.inside),
+            .span = self.ast.tokenSpan(carried.inside),
+            .message = carried.why,
+            .style = .secondary,
+        };
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_defaulted_allocator,
+            .message = try std.fmt.allocPrint(self.sink.arena, "Public library signature uses the default allocator for `{s}`.", .{name}),
+            .labels = labels,
+        });
+    }
+
+    /// Whether `tok`, a type written in declaration `owner`, is part of a
+    /// signature a library publishes to the roots that depend on it: a public
+    /// function's or a public trait's signature up to its body, an inherent
+    /// implementation's head or its public members' signatures where the type
+    /// is public, a type a public type settles for a trait, a public
+    /// structure's fields or enumeration's payloads, or a public alias,
+    /// newtype or constant. A trait implementation's members are its trait's
+    /// signatures, checked where the trait is declared.
+    ///
+    /// **Bound:** constant work per written type, after one pass over the
+    /// declarations that finds the implementations with a public member.
+    fn publicLibrarySignature(self: *Checker, owner: node.DeclId, tok: TokenId) std.mem.Allocator.Error!bool {
+        if (owner == node.DeclId.none) return false;
+        if (!self.program.inLibraryRoot(self.program.moduleOf(owner))) return false;
+        switch (self.ast.declTag(owner)) {
+            .function => {
+                if (self.ast.declIsExtern(owner)) return false;
+                const body = self.ast.declBody(owner);
+                if (body != ExprId.none and self.ast.tokenSpan(tok).start >= self.ast.exprSpan(body).start) return false;
+                if (self.traitDeclaring(owner)) |trait| return publishes(self.ast.declVisibility(trait));
+                if (self.implEnclosing(owner)) |implementation| {
+                    if (self.ast.declTrait(implementation) != TokenId.none) return false;
+                    return publishes(self.ast.declVisibility(owner)) and self.implementedTypeIsPublic(implementation);
+                }
+                return publishes(self.ast.declVisibility(owner));
+            },
+            .impl_ => {
+                if (self.ast.declTrait(owner) != TokenId.none) return false;
+                if (!self.implementedTypeIsPublic(owner)) return false;
+                try self.collectImplsPublishing();
+                return self.impls_publishing.contains(owner);
+            },
+            .associated_type => {
+                const implementation = self.implEnclosing(owner) orelse return false;
+                return self.implementedTypeIsPublic(implementation);
+            },
+            .struct_, .enum_, .alias, .newtype, .constant => return self.ast.declVisibility(owner) == .pub_,
+            else => return false,
+        }
+    }
+
+    fn publishes(visibility: node.Visibility) bool {
+        return visibility == .pub_ or visibility == .opaque_;
+    }
+
+    /// Whether the type an implementation's head names is reachable from
+    /// another root. A head naming no declared type is the library's own
+    /// primitive, which every root reaches.
+    fn implementedTypeIsPublic(self: *const Checker, implementation: node.DeclId) bool {
+        const head = self.ast.declHead(implementation);
+        const declared = self.declOfType(self.program.moduleOf(implementation), implementation, head.name) orelse return true;
+        return publishes(self.ast.declVisibility(declared));
+    }
+
+    fn collectImplsPublishing(self: *Checker) std.mem.Allocator.Error!void {
+        if (self.impls_publishing_ready) return;
+        self.impls_publishing_ready = true;
+        for (0..self.ast.declCount()) |i| {
+            const member = node.DeclId.at(@intCast(i));
+            if (!publishes(self.ast.declVisibility(member))) continue;
+            const implementation = self.implEnclosing(member) orelse continue;
+            try self.impls_publishing.put(self.gpa, implementation, {});
+        }
+    }
+
+    /// [T-DefaultedAllocator] for a public library function whose type
+    /// parameter bounded by `Allocator` writes a default: a caller that omits
+    /// the argument takes the system allocator without writing it.
+    fn checkLibraryFunctionDefaults(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
+        const allocator = self.allocator_decl orelse return;
+        for (self.ast.declTypeParams(d)) |parameter| {
+            if (!parameter.default.wasWritten()) continue;
+            if (!self.isAllocatorParameter(d, parameter, allocator)) continue;
+            if (!try self.publicLibrarySignature(d, parameter.name)) return;
+            if (self.refusedBefore(parameter.default.at)) continue;
+            try self.noteRefused(parameter.default.at);
+            const name = self.ast.tokenText(self.ast.declName(d));
+            // The pair's two names come from the function's own, whichever of
+            // the two it is.
+            const base = if (std.mem.endsWith(u8, name, "_in")) name[0 .. name.len - 3] else name;
+            const params = self.ast.declParams(d);
+            const where = if (params.len > 0 and std.mem.eql(u8, self.ast.tokenText(params[0].name), "self")) "first after the receiver" else "first";
+            const label = try std.fmt.allocPrint(self.sink.arena, "drop the default; offer `{s}` over `mem.SystemAllocator` beside `{s}_in`, which takes the allocator {s}", .{ base, base, where });
+            try self.reportLibraryDefaultAt(self.ast.fileOf(parameter.default.at), self.ast.writtenSpan(parameter.default), name, label, null);
+        }
+    }
+
+    /// Whether a type parameter of `owner` is bounded by `Allocator`, where it
+    /// is declared or in `owner`'s `where` clause.
+    fn isAllocatorParameter(self: *const Checker, owner: node.DeclId, parameter: node.TypeParam, allocator: node.DeclId) bool {
+        if (self.isBoundedBy(parameter, allocator)) return true;
+        for (self.ast.declWherePredicates(owner)) |predicate| {
+            const subject = predicate.subject;
+            if (subject.kind != .named or subject.args.len() != 0 or subject.name == TokenId.none) continue;
+            if (self.ast.tokenName(subject.name) != self.ast.tokenName(parameter.name)) continue;
+            if (self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator, 0)) return true;
+        }
+        return false;
     }
 
     /// The type a declaration's parameter defaults to, read where the
@@ -8890,6 +9107,9 @@ const Checker = struct {
         }
         try self.defaults_reading.put(self.gpa, key, {});
         defer _ = self.defaults_reading.remove(key);
+        const outer = self.reading_default;
+        self.reading_default = carriedKey(decl, index);
+        defer self.reading_default = outer;
         return self.typeOfRefOf(self.program.moduleOf(decl), decl, parameter.default);
     }
 
@@ -9094,13 +9314,7 @@ const Checker = struct {
         for (scopes) |scope| {
             if (scope == node.DeclId.none) continue;
             for (self.ast.declTypeParams(scope)) |parameter| {
-                if (self.isBoundedBy(parameter, allocator)) return parameter.name;
-                for (self.ast.declWherePredicates(scope)) |predicate| {
-                    const subject = predicate.subject;
-                    if (subject.kind != .named or subject.args.len() != 0 or subject.name == TokenId.none) continue;
-                    if (self.ast.tokenName(subject.name) != self.ast.tokenName(parameter.name)) continue;
-                    if (self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator, 0)) return parameter.name;
-                }
+                if (self.isAllocatorParameter(scope, parameter, allocator)) return parameter.name;
             }
         }
         return null;
@@ -9421,6 +9635,7 @@ const Checker = struct {
         if (written < wanted and try self.refusedDefaultedAllocator(owner, tok, .none, alias, written)) return .poison;
 
         const named = try self.aliasedType(alias);
+        try self.checkCarriedOmission(owner, tok, alias, alias_body);
         if (wanted == 0 or named == .poison) return named;
 
         // Read into a run of this application's own before any is kept: an
@@ -9429,6 +9644,7 @@ const Checker = struct {
         defer self.gpa.free(supplied);
         for (self.ast.typeArgs(args), supplied[0..written]) |a, *t| t.* = try self.typeOfRefOf(m, owner, a);
         try self.fillDefaults(alias, supplied, written);
+        for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, alias, i);
         for (supplied) |t| if (t == .poison) return .poison;
         if (self.callable_effects_ready) {
             const args_start: u32 = @intCast(self.alias_site_args.items.len);

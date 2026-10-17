@@ -1,0 +1,9 @@
+import greetings
+import std.io
+
+// `import greetings` reaches the library the manifest names under
+// `dependencies`, not a module of this program.
+fn main() -> Result[UInt8, io.IoError] {
+    io.println(greetings.greeting())?
+    .Ok(0)
+}

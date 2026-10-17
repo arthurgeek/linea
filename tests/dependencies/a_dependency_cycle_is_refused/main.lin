@@ -1,0 +1,5 @@
+import eggs
+
+fn main() -> UInt8 {
+    eggs.count()
+}

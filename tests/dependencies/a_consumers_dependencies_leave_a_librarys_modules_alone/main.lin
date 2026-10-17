@@ -1,0 +1,6 @@
+import canvas
+import colors
+
+fn main() -> UInt8 {
+    canvas.size() + colors.red()
+}

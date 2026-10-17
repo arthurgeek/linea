@@ -1,0 +1,10 @@
+error[M-Dependency]: the manifest of `descriptors` grants it `extern`, and this entry does not consent to it
+ --> tests/dependencies/a_library_granted_extern_needs_its_consumers_consent/linea.json:3:9
+  |
+3 |         "descriptors": { "path": "descriptors" },
+  |         ^^^^^^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
+error[M-Dependency]: the manifest of `plain` does not grant it `extern`, so there is nothing to consent to
+ --> tests/dependencies/a_library_granted_extern_needs_its_consumers_consent/linea.json:4:9
+  |
+4 |         "plain": { "path": "plain", "extern": true }
+  |         ^^^^^^^ drop `"extern": true` from this entry

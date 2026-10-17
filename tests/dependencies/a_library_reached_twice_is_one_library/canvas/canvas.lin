@@ -1,0 +1,7 @@
+import shapes
+
+// `corner` answers with the library's own `shapes.Point`, which is the same type
+// the program names, because both reach one `shapes` directory.
+pub fn corner() -> shapes.Point {
+    shapes.Point.at(3, 4)
+}

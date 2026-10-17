@@ -206,7 +206,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     }
 }
 
-impl[R: Reader] BufferedReader[R] {
+impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
     // Read from `reader` through a read-ahead buffer of `capacity` bytes from
     // the system allocator, as `open_in` does.
     pub fn open(capacity: UInt64, sink reader: R) -> Result[Self, BufferOpenFailure[R]] where carries(.Ok.reader: reader), carries(.Err.resource: reader) {
@@ -803,10 +803,10 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     }
 }
 
-impl[R: Reader] BufferedReader[R] {
+impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
     // Read exactly count bytes into storage from the system allocator, under
     // the limits of `read_exact_in`.
-    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader) {
+    pub fn read_exact(inout self: Self, count: UInt64, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemAllocator], ExactError[R.Error]] where carries(.Err.Input.reason: self.reader) {
         &self.read_exact_in(mem.system(), count, max_bytes)
     }
 }

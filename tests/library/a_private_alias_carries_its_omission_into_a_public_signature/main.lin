@@ -1,0 +1,13 @@
+// A private alias is a name for the type it writes, so a public signature that
+// names it leaves the vector's allocator to its default just the same.
+alias Titles = Vec[Str]
+
+pub fn titles() -> Titles {
+    Vec.new()
+}
+
+pub fn later() -> Later {
+    Vec.new()
+}
+
+alias Later = Vec[UInt8]

@@ -1,0 +1,5 @@
+error[M-Import]: `vendor/quiet` holds its own linea.json, so it is a library of its own rather than a module; name it under `dependencies` in this root's linea.json to import it
+ --> tests/dependencies/a_library_another_library_loaded_is_not_a_module/main.lin:4:8
+  |
+4 | import vendor.quiet as hidden
+  |        ^^^^^^^^^^^^ cannot import it

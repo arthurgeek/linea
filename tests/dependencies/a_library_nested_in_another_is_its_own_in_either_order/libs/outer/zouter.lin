@@ -1,0 +1,3 @@
+pub fn fo() -> UInt8 {
+    1
+}

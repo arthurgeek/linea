@@ -363,7 +363,7 @@ pub fn lower(
                 .declaration => |decl| decl,
                 .closure_release, .closure, .constructor, .erased_entry, .erased_settle, .built_in, .viewed => continue,
             };
-            if (!ast.declIsExport(decl)) continue;
+            if (!program.publishesExport(decl)) continue;
             exported[i] = try gpa.dupe(u8, ast.tokenText(ast.declName(decl)));
         }
     }

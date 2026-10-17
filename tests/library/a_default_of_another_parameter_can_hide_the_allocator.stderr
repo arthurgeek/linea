@@ -1,0 +1,19 @@
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+ --> tests/library/a_default_of_another_parameter_can_hide_the_allocator/main.lin:6:19
+  |
+4 | alias Boxed[T = Vec[Str]] = Option[T]
+  |                 --- this default leaves the allocator to its default
+6 | pub fn boxed() -> Boxed {
+  |                   ^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_default_of_another_parameter_can_hide_the_allocator/main.lin:14:20
+   |
+10 | struct Hidden[T = Vec[UInt16]] {
+   |                   --- this default leaves the allocator to its default
+14 | pub fn hidden() -> Hidden {
+   |                    ^^^^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.
+error[T-DefaultedAllocator]: Public library signature uses the default allocator for `Vec`.
+  --> tests/library/a_default_of_another_parameter_can_hide_the_allocator/main.lin:18:23
+   |
+18 | pub struct Holder[T = Vec[UInt8]] {
+   |                       ^^^ Specify `mem.SystemAllocator` to make this restriction intentional, or make the allocator a generic parameter to preserve allocator polymorphism.

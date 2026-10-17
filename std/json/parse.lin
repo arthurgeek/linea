@@ -271,7 +271,7 @@ pub fn parse_in[A: Allocator](allocator: A, input: Str, limits: ParseLimits = st
 
 // Parse `input` as one JSON document, allocating its values from the system
 // allocator, within `limits`.
-pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseError] where carries() {
     parse_in(mem.system(), input, limits: limits)
 }
 
@@ -530,7 +530,7 @@ pub fn parse_bytes_in[A: Allocator](allocator: A, input: mem.Slice[UInt8], limit
 }
 
 // Parse bytes as `parse` does, allocating from the system allocator.
-pub fn parse_bytes(input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+pub fn parse_bytes(input: mem.Slice[UInt8], limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseError] where carries() {
     parse_bytes_in(mem.system(), input, limits: limits)
 }
 

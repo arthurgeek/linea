@@ -25,7 +25,7 @@ error[T-Arity]: expected 0 argument(s), found 1
 26 |     let _owned = "Lisbon".to_owned(mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
-L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+L  |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
@@ -35,7 +35,7 @@ error[T-Arity]: expected 1 argument(s), found 2
 27 |     let _named = Str.to_owned("Lisbon", mem.system())
    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
-L  |     pub fn to_owned(self: Self) -> Result[String, mem.Oom] where carries() {
+L  |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator
@@ -45,7 +45,7 @@ error[T-Mismatch]: expected `Str`, found `mem.SystemAllocator`
 28 |     let _parsed = json.parse(mem.system(), "1")
    |                              ^^^^^^^^^^^^ expected `Str`, found `mem.SystemAllocator`
   ::: std/json/parse.lin
-L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseError] where  ...
    |              ----- expected because of this parameter
    |
    = help: `parse` uses the system allocator; use `parse_in(allocator, …)` to choose the allocator
@@ -55,7 +55,7 @@ error[T-Mismatch]: expected `json.ParseLimits`, found `Str`
 28 |     let _parsed = json.parse(mem.system(), "1")
    |                                            ^^^ expected `json.ParseLimits`, found `Str`
   ::: std/json/parse.lin
-L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value, ParseError] where carries() {
+L  | pub fn parse(input: Str, limits: ParseLimits = standard_limits) -> Result[Value[mem.SystemAllocator], ParseError] where  ...
    |                          ------ expected because of this parameter
 error[T-Mismatch]: expected `log.Level`, found `mem.SystemAllocator`
   --> tests/decl/a_method_call_counts_the_arguments_it_writes.lin:29:33
@@ -63,7 +63,7 @@ error[T-Mismatch]: expected `log.Level`, found `mem.SystemAllocator`
 29 |     let _logger = log.to_stderr(mem.system())
    |                                 ^^^^^^^^^^^^ expected `log.Level`, found `mem.SystemAllocator`
   ::: std/log/log.lin
-L  | pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor] {
+L  | pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor, mem.SystemAllocator] {
    |                  ------- expected because of this parameter
    |
    = help: `to_stderr` uses the system allocator; use `to_stderr_in(allocator, …)` to choose the allocator

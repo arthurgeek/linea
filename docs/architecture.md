@@ -455,6 +455,27 @@ one whatever their names are spelled (`instantiate.symbolFor`).
 `Program.importRoute` is the only later-pass API for reproducing a loaded source
 route.
 
+Before the first module is loaded, the loader reads the dependency graph: the
+root's manifest names libraries under `dependencies`, each library's manifest
+may name more, and `dependencies.zig` reads each entry with the span it is
+written at. A library is identified by its directory, spelled by `joinedDir`
+for disk and memory alike, so a library two manifests name is one root.
+Dependency roots take `RootId`s from 2, depth first over each manifest's names
+in order. A refused entry is [M-Dependency], reported against the manifest's
+text, which only then enters the file table. The result is `Program.roots`,
+one `RootFacts` row per root: its name, its source directory, its root module
+and the roots it depends on. `Program.importRoute` reads the edges.
+`Program.inLibraryRoot` reads the module's `RootId` and `library` bit and the
+primary root's `kind`, which the loader records beside the table rather than in
+it. On disk a library is identified by its real path, so one library spelled
+two ways is one root. An import whose first element names a dependency of the
+importing root resolves beneath that library's source directory, and only the
+importing root's own manifest is consulted; a directory holding a
+manifest is never a module of the root above it (`pathsOfModule` lists its
+manifest and stops there), and `pathsOfRoot` adds every dependency's files, so
+the command line, the language server and the conformance runner load the same
+graph.
+
 Disk loading indexes source paths beneath the root, then reads source bytes
 only when their module is reached. Test discovery reaches every module in the
 requested directory root; ordinary compilation follows imports. In-memory and

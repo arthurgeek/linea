@@ -976,7 +976,6 @@ test "a module says every place it is written" {
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
         .{ .path = "app/main.lin", .text = main_text },
         .{ .path = "app/sizes/sizes.lin", .text = sizes_text },
-        .{ .path = "app/sizes/linea.json", .text = "{}\n" },
     }, "app");
     defer checked.deinit();
     try testing.expect(!checked.sink.hasErrors());

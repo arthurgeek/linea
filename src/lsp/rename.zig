@@ -1788,7 +1788,6 @@ test "a type is changed where a pattern in another module takes it apart" {
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
         .{ .path = "app/main.lin", .text = main_text },
         .{ .path = "app/shapes/shapes.lin", .text = shapes_text },
-        .{ .path = "app/shapes/linea.json", .text = "{}\n" },
     }, "app");
     defer checked.deinit();
     try testing.expect(!checked.sink.hasErrors());

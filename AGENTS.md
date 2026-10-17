@@ -482,6 +482,12 @@ APIs.
   one, first after the receiver for a method. A constructor's base name says what it does: `new` builds and cannot
   fail, and `open` can fail or acquires a resource. An allocator built over a
   backing (`mem.Arena.open`) keeps its backing argument.
+- A library states its allocator. In a library root, std included, every
+  public signature writes the allocator of each type that takes one: a
+  parameter `A: Allocator` where the caller chooses, `mem.SystemAllocator`
+  written out where the restriction is intended, and no default on a public
+  function's allocator parameter ([T-DefaultedAllocator]). Bodies, private
+  helpers and programs keep the short form.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

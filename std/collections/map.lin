@@ -391,7 +391,7 @@ test fn a_map_built_in_an_allocator_holds_no_entries() {
     testing.assert(absent, "a new map found a key")?
 }
 
-impl[K, V] Map[K, V] {
+impl[K, V] Map[K, V, mem.SystemAllocator] {
     // Make an empty map that takes its storage from the system allocator.
     pub fn new() -> Self {
         Map.new_in(mem.system())

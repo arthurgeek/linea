@@ -1,0 +1,10 @@
+// A default may not name a parameter of its own list, so `Pair[UInt8]` is
+// refused there and nowhere else.
+struct Pair[K, V = Vec[K]] {
+    key: K,
+    value: V,
+}
+
+pub fn pair() -> Pair[UInt8] {
+    .{ key = 1, value = Vec.new() }
+}

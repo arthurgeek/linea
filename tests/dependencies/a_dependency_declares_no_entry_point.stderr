@@ -1,0 +1,5 @@
+error[M-Entry]: a library declares no entry point
+ --> tests/dependencies/a_dependency_declares_no_entry_point/chores/chores.lin:5:4
+  |
+5 | fn main() -> UInt8 {
+  |    ^^^^ a library has nothing to run: drop it, or name this root a program

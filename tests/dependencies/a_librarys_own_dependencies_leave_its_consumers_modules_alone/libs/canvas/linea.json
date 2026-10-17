@@ -1,0 +1,7 @@
+{
+    "kind": "library",
+    "name": "canvas",
+    "dependencies": {
+        "utils": { "path": "../utils" }
+    }
+}
