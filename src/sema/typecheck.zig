@@ -9844,15 +9844,27 @@ const Checker = struct {
     /// the one being walked -- and without it a parameter cannot discharge a
     /// bound it carries, which would make a bounded generic type writable and
     /// unusable from any generic function.
-    /// Whether one of `args` was refused for lacking a capability a bound
-    /// asks of it: a type whose argument lacks the capability its bound asks
-    /// promises no capability, while one lacking only a trait keeps the
-    /// capabilities its arguments give it.
-    fn lacksRefusedCapability(self: *const Checker, args: []const TypeId) bool {
-        for (args) |arg| {
-            for ([_]types_mod.CapabilityRequirement{ .copyable, .discardable }) |requirement| {
-                if (self.refused_demands.contains(.{ .ty = arg, .lacks = .{ .capability = requirement } })) return true;
-            }
+    /// Whether one of `args` lacks the capability the bound on its own
+    /// parameter of `d` asks for. A type whose argument lacks the capability
+    /// its bound asks promises no capability, while one lacking only a trait
+    /// keeps the capabilities its arguments give it. Asked of this
+    /// declaration's bounds, so a refusal elsewhere in the program decides
+    /// nothing here.
+    fn lacksBoundCapability(self: *Checker, d: node.DeclId, args: []const TypeId) std.mem.Allocator.Error!bool {
+        const range = self.constraints.rangeOfDeclaration(d);
+        for (range.start..range.end) |at| {
+            const constraint = self.constraints.records[at];
+            const i = switch (constraint.subject) {
+                .parameter => |i| i,
+                .written => continue,
+            };
+            if (i >= args.len) continue;
+            const bounds = self.constraints.requirementsOf(constraint);
+            const admits = try self.traitsBounding(null, bounds);
+            defer types_mod.freeBoundTraits(self.gpa, admits);
+            const requirement = capabilityDemandedBy(self.ast, self.res, bounds, admits);
+            if (requirement == .unrestricted) continue;
+            if (!try self.builder.meetsCapabilityWithin(self.generic, args[i], requirement)) return true;
         }
         return false;
     }
@@ -9882,7 +9894,7 @@ const Checker = struct {
             const inst = self.builder.instanceOf(site.ty) orelse continue;
             if (self.refusedBefore(site.at)) continue;
             if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report) and
-                self.lacksRefusedCapability(self.builder.argsOf(inst)))
+                try self.lacksBoundCapability(inst.decl, self.builder.argsOf(inst)))
                 try self.broken_types.put(self.gpa, site.ty, {});
         }
         try self.reportBrokenTraitBounds();
