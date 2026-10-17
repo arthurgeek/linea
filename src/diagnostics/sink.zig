@@ -6,6 +6,7 @@ const diagnostic = @import("diagnostic.zig");
 const Code = diagnostic.Code;
 const Diagnostic = diagnostic.Diagnostic;
 const Label = diagnostic.Label;
+const Edit = diagnostic.Edit;
 const FileId = @import("../support/source.zig").FileId;
 
 /// The most of one text a diagnostic carries.
@@ -30,7 +31,8 @@ pub const truncated = " ... (truncated)";
 /// Passes report and continue; only the driver decides to stop, and only
 /// between passes.
 ///
-/// Every text a diagnostic carries is cut to `max_text_bytes` on the way in.
+/// Every text a diagnostic carries is cut to `max_text_bytes` on the way in,
+/// except an edit's, which is kept whole or dropped.
 /// The bound sits here rather than in a renderer because a renderer is not the
 /// only one: the human form and the JSON form are two writers of the same
 /// text, and a bound written into one of them says nothing about the other. A
@@ -63,6 +65,12 @@ pub const Sink = struct {
         bounded.labels = try cutLabels(self.arena, d.labels);
         bounded.notes = try cutNotes(self.arena, d.notes);
         bounded.remarks = try cutNotes(self.arena, d.remarks);
+        // An edit is source a tool writes, and half a clause does not parse,
+        // so one over the bound is dropped rather than cut. Its help is a
+        // note, and stays.
+        if (d.edit) |e| if (e.text.len > max_text_bytes) {
+            bounded.edit = null;
+        };
         try self.list.append(self.arena, bounded);
     }
 
@@ -307,16 +315,46 @@ test "every text a diagnostic carries is one the sink cuts" {
     // A file's path is not among them and is deliberately not cut: it is
     // bounded by what the filesystem will open, never by the source, and a cut
     // one would leave a diagnostic naming a place that cannot be found.
-    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks" };
+    const expected_diagnostic = [_][]const u8{ "severity", "code", "message", "labels", "notes", "remarks", "edit" };
     const expected_label = [_][]const u8{ "file", "span", "message", "style" };
+    const expected_edit = [_][]const u8{ "file", "span", "text" };
 
     const d_fields = @typeInfo(Diagnostic).@"struct".fields;
     const l_fields = @typeInfo(Label).@"struct".fields;
+    const e_fields = @typeInfo(Edit).@"struct".fields;
 
     try testing.expectEqual(expected_diagnostic.len, d_fields.len);
     try testing.expectEqual(expected_label.len, l_fields.len);
+    try testing.expectEqual(expected_edit.len, e_fields.len);
     inline for (d_fields, expected_diagnostic) |f, name| try testing.expectEqualStrings(name, f.name);
     inline for (l_fields, expected_label) |f, name| try testing.expectEqualStrings(name, f.name);
+    inline for (e_fields, expected_edit) |f, name| try testing.expectEqualStrings(name, f.name);
+}
+
+test "an edit whose text is over the bound is dropped, and its help kept" {
+    // A cut edit would write half a clause into the source, so an edit is
+    // carried whole or not at all; the help's prose is cut like any note.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const span: Span = .{ .start = 0, .end = 0 };
+    var sink = Sink.init(arena.allocator());
+    for ([_]usize{ max_text_bytes, max_text_bytes + 1 }) |len| {
+        const text = try arena.allocator().alloc(u8, len);
+        @memset(text, 'a');
+        try sink.add(.{
+            .severity = .err,
+            .message = "boom",
+            .notes = &.{"write the clause"},
+            .edit = .{ .file = .from(0), .span = span, .text = text },
+        });
+    }
+
+    const kept = sink.items()[0];
+    try testing.expectEqual(max_text_bytes, kept.edit.?.text.len);
+    const dropped = sink.items()[1];
+    try testing.expect(dropped.edit == null);
+    try testing.expectEqual(@as(usize, 1), dropped.notes.len);
 }
 
 test "empty sink has no errors" {

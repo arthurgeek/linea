@@ -119,10 +119,11 @@ until it is green.
   disagree about the language.
 - Every rejected case of one file is also held to its helps: a diagnostic may
   carry an `edit`, the machine-readable form of one of its helps, and the
-  conformance runner applies it and checks the case again. The error must be
-  gone from the line it was reported at; a new error elsewhere is the program's
-  next mistake and is allowed, and a help at the same line whose edit leads
-  back is followed at most four times, then reported as a loop. There is no
+  conformance runner applies the edits one at a time, checking the case again
+  after each, until no error carries one. An error an edit answered must not
+  come back at its line, whichever later edit brings it back; a new error
+  elsewhere is the program's next mistake and is allowed, and edits still
+  offered after eight are reported as helps that undo each other. There is no
   golden, `-Dupdate` cannot silence it, and the run fails under a floor of
   cases that carried an edit. Edits carried today: the `where` clause
   [O-Escapes] and [T-BorrowContract] name, where the clause answers everything
