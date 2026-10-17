@@ -12527,6 +12527,18 @@ const Checker = struct {
         return .{ .edit = try std.fmt.allocPrint(self.sink.arena, "{s} in `{s}` or `{s}`", .{ what, self.program.get(writers[0]).name, self.program.get(writers[1]).name }) };
     }
 
+    /// The import route of the module `traitInstanceName` writes `trait`
+    /// through, where the module being checked does not import it; null
+    /// where the trait is written bare or through an import already there.
+    fn unimportedQualifier(self: *Checker, trait: node.DeclId) std.mem.Allocator.Error!?[]const u8 {
+        const reached = self.res.traitNamed(self.current, self.ast.tokenName(self.ast.declName(trait))) orelse return null;
+        if (reached == trait) return null;
+        const module = self.program.moduleOf(trait);
+        if (module == .none) return null;
+        for (self.program.get(self.current).imports) |import| if (import.module == module) return null;
+        return self.program.modulePath(module);
+    }
+
     /// A trait applied to `args` as a report writes it to the module being
     /// checked: each argument by `typeName`, so `From[io.IoError]` reads as the
     /// headline beside it does.
@@ -13924,10 +13936,9 @@ const Checker = struct {
             if (try self.settledReason(failure)) |reason| if (reason == answered or try self.errorConversion(reason, answered) != null)
                 return "match it, or hand on its reason with `.settled()?`";
         };
-        return if (self.payloadTypeOf(carrier) == .unit)
-            "match it, or handle the failure with `let _ = … else |_| { … }`"
-        else
-            "match it, or handle the failure with `let value = … else |_| { … }`";
+        // The value is being discarded, so the binding that handles its
+        // failure keeps nothing either.
+        return "match it, or handle the failure with `let _ = … else |_| { … }`";
     }
 
     fn checkLet(self: *Checker, s: StmtId) !void {
@@ -13953,7 +13964,7 @@ const Checker = struct {
         defer self.initialising = previous_initialising;
         const previous_statement = self.statement_value;
         defer self.statement_value = previous_statement;
-        self.statement_value = if (d.init != ExprId.none and d.pattern == ExprId.none) .{ .expr = self.ast.withoutGroups(d.init), .kind = .binding, .name = self.ast.tokenText(d.name) } else null;
+        self.statement_value = if (d.init != ExprId.none and d.pattern == ExprId.none) .{ .expr = self.ast.withoutGroups(d.init), .kind = .binding, .name = self.ast.tokenText(d.name), .keyword = if (self.ast.stmtIsMutable(s)) "var" else "let" } else null;
         self.initialising = if (!d.annotation.wasWritten() and d.pattern == ExprId.none) s else null;
         const t = if (d.init == ExprId.none)
             TypeId.poison
@@ -16768,9 +16779,10 @@ const Checker = struct {
         // its effect.
         const binder = if (carrier.kind == .result) " |_|" else "";
         const where: ?StatementValue = if (self.statement_value) |statement| if (statement.expr == id) statement else null else null;
-        const help = if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `let {s} = … else{s} {{ … }}` in place of `?`", .{
+        const help = if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
             signature,
             if (carrier.kind == .result) "failure" else "absence",
+            statement.keyword,
             statement.name,
             binder,
         }) else signature;
@@ -16792,6 +16804,8 @@ const Checker = struct {
         kind: Kind,
         /// The binding's name, for a `let` initialiser.
         name: []const u8 = "_",
+        /// The keyword that binds it, `let` or `var`.
+        keyword: []const u8 = "let",
         const Kind = enum { binding, effect };
     };
 
@@ -16978,15 +16992,20 @@ const Checker = struct {
         };
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = label, .style = .primary };
-        const notes: []const []const u8 = if (settles_to) |reason|
-            try self.sink.arena.dupe([]const u8, &.{try std.fmt.allocPrint(
-                self.sink.arena,
-                "call `.settled()` before `?`: it releases what `{s}` hands back and keeps its reason, `{s}`",
-                .{ failure_name, try self.typeName(reason) },
-            )})
-        else
-            &.{};
-        self.sink.add(.{ .severity = .err, .code = .t_try_answer, .message = message, .labels = labels, .notes = notes }) catch {};
+        var notes: std.ArrayList([]const u8) = .empty;
+        if (settles_to) |reason| try notes.append(self.sink.arena, try std.fmt.allocPrint(
+            self.sink.arena,
+            "call `.settled()` before `?`: it releases what `{s}` hands back and keeps its reason, `{s}`",
+            .{ failure_name, try self.typeName(reason) },
+        ));
+        // A trait written through its module, because the program's own
+        // declaration shadows the name, needs that module imported.
+        if (self.from_decl) |from| if (try self.unimportedQualifier(from)) |route| try notes.append(self.sink.arena, try std.fmt.allocPrint(
+            self.sink.arena,
+            "`{s}` is reached with `import {s}`",
+            .{ trait_name, route },
+        ));
+        self.sink.add(.{ .severity = .err, .code = .t_try_answer, .message = message, .labels = labels, .notes = notes.items }) catch {};
         return self.record(id, .poison);
     }
 
@@ -29500,12 +29519,19 @@ const Checker = struct {
     /// walk rather than by a walk each -- two walks would check an argument
     /// mentioning both a second time, and report whatever is wrong inside it
     /// twice.
+    const Settling = struct {
+        owner: node.DeclId,
+        generics: []const node.TypeParam,
+        found: []TypeId,
+        parameters: []const TypeId = &.{},
+    };
+
     /// The help for a constructor call `Head.op(…)` that leaves a parameter of
     /// the implementation it reaches open and is the whole initialiser of an
     /// unannotated binding: the annotation that says what the parameter is,
     /// written as the implementation's head type with what the call settled
     /// in place and each open parameter by its name. Null anywhere else.
-    fn annotationSettling(self: *Checker, call: ExprId, s: Settling, open: []const u8) std.mem.Allocator.Error!?[]const u8 {
+    fn annotationSettling(self: *Checker, call: ExprId, s: Settling) std.mem.Allocator.Error!?[]const u8 {
         const stmt = self.initialising orelse return null;
         const init = self.ast.stmtData(stmt).init;
         if (self.ast.withoutGroups(init) != call) return null;
@@ -29520,14 +29546,28 @@ const Checker = struct {
         defer self.gpa.free(with_open);
         for (s.found, own, with_open) |f, parameter, *slot| slot.* = if (f == .poison) parameter else f;
         const annotation = try self.typeName(try self.builder.substitute(row.ty, s.owner.index(), with_open));
-        return try std.fmt.allocPrint(self.sink.arena, "say what `{s}` is where `{s}` is declared: `{s} {s}: {s} = {s}`, with a type in place of `{s}`", .{
-            open,
+        // Every parameter the call left open is named, since the annotation
+        // has to say what each of them is.
+        var open: std.ArrayList(u8) = .empty;
+        var count: usize = 0;
+        for (s.found) |f| count += @intFromBool(f == .poison);
+        var listed: usize = 0;
+        for (s.found, s.generics) |f, g| {
+            if (f != .poison) continue;
+            const joiner = if (listed == 0) "" else if (listed + 1 == count) " and " else ", ";
+            try open.print(self.sink.arena, "{s}`{s}`", .{ joiner, self.ast.tokenText(g.name) });
+            listed += 1;
+        }
+        return try std.fmt.allocPrint(self.sink.arena, "say what {s} {s} where `{s}` is declared: `{s} {s}: {s} = {s}`, with {s} in place of {s}", .{
+            open.items,
+            if (count == 1) "is" else "are",
             self.ast.tokenText(self.ast.stmtData(stmt).name),
             if (self.ast.stmtIsMutable(stmt)) "var" else "let",
             self.ast.tokenText(self.ast.stmtData(stmt).name),
             annotation,
             written,
-            open,
+            if (count == 1) "a type" else "types",
+            open.items,
         });
     }
 
@@ -29590,13 +29630,6 @@ const Checker = struct {
         for (wanted, had) |w, h| if (self.shapeClashAroundOpen(w, h, settling)) return true;
         return false;
     }
-
-    const Settling = struct {
-        owner: node.DeclId,
-        generics: []const node.TypeParam,
-        found: []TypeId,
-        parameters: []const TypeId = &.{},
-    };
 
     /// What a call settled, per list.
     ///
@@ -30022,7 +30055,7 @@ const Checker = struct {
                     .{named},
                     "no argument determines it, and nothing expects a type of it",
                 );
-                if (through_alias == null and s.owner == over and self.sink.items().len > reported_at) if (try self.annotationSettling(id, s, named)) |help|
+                if (through_alias == null and s.owner == over and self.sink.items().len > reported_at) if (try self.annotationSettling(id, s)) |help|
                     try self.addNote(reported_at, help);
                 return null;
             }

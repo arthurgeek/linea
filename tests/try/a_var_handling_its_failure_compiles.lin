@@ -1,0 +1,16 @@
+// The binding the report on `var x = parse()?` offers, applied.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    var x = parse() else |_| {
+        return 1
+    }
+    x = x + 1
+    x
+}

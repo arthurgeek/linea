@@ -1,0 +1,7 @@
+error[T-Infer]: nothing here says what `A` is
+  --> tests/inference/every_open_parameter_is_named_in_the_annotation.lin:15:13
+   |
+15 |     let p = Pair.empty()
+   |             ^^^^^^^^^^^^ no argument determines it, and nothing expects a type of it
+   |
+   = help: say what `A` and `B` are where `p` is declared: `let p: Pair[A, B] = Pair.empty()`, with types in place of `A` and `B`

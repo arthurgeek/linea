@@ -3,3 +3,5 @@ error[T-TryAnswer]: this `?` may fail with `Parse`, and no `convert.From[Parse] 
    |
 26 |     let n = parsed()?
    |             ^^^^^^^^^ `?` converts a different error through `convert.From`: implement `convert.From[Parse]` for `Io`, or convert it before `?` with `.map_err(…)`
+   |
+   = help: `convert.From` is reached with `import std.convert`

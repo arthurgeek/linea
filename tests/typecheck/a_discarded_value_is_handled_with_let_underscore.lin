@@ -1,0 +1,14 @@
+// `parse()` is kept for its effect and its value discarded, so the binding
+// that handles its failure keeps nothing: `let _`.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    parse()
+    0
+}
