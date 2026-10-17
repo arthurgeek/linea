@@ -2586,6 +2586,21 @@ fn matchArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One `match` over a pair of n-variant enums with an arm per variant naming
+/// it in both columns: the first column splits into n branches, and the
+/// second column is split again inside each of them.
+fn twoWideColumnsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("enum Wide {\n");
+    for (0..n) |i| try w.print("    V{d},\n", .{i});
+    try w.writeAll("}\nstruct Pair { a: Wide, b: Wide }\nfn same(sink pair: Pair) -> UInt8 {\n    match pair {\n");
+    for (0..n) |i| try w.print("        Pair {{ a: V{d}, b: V{d} }} => 1,\n", .{ i, i });
+    try w.writeAll("        _ => 0,\n    }\n}\nfn main() -> UInt8 {\n    same(Pair { a = .V0, b = .V1 })\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// One `match` of n arms, each binding a name: the arms' paths meet at the
 /// join after the `match`, each holding a binding the others never had.
 fn bindingArmsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
@@ -6213,6 +6228,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "match arms", .n = 4000, .cost = throughTheTree(matchArmsModule) },
     .{ .name = "variants in one enum", .n = 1000, .cost = throughTheTree(wideEnumModule) },
     .{ .name = "arms that each bind", .n = 2000, .cost = throughTheTree(bindingArmsModule) },
+    .{ .name = "two wide columns", .n = 1000, .cost = throughTheTree(twoWideColumnsModule) },
     .{ .name = "pattern depth", .n = 400, .cost = throughTreeBatch(patternDepthModule, .check, 1) },
     .{ .name = "function values settled in one function", .n = 4000, .cost = throughTheTree(openFunctionValuesModule) },
     .{ .name = "function values settled across functions", .n = 4000, .cost = throughTheTree(functionValueBodiesModule) },

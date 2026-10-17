@@ -228,22 +228,42 @@ pub fn Coverage(comptime Context: type) type {
             switch (self.context.kind(ty)) {
                 .product => try out.append(self.arena, try self.branch(rows, ty, .product)),
                 .variants => |count| {
-                    var named = try std.DynamicBitSetUnmanaged.initEmpty(self.arena, count);
+                    // The variants the rows name, sorted, and nothing sized by
+                    // the enum: a column split again under every branch of the
+                    // one before it pays for what its rows name each time,
+                    // never for every variant the enum declares.
+                    var named: std.ArrayList(u32) = .empty;
                     for (rows) |r| switch (r.cells[0].pattern.*) {
-                        .variant => |v| if (v.index < count) named.set(v.index),
+                        .variant => |v| if (v.index < count) try named.append(self.arena, v.index),
                         else => {},
                     };
-                    try self.variantBranches(&out, rows, ty, count, &named);
-                    if (named.count() == count) return out.items;
-                    var k: u32 = 0;
+                    std.mem.sort(u32, named.items, {}, std.sort.asc(u32));
+                    var kept: usize = 0;
+                    for (named.items) |k| {
+                        if (kept > 0 and named.items[kept - 1] == k) continue;
+                        named.items[kept] = k;
+                        kept += 1;
+                    }
+                    named.shrinkRetainingCapacity(kept);
+                    try self.charge(named.items.len);
+                    try self.variantBranches(&out, rows, ty, named.items);
+                    if (named.items.len == count) return out.items;
                     // The variants no row names: any of them, carrying
-                    // anything; with none named, any value at all.
+                    // anything; with none named, any value at all. Found by
+                    // walking the named ones in order, so the walk stops after
+                    // the named ones and the witnesses it keeps.
                     var absent: std.ArrayList(Witness) = .empty;
-                    if (named.count() == 0) {
+                    if (named.items.len == 0) {
                         try absent.append(self.arena, .{ .ty = ty, .shape = .wild });
                     } else {
+                        var k: u32 = 0;
+                        var next: usize = 0;
                         while (k < count and absent.items.len < max_witnesses) : (k += 1) {
-                            if (!named.isSet(k)) try absent.append(self.arena, try self.applied(ty, .{ .variant = k }, null));
+                            if (next < named.items.len and named.items[next] == k) {
+                                next += 1;
+                                continue;
+                            }
+                            try absent.append(self.arena, try self.applied(ty, .{ .variant = k }, null));
                         }
                     }
                     try out.append(self.arena, try self.rest(rows, ty, absent.items));
@@ -264,38 +284,30 @@ pub fn Coverage(comptime Context: type) type {
             out: *std.ArrayList(Branch),
             rows: []const Ref,
             ty: Ty,
-            count: u32,
-            named: *const std.DynamicBitSetUnmanaged,
+            named: []const u32,
         ) Error!void {
-            // Where each named variant's branch sits among the branches.
-            const slot = try self.arena.alloc(u32, count);
-            const buckets = try self.arena.alloc(std.ArrayList(Ref), named.count());
+            const buckets = try self.arena.alloc(std.ArrayList(Ref), named.len);
             for (buckets) |*b| b.* = .empty;
-            var order: std.ArrayList(u32) = .empty;
-            {
-                var it = named.iterator(.{});
-                var n: u32 = 0;
-                while (it.next()) |k| : (n += 1) {
-                    slot[k] = n;
-                    try order.append(self.arena, @intCast(k));
-                }
-            }
             for (rows) |r| {
                 switch (r.cells[0].pattern.*) {
                     .variant => |v| {
+                        const at = std.sort.binarySearch(u32, named, v.index, orderIndex).?;
                         const arity = self.context.arity(ty, .{ .variant = v.index });
-                        const s = (try self.specialise(r, .{ .variant = v.index }, arity)).?;
-                        try buckets[slot[v.index]].append(self.arena, s);
+                        try buckets[at].append(self.arena, (try self.specialise(r, .{ .variant = v.index }, arity)).?);
                     },
-                    else => for (order.items, buckets) |k, *b| {
+                    else => for (named, buckets) |k, *b| {
                         const arity = self.context.arity(ty, .{ .variant = k });
                         try b.append(self.arena, (try self.specialise(r, .{ .variant = k }, arity)).?);
                     },
                 }
             }
-            for (order.items, buckets) |k, b| {
+            for (named, buckets) |k, b| {
                 try out.append(self.arena, .{ .step = .{ .ty = ty, .choice = .{ .ctor = .{ .variant = k } } }, .rows = b.items });
             }
+        }
+
+        fn orderIndex(key: u32, item: u32) std.math.Order {
+            return std.math.order(key, item);
         }
 
         /// The branch for constructor `c`: each row naming it, with its head
