@@ -4,4 +4,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 5 |     b.view()
   |     ^^^^^^^^ escape observations only from the signature's declared sources
   |
-  = help: `second` is passed where a callable type is expected, and that type does not permit `where borrows(b)`, so it cannot be added here: return what that type permits, or write the source into that type where it is written and into this signature alike
+  = help: `second` is passed where a callable type is expected, and that type does not permit `where borrows(_a, b)`, so it cannot be added here: return what that type permits, or write the source into that type where it is written and into this signature alike

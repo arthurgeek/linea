@@ -11,4 +11,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 20 |     http.text(request, "hello {author.name}")
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `request`; write `where carries(request)` to say so
+   = help: the value comes from `request`; write `where carries(author, request)` to say so

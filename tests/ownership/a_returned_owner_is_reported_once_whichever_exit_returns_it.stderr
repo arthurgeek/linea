@@ -4,7 +4,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 5 |     let kept = copy(other)
   |                ^^^^^^^^^^^ escape observations only from the signature's declared sources
   |
-  = help: the value comes from `other`; write `where carries(other)` to say so
+  = help: the value comes from `other`; write `where carries(_first, other)` to say so
   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
   --> tests/ownership/a_returned_owner_is_reported_once_whichever_exit_returns_it.lin:16:5
@@ -12,7 +12,7 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 16 |     copy(second)
    |     ^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `second`; write `where carries(second)` to say so
+   = help: the value comes from `second`; write `where carries(_first, second)` to say so
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
   --> tests/ownership/a_returned_owner_is_reported_once_whichever_exit_returns_it.lin:14:16
@@ -20,5 +20,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 14 |         return copy(third)
    |                ^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: the value comes from `third`; write `where carries(third)` to say so
+   = help: the value comes from `third`; write `where carries(_first, third)` to say so
    = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`

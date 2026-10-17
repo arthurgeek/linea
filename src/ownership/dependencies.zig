@@ -14,6 +14,7 @@ const Resolution = @import("../sema/resolve.zig").Resolution;
 const types = @import("../sema/types.zig");
 const writtenTypeName = @import("../sema/typecheck.zig").writtenTypeName;
 const ModuleId = @import("../syntax/program.zig").ModuleId;
+const TokenId = @import("../lexer/token.zig").TokenId;
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const diagnostics = @import("../diagnostics/diagnostic.zig");
@@ -1502,9 +1503,12 @@ const Analysis = struct {
         try kept.append(self.gpa, fact);
     }
 
-    fn write(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, report: bool) !void {
+    /// `arrived` is the expression whose value is written: an assignment's
+    /// right-hand side rather than its target, which is where a report about
+    /// what the binding holds points.
+    fn write(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, arrived: ExprId, report: bool) !void {
         const value_set = try self.heldAs(written, self.typing.bindingType(root));
-        try self.noteArrivalsOf(Cell.binding(root), value_set, at, true);
+        try self.noteArrivalsOf(Cell.binding(root), value_set, arrived, true);
         if (report and !self.reported.contains(at) and try self.store.containsLocalOrigin(value_set, root)) {
             try self.reported.put(self.gpa, at, {});
             try self.sink.addErrorFmt(.o_escapes, self.ast.fileOfExpr(at), self.ast.exprSpan(at), "keep an observation outside the owner it observes", "this write would make a value contain an observation of itself", .{});
@@ -1848,7 +1852,7 @@ const Analysis = struct {
             const path = endpoint.selected.path;
             const added = try self.sourceFacts(state, normalized, contract.source, contract.borrows_source, false);
             const previous = try self.store.select(state.get(Cell.binding(root)) orelse .empty, path);
-            try self.write(state, root, path, try self.store.join(previous, added), id, report);
+            try self.write(state, root, path, try self.store.join(previous, added), id, id, report);
         }
     }
 
@@ -1974,7 +1978,12 @@ const Analysis = struct {
     /// Where an escaping observation leaves: the function's result, with the
     /// owners the signature's contract already covered at that exit, or an
     /// `inout` parameter that keeps it.
-    const Leaving = union(enum) { returned: []const BindingId, retained: BindingId };
+    const Leaving = union(enum) { returned: Returned, retained: BindingId };
+
+    /// What a returned escape knows besides its origins: the owners the
+    /// contract covered at that exit, and where each further escaping origin
+    /// took its dependency, which the report points at too.
+    const Returned = struct { covered: []const BindingId = &.{}, also: []const EscapeSite = &.{}, exit: ExprId = .none };
 
     /// `held` is the type of the part of the result or parameter that holds
     /// the escaping observation, where its path names one.
@@ -2112,13 +2121,13 @@ const Analysis = struct {
             const joiner = if (i == 0) "" else if (i + 1 == sources.items.len) " and " else ", ";
             try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
         }
-        // A clause written where none was replaces the contract the
-        // signature inferred, so it names the sources that contract covered
-        // for a value this exit returns.
+        // The clause named is the whole clause to write. One the signature
+        // already wrote keeps its sources. One written where none was
+        // replaces the contract the signature inferred, so it keeps the
+        // sources that contract covered for a value this exit returns.
         var written_sources = std.ArrayList(types.ClauseSource).fromOwnedSlice(try arena.dupe(types.ClauseSource, sources.items));
-        if (leaving == .returned and self.function.decl != .none and self.ast.declContracts(self.function.decl).len == 0 and
-            self.typing.adopted_contracts.get(self.function.decl) == null)
-        {
+        const wrote_clause = self.function.decl != .none and self.ast.declContracts(self.function.decl).len != 0;
+        if (leaving == .returned and self.function.decl != .none and self.typing.adopted_contracts.get(self.function.decl) == null) {
             if (switch (self.typing.get(self.function.signature)) {
                 .callable => |callable| callable,
                 else => null,
@@ -2128,7 +2137,7 @@ const Analysis = struct {
                     .parameter => |index| index,
                     else => continue,
                 };
-                const reached = for (leaving.returned) |owner| {
+                const reached = wrote_clause or for (leaving.returned.covered) |owner| {
                     if (owner == self.function.parameters[at]) break true;
                 } else false;
                 if (!reached) continue;
@@ -2139,6 +2148,9 @@ const Analysis = struct {
                 if (!listed) try written_sources.append(arena, .{ .spelling = spelling, .borrows = contract.kind == .borrows });
             };
         }
+        // The sources the signature already had come first, so the clause
+        // reads as the one written with the new sources added.
+        std.mem.rotate(types.ClauseSource, written_sources.items, sources.items.len);
         const clause: []const u8 = switch (leaving) {
             .returned => try types.sourceClause(arena, written_sources.items),
             .retained => |destination| retained: {
@@ -2185,7 +2197,10 @@ const Analysis = struct {
                 .callable => |callable| held != null and held.? == callable.result,
                 else => false,
             } else false;
-            const local_owns = if (local) |owner| self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) else false;
+            const local_owns = if (local) |owner|
+                self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
+            else
+                false;
             try notes.append(arena, if (leaving == .returned and local_owns)
                 try std.fmt.allocPrint(arena, "`{s}` owns the text already: put `{s}` itself where its view is, declaring `{s}` {s}", .{
                     self.ast.tokenText(self.res.declaringToken(local.?)),
@@ -2205,7 +2220,17 @@ const Analysis = struct {
             .severity = .err,
             .code = .o_escapes,
             .message = message,
-            .labels = try arena.dupe(diagnostics.Label, &.{primary}),
+            .labels = labels: {
+                var labels: std.ArrayList(diagnostics.Label) = .empty;
+                try labels.append(arena, primary);
+                if (leaving == .returned) for (leaving.returned.also) |site| try labels.append(arena, .{
+                    .file = site.file,
+                    .span = site.span,
+                    .message = "this leaves the function as well",
+                    .style = .secondary,
+                });
+                break :labels labels.items;
+            },
             .notes = try notes.toOwnedSlice(arena),
         });
     }
@@ -2286,6 +2311,38 @@ const Analysis = struct {
             if (!permitted) return why;
         }
         return null;
+    }
+
+    /// Whether putting `owner` where its view was leaves its `defer` with
+    /// nothing to do: a `defer` releases it (it was bound by `defer let` or
+    /// `defer var`, or the function writes `defer owner.release()`), and the
+    /// exit at `exit` is the function's only way out, so moving it there
+    /// leaves no path for the schedule. With another `return` or `?`, the
+    /// `defer` still releases it on those paths.
+    ///
+    /// **Bound:** the function's tokens, once per report.
+    fn deferWouldDie(self: *const Analysis, owner: BindingId, exit: ExprId) bool {
+        if (self.function.decl == .none) return false;
+        const range = self.ast.declTokens(self.function.decl);
+        const statement = self.res.stmtOf(owner);
+        var released = statement != node.StmtId.none and self.ast.stmtTag(statement) == .let_decl and self.ast.stmtIsDeferredBinding(statement);
+        const name = self.ast.tokenText(self.res.declaringToken(owner));
+        // The exit itself is one `return` or `?` where it is written, and
+        // none where the body reaches its end.
+        const explicit = exit != .none and switch (self.ast.exprTag(exit)) {
+            .return_, .try_ => true,
+            else => false,
+        };
+        var written_exits: usize = 0;
+        var at = range.start.index();
+        while (at < range.end.index()) : (at += 1) {
+            const tag = self.ast.tokenTag(TokenId.at(at));
+            if (tag == .keyword_return or tag == .question) written_exits += 1;
+            if (tag != .keyword_defer or at + 3 >= range.end.index()) continue;
+            if (std.mem.eql(u8, self.ast.tokenText(TokenId.at(at + 1)), name) and std.mem.eql(u8, self.ast.tokenText(TokenId.at(at + 3)), "release")) released = true;
+        }
+        const other_exit = written_exits > @intFromBool(explicit);
+        return released and !other_exit;
     }
 
     /// What `held`, the type holding the escaping observation, copies itself
@@ -2492,6 +2549,8 @@ const Analysis = struct {
         var first_escape: ?struct { site: EscapeSite, escaped: Escaped, held: ?types.TypeId } = null;
         var covered: std.ArrayList(BindingId) = .empty;
         defer covered.deinit(self.gpa);
+        var also: std.ArrayList(EscapeSite) = .empty;
+        defer also.deinit(self.gpa);
         if (!self.function.contract_declined) for (self.store.facts(result)) |fact| {
             // A temporary ends with its statement, before the caller could
             // read what the function returns.
@@ -2518,13 +2577,20 @@ const Analysis = struct {
                 .{ .lend = fact.origin.lent }
             else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation;
             if (escaped != .observation) {
-                try self.escape(at, site, escaped, .{ .returned = &.{} }, &.{fact.origin}, held);
+                try self.escape(at, site, escaped, .{ .returned = .{} }, &.{fact.origin}, held);
                 continue;
             }
-            if (first_escape == null) first_escape = .{ .site = site, .escaped = escaped, .held = held };
+            if (first_escape == null) {
+                first_escape = .{ .site = site, .escaped = escaped, .held = held };
+            } else if (!std.meta.eql(first_escape.?.site, site)) {
+                const seen = for (also.items) |earlier| {
+                    if (std.meta.eql(earlier, site)) break true;
+                } else false;
+                if (!seen) try also.append(self.gpa, site);
+            }
             try uncovered.append(self.gpa, fact.origin);
         };
-        if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .{ .returned = covered.items }, uncovered.items, escaping.held);
+        if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .{ .returned = .{ .covered = covered.items, .also = also.items, .exit = at } }, uncovered.items, escaping.held);
         try self.stale(result, .{ .returned = returned_value }, report);
         for (self.function.inouts) |parameter| {
             const retained = try self.carriedBy(state.get(Cell.binding(parameter)) orelse .empty, self.typing.bindingType(parameter));
@@ -2661,7 +2727,7 @@ const Analysis = struct {
                         try self.put(state, Cell.alias(place.root), try self.store.intern(aliases.items));
                     }
                     if (assignment) try self.invalidate(state, .{ .root = place.root, .path = path }, null, at);
-                    try self.write(state, place.root, path, incoming, at, report);
+                    try self.write(state, place.root, path, incoming, at, if (assignment and source != .none) source else at, report);
                 },
                 .dies => try self.invalidate(state, null, self.cfg.opRun(op), at),
                 .temporaries_end => try self.invalidateTemporaries(state, at),

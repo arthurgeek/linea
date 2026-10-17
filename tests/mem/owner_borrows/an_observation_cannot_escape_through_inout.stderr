@@ -1,7 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/mem/owner_borrows/an_observation_cannot_escape_through_inout.lin:3:5
+ --> tests/mem/owner_borrows/an_observation_cannot_escape_through_inout.lin:3:14
   |
 3 |     target = .Some(borrow local)
-  |     ^^^^^^ escape observations only from the signature's declared sources
+  |              ^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
   |
   = help: `local` belongs to `fill` and ends when it returns, so `target` may not keep an observation of it

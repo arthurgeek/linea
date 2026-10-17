@@ -4176,7 +4176,8 @@ payload. There is no conversion between `Option` and `Result`. Using `?` in a
 function returning `UInt8` violates this rule; the report names the result type
 that would carry the failure, `Result[UInt8, E]` with the operand's error. Where
 the `?` is the whole of a statement, it also offers handling the failure there:
-`let count = … else |_| { … }` for the initialiser of `let count`, and
+`let count = … else |_| { … }` for the initialiser of `let count` (`var` for a
+`var`), and
 `let _ = … else |_| { … }` for an expression kept for its effect. `else` stands
 nowhere else, so a `?` inside a larger expression is offered only the signature.
 
@@ -5303,9 +5304,11 @@ names the edit each source calls for, spelled as [T-BorrowContract] spells it:
 the one clause listing every parameter the value comes from (`where
 borrows(first, second)`), the retention clause for a value an `inout` parameter
 keeps (`where retains(seen: field)`), or, for a local owner, that it ends when the
-function returns. A clause written where the signature wrote none replaces the
-contract it inferred, so the clause named also lists the sources that contract
-covered: `where borrows(self), carries(other)`.
+function returns. Each further place the value took a dependency is pointed at
+as well. The clause named is the whole clause to write: one the signature wrote
+keeps its sources, and one written where the signature wrote none replaces the
+contract it inferred, so it also lists the sources that contract covered for
+this exit: `where borrows(self), carries(other)`.
 
 A member of a trait implementation answers to its trait's signature, and a
 function received by a written callable type or a callable bound answers to that
@@ -5319,7 +5322,9 @@ offers the owned copy, which observes nothing and needs no clause, naming the
 type that holds it and the failure copying can report: `Result[String, mem.Oom]`
 for a result that was the view, `String` where a part of the result or an
 `inout` parameter held it. Where a local owner of that type supplied the view,
-and no `defer` already releases it, it offers the owner itself instead. Under a
+it offers the owner itself instead, unless a `defer` releases the owner and this
+exit is the only way out, where moving it would leave the `defer` nothing to
+release. Under a
 fixed signature the result type is fixed too, so a returned view is offered no
 copy; a stored view still is, which is the fix for a route handler that keeps a
 request's text in its state.

@@ -4,4 +4,4 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
 15 |         other.view()
    |         ^^^^^^^^^^^^ escape observations only from the signature's declared sources
    |
-   = help: `pick` implements `Pick`, whose signature does not permit `where borrows(other)`, so it cannot be added here: return what that signature permits, or write the source into `Pick.pick`'s clause and this one alike
+   = help: `pick` implements `Pick`, whose signature does not permit `where borrows(_self, other)`, so it cannot be added here: return what that signature permits, or write the source into `Pick.pick`'s clause and this one alike

@@ -1,8 +1,10 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/borrows/contracts/two_borrowed_sources_name_one_clause.lin:8:9
-  |
-8 |         first.view()
-  |         ^^^^^^^^^^^^ escape observations only from the signature's declared sources
-  |
-  = help: the value comes from `first` and `second`; write `where borrows(first, second)` to say so
-  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  --> tests/borrows/contracts/two_borrowed_sources_name_one_clause.lin:8:9
+   |
+8  |         first.view()
+   |         ^^^^^^^^^^^^ escape observations only from the signature's declared sources
+10 |         second.view()
+   |         ------------- this leaves the function as well
+   |
+   = help: the value comes from `first` and `second`; write `where borrows(first, second)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String[mem.SystemAllocator], mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`

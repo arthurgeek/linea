@@ -1,7 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/closure_captures/captured_destination_requires_contract.lin:5:9
+ --> tests/closure_captures/captured_destination_requires_contract.lin:5:17
   |
 5 |         saved = copy(value)
-  |         ^^^^^ escape observations only from the signature's declared sources
+  |                 ^^^^^^^^^^^ escape observations only from the signature's declared sources
   |
   = help: `saved` keeps a value that comes from `value`; write `where retains(saved: value)` to say so
