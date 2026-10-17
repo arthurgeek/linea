@@ -1861,86 +1861,93 @@ fn sortedKeys(gpa: std.mem.Allocator, keys: []const []const u8) []const []const 
     return copy;
 }
 
-/// The `.lin` sources and `linea.json` manifests beneath `sub_path`, with their
-/// text, ordered by path. Paths are relative to `sub_path` and use `/`.
+/// One file or directory beneath `examples/`, by path relative to it.
+pub const ExampleEntry = struct {
+    path: []const u8,
+    directory: bool,
+};
+
+pub const ExampleLayout = union(enum) {
+    entries: []const ExampleEntry,
+    /// A symlink, by path. `linea` does not follow one inside a root, so
+    /// whether a linked directory is a root is a question the walk cannot
+    /// settle, and the gate refuses to guess.
+    symlink: []const u8,
+};
+
+/// Every file and directory beneath `sub_path`, ordered by path.
 ///
 /// `iterate` is what makes the walk legal: a directory opened without it can
 /// still be iterated on some hosts and not on others.
-pub fn exampleSource(
+pub fn exampleLayout(
     gpa: std.mem.Allocator,
     io: std.Io,
     root: std.Io.Dir,
     sub_path: []const u8,
-) ![]const SourceFile {
+) !ExampleLayout {
     var dir = try root.openDir(io, sub_path, .{ .iterate = true });
     defer dir.close(io);
 
     var walker = try dir.walk(gpa);
     defer walker.deinit();
 
-    var found: std.ArrayList(SourceFile) = .empty;
+    var found: std.ArrayList(ExampleEntry) = .empty;
     while (try walker.next(io)) |entry| {
-        if (entry.kind != .file) continue;
-        const is_source = std.mem.endsWith(u8, entry.basename, ".lin");
-        if (!is_source and !std.mem.eql(u8, entry.basename, manifest_name)) continue;
-        const text = try dir.readFileAlloc(io, entry.path, gpa, .limited(1 << 22));
-        try found.append(gpa, .{ .path = try gpa.dupe(u8, entry.path), .text = text });
+        const path = try gpa.dupe(u8, entry.path);
+        switch (entry.kind) {
+            .sym_link => return .{ .symlink = path },
+            .directory => try found.append(gpa, .{ .path = path, .directory = true }),
+            .file => try found.append(gpa, .{ .path = path, .directory = false }),
+            else => {},
+        }
     }
-    std.mem.sort(SourceFile, found.items, {}, lessThanPath);
-    return found.items;
+    std.mem.sort(ExampleEntry, found.items, {}, struct {
+        fn less(_: void, a: ExampleEntry, b: ExampleEntry) bool {
+            return std.mem.lessThan(u8, a.path, b.path);
+        }
+    }.less);
+    return .{ .entries = found.items };
 }
 
 const manifest_name = "linea.json";
 
-/// The roots under `examples/` whose tests CI runs, and the sources that
-/// declare a test but belong to no root.
-pub const ExampleRoots = struct {
-    roots: []const []const u8,
-    unowned: []const []const u8,
-};
-
-/// Which paths to hand to `linea test`, from the files beneath `examples/`.
+/// Which paths to hand to `linea test`, relative to `examples/`: each `.lin`
+/// file directly in it, each directory directly in it (an example is a root
+/// with or without a manifest), and each deeper directory holding a
+/// `linea.json`, which is a library or application of its own.
 ///
-/// A root is a `.lin` file directly in `examples/`, or any directory holding a
-/// `linea.json`, at any depth. `linea test` runs only the tests of the root it
-/// names (ADR 0229), so a library nested under an application is a root of its
-/// own, and a test it declares does not make the application a root. Roots with
-/// no `test fn` are left out. A test in a nested `.lin` that no manifest
-/// encloses would never run, so it is reported as unowned.
-pub fn exampleTestRoots(gpa: std.mem.Allocator, files: []const SourceFile) ExampleRoots {
-    var manifests: std.ArrayList([]const u8) = .empty;
-    for (files) |file| {
-        if (!std.mem.endsWith(u8, file.path, manifest_name)) continue;
-        const directory = std.fs.path.dirnamePosix(file.path) orelse continue;
-        if (!std.mem.eql(u8, std.fs.path.basenamePosix(file.path), manifest_name)) continue;
-        manifests.append(gpa, directory) catch @panic("out of memory");
-    }
-
+/// `linea test` runs only the tests of the root it names (ADR 0229), so a
+/// nested library needs its own run. Which files a root reaches, and which of
+/// them declare tests, is the loader's answer and is read from the run.
+pub fn exampleRoots(gpa: std.mem.Allocator, entries: []const ExampleEntry) []const []const u8 {
     var roots: std.StringArrayHashMapUnmanaged(void) = .empty;
-    var unowned: std.ArrayList([]const u8) = .empty;
-    for (files) |file| {
-        if (!std.mem.endsWith(u8, file.path, ".lin") or !declaresTest(file.text)) continue;
-        var owner: ?[]const u8 = null;
-        for (manifests.items) |directory| {
-            const encloses = file.path.len > directory.len and
-                file.path[directory.len] == '/' and std.mem.startsWith(u8, file.path, directory);
-            if (encloses and (owner == null or directory.len > owner.?.len)) owner = directory;
+    for (entries) |entry| {
+        const nested = std.mem.indexOfScalar(u8, entry.path, '/') != null;
+        if (entry.directory) {
+            if (!nested) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
         }
-        if (owner) |directory| {
+        if (!nested) {
+            if (std.mem.endsWith(u8, entry.path, ".lin")) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
+        }
+        const directory = std.fs.path.dirnamePosix(entry.path).?;
+        if (std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) {
             roots.put(gpa, directory, {}) catch @panic("out of memory");
-        } else if (std.mem.indexOfScalar(u8, file.path, '/') == null) {
-            roots.put(gpa, file.path, {}) catch @panic("out of memory");
-        } else {
-            unowned.append(gpa, file.path) catch @panic("out of memory");
         }
     }
-    return .{ .roots = sortedKeys(gpa, roots.keys()), .unowned = unowned.items };
+    return sortedKeys(gpa, roots.keys());
 }
 
-fn declaresTest(text: []const u8) bool {
-    var lines = std.mem.splitScalar(u8, text, '\n');
-    while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "test fn ")) return true;
-    }
-    return false;
+/// How many tests a `linea test` run reported, from its closing
+/// `N passed, M failed` line; null when the output ends otherwise.
+pub fn testsReported(output: []const u8) ?usize {
+    const trimmed = std.mem.trimEnd(u8, output, "\n");
+    const line = trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..];
+    var words = std.mem.tokenizeAny(u8, line, " ,\n");
+    const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;
+    const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
+    return passed + failed;
 }

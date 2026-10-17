@@ -1254,9 +1254,9 @@ const HeavySteps = struct {
         return run;
     }
 
-    /// `linea test` on every root beneath `examples/` that declares a test,
-    /// including a library nested under an application, which the application's
-    /// own run does not reach. The suite runs some of these as cases and
+    /// `linea test` on every root beneath `examples/`, including a library
+    /// nested under an application, which the application's own run does not
+    /// reach. The suite runs some of these as cases and
     /// compares a transcript, which `-Dupdate` can rewrite to hold a failure;
     /// this step asserts the exit status, which cannot be accepted.
     fn exampleTests(self: *const HeavySteps, installed: *std.Build.Step) *std.Build.Step.Run {
@@ -1352,7 +1352,7 @@ pub fn build(b: *std.Build) void {
     // jobs on one machine, so a run that takes every core makes the other jobs
     // wait for it. It is also the only way to measure what the parallelism is
     // actually buying, by asking for one.
-    const walkers = b.option(u32, "walkers", "How many workers walk the corpus (default: one per core), or run the examples' tests (default: 2)");
+    const walkers = b.option(u32, "walkers", "How many workers the corpus walk, the guide gate, the example tests and the soundness run use (default: one per core)");
 
     const scratch = b.option(
         []const u8,
@@ -1992,7 +1992,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     heavy.example_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
-    const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/ that declares a test");
+    const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/");
     example_tests_step.dependOn(&heavy.exampleTests(b.getInstallStep()).step);
 
     // Fidelity, as a checked claim rather than an impression. Reserved-word

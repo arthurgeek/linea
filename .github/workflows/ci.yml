@@ -198,14 +198,16 @@ jobs:
       # runs one of these as a case and compares its transcript, so a run that
       # stopped passing can be accepted into the golden.
       #
-      # Every root beneath examples/ that declares a test, rather than a list of
-      # them, because a list is a second place to remember: an example gaining a
-      # test and not gaining a line here is one nothing runs, and nothing would
-      # say so. A library nested under an application is a root of its own, since
-      # `linea test` on the application runs the application's tests alone.
+      # Every root beneath examples/, rather than a list of them, because a list
+      # is a second place to remember: an example gaining a test and not gaining
+      # a line here is one nothing runs, and nothing would say so. A root is each
+      # examples/*.lin, each examples/*/ and each deeper directory holding a
+      # linea.json, since `linea test` on an application runs the application's
+      # tests alone and a library nested under it needs a run of its own.
       #
-      # `zig build example-tests` chooses the roots, with cases in
-      # build/source_test.zig, and fails when it finds none.
+      # `zig build example-tests` runs `linea test` on each root and counts the
+      # tests the runs report. It fails when any root fails, when the runs
+      # report no test at all, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         if: ${{ github.event_name == 'push' }}
         run: nix develop --command zig build example-tests -Dwalkers=1
@@ -432,15 +434,16 @@ jobs:
       # runs one of these as a case and compares its transcript, so a run that
       # stopped passing can be accepted into the golden.
       #
-      # Every root beneath examples/ that declares a test, rather than a list of
-      # them, because a list is a second place to remember: an example gaining a
-      # test and not gaining a line here is one nothing runs, and nothing would
-      # say so. A library nested under an application is a root of its own, since
-      # `linea test` on the application runs the application's tests alone.
+      # Every root beneath examples/, rather than a list of them, because a list
+      # is a second place to remember: an example gaining a test and not gaining
+      # a line here is one nothing runs, and nothing would say so. A root is each
+      # examples/*.lin, each examples/*/ and each deeper directory holding a
+      # linea.json, since `linea test` on an application runs the application's
+      # tests alone and a library nested under it needs a run of its own.
       #
-      # `zig build example-tests` chooses the roots, with cases in
-      # build/source_test.zig, and fails when it finds none. Two at a time, one
-      # per core.
+      # `zig build example-tests` runs `linea test` on each root and counts the
+      # tests the runs report. It fails when any root fails, when the runs
+      # report no test at all, and when examples/ holds a symlink.
       - name: The examples' own tests pass
         run: nix develop --command zig build example-tests -Dwalkers=2
 

@@ -1,22 +1,23 @@
-//! Runs `linea test` on every root beneath `examples/` that declares a test.
+//! Runs `linea test` on every root beneath `examples/`.
 //!
 //! Usage: `example-tests <examples directory> <linea> [workers]`.
-//! Choosing the roots is `source.zig`'s job; this file only runs the compiler
-//! and reports. It fails when it finds no root, when a test sits in a source
-//! no manifest encloses, and when any root's tests fail.
+//! Choosing the roots and reading a run's test count are `source.zig`'s job;
+//! this file only runs the compiler and reports. Which of a root's files
+//! declare tests is the compiler's answer, so this file counts what the runs
+//! report and fails when that is none, when any root fails, and when a root's
+//! run ends without a count.
 
 const std = @import("std");
 const source = @import("source.zig");
-const process = @import("process");
+const pool = @import("pool.zig");
 
 /// Longest one root's tests may take to build and run.
 const root_timeout_seconds = 600;
 
-const default_workers = 2;
-
 const Outcome = struct {
-    passed: bool = false,
+    failure: ?[]const u8 = null,
     output: []const u8 = "",
+    tests: usize = 0,
 };
 
 const Walk = struct {
@@ -25,32 +26,28 @@ const Walk = struct {
     examples: []const u8,
     roots: []const []const u8,
     outcomes: []Outcome,
-    next: *std.atomic.Value(usize),
 
-    fn run(self: Walk, arena: *std.heap.ArenaAllocator) void {
-        while (true) {
-            const index = self.next.fetchAdd(1, .monotonic);
-            if (index >= self.roots.len) return;
-            self.outcomes[index] = self.one(arena.allocator(), self.roots[index]) catch |err| .{
-                .output = std.fmt.allocPrint(arena.allocator(), "could not run: {s}\n", .{@errorName(err)}) catch "out of memory\n",
-            };
-        }
+    fn run(self: Walk, gpa: std.mem.Allocator, index: usize) void {
+        self.outcomes[index] = self.one(gpa, self.roots[index]) catch |err| .{
+            .failure = std.fmt.allocPrint(gpa, "could not run: {s}\n", .{@errorName(err)}) catch "out of memory\n",
+        };
     }
 
     fn one(self: Walk, gpa: std.mem.Allocator, root: []const u8) !Outcome {
         const path = try std.fs.path.join(gpa, &.{ self.examples, root });
-        const result = process.run(gpa, self.io, .{
-            .argv = &.{ "/bin/sh", "-c", "exec \"$0\" \"$@\" 2>&1", self.linea, "test", path },
-            .timeout = .{ .duration = .{ .raw = .fromSeconds(root_timeout_seconds), .clock = .awake } },
-        }) catch |err| switch (err) {
-            error.Timeout => return .{ .output = "did not finish in time\n" },
-            else => |e| return e,
-        };
-        const passed = switch (result.term) {
-            .exited => |code| code == 0,
-            else => false,
-        };
-        return .{ .passed = passed, .output = result.stdout };
+        const finished = try pool.runMerged(gpa, self.io, &.{ self.linea, "test", path }, .inherit, root_timeout_seconds);
+        if (finished.timed_out) {
+            const command = try std.fmt.allocPrint(gpa, "linea test {s}", .{path});
+            return .{ .failure = try pool.timeoutMessage(gpa, command, root_timeout_seconds, finished.output) };
+        }
+        const tests = source.testsReported(finished.output);
+        const failure: ?[]const u8 = if (!finished.succeeded)
+            finished.output
+        else if (tests == null)
+            "the run ended without a `N passed, M failed` line\n"
+        else
+            null;
+        return .{ .failure = failure, .output = finished.output, .tests = tests orelse 0 };
     }
 };
 
@@ -62,44 +59,41 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print("usage: example-tests <examples directory> <linea> [workers]\n", .{});
         return 2;
     }
-    const wanted: usize = if (args.len > 3) try std.fmt.parseInt(usize, args[3], 10) else default_workers;
+    const wanted: ?usize = if (args.len > 3) try std.fmt.parseInt(usize, args[3], 10) else null;
 
-    const files = try source.exampleSource(gpa, io, std.Io.Dir.cwd(), args[1]);
-    const found = source.exampleTestRoots(gpa, files);
-    for (found.unowned) |path| {
-        std.debug.print("{s}/{s}: declares a test, and no linea.json encloses it, so no root runs it\n", .{ args[1], path });
-    }
-    if (found.roots.len == 0) {
-        std.debug.print("no example declared a test\n", .{});
-        return 1;
-    }
-
-    const outcomes = try gpa.alloc(Outcome, found.roots.len);
+    const entries = switch (try source.exampleLayout(gpa, io, std.Io.Dir.cwd(), args[1])) {
+        .entries => |entries| entries,
+        .symlink => |path| {
+            std.debug.print("{s}/{s} is a symlink; examples hold real files, since `linea` does not follow one inside a root\n", .{ args[1], path });
+            return 1;
+        },
+    };
+    const roots = source.exampleRoots(gpa, entries);
+    const outcomes = try gpa.alloc(Outcome, roots.len);
     @memset(outcomes, .{});
-    const count = @min(found.roots.len, @max(1, wanted));
-    const arenas = try gpa.alloc(std.heap.ArenaAllocator, count);
-    for (arenas) |*arena| arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    var next: std.atomic.Value(usize) = .init(0);
-    const walk: Walk = .{
+    try pool.forEach(gpa, roots.len, wanted, Walk{
         .io = io,
         .linea = args[2],
         .examples = args[1],
-        .roots = found.roots,
+        .roots = roots,
         .outcomes = outcomes,
-        .next = &next,
-    };
-    const threads = try gpa.alloc(std.Thread, count);
-    for (threads, arenas) |*thread, *arena| thread.* = try std.Thread.spawn(.{}, Walk.run, .{ walk, arena });
-    for (threads) |thread| thread.join();
+    }, Walk.run);
 
     var failed: usize = 0;
-    for (outcomes, found.roots) |outcome, root| {
-        std.debug.print(">>> {s}/{s}\n", .{ args[1], root });
-        if (!outcome.passed) {
-            failed += 1;
-            std.debug.print("{s}FAILED: {s}\n", .{ outcome.output, root });
-        }
+    var tests: usize = 0;
+    for (outcomes, roots) |outcome, root| {
+        tests += outcome.tests;
+        const failure = outcome.failure orelse {
+            std.debug.print(">>> {s}: {d} test(s)\n", .{ root, outcome.tests });
+            continue;
+        };
+        failed += 1;
+        std.debug.print(">>> {s}: FAILED\n{s}\n", .{ root, failure });
     }
-    std.debug.print("examples: {d} root(s) tested, {d} failed, {d} with an unreachable test\n", .{ found.roots.len, failed, found.unowned.len });
-    return if (failed + found.unowned.len == 0) 0 else 1;
+    std.debug.print("examples: {d} root(s), {d} test(s), {d} root(s) failed\n", .{ roots.len, tests, failed });
+    if (tests == 0) {
+        std.debug.print("no example root ran a test\n", .{});
+        return 1;
+    }
+    return if (failed == 0) 0 else 1;
 }
