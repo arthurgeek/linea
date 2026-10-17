@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |
 13 |     match &entries.push(.{ value, label = copy(label) }) {
    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `entries` keeps a value that comes from `label`; write `where retains(entries: label)` to say so

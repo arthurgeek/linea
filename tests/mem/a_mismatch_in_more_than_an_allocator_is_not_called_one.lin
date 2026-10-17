@@ -3,7 +3,7 @@
 // report does not say that only the allocators do.
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 @derive(Release)
 struct Pair[X, Y] {

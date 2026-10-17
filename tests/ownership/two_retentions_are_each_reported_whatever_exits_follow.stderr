@@ -3,18 +3,26 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 5 |     &first.push(copy(left)).unwrap()
   |     ^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `first` keeps a value that comes from `left`; write `where retains(first: left)` to say so
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
  --> tests/ownership/two_retentions_are_each_reported_whatever_exits_follow.lin:6:5
   |
 6 |     &second.push(copy(right)).unwrap()
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `second` keeps a value that comes from `right`; write `where retains(second: right)` to say so
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
   --> tests/ownership/two_retentions_are_each_reported_whatever_exits_follow.lin:11:5
    |
 11 |     &first.push(copy(left)).unwrap()
    |     ^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `first` keeps a value that comes from `left`; write `where retains(first: left)` to say so
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
   --> tests/ownership/two_retentions_are_each_reported_whatever_exits_follow.lin:15:5
    |
 15 |     &second.push(copy(right)).unwrap()
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `second` keeps a value that comes from `right`; write `where retains(second: right)` to say so

@@ -2,7 +2,7 @@
 // for `T`.
 import std.mem
 
-use mem.Owner
+use mem.Lender
 
 fn main() -> UInt8 {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
