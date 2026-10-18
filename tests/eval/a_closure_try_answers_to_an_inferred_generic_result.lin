@@ -1,0 +1,64 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn apply[T](f: fn(value: UInt8) -> T, x: UInt8) -> T {
+    f(x)
+}
+
+fn main() -> UInt8 {
+    // `apply` learns `T` from what the closure answers, and the `?` answers
+    // to the same type: `Option[UInt8]`.
+    let tail = apply(
+        |x: UInt8| {
+            let h = half(x)?
+            half(h)
+        },
+        8,
+    )
+    let returned = apply(
+        |x: UInt8| {
+            let h = half(x)?
+            return half(h)
+        },
+        8,
+    )
+    // A closure that only leaves through `return` answers what its returns
+    // solved `T` to.
+    let only_returns = apply(
+        |x: UInt8| {
+            return half(x)
+        },
+        8,
+    )
+    let failed = apply(
+        |x: UInt8| {
+            let h = half(x)?
+            half(h)
+        },
+        6,
+    )
+    let sum = match tail {
+        Some(v) => v,
+        None => 0,
+    } + match returned {
+        Some(v) => v,
+        None => 0,
+    } + match only_returns {
+        Some(v) => v,
+        None => 0,
+    }
+    let none = match failed {
+        Some(_) => false,
+        None => true,
+    }
+    if sum == 8 && none {
+        0
+    } else {
+        1
+    }
+}

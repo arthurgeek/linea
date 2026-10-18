@@ -1,0 +1,60 @@
+fn nested_return(a: UInt16, b: UInt8) -> UInt8 {
+    // Both arms of the returned `if` complete, so the whole `if` is the value
+    // that disagrees with the `return b` inside it.
+    let f = [a, b] |c: UInt8| {
+        return if c == 0 {
+            3
+        } else {
+            if c == 1 {
+                return b
+            }
+            a
+        }
+    }
+    f(2)
+}
+
+fn nested_break(a: UInt16, b: UInt8, c: UInt8) -> UInt8 {
+    let v = loop {
+        break if c == 0 {
+            3
+        } else {
+            if c == 1 {
+                break b
+            }
+            a
+        }
+    }
+    v
+}
+
+fn nested_arm(small: UInt8, big: UInt16, c: UInt8) -> UInt8 {
+    // The first arm's value is an `if` whose two arms both complete, so the
+    // label names that `if` rather than one of its arms.
+    let v = if c == 0 {
+        if c == 1 {
+            3
+        } else {
+            big
+        }
+    } else {
+        small
+    }
+    let _v = v
+    0
+}
+
+fn matched(a: UInt16, b: UInt8) -> UInt8 {
+    // Only `_ => a` completes, so it is the value that disagrees.
+    let f = [a, b] |c: UInt8| {
+        return match c {
+            0 => return b,
+            _ => a,
+        }
+    }
+    f(1)
+}
+
+fn main() -> UInt8 {
+    nested_return(300, 4) + nested_break(300, 4, 2) + nested_arm(3, 300, 1) + matched(300, 4)
+}

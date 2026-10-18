@@ -1,0 +1,29 @@
+error[N-Undefined]: undefined name `undefined_name`
+ --> tests/diag/a_refused_arm_leaves_the_others_to_agree.lin:5:14
+  |
+5 |         0 => undefined_name,
+  |              ^^^^^^^^^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `undefined_name`
+  --> tests/diag/a_refused_arm_leaves_the_others_to_agree.lin:15:14
+   |
+15 |         0 => undefined_name,
+   |              ^^^^^^^^^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `undefined_name`
+  --> tests/diag/a_refused_arm_leaves_the_others_to_agree.lin:25:9
+   |
+25 |         undefined_name
+   |         ^^^^^^^^^^^^^^ no binding with this name is in scope
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/diag/a_refused_arm_leaves_the_others_to_agree.lin:17:14
+   |
+16 |         1 => true,
+   |              ---- expected because of this arm
+17 |         _ => 4,
+   |              ^ expected `Bool`, found `Int64`
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/diag/a_refused_arm_leaves_the_others_to_agree.lin:29:9
+   |
+27 |         true
+   |         ---- expected because of this arm
+29 |         4
+   |         ^ expected `Bool`, found `Int64`

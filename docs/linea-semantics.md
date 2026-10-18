@@ -620,6 +620,9 @@ inside another `break`'s value for its loop. A `?` fixes only whether the
 answer is an `Option` or a `Result`, not what a success carries, so it settles
 nothing: it answers to the closure's result, whatever settles it and wherever
 that is written, and is refused by [T-TryAnswer] only when nothing settles it.
+A closure passed where its result is a type parameter the call infers is
+read the same way: its `?`s answer to what its returns and body solve that
+parameter to.
 One that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
 A `test fn` that writes no result answers `Result[(), testing.Failure]`

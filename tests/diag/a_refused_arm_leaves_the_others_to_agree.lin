@@ -1,0 +1,37 @@
+fn quiet(c: UInt8) -> UInt8 {
+    // The refused first arm says nothing about `.None`, which reports nothing
+    // more.
+    let v = match c {
+        0 => undefined_name,
+        _ => .None,
+    }
+    let _w = v
+    0
+}
+
+fn matched(c: UInt8) -> UInt8 {
+    // The arms after a refused one still have to agree with each other.
+    let v = match c {
+        0 => undefined_name,
+        1 => true,
+        _ => 4,
+    }
+    let _v = v
+    0
+}
+
+fn chained(c: UInt8) -> UInt8 {
+    let v = if c == 0 {
+        undefined_name
+    } else if c == 1 {
+        true
+    } else {
+        4
+    }
+    let _v = v
+    0
+}
+
+fn main() -> UInt8 {
+    quiet(0) + matched(1) + chained(1)
+}

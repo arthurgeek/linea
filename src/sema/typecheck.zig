@@ -16660,7 +16660,9 @@ const Checker = struct {
             return self.record(id, .never);
         }
 
-        if (self.current_return == null) if (self.inferred_return) |inferred| if (inferred.* == null and t != .poison) {
+        // A refused value settles poison: what the closure answers is then
+        // unknown, and nothing that answers to it is reported again.
+        if (self.current_return == null) if (self.inferred_return) |inferred| if (inferred.* == null) {
             inferred.* = .{
                 .ty = t,
                 .at = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) },
@@ -16763,8 +16765,13 @@ const Checker = struct {
         // and one answer to it.
         self.unwindsEveryLoop();
 
-        if (self.returnAnswer()) |want| {
+        if (self.returnAnswer()) |want| if (want.inference == null or self.deferred_tries == null) {
             if (!try self.answerTry(id, t, carrier, want.ty)) return self.record(id, .poison);
+        } else {
+            // The result is a type the call is still inferring from this
+            // closure, so the `?` answers to what it is solved to once the
+            // body is checked.
+            try self.deferred_tries.?.append(self.gpa, id);
         } else if (self.deferred_tries) |deferred| {
             // A `?` fixes only whether the answer is an `Option` or a
             // `Result`, never what a success carries, so it settles nothing:
@@ -18690,7 +18697,7 @@ const Checker = struct {
             self.current_return = result_expected;
             self.inferred_return = if (result_expected == null) &inferred_return else null;
             self.inferred_body = if (result_expected == null) lambda.body else .none;
-            self.deferred_tries = if (result_expected == null) &deferred_tries else null;
+            self.deferred_tries = if (result_expected == null or result_expected.?.inference != null) &deferred_tries else null;
             self.failure_expected = null;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
@@ -18723,12 +18730,22 @@ const Checker = struct {
             }
             break :tied try self.builder.resolveOpen(returned.ty, &self.open_types);
         } else null;
-        const result = settled_by_return orelse if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
+        // A body that only leaves through `return`s has the expected result,
+        // read through what those returns solved where the call is still
+        // inferring it.
+        const leaves_only = if (result_expected) |want| if (want.inference) |settling| try self.callableContext(want.ty, settling) else want.ty else null;
+        const result = settled_by_return orelse if (body_result == .never and leaves_only != null) leaves_only.? else body_result;
+        // What the deferred `?`s answer to: the result the returns and the
+        // body settled, or the inferred type parameter as they solved it.
+        const answered = if (result_expected) |want| if (want.inference) |settling| solved: {
+            const solved = try self.callableContext(want.ty, settling);
+            break :solved if (self.hasOpenParameter(solved, settling)) TypeId.never else solved;
+        } else result else result;
         for (deferred_tries.items) |at| {
             const tried = self.builder.exprType(self.ast.unaryOperand(at));
             const carrier = self.carrierOf(tried) orelse continue;
-            if (result == .poison) continue;
-            if (result == .never) {
+            if (answered == .poison) continue;
+            if (answered == .never) {
                 _ = self.report(
                     .t_try_answer,
                     at,
@@ -18737,7 +18754,7 @@ const Checker = struct {
                     "write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it",
                 );
                 refused = true;
-            } else if (!try self.answerTry(at, tried, carrier, result)) refused = true;
+            } else if (!try self.answerTry(at, tried, carrier, answered)) refused = true;
         }
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
@@ -31109,10 +31126,12 @@ const Checker = struct {
     }
 
     fn settleMatchArm(self: *Checker, settled: *?Expected, body_expr: ExprId, body: TypeId) void {
-        // A refused arm settles poison, which the others then agree with, as
-        // an `if`'s refused arm does.
+        // A refused arm settles poison, which quiets an arm after it that
+        // cannot settle itself; the first arm with a real type replaces it,
+        // so the arms after that still have to agree, as an `if`'s do.
         if (body == .never) return;
-        if (settled.*) |context| if (!context.unit_test_success) return;
+        if (settled.*) |context| if (!context.unit_test_success and context.ty != .poison) return;
+        if (body == .poison and settled.* != null) return;
         settled.* = .{ .ty = body, .at = self.locOf(self.resultOf(body_expr)), .reason = .arm };
     }
 
@@ -31397,7 +31416,12 @@ const Checker = struct {
             return self.record(id, .unit);
         }
 
-        const otherwise = try self.checkResult(id, c.otherwise, expected orelse self.armExpectation(then, c.then));
+        // A poison expectation, from an arm refused beside this construct,
+        // only quiets what cannot settle itself: a real type the first arm
+        // settled is what the second answers to, so two arms that disagree
+        // are still reported.
+        const weak = expected != null and expected.?.ty == .poison;
+        const otherwise = try self.checkResult(id, c.otherwise, if (expected != null and !weak) expected else self.armExpectation(then, c.then) orelse expected);
 
         if (then == .poison or otherwise == .poison) return self.record(id, .poison);
         if (condition == .never) return self.expect(id, .never, expected);
@@ -31465,17 +31489,39 @@ const Checker = struct {
     }
 
     /// The expression that gave a checked arm its type: through braces to
-    /// the value they yield, and through an `else if` to its first arm that
-    /// completes, so a label names the value rather than the whole chain.
+    /// the value they yield, and into an `if` or `match` whose arms all but
+    /// one leave, to that one. Where two or more complete, they agreed on the
+    /// type together, so the construct itself is what a label names.
     fn armValue(self: *const Checker, arm: ExprId) ExprId {
         var at = self.resultOf(arm);
-        while (self.ast.exprTag(at) == .conditional) {
-            const c = self.ast.conditional(at);
-            if (c.otherwise == ExprId.none) break;
-            const then = self.resultOf(c.then);
-            at = if (self.builder.exprType(then) == .never) self.resultOf(c.otherwise) else then;
-        }
+        while (self.onlyCompletingArm(at)) |inner| at = self.resultOf(inner);
         return at;
+    }
+
+    /// The one arm of an `if` with an `else`, or of a `match`, that completes,
+    /// or null where none or several do or `at` is neither.
+    fn onlyCompletingArm(self: *const Checker, at: ExprId) ?ExprId {
+        var found: ?ExprId = null;
+        switch (self.ast.exprTag(at)) {
+            .conditional => {
+                const c = self.ast.conditional(at);
+                if (c.otherwise == ExprId.none) return null;
+                for ([_]ExprId{ c.then, c.otherwise }) |branch| if (self.builder.exprType(branch) != .never) {
+                    if (found != null) return null;
+                    found = branch;
+                };
+            },
+            .match_, .match_read => {
+                const m = self.ast.call(at);
+                var j: usize = 1;
+                while (j < m.args.len) : (j += 2) if (self.builder.exprType(m.args[j]) != .never) {
+                    if (found != null) return null;
+                    found = m.args[j];
+                };
+            },
+            else => {},
+        }
+        return found;
     }
 
     /// The value type of two alternatives that may not both complete.
