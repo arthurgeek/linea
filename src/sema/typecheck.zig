@@ -5387,6 +5387,11 @@ const Checker = struct {
     /// variant reached with more variants than a scan is worth. Sized by those
     /// enums' variants, and freed with the checker.
     variant_names: std.AutoHashMapUnmanaged(TypeId, std.StringHashMapUnmanaged(u32)) = .empty,
+    /// How many parts of patterns were reported as matching nothing
+    /// ([T-Unreachable]): a range written backwards, or a literal outside a
+    /// refinement. A pattern refused for those alone is well formed, so the
+    /// values its `match` misses are still asked about.
+    empty_parts: u32 = 0,
     /// The place each pattern nested inside a lending or matched pattern
     /// stands for: the place of the pattern around it and the step that
     /// selects it. Keyed by the nested pattern's node, and written only for
@@ -13486,6 +13491,7 @@ const Checker = struct {
         const iv = try self.intArmInterval(pattern, settled) orelse return false;
         if (iv.lo > iv.hi) {
             _ = self.report(.t_unreachable, pattern, "no value reaches this arm", .{}, "this range matches nothing");
+            self.empty_parts += 1;
             return false;
         }
         return true;
@@ -13810,6 +13816,7 @@ const Checker = struct {
                     .{},
                     try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}),
                 );
+                self.empty_parts += 1;
                 return false;
             };
         }
@@ -31088,13 +31095,20 @@ const Checker = struct {
             // A pattern the parser could not read was reported where it was
             // written. It takes nothing, so it leaves the cover where it was
             // and makes no arm after it unreachable.
+            const errors_before = self.sink.error_count;
+            const empty_before = self.empty_parts;
             const sound = if (self.ast.exprTag(pattern) == .err) blk: {
                 _ = self.record(pattern, .poison);
                 break :blk false;
             } else try self.checkPattern(pattern, scrutinee, m.callee);
+            // A pattern whose only mistakes are parts matching nothing takes
+            // no value, so it adds no row; the cover the other arms leave is
+            // still a question of its own.
+            const only_empty = self.empty_parts > empty_before and
+                self.sink.error_count - errors_before == self.empty_parts - empty_before;
 
             if (!sound) {
-                if (self.ast.exprTag(pattern) != .err) poisoned = true;
+                if (self.ast.exprTag(pattern) != .err and !only_empty) poisoned = true;
             } else if (scrutinee != .poison) {
                 const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
                 row[0] = .{ .pattern = try self.coveragePattern(coverage.arena, pattern, scrutinee), .ty = scrutinee };
