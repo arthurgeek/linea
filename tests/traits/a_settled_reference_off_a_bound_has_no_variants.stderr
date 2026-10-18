@@ -4,11 +4,11 @@ error[N-Variant]: `W.Item` is not known to be an enum, so `Dark` names no varian
 24 |         Dark => 0,
    |         ^^^^ a name at an arm's head names a variant
    |
-   = help: write `_` to match any value
+   = help: nothing says how `W.Item` is built, so use the value without taking it apart
 error[N-Variant]: `W.Item` is not known to be an enum, so `Light` names no variant of it
   --> tests/traits/a_settled_reference_off_a_bound_has_no_variants.lin:25:9
    |
 25 |         Light => 1,
    |         ^^^^^ a name at an arm's head names a variant
    |
-   = help: write `_` to match any value
+   = help: nothing says how `W.Item` is built, so use the value without taking it apart

@@ -13395,7 +13395,16 @@ const Checker = struct {
         if (self.builder.get(of) != .enum_) {
             const shown = try self.typeName(of);
             const tuple = if (self.builder.instanceOf(of)) |inst| self.builder.isTupleDecl(inst.decl) else false;
-            const help = if (self.builder.get(of) == .newtype)
+            // A type parameter may be settled by an enum, but nothing the
+            // body is checked against says which. It may also be settled by
+            // a linear type, which `_` would drop, so no pattern is offered.
+            const symbolic = switch (self.builder.get(of)) {
+                .parameter, .open_type => true,
+                else => false,
+            };
+            const help = if (symbolic)
+                try std.fmt.allocPrint(self.sink.arena, "nothing says how `{s}` is built, so use the value without taking it apart", .{shown})
+            else if (self.builder.get(of) == .newtype)
                 try std.fmt.allocPrint(self.sink.arena, "write `{s}(…)` to read the value it wraps, or `_` to match any value", .{shown})
             else if (tuple)
                 "write `(…)` to take its components apart, or `_` to match any value"
@@ -13403,12 +13412,6 @@ const Checker = struct {
                 try std.fmt.allocPrint(self.sink.arena, "write `{s} {{ … }}` to take its fields apart, or `_` to match any value", .{shown})
             else
                 "write `_` to match any value";
-            // A type parameter may be settled by an enum, but nothing the
-            // body is checked against says which.
-            const symbolic = switch (self.builder.get(of)) {
-                .parameter, .open_type => true,
-                else => false,
-            };
             _ = self.reportWithOriginNotes(
                 .n_variant,
                 pattern,
