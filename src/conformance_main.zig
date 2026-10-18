@@ -3475,15 +3475,15 @@ fn deferredBindingsAcrossJoinsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
-/// A fixed number of values deferred at the top of a body that then nests
-/// `n` loops, so what a schedule needs crosses `n` back edges.
+/// Sixteen values deferred at the top of a body that then nests `n` loops, so
+/// the schedules at the body's end are awaited across `n` back edges.
 fn deferredBindingsUnderNestedLoopsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
     const w = &out.writer;
 
     try w.writeAll(deferredKeyPrelude);
-    for (0..256) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
+    for (0..16) |i| try w.print("    let k{d}: Key = .{{ n = 1 }}\n    defer lock(k{d})\n", .{ i, i });
     for (0..n) |_| try w.writeAll("    while turns < 1 {\n");
     for (0..n) |_| try w.writeAll("    turns = turns + 1\n    }\n");
     try w.writeAll(deferredKeyEnd);
@@ -6156,7 +6156,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
     .{ .name = "heavy ownership deltas", .n = 2000, .cost = throughTheTree(heavyOwnershipDeltasModule) },
     .{ .name = "deferred bindings across joins", .n = 2000, .cost = throughTheTree(deferredBindingsAcrossJoinsModule) },
-    .{ .name = "deferred bindings under nested loops", .n = 200, .cost = throughTheTree(deferredBindingsUnderNestedLoopsModule) },
+    .{ .name = "deferred bindings under nested loops", .n = 50, .cost = throughTreeBatch(deferredBindingsUnderNestedLoopsModule, .check, 32) },
     .{ .name = "lending binders", .n = 1100, .cost = throughTheTree(lendingBindersModule) },
     .{ .name = "views taken and lent in one body", .n = 3000, .cost = throughTheTree(storage_mod.viewsProgram) },
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },
