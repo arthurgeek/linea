@@ -1152,12 +1152,17 @@ const Analysis = struct {
         const location = try self.actualPlace(state, source);
         var lent: std.ArrayList(Fact) = .empty;
         defer lent.deinit(self.gpa);
+        // A capture lending a `for inout` binder keeps the walk's lends, as a
+        // change through the binder does.
+        var kept = try self.lendsThrough(state, source);
+        defer kept.deinit(self.gpa);
         for (self.store.facts(location)) |fact| {
             if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, source);
             var exclusive = fact;
             exclusive.origin.lent = source;
             try lent.append(self.gpa, exclusive);
         }
+        try self.restoreLends(state, kept.items);
         const contained = try self.store.prefixed(try self.value(state, source), try self.store.prepend(observed, .root));
         return self.store.join(try self.store.intern(lent.items), contained);
     }
@@ -1848,12 +1853,66 @@ const Analysis = struct {
     /// for: the binder stays the element's one path, as an `inout` parameter
     /// does, and observations made through it before the change still end.
     fn changeThrough(self: *Analysis, state: *State, place: ExprId, at: ExprId) !void {
-        const root = self.res.pathBinding(self.ast, place);
-        const lend = if (root != .none) state.get(Cell.alias(root)) else null;
+        var kept = try self.lendsThrough(state, place);
+        defer kept.deinit(self.gpa);
         for (self.store.facts(try self.actualPlace(state, place))) |fact| {
             if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, at);
         }
-        if (lend) |kept| try self.put(state, Cell.alias(root), kept);
+        try self.restoreLends(state, kept.items);
+    }
+
+    const KeptLend = struct { binding: BindingId, set: SetId };
+
+    /// The lends a change through `place` passes through: the walk binder
+    /// it is rooted in, and every walk binder lending a region that holds
+    /// what the change reaches, as a nested `for inout` lends a row of the
+    /// grid and then a list of that row. Each stays the one path to what it
+    /// names, as an `inout` parameter does, so the change ends none of them.
+    ///
+    /// **Bound:** the sets the change's own invalidation visits, through the
+    /// same owner index, and the cells holding each.
+    fn lendsThrough(self: *Analysis, state: *const State, place: ExprId) !std.ArrayList(KeptLend) {
+        var kept: std.ArrayList(KeptLend) = .empty;
+        errdefer kept.deinit(self.gpa);
+        const root = self.res.pathBinding(self.ast, place);
+        if (root == .none) return kept;
+        const own = state.get(Cell.alias(root)) orelse return kept;
+        try kept.append(self.gpa, .{ .binding = root, .set = own });
+        for (self.store.facts(own)) |reached| {
+            if (reached.origin.external) continue;
+            const owner = Owner.binding(reached.origin.place.root);
+            const sets = try self.dependents.owners.setsOverlapping(self.gpa, &self.store, owner, reached.origin.place.path);
+            defer self.gpa.free(sets);
+            for (sets) |set| {
+                const cells = self.dependents.active.get(set) orelse continue;
+                var holders = cells.keyIterator();
+                while (holders.next()) |cell| {
+                    const raw = @intFromEnum(cell.*);
+                    if (raw & 3 != 2) continue;
+                    const binding: BindingId = @enumFromInt(@as(u32, @intCast(raw >> 2)));
+                    if (binding == root) continue;
+                    if (!self.enclosesAll(set, reached.origin.place)) continue;
+                    if (for (kept.items) |held| {
+                        if (held.binding == binding) break true;
+                    } else false) continue;
+                    try kept.append(self.gpa, .{ .binding = binding, .set = set });
+                }
+            }
+        }
+        return kept;
+    }
+
+    /// Whether every fact of `set` lends a region holding `place`.
+    fn enclosesAll(self: *Analysis, set: SetId, place: Place) bool {
+        for (self.store.facts(set)) |fact| {
+            if (fact.origin.external or fact.origin.place.root != place.root) return false;
+            if (self.store.strip(place.path, fact.origin.place.path) == null) return false;
+        }
+        return true;
+    }
+
+    fn restoreLends(self: *Analysis, state: *State, kept: []const KeptLend) !void {
+        for (kept) |held| try self.put(state, Cell.alias(held.binding), held.set);
     }
 
     fn applyCall(self: *Analysis, state: *State, id: ExprId, report: bool) !void {
