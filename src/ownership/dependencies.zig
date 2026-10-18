@@ -1841,6 +1841,21 @@ const Analysis = struct {
         }
     }
 
+    /// A call changes the place `place` names: every observation of it ends,
+    /// except the lend `place` is reached through. A `for inout` binder is
+    /// itself an observation of the element it lends, recorded in its alias
+    /// cell, and changing the element through the binder is what the walk is
+    /// for: the binder stays the element's one path, as an `inout` parameter
+    /// does, and observations made through it before the change still end.
+    fn changeThrough(self: *Analysis, state: *State, place: ExprId, at: ExprId) !void {
+        const root = self.res.pathBinding(self.ast, place);
+        const lend = if (root != .none) state.get(Cell.alias(root)) else null;
+        for (self.store.facts(try self.actualPlace(state, place))) |fact| {
+            if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, at);
+        }
+        if (lend) |kept| try self.put(state, Cell.alias(root), kept);
+    }
+
     fn applyCall(self: *Analysis, state: *State, id: ExprId, report: bool) !void {
         const normalized = self.typing.call_index.callOf(self.typing, id) orelse return;
         const signature = switch (self.typing.get(normalized.signature)) {
@@ -1850,11 +1865,7 @@ const Analysis = struct {
         // Without a live local origin, an inout call cannot invalidate an
         // observation. Avoid constructing place facts solely for that check.
         if (self.dependents.owners.by_owner.count() != 0) {
-            if (normalized.callee_convention == .inout) {
-                for (self.store.facts(try self.actualPlace(state, self.ast.call(id).callee))) |fact| {
-                    if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
-                }
-            }
+            if (normalized.callee_convention == .inout) try self.changeThrough(state, self.ast.call(id).callee, id);
             // An `extern` taking a handle without `read` may change the object
             // it holds, so the call lends the argument's place as `inout`
             // would although C receives the handle by value.
@@ -1866,9 +1877,7 @@ const Analysis = struct {
                 if (arg == .none) continue;
                 const changes = if (foreign) |d| intrinsics.changesForeignHandle(self.program, self.ast, self.typing, d, k, param.ty) else false;
                 if (param.convention != .inout and !changes) continue;
-                for (self.store.facts(try self.actualPlace(state, arg))) |fact| {
-                    if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
-                }
+                try self.changeThrough(state, arg, id);
             }
         }
         // The callable is invoked after its arguments finish evaluating.
