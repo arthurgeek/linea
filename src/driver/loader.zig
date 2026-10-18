@@ -546,11 +546,6 @@ fn loadInputs(
     };
 }
 
-/// What a manifest among these files declares about the root.
-///
-/// The shallowest one, because a root's manifest sits above every module of it:
-/// a program holding a submodule that carries a manifest of its own would
-/// otherwise be read as whatever that submodule said.
 /// Whether the root's manifest among `files` names it the standard library.
 fn isStandard(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!bool {
     const declared = try declaredGiven(gpa, files, root_dir);
@@ -558,6 +553,11 @@ fn isStandard(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]
     return declared.standard;
 }
 
+/// What a manifest among these files declares about the root.
+///
+/// The shallowest one, because a root's manifest sits above every module of it:
+/// a program holding a submodule that carries a manifest of its own would
+/// otherwise be read as whatever that submodule said.
 pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!Declared {
     // Total, unlike the read from disk. A manifest that will not parse stops a
     // command run against a root, because the person who ran it is there to be
@@ -1341,12 +1341,6 @@ fn grantedTo(externs: []const []const u8, route: []const u8, root_name: []const 
         if (std.mem.eql(u8, granted, ".") and relative.len == 0) return true;
         if (std.mem.eql(u8, granted, relative)) return true;
     }
-    return false;
-}
-
-/// Whether `list` holds `text`.
-fn containsString(list: []const []const u8, text: []const u8) bool {
-    for (list) |held| if (std.mem.eql(u8, held, text)) return true;
     return false;
 }
 
@@ -2924,12 +2918,22 @@ const Loader = struct {
     /// which it reaches the library is refused.
     fn refuseUnconsentedExterns(self: *Loader, manifest_path: []const u8, text: []const u8) LoadError!void {
         const a = self.scratch.allocator();
+        // Which libraries need the program's consent, decided once: those
+        // whose manifest grants `extern` and that the program's manifest
+        // neither names nor refused.
+        var unconsented = try std.DynamicBitSetUnmanaged.initEmpty(a, self.graph.items.len);
+        for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
+            if (held.externs.len == 0) continue;
+            if (self.dependencyNamed(.primary, held.name) == RootId.from(i) or self.refusedBy(.primary, held.name)) continue;
+            unconsented.set(i);
+        }
         // One walk from each entry of the program's manifest, so every entry
         // through which an unconsented library is reached is refused and each
         // path a reader must fix is named.
         //
-        // **Bound:** the program's entries times the graph's roots and edges,
-        // each root visited once per entry.
+        // **Bound:** the graph's roots times the program's entries, for the
+        // set above and the walks' starts, plus the entries times the graph's
+        // roots and edges, each root visited once per entry with no scan.
         const entries = try a.dupe(RootId, self.graph.items[0].dependencies.items);
         var seen = try std.DynamicBitSetUnmanaged.initEmpty(a, self.graph.items.len);
         var pending: std.ArrayList(RootId) = .empty;
@@ -2944,9 +2948,8 @@ const Loader = struct {
                 if (seen.isSet(at.index())) continue;
                 seen.set(at.index());
                 try pending.appendSlice(a, self.graph.items[at.index()].dependencies.items);
+                if (!unconsented.isSet(at.index())) continue;
                 const held = self.graph.items[at.index()];
-                if (held.externs.len == 0) continue;
-                if (self.dependencyNamed(.primary, held.name) == at or self.refusedBy(.primary, held.name)) continue;
                 try self.reportManifest(
                     manifest_path,
                     text,
@@ -3257,6 +3260,8 @@ const Loader = struct {
         for (modules) |m| if (m.root.isDependency()) loaded.set(m.root.index());
 
         var native: std.ArrayList([]const u8) = .empty;
+        var built: std.StringHashMapUnmanaged(void) = .empty;
+        defer built.deinit(self.gpa);
         var link: std.ArrayList([]const u8) = .empty;
         errdefer {
             for (native.items) |path| self.gpa.free(path);
@@ -3264,10 +3269,10 @@ const Loader = struct {
             for (link.items) |name| self.gpa.free(name);
             link.deinit(self.gpa);
         }
-        try self.appendForeign(&native, &link, primary.native, primary.link);
+        try self.appendForeign(&native, &built, &link, primary.native, primary.link);
         for (self.graph.items[RootId.first_dependency.index()..], RootId.first_dependency.index()..) |held, i| {
             if (!loaded.isSet(i)) continue;
-            try self.appendForeign(&native, &link, held.native, held.link);
+            try self.appendForeign(&native, &built, &link, held.native, held.link);
         }
         const owned_native = try native.toOwnedSlice(self.gpa);
         errdefer {
@@ -3277,12 +3282,17 @@ const Loader = struct {
         return .{ .native = owned_native, .link = try link.toOwnedSlice(self.gpa) };
     }
 
-    fn appendForeign(self: *Loader, native: *std.ArrayList([]const u8), link: *std.ArrayList([]const u8), sources: []const []const u8, names: []const []const u8) std.mem.Allocator.Error!void {
-        for (sources) |path| if (!containsString(native.items, path)) {
+    /// **Bound:** each source and library name once, the sources through a
+    /// set of those already built.
+    fn appendForeign(self: *Loader, native: *std.ArrayList([]const u8), built: *std.StringHashMapUnmanaged(void), link: *std.ArrayList([]const u8), sources: []const []const u8, names: []const []const u8) std.mem.Allocator.Error!void {
+        for (sources) |path| {
+            if (built.contains(path)) continue;
+            try built.ensureUnusedCapacity(self.gpa, 1);
             const copy = try self.gpa.dupe(u8, path);
             errdefer self.gpa.free(copy);
             try native.append(self.gpa, copy);
-        };
+            built.putAssumeCapacity(copy, {});
+        }
         for (names) |name| {
             const copy = try self.gpa.dupe(u8, name);
             errdefer self.gpa.free(copy);
