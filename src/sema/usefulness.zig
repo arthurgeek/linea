@@ -331,14 +331,14 @@ pub fn Coverage(comptime Context: type) type {
                     try out.append(self.arena, try self.rest(rows, ty, absent.items));
                 },
                 .integer => |bounds| try self.integers(&out, rows, ty, bounds),
-                .opaque_ => try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }})),
+                .opaque_ => try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty))),
                 // A wildcard takes any value whatever the type holds, so a
                 // column every row leaves to one is split as an opaque type's
                 // is, and the other columns are still judged. A row naming a
                 // value there asks what nobody declared.
                 .refused => {
                     for (rows) |r| if (r.cells[0].pattern.* != .wild) return error.Refused;
-                    try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }}));
+                    try out.append(self.arena, try self.rest(rows, ty, try self.anyValue(ty)));
                 },
             }
             return out.items;
@@ -390,6 +390,15 @@ pub fn Coverage(comptime Context: type) type {
                 if (try self.specialise(r, c, arity)) |s| try kept.append(self.arena, s);
             }
             return .{ .step = .{ .ty = ty, .choice = .{ .ctor = c } }, .rows = kept.items };
+        }
+
+        /// Any value of `ty`, as the one witness of a branch no row's head
+        /// names. Built in the arena, since the branch's step outlives the
+        /// split that makes it.
+        fn anyValue(self: *Self, ty: Ty) Error![]const Witness {
+            const out = try self.arena.alloc(Witness, 1);
+            out[0] = .{ .ty = ty, .shape = .wild };
+            return out;
         }
 
         /// The branch for the values no row's head names: the rows with a
