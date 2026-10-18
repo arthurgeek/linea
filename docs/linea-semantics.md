@@ -4916,7 +4916,10 @@ Callable source clauses describe dependencies at a boundary:
 Source paths name parameters and fixed fields and can dereference observations.
 A message that prints a `fn` type's contracts names a parameter as `#n`, its
 position counted from 1, because a parameter's name is not part of the type;
-a program names the parameter. `carries(reference)` preserves the descriptor's
+a program names the parameter, and a mismatch that prints such a clause says
+so. What a callable requirement's result may carry from the callable itself is
+implied by the requirement and written by no program, so a message leaves it
+out. `carries(reference)` preserves the descriptor's
 dependencies; `carries(*reference)` preserves those contained in its referent.
 Retention destinations cannot cross readonly observation storage. A clause can
 list several sources. `borrows` and `retains` require a source; only `carries()`

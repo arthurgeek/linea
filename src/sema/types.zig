@@ -1889,8 +1889,14 @@ fn appendContractPath(gpa: std.mem.Allocator, out: anytype, path: ContractPath, 
 }
 
 fn appendContractText(gpa: std.mem.Allocator, out: anytype, contracts: []const CallableContract, names: ?[]const []const u8, mangled: bool) !void {
-    for (contracts, 0..) |contract, index| {
-        if (!mangled) try out.appendSlice(gpa, if (index == 0) " where " else ", ");
+    var written: usize = 0;
+    for (contracts) |contract| {
+        // What a callable requirement's result may carry from the callable
+        // itself is implied by the requirement and written by no program, so
+        // its text leaves it out; the symbol keeps it.
+        if (!mangled and contract.source.root == .callee) continue;
+        if (!mangled) try out.appendSlice(gpa, if (written == 0) " where " else ", ");
+        written += 1;
         try out.appendSlice(gpa, @tagName(contract.kind));
         try out.append(gpa, '(');
         if (contract.target.len != 0) {
@@ -2067,6 +2073,7 @@ fn renderCallable(
     try appendContractText(gpa, rendered, contracts, names, false);
     if (independent) try rendered.appendSlice(gpa, " where carries()");
 }
+
 
 /// One exact structural callable signature and its parameter run.
 pub const CallableSignature = struct {

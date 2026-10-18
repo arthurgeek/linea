@@ -13177,6 +13177,20 @@ const Checker = struct {
     /// through a recursive type does not end, so the notes stop here.
     const unmet_requirement_depth = 4;
 
+    /// Whether `ty` is a `fn` type whose clause names one of its parameters,
+    /// which its text writes by position.
+    fn namesAParameterByPosition(self: *Checker, ty: TypeId) bool {
+        const signature = switch (self.builder.get(ty)) {
+            .callable => |callable| callable,
+            else => return false,
+        };
+        for (signature.contracts) |contract| {
+            if (contract.source.root == .parameter) return true;
+            if (contract.destination) |destination| if (destination.root == .parameter) return true;
+        }
+        return false;
+    }
+
     /// Reports a type mismatch at the expression, and again at whatever asked
     /// for the type.
     ///
@@ -13260,8 +13274,18 @@ const Checker = struct {
         const fill_note = self.defaultedFillNote(id, actual, want) catch return self.recordMismatch(id);
         const allocator_note = self.allocatorPassedNote(actual, want) catch return self.recordMismatch(id);
         const allocators_note = self.allocatorMismatchNote(want.ty, actual) catch return self.recordMismatch(id);
-        var extra: [3][]const u8 = undefined;
+        // A `fn` type's clause names a parameter by its position, which a
+        // reader who wrote names needs told.
+        const positions_note: ?[]const u8 = if (self.namesAParameterByPosition(want.ty) or self.namesAParameterByPosition(actual))
+            "`#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type"
+        else
+            null;
+        var extra: [4][]const u8 = undefined;
         var extras: usize = 0;
+        if (positions_note) |text| {
+            extra[extras] = text;
+            extras += 1;
+        }
         if (fill_note) |text| {
             extra[extras] = text;
             extras += 1;
