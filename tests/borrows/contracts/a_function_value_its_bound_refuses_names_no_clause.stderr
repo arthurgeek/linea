@@ -1,10 +1,12 @@
-error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1), carries(callee)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
+error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
   --> tests/borrows/contracts/a_function_value_its_bound_refuses_names_no_clause.lin:13:17
    |
 2  | fn apply[F: fn(read a: String, read b: String) -> Str where borrows(a)](a: String, b: String, f: F) -> UInt8 {
    |                                                                                               - expected because of this parameter
 13 |     apply(a, b, second)
-   |                 ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1), carries(callee)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
+   |                 ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
  --> tests/borrows/contracts/a_function_value_its_bound_refuses_names_no_clause.lin:7:5
   |

@@ -4,6 +4,8 @@ error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[System
 11 |     let p = Picker { f = second }
    |                      - expected because of this field
    |                          ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
+   |
+   = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
  --> tests/borrows/contracts/a_function_value_its_field_refuses_names_no_clause.lin:7:5
   |

@@ -4,6 +4,8 @@ error[T-Mismatch]: expected `fn(read String[SystemAllocator], read String[System
 9 |     let f: fn(read a: String, read b: String) -> Str where borrows(a) = second
   |            ----------------------------------------- expected because of this annotation
   |                                                                         ^^^^^^ expected `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str where borrows(#1)`, found `fn(read String[SystemAllocator], read String[SystemAllocator]) -> Str`
+  |
+  = help: `#n` in a `fn` type's clause is its parameter at position n, counted from 1, because a parameter's name is not part of the type
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
  --> tests/borrows/contracts/a_function_value_its_annotation_refuses_names_no_clause.lin:5:5
   |
