@@ -3,8 +3,3 @@ error[O-Merge]: the paths here disagree about `key`
    |
 17 |     if turns == 0 {
    |     ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
-error[O-Merge]: the paths here disagree about `key`
-  --> tests/defer/a_var_reassigned_on_one_path_before_a_later_defer_is_a_merge_disagreement.lin:21:5
-   |
-21 |     if fresh {
-   |     ^^^^^^^^^^ consume it on the other path too, or on neither

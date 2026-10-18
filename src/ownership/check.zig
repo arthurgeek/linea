@@ -276,10 +276,12 @@ const Checker = struct {
     /// an exit written inside n live bindings would otherwise read all n to
     /// find the none of them that could leak or disagree at a join.
     tracked: []cfg_mod.ScopeId,
-    /// Binding-state changes whose pessimistic state reached a diagnosed merge.
+    /// Binding-state changes whose pessimistic state reached a diagnosed merge,
+    /// each with the first join in reverse postorder that diagnosed it.
     /// Safety still reads that state; diagnostics use this provenance to avoid
-    /// restating the same disagreement as a later failure about that binding.
-    merge_origins: std.AutoHashMapUnmanaged(MergeOrigin, void) = .empty,
+    /// restating the same disagreement as a later failure about that binding,
+    /// or as a disagreement at a later join that only inherits it.
+    merge_origins: std.AutoHashMapUnmanaged(MergeOrigin, u32) = .empty,
     /// The bindings a `defer` of the function being walked consumes, each
     /// numbered by the bit it holds in a row of `awaiting`. Sized by the
     /// function's own operations.
@@ -480,12 +482,13 @@ const Checker = struct {
     ///
     /// A Linear binding must everywhere, because it has to be consumed exactly
     /// once. A binding a `defer` consumes must where one of its schedules can
-    /// still run before the binding is written again, because a schedule runs
-    /// or is cancelled by the state it finds, and a pessimistic merge would
-    /// cancel it on the path that still holds the value. Past the last schedule that can run, a `defer` has
-    /// consumed the value where it ran, exactly as a call written there
-    /// would, and the binding merges like any other: pessimistically, with a
-    /// use after the join reporting the move it reads.
+    /// still run before the binding is assigned again as a whole, because a
+    /// schedule runs or is cancelled by the state it finds, and a pessimistic
+    /// merge would cancel it on the path that still holds the value. Past the
+    /// last schedule that can run, a `defer` has consumed the value where it
+    /// ran, exactly as a call written there would, and the binding merges
+    /// like any other: pessimistically, with a use after the join reporting
+    /// the move it reads.
     ///
     /// `checkMerges` compares exactly the bindings tracked at its join. A
     /// scope end resets every binding tracked anywhere, so a binding whose
@@ -2284,8 +2287,10 @@ const Checker = struct {
         std.debug.assert(!changed);
         if (std.debug.runtime_safety) try self.agreesWithRows(f, count, n, order, &flow);
 
-        for (0..count) |i| {
-            const b: u32 = @intCast(i);
+        // In reverse postorder, so each origin keeps the first join that
+        // diagnosed it: the one a later join's inherited disagreement came
+        // from.
+        for (order) |b| {
             if (!flow.computed[b]) continue;
             try self.checkMerges(f, b, roots, &preds, &flow, &asked, &merged, &merged_at, .mark_origins);
         }
@@ -2851,17 +2856,30 @@ const Checker = struct {
 
                 switch (action) {
                     .mark_origins => {
-                        if (was_at != .none) try self.merge_origins.put(self.gpa, .{ .at = was_at, .binding = binding }, {});
-                        const at = flow.state_at[s];
-                        if (at != .none) try self.merge_origins.put(self.gpa, .{ .at = at, .binding = binding }, {});
+                        for ([_]ExprId{ was_at, flow.state_at[s] }) |at| {
+                            if (at == .none) continue;
+                            const origin = try self.merge_origins.getOrPut(self.gpa, .{ .at = at, .binding = binding });
+                            if (!origin.found_existing) origin.value_ptr.* = b;
+                        }
                     },
-                    .report => try self.report(
-                        .o_merge,
-                        self.cfg.blocks[f.blocks.start + b].at,
-                        "consume it on the other path too, or on neither",
-                        "the paths here disagree about `{s}`",
-                        .{try self.nameOf(binding)},
-                    ),
+                    .report => {
+                        // A path that holds the value as moved only because an
+                        // earlier join merged it pessimistically carries that
+                        // join's disagreement here, and it was said there.
+                        const moved_at = if (was == .moved) was_at else if (flow.state[s] == .moved) flow.state_at[s] else ExprId.none;
+                        if (moved_at != .none) {
+                            if (self.merge_origins.get(.{ .at = moved_at, .binding = binding })) |join| {
+                                if (join != b) continue;
+                            }
+                        }
+                        try self.report(
+                            .o_merge,
+                            self.cfg.blocks[f.blocks.start + b].at,
+                            "consume it on the other path too, or on neither",
+                            "the paths here disagree about `{s}`",
+                            .{try self.nameOf(binding)},
+                        );
+                    },
                 }
             }
         }

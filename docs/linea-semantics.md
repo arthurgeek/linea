@@ -5151,13 +5151,14 @@ consuming right-hand side takes the value before the destination is written.
 
 **[O-Merge]** Paths into a join must agree about the state of a Linear binding,
 and of a binding that a `defer` able to run after the join, before the binding is
-assigned again, consumes. Other bindings merge pessimistically
-(`init ⊔ moved = moved`), with any later use reported as an error. For a Linear binding, choosing `moved` would hide a leak on
-one path, while choosing `init` would permit double consumption on the other; for
-a deferred binding the same two choices skip the schedule where it should run, or
-run it where the value is gone. The disagreement is reported at the join. A path
-that leaves the join's scope keeps an answer of its own, so a value given away on
-a path that returns is not a disagreement.
+assigned again as a whole, consumes. Other bindings merge pessimistically
+(`init ⊔ moved = moved`), with any later use reported as an error. For a Linear
+binding, choosing `moved` would hide a leak on one path, while choosing `init`
+would permit double consumption on the other; for a deferred binding the same two
+choices skip the schedule where it should run, or run it where the value is gone.
+The disagreement is reported at the join, once: a later join that only inherits
+it is not reported again. A path that leaves the join's scope keeps an answer of
+its own, so a value given away on a path that returns is not a disagreement.
 
 A `defer` whose schedule has already run consumed its value where it ran, as the
 same call written there would. A `defer lock(k)` in an `if` body or a `match` arm
