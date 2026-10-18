@@ -5387,11 +5387,10 @@ const Checker = struct {
     /// variant reached with more variants than a scan is worth. Sized by those
     /// enums' variants, and freed with the checker.
     variant_names: std.AutoHashMapUnmanaged(TypeId, std.StringHashMapUnmanaged(u32)) = .empty,
-    /// How many parts of patterns were reported as matching nothing
-    /// ([T-Unreachable]): a range written backwards, or a literal outside a
-    /// refinement. A pattern refused for those alone is well formed, so the
-    /// values its `match` misses are still asked about.
-    empty_parts: u32 = 0,
+    /// What holds the pattern being checked: a `match` arm, or a binding
+    /// (`let`, `let read`, `let ... else`, a walk or a lambda's parameter).
+    /// A part that matches nothing is reported in the words of its holder.
+    pattern_site: PatternSite = .arm,
     /// The place each pattern nested inside a lending or matched pattern
     /// stands for: the place of the pattern around it and the step that
     /// selects it. Keyed by the nested pattern's node, and written only for
@@ -13276,7 +13275,7 @@ const Checker = struct {
     ///
     /// Answers whether the pattern is sound. An unsound one was reported, or
     /// sits over a value that was, and takes no part in coverage.
-    fn checkPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!bool {
+    fn checkPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!PatternCheck {
         return switch (self.ast.exprTag(pattern)) {
             .struct_pattern => self.checkStructPattern(pattern, of, at),
             .tuple_pattern => self.checkTuplePattern(pattern, of, at),
@@ -13286,29 +13285,62 @@ const Checker = struct {
                 self.checkVariantPattern(pattern, of, at),
             .name_ref => if (isCatchAll(self.ast, pattern)) blk: {
                 _ = self.record(pattern, of);
-                break :blk true;
+                break :blk .matches;
             } else self.checkVariantPattern(pattern, of, at),
             // The parser said what is wrong here; a second report about the
             // hole it left would describe the recovery, not the program.
             .err => blk: {
                 _ = self.record(pattern, .poison);
-                break :blk false;
+                break :blk .refused;
             },
             else => self.checkLiteralPattern(pattern, of),
         };
     }
 
+    /// What checking a pattern answers.
+    const PatternCheck = enum {
+        /// Well formed: it takes the values it names.
+        matches,
+        /// Well formed, but a part of it matches no value, which was
+        /// reported, so the pattern takes none. Its holder is still held to
+        /// the questions the other patterns answer.
+        matches_nothing,
+        /// Refused, or over a value that was: it takes part in no coverage
+        /// question.
+        refused,
+
+        /// The answer for a pattern of two parts: refused if either is, else
+        /// matching nothing if either does.
+        fn join(a: PatternCheck, b: PatternCheck) PatternCheck {
+            return @enumFromInt(@max(@intFromEnum(a), @intFromEnum(b)));
+        }
+    };
+
+    const PatternSite = enum { arm, binding };
+
+    /// Reports a part of a pattern that matches no value: a range written
+    /// backwards, or a literal outside a refinement. An arm no value reaches
+    /// is [T-Unreachable]; a binding's pattern must match every value, so
+    /// one matching none is [T-Refutable].
+    fn reportEmptyPart(self: *Checker, part: ExprId, label: []const u8) PatternCheck {
+        _ = switch (self.pattern_site) {
+            .arm => self.report(.t_unreachable, part, "no value reaches this arm", .{}, label),
+            .binding => self.report(.t_refutable, part, "this pattern matches no value", .{}, label),
+        };
+        return .matches_nothing;
+    }
+
     /// One part of a pattern: a binder, which takes the part's type and
     /// stands for its place, or a pattern nested there, checked in turn.
     /// `step` selects the part from the value at `at`.
-    fn checkPart(self: *Checker, part: ExprId, ty: TypeId, at: ExprId, step: Step) std.mem.Allocator.Error!bool {
+    fn checkPart(self: *Checker, part: ExprId, ty: TypeId, at: ExprId, step: Step) std.mem.Allocator.Error!PatternCheck {
         if (self.ast.partBinds(part)) {
             _ = self.record(part, ty);
             const b = self.res.targetOf(part);
-            if (b == BindingId.none) return true;
+            if (b == BindingId.none) return .matches;
             self.setBindingType(b, ty);
             if (at != ExprId.none) self.binder_places[b.index()] = .{ .of = at, .step = step };
-            return true;
+            return .matches;
         }
         if (at == ExprId.none) return self.checkPattern(part, ty, ExprId.none);
         try self.pattern_places.put(self.gpa, part, .{ .of = at, .step = step });
@@ -13340,7 +13372,7 @@ const Checker = struct {
     /// all: an arm that does not want the payload says so by not naming it,
     /// which is what a name is for. Naming more than one, or naming where
     /// there is nothing to name, is the arity rule a call already states.
-    fn checkVariantPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!bool {
+    fn checkVariantPattern(self: *Checker, pattern: ExprId, of: TypeId, at: ExprId) std.mem.Allocator.Error!PatternCheck {
         const binds = self.ast.exprTag(pattern) == .call;
         const parts: []const ExprId = if (binds) self.ast.call(pattern).args else &.{};
         const name = self.ast.tokenText(self.ast.exprMain(pattern));
@@ -13348,9 +13380,9 @@ const Checker = struct {
         if (binds) _ = self.record(self.ast.call(pattern).callee, of);
 
         const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) bool {
+            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
                 for (held) |part| checker.poisonPattern(part);
-                return false;
+                return .refused;
             }
         }.poisoned;
 
@@ -13449,11 +13481,11 @@ const Checker = struct {
             .drops_payload = parts.len == 0 and carries != 0,
         });
 
-        var sound = true;
+        var sound: PatternCheck = .matches;
         for (parts, 0..) |part, j| {
             const ty = self.builder.variantFieldType(of, k, @intCast(j));
             const step: Step = .{ .carried = .{ .variant = k, .index = @intCast(j) } };
-            if (!try self.checkPart(part, ty, at, step)) sound = false;
+            sound = sound.join(try self.checkPart(part, ty, at, step));
         }
         return sound;
     }
@@ -13461,9 +13493,9 @@ const Checker = struct {
     /// An integer literal or range: a pattern that compares. Its bounds are
     /// read through the fold table, and a range written backwards matches
     /// nothing, which is what [T-Unreachable] says of an arm no value reaches.
-    fn checkLiteralPattern(self: *Checker, pattern: ExprId, of: TypeId) std.mem.Allocator.Error!bool {
+    fn checkLiteralPattern(self: *Checker, pattern: ExprId, of: TypeId) std.mem.Allocator.Error!PatternCheck {
         _ = self.record(pattern, of);
-        if (of == .poison) return false;
+        if (of == .poison) return .refused;
         // A column whose type is already an integer compares as it is; only
         // an open one is settled here, where the literal compares it.
         const settled = if (of.bounds() != null) of else try self.receiverType(of, self.literalSite(pattern));
@@ -13478,7 +13510,7 @@ const Checker = struct {
                     .{(try self.typeName(settled))},
                     "not a literal or a range",
                 );
-                return false;
+                return .refused;
             },
         }
         if (settled.bounds() == null) {
@@ -13489,15 +13521,13 @@ const Checker = struct {
                 .{(try self.typeName(settled))},
                 "only an integer is compared in a pattern",
             );
-            return false;
+            return .refused;
         }
-        const iv = try self.intArmInterval(pattern, settled) orelse return false;
+        const iv = try self.intArmInterval(pattern, settled) orelse return .refused;
         if (iv.lo > iv.hi) {
-            _ = self.report(.t_unreachable, pattern, "no value reaches this arm", .{}, "this range matches nothing");
-            self.empty_parts += 1;
-            return false;
+            return self.reportEmptyPart(pattern, "this range matches nothing");
         }
-        return true;
+        return .matches;
     }
 
     /// A struct pattern, against the type of what it is taking apart.
@@ -13513,16 +13543,16 @@ const Checker = struct {
         pattern: ExprId,
         of: TypeId,
         at: ExprId,
-    ) std.mem.Allocator.Error!bool {
+    ) std.mem.Allocator.Error!PatternCheck {
         const p = self.ast.call(pattern);
         _ = self.record(pattern, of);
         if (p.callee != ExprId.none) _ = self.record(p.callee, of);
 
         const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) bool {
+            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
                 var i: usize = 1;
                 while (i < held.len) : (i += 2) checker.poisonPattern(held[i]);
-                return false;
+                return .refused;
             }
         }.poisoned;
         if (of == .poison) return fail(self, p.args);
@@ -13576,7 +13606,7 @@ const Checker = struct {
         defer self.gpa.free(named);
         @memset(named, false);
 
-        var sound = true;
+        var sound: PatternCheck = .matches;
         var i: usize = 0;
         while (i + 1 < p.args.len) : (i += 2) {
             const name = self.ast.tokenText(self.ast.exprMain(p.args[i]));
@@ -13591,7 +13621,7 @@ const Checker = struct {
                     "not a field of this type",
                 );
                 self.poisonPattern(p.args[i + 1]);
-                sound = false;
+                sound = .refused;
                 continue;
             };
 
@@ -13599,12 +13629,12 @@ const Checker = struct {
 
             if (named[field]) {
                 _ = self.report(.t_duplicate_field, p.args[i], "`{s}` is named twice", .{name}, "already named above");
-                sound = false;
+                sound = .refused;
             }
             named[field] = true;
 
             const step: Step = .{ .field = self.ast.tokenName(self.ast.exprMain(p.args[i])) };
-            if (!try self.checkPart(p.args[i + 1], self.builder.fieldType(of, field), at, step)) sound = false;
+            sound = sound.join(try self.checkPart(p.args[i + 1], self.builder.fieldType(of, field), at, step));
         }
 
         // Whole-struct: every field is named exactly once. There are no
@@ -13619,7 +13649,7 @@ const Checker = struct {
                 .{self.builder.fieldName(of, @intCast(f))},
                 "every field is named exactly once",
             );
-            sound = false;
+            sound = .refused;
         }
         return sound;
     }
@@ -13636,14 +13666,14 @@ const Checker = struct {
         pattern: ExprId,
         of: TypeId,
         at: ExprId,
-    ) std.mem.Allocator.Error!bool {
+    ) std.mem.Allocator.Error!PatternCheck {
         const p = self.ast.call(pattern);
         _ = self.record(pattern, of);
 
         const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) bool {
+            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
                 for (held) |part| checker.poisonPattern(part);
-                return false;
+                return .refused;
             }
         }.poisoned;
         if (of == .poison) return fail(self, p.args);
@@ -13683,13 +13713,13 @@ const Checker = struct {
 
         // The arity check above is what makes a part's position a field of
         // the declaration.
-        var sound = true;
+        var sound: PatternCheck = .matches;
         for (p.args, 0..) |part, i| {
             if (self.ast.partBinds(part)) {
                 try self.field_names.put(self.gpa, self.ast.exprMain(part), .{ .receiver = settled, .field = @enumFromInt(i) });
             }
             const step: Step = .{ .field = self.ast.declFieldName(instance.?.decl, i) };
-            if (!try self.checkPart(part, self.builder.fieldType(settled, @intCast(i)), at, step)) sound = false;
+            sound = sound.join(try self.checkPart(part, self.builder.fieldType(settled, @intCast(i)), at, step));
         }
         return sound;
     }
@@ -13738,15 +13768,15 @@ const Checker = struct {
         pattern: ExprId,
         of: TypeId,
         at: ExprId,
-    ) std.mem.Allocator.Error!bool {
+    ) std.mem.Allocator.Error!PatternCheck {
         const p = self.ast.call(pattern);
         _ = self.record(pattern, of);
         _ = self.record(p.callee, of);
 
         const fail = struct {
-            fn poisoned(checker: *Checker, held: []const ExprId) bool {
+            fn poisoned(checker: *Checker, held: []const ExprId) PatternCheck {
                 for (held) |part| checker.poisonPattern(part);
-                return false;
+                return .refused;
             }
         }.poisoned;
         if (of == .poison) return fail(self, p.args);
@@ -13801,7 +13831,8 @@ const Checker = struct {
             return fail(self, p.args);
         }
 
-        if (!try self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) })) return false;
+        const base_check = try self.checkPart(p.args[0], self.builder.baseOf(of), at, .{ .field = self.ast.tokenName(head_tok) });
+        if (base_check != .matches) return base_check;
 
         // A literal or range outside the refinement names a value the base
         // never holds, so no value reaches the arm.
@@ -13810,20 +13841,12 @@ const Checker = struct {
             else => false,
         };
         if (compares and self.builder.isRefined(of)) {
-            const r = self.refinedValues(of) orelse return true;
+            const r = self.refinedValues(of) orelse return .matches;
             if (self.foldedInterval(p.args[0])) |iv| if (iv.hi < r.lo or iv.lo > r.hi) {
-                _ = self.report(
-                    .t_unreachable,
-                    p.args[0],
-                    "no value reaches this arm",
-                    .{},
-                    try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}),
-                );
-                self.empty_parts += 1;
-                return false;
+                return self.reportEmptyPart(p.args[0], try std.fmt.allocPrint(self.sink.arena, "no `{s}` holds this value", .{head}));
             };
         }
-        return true;
+        return .matches;
     }
 
     /// The values a refined newtype `t` admits, as its patterns are judged:
@@ -14278,12 +14301,15 @@ const Checker = struct {
             // value's own enum -- a pattern that may not match, which
             // [T-Refutable] says once it is checked. Any other spelling is
             // the newtype check's to refuse.
-            const sound = if (self.ast.exprTag(d.pattern) == .call and
+            const saved_site = self.pattern_site;
+            self.pattern_site = .binding;
+            const checked = if (self.ast.exprTag(d.pattern) == .call and
                 (try self.variantNamed(of, self.ast.tokenText(self.ast.exprMain(d.pattern)))) == null)
                 try self.checkNewtypePattern(d.pattern, of, taken)
             else
                 try self.checkPattern(d.pattern, of, taken);
-            if (sound) try self.refuseRefutable(d.pattern, of);
+            self.pattern_site = saved_site;
+            if (checked == .matches) try self.refuseRefutable(d.pattern, of);
         }
     }
 
@@ -16544,7 +16570,11 @@ const Checker = struct {
     /// bindings of their own, which is all its overlap rules ask of them.
     fn checkParameterPattern(self: *Checker, param: node.Param, ty: TypeId) std.mem.Allocator.Error!void {
         _ = self.record(param.argument, ty);
-        if (try self.checkTuplePattern(param.pattern, ty, ExprId.none)) try self.refuseRefutable(param.pattern, ty);
+        const saved_site = self.pattern_site;
+        self.pattern_site = .binding;
+        const checked = try self.checkTuplePattern(param.pattern, ty, ExprId.none);
+        self.pattern_site = saved_site;
+        if (checked == .matches) try self.refuseRefutable(param.pattern, ty);
     }
 
     test checkParameterPattern {
@@ -16604,7 +16634,11 @@ const Checker = struct {
             try self.pattern_places.put(self.gpa, binder, p);
             at = binder;
         }
-        if (try self.checkTuplePattern(binder, element, at)) try self.refuseRefutable(binder, element);
+        const saved_site = self.pattern_site;
+        self.pattern_site = .binding;
+        const checked = try self.checkTuplePattern(binder, element, at);
+        self.pattern_site = saved_site;
+        if (checked == .matches) try self.refuseRefutable(binder, element);
     }
 
     /// Lends the places a lending walk's binders name for the extent of its
@@ -31103,25 +31137,25 @@ const Checker = struct {
             // A pattern the parser could not read was reported where it was
             // written. It takes nothing, so it leaves the cover where it was
             // and makes no arm after it unreachable.
-            const errors_before = self.sink.error_count;
-            const empty_before = self.empty_parts;
-            const sound = if (self.ast.exprTag(pattern) == .err) blk: {
+            const checked: PatternCheck = if (self.ast.exprTag(pattern) == .err) blk: {
                 _ = self.record(pattern, .poison);
-                break :blk false;
+                break :blk .refused;
             } else try self.checkPattern(pattern, scrutinee, m.callee);
-            // A pattern whose only mistakes are parts matching nothing takes
-            // no value, so it adds no row; the cover the other arms leave is
-            // still a question of its own.
-            const only_empty = self.empty_parts > empty_before and
-                self.sink.error_count - errors_before == self.empty_parts - empty_before;
 
-            if (!sound) {
-                if (self.ast.exprTag(pattern) != .err and !only_empty) poisoned = true;
-            } else if (scrutinee != .poison) {
-                const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
-                row[0] = .{ .pattern = try self.coveragePattern(coverage.arena, pattern, scrutinee), .ty = scrutinee };
-                try rows.append(coverage.arena, row);
-                try row_patterns.append(coverage.arena, pattern);
+            switch (checked) {
+                .matches => if (scrutinee != .poison) {
+                    const row = try coverage.arena.alloc(PatternCoverage.Cell, 1);
+                    row[0] = .{ .pattern = try self.coveragePattern(coverage.arena, pattern, scrutinee), .ty = scrutinee };
+                    try rows.append(coverage.arena, row);
+                    try row_patterns.append(coverage.arena, pattern);
+                },
+                // A pattern a part of which matches nothing takes no value,
+                // so it adds no row; the cover the other arms leave is still
+                // a question of its own.
+                .matches_nothing => {},
+                .refused => if (self.ast.exprTag(pattern) != .err) {
+                    poisoned = true;
+                },
             }
 
             if (try self.matchArmBody(id, &arms, pattern, m.args[i + 1], lends)) |body| {

@@ -4286,7 +4286,10 @@ A pattern nested inside the head is held to the same rule, so
 binding runs when its `Option` or `Result` initializer fails, never when a part
 of the pattern does ([ADR 0224](adr/0224-a-pattern-nests-wherever-a-binder-stands.md)).
 The diagnostic names a value the pattern misses, at the part of the pattern
-that first leaves it out.
+that first leaves it out. A part that matches no value at all, a literal
+outside a refinement or a range written backwards, is reported here as well,
+as "this pattern matches no value"; in a `match` arm the same part is
+[T-Unreachable].
 
 **[T-Refine]** Every violation of a newtype's refinement contract is reported
 under this rule. An empty range is rejected at its declaration:
