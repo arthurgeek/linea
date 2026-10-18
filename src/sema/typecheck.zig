@@ -31339,11 +31339,7 @@ const Checker = struct {
             return self.record(id, .unit);
         }
 
-        const otherwise = try self.checkResult(id, c.otherwise, expected orelse Expected{
-            .ty = then,
-            .at = self.locOf(self.resultOf(c.then)),
-            .reason = .arm,
-        });
+        const otherwise = try self.checkResult(id, c.otherwise, expected orelse self.armExpectation(then, c.then));
 
         if (then == .poison or otherwise == .poison) return self.record(id, .poison);
         if (condition == .never) return self.expect(id, .never, expected);
@@ -31380,11 +31376,7 @@ const Checker = struct {
     ) std.mem.Allocator.Error!TypeId {
         const otherwise = try self.checkResult(id, c.otherwise, null);
 
-        const then = try self.checkResult(id, c.then, Expected{
-            .ty = otherwise,
-            .at = self.locOf(self.resultOf(c.otherwise)),
-            .reason = .arm,
-        });
+        const then = try self.checkResult(id, c.then, self.armExpectation(otherwise, c.otherwise));
 
         if (then == .poison or otherwise == .poison) return self.record(id, .poison);
 
@@ -31404,6 +31396,14 @@ const Checker = struct {
         };
 
         return self.record(id, answer);
+    }
+
+    /// What an arm that was checked first asks of the other. An arm that never
+    /// completes, a `return` or a `panic`, gives the construct no value, so it
+    /// asks nothing and the other arm's type is the construct's.
+    fn armExpectation(self: *const Checker, settled: TypeId, arm: ExprId) ?Expected {
+        if (settled == .never) return null;
+        return .{ .ty = settled, .at = self.locOf(self.resultOf(arm)), .reason = .arm };
     }
 
     /// The value type of two alternatives that may not both complete.
