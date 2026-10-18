@@ -60,8 +60,10 @@ pub const Kind = union(enum) {
     /// Nothing a pattern names: only a wildcard matches it.
     opaque_,
     /// A type whose declaration was refused, so which values it holds is
-    /// not known. A column of it ends the check with `error.Refused`,
-    /// since any answer about its rows would rest on values nobody declared.
+    /// not known. A column of it is matched only by a wildcard, as an opaque
+    /// type's is; a row naming a value there ends the check with
+    /// `error.Refused`, since any answer about it would rest on values nobody
+    /// declared.
     refused,
 };
 
@@ -330,7 +332,14 @@ pub fn Coverage(comptime Context: type) type {
                 },
                 .integer => |bounds| try self.integers(&out, rows, ty, bounds),
                 .opaque_ => try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }})),
-                .refused => return error.Refused,
+                // A wildcard takes any value whatever the type holds, so a
+                // column every row leaves to one is split as an opaque type's
+                // is, and the other columns are still judged. A row naming a
+                // value there asks what nobody declared.
+                .refused => {
+                    for (rows) |r| if (r.cells[0].pattern.* != .wild) return error.Refused;
+                    try out.append(self.arena, try self.rest(rows, ty, &.{.{ .ty = ty, .shape = .wild }}));
+                },
             }
             return out.items;
         }
@@ -761,15 +770,18 @@ test "witnesses are ordered by variant, then by what each part holds" {
     try testing.expectEqual(@as(u32, 1), found[2].shape.variant.index);
 }
 
-test "a column of a refused type answers nothing" {
+test "a refused type is taken by a wildcard, and a value named under it answers nothing" {
     var state = std.heap.ArenaAllocator.init(testing.allocator);
     defer state.deinit();
     const arena = state.allocator();
     var c: TestCoverage = .{ .context = .{}, .arena = arena };
 
-    const rows = [_]TestCoverage.Row{try rowOf(arena, &wild, .refused)};
-    try testing.expectError(error.Refused, c.check(&rows, .refused));
-    try testing.expectError(error.Refused, c.check(&.{}, .refused));
+    try testing.expect(try firstMissing(&c, &.{}, .refused) != null);
+    const covered = [_]TestCoverage.Row{try rowOf(arena, &wild, .refused)};
+    try testing.expect(try firstMissing(&c, &covered, .refused) == null);
+
+    const named = [_]TestCoverage.Row{try rowOf(arena, &none, .refused)};
+    try testing.expectError(error.Refused, c.check(&named, .refused));
 }
 
 test "the cells a matrix with no overlapping wildcards builds grow with its rows" {
