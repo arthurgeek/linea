@@ -215,6 +215,16 @@ pub const RunOutput = struct {
     }
 };
 
+/// A path under `scratch_root` that no other build names: `prefix`, a dash and
+/// sixty-four random bits in hex. A clock reading is not unique, since two
+/// builds that start in the same tick would write and then delete each other's
+/// intermediates, and a sharded CI job or a watch loop starts builds together.
+pub fn uniqueTarget(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, prefix: []const u8) std.mem.Allocator.Error![]const u8 {
+    var random: u64 = undefined;
+    io.random(@ptrCast(&random));
+    return std.fmt.allocPrint(gpa, "{s}/{s}-{s}", .{ scratch_root, prefix, std.fmt.hex(random) });
+}
+
 /// The files a build writes between the module and the executable, named in
 /// one place from the executable's own name. One routine, because whoever
 /// removes them must spell them the way the build did -- a cleanup keeping an
@@ -694,6 +704,22 @@ test "overlapping runs keep their own directories under the scratch root" {
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, first.directory, .{}));
     for ([_][]const u8{ second.path, second_mid.ir, second_mid.lowered, second_mid.assembly }) |path| {
         try std.Io.Dir.cwd().access(io, path, .{});
+    }
+}
+
+test "a target name ends in sixteen hex digits, and a thousand of them are all distinct" {
+    const gpa = testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(gpa);
+    for (0..1000) |_| {
+        const name = try uniqueTarget(arena.allocator(), testing.io, "/tmp", "linea-test");
+        try testing.expect(std.mem.startsWith(u8, name, "/tmp/linea-test-"));
+        const digits = name["/tmp/linea-test-".len..];
+        try testing.expectEqual(@as(usize, 16), digits.len);
+        for (digits) |c| try testing.expect(std.ascii.isHex(c));
+        try testing.expect(!(try seen.getOrPut(gpa, name)).found_existing);
     }
 }
 

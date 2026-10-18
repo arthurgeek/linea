@@ -3206,6 +3206,27 @@ test "a manifest outside the workspace is not the opened file's program" {
     try testing.expectEqualStrings(opened, entry);
 }
 
+test "a manifest's source key narrows the files a root reaches" {
+    // `reachOf` in `build/source.zig` applies this rule to the examples with the
+    // same manifest text; the two must agree.
+    const gpa = testing.allocator;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "src");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "linea.json", .data = "{\"source\": \"./src/\"}" });
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(root);
+    const named = try sourceRootOf(gpa, testing.io, root);
+    defer gpa.free(named);
+    const settled = try canonical(gpa, named);
+    defer gpa.free(settled);
+    const expected = try std.fmt.allocPrint(gpa, "{s}/src", .{root});
+    defer gpa.free(expected);
+    try testing.expectEqualStrings(expected, settled);
+}
+
 test "a source root written as this directory names the files the walk found" {
     const gpa = testing.allocator;
 

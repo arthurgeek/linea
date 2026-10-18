@@ -1860,3 +1860,191 @@ fn sortedKeys(gpa: std.mem.Allocator, keys: []const []const u8) []const []const 
     }.less);
     return copy;
 }
+
+/// One file or directory beneath `examples/`, by path relative to it.
+pub const ExampleEntry = struct {
+    path: []const u8,
+    directory: bool,
+    /// A manifest's text; empty for everything else.
+    text: []const u8 = "",
+};
+
+pub const ExampleLayout = union(enum) {
+    entries: []const ExampleEntry,
+    /// A symlink, by path. `linea` does not follow one inside a root, so
+    /// whether a linked directory is a root is a question the walk cannot
+    /// settle, and the gate refuses to guess.
+    symlink: []const u8,
+};
+
+/// Every file and directory beneath `sub_path`, ordered by path.
+///
+/// `iterate` is what makes the walk legal: a directory opened without it can
+/// still be iterated on some hosts and not on others.
+pub fn exampleLayout(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    root: std.Io.Dir,
+    sub_path: []const u8,
+) !ExampleLayout {
+    var dir = try root.openDir(io, sub_path, .{ .iterate = true });
+    defer dir.close(io);
+
+    var walker = try dir.walk(gpa);
+    defer walker.deinit();
+
+    var found: std.ArrayList(ExampleEntry) = .empty;
+    while (try walker.next(io)) |entry| {
+        const path = try gpa.dupe(u8, entry.path);
+        switch (entry.kind) {
+            .sym_link => return .{ .symlink = path },
+            .directory => try found.append(gpa, .{ .path = path, .directory = true }),
+            .file => {
+                const text: []const u8 = if (std.mem.eql(u8, entry.basename, manifest_name))
+                    try dir.readFileAlloc(io, entry.path, gpa, .limited(1 << 20))
+                else
+                    "";
+                try found.append(gpa, .{ .path = path, .directory = false, .text = text });
+            },
+            else => {},
+        }
+    }
+    std.mem.sort(ExampleEntry, found.items, {}, struct {
+        fn less(_: void, a: ExampleEntry, b: ExampleEntry) bool {
+            return std.mem.lessThan(u8, a.path, b.path);
+        }
+    }.less);
+    return .{ .entries = found.items };
+}
+
+const manifest_name = "linea.json";
+
+/// Which paths to hand to `linea test`, relative to `examples/`: each `.lin`
+/// file directly in it, each directory directly in it (an example is a root
+/// with or without a manifest), and each deeper directory holding a
+/// `linea.json`, which is a library or application of its own.
+///
+/// `linea test` runs only the tests of the root it names (ADR 0229), so a
+/// nested library needs its own run. Which files a root reaches, and which of
+/// them declare tests, is the loader's answer and is read from the run.
+pub fn exampleRoots(gpa: std.mem.Allocator, entries: []const ExampleEntry) []const []const u8 {
+    var roots: std.StringArrayHashMapUnmanaged(void) = .empty;
+    for (entries) |entry| {
+        const nested = std.mem.indexOfScalar(u8, entry.path, '/') != null;
+        if (entry.directory) {
+            if (!nested) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
+        }
+        if (!nested) {
+            if (std.mem.endsWith(u8, entry.path, ".lin")) roots.put(gpa, entry.path, {}) catch @panic("out of memory");
+            continue;
+        }
+        const directory = std.fs.path.dirnamePosix(entry.path).?;
+        if (std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) {
+            roots.put(gpa, directory, {}) catch @panic("out of memory");
+        }
+    }
+    return sortedKeys(gpa, roots.keys());
+}
+
+/// How many tests a `linea test` run reported, from its closing
+/// `N passed, M failed` line; null when the output ends otherwise.
+pub fn testsReported(output: []const u8) ?usize {
+    const trimmed = std.mem.trimEnd(u8, output, "\n");
+    const line = trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..];
+    var words = std.mem.tokenizeAny(u8, line, " ,\n");
+    const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;
+    const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
+    if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
+    return passed + failed;
+}
+
+/// What `unreachedSources` found wrong beneath `examples/`.
+pub const Unreached = struct {
+    /// `.lin` files no root's run would load.
+    files: []const []const u8,
+    /// Manifests whose `source` cannot be applied, each as a sentence naming it.
+    problems: []const []const u8,
+};
+
+/// Whether a manifest's `source` names a directory inside the one holding the
+/// manifest: not absolute, and not climbing past it once `.` and `..` are
+/// resolved. The rule is `sourceStaysInside` in `src/driver/loader.zig`, which
+/// build/ cannot import; its test "a manifest's source stays inside the
+/// directory holding it" and the case "a source that leaves its root, and a
+/// manifest that is not JSON, are named" in `build/source_test.zig` use the
+/// same spellings.
+fn staysInside(gpa: std.mem.Allocator, named: []const u8) bool {
+    if (named.len > 0 and named[0] == '/') return false;
+    const resolved = std.fs.path.resolvePosix(gpa, &.{named}) catch @panic("out of memory");
+    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
+}
+
+/// The directory, relative to `examples/`, whose files `root` reaches: the
+/// root itself, or its manifest's `source` directory. A manifest that cannot
+/// be read, or whose `source` leaves the root, is a problem and has no reach.
+///
+/// This is the rule `sourceRootOf` in `src/driver/loader.zig` applies to a
+/// manifest, spelled by joining and removing `.` segments. The compiler cannot
+/// be imported here, so the loader's test "a manifest's source key narrows the
+/// files a root reaches" and the case "a source no root reaches belongs to no
+/// example root" in `build/source_test.zig` use the same manifest text and fail
+/// when the two disagree.
+fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry, problems: *std.ArrayList([]const u8)) ?[]const u8 {
+    const manifest = for (entries) |entry| {
+        if (entry.directory or !std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) continue;
+        const directory = std.fs.path.dirnamePosix(entry.path) orelse continue;
+        if (std.mem.eql(u8, directory, root)) break entry;
+    } else null;
+    var named: []const u8 = ".";
+    if (manifest) |found| {
+        const Written = struct { source: ?[]const u8 = null };
+        const parsed = std.json.parseFromSliceLeaky(Written, gpa, found.text, .{ .ignore_unknown_fields = true }) catch {
+            problems.append(gpa, std.fmt.allocPrint(gpa, "{s} is not valid JSON", .{found.path}) catch @panic("out of memory")) catch @panic("out of memory");
+            return null;
+        };
+        if (parsed.source) |source| if (source.len > 0) {
+            if (!staysInside(gpa, source)) {
+                problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", outside its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
+                return null;
+            }
+            named = source;
+        };
+    }
+    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named }) catch @panic("out of memory");
+    return resolved[1..];
+}
+
+/// The `.lin` files beneath `examples/` that no root reaches, so that no run of
+/// `linea test` would load them, and the manifests whose `source` cannot be
+/// applied. A file belongs to the deepest root enclosing it, and is reached
+/// when it lies inside that root's source directory.
+pub fn unreachedSources(gpa: std.mem.Allocator, entries: []const ExampleEntry, roots: []const []const u8) Unreached {
+    var problems: std.ArrayList([]const u8) = .empty;
+    const reaches = gpa.alloc(?[]const u8, roots.len) catch @panic("out of memory");
+    for (roots, reaches) |root, *reach| {
+        reach.* = if (std.mem.endsWith(u8, root, ".lin")) root else reachOf(gpa, root, entries, &problems);
+    }
+    var unreached: std.ArrayList([]const u8) = .empty;
+    for (entries) |entry| {
+        if (entry.directory or !std.mem.endsWith(u8, entry.path, ".lin")) continue;
+        var owner: ?usize = null;
+        for (roots, 0..) |root, at| {
+            const encloses = std.mem.eql(u8, entry.path, root) or
+                (entry.path.len > root.len and entry.path[root.len] == '/' and std.mem.startsWith(u8, entry.path, root));
+            if (encloses and (owner == null or root.len > roots[owner.?].len)) owner = at;
+        }
+        const at = owner orelse {
+            unreached.append(gpa, entry.path) catch @panic("out of memory");
+            continue;
+        };
+        if (std.mem.eql(u8, entry.path, roots[at])) continue;
+        // A root whose manifest is refused reports that, not its files.
+        const reach = reaches[at] orelse continue;
+        const inside = reach.len == 0 or
+            (entry.path.len > reach.len and entry.path[reach.len] == '/' and std.mem.startsWith(u8, entry.path, reach));
+        if (!inside) unreached.append(gpa, entry.path) catch @panic("out of memory");
+    }
+    return .{ .files = unreached.items, .problems = problems.items };
+}

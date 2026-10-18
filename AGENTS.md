@@ -42,6 +42,7 @@ zig fmt --check build.zig build src runtime  # what CI checks first
 zig build sweep -Drelease      # every cost dimension
 zig build sweep -Drelease -Dsweep-filter=<substring>  # one cost dimension
 zig build guide                # compile the guide's programs, compare pasted output
+zig build example-tests        # linea test on every root under examples/, nested libraries included
 ```
 
 `zig build test` does not check formatting, so run `zig fmt --check` as well

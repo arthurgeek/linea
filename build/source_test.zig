@@ -815,6 +815,161 @@ test "the source of a tree is every zig file beneath it, in one order" {
     try testing.expectEqualStrings("const b = 2;\n", files[1].text);
 }
 
+test "example roots: every example and every nested manifest is a root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const found = source.exampleRoots(gpa, &.{
+        .{ .path = "README.md", .directory = false },
+        .{ .path = "hello.lin", .directory = false },
+        .{ .path = "discounts", .directory = true },
+        .{ .path = "discounts/linea.json", .directory = false },
+        .{ .path = "discounts/main.lin", .directory = false },
+        .{ .path = "discounts/mail", .directory = true },
+        .{ .path = "discounts/mail/send.lin", .directory = false },
+        .{ .path = "guest-book", .directory = true },
+        .{ .path = "guest-book/linea.json", .directory = false },
+        .{ .path = "guest-book/sqlite", .directory = true },
+        .{ .path = "guest-book/sqlite/linea.json", .directory = false },
+        .{ .path = "guest-book/sqlite/deep", .directory = true },
+        .{ .path = "loose", .directory = true },
+        .{ .path = "loose/main.lin", .directory = false },
+    });
+    try testing.expectEqual(@as(usize, 5), found.len);
+    try testing.expectEqualStrings("discounts", found[0]);
+    try testing.expectEqualStrings("guest-book", found[1]);
+    try testing.expectEqualStrings("guest-book/sqlite", found[2]);
+    try testing.expectEqualStrings("hello.lin", found[3]);
+    try testing.expectEqualStrings("loose", found[4]);
+}
+
+test "example roots: a symlink under examples is refused by name" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "elsewhere");
+    try tmp.dir.createDirPath(io, "examples");
+    try tmp.dir.writeFile(io, .{ .sub_path = "elsewhere/main.lin", .data = "fn main() {}\n" });
+    try tmp.dir.symLink(io, "../elsewhere", "examples/linked", .{ .is_directory = true });
+
+    const layout = try source.exampleLayout(gpa, io, tmp.dir, "examples");
+    try testing.expectEqualStrings("linked", layout.symlink);
+}
+
+test "example roots: the walk lists nested directories and files and nothing else" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "examples/guest-book/sqlite");
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/hello.lin", .data = "fn main() {}\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "examples/guest-book/sqlite/linea.json", .data = "{}" });
+
+    const layout = try source.exampleLayout(gpa, io, tmp.dir, "examples");
+    const roots = source.exampleRoots(gpa, layout.entries);
+    try testing.expectEqual(@as(usize, 3), roots.len);
+    try testing.expectEqualStrings("guest-book", roots[0]);
+    try testing.expectEqualStrings("guest-book/sqlite", roots[1]);
+    try testing.expectEqualStrings("hello.lin", roots[2]);
+}
+
+test "example roots: a source no root reaches belongs to no example root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The same manifest text and directories as the loader's test "a manifest's
+    // source key narrows the files a root reaches", which must agree.
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "hello.lin", .directory = false },
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"./src/\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/src/deep/part.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+        .{ .path = "app/lib", .directory = true },
+        .{ .path = "app/lib/linea.json", .directory = false, .text = "{}" },
+        .{ .path = "app/lib/main.lin", .directory = false },
+        .{ .path = "flat", .directory = true },
+        .{ .path = "flat/main.lin", .directory = false },
+        .{ .path = "flat/mail/send.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a file named like a manifest is not the manifest" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/alinea.json", .directory = false },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"src\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a source that leaves its root, and a manifest that is not JSON, are named" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The spellings of the loader's test "a manifest's source stays inside the
+    // directory holding it".
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "up", .directory = true },
+        .{ .path = "up/linea.json", .directory = false, .text = "{\"source\": \"../d\"}" },
+        .{ .path = "up/main.lin", .directory = false },
+        .{ .path = "climbs", .directory = true },
+        .{ .path = "climbs/linea.json", .directory = false, .text = "{\"source\": \"src/../../x\"}" },
+        .{ .path = "absolute", .directory = true },
+        .{ .path = "absolute/linea.json", .directory = false, .text = "{\"source\": \"/tmp\"}" },
+        .{ .path = "inside", .directory = true },
+        .{ .path = "inside/linea.json", .directory = false, .text = "{\"source\": \"src/../lib\"}" },
+        .{ .path = "inside/lib/main.lin", .directory = false },
+        .{ .path = "broken", .directory = true },
+        .{ .path = "broken/linea.json", .directory = false, .text = "{\"source\": " },
+        .{ .path = "broken/main.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const found = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), found.files.len);
+    try testing.expectEqual(@as(usize, 4), found.problems.len);
+    try testing.expectEqualStrings("absolute/linea.json names a source, \"/tmp\", outside its directory", found.problems[0]);
+    try testing.expectEqualStrings("broken/linea.json is not valid JSON", found.problems[1]);
+    try testing.expectEqualStrings("climbs/linea.json names a source, \"src/../../x\", outside its directory", found.problems[2]);
+    try testing.expectEqualStrings("up/linea.json names a source, \"../d\", outside its directory", found.problems[3]);
+}
+
+test "example roots: the tests a run reported are read from its closing line" {
+    try testing.expectEqual(@as(?usize, 3), source.testsReported("ok    a\n\n3 passed, 0 failed\n"));
+    try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));
+    try testing.expectEqual(@as(?usize, 5), source.testsReported("x\n4 passed, 1 failed"));
+    try testing.expectEqual(@as(?usize, null), source.testsReported("error[N-Undefined]: no such name\n"));
+    try testing.expectEqual(@as(?usize, null), source.testsReported(""));
+}
+
 test "the quoted strings of a text are read in order" {
     const gpa = testing.allocator;
     const rows =
