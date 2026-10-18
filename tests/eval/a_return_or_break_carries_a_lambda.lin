@@ -1,0 +1,16 @@
+fn main() -> UInt8 {
+    // A lambda written straight after `return` or `break` is the value it
+    // carries, as any other expression would be.
+    let make = || {
+        return |y: UInt8| y + 1
+    }
+    let increment = make()
+    let double = loop {
+        break |x: UInt8| x * 2
+    }
+    if increment(1) == 2 && double(3) == 6 {
+        0
+    } else {
+        1
+    }
+}

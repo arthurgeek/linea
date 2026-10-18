@@ -5915,7 +5915,10 @@ const Parser = struct {
             return self.builder.addLiteral(.continue_, start, self.rangeFrom(start));
         }
 
-        const value = if (inExprFollow(self.cursor.peek()) or self.cursor.at(.comma) or self.cursor.precededByNewline())
+        // A `|` here opens a lambda the jump carries, not the end of a
+        // parameter list: no parameter list holds a jump before its close.
+        const ends = inExprFollow(self.cursor.peek()) and !self.cursor.at(.pipe);
+        const value = if (ends or self.cursor.at(.comma) or self.cursor.precededByNewline())
             ExprId.none
         else
             try self.parseExpr(1);
