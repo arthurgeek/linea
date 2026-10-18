@@ -1,0 +1,17 @@
+error[T-Mismatch]: expected `UInt8`, found `()`
+ --> tests/recovery/a_jump_in_a_parameter_default_ends_at_the_pipe.lin:2:25
+  |
+1 | fn returned() -> UInt8 {
+  |                  ----- expected because of this return type
+2 |     let f = |x: UInt8 = return| x
+  |                         ^^^^^^ this `return` carries no value
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/recovery/a_jump_in_a_parameter_default_ends_at_the_pipe.lin:2:25
+  |
+2 |     let f = |x: UInt8 = return| x
+  |                         ^^^^^^ this is not a constant
+error[T-Default]: a default is worked out where the parameter is declared, so it is a constant expression
+ --> tests/recovery/a_jump_in_a_parameter_default_ends_at_the_pipe.lin:8:29
+  |
+8 |         let f = |x: UInt8 = break| x
+  |                             ^^^^^ this is not a constant
