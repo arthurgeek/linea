@@ -906,8 +906,60 @@ test "example roots: a source no root reaches belongs to no example root" {
     };
     const roots = source.exampleRoots(gpa, &entries);
     const stray = source.unreachedSources(gpa, &entries, roots);
-    try testing.expectEqual(@as(usize, 1), stray.len);
-    try testing.expectEqualStrings("app/stray.lin", stray[0]);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a file named like a manifest is not the manifest" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "app", .directory = true },
+        .{ .path = "app/alinea.json", .directory = false },
+        .{ .path = "app/linea.json", .directory = false, .text = "{\"source\": \"src\"}" },
+        .{ .path = "app/src/main.lin", .directory = false },
+        .{ .path = "app/stray.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const stray = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), stray.problems.len);
+    try testing.expectEqual(@as(usize, 1), stray.files.len);
+    try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
+}
+
+test "example roots: a source that leaves its root, and a manifest that is not JSON, are named" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // The spellings of the loader's test "a manifest's source stays inside the
+    // directory holding it".
+    const entries = [_]source.ExampleEntry{
+        .{ .path = "up", .directory = true },
+        .{ .path = "up/linea.json", .directory = false, .text = "{\"source\": \"../d\"}" },
+        .{ .path = "up/main.lin", .directory = false },
+        .{ .path = "climbs", .directory = true },
+        .{ .path = "climbs/linea.json", .directory = false, .text = "{\"source\": \"src/../../x\"}" },
+        .{ .path = "absolute", .directory = true },
+        .{ .path = "absolute/linea.json", .directory = false, .text = "{\"source\": \"/tmp\"}" },
+        .{ .path = "inside", .directory = true },
+        .{ .path = "inside/linea.json", .directory = false, .text = "{\"source\": \"src/../lib\"}" },
+        .{ .path = "inside/lib/main.lin", .directory = false },
+        .{ .path = "broken", .directory = true },
+        .{ .path = "broken/linea.json", .directory = false, .text = "{\"source\": " },
+        .{ .path = "broken/main.lin", .directory = false },
+    };
+    const roots = source.exampleRoots(gpa, &entries);
+    const found = source.unreachedSources(gpa, &entries, roots);
+    try testing.expectEqual(@as(usize, 0), found.files.len);
+    try testing.expectEqual(@as(usize, 4), found.problems.len);
+    try testing.expectEqualStrings("absolute/linea.json names a source, \"/tmp\", outside its directory", found.problems[0]);
+    try testing.expectEqualStrings("broken/linea.json is not valid JSON", found.problems[1]);
+    try testing.expectEqualStrings("climbs/linea.json names a source, \"src/../../x\", outside its directory", found.problems[2]);
+    try testing.expectEqualStrings("up/linea.json names a source, \"../d\", outside its directory", found.problems[3]);
 }
 
 test "example roots: the tests a run reported are read from its closing line" {

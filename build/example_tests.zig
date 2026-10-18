@@ -77,7 +77,8 @@ pub fn main(init: std.process.Init) !u8 {
     };
     const roots = source.exampleRoots(gpa, entries);
     const unreached = source.unreachedSources(gpa, entries, roots);
-    for (unreached) |path| std.debug.print("{s}/{s} belongs to no example root\n", .{ args[1], path });
+    for (unreached.files) |path| std.debug.print("{s}/{s} belongs to no example root\n", .{ args[1], path });
+    for (unreached.problems) |problem| std.debug.print("{s}/{s}\n", .{ args[1], problem });
     const outcomes = try gpa.alloc(Outcome, roots.len);
     @memset(outcomes, .{});
     try pool.forEach(gpa, roots.len, wanted, Walk{
@@ -100,7 +101,7 @@ pub fn main(init: std.process.Init) !u8 {
         std.debug.print(">>> {s}: FAILED\n{s}\n", .{ root, failure });
     }
     std.debug.print("examples: {d} root(s), {d} test(s), {d} root(s) failed\n", .{ roots.len, tests, failed });
-    if (unreached.len > 0) return 1;
+    if (unreached.files.len + unreached.problems.len > 0) return 1;
     if (tests == 0) {
         std.debug.print("no example root ran a test\n", .{});
         return 1;

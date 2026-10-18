@@ -731,6 +731,7 @@ pub fn run(process: std.process.Init) !u8 {
                         // anything the user wrote, and two dumps at once do
                         // not overwrite each other.
                         const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-asm");
+                        defer gpa.free(target);
                         const mid = try toolchain.Intermediates.of(gpa, target);
                         defer mid.deinit(gpa);
                         const asm_path = try std.fmt.allocPrint(gpa, "{s}.s", .{target});
@@ -789,6 +790,7 @@ pub fn run(process: std.process.Init) !u8 {
                             // a watch loop and a sharded CI job are both two at
                             // once.
                             const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-test");
+                            defer gpa.free(target);
 
                             const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,

@@ -707,14 +707,20 @@ test "overlapping runs keep their own directories under the scratch root" {
     }
 }
 
-test "builds started in the same clock tick get different target names" {
+test "a target name ends in sixteen hex digits, and a thousand of them are all distinct" {
     const gpa = testing.allocator;
-    const first = try uniqueTarget(gpa, testing.io, "/tmp", "linea-test");
-    defer gpa.free(first);
-    const second = try uniqueTarget(gpa, testing.io, "/tmp", "linea-test");
-    defer gpa.free(second);
-    try testing.expect(std.mem.startsWith(u8, first, "/tmp/linea-test-"));
-    try testing.expect(!std.mem.eql(u8, first, second));
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    defer seen.deinit(gpa);
+    for (0..1000) |_| {
+        const name = try uniqueTarget(arena.allocator(), testing.io, "/tmp", "linea-test");
+        try testing.expect(std.mem.startsWith(u8, name, "/tmp/linea-test-"));
+        const digits = name["/tmp/linea-test-".len..];
+        try testing.expectEqual(@as(usize, 16), digits.len);
+        for (digits) |c| try testing.expect(std.ascii.isHex(c));
+        try testing.expect(!(try seen.getOrPut(gpa, name)).found_existing);
+    }
 }
 
 test "a run's directory is deleted when the process that made it ends" {

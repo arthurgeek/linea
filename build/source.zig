@@ -1960,8 +1960,30 @@ pub fn testsReported(output: []const u8) ?usize {
     return passed + failed;
 }
 
+/// What `unreachedSources` found wrong beneath `examples/`.
+pub const Unreached = struct {
+    /// `.lin` files no root's run would load.
+    files: []const []const u8,
+    /// Manifests whose `source` cannot be applied, each as a sentence naming it.
+    problems: []const []const u8,
+};
+
+/// Whether a manifest's `source` names a directory inside the one holding the
+/// manifest: not absolute, and not climbing past it once `.` and `..` are
+/// resolved. The rule is `sourceStaysInside` in `src/driver/loader.zig`, which
+/// build/ cannot import; its test "a manifest's source stays inside the
+/// directory holding it" and the case "a source that leaves its root, and a
+/// manifest that is not JSON, are named" in `build/source_test.zig` use the
+/// same spellings.
+fn staysInside(gpa: std.mem.Allocator, named: []const u8) bool {
+    if (named.len > 0 and named[0] == '/') return false;
+    const resolved = std.fs.path.resolvePosix(gpa, &.{named}) catch @panic("out of memory");
+    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
+}
+
 /// The directory, relative to `examples/`, whose files `root` reaches: the
-/// root itself, or its manifest's `source` directory.
+/// root itself, or its manifest's `source` directory. A manifest that cannot
+/// be read, or whose `source` leaves the root, is a problem and has no reach.
 ///
 /// This is the rule `sourceRootOf` in `src/driver/loader.zig` applies to a
 /// manifest, spelled by joining and removing `.` segments. The compiler cannot
@@ -1969,41 +1991,60 @@ pub fn testsReported(output: []const u8) ?usize {
 /// files a root reaches" and the case "a source no root reaches belongs to no
 /// example root" in `build/source_test.zig` use the same manifest text and fail
 /// when the two disagree.
-fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry) []const u8 {
-    const named: ?[]const u8 = for (entries) |entry| {
-        if (entry.directory or !std.mem.endsWith(u8, entry.path, manifest_name)) continue;
+fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry, problems: *std.ArrayList([]const u8)) ?[]const u8 {
+    const manifest = for (entries) |entry| {
+        if (entry.directory or !std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) continue;
         const directory = std.fs.path.dirnamePosix(entry.path) orelse continue;
-        if (!std.mem.eql(u8, directory, root)) continue;
-        const Written = struct { source: ?[]const u8 = null };
-        const parsed = std.json.parseFromSliceLeaky(Written, gpa, entry.text, .{ .ignore_unknown_fields = true }) catch break null;
-        break parsed.source;
+        if (std.mem.eql(u8, directory, root)) break entry;
     } else null;
-    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named orelse "." }) catch @panic("out of memory");
+    var named: []const u8 = ".";
+    if (manifest) |found| {
+        const Written = struct { source: ?[]const u8 = null };
+        const parsed = std.json.parseFromSliceLeaky(Written, gpa, found.text, .{ .ignore_unknown_fields = true }) catch {
+            problems.append(gpa, std.fmt.allocPrint(gpa, "{s} is not valid JSON", .{found.path}) catch @panic("out of memory")) catch @panic("out of memory");
+            return null;
+        };
+        if (parsed.source) |source| if (source.len > 0) {
+            if (!staysInside(gpa, source)) {
+                problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", outside its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
+                return null;
+            }
+            named = source;
+        };
+    }
+    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named }) catch @panic("out of memory");
     return resolved[1..];
 }
 
 /// The `.lin` files beneath `examples/` that no root reaches, so that no run of
-/// `linea test` would load them. A file belongs to the deepest root enclosing
-/// it, and is reached when it lies inside that root's source directory.
-pub fn unreachedSources(gpa: std.mem.Allocator, entries: []const ExampleEntry, roots: []const []const u8) []const []const u8 {
+/// `linea test` would load them, and the manifests whose `source` cannot be
+/// applied. A file belongs to the deepest root enclosing it, and is reached
+/// when it lies inside that root's source directory.
+pub fn unreachedSources(gpa: std.mem.Allocator, entries: []const ExampleEntry, roots: []const []const u8) Unreached {
+    var problems: std.ArrayList([]const u8) = .empty;
+    const reaches = gpa.alloc(?[]const u8, roots.len) catch @panic("out of memory");
+    for (roots, reaches) |root, *reach| {
+        reach.* = if (std.mem.endsWith(u8, root, ".lin")) root else reachOf(gpa, root, entries, &problems);
+    }
     var unreached: std.ArrayList([]const u8) = .empty;
     for (entries) |entry| {
         if (entry.directory or !std.mem.endsWith(u8, entry.path, ".lin")) continue;
-        var owner: ?[]const u8 = null;
-        for (roots) |root| {
+        var owner: ?usize = null;
+        for (roots, 0..) |root, at| {
             const encloses = std.mem.eql(u8, entry.path, root) or
                 (entry.path.len > root.len and entry.path[root.len] == '/' and std.mem.startsWith(u8, entry.path, root));
-            if (encloses and (owner == null or root.len > owner.?.len)) owner = root;
+            if (encloses and (owner == null or root.len > roots[owner.?].len)) owner = at;
         }
-        const root = owner orelse {
+        const at = owner orelse {
             unreached.append(gpa, entry.path) catch @panic("out of memory");
             continue;
         };
-        if (std.mem.eql(u8, entry.path, root)) continue;
-        const reach = reachOf(gpa, root, entries);
+        if (std.mem.eql(u8, entry.path, roots[at])) continue;
+        // A root whose manifest is refused reports that, not its files.
+        const reach = reaches[at] orelse continue;
         const inside = reach.len == 0 or
             (entry.path.len > reach.len and entry.path[reach.len] == '/' and std.mem.startsWith(u8, entry.path, reach));
         if (!inside) unreached.append(gpa, entry.path) catch @panic("out of memory");
     }
-    return unreached.items;
+    return .{ .files = unreached.items, .problems = problems.items };
 }
