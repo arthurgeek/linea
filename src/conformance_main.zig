@@ -6156,7 +6156,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "small ownership deltas", .n = 2000, .cost = throughTheTree(smallOwnershipDeltasModule) },
     .{ .name = "heavy ownership deltas", .n = 2000, .cost = throughTheTree(heavyOwnershipDeltasModule) },
     .{ .name = "deferred bindings across joins", .n = 2000, .cost = throughTheTree(deferredBindingsAcrossJoinsModule) },
-    .{ .name = "deferred bindings under nested loops", .n = 50, .cost = throughTreeBatch(deferredBindingsUnderNestedLoopsModule, .check, 32) },
+    .{ .name = "deferred bindings under nested loops", .n = 200, .grows = false, .cost = throughTreeBatch(deferredBindingsUnderNestedLoopsModule, .check, 32) },
     .{ .name = "lending binders", .n = 1100, .cost = throughTheTree(lendingBindersModule) },
     .{ .name = "views taken and lent in one body", .n = 3000, .cost = throughTheTree(storage_mod.viewsProgram) },
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },
