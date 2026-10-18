@@ -43,16 +43,27 @@ pub const FloatMath = struct {
     }
 };
 
-/// Whether `t` is a handle to an object C holds ([T-ExternHandle]): a sealed
-/// newtype declared in a module its root's manifest grants `extern`, in any
-/// root. Only such a module can make one from an address, so a handle names
-/// the object C gave it wherever it crosses an `extern`, the program's own or
-/// another library's. Asked of a pool being built or of a finished typing.
+/// Whether `t` is a handle to an object C holds ([T-ExternHandle]): a newtype
+/// that is not `copyable` and is either sealed in a module its root's
+/// manifest grants `extern`, in any root, or a newtype over a handle. Only a
+/// module trusted with C makes the innermost one from an address, and a newtype
+/// around it names the same object, so each is a handle wherever it crosses an
+/// `extern`. A copyable newtype is never one: anyone holding a copy names the
+/// object, so nothing read through it can be kept alive by its place. Asked of
+/// a pool being built or of a finished typing.
 pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, t: TypeId) bool {
-    if (t == .poison or pool.get(t) != .newtype) return false;
-    const declared = pool.declOfType(t) orelse return false;
-    if (ast.declVisibility(declared) != .opaque_) return false;
-    return program.get(program.moduleOf(declared)).externs;
+    var at = t;
+    while (true) {
+        if (at == .poison) return false;
+        const newtype = switch (pool.get(at)) {
+            .newtype => |newtype| newtype,
+            else => return false,
+        };
+        const declared = pool.declOfType(at) orelse return false;
+        if (ast.declOwnershipPolicy(declared) == .copyable) return false;
+        if (ast.declVisibility(declared) == .opaque_ and program.get(program.moduleOf(declared)).externs) return true;
+        at = newtype.base;
+    }
 }
 
 /// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle

@@ -127,17 +127,24 @@ record the construction dropped them, which for a view of C memory was a read
 after free.
 
 **A view borrows from a handle, and a handle C may change is lent whole**
-([T-Extern], [T-ExternHandle], [N-Aliased]). A handle is a sealed newtype
-declared in a module its root's manifest grants `extern`, in any root, so only
-trusted code makes one from an address. A library's handle is a handle in the
-program's own `extern` declarations too: one predicate decides it, with no
-condition on which root the `extern` sits in. The rules hold for every parameter
-of every `extern`, whatever shape the program gives the place it passes:
+([T-Extern], [T-ExternHandle], [N-Aliased]). A handle is a newtype that is
+not `copyable` and is either sealed (`@opaque`) in a module its root's manifest
+grants `extern`, in any root, or a newtype over a handle. Only trusted code
+makes the innermost one from an address, and a newtype around it names the
+same object, so a label a program puts around a library's handle is a handle
+too. A library's handle is a handle in the program's own `extern` declarations:
+one predicate decides it, with no condition on which root the `extern` sits in.
+A `copyable` newtype is never a handle, whoever seals it: anyone holding a copy
+names the object, so nothing read through one can be kept alive by its place.
+That is why `std.io`'s `Descriptor`, which any program makes from an integer
+with `io.descriptor`, is an ordinary value at the boundary. The rules hold for
+every parameter of every `extern`, whatever shape the program gives the place
+it passes:
 
 - An `extern` answering memory a parameter lends, `borrows(p)`, takes `p` as a
-  handle that is not `copyable`, or as a `std.ffi` view. An integer, an
-  unsealed newtype or a type of an untrusted module could be copied or rebuilt
-  to name the same memory after the place it came from was changed, so it is
+  handle or as a `std.ffi` view. An integer, a `copyable` or unsealed newtype
+  over one, or a type of an untrusted module could be copied or rebuilt to
+  name the same memory after the place it came from was changed, so it is
   refused by [T-Extern].
 - A handle parameter written `read` promises that C only reads the object.
   Every other convention lets C change or free it. A plain lend is checked as
@@ -147,10 +154,6 @@ of every `extern`, whatever shape the program gives the place it passes:
   [O-Borrow] wherever it is used after, and no other argument of the call may
   name it ([N-Aliased]). `inout` lends the place and `sink` moves it, as for
   any Linea parameter.
-- A handle type taken by any convention but `read` may not be `copyable`. A
-  copy would still name the object, so changing or freeing it through one
-  copy, whether lent, `inout` or `sink`, would leave what was read through
-  another dangling.
 
 C takes the handle by value either way, so the marker is the only thing that
 can tell the compiler a call leaves the object as it was, and a `read` written

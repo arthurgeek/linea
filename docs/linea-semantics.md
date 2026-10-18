@@ -4175,7 +4175,8 @@ aggregate.
 
 **[T-Extern]** An `extern`'s parameters and result cross the foreign boundary,
 and the result may also be Unit. What crosses is an integer of 8, 16, 32 or 64
-bits, a `Float64`, or an unrefined newtype over one, which crosses as its base:
+bits, a `Float64`, or an unrefined newtype whose base crosses, which crosses as
+its base:
 every bit pattern of these is a value on both sides, so nothing C hands back
 is a value Linea does not define. Integer width and signedness define the
 integer's representation, and an 8- or 16-bit integer is extended to a full
@@ -4260,10 +4261,11 @@ fn add_square(inout tally: Tally, square: Int32) -> Int32 {
 `squares_visit(5, add_square, &tally)` lends `tally` for the call, and every
 call C makes to `add_square` receives it.
 
-**[T-ExternHandle]** An `extern` parameter whose type is a sealed (`@opaque`)
-newtype declared in a module its root's manifest grants `extern`, in any root,
-is a handle to an object C holds, whichever root's `extern` takes it. Written `read`, the parameter
-promises that C only reads the object. Only an `extern` may write `read` on a
+**[T-ExternHandle]** A handle is a newtype that is not `copyable` and is either
+sealed (`@opaque`) in a module its root's manifest grants `extern`, in any root,
+or a newtype over a handle. An `extern` parameter whose type is a handle names
+an object C holds, whichever root's `extern` takes it. A `copyable` newtype is
+never a handle. Written `read`, the parameter promises that C only reads the object. Only an `extern` may write `read` on a
 parameter, and only on a handle; on any other parameter it is redundant
 ([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C
 change or free the object, so a call lends its argument's place exclusively,
@@ -4272,10 +4274,9 @@ argument must be a place that may change: a mutable binding, an `inout`
 parameter, a mutable capture, the binder of a `for inout` walk, or a field of
 one. Every observation of the place made before the call, such as a `CText`
 read from the object, ends at the call, and a later use of it is [O-Borrow];
-another argument of the same call naming the place is [N-Aliased]. A handle taken `inout` is lent as any
-`inout` argument is, and one taken `sink` is moved. A handle type taken by any
-convention but `read` may not be `copyable`, because a copy would name the
-same object and outlive what changing it frees. The compiler believes a
+another argument of the same call naming the place is [N-Aliased]. A handle
+taken `inout` is lent as any `inout` argument is, and one taken `sink` is
+moved. The compiler believes a
 written `read`, and believes that each handle is the only one naming its
 object: an `extern` answering a handle answers a new or handed-over object,
 and the module trusted with C never builds a handle from an address another

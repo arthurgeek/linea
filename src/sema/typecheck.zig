@@ -18368,10 +18368,7 @@ const Checker = struct {
         }
 
         // `read` says C leaves a handle's object as it was, which is a promise
-        // only about a handle. A handle C may change is lent from a place as
-        // `inout` would lend it, which a copy would bypass: changing the
-        // object through one copy leaves what was read through another
-        // dangling ([T-ExternHandle]).
+        // only about a handle ([T-ExternHandle]).
         if (category == .t_extern) {
             const pool = self.builder.view();
             for (self.ast.declParams(d), 0..) |p, k| {
@@ -18383,25 +18380,8 @@ const Checker = struct {
                         .s_entry,
                         self.ast.fileOf(token),
                         self.ast.tokenSpan(token),
-                        "`read` on an `extern` parameter marks a handle, a sealed newtype of a module trusted with C, whose object C only reads",
+                        "`read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads",
                         "omit `read`; parameters are read by default",
-                    );
-                }
-                if (!marked and intrinsics.isForeignHandle(self.program, self.ast, &pool, t) and
-                    try self.builder.capabilityOf(t) == .copyable)
-                {
-                    const help = try std.fmt.allocPrint(
-                        self.sink.arena,
-                        "drop `copyable` from the handle's type, or mark `{s}` `read` if C only reads it",
-                        .{self.ast.tokenText(p.name)},
-                    );
-                    try self.sink.addErrorFmt(
-                        .t_extern_handle,
-                        self.ast.fileOf(p.name),
-                        self.ast.tokenSpan(p.name),
-                        help,
-                        "`{s}` may change the object a copyable handle holds, and a copy of the handle would still name it",
-                        .{self.ast.tokenText(self.ast.declName(d))},
                     );
                 }
             }
@@ -18716,13 +18696,12 @@ const Checker = struct {
             const t = try self.declaredParamType(d, k);
             if (t == .poison) continue;
             if (self.isForeignView(t)) continue;
-            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, t) and
-                try self.builder.capabilityOf(t) != .copyable) continue;
+            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) continue;
             try self.sink.addErrorFmt(
                 .t_extern,
                 self.ast.fileOf(params[k].name),
                 self.ast.tokenSpan(params[k].name),
-                "give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life",
+                "take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life",
                 "`{s}` answers memory `{s}` lends, so `{s}` must be a handle or a `std.ffi` view, and `{s}` is neither",
                 .{ self.ast.tokenText(self.ast.declName(d)), self.ast.tokenText(params[k].name), self.ast.tokenText(params[k].name), try self.typeName(t) },
             );

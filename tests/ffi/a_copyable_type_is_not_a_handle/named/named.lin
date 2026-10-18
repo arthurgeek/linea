@@ -1,7 +1,9 @@
 import std.ffi
 
-// A copy of a copyable handle names the same object, so changing the object
-// through one copy would leave text read through the other dangling.
+// A copy of a copyable type names the same object, so it is not a handle:
+// `read` says nothing about it, and text read from the object cannot be tied
+// to it, since changing the object through one copy would leave text read
+// through another dangling.
 @(opaque, copyable)
 type Name = UInt64
 

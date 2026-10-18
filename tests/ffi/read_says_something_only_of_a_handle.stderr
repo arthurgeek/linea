@@ -1,4 +1,4 @@
-error[S-Entry]: `read` on an `extern` parameter marks a handle, a sealed newtype of a module trusted with C, whose object C only reads
+error[S-Entry]: `read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads
  --> tests/ffi/read_says_something_only_of_a_handle/main.lin:3:16
   |
 3 | extern fn labs(read value: Int64) -> Int64

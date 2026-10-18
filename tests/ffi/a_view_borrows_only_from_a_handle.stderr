@@ -2,14 +2,14 @@ error[T-Extern]: `named_name_of_address` answers memory `handle` lends, so `hand
   --> tests/ffi/a_view_borrows_only_from_a_handle/named/named.lin:12:33
    |
 12 | extern fn named_name_of_address(handle: UInt64) -> ffi.CText where borrows(handle)
-   |                                 ^^^^^^ give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life
+   |                                 ^^^^^^ take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life
 error[T-Extern]: `named_name_of_loose` answers memory `handle` lends, so `handle` must be a handle or a `std.ffi` view, and `Loose` is neither
   --> tests/ffi/a_view_borrows_only_from_a_handle/named/named.lin:14:31
    |
 14 | extern fn named_name_of_loose(handle: Loose) -> ffi.CText where borrows(handle)
-   |                               ^^^^^^ give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life
+   |                               ^^^^^^ take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life
 error[T-Extern]: `named_name_of_outside` answers memory `handle` lends, so `handle` must be a handle or a `std.ffi` view, and `types.Outside` is neither
   --> tests/ffi/a_view_borrows_only_from_a_handle/named/named.lin:16:33
    |
 16 | extern fn named_name_of_outside(handle: types.Outside) -> ffi.CText where borrows(handle)
-   |                                 ^^^^^^ give it a type sealed with `@opaque` in a module trusted with C and not `copyable`, or write `where carries()` when C keeps the memory for the program's life
+   |                                 ^^^^^^ take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life

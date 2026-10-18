@@ -187,9 +187,11 @@ itself. How the `extern` takes the handle says what C does with the object:
 - `sink` gives it to C for good, which is how the function that frees it is
   declared.
 
-A handle type that any of these but `read` takes cannot be `copyable`: a copy
-would still name the object after C changed or freed it through another
-copy. And an `extern` whose answer lives inside an object, written
+A handle is not `copyable`: a `copyable` sealed type is an ordinary value at
+the boundary, because a copy would still name the object after C changed or
+freed it through another. A newtype the program wraps around a handle is a
+handle too, so a label around a library's handle is lent to C the same way.
+And an `extern` whose answer lives inside an object, written
 `where borrows(handle)`, takes that object as a handle, never as a bare
 `UInt64`, which anything could copy.
 

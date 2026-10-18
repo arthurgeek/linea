@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/dependencies/a_programs_newtype_over_a_librarys_handle_is_a_handle/main.lin:19:5
+   |
+19 |     n_reset(wrapped)
+   |     ^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+20 |     io.println("{name.length()}")?
+   |                  ---- the observation is still used here

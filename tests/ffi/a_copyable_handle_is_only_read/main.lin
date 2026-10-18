@@ -1,5 +1,0 @@
-import named
-
-fn main() -> UInt8 {
-    UInt8(named.first_length())
-}
