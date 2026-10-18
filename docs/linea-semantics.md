@@ -5450,7 +5450,9 @@ value the lend is a read observation. A `let read` binder observes the part its
 pattern selected in the same way, whatever that part's type, until the binder's
 last use. Copies and stored observations preserve the restriction. Disjoint
 record fields remain independent; an observation of a container element protects
-its container. Scope exits and deferred actions participate in the same check.
+its container, and the binders of a lending walk's pattern share the walked
+element's place, so a change through one ends an observation made through
+another. Scope exits and deferred actions participate in the same check.
 
 **[O-Escapes]** A returned or retained observation must depend only on the
 sources its callable contract permits. A place lent `inout` to a closure never
