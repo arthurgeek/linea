@@ -1,3 +1,5 @@
+// Written by tests/ffi/make-handle-matrix.py, which writes the whole matrix;
+// change the script and run it rather than editing this file.
 import std.io
 import named
 

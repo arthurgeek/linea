@@ -13,6 +13,9 @@
 #   are the same with the handle's type declared in a library, `handles`, and
 #   every changing `extern` declared in the program.
 #
+# Every Linea and C file it writes names it in its first lines; a manifest is
+# JSON, which holds no comment, and carries no such line.
+#
 # Run from this directory, then format what it wrote and refill the goldens:
 #   python3 make-handle-matrix.py
 #   linea fmt <each written .lin file>
@@ -20,7 +23,10 @@
 import os
 
 root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-C = r'''#include <stdint.h>
+STAMP = 'Written by tests/ffi/make-handle-matrix.py, which writes the whole matrix;\nchange the script and run it rather than editing this file.'
+LINEA_STAMP = ''.join(f'// {line}\n' for line in STAMP.split('\n'))
+
+C = '/* ' + STAMP.replace('\n', '\n * ') + ' */\n' + r'''#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,9 +59,7 @@ void named_replace(uint64_t *handle) {
     *handle = named_open();
 }
 '''
-HEAD = '''// Written by tests/ffi/make-handle-matrix.py, which writes the whole matrix;
-// change the script and run it rather than editing this file.
-import std.ffi
+HEAD = LINEA_STAMP + '''import std.ffi
 
 // A handle to an object C holds. `read` says C only reads it; every other
 // convention lets C change or free it.
@@ -143,7 +147,7 @@ fn named_open() -> Name {
     pub_calls = [c if not c.startswith('self_field_') else c.replace('self_field_', 'self_') for c in calls]
     return src, pub_calls
 
-LIB = '''// A handle to an object C holds, sealed so only this library makes one.
+LIB = LINEA_STAMP + '''// A handle to an object C holds, sealed so only this library makes one.
 @(opaque, linear)
 type Name = UInt64
 
@@ -169,7 +173,7 @@ for group, name, before, cross in cases:
     src, calls = gen(before, cross)
     open(os.path.join(d, 'named', 'named.lin'), 'w').write(src)
     if before:
-        main = 'import std.io\nimport named\n\n// Each reads the name before C changes the object, so each answers 5.\nfn main() -> Result[UInt8, io.IoError] {\n' + ''.join(f'    io.println("{c}: {{named.{c}()}}")?\n' for c in calls) + '    .Ok(0)\n}\n'
+        main = LINEA_STAMP + 'import std.io\nimport named\n\n// Each reads the name before C changes the object, so each answers 5.\nfn main() -> Result[UInt8, io.IoError] {\n' + ''.join(f'    io.println("{c}: {{named.{c}()}}")?\n' for c in calls) + '    .Ok(0)\n}\n'
     else:
-        main = 'import named\n\n// Each reads the name after C changed the object it lives in.\nfn main() -> UInt8 {\n    let total = ' + ' + '.join(f'named.{c}()' for c in calls) + '\n    UInt8(total)\n}\n'
+        main = LINEA_STAMP + 'import named\n\n// Each reads the name after C changed the object it lives in.\nfn main() -> UInt8 {\n    let total = ' + ' + '.join(f'named.{c}()' for c in calls) + '\n    UInt8(total)\n}\n'
     open(os.path.join(d, 'main.lin'), 'w').write(main)
