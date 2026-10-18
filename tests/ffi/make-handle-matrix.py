@@ -53,7 +53,9 @@ void named_replace(uint64_t *handle) {
     *handle = named_open();
 }
 '''
-HEAD = '''import std.ffi
+HEAD = '''// Written by tests/ffi/make-handle-matrix.py, which writes the whole matrix;
+// change the script and run it rather than editing this file.
+import std.ffi
 
 // A handle to an object C holds. `read` says C only reads it; every other
 // convention lets C change or free it.

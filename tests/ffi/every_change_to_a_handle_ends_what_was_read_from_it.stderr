@@ -1,63 +1,63 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:32:9
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:34:9
    |
-32 |         named_reset(self.handle)
+34 |         named_reset(self.handle)
    |         ^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-33 |         let length = name.length()
+35 |         let length = name.length()
    |                      ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:40:9
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:42:9
    |
-40 |         named_replace(&self.handle)
+42 |         named_replace(&self.handle)
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-41 |         let length = name.length()
+43 |         let length = name.length()
    |                      ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:50:5
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:52:5
    |
-50 |     named_reset(held)
+52 |     named_reset(held)
    |     ^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-51 |     let length = name.length()
+53 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:60:5
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:62:5
    |
-60 |     named_replace(&held)
+62 |     named_replace(&held)
    |     ^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-61 |     let length = name.length()
+63 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:70:17
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:72:17
    |
-70 |     named_close(held)
+72 |     named_close(held)
    |                 ^^^^ keep this place available until the last use of its observation
-71 |     let length = name.length()
+73 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:79:5
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:81:5
    |
-79 |     named_reset(box.handle)
+81 |     named_reset(box.handle)
    |     ^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-80 |     let length = name.length()
+82 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:88:5
+  --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:90:5
    |
-88 |     named_reset(handle)
+90 |     named_reset(handle)
    |     ^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-89 |     let length = name.length()
+91 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-   --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:104:5
+   --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:106:5
     |
-104 |     named_replace(&box.handle)
+106 |     named_replace(&box.handle)
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-105 |     let length = name.length()
+107 |     let length = name.length()
     |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-   --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:113:5
+   --> tests/ffi/every_change_to_a_handle_ends_what_was_read_from_it/named/named.lin:115:5
     |
-113 |     named_replace(&handle)
+115 |     named_replace(&handle)
     |     ^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-114 |     let length = name.length()
+116 |     let length = name.length()
     |                  ---- the observation is still used here

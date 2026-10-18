@@ -2120,7 +2120,11 @@ test "the guide gate: a labelled manifest and C source join the project" {
         \\`tally/counter/counter.lin`:
         \\
         \\```linea
-        \\pub extern fn counter_double(value: Int32) -> Int32
+        \\extern fn counter_double(value: Int32) -> Int32
+        \\
+        \\pub fn double(value: Int32) -> Int32 {
+        \\    counter_double(value)
+        \\}
         \\```
         \\
         \\`tally/main.lin`:
@@ -2129,7 +2133,7 @@ test "the guide gate: a labelled manifest and C source join the project" {
         \\import counter
         \\
         \\fn main() -> UInt8 {
-        \\    UInt8(counter.counter_double(2))
+        \\    UInt8(counter.double(2))
         \\}
         \\```
         \\
