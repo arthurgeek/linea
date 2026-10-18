@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `lamp`
+  --> tests/defer/a_linear_value_given_to_a_defer_on_one_path_is_a_merge_disagreement.lin:16:5
+   |
+16 |     if turns == 0 {
+   |     ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

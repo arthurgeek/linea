@@ -2372,7 +2372,10 @@ pub const Phase = struct {
     fn meet(self: *Phase, a: Values, b: Values) !Values {
         return .{
             .moved = a.moved or b.moved,
-            .moved_at = if (a.moved_at != .none) a.moved_at else b.moved_at,
+            // The earliest instruction that moved it, so the meet does not
+            // depend on the order its predecessors are visited in. `none` is
+            // the largest id, so a path that moved nothing never wins.
+            .moved_at = @enumFromInt(@min(@intFromEnum(a.moved_at), @intFromEnum(b.moved_at))),
             .deps = try self.unionOf(a.deps, b.deps),
             .stale = try self.markUnion(a.stale, b.stale),
             .events = try self.unionOf(a.events, b.events),

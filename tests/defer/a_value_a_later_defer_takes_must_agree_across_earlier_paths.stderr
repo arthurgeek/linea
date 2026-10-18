@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `k`
+  --> tests/defer/a_value_a_later_defer_takes_must_agree_across_earlier_paths.lin:16:5
+   |
+16 |     if turns == 0 {
+   |     ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither

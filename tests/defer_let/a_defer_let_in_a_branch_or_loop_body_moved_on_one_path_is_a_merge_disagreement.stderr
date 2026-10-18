@@ -1,0 +1,15 @@
+error[O-Merge]: the paths here disagree about `lamp`
+  --> tests/defer_let/a_defer_let_in_a_branch_or_loop_body_moved_on_one_path_is_a_merge_disagreement.lin:25:9
+   |
+25 |         if total == 0 {
+   |         ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
+error[O-Merge]: the paths here disagree about `lamp`
+  --> tests/defer_let/a_defer_let_in_a_branch_or_loop_body_moved_on_one_path_is_a_merge_disagreement.lin:31:9
+   |
+31 |         if total == 1 {
+   |         ^^^^^^^^^^^^^^^ consume it on the other path too, or on neither
+error[O-Merge]: the paths here disagree about `lamp`
+  --> tests/defer_let/a_defer_let_in_a_branch_or_loop_body_moved_on_one_path_is_a_merge_disagreement.lin:38:9
+   |
+38 |         if id == 4 {
+   |         ^^^^^^^^^^^^ consume it on the other path too, or on neither

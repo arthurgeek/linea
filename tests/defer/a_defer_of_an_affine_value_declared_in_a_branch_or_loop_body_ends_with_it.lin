@@ -1,0 +1,33 @@
+// A `Key` is affine, so it owes nothing, and `defer lock(k)` gives it to
+// `lock` when the body that declares it ends. Inside an `if`, `while` or `for`
+// body the key is gone by then, so the path through the body and the path
+// around it agree that no `Key` is held after it.
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key, inout locked: UInt8) {
+    let Key { n } = k
+    locked = locked + n
+}
+
+fn main() -> UInt8 {
+    var locked: UInt8 = 0
+    var turns: UInt8 = 0
+    if turns == 0 {
+        let k: Key = .{ n = 1 }
+        defer lock(k, &locked)
+        turns = turns + 1
+    }
+    while turns < 3 {
+        let k: Key = .{ n = 2 }
+        defer lock(k, &locked)
+        turns = turns + 1
+    }
+    for n in [4, 8] {
+        let k: Key = .{ n = n }
+        defer lock(k, &locked)
+        turns = turns + 1
+    }
+    locked
+}

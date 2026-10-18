@@ -1,0 +1,43 @@
+// [O-Merge]. A `Lamp` is `@linear`, so it owes its release. Inside an `if`,
+// `while` or `for` body, a `defer let` lamp given away on one path through the
+// body and kept on the other is held on one side of the join and not on the
+// other, however its own scope ends afterwards.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+impl Release for Lamp {
+    fn release(sink self: Self) {
+        let Lamp { id: _ } = self
+    }
+}
+
+fn give(sink lamp: Lamp) -> UInt8 {
+    let Lamp { id } = lamp
+    id
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    if total == 0 {
+        defer let lamp: Lamp = .{ id = 1 }
+        if total == 0 {
+            total = total + give(lamp)
+        }
+    }
+    while total < 3 {
+        defer let lamp: Lamp = .{ id = 2 }
+        if total == 1 {
+            total = total + give(lamp)
+        }
+        total = total + 1
+    }
+    for id in [4, 5] {
+        defer let lamp: Lamp = .{ id = id }
+        if id == 4 {
+            total = total + give(lamp)
+        }
+    }
+    total
+}

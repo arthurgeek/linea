@@ -1,0 +1,5 @@
+error[O-Merge]: the paths here disagree about `key`
+  --> tests/defer/a_var_assigned_in_a_loop_before_an_earlier_return_is_a_merge_disagreement.lin:28:9
+   |
+28 |         if turn == 1 {
+   |         ^^^^^^^^^^^^^^ consume it on the other path too, or on neither

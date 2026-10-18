@@ -1,0 +1,28 @@
+// [O-Merge], twice. The lamp is given away on one path through the first `if`.
+// A new lamp is then stored on every path, and that lamp is given away on one
+// path through the second `if`. The second disagreement is about the new lamp,
+// not the first one, so both are reported.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+fn give(sink lamp: Lamp) {
+    let Lamp { id: _ } = lamp
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    var lamp = Lamp { id = 1 }
+    if turns == 0 {
+        give(lamp)
+        turns = turns + 1
+    }
+    lamp = Lamp { id = 2 }
+    if turns == 1 {
+        give(lamp)
+        turns = turns + 1
+    }
+    give(lamp)
+    turns
+}

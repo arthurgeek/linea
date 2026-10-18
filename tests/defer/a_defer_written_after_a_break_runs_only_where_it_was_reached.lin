@@ -1,0 +1,32 @@
+// The `defer keep(note)` is written after the `break`, so it is scheduled only
+// on the iterations that get past the `if`. On the iteration that breaks, the
+// note is still held when the loop body ends, and a `Note` is affine, so it is
+// dropped there without being kept.
+import std.io
+
+use io.print
+
+struct Note {
+    id: UInt8,
+}
+
+fn keep(sink note: Note) {
+    let Note { id } = note
+    match print("k{id} ") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var total: UInt8 = 0
+    while total < 5 {
+        let note = Note { id = total }
+        if total == 2 {
+            break
+        }
+        defer keep(note)
+        total = total + 1
+    }
+    total
+}

@@ -1,0 +1,21 @@
+// [O-Merge]. A `Lamp` is `@linear`, so it must be settled on every path. A
+// `defer` inside the `if` body settles it on the path through the body and
+// leaves it held on the path around it, so the paths disagree where they meet.
+@linear
+struct Lamp {
+    id: UInt8,
+}
+
+fn settle(sink lamp: Lamp) {
+    let Lamp { id: _ } = lamp
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    let lamp: Lamp = .{ id = 1 }
+    if turns == 0 {
+        defer settle(lamp)
+        turns = turns + 1
+    }
+    turns
+}

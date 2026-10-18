@@ -1,0 +1,55 @@
+// A `defer lock(k)` runs where the body holding it ends, so for the paths
+// around that body it means what `lock(k)` written there means. A `Key` is
+// affine: given away on one path and kept on the other, it is simply gone
+// after the join, as it would be after a direct `lock(k)`. That holds for an
+// `if` body and a `match` arm, and for a key declared in a `while` or `for`
+// body and given away by a `defer` in an `if` inside it.
+import std.io
+
+use io.print
+
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key) {
+    let Key { n } = k
+    match print("{n}") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    let first: Key = .{ n = 1 }
+    if turns == 0 {
+        defer lock(first)
+        turns = turns + 1
+    }
+    let second: Key = .{ n = 2 }
+    let pick: Option[UInt8] = .Some(1)
+    match pick {
+        Some(step) => {
+            defer lock(second)
+            turns = turns + step
+        },
+        None => {},
+    }
+    while turns < 4 {
+        let k: Key = .{ n = 3 }
+        if turns == 2 {
+            defer lock(k)
+            turns = turns + 1
+        }
+        turns = turns + 1
+    }
+    for n in [4, 5] {
+        let k: Key = .{ n = n }
+        if n == 5 {
+            defer lock(k)
+            turns = turns + 1
+        }
+    }
+    turns
+}

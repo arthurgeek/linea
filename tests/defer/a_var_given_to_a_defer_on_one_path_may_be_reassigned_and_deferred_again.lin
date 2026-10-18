@@ -1,0 +1,30 @@
+// The first `defer lock(key)` gives the key away on the path through the
+// `if` body. `key = ...` then stores a new key on every path, so the second
+// `defer lock(key)` releases that new key whatever happened to the first.
+import std.io
+
+use io.print
+
+struct Key {
+    n: UInt8,
+}
+
+fn lock(sink k: Key) {
+    let Key { n } = k
+    match print("L{n} ") {
+        Ok(_) => {},
+        Err(_) => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var turns: UInt8 = 0
+    var key: Key = .{ n = 1 }
+    if turns == 0 {
+        defer lock(key)
+        turns = turns + 1
+    }
+    key = .{ n = 2 }
+    defer lock(key)
+    turns
+}
