@@ -7,10 +7,3 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   = help: `document` belongs to `text` and ends when it returns, so nothing returned may observe it
   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
   = help: the types this names are reached with `import std.mem`
-error[O-Borrow]: this operation invalidates a place that a later observation still needs
- --> tests/json/observations/text_cannot_escape_document.lin:5:11
-  |
-5 |     defer document.release()
-  |           ^^^^^^^^ keep this place available until the last use of its observation
-6 |     document.as_str().unwrap()
-  |     -------------------------- the observation is returned here

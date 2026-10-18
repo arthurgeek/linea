@@ -9,15 +9,3 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
    |               ----- the code was generated for this field
 21 | derive Build for View
    |        ^^^^^ escape observations only from the signature's declared sources
-error[O-Borrow]: `View.value` ends while a value borrowing it is still used
-  --> tests/construction_derive/construct_temporary_borrow.lin:21:8
-   |
-7  |         reflect.construct(
-   |         ------------------ generated from this template code for `View.value`
-19 | struct View { value: borrow UInt64 }
-   |               ----- the code was generated for this field
-21 | derive Build for View
-   |        ^^^^^ `View.value` ends here
-   |        ----- the observation is returned here
-   |
-   = help: keep the borrowing value inside the scope, or declare what it borrows outside it
