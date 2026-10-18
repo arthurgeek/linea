@@ -14066,6 +14066,11 @@ const Checker = struct {
                 // A refined newtype's column is its base's integers, so the
                 // pattern is what it holds.
                 return self.coveragePattern(arena, self.ast.call(pattern).args[0], of);
+            } else if (types.kind(of) == .refused and (isCatchAll(self.ast, self.ast.call(pattern).args[0]) or self.ast.partBinds(self.ast.call(pattern).args[0]))) {
+                // A refused refinement's values are unknown, but `_` or a
+                // binder inside its name takes any of them, as a bare `_`
+                // does, so it names no value coverage would have to know.
+                return &usefulness.wild;
             } else {
                 // A newtype's pattern: its one constructor, around its base.
                 const args = try arena.alloc(*const usefulness.Pattern, 1);

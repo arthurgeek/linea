@@ -1,8 +1,8 @@
 // A refused refinement's values are unknown, so a pattern naming one of them
-// is not judged. A `_` or a binder at that type takes any value whatever the
-// values are, so the other parts of the pattern are still held to coverage:
-// the arms missing `B` and `C`, an arm the ones before it take, and a
-// refutable `let` are each reported.
+// is not judged. A `_` or a binder at that type, bare or inside the type's
+// name, takes any value whatever the values are, so the other parts of the
+// pattern are still held to coverage: the arms missing `B` and `C`, an arm the
+// ones before it take, and a refutable `let` are each reported.
 type Closed = UInt8 where it in 5..=4
 
 type Flag = Bool where it in 0..=1
@@ -43,6 +43,25 @@ fn _over_a_bool(sink pair: (Flag, Mode)) -> UInt8 {
 fn _through_an_alias(sink maybe: Option[(Shut, Mode)]) -> UInt8 {
     match maybe {
         Some((_, A)) => 1,
+    }
+}
+
+fn _wild_inside(sink pair: (Closed, Mode)) -> UInt8 {
+    match pair {
+        (Closed(_), A) => 1,
+    }
+}
+
+fn _binder_inside(sink pair: (Closed, Mode)) -> UInt8 {
+    match pair {
+        (Closed(_level), A) => 1,
+    }
+}
+
+fn _behind_a_wrapped_wildcard(sink pair: (Closed, Mode)) -> UInt8 {
+    match pair {
+        (Closed(_), _) => 1,
+        (_, A) => 2,
     }
 }
 

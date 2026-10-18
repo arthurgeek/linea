@@ -4307,8 +4307,8 @@ A rejected refinement is reported once, at its declaration. Patterns of its type
 are judged by the values the range admits within what the base can hold, so
 `Level(0..=255)` covers the `UInt8` refinement above ([T-Cover]). Where no such
 value is left, because the range is empty or the base is not an integer, a `_`
-or a binder at that type still takes any value it holds, so the rest of the
-pattern is judged as usual. A pattern that names a value of the type is not
+or a binder at that type, bare or inside the type's name as `Closed(_)`, still
+takes any value it holds, so the rest of the pattern is judged as usual. A pattern that names a value of the type is not
 judged, and neither are the other arms of its `match` nor its `let`.
 
 ### §4.1 Constant expressions
