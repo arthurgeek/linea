@@ -3710,7 +3710,12 @@ every pattern, so a pair of options is covered by its four shapes and an arm
 newtype have one shape, so a pattern taking one apart with a binder or `_` at
 every part covers it; an integer's arms cover the values their literals and
 ranges name. The diagnostic names the values no arm takes, each written as a
-pattern: `(None, Some)`, `Some(10..=255)`, `Wood`. A variant whose payload the
+pattern: `(None, Some)`, `Some(10..=255)`, `Wood`. It names at most nine of
+them, then says "and more", in declaration order compared column by column.
+Where arms leave several variants of one column to `_`, as `(_, One(0))` leaves
+`Off` and `Idle`, the values of the later columns are found for those variants
+together, so the nine may name `(Idle, Unset)` before every missing value that
+goes with `Off`. A variant whose payload the
 pattern would leave unnamed is written bare. A variant remains in the exhaustive
 set when its payload contains `Never`; `Option[Never]` must still account for
 `Some`. Text, a type parameter and any other type no pattern takes apart are

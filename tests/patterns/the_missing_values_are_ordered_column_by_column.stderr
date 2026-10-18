@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `(Off, Unset)`, `(Off, One(1..=255))`, `(Off, Two(1..=255))`, `(Off, Three(1..=255))`, `(Off, Four(1..=255))`, `(Off, Five(1..=255))`, `(Idle, Unset)`, `(Idle, One(1..=255))`, and more
+  --> tests/patterns/the_missing_values_are_ordered_column_by_column.lin:23:5
+   |
+23 |     match state {
+   |     ^^^^^^^^^^^^^ add the missing arms, or a `_`
