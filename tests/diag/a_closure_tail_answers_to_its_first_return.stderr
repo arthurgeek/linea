@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt16` cannot hold 70000
+ --> tests/diag/a_closure_tail_answers_to_its_first_return.lin:7:9
+  |
+5 |             return small
+  |             ------------ expected because of this `return`
+7 |         70000
+  |         ^^^^^ literal is out of range for its type

@@ -1,0 +1,31 @@
+fn main() -> UInt8 {
+    let some: Option[UInt8] = .Some(3)
+    // The first `return` makes the closure answer `Option[UInt8]`, so the
+    // later `.None` and the tail's `.Some(9)` take that type.
+    let pick = [some] |choice: UInt8| {
+        if choice == 0 {
+            return copy(some)
+        }
+        if choice == 1 {
+            return .None
+        }
+        .Some(9)
+    }
+    let first = match pick(0) {
+        Some(v) => v,
+        None => 0,
+    }
+    let second = match pick(1) {
+        Some(v) => v,
+        None => 0,
+    }
+    let third = match pick(2) {
+        Some(v) => v,
+        None => 0,
+    }
+    if first == 3 && second == 0 && third == 9 {
+        0
+    } else {
+        1
+    }
+}

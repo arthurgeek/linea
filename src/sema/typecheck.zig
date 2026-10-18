@@ -5488,6 +5488,9 @@ const Checker = struct {
     /// later `return` and the body's own value answer to it, as a loop's
     /// `break`s answer to the first. Null outside such a closure.
     inferred_return: ?*?Expected = null,
+    /// The body of the closure `inferred_return` belongs to, whose value
+    /// answers to that result as a later `return` does.
+    inferred_body: ExprId = .none,
     default_test_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
@@ -13258,6 +13261,14 @@ const Checker = struct {
         return if (tail == ExprId.none) id else tail;
     }
 
+    /// What a `return` or a `?` here answers to: the function's declared
+    /// result, or in a closure writing none, what its first `return` settled.
+    fn returnAnswer(self: *const Checker) ?Expected {
+        if (self.current_return) |declared| return declared;
+        const inferred = self.inferred_return orelse return null;
+        return inferred.*;
+    }
+
     /// Where an expression is, as a position that survives leaving the tree.
     fn locOf(self: *const Checker, id: ExprId) Loc {
         return .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) };
@@ -13301,6 +13312,10 @@ const Checker = struct {
 
         for (self.ast.blockStmts(b)) |s| try self.checkStmt(s);
 
+        // A closure body whose result a `return` settled gives its value
+        // that result as its expectation, as a later `return` is given it.
+        const want_value = expected orelse if (id == self.inferred_body) self.returnAnswer() else null;
+
         if (b.tail == ExprId.none) {
             // A body with no trailing expression has no value where control
             // reaches its continuation. Where it leaves instead, no value has
@@ -13308,7 +13323,7 @@ const Checker = struct {
             // other arm to disagree with it.
             const falls_through = self.completionReaches(id);
             if (!falls_through) return self.record(id, .never);
-            if (expected) |want| {
+            if (want_value) |want| {
                 if (!want.unit_test_success and want.ty != .unit and want.ty != .poison) {
                     _ = self.reportMismatch(id, .unit, want, "this body produces nothing");
                 }
@@ -13316,7 +13331,7 @@ const Checker = struct {
             return self.record(id, .unit);
         }
 
-        const t = try self.checkResult(id, b.tail, expected);
+        const t = try self.checkResult(id, b.tail, want_value);
 
         return self.record(id, t);
     }
@@ -16599,7 +16614,7 @@ const Checker = struct {
         const value = self.ast.unaryOperand(id);
 
         const t = if (value == ExprId.none) blk: {
-            if (self.current_return) |want| {
+            if (self.returnAnswer()) |want| {
                 if (want.unit_test_success) {
                     try self.implicit_test_successes.put(self.gpa, id, want.ty);
                 } else if (want.ty != .unit and want.ty != .poison) {
@@ -16608,7 +16623,7 @@ const Checker = struct {
             }
             break :blk TypeId.unit;
         } else blk: {
-            var return_expected = if (self.current_return == null and self.inferred_return != null) self.inferred_return.?.* else self.current_return;
+            var return_expected = self.returnAnswer();
             if (return_expected) |*want| want.unit_test_success = false;
             break :blk try self.check(value, return_expected);
         };
@@ -16687,7 +16702,7 @@ const Checker = struct {
         const previous_failure = self.failure_expected;
         defer self.failure_expected = previous_failure;
         self.failure_expected = null;
-        if (self.current_return) |answer| if (self.carrierOf(answer.ty)) |carrier| {
+        if (self.returnAnswer()) |answer| if (self.carrierOf(answer.ty)) |carrier| {
             if (carrier.kind == .result) self.failure_expected = .{
                 .target = self.ast.withoutGroups(operand),
                 .depth = 0,
@@ -16715,7 +16730,16 @@ const Checker = struct {
             "`?` works over exactly those two types",
         );
 
-        const want = self.current_return orelse return self.report(
+        // A `?` fixes only whether the answer is an `Option` or a `Result`,
+        // never what a success carries, so in a closure writing no result it
+        // cannot settle one: a `return` before it must.
+        const want = self.returnAnswer() orelse return if (self.inferred_return != null) self.report(
+            .t_try_answer,
+            id,
+            "this `?` may return `{s}`, and nothing before it says what the closure answers",
+            .{(try self.typeName(t))},
+            "write the closure's result type, as `|...| -> Option[T]`, or `return` a value before this `?`",
+        ) else self.report(
             .t_try_answer,
             id,
             "this `?` may return `{s}`, and the function answers with nothing",
@@ -18622,12 +18646,15 @@ const Checker = struct {
         const body_result = checked: {
             const previous_return = self.current_return;
             const previous_inferred = self.inferred_return;
+            const previous_body = self.inferred_body;
             const previous_failure = self.failure_expected;
             self.current_return = result_expected;
             self.inferred_return = if (result_expected == null) &inferred_return else null;
+            self.inferred_body = if (result_expected == null) lambda.body else .none;
             self.failure_expected = null;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
+            defer self.inferred_body = previous_body;
             defer self.failure_expected = previous_failure;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`

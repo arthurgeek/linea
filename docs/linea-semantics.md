@@ -611,9 +611,13 @@ are results that hold a Unit, and a name standing for `()`, such as an alias, is
 not looked through. A lambda that writes no result takes its body's
 type, Unit included, so `-> ()` is refused on a lambda too. Where neither a
 written result nor its context gives it a type, its first `return` carrying a
-value settles the result, as a loop's first `break` does: every later `return`
-and the body's own value must have that type, and an open literal in any of
-them settles with the rest. One that writes
+value settles the result, as a loop's first `break` does: every later
+`return`, a bare one included, and the body's own value are checked against
+that type as their expected type, and an open literal in any of them settles
+with the rest. A `?` there answers to the settled result as it answers to a
+written one. A `?` fixes only whether the answer is an `Option` or a `Result`,
+not what a success carries, so it settles nothing: one reached before any
+`return` has settled the result is refused by [T-TryAnswer]. One that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
 A `test fn` that writes no result answers `Result[(), testing.Failure]`
 ([S-Test]). A projection names a place and always writes its type.

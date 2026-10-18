@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `Int64`, found `()`
+ --> tests/diag/a_closure_bare_return_after_a_value_is_refused.lin:7:13
+  |
+4 |             return 5
+  |             -------- expected because of this `return`
+7 |             return
+  |             ^^^^^^ this `return` carries no value
