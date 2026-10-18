@@ -5491,6 +5491,9 @@ const Checker = struct {
     /// The body of the closure `inferred_return` belongs to, whose value
     /// answers to that result as a later `return` does.
     inferred_body: ExprId = .none,
+    /// The `?`s of that closure reached before anything settled its result,
+    /// each checked against the result once its body is checked.
+    deferred_tries: ?*std.ArrayList(ExprId) = null,
     default_test_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
@@ -16553,7 +16556,9 @@ const Checker = struct {
         }
 
         const value = self.ast.unaryOperand(id);
-        const frame = &self.loops.items[self.loops.items.len - 1];
+        // Re-read after the value is checked: a loop inside it grows the list.
+        const depth = self.loops.items.len - 1;
+        var frame = &self.loops.items[depth];
 
         // Checked against whatever settled the loop's type, so a disagreement
         // reports here and points at what decided. A bare `break` yields Unit
@@ -16566,7 +16571,17 @@ const Checker = struct {
                 }
             }
             break :blk TypeId.unit;
-        } else try self.check(value, frame.settled);
+        } else blk: {
+            const before = frame.settled;
+            const checked = try self.check(value, before);
+            frame = &self.loops.items[depth];
+            // A `break` inside the value may settle the loop's type first,
+            // and the value answers to it then.
+            if (before == null) if (frame.settled) |settled| if (checked != .poison and checked != .never) {
+                break :blk try self.expect(self.armValue(value), checked, settled);
+            };
+            break :blk checked;
+        };
 
         // A value that does not complete never reaches the transfer itself, so
         // it neither settles nor exits the loop.
@@ -16623,9 +16638,21 @@ const Checker = struct {
             }
             break :blk TypeId.unit;
         } else blk: {
-            var return_expected = self.returnAnswer();
+            const before = self.returnAnswer();
+            var return_expected = before;
             if (return_expected) |*want| want.unit_test_success = false;
-            break :blk try self.check(value, return_expected);
+            // A `return` inside the value may settle the closure's result
+            // before the value is complete, so the value's own tail takes
+            // that result as a closure body's tail does, and the whole value
+            // answers to it afterwards.
+            const previous_body = self.inferred_body;
+            if (before == null and self.inferred_return != null) self.inferred_body = value;
+            defer self.inferred_body = previous_body;
+            const checked = try self.check(value, return_expected);
+            if (before == null) if (self.returnAnswer()) |settled| if (checked != .poison and checked != .never) {
+                break :blk try self.expect(self.armValue(value), checked, settled);
+            };
+            break :blk checked;
         };
 
         // A value that does not complete leaves before `return` itself can.
@@ -16730,16 +16757,21 @@ const Checker = struct {
             "`?` works over exactly those two types",
         );
 
-        // A `?` fixes only whether the answer is an `Option` or a `Result`,
-        // never what a success carries, so in a closure writing no result it
-        // cannot settle one: a `return` before it must.
-        const want = self.returnAnswer() orelse return if (self.inferred_return != null) self.report(
-            .t_try_answer,
-            id,
-            "this `?` may return `{s}`, and nothing before it says what the closure answers",
-            .{(try self.typeName(t))},
-            "write the closure's result type, as `|...| -> Option[T]`, or `return` a value before this `?`",
-        ) else self.report(
+        // `?` is a `return` on the failing path, so it leaves the loops a
+        // `return` leaves. Marked here rather than where it is lowered: what a
+        // construct does to the loops around it is a fact about the construct,
+        // and one answer to it.
+        self.unwindsEveryLoop();
+
+        if (self.returnAnswer()) |want| {
+            if (!try self.answerTry(id, t, carrier, want.ty)) return self.record(id, .poison);
+        } else if (self.deferred_tries) |deferred| {
+            // A `?` fixes only whether the answer is an `Option` or a
+            // `Result`, never what a success carries, so it settles nothing:
+            // it answers to whatever settles the closure's result, wherever
+            // that is written, once the closure's body is checked.
+            try deferred.append(self.gpa, id);
+        } else return self.report(
             .t_try_answer,
             id,
             "this `?` may return `{s}`, and the function answers with nothing",
@@ -16747,18 +16779,27 @@ const Checker = struct {
             "`?` returns from the function it is written in",
         );
 
+        return self.expect(id, self.payloadTypeOf(carrier), expected);
+    }
+
+    /// Whether a `?` over `t` may return through an answer of type `answer`,
+    /// reporting why not where it may not.
+    fn answerTry(self: *Checker, id: ExprId, t: TypeId, carrier: Carrier, answer: TypeId) std.mem.Allocator.Error!bool {
         // The payload types are free to differ: the failing path of an
         // `Option` carries nothing, so nothing about a payload reaches the
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
-        const answers = self.carrierOf(want.ty);
-        if (answers == null or answers.?.kind != carrier.kind) return self.report(
-            .t_try_answer,
-            id,
-            "this `?` may return `{s}`, and the function answers with `{s}`",
-            .{ (try self.typeName(t)), (try self.typeName(want.ty)) },
-            "`?` returns from the function it is written in",
-        );
+        const answers = self.carrierOf(answer);
+        if (answers == null or answers.?.kind != carrier.kind) {
+            _ = self.report(
+                .t_try_answer,
+                id,
+                "this `?` may return `{s}`, and the function answers with `{s}`",
+                .{ (try self.typeName(t)), (try self.typeName(answer)) },
+                "`?` returns from the function it is written in",
+            );
+            return false;
+        }
 
         // A different error type converts through the function's own error
         // type's `From` implementation, so the target is never in question.
@@ -16770,19 +16811,14 @@ const Checker = struct {
             const failure = self.errorTypeOf(carrier);
             const answered = self.errorTypeOf(answers.?);
             if (failure != answered and failure != .poison and answered != .poison) {
-                const conversion = try self.errorConversion(failure, answered) orelse
-                    return self.reportUnconverted(id, failure, answered);
+                const conversion = try self.errorConversion(failure, answered) orelse {
+                    _ = try self.reportUnconverted(id, failure, answered);
+                    return false;
+                };
                 try self.try_conversions.put(self.gpa, id, conversion);
             }
         }
-
-        // `?` is a `return` on the failing path, so it leaves the loops a
-        // `return` leaves. Marked here rather than where it is lowered: what a
-        // construct does to the loops around it is a fact about the construct,
-        // and one answer to it.
-        self.unwindsEveryLoop();
-
-        return self.expect(id, self.payloadTypeOf(carrier), expected);
+        return true;
     }
 
     /// Returns what the operand of `e?` or `e else { … }` is expected to carry
@@ -18643,18 +18679,23 @@ const Checker = struct {
         // With no result type written or given, the closure's `return`s and
         // its body's value settle it together.
         var inferred_return: ?Expected = null;
+        var deferred_tries: std.ArrayList(ExprId) = .empty;
+        defer deferred_tries.deinit(self.gpa);
         const body_result = checked: {
             const previous_return = self.current_return;
             const previous_inferred = self.inferred_return;
             const previous_body = self.inferred_body;
+            const previous_tries = self.deferred_tries;
             const previous_failure = self.failure_expected;
             self.current_return = result_expected;
             self.inferred_return = if (result_expected == null) &inferred_return else null;
             self.inferred_body = if (result_expected == null) lambda.body else .none;
+            self.deferred_tries = if (result_expected == null) &deferred_tries else null;
             self.failure_expected = null;
             defer self.current_return = previous_return;
             defer self.inferred_return = previous_inferred;
             defer self.inferred_body = previous_body;
+            defer self.deferred_tries = previous_tries;
             defer self.failure_expected = previous_failure;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
@@ -18683,6 +18724,21 @@ const Checker = struct {
             break :tied try self.builder.resolveOpen(returned.ty, &self.open_types);
         } else null;
         const result = settled_by_return orelse if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
+        for (deferred_tries.items) |at| {
+            const tried = self.builder.exprType(self.ast.unaryOperand(at));
+            const carrier = self.carrierOf(tried) orelse continue;
+            if (result == .poison) continue;
+            if (result == .never) {
+                _ = self.report(
+                    .t_try_answer,
+                    at,
+                    "this `?` may return `{s}`, and nothing says what the closure answers",
+                    .{(try self.typeName(tried))},
+                    "write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it",
+                );
+                refused = true;
+            } else if (!try self.answerTry(at, tried, carrier, result)) refused = true;
+        }
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
                 .ty = contextual.?.result,
@@ -31053,7 +31109,9 @@ const Checker = struct {
     }
 
     fn settleMatchArm(self: *Checker, settled: *?Expected, body_expr: ExprId, body: TypeId) void {
-        if (body == .poison or body == .never) return;
+        // A refused arm settles poison, which the others then agree with, as
+        // an `if`'s refused arm does.
+        if (body == .never) return;
         if (settled.*) |context| if (!context.unit_test_success) return;
         settled.* = .{ .ty = body, .at = self.locOf(self.resultOf(body_expr)), .reason = .arm };
     }
@@ -31403,7 +31461,21 @@ const Checker = struct {
     /// asks nothing and the other arm's type is the construct's.
     fn armExpectation(self: *const Checker, settled: TypeId, arm: ExprId) ?Expected {
         if (settled == .never) return null;
-        return .{ .ty = settled, .at = self.locOf(self.resultOf(arm)), .reason = .arm };
+        return .{ .ty = settled, .at = self.locOf(self.armValue(arm)), .reason = .arm };
+    }
+
+    /// The expression that gave a checked arm its type: through braces to
+    /// the value they yield, and through an `else if` to its first arm that
+    /// completes, so a label names the value rather than the whole chain.
+    fn armValue(self: *const Checker, arm: ExprId) ExprId {
+        var at = self.resultOf(arm);
+        while (self.ast.exprTag(at) == .conditional) {
+            const c = self.ast.conditional(at);
+            if (c.otherwise == ExprId.none) break;
+            const then = self.resultOf(c.then);
+            at = if (self.builder.exprType(then) == .never) self.resultOf(c.otherwise) else then;
+        }
+        return at;
     }
 
     /// The value type of two alternatives that may not both complete.

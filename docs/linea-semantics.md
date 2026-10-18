@@ -614,10 +614,13 @@ written result nor its context gives it a type, its first `return` carrying a
 value settles the result, as a loop's first `break` does: every later
 `return`, a bare one included, and the body's own value are checked against
 that type as their expected type, and an open literal in any of them settles
-with the rest. A `?` there answers to the settled result as it answers to a
-written one. A `?` fixes only whether the answer is an `Option` or a `Result`,
-not what a success carries, so it settles nothing: one reached before any
-`return` has settled the result is refused by [T-TryAnswer]. One that writes
+with the rest. A `return` inside another `return`'s value that settles the
+result first holds that value to it in the same way, and so does a `break`
+inside another `break`'s value for its loop. A `?` fixes only whether the
+answer is an `Option` or a `Result`, not what a success carries, so it settles
+nothing: it answers to the closure's result, whatever settles it and wherever
+that is written, and is refused by [T-TryAnswer] only when nothing settles it.
+One that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
 A `test fn` that writes no result answers `Result[(), testing.Failure]`
 ([S-Test]). A projection names a place and always writes its type.

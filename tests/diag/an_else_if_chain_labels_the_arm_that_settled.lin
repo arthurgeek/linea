@@ -1,0 +1,18 @@
+fn pick(c: UInt8, small: UInt16) -> UInt16 {
+    let v = if c == 0 {
+        70000
+    } else if c == 1 {
+        return 4
+    } else {
+        small
+    }
+    v
+}
+
+fn main() -> UInt8 {
+    if pick(2, 5) == 5 {
+        0
+    } else {
+        1
+    }
+}

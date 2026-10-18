@@ -1,0 +1,35 @@
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/a_return_value_answers_to_a_return_inside_it.lin:11:13
+   |
+9  |                 return b
+   |                 -------- expected because of this `return`
+11 |             a
+   |             ^ expected `UInt8`, found `UInt16`
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/a_return_value_answers_to_a_return_inside_it.lin:20:13
+   |
+20 |             a
+   |             ^ expected `UInt8`, found `UInt16`
+22 |             return b
+   |             -------- expected because of this `return`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/diag/a_return_value_answers_to_a_return_inside_it.lin:34:13
+   |
+32 |                 return b
+   |                 -------- expected because of this `return`
+34 |             true
+   |             ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/a_return_value_answers_to_a_return_inside_it.lin:46:13
+   |
+44 |                 return id(4)
+   |                 ------------ expected because of this `return`
+46 |             a
+   |             ^ expected `UInt8`, found `UInt16`
+error[T-Mismatch]: expected `UInt8`, found `UInt16`
+  --> tests/diag/a_return_value_answers_to_a_return_inside_it.lin:58:13
+   |
+56 |                 break b
+   |                 ------- expected because of this `break`
+58 |             a
+   |             ^ expected `UInt8`, found `UInt16`

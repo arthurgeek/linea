@@ -1,0 +1,5 @@
+error[T-TryAnswer]: this `?` may return `Option[UInt8]`, and nothing says what the closure answers
+  --> tests/diag/a_closure_try_with_nothing_settled_is_refused.lin:15:17
+   |
+15 |             n = half(n)?
+   |                 ^^^^^^^^ write the closure's result type, as `|...| -> Option[T]`, or `return` a value from it

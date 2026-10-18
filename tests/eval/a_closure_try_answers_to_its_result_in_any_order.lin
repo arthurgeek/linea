@@ -1,0 +1,89 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    // A `?` answers to the closure's result wherever the `return` that
+    // settles it is written, before the `?` or after it.
+    let return_first = |start: UInt8| {
+        var n = start
+        var i: UInt8 = 0
+        loop {
+            if i == 2 {
+                return half(n + n)
+            }
+            n = half(n)?
+            i = i + 1
+        }
+    }
+    let return_last = |start: UInt8| {
+        var n = start
+        var i: UInt8 = 0
+        loop {
+            n = half(n)?
+            i = i + 1
+            if i == 2 {
+                return half(n + n)
+            }
+        }
+    }
+    let then_returns = |x: UInt8| {
+        let h = if x != 3 {
+            if x == 0 {
+                return half(1 + 1)
+            }
+            7
+        } else {
+            half(x)?
+        }
+        .Some(h)
+    }
+    let else_returns = |x: UInt8| {
+        let h = if x != 3 {
+            let _q = half(x)?
+            7
+        } else {
+            return half(1 + 1)
+        }
+        .Some(h)
+    }
+    let arm_returns = |x: UInt8| {
+        let h = match x {
+            0 => {
+                if x == 0 {
+                    return half(1 + 1)
+                }
+                7
+            },
+            _ => half(x)?,
+        }
+        .Some(h)
+    }
+    // With no `return`, the body's value settles the result the `?` answers
+    // to.
+    let quarter = |x: UInt8| {
+        let h = half(x)?
+        half(h)
+    }
+    let all = [return_first(8), return_last(8), then_returns(4), else_returns(4), arm_returns(4), quarter(8)]
+    var total: UInt8 = 0
+    for value in all {
+        total += match value {
+            Some(v) => v,
+            None => 100,
+        }
+    }
+    let failed = match quarter(6) {
+        Some(_) => false,
+        None => true,
+    }
+    if total == 2 + 2 + 7 + 7 + 2 + 2 && failed {
+        0
+    } else {
+        1
+    }
+}

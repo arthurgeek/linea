@@ -1,0 +1,66 @@
+fn id(x: UInt8) -> UInt8 {
+    x
+}
+
+fn wider(a: UInt16, b: UInt8) -> UInt8 {
+    let f = [a, b] |early: Bool| {
+        return {
+            if early {
+                return b
+            }
+            a
+        }
+    }
+    f(false)
+}
+
+fn branch(a: UInt16, b: UInt8) -> UInt8 {
+    let f = [a, b] |early: Bool| {
+        return if early {
+            a
+        } else {
+            return b
+        }
+    }
+    f(false)
+}
+
+fn boolean(b: UInt8) -> UInt8 {
+    let f = [b] |early: Bool| {
+        return {
+            if early {
+                return b
+            }
+            true
+        }
+    }
+    f(false)
+}
+
+fn called(a: UInt16) -> UInt8 {
+    let f = [a] |early: Bool| {
+        return {
+            if early {
+                return id(4)
+            }
+            a
+        }
+    }
+    f(false)
+}
+
+fn broken(a: UInt16, b: UInt8, early: Bool) -> UInt8 {
+    let v = loop {
+        break {
+            if early {
+                break b
+            }
+            a
+        }
+    }
+    v
+}
+
+fn main() -> UInt8 {
+    wider(300, 4) + branch(300, 4) + boolean(4) + called(300) + broken(300, 4, false)
+}

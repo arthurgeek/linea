@@ -1,0 +1,56 @@
+fn half(x: UInt8) -> Option[UInt8] {
+    if x % 2 == 0 {
+        .Some(x / 2)
+    } else {
+        .None
+    }
+}
+
+fn main() -> UInt8 {
+    // A `return` inside another `return`'s value settles the closure's
+    // result first, and the outer value is checked against it: every literal
+    // here becomes UInt8.
+    let block = |early: Bool| {
+        return {
+            if early {
+                return 4
+            }
+            3
+        }
+    }
+    let chosen = |code: UInt8| {
+        return match code {
+            0 => return 4,
+            _ => 3,
+        }
+    }
+    let branch = |early: Bool| {
+        return if early {
+            3
+        } else {
+            return 4
+        }
+    }
+    // The block's value takes the settled `Option[UInt8]`, so `.Some` knows
+    // its enum and the `?` answers to it.
+    let optional = |x: UInt8| {
+        return {
+            if x == 0 {
+                return half(2)
+            }
+            .Some(half(x)? + 1)
+        }
+    }
+    let a: UInt8 = block(false)
+    let b: UInt8 = chosen(0)
+    let c: UInt8 = branch(false)
+    let d = match optional(4) {
+        Some(v) => v,
+        None => 0,
+    }
+    if a == 3 && block(true) == 4 && b == 4 && chosen(1) == 3 && c == 4 && d == 3 {
+        0
+    } else {
+        1
+    }
+}

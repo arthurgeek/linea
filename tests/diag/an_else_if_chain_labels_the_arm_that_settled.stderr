@@ -1,0 +1,7 @@
+error[T-Literal]: `UInt16` cannot hold 70000
+ --> tests/diag/an_else_if_chain_labels_the_arm_that_settled.lin:3:9
+  |
+3 |         70000
+  |         ^^^^^ literal is out of range for its type
+7 |         small
+  |         ----- expected because of this arm

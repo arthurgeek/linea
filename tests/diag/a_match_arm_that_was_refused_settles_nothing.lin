@@ -1,0 +1,9 @@
+fn main() -> UInt8 {
+    let c: UInt8 = 0
+    let v = match c {
+        0 => undefined_name,
+        _ => .None,
+    }
+    let _w = v
+    0
+}
