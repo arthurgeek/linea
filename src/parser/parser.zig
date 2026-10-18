@@ -4350,50 +4350,75 @@ const Parser = struct {
 
     /// `(a, b, …)`: a tuple taken apart by position, each component a
     /// pattern. The node is built whatever its arity, as a tuple literal's is.
+    ///
+    /// Recovery stays inside the parentheses, so every part after a mistake
+    /// is read and its binders are declared. A keyword part is reported and
+    /// its token taken. A token no pattern begins with is reported, and the
+    /// rest of that part, up to the next `,`, goes with it. A missing comma
+    /// is reported, and a part that begins after it is read as if the comma
+    /// were written. Only a pattern whose `)` is never found ends short; it
+    /// is marked so, and its arity is judged by nobody.
     fn parseTuplePattern(self: *Parser) std.mem.Allocator.Error!ExprId {
         const open = self.cursor.current();
         _ = self.cursor.advance();
+        const close = self.delimiterEnd(open);
 
         var binders: std.ArrayList(ExprId) = .empty;
         defer binders.deinit(self.gpa);
+        // A part that is no pattern says nothing of how many were meant, so
+        // the arity of `()`, a single part or more than eight is not judged.
         var refused = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
-            // A keyword part is reported and its token taken, so the
-            // components after it parse as written and their binders are
-            // declared. A token no pattern begins with is left where it
-            // stands, and the list ends there.
             const keyword = self.atKeywordName();
             const component = try self.parseSubPattern();
             try binders.append(self.gpa, component);
             if (!keyword and self.builder.exprTag(component) == .err) {
                 refused = true;
-                break;
+                if (!self.skipToNextPart(close)) break;
+            } else if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and close != null) {
+                try self.reportAt(.s_tuple, self.cursor.current(), "expected `,` or `)`", "a tuple pattern separates its binders with commas");
+                if (self.atKeywordName() or self.atArmPattern() or self.cursor.at(.l_brace)) continue;
+                if (!self.skipToNextPart(close)) break;
             }
             if (self.cursor.eat(.comma) == null) break;
         }
 
-        // A pattern missing a comma or its `)` may hold more than was read,
-        // and a component that is no pattern has already been reported, so
-        // none of them has its arity judged. A keyword part is one
-        // component, so a pattern holding one is judged.
-        if (self.cursor.eat(.r_paren) != null) {
-            if (!refused) try self.checkTupleArity(open, binders.items.len, switch (binders.items.len) {
+        const cut_short = self.cursor.eat(.r_paren) == null;
+        if (cut_short) {
+            try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple pattern is never closed");
+        } else if (!refused) {
+            try self.checkTupleArity(open, binders.items.len, switch (binders.items.len) {
                 0 => "`()` has nothing to take apart",
                 1 => "bind one value with `let a = …`",
                 else => too_many_help,
             });
-        } else if (refused and self.delimiterEnd(open) != null) {
-            // What stopped the refused binder's skip is part of that one
-            // mistake, so the pattern closes where it was written.
-            self.cursor.seek(@intCast(self.delimiterEnd(open).?.index() + 1));
-        } else if (refused or !try self.skipPastMissingComma(open, "a tuple pattern separates its binders with commas")) {
-            try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple pattern is never closed");
         }
 
         const id = try self.builder.addCall(open, self.rangeFrom(open), .none, binders.items, &.{});
         self.builder.retag(id, .tuple_pattern);
+        if (cut_short) self.builder.markCutShort(id);
         return id;
+    }
+
+    /// Moves to the `,` that ends the current part of a parenthesised list,
+    /// or to its `)`, skipping whatever is nested between. False where the
+    /// list has no `)` to bound the skip.
+    fn skipToNextPart(self: *Parser, close: ?TokenId) bool {
+        const end = close orelse return false;
+        var i = self.cursor.current().index();
+        if (i > end.index()) return false;
+        var depth: usize = 0;
+        while (i < end.index()) : (i += 1) {
+            switch (self.cursor.tags[i]) {
+                .l_paren, .l_bracket, .l_brace => depth += 1,
+                .r_paren, .r_bracket, .r_brace => depth -|= 1,
+                .comma => if (depth == 0) break,
+                else => {},
+            }
+        }
+        self.cursor.seek(@intCast(i));
+        return true;
     }
 
     test "a comma after the first component makes a tuple, and a lone comma is refused" {

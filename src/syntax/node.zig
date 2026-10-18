@@ -1043,7 +1043,10 @@ pub const Expr = struct {
     pub const CallFlags = packed struct(u8) {
         fallible: bool = false,
         marked: bool = false,
-        _: u6 = 0,
+        /// A tuple pattern whose `)` was never found, so what it holds may
+        /// be fewer parts than were written.
+        cut_short: bool = false,
+        _: u5 = 0,
     };
 
     pub const Tag = enum(u8) {

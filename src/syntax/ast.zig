@@ -1600,6 +1600,13 @@ pub const Ast = struct {
         }
     }
 
+    /// Whether a tuple pattern's `)` was never found, so its parts may stop
+    /// short of what was written and its arity says nothing.
+    pub fn tuplePatternCutShort(self: *const Ast, id: ExprId) bool {
+        std.debug.assert(self.exprTag(id) == .tuple_pattern);
+        return self.exprs.items(.call_flags)[id.index()].cut_short;
+    }
+
     /// Whether a call is `Name?(e)`, a newtype's unproven construction,
     /// rather than `Name(e)`. Meaningless for anything but `.call`.
     pub fn callFallible(self: *const Ast, id: ExprId) bool {
@@ -2423,6 +2430,13 @@ pub const Ast = struct {
         /// the `(` that follows it have both been seen.
         pub fn markFallible(self: *Builder, id: ExprId) void {
             self.exprs.items(.call_flags)[id.index()].fallible = true;
+        }
+
+        /// Marks an already-built tuple pattern as one whose `)` was never
+        /// found.
+        pub fn markCutShort(self: *Builder, id: ExprId) void {
+            std.debug.assert(self.exprTag(id) == .tuple_pattern);
+            self.exprs.items(.call_flags)[id.index()].cut_short = true;
         }
 
         /// Records that an already-built call is written with `&` before it.

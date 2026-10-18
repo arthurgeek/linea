@@ -13641,8 +13641,9 @@ const Checker = struct {
 
         // A pattern of an arity the parser refused was reported at the `(`,
         // and is held against nothing more: not the value's kind, and not
-        // its arity, which is what the refusal already said.
-        if (!node.isTupleArity(p.args.len)) return fail(self, p.args);
+        // its arity, which is what the refusal already said. Nor is one whose
+        // `)` was never found, which may hold fewer parts than were written.
+        if (!node.isTupleArity(p.args.len) or self.ast.tuplePatternCutShort(pattern)) return fail(self, p.args);
 
         const settled = try self.builder.resolveOpen(of, &self.open_types);
         const instance = self.builder.instanceOf(settled);
