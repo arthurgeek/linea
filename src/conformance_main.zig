@@ -1530,7 +1530,7 @@ const Property = enum {
             .float_round_trip => 6,
             .walk_named => 5,
             .walk_loops => 50,
-            .help_edits => 20,
+            .help_edits => 50,
         };
     }
 

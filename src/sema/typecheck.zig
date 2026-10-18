@@ -1412,7 +1412,16 @@ fn typecheckInternal(
             // A body's open literals take the default where nothing in the
             // body settled them, before any other body can read their types.
             const scope = c.openScope();
+            var returns: std.ArrayList(ExprId) = .empty;
+            defer returns.deinit(gpa);
+            var answer_fixes: std.ArrayList(Checker.AnswerFix) = .empty;
+            defer answer_fixes.deinit(gpa);
+            c.returns_seen = &returns;
+            c.answer_fixes = &answer_fixes;
             const actual = try c.checkBody(body, want);
+            c.returns_seen = null;
+            c.answer_fixes = null;
+            if (answer_fixes.items.len > 0) if (resultSiteOf(ast, d)) |site| try c.attachAnswerFixes(answer_fixes.items, site, body, returns.items);
             try c.closeScope(scope);
             if (want) |context| if (context.unit_test_success and actual == .unit) {
                 try c.implicit_test_successes.put(gpa, body, context.ty);
@@ -3788,6 +3797,76 @@ pub fn clauseEdit(arena: std.mem.Allocator, ast: *const Ast, d: node.DeclId, cla
     return .{ .file = ast.fileOf(before), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}", .{clause}) };
 }
 
+/// Where a body's result type is written, or goes, for a fix that changes
+/// what the body answers with.
+pub const ResultSite = union(enum) {
+    /// A written result, replaced.
+    replace: Span,
+    /// No written result: inserted after this byte, as ` -> T`.
+    arrow_after: u32,
+    /// An arrow written with no result, `-> where …`: inserted after it.
+    after_arrow: u32,
+
+    /// The edit writing `result` at this site of `file`.
+    pub fn edit(self: ResultSite, arena: std.mem.Allocator, file: FileId, result: []const u8) std.mem.Allocator.Error!HelpEdit {
+        return switch (self) {
+            .replace => |span| .{ .file = file, .span = span, .text = result },
+            .arrow_after => |at| .{ .file = file, .span = .{ .start = at, .end = at }, .text = try std.fmt.allocPrint(arena, " -> {s}", .{result}) },
+            .after_arrow => |at| .{ .file = file, .span = .{ .start = at, .end = at }, .text = try std.fmt.allocPrint(arena, " {s}", .{result}) },
+        };
+    }
+};
+
+/// Where the declaration `d`'s result type is written, or goes.
+pub fn resultSiteOf(ast: *const Ast, d: node.DeclId) ?ResultSite {
+    if (d == .none) return null;
+    const written = ast.declReturnRef(d);
+    if (written.wasWritten()) return .{ .replace = ast.writtenSpan(written) };
+    const body = ast.declBody(d);
+    if (body == ExprId.none) return null;
+    const opening = ast.exprTokens(body).start;
+    const where = ast.declWhereToken(d);
+    const before = if (where != .none) where else opening;
+    if (before.index() == 0) return null;
+    return .{ .arrow_after = ast.tokenSpan(TokenId.at(before.index() - 1)).end };
+}
+
+/// Where the lambda `lambda`'s result type is written, or goes.
+pub fn lambdaResultSite(ast: *const Ast, lambda: ExprId) ?ResultSite {
+    if (lambda == .none or ast.exprTag(lambda) != .lambda) return null;
+    const written = ast.lambda(lambda);
+    if (written.result.wasWritten()) return .{ .replace = ast.writtenSpan(written.result) };
+    if (written.result_arrow != .none) return .{ .after_arrow = ast.tokenSpan(written.result_arrow).end };
+    if (written.close == .none) return null;
+    return .{ .arrow_after = ast.tokenSpan(written.close).end };
+}
+
+/// The edit writing `clause` as the `where` clause of the lambda `lambda`, in
+/// its header between its parameters and its body: in place of the one it
+/// wrote, after its result where it wrote one, and as `-> where …` where it
+/// wrote neither.
+///
+/// **Bound:** the tokens of the lambda's header.
+pub fn lambdaClauseEdit(arena: std.mem.Allocator, ast: *const Ast, lambda: ExprId, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
+    if (lambda == .none or ast.exprTag(lambda) != .lambda) return null;
+    const written = ast.lambda(lambda);
+    const opening = ast.exprTokens(written.body).start;
+    if (written.close == .none or opening.index() <= written.close.index()) return null;
+    const last = TokenId.at(opening.index() - 1);
+    var at = written.close.index() + 1;
+    while (at < opening.index()) : (at += 1) {
+        const token = TokenId.at(@intCast(at));
+        if (ast.tokenTag(token) != .keyword_where) continue;
+        return .{ .file = ast.fileOf(token), .span = .{ .start = ast.tokenSpan(token).start, .end = ast.tokenSpan(last).end }, .text = clause };
+    }
+    const end = ast.tokenSpan(last).end;
+    const text = if (written.result_arrow != .none)
+        try std.fmt.allocPrint(arena, " {s}", .{clause})
+    else
+        try std.fmt.allocPrint(arena, " -> {s}", .{clause});
+    return .{ .file = ast.fileOf(last), .span = .{ .start = end, .end = end }, .text = text };
+}
+
 /// A type written into a help, for a reader in module `from` to copy into
 /// the program: as `writtenTypeName` writes it, with each trailing argument
 /// that is its parameter's written default left out (`String`, not
@@ -3895,6 +3974,26 @@ fn writeHelpDeclaredName(
 
 /// The note a help adds where the types it writes need modules the reader
 /// has not imported, or null where they need none.
+/// The edit writing an `import` of every route in `missing` into the file
+/// holding `at`, where `placement.placementIn` puts an import. Null where
+/// nothing is missing.
+pub fn importEdit(arena: std.mem.Allocator, ast: *const Ast, at: TokenId, missing: []const []const u8) std.mem.Allocator.Error!?HelpEdit {
+    if (missing.len == 0) return null;
+    const part = ast.partOf(at);
+    const place = placement.placementIn(ast, part, part.source);
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, place.lead);
+    for (missing, 0..) |route, i| {
+        const earlier = for (missing[0..i]) |before| {
+            if (std.mem.eql(u8, before, route)) break true;
+        } else false;
+        if (earlier) continue;
+        try out.print(arena, "{s}import {s}", .{ if (i == 0) "" else "\n", route });
+    }
+    try out.appendSlice(arena, place.trail);
+    return .{ .file = ast.fileOf(at), .span = .{ .start = place.at, .end = place.at }, .text = out.items };
+}
+
 pub fn importNote(arena: std.mem.Allocator, missing: []const []const u8) std.mem.Allocator.Error!?[]const u8 {
     if (missing.len == 0) return null;
     var out: std.ArrayList(u8) = .empty;
@@ -5592,6 +5691,18 @@ const Checker = struct {
     /// What the function being checked declares it returns, so a `return`
     /// answers to that rather than to its surroundings.
     current_return: ?Expected = null,
+    /// Inside a closure that writes no result and has no expected one, the
+    /// `?`s whose answer its body decides: each gives its payload, and is
+    /// reported once the body's type is known. Null elsewhere.
+    unanswered_tries: ?*std.ArrayList(UnansweredTry) = null,
+    /// The `return`s of the body being checked, outside the closures in it,
+    /// which a fix changing what the body answers with rewrites. Null where
+    /// no body is being checked.
+    returns_seen: ?*std.ArrayList(ExprId) = null,
+    /// The [T-TryAnswer] reports of the body being checked whose help names
+    /// the result that would carry the failure, given their fix once every
+    /// `return` of the body is known.
+    answer_fixes: ?*std.ArrayList(AnswerFix) = null,
     /// The unannotated `let` or `var` whose initialiser is being checked, so a
     /// call that leaves its type open can show the annotation that settles it.
     initialising: ?StmtId = null,
@@ -7620,6 +7731,14 @@ const Checker = struct {
         /// The declaration the signature belongs to, where it is one, which
         /// a report's edit writes the clause into.
         decl: node.DeclId = .none,
+        /// The lambda the signature belongs to, where it is one.
+        lambda: ExprId = .none,
+
+        /// The edit writing `clause` where this signature is written.
+        fn clauseFix(self: ContractOutcome, arena: std.mem.Allocator, ast: *const Ast, clause: []const u8) std.mem.Allocator.Error!?HelpEdit {
+            if (self.decl != .none) return clauseEdit(arena, ast, self.decl, clause);
+            return lambdaClauseEdit(arena, ast, self.lambda, clause);
+        }
     };
 
     const CarrierParameters = struct {
@@ -7788,7 +7907,12 @@ const Checker = struct {
                         try types_mod.sourceClause(self.sink.arena, carrying.items),
                         if (listed_carriers == 2) "either" else "any of them",
                     });
+                    const reported = self.sink.items().len;
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source, and several parameters are carriers", help, null);
+                    // The clause naming every carrier answers whichever the
+                    // body uses.
+                    if (outcome) |out| if (try out.clauseFix(self.sink.arena, self.ast, try types_mod.sourceClause(self.sink.arena, carrying.items))) |edit|
+                        try self.addFix(reported, null, &.{edit});
                 } else {
                     const every_clause = try types_mod.sourceClause(self.sink.arena, every.items);
                     const help = try std.fmt.allocPrint(self.sink.arena, "the result may come from {s}; add {s}, or `{s}` where it may come from {s}", .{
@@ -7801,7 +7925,7 @@ const Checker = struct {
                     self.reportAtToken(.t_borrow_contract, at, "the result has more than one eligible observation source", help, null);
                     // The clause naming every candidate is the one edit that
                     // answers whichever the body uses.
-                    if (outcome) |out| if (try clauseEdit(self.sink.arena, self.ast, out.decl, every_clause)) |edit|
+                    if (outcome) |out| if (try out.clauseFix(self.sink.arena, self.ast, every_clause)) |edit|
                         try self.addFix(reported, null, &.{edit});
                 }
                 // The body has no contract to be checked against, so the
@@ -9833,7 +9957,7 @@ const Checker = struct {
             if (!self.writesParameter(heading, pattern)) continue;
             var clash: ?Clash = null;
             if (try self.settle(pattern, actual, heading.alias, heading.found, &clash)) continue;
-            try self.reportSettledTwice(at, self.ast.tokenText(generics[clash.?.index].name), clash.?, false);
+            try self.reportSettledTwice(at, self.ast.tokenText(generics[clash.?.index].name), clash.?, false, null);
             return false;
         }
         for (heading.written, got) |pattern, actual| {
@@ -13294,8 +13418,10 @@ const Checker = struct {
             extra[extras] = text;
             extras += 1;
         }
-        if (allocators_note) |text| {
-            extra[extras] = text;
+        var allocators_at: ?u32 = null;
+        if (allocators_note) |note| {
+            allocators_at = @intCast(notes.len + extras);
+            extra[extras] = note.text;
             extras += 1;
         }
         const all_notes: []const []const u8 = if (extras > 0) blk: {
@@ -13322,7 +13448,60 @@ const Checker = struct {
             .labels = labels,
             .notes = all_notes,
         }) catch {};
+        if (allocators_note) |note| if (self.allocatorFormEdits(id, note.form) catch null) |edits| {
+            self.addFix(self.sink.items().len - 1, allocators_at.?, edits) catch {};
+        };
         return self.recordMismatch(id);
+    }
+
+    /// The edits rewriting the call `id` in the other allocator form a note
+    /// names: `x_in(allocator, …)` as `x(…)`, or `x(…)` as `x_in(allocator,
+    /// …)` with the one parameter of the function being checked whose type
+    /// is the allocator wanted. Null where `id` is no such call, or no one
+    /// parameter is that allocator.
+    fn allocatorFormEdits(self: *Checker, id: ExprId, form: AllocatorForm) std.mem.Allocator.Error!?[]const HelpEdit {
+        const call = self.ast.withoutGroups(id);
+        if (self.ast.exprTag(call) != .call) return null;
+        const c = self.ast.call(call);
+        const callee = self.ast.withoutGroups(c.callee);
+        const name = switch (self.ast.exprTag(callee)) {
+            .field, .name_ref => self.ast.exprMain(callee),
+            else => return null,
+        };
+        const spelled = self.ast.tokenText(name);
+        const file = self.ast.fileOf(name);
+        const name_span = self.ast.tokenSpan(name);
+        switch (form) {
+            .none => return null,
+            .system => {
+                if (!std.mem.endsWith(u8, spelled, "_in") or c.args.len == 0) return null;
+                const first = self.ast.exprSpan(c.args[0]);
+                const removed: Span = if (c.args.len > 1) .{ .start = first.start, .end = self.ast.exprSpan(c.args[1]).start } else first;
+                return try self.sink.arena.dupe(HelpEdit, &.{
+                    .{ .file = file, .span = name_span, .text = spelled[0 .. spelled.len - "_in".len] },
+                    .{ .file = file, .span = removed, .text = "" },
+                });
+            },
+            .with_allocator => |wanted| {
+                if (std.mem.endsWith(u8, spelled, "_in")) return null;
+                const owner = self.generic;
+                if (owner == .none or self.ast.declTag(owner) != .function) return null;
+                var chosen: ?[]const u8 = null;
+                for (self.res.parametersOf(owner)) |b| {
+                    if (self.binding_types.get(b) != wanted) continue;
+                    if (chosen != null) return null;
+                    chosen = self.ast.tokenText(self.res.declaringToken(b));
+                }
+                const allocator = chosen orelse return null;
+                const close = self.ast.exprTokens(call).end;
+                if (close.index() == 0) return null;
+                const at = if (c.args.len > 0) self.ast.exprSpan(c.args[0]).start else self.ast.tokenSpan(TokenId.at(close.index() - 1)).start;
+                return try self.sink.arena.dupe(HelpEdit, &.{
+                    .{ .file = file, .span = name_span, .text = try std.fmt.allocPrint(self.sink.arena, "{s}_in", .{spelled}) },
+                    .{ .file = file, .span = .{ .start = at, .end = at }, .text = try std.fmt.allocPrint(self.sink.arena, "{s}{s}", .{ allocator, if (c.args.len > 0) ", " else "" }) },
+                });
+            },
+        }
     }
 
     /// What two different closures can be kept as. Closures called alike --
@@ -13970,7 +14149,17 @@ const Checker = struct {
                 };
             };
 
+            // `let … else` takes a value apart with the same pattern, so a
+            // `?` initialising a consuming destructure can be offered it.
+            const previous_statement = self.statement_value;
+            defer self.statement_value = previous_statement;
+            self.statement_value = if (d.init != ExprId.none and self.ast.stmtTag(s) == .let_destructure) .{
+                .expr = self.ast.withoutGroups(d.init),
+                .kind = .binding,
+                .name = self.ast.exprSpan(d.pattern).slice(self.ast.partOf(self.ast.exprTokens(d.pattern).start).source),
+            } else null;
             const of = try self.check(d.init, named);
+            self.statement_value = previous_statement;
             // A consuming `let` takes the value apart, so each name owns what
             // it holds and is a place of its own. A `let read` observes the
             // place instead, so each name stands for the part the pattern
@@ -14093,18 +14282,21 @@ const Checker = struct {
                 // be called.
                 const named = self.res.targetOf(self.ast.withoutGroups(e));
                 const names_function = named != BindingId.none and self.res.kindOf(named) == .function;
+                const handling: Handling = if (reports_failure) try self.handlingOfFailure(t) else .{ .text = "" };
+                const reported = self.sink.items().len;
                 _ = self.report(
                     .t_discard,
                     e,
                     "this expression produces {s} `{s}` that is discarded",
                     .{ article.before(try self.typeName(t)), (try self.typeName(t)) },
                     if (reports_failure)
-                        try self.handlingOfFailure(t)
+                        handling.text
                     else if (names_function)
                         "call it with `(...)`, or bind it with `let _ =` to discard it deliberately"
                     else
                         "bind it with `let _ =` to discard it deliberately",
                 );
+                if (reports_failure) try self.addHandOnFix(reported, e, handling, t, true);
             }
             return;
         }
@@ -14116,19 +14308,38 @@ const Checker = struct {
     /// the failure is or converts to, or, for a failure that settles to a
     /// reason which does, `.settled()?`. Otherwise the failure is handled
     /// where it happens, by the `let … else` that binds what succeeded.
-    fn handlingOfFailure(self: *Checker, t: TypeId) std.mem.Allocator.Error![]const u8 {
-        const carrier = self.carrierOf(t) orelse return "match it";
+    fn handlingOfFailure(self: *Checker, t: TypeId) std.mem.Allocator.Error!Handling {
+        const carrier = self.carrierOf(t) orelse return .{ .text = "match it" };
         const failure = self.errorTypeOf(carrier);
         if (self.current_return) |want| if (self.carrierOf(want.ty)) |answers| if (answers.kind == .result) {
             const answered = self.errorTypeOf(answers);
             if (failure == answered or failure == .poison or answered == .poison or try self.errorConversion(failure, answered) != null)
-                return "match it, hand it on with `?`, or return it";
+                return .{ .text = "match it, hand it on with `?`, or return it", .hands_on = "?" };
             if (try self.settledReason(failure)) |reason| if (reason == answered or try self.errorConversion(reason, answered) != null)
-                return "match it, or hand on its reason with `.settled()?`";
+                return .{ .text = "match it, or hand on its reason with `.settled()?`", .hands_on = ".settled()?" };
         };
         // The value is being discarded, so the binding that handles its
         // failure keeps nothing either.
-        return "match it, or handle the failure with `let _ = … else |_| { … }`";
+        return .{ .text = "match it, or handle the failure with `let _ = … else |_| { … }`" };
+    }
+
+    /// What `handlingOfFailure` offers: the help, and the text that hands
+    /// the failure on where written after the value, where it offers that.
+    const Handling = struct { text: []const u8, hands_on: ?[]const u8 = null };
+
+    /// The fix appending `handling`'s hand-on after `value`, for the report
+    /// just made, where the help offers one and what it leaves needs nothing
+    /// more: a value kept for its effect hands on only an empty success, which
+    /// a statement may drop.
+    fn addHandOnFix(self: *Checker, reported: usize, value: ExprId, handling: Handling, t: TypeId, statement: bool) std.mem.Allocator.Error!void {
+        const text = handling.hands_on orelse return;
+        if (self.sink.items().len <= reported) return;
+        if (statement) {
+            const carrier = self.carrierOf(t) orelse return;
+            if (self.payloadTypeOf(carrier) != .unit) return;
+        }
+        const end = self.ast.exprSpan(value).end;
+        try self.addFix(reported, null, &.{.{ .file = self.ast.fileOfExpr(value), .span = .{ .start = end, .end = end }, .text = text }});
     }
 
     fn checkLet(self: *Checker, s: StmtId) !void {
@@ -14176,13 +14387,16 @@ const Checker = struct {
         if (d.pattern == ExprId.none and std.mem.eql(u8, self.ast.tokenText(d.name), "_")) {
             if (self.carrierOf(t)) |c| {
                 if (c.kind == .result) {
+                    const handling = try self.handlingOfFailure(t);
+                    const reported = self.sink.items().len;
                     _ = self.report(
                         .t_discard_failure,
                         d.init,
                         "this `{s}` reports a failure, and `_` discards it",
                         .{(try self.typeName(t))},
-                        try self.handlingOfFailure(t),
+                        handling.text,
                     );
+                    try self.addHandOnFix(reported, d.init, handling, t, false);
                 }
             }
         }
@@ -16809,6 +17023,7 @@ const Checker = struct {
     /// arm's value, it is the function's.
     fn checkReturn(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const value = self.ast.unaryOperand(id);
+        if (self.returns_seen) |seen| try seen.append(self.gpa, id);
 
         const t = if (value == ExprId.none) blk: {
             if (self.current_return) |want| {
@@ -16920,20 +17135,26 @@ const Checker = struct {
             "`?` works over exactly those two types",
         );
 
-        const want = self.current_return orelse return self.report(
-            .t_try_answer,
-            id,
-            "this `?` may return `{s}`, and the function answers with nothing",
-            .{(try self.typeName(t))},
-            "`?` returns from the function it is written in",
-        );
+        const want = self.current_return orelse {
+            if (self.unanswered_tries) |pending| {
+                try pending.append(self.gpa, .{ .id = id, .operand = t, .carrier = carrier, .statement = self.statementAt(id) });
+                return self.expect(id, self.payloadTypeOf(carrier), expected);
+            }
+            return self.report(
+                .t_try_answer,
+                id,
+                "this `?` may return `{s}`, and the function answers with nothing",
+                .{(try self.typeName(t))},
+                "`?` returns from the function it is written in",
+            );
+        };
 
         // The payload types are free to differ: the failing path of an
         // `Option` carries nothing, so nothing about a payload reaches the
         // caller. A `Result`'s failing path carries an error that does, which
         // is the whole of the asymmetry.
         const answers = self.carrierOf(want.ty);
-        if (answers == null) return self.reportTryWithoutCarrier(id, t, carrier, want.ty);
+        if (answers == null) return self.reportTryWithoutCarrier(id, t, carrier, want.ty, .function, self.statementAt(id));
         if (answers.?.kind != carrier.kind) return self.report(
             .t_try_answer,
             id,
@@ -16971,21 +17192,103 @@ const Checker = struct {
     /// `Result`, and names the two edits that make it work: the result type
     /// that carries the failure, with what the function answers now as its
     /// success, or handling the failure where it happens.
-    fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId) std.mem.Allocator.Error!TypeId {
+    /// The fix a [T-TryAnswer] help names: answering with `result`, which
+    /// carries the failure, and wrapping every value the body answers with
+    /// in `wrap`, with the imports the result's types need.
+    const AnswerFix = struct {
+        diagnostic: usize,
+        at: TokenId,
+        result: []const u8,
+        wrap: []const u8,
+        imports: []const []const u8,
+    };
+
+    /// Gives each fix in `pending` its edits: the result at `site`, each
+    /// `return`'s value and the body's tail wrapped, and the imports.
+    fn attachAnswerFixes(self: *Checker, pending: []const AnswerFix, site: ResultSite, body: ExprId, returns: []const ExprId) std.mem.Allocator.Error!void {
+        const arena = self.sink.arena;
+        for (pending) |fix| {
+            var edits: std.ArrayList(HelpEdit) = .empty;
+            const file = self.ast.fileOf(fix.at);
+            try edits.append(arena, try site.edit(arena, file, fix.result));
+            for (returns) |r| {
+                const value = self.ast.unaryOperand(r);
+                if (value == ExprId.none) {
+                    const end = self.ast.exprSpan(r).end;
+                    try edits.append(arena, .{ .file = file, .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, " {s}(())", .{fix.wrap}) });
+                } else try self.wrapEdits(&edits, value, fix.wrap);
+            }
+            if (!try self.wrapTail(&edits, body, fix.wrap)) continue;
+            if (try importEdit(arena, self.ast, fix.at, fix.imports)) |edit| try edits.append(arena, edit);
+            try self.addFix(fix.diagnostic, 0, edits.items);
+        }
+    }
+
+    /// The two edits that write `wrap(` before `value` and `)` after it.
+    fn wrapEdits(self: *Checker, edits: *std.ArrayList(HelpEdit), value: ExprId, wrap: []const u8) std.mem.Allocator.Error!void {
+        const span = self.ast.exprSpan(value);
+        const file = self.ast.fileOfExpr(value);
+        try edits.append(self.sink.arena, .{ .file = file, .span = .{ .start = span.start, .end = span.start }, .text = try std.fmt.allocPrint(self.sink.arena, "{s}(", .{wrap}) });
+        try edits.append(self.sink.arena, .{ .file = file, .span = .{ .start = span.end, .end = span.end }, .text = ")" });
+    }
+
+    /// Wraps what `body` answers with where it ends: its tail, or `wrap(())`
+    /// after its last statement where it has no tail. False where it holds
+    /// nothing to put the answer after.
+    fn wrapTail(self: *Checker, edits: *std.ArrayList(HelpEdit), body: ExprId, wrap: []const u8) std.mem.Allocator.Error!bool {
+        if (self.ast.exprTag(body) != .block) {
+            try self.wrapEdits(edits, body, wrap);
+            return true;
+        }
+        const b = self.ast.blockOf(body);
+        if (b.tail != ExprId.none) {
+            try self.wrapEdits(edits, b.tail, wrap);
+            return true;
+        }
+        const statements = self.ast.blockStmts(b);
+        if (statements.len == 0) return false;
+        const last = statements[statements.len - 1];
+        const first = self.ast.stmtTokens(last).start;
+        const source = self.ast.partOf(first).source;
+        const start = self.ast.tokenSpan(first).start;
+        const line = if (std.mem.lastIndexOfScalar(u8, source[0..start], '\n')) |nl| nl + 1 else 0;
+        const end = self.ast.stmtSpan(last).end;
+        try edits.append(self.sink.arena, .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(self.sink.arena, "\n{s}{s}(())", .{ source[line..start], wrap }) });
+        return true;
+    }
+
+    /// A `?` a closure without a written result met, reported once its body
+    /// decided what the closure answers with.
+    const UnansweredTry = struct { id: ExprId, operand: TypeId, carrier: Carrier, statement: ?StatementValue };
+
+    /// What answers a `?`: the function it is written in, or a closure whose
+    /// result its body decided.
+    const TryAnswerer = enum { function, closure };
+
+    /// The statement `id` is the whole value of, where it is one.
+    fn statementAt(self: *const Checker, id: ExprId) ?StatementValue {
+        const statement = self.statement_value orelse return null;
+        return if (statement.expr == id) statement else null;
+    }
+
+    fn reportTryWithoutCarrier(self: *Checker, id: ExprId, operand: TypeId, carrier: Carrier, answered: TypeId, answerer: TryAnswerer, where: ?StatementValue) std.mem.Allocator.Error!TypeId {
         const answered_name = try self.typeName(answered);
         const ending = if (answered == .unit) "()" else "…";
         var missing: std.ArrayList([]const u8) = .empty;
         const written_answer = try self.helpName(answered, &missing);
+        const subject = switch (answerer) {
+            .function => "make the function return `",
+            .closure => "write the closure's result as `-> ",
+        };
         const written_signature = switch (carrier.kind) {
-            .result => try std.fmt.allocPrint(self.sink.arena, "make the function return `Result[{s}, {s}]` and end it with `.Ok({s})`", .{ written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
-            .option => try std.fmt.allocPrint(self.sink.arena, "make the function return `Option[{s}]` and end it with `.Some({s})`", .{ written_answer, ending }),
+            .result => try std.fmt.allocPrint(self.sink.arena, "{s}Result[{s}, {s}]` and end it with `.Ok({s})`", .{ subject, written_answer, try self.helpName(self.errorTypeOf(carrier), &missing), ending }),
+            .option => try std.fmt.allocPrint(self.sink.arena, "{s}Option[{s}]` and end it with `.Some({s})`", .{ subject, written_answer, ending }),
         };
         const signature = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "{s} ({s})", .{ written_signature, note }) else written_signature;
         // `else` handles a failure only as the whole of a statement: the
         // initialiser of a `let`, or a `let _` written for a value kept for
         // its effect.
         const binder = if (carrier.kind == .result) " |_|" else "";
-        const where: ?StatementValue = if (self.statement_value) |statement| if (statement.expr == id) statement else null else null;
         const help = if (where) |statement| try std.fmt.allocPrint(self.sink.arena, "{s}, or handle the {s} here with `{s} {s} = … else{s} {{ … }}` in place of `?`", .{
             signature,
             if (carrier.kind == .result) "failure" else "absence",
@@ -16995,10 +17298,23 @@ const Checker = struct {
         }) else signature;
         const labels = try self.sink.arena.alloc(Label, 1);
         labels[0] = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id), .message = "`?` returns from the function it is written in", .style = .primary };
+        if (self.answer_fixes) |pending| try pending.append(self.gpa, .{
+            .diagnostic = self.sink.items().len,
+            .at = self.ast.exprMain(id),
+            .result = switch (carrier.kind) {
+                .result => try std.fmt.allocPrint(self.sink.arena, "Result[{s}, {s}]", .{ written_answer, try self.helpName(self.errorTypeOf(carrier), &missing) }),
+                .option => try std.fmt.allocPrint(self.sink.arena, "Option[{s}]", .{written_answer}),
+            },
+            .wrap = switch (carrier.kind) {
+                .result => ".Ok",
+                .option => ".Some",
+            },
+            .imports = try self.sink.arena.dupe([]const u8, missing.items),
+        });
         try self.sink.add(.{
             .severity = .err,
             .code = .t_try_answer,
-            .message = try std.fmt.allocPrint(self.sink.arena, "this `?` may return `{s}`, and the function answers with `{s}`", .{ try self.typeName(operand), answered_name }),
+            .message = try std.fmt.allocPrint(self.sink.arena, "this `?` may return `{s}`, and the {s} answers with `{s}`", .{ try self.typeName(operand), @tagName(answerer), answered_name }),
             .labels = labels,
             .notes = try self.sink.arena.dupe([]const u8, &.{help}),
         });
@@ -17009,7 +17325,8 @@ const Checker = struct {
     const StatementValue = struct {
         expr: ExprId,
         kind: Kind,
-        /// The binding's name, for a `let` initialiser.
+        /// The binding's name, or the pattern it is written with, for a `let`
+        /// initialiser.
         name: []const u8 = "_",
         /// The keyword that binds it, `let` or `var`.
         keyword: []const u8 = "let",
@@ -17212,7 +17529,16 @@ const Checker = struct {
             "`{s}` is reached with `import {s}`",
             .{ trait_name, route },
         ));
+        const reported = self.sink.items().len;
         self.sink.add(.{ .severity = .err, .code = .t_try_answer, .message = message, .labels = labels, .notes = notes.items }) catch {};
+        // Settling is written in front of the `?`, which is the last token.
+        if (settles_to != null) {
+            const question = self.ast.exprTokens(id).end;
+            if (question.index() > 0) {
+                const at = self.ast.tokenSpan(TokenId.at(question.index() - 1)).start;
+                try self.addFix(reported, 0, &.{.{ .file = self.ast.fileOfExpr(id), .span = .{ .start = at, .end = at }, .text = ".settled()" }});
+            }
+        }
         return self.record(id, .poison);
     }
 
@@ -18891,13 +19217,28 @@ const Checker = struct {
             .inference = if (expected.?.infer_lambda_result) expected.?.inference else null,
         } else null;
         const written_before_body = self.written.items.len;
+        var unanswered: std.ArrayList(UnansweredTry) = .empty;
+        defer unanswered.deinit(self.gpa);
+        var lambda_returns: std.ArrayList(ExprId) = .empty;
+        defer lambda_returns.deinit(self.gpa);
+        var lambda_fixes: std.ArrayList(AnswerFix) = .empty;
+        defer lambda_fixes.deinit(self.gpa);
+        const previous_returns = self.returns_seen;
+        const previous_fixes = self.answer_fixes;
+        self.returns_seen = &lambda_returns;
+        self.answer_fixes = &lambda_fixes;
+        defer self.returns_seen = previous_returns;
+        defer self.answer_fixes = previous_fixes;
         const body_result = checked: {
             const previous_return = self.current_return;
             const previous_failure = self.failure_expected;
+            const previous_unanswered = self.unanswered_tries;
             self.current_return = result_expected;
             self.failure_expected = null;
+            self.unanswered_tries = if (result_expected == null) &unanswered else null;
             defer self.current_return = previous_return;
             defer self.failure_expected = previous_failure;
+            defer self.unanswered_tries = previous_unanswered;
             // A closure's body is a function of its own: a `break` or
             // `continue` in it has no loop to leave, and its `return` and `?`
             // leave the closure rather than the loops around it.
@@ -18918,6 +19259,15 @@ const Checker = struct {
         // the places the checker recorded as written; ownership reports the
         // refusal, since what the body takes is decided by position there.
         const uncaptured_changed = free != .none and self.writesBinding(self.res.targetOf(free), self.written.items[written_before_body..]);
+        // A `?` hands a failure on only to a result that carries it, and the
+        // body decided that this closure's does not.
+        for (unanswered.items) |pending| {
+            _ = try self.reportTryWithoutCarrier(pending.id, pending.operand, pending.carrier, body_result, .closure, pending.statement);
+            refused = true;
+        }
+        // A closure given its result by a callable type it is passed as
+        // answers to that type, which the fix would not change.
+        if (lambda_fixes.items.len > 0 and contextual == null) if (lambdaResultSite(self.ast, id)) |site| try self.attachAnswerFixes(lambda_fixes.items, site, lambda.body, lambda_returns.items);
         const result = if (body_result == .never and result_expected != null) result_expected.?.ty else body_result;
         if (written_result != null and contextual != null) {
             if (try self.expect(id, result, .{
@@ -18930,7 +19280,7 @@ const Checker = struct {
         self.closure_descriptors[closure.index()].invocation = lambda.invocation;
         // An omitted clause inherits the contextual parameter contract. Authored
         // clauses describe the actual closure and must fit that promise unchanged.
-        var outcome: ContractOutcome = .{};
+        var outcome: ContractOutcome = .{ .lambda = id };
         const authored_contracts = if (contextual != null and lambda.contracts.start == lambda.contracts.end)
             null
         else
@@ -19995,7 +20345,18 @@ const Checker = struct {
     /// sentence every inference site uses, naming the call's brackets where
     /// `in_brackets` says they settled it first, with the allocator note
     /// where the two differ only in their allocator.
-    fn reportSettledTwice(self: *Checker, at: ExprId, parameter: []const u8, clash: Clash, in_brackets: bool) std.mem.Allocator.Error!void {
+    fn reportSettledTwice(self: *Checker, at: ExprId, parameter: []const u8, clash: Clash, in_brackets: bool, site: ?SettledSite) std.mem.Allocator.Error!void {
+        // Two closures spell alike, so the sentence names why they differ.
+        if (self.builder.get(clash.was) == .closure and self.builder.get(clash.got) == .closure) {
+            const reported = self.sink.items().len;
+            _ = self.report(.t_mismatch, at, "each closure has its own type, so `{s}`, settled by one, cannot stand for this one too", .{parameter}, "one type parameter, two closures");
+            if (self.sink.items().len > reported) {
+                try self.addNote(reported, try std.fmt.allocPrint(self.sink.arena, "declare a type parameter for each closure, with `{s}`'s bound", .{parameter}));
+                if (site) |where| if (try self.ownParameterEdits(where)) |edits| try self.addFix(reported, 0, edits);
+                try self.addNote(reported, try self.closuresNote(clash.was, clash.got));
+            }
+            return;
+        }
         const got_name = try self.typeName(clash.got);
         const spelled = .{ parameter, try self.typeName(clash.was), article.before(got_name), got_name };
         const reported_at = self.sink.items().len;
@@ -20004,7 +20365,61 @@ const Checker = struct {
         else
             self.report(.t_mismatch, at, "`{s}` was already settled as `{s}`, and this is {s} `{s}`", spelled, "one type parameter, two types");
         if (self.sink.items().len > reported_at) if (try self.allocatorMismatchNote(clash.was, clash.got)) |note|
-            try self.addNote(reported_at, note);
+            try self.addNote(reported_at, note.text);
+    }
+
+    /// The type parameter a call settled twice, the declaration declaring it
+    /// and the parameter whose argument settled it the second time.
+    const SettledSite = struct { decl: node.DeclId, param: usize, generic: node.TypeParam };
+
+    /// The edits giving the parameter at `site` a type parameter of its own:
+    /// one declared beside the one it shared, with the same bound, under a
+    /// name the declaration does not use, and the parameter's type written as
+    /// it. Null where the declaration is the library's, or the parameter's
+    /// type is written as more than the shared type parameter.
+    ///
+    /// **Bound:** the declaration's type parameters and the tokens of the
+    /// shared one's bound.
+    fn ownParameterEdits(self: *Checker, site: SettledSite) std.mem.Allocator.Error!?[]const HelpEdit {
+        if (self.program.get(self.program.moduleOf(site.decl)).library) return null;
+        const params = self.ast.declParams(site.decl);
+        if (site.param >= params.len) return null;
+        const written = params[site.param].written;
+        if (!written.wasWritten()) return null;
+        const shared = self.ast.tokenText(site.generic.name);
+        const part = self.ast.partOf(site.generic.name);
+        const type_span = self.ast.writtenSpan(written);
+        if (!std.mem.eql(u8, type_span.slice(part.source), shared)) return null;
+        // The bound runs from after the name to the `,` or `]` closing it.
+        var end = site.generic.name;
+        var depth: i32 = 0;
+        var at = site.generic.name.index() + 1;
+        while (at < self.ast.tokenCount()) : (at += 1) {
+            const token = TokenId.at(@intCast(at));
+            const tag = self.ast.tokenTag(token);
+            if (depth == 0 and (tag == .comma or tag == .r_bracket)) break;
+            depth += tag.nesting();
+            if (depth < 0) break;
+            if (!tag.isTrivia()) end = token;
+        }
+        const name_span = self.ast.tokenSpan(site.generic.name);
+        const bound = part.source[name_span.end..self.ast.tokenSpan(end).end];
+        var fresh: []const u8 = "";
+        for ([_][]const u8{ "G", "H", "K", "L", "M", "N", "P", "Q" }) |candidate| {
+            const taken = for (self.ast.declTypeParams(site.decl)) |declared| {
+                if (std.mem.eql(u8, self.ast.tokenText(declared.name), candidate)) break true;
+            } else false;
+            if (!taken) {
+                fresh = candidate;
+                break;
+            }
+        } else return null;
+        const after = self.ast.tokenSpan(end).end;
+        const file = self.ast.fileOf(site.generic.name);
+        return try self.sink.arena.dupe(HelpEdit, &.{
+            .{ .file = file, .span = .{ .start = after, .end = after }, .text = try std.fmt.allocPrint(self.sink.arena, ", {s}{s}", .{ fresh, bound }) },
+            .{ .file = file, .span = type_span, .text = fresh },
+        });
     }
 
     /// Where `expected` and `found` are one declaration applied to arguments
@@ -20016,7 +20431,11 @@ const Checker = struct {
     /// expected. Null for any other pair.
     ///
     /// **Bound:** one walk over the two types' arguments, together.
-    fn allocatorMismatchNote(self: *Checker, expected: TypeId, found: TypeId) std.mem.Allocator.Error!?[]const u8 {
+    /// Which form of the call that made a value an allocator note names.
+    const AllocatorForm = union(enum) { none, system, with_allocator: TypeId };
+    const AllocatorNote = struct { text: []const u8, form: AllocatorForm = .none };
+
+    fn allocatorMismatchNote(self: *Checker, expected: TypeId, found: TypeId) std.mem.Allocator.Error!?AllocatorNote {
         const allocator = self.allocator_decl orelse return null;
         if (expected == .poison or found == .poison) return null;
         const want = self.builder.instanceOf(expected) orelse return null;
@@ -20047,22 +20466,22 @@ const Checker = struct {
             var missing: std.ArrayList([]const u8) = .empty;
             const written = try self.helpName(found, &missing);
             const imports = if (try importNote(self.sink.arena, missing.items)) |note| try std.fmt.allocPrint(self.sink.arena, "; {s}", .{note}) else "";
-            return try std.fmt.allocPrint(
+            return .{ .form = .system, .text = try std.fmt.allocPrint(
                 self.sink.arena,
                 "only their allocators differ: the `{s}` expected is in `{s}`, the default where a type leaves its allocator out, and this one is in `{s}`; build it with the system form of the call that made it, without `_in`, or write `{s}` where the `{s}` expected is declared{s}",
                 .{ name, in_expected, in_found, written, name, imports },
-            );
+            ) };
         }
-        if (had[at] == default) return try std.fmt.allocPrint(
+        if (had[at] == default) return .{ .form = .{ .with_allocator = wanted[at] }, .text = try std.fmt.allocPrint(
             self.sink.arena,
             "only their allocators differ: the `{s}` expected is in `{s}`, and this one is in `{s}`, the default; build it with the `_in` form of the call that made it, passing the allocator `{s}` stands for",
             .{ name, in_expected, in_found, in_expected },
-        );
-        return try std.fmt.allocPrint(
+        ) };
+        return .{ .text = try std.fmt.allocPrint(
             self.sink.arena,
             "only their allocators differ: the `{s}` expected is in `{s}`, and this one is in `{s}`; build it with the allocator expected",
             .{ name, in_expected, in_found },
-        );
+        ) };
     }
 
     /// The name of the declaration beside `owner` that takes the allocator
@@ -29975,7 +30394,7 @@ const Checker = struct {
                     var clash: ?Clash = null;
                     if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
 
-                    try self.reportSettledTwice(a, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, s.owner == d and written.len > 0);
+                    try self.reportSettledTwice(a, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, s.owner == d and written.len > 0, if (s.owner == d) .{ .decl = d, .param = j, .generic = s.generics[clash.?.index] } else null);
                     return null;
                 }
 
@@ -30167,7 +30586,7 @@ const Checker = struct {
             for (settling) |s| {
                 var clash: ?Clash = null;
                 if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
-                try self.reportSettledTwice(value, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, false);
+                try self.reportSettledTwice(value, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, false, if (s.owner == d) .{ .decl = d, .param = j, .generic = s.generics[clash.?.index] } else null);
                 delayed_refused = true;
             }
         }

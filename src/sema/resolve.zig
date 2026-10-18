@@ -4389,6 +4389,11 @@ fn resolveInternal(
         // and no reference can name it.
         if (b.at != TokenId.none and ast.tokenTag(b.at) != .identifier) continue;
 
+        // An import or `use` naming nothing was refused where it is written;
+        // nothing could use what it binds, so its disuse is that refusal's
+        // consequence.
+        if (b.unresolved) continue;
+
         const id = BindingId.at(@intCast(index));
         if (candidates.contains(id)) {
             try deferred_unused.append(gpa, id);

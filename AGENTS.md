@@ -117,21 +117,31 @@ until it is green.
   consecutive from zero, so a failure names a reproducing number). A generated
   program the compiler rejects is a failure: the generator and the compiler
   disagree about the language.
-- Every rejected case of one file is also held to its helps: a diagnostic may
-  carry an `edit`, the machine-readable form of one of its helps, and the
-  conformance runner applies the edits one at a time, checking the case again
-  after each, until no error carries one. An error an edit answered must not
-  come back at its line, whichever later edit brings it back; a new error
-  elsewhere is the program's next mistake and is allowed, and edits still
+- Every rejected case of one file is also held to its helps: a diagnostic
+  carries a `Fix` for each help concrete enough to write, the edits that help
+  names applied together, and the conformance runner applies each fix alone and
+  checks the case again: the error must be gone from the line it was reported
+  at. Then it follows the fixes in turn, one each round, until no error carries
+  one: an error a fix answered must not come back at its line, a new error
+  elsewhere is the program's next mistake and is allowed, and fixes still
   offered after eight are reported as helps that undo each other. There is no
-  golden, `-Dupdate` cannot silence it, and the run fails under a floor of
-  cases that carried an edit. Edits carried today: the `where` clause
-  [O-Escapes] and [T-BorrowContract] name, where the clause answers everything
-  reported there. Helps that carry none yet, and are checked only by reading:
-  the [T-Infer] annotation (it names a type to fill in), `let … else` in place
-  of `?`, the owned copy (it changes the result type and the body), the
-  `import` a help names, the [O-Leak] `defer let`, and the allocator forms. A
-  help offering an edit a tool could write should carry it.
+  golden, `-Dupdate` cannot silence it, and the run fails under a floor of cases
+  that carried a fix. Fixes carried: the `where` clause [O-Escapes] and
+  [T-BorrowContract] name, on a function or a lambda; the owned copy of a
+  returned view and the owner put in place of its view, with the imports they
+  need; the result type [T-TryAnswer] names, with every `return` and the tail
+  wrapped; `.settled()` before `?` and a discarded failure handed on; the
+  [O-Leak] `defer`; a member [T-Impl] says to drop; the other allocator form of
+  a call; and a type parameter for each of two closures. Helps that carry none,
+  because the edit is a choice the reader makes: the [T-Infer] annotation and
+  defaulted parameters (which type), `let … else` (what the `else` block
+  does), releasing before a path leaves and [O-Merge] (where, and on which
+  path), the owned copy kept in a field or an `inout` parameter (the field's
+  type and the failure path both change, or `append` instead), the allocator
+  taken as a parameter (the signature and every caller), implementing a
+  conversion (a body to write) and the import beside it, and every help
+  outside this list's rules. A help offering an edit a tool could write
+  should carry it.
 
 ### CI lanes
 

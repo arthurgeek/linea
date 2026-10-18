@@ -2074,7 +2074,6 @@ fn renderCallable(
     if (independent) try rendered.appendSlice(gpa, " where carries()");
 }
 
-
 /// One exact structural callable signature and its parameter run.
 pub const CallableSignature = struct {
     invocation: Convention = .read,

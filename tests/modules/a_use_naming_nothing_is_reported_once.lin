@@ -1,0 +1,10 @@
+// `mem` declares no `Owner`, so the `use` names nothing. That is the one
+// mistake: a `use` that names nothing is not also reported as unused.
+import std.mem
+
+use mem.Owner
+
+fn main() -> UInt8 {
+    let _arena = mem.system()
+    0
+}

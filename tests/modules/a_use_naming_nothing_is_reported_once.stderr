@@ -1,0 +1,5 @@
+error[M-Import]: `Owner` is not declared in `mem`
+ --> tests/modules/a_use_naming_nothing_is_reported_once.lin:5:9
+  |
+5 | use mem.Owner
+  |         ^^^^^ no declaration of that name is in that module

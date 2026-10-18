@@ -1947,7 +1947,8 @@ exempt because it exposes the declaration to other modules.
 A `use` that binds a trait is exempt: a method call can use a trait without
 naming it (`a.acquire(n)` requires `Allocator` in scope even if it appears only
 in the `use`), and these calls are resolved after name resolution. Unused
-aliases of types and functions remain diagnosed.
+aliases of types and functions remain diagnosed. An import or `use` that names
+nothing is refused by [M-Import], and is not also reported as unused.
 
 Prelude imports are exempt. The prelude imports every library module so its
 implementations are loaded and available for lookup, and a module that only
@@ -2117,7 +2118,10 @@ omitted parameter types and its result type is the expectation on the body. A
 non-capturing lambda whose completed signature satisfies that interface then
 converts to that one structural code-pointer type. A structural callable bound
 supplies the same parameter and result context without erasing the lambda's
-unique type. Callable-bound satisfaction also compares outer parameters by
+unique type, so two closures passed for one type parameter are two types, and
+the call is [T-Mismatch]: the report says each closure has its own type and
+names a type parameter for each, with the same bound. Callable-bound
+satisfaction also compares outer parameters by
 position, independently of their binder names. Label differences require no
 runtime adapter and introduce no parameter or result type variance.
 
@@ -4182,6 +4186,11 @@ the `?` is the whole of a statement, it also offers handling the failure there:
 `var`), and
 `let _ = … else |_| { … }` for an expression kept for its effect. `else` stands
 nowhere else, so a `?` inside a larger expression is offered only the signature.
+A destructuring `let` is offered `let … else` with its own pattern,
+`let (a, b) = … else |_| { … }`. A closure that writes no result, and is given
+none by a callable type it is passed as, answers with what its body gives, so a
+`?` in it is held to that type once the body is checked, and the report offers
+the closure's result, `|| -> Result[UInt8, E] { … }`.
 
 A failing `Result` returns its error. An error of the function's own error type
 passes through unchanged and needs no implementation. An error of a different

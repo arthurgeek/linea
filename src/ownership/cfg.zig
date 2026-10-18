@@ -744,6 +744,8 @@ pub const Cfg = struct {
 pub const Function = struct {
     /// The declaration this graph represents, or none for a closure.
     decl: DeclId,
+    /// The lambda this graph represents, or none for a declaration.
+    lambda: ExprId = .none,
     /// The declaration whose contextual constraints apply inside this body.
     owner: DeclId,
     entry: BlockId,

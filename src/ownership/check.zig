@@ -12,6 +12,8 @@ const ExpandedProgram = @import("../syntax/expanded_program.zig").ExpandedProgra
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
 const Diagnostic = @import("../diagnostics/diagnostic.zig").Diagnostic;
+const HelpEdit = @import("../diagnostics/diagnostic.zig").Edit;
+const Fix = @import("../diagnostics/diagnostic.zig").Fix;
 const resolve_mod = @import("../sema/resolve.zig");
 const BindingId = resolve_mod.BindingId;
 const Resolution = resolve_mod.Resolution;
@@ -1102,10 +1104,14 @@ const Checker = struct {
         const receiver = if (generated) null else try self.receiverOf(b);
         const notes = try arena.alloc([]const u8, 1);
         notes[0] = try self.settleHelp(ty, "settle it first with", receiver);
+        var fixes: []const Fix = &.{};
         // A value left on an early exit is settled on every path by one
         // schedule; one left only where its scope ends is settled there.
         if (!generated and !discard and primary != null) if (try self.deferredReleaseHint(b, ty)) |hint| {
-            notes[0] = try std.fmt.allocPrint(arena, "{s}, or {s}", .{ notes[0], hint });
+            notes[0] = try std.fmt.allocPrint(arena, "{s}, or {s}", .{ notes[0], hint.text });
+            // Where the release goes is the reader's choice; the schedule's
+            // place is not, so it is the fix.
+            if (hint.edit) |edit| fixes = try arena.dupe(Fix, &.{.{ .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
         };
         // `let _ = badge` holds what `badge` held, and `badge` is the name the
         // reader wrote for it.
@@ -1122,22 +1128,66 @@ const Checker = struct {
             }),
             .labels = labels.items,
             .notes = notes,
+            .fixes = fixes,
         });
     }
+
+    /// A schedule a help names, and the edit writing it where one can.
+    const ReleaseHint = struct { text: []const u8, edit: ?HelpEdit };
 
     /// The schedule that settles `b` on every path out, for a type that
     /// implements `Release`, the trait `defer let` schedules: `defer let` (or
     /// `defer var`) where a single-name `let` or `var` binds it, and
     /// `defer name.release()` where it arrives for any other binding, a
     /// parameter or a pattern's binder. Null for a type without `Release`.
-    fn deferredReleaseHint(self: *const Checker, b: BindingId, ty: TypeId) std.mem.Allocator.Error!?[]const u8 {
+    ///
+    /// The edit writes `defer ` in front of the `let`; for a pattern's binder,
+    /// the `defer` on the line after the statement binding it; for a
+    /// function's parameter, the `defer` first in its body.
+    fn deferredReleaseHint(self: *const Checker, b: BindingId, ty: TypeId) std.mem.Allocator.Error!?ReleaseHint {
         const release = self.typing.closure_release orelse return null;
         if (!try self.reach().answers(self.gpa, ty, release.trait)) return null;
+        const arena = self.sink.arena;
         const name = try self.nameOf(b);
         const s = self.res.stmtOf(b);
-        if (s != node.StmtId.none and self.ast.stmtTag(s) == .let_decl and self.ast.stmtData(s).pattern == ExprId.none and !self.ast.stmtIsDeferredBinding(s))
-            return try std.fmt.allocPrint(self.sink.arena, "declare it `defer {s} {s} = …` so every path releases it", .{ if (self.ast.stmtIsMutable(s)) "var" else "let", name });
-        return try std.fmt.allocPrint(self.sink.arena, "write `defer {s}.release()` where it is bound so every path releases it", .{name});
+        if (s != node.StmtId.none and self.ast.stmtTag(s) == .let_decl and self.ast.stmtData(s).pattern == ExprId.none and !self.ast.stmtIsDeferredBinding(s)) {
+            const at = self.ast.stmtTokens(s).start;
+            return .{
+                .text = try std.fmt.allocPrint(arena, "declare it `defer {s} {s} = …` so every path releases it", .{ if (self.ast.stmtIsMutable(s)) "var" else "let", name }),
+                .edit = .{ .file = self.ast.fileOf(at), .span = .{ .start = self.ast.tokenSpan(at).start, .end = self.ast.tokenSpan(at).start }, .text = "defer " },
+            };
+        }
+        const text = try std.fmt.allocPrint(arena, "write `defer {s}.release()` where it is bound so every path releases it", .{name});
+        const statement = try std.fmt.allocPrint(arena, "defer {s}.release()", .{name});
+        // After the statement that binds it, at that statement's indentation.
+        if (s != node.StmtId.none and !self.ast.stmtIsDeferredBinding(s)) {
+            const first = self.ast.stmtTokens(s).start;
+            const source = self.ast.partOf(first).source;
+            const end = self.ast.stmtSpan(s).end;
+            return .{ .text = text, .edit = .{ .file = self.ast.fileOf(first), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}{s}", .{ indentationOf(source, self.ast.tokenSpan(first).start), statement }) } };
+        }
+        // First in the body of the function whose parameter it is.
+        if (self.res.kindOf(b) == .parameter and self.current_owner != .none and self.ast.declTag(self.current_owner) == .function) {
+            const body = self.ast.declBody(self.current_owner);
+            if (body != ExprId.none and self.ast.exprTag(body) == .block) {
+                const opening = self.ast.exprTokens(body).start;
+                const source = self.ast.partOf(opening).source;
+                const name_token = self.ast.declName(self.current_owner);
+                const fn_indent = indentationOf(source, self.ast.tokenSpan(name_token).start);
+                const end = self.ast.tokenSpan(opening).end;
+                return .{ .text = text, .edit = .{ .file = self.ast.fileOf(opening), .span = .{ .start = end, .end = end }, .text = try std.fmt.allocPrint(arena, "\n{s}    {s}", .{ fn_indent, statement }) } };
+            }
+        }
+        return .{ .text = text, .edit = null };
+    }
+
+    /// The spaces and tabs a line of `source` begins with, for the line
+    /// holding byte `at`.
+    fn indentationOf(source: []const u8, at: u32) []const u8 {
+        const start = if (std.mem.lastIndexOfScalar(u8, source[0..at], '\n')) |nl| nl + 1 else 0;
+        var end = start;
+        while (end < source.len and (source[end] == ' ' or source[end] == '\t')) end += 1;
+        return source[start..end];
     }
 
     /// Names a binding for a message: by its name in backticks, or, for one a

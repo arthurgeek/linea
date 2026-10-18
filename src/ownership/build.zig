@@ -652,6 +652,7 @@ const Builder = struct {
         if (self.at != .none) try self.markExit(self.at);
         try self.functions.append(self.gpa, .{
             .decl = .none,
+            .lambda = descriptor.expr,
             .owner = descriptor.enclosing,
             .entry = .at(first),
             .signature = descriptor.signature,
