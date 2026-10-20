@@ -1,0 +1,21 @@
+error[T-Refutable]: this pattern does not match every `Option[UInt8]`
+  --> tests/patterns/a_refutable_let_is_refused.lin:14:9
+   |
+14 |     let Some(n) = found
+   |         ^^^^^^^ `None` is not matched
+   |
+   = help: bind what it carries with `let ... else`, or take it apart with `match`
+error[T-Refutable]: this pattern does not match every `(Str, Option[UInt8])`
+  --> tests/patterns/a_refutable_let_is_refused.lin:16:16
+   |
+16 |     let (_key, Some(width)) = pair
+   |                ^^^^^^^^^^^ `(_, None)` is not matched
+   |
+   = help: take it apart with `match`, which has an arm for every case
+error[T-Refutable]: this pattern does not match every `(Str, Option[UInt8])`
+  --> tests/patterns/a_refutable_let_is_refused.lin:17:17
+   |
+17 |     let (_name, Some(port)) = lookup(true) else {
+   |                 ^^^^^^^^^^ `(_, None)` is not matched
+   |
+   = help: take it apart with `match`, which has an arm for every case

@@ -1,0 +1,20 @@
+// One `let` takes apart a struct and the struct in its field. `let read` does
+// the same without taking anything: `y` is a lend of the inner point's field.
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+struct Frame {
+    origin: Point,
+    scale: UInt8,
+}
+
+fn main() -> UInt8 {
+    let lent = Frame { origin = Point { x = 1, y = 2 }, scale = 3 }
+    let read Frame { origin: Point { x: _, y }, scale: _ } = lent
+    let lent_y = y
+    let frame = Frame { origin = Point { x = 4, y = 5 }, scale = 6 }
+    let Frame { origin: Point { x, y: _ }, scale } = frame
+    lent_y + x + scale - 12
+}

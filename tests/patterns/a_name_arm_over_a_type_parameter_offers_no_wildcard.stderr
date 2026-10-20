@@ -1,0 +1,7 @@
+error[N-Variant]: `T` is not known to be an enum, so `Empty` names no variant of it
+ --> tests/patterns/a_name_arm_over_a_type_parameter_offers_no_wildcard.lin:6:9
+  |
+6 |         Empty => 0,
+  |         ^^^^^ a name at an arm's head names a variant
+  |
+  = help: nothing says how `T` is built, so use the value without taking it apart

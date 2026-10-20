@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Pair { a: 0, b: _ }`, `Pair { a: 2..=255, b: _ }`
+  --> tests/structs/a_field_literal_leaves_the_other_values_uncovered.lin:11:5
+   |
+11 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`

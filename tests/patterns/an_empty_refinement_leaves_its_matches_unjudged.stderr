@@ -1,0 +1,10 @@
+error[T-Refine]: 5..=4 admits no value for `Closed`
+ --> tests/patterns/an_empty_refinement_leaves_its_matches_unjudged.lin:3:6
+  |
+3 | type Closed = UInt8 where it in 5..=4
+  |      ^^^^^^ widen the range, or write no clause at all
+error[T-Refine]: 0..0 admits no value for `Gone`
+ --> tests/patterns/an_empty_refinement_leaves_its_matches_unjudged.lin:5:6
+  |
+5 | type Gone = UInt8 where it in 0..0
+  |      ^^^^ widen the range, or write no clause at all

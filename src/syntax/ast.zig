@@ -16,6 +16,7 @@ const TokenRange = token.TokenRange;
 const TokenList = token.TokenList;
 const node = @import("node.zig");
 const Table = @import("../support/table.zig").Table;
+const name_case = @import("../support/name_case.zig");
 const Expr = node.Expr;
 const Stmt = node.Stmt;
 const Block = node.Block;
@@ -1363,6 +1364,42 @@ pub const Ast = struct {
         return self.exprTag(label) != .err and self.exprMain(label) == self.exprMain(value);
     }
 
+    /// Whether a pattern's part is a binder: a bare lowercase name or `_`,
+    /// in a payload, a tuple's component or after a struct field's `:`. A
+    /// bare capitalised name there is a variant, which binds nothing. A name's
+    /// case is part of its kind, so the spelling settles which it is; the
+    /// resolver declares a binder by this answer and the checker types it by
+    /// the same one.
+    pub fn partBinds(self: *const Ast, part: ExprId) bool {
+        if (self.exprTag(part) != .name_ref) return false;
+        return name_case.of(self.tokenText(self.exprMain(part))) != .capital;
+    }
+
+    /// The parts a pattern node takes its value apart into, in source order:
+    /// what a variant's or newtype's pattern names inside its parentheses, a
+    /// tuple pattern's components, and a struct pattern's field patterns
+    /// (each after the field it takes). Nothing for any other node.
+    pub fn patternParts(self: *const Ast, pattern: ExprId) PatternParts {
+        return switch (self.exprTag(pattern)) {
+            .struct_pattern => .{ .args = self.call(pattern).args, .at = 1, .stride = 2 },
+            .tuple_pattern, .call => .{ .args = self.call(pattern).args, .at = 0, .stride = 1 },
+            else => .{ .args = &.{}, .at = 0, .stride = 1 },
+        };
+    }
+
+    pub const PatternParts = struct {
+        args: []const ExprId,
+        at: usize,
+        stride: usize,
+
+        pub fn next(self: *PatternParts) ?ExprId {
+            if (self.at >= self.args.len) return null;
+            const part = self.args[self.at];
+            self.at += self.stride;
+            return part;
+        }
+    };
+
     /// A call's callee and its arguments. The count is stored ahead of the
     /// run, so the arguments are a slice rather than a walk.
     pub fn call(self: *const Ast, id: ExprId) struct { callee: ExprId, args: []const ExprId } {
@@ -1561,6 +1598,13 @@ pub const Ast = struct {
             }
             try out.appendSlice(gpa, self.exprExtent(a).slice(source));
         }
+    }
+
+    /// Whether a tuple pattern's `)` was never found, so its parts may stop
+    /// short of what was written and its arity says nothing.
+    pub fn tuplePatternCutShort(self: *const Ast, id: ExprId) bool {
+        std.debug.assert(self.exprTag(id) == .tuple_pattern);
+        return self.exprs.items(.call_flags)[id.index()].cut_short;
     }
 
     /// Whether a call is `Name?(e)`, a newtype's unproven construction,
@@ -2386,6 +2430,13 @@ pub const Ast = struct {
         /// the `(` that follows it have both been seen.
         pub fn markFallible(self: *Builder, id: ExprId) void {
             self.exprs.items(.call_flags)[id.index()].fallible = true;
+        }
+
+        /// Marks an already-built tuple pattern as one whose `)` was never
+        /// found.
+        pub fn markCutShort(self: *Builder, id: ExprId) void {
+            std.debug.assert(self.exprTag(id) == .tuple_pattern);
+            self.exprs.items(.call_flags)[id.index()].cut_short = true;
         }
 
         /// Records that an already-built call is written with `&` before it.

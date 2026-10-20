@@ -1,0 +1,5 @@
+error[S-Paren]: unclosed `(`
+ --> tests/patterns/an_unclosed_tuple_pattern_has_no_arity_judged.lin:4:9
+  |
+4 |     let (low, _middle = triple
+  |         ^ this tuple pattern is never closed

@@ -1663,7 +1663,7 @@ const Analysis = struct {
         try self.put(state, Cell.expression(id), try self.carriedBy(result, self.typing.exprType(id)));
     }
 
-    fn projectionPath(self: *Analysis, projection: cfg_mod.Projection) !PathId {
+    fn projectionPath(self: *Analysis, projection: cfg_mod.Projection) std.mem.Allocator.Error!PathId {
         return switch (projection) {
             .whole => .root,
             .field => |field| self.store.prepend(@intFromEnum(field), .root),
@@ -1674,6 +1674,34 @@ const Analysis = struct {
                 self.expansionPath(expansion, null)
             else
                 self.store.prepend(element, .root),
+            .part => |nested| self.partPath(nested),
+        };
+    }
+
+    /// The path a nested pattern node selects: the path to the pattern
+    /// around it, then its own step. Built from the node outwards, each step
+    /// put in front of the path so far, so it costs the pattern's depth.
+    fn partPath(self: *Analysis, nested: ExprId) std.mem.Allocator.Error!PathId {
+        var out: PathId = .root;
+        var at = nested;
+        while (self.cfg.pattern_parts.get(at)) |part| {
+            out = try self.store.concat(try self.projectionPath(part.step), out);
+            if (part.within == .none) break;
+            at = part.within;
+        }
+        return out;
+    }
+
+    /// Whether a binder takes its part from the element an owning walk took.
+    fn walksAnElement(self: *const Analysis, projection: cfg_mod.Projection) bool {
+        var at = projection;
+        while (true) switch (at) {
+            .element, .element_component => return true,
+            .part => |nested| {
+                const part = self.cfg.pattern_parts.get(nested) orelse return false;
+                at = if (part.within == .none) part.step else .{ .part = part.within };
+            },
+            else => return false,
         };
     }
 
@@ -2355,7 +2383,7 @@ const Analysis = struct {
                     // walked value, through `next` or from the array, so the
                     // walked value itself is what still needs an observation
                     // the body invalidated.
-                    if (projection == .element or projection == .element_component) try self.stale(incoming, .{ .walked = source }, report);
+                    if (self.walksAnElement(projection)) try self.stale(incoming, .{ .walked = source }, report);
                     const projected = try self.projectionPath(projection);
                     incoming = try self.store.select(incoming, projected);
                     if (self.cfg.opTag(op) == .lent) {

@@ -1,0 +1,27 @@
+// A variant inside a pattern that leaves its payload unnamed drops it, as a bare
+// variant arm does, so a linear ticket inside `Taken` inside `Some` is never
+// settled.
+@linear
+struct Ticket {
+    number: UInt8,
+}
+
+impl Release for Ticket {
+    fn release(sink self: Self) {
+        let Ticket { number: _number } = self
+    }
+}
+
+enum Slot {
+    Taken(Ticket),
+    Free,
+}
+
+fn main() -> UInt8 {
+    let slot: Option[Slot] = .Some(.Free)
+    match slot {
+        Some(Taken) => 1,
+        Some(Free) => 0,
+        None => 2,
+    }
+}

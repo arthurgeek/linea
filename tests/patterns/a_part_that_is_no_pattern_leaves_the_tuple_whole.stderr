@@ -1,0 +1,30 @@
+error[S-Match]: `true` is a keyword, and a keyword cannot be a name
+ --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:6:10
+  |
+6 |         (true, +, count) => count,
+  |          ^^^^ choose another name
+error[S-Match]: expected a pattern
+ --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:6:16
+  |
+6 |         (true, +, count) => count,
+  |                ^ an arm begins with a variant, `_`, a number or a string
+error[S-Match]: expected a pattern
+  --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:13:17
+   |
+13 |         (first, +, last) => first + last,
+   |                 ^ an arm begins with a variant, `_`, a number or a string
+error[S-Tuple]: expected `,` or `)`
+  --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:20:20
+   |
+20 |         (flag, low high) => if flag { low } else { high },
+   |                    ^^^^ a tuple pattern separates its binders with commas
+error[S-Match]: `true` is a keyword, and a keyword cannot be a name
+  --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:25:10
+   |
+25 |     let (true, +, count) = triple
+   |          ^^^^ choose another name
+error[S-Match]: expected a pattern
+  --> tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin:25:16
+   |
+25 |     let (true, +, count) = triple
+   |                ^ an arm begins with a variant, `_`, a number or a string

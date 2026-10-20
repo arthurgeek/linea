@@ -1,0 +1,11 @@
+// A pattern declares each name once, however deep the names sit.
+fn both(sink pair: (Option[UInt8], Option[UInt8])) -> UInt8 {
+    match pair {
+        (Some(value), Some(value)) => value,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    both((.None, .None))
+}

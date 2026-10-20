@@ -1,0 +1,17 @@
+// A struct pattern's field may hold a pattern: `value: Some(reading)` takes the
+// field apart where the reading is matched.
+struct Sample {
+    sensor: UInt8,
+    value: Option[UInt8],
+}
+
+fn total(sink sample: Sample) -> UInt8 {
+    match sample {
+        Sample { sensor, value: Some(reading) } => sensor + reading,
+        Sample { sensor, value: None } => sensor,
+    }
+}
+
+fn main() -> UInt8 {
+    total(Sample { sensor = 1, value = .Some(2) }) + total(Sample { sensor = 5, value = .None }) - 8
+}

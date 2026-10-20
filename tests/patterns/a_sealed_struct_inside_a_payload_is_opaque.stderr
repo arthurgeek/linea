@@ -1,0 +1,5 @@
+error[M-Opaque]: `Secret` is opaque outside `vault`
+ --> tests/patterns/a_sealed_struct_inside_a_payload_is_opaque/main.lin:9:14
+  |
+9 |         Some(Secret { value }) => value,
+  |              ^^^^^^^^^^^^^^^^ only its own module can take one apart

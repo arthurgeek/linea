@@ -1,0 +1,15 @@
+error[T-Refutable]: this pattern matches no value
+ --> tests/patterns/a_binding_pattern_matching_nothing_is_refutable.lin:8:16
+  |
+8 |     let (Digit(12), count) = pair
+  |                ^^ no `Digit` holds this value
+error[T-Refutable]: this pattern matches no value
+  --> tests/patterns/a_binding_pattern_matching_nothing_is_refutable.lin:14:10
+   |
+14 |     for (9..=1, count) in pairs {
+   |          ^^^^^ this range matches nothing
+error[T-Refutable]: this pattern matches no value
+  --> tests/patterns/a_binding_pattern_matching_nothing_is_refutable.lin:21:24
+   |
+21 |     let pick = |(Digit(12), count): (Digit, UInt8)| count
+   |                        ^^ no `Digit` holds this value

@@ -34,8 +34,8 @@ module {
     %s6 = llvm.alloca %z6 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %rz11 = arith.constant 16 : i64
     %rs11 = llvm.alloca %rz11 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz34 = arith.constant 16 : i64
-    %rs34 = llvm.alloca %rz34 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz35 = arith.constant 16 : i64
+    %rs35 = llvm.alloca %rz35 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
     %ba1 = llvm.mlir.addressof @linea_str0 : !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":10:13)
@@ -51,19 +51,24 @@ module {
     %v12 = llvm.load %rs11 : !llvm.ptr -> i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %v13 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %v14 = arith.cmpi eq, %v12, %v13 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    cf.cond_br %v14, ^b2, ^b3 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    cf.cond_br %v14, ^b3, ^b2 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
   ^b1:
-    %lw30 = llvm.load %s2 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    %v30 = arith.extui %lw30 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    %sw31 = arith.trunci %v30 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:5)
-    llvm.store %sw31, %s1 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:5)
-    %v33 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:49)
-    func.call @"lin.std.text;Str.byte"(%rs34, %s0, %v33) : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:37)
-    %v35 = llvm.load %rs34 : !llvm.ptr -> i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v36 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v37 = arith.cmpi eq, %v35, %v36 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    cf.cond_br %v37, ^b7, ^b8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %lw31 = llvm.load %s2 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    %v31 = arith.extui %lw31 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    %sw32 = arith.trunci %v31 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:5)
+    llvm.store %sw32, %s1 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:5)
+    %v34 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:49)
+    func.call @"lin.std.text;Str.byte"(%rs35, %s0, %v34) : (!llvm.ptr, !llvm.ptr, i64) -> () loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:37)
+    %v36 = llvm.load %rs35 : !llvm.ptr -> i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v37 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v38 = arith.cmpi eq, %v36, %v37 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    cf.cond_br %v38, ^b8, ^b7 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
   ^b2:
+    %v23 = llvm.load %rs11 : !llvm.ptr -> i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    %v24 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    %v25 = arith.cmpi eq, %v23, %v24 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    cf.cond_br %v25, ^b5, ^b4 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+  ^b3:
     %v16 = arith.constant 8 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %v17 = llvm.getelementptr %rs11[%v16] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %iw18 = llvm.load %v17 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
@@ -75,81 +80,78 @@ module {
     %sw21 = arith.trunci %v20 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     llvm.store %sw21, %s2 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     cf.br ^b1 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-  ^b3:
-    %v23 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    %v24 = arith.cmpi eq, %v12, %v23 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    cf.cond_br %v24, ^b4, ^b5 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
   ^b4:
-    %v26 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":14:17)
-    %sw27 = arith.trunci %v26 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    llvm.store %sw27, %s2 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-    cf.br ^b1 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
-  ^b5:
     %tk1 = arith.constant 3 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %tl1 = arith.constant 12 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     %tc1 = arith.constant 23 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
     llvm.unreachable loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+  ^b5:
+    %v27 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":14:17)
+    %sw28 = arith.trunci %v27 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    llvm.store %sw28, %s2 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
+    cf.br ^b1 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":12:23)
   ^b6:
-    %lw53 = llvm.load %s5 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v53 = arith.extui %lw53 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %sw54 = arith.trunci %v53 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:5)
-    llvm.store %sw54, %s4 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:5)
-    %lw55 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
-    %v55 = arith.extui %lw55 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
-    %v56 = arith.constant 195 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:16)
-    %v57 = arith.cmpi ne, %v55, %v56 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
-    cf.cond_br %v57, ^b11, ^b12 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:5)
+    %lw55 = llvm.load %s5 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v55 = arith.extui %lw55 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %sw56 = arith.trunci %v55 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:5)
+    llvm.store %sw56, %s4 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:5)
+    %lw57 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
+    %v57 = arith.extui %lw57 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
+    %v58 = arith.constant 195 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:16)
+    %v59 = arith.cmpi ne, %v57, %v58 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:8)
+    cf.cond_br %v59, ^b11, ^b12 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:5)
   ^b7:
-    %v39 = arith.constant 8 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v40 = llvm.getelementptr %rs34[%v39] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %iw41 = llvm.load %v40 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v41 = arith.extui %iw41 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %sw42 = arith.trunci %v41 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    llvm.store %sw42, %s6 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %lw43 = llvm.load %s6 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":18:20)
-    %v43 = arith.extui %lw43 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":18:20)
-    %sw44 = arith.trunci %v43 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    llvm.store %sw44, %s5 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    cf.br ^b6 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v47 = llvm.load %rs35 : !llvm.ptr -> i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v48 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v49 = arith.cmpi eq, %v47, %v48 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    cf.cond_br %v49, ^b10, ^b9 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
   ^b8:
-    %v46 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    %v47 = arith.cmpi eq, %v35, %v46 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    cf.cond_br %v47, ^b9, ^b10 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-  ^b9:
-    %v49 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":19:17)
-    %sw50 = arith.trunci %v49 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-    llvm.store %sw50, %s5 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v40 = arith.constant 8 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v41 = llvm.getelementptr %rs35[%v40] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %iw42 = llvm.load %v41 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %v42 = arith.extui %iw42 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %sw43 = arith.trunci %v42 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    llvm.store %sw43, %s6 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    %lw44 = llvm.load %s6 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":18:20)
+    %v44 = arith.extui %lw44 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":18:20)
+    %sw45 = arith.trunci %v44 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    llvm.store %sw45, %s5 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     cf.br ^b6 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
-  ^b10:
+  ^b9:
     %tk2 = arith.constant 3 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     %tl2 = arith.constant 17 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     %tc2 = arith.constant 31 : i32 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
     llvm.unreachable loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+  ^b10:
+    %v51 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":19:17)
+    %sw52 = arith.trunci %v51 : i64 to i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    llvm.store %sw52, %s5 : i8, !llvm.ptr loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
+    cf.br ^b6 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":17:31)
   ^b11:
-    %v59 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":23:16)
-    func.return %v59 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":23:9)
+    %v61 = arith.constant 1 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":23:16)
+    func.return %v61 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":23:9)
   ^b12:
     cf.br ^b13 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:5)
   ^b13:
-    %v64 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:5)
-    %lw65 = llvm.load %s4 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
-    %v65 = arith.extui %lw65 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
-    %v66 = arith.constant 161 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:24)
-    %v67 = arith.cmpi ne, %v65, %v66 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
-    cf.cond_br %v67, ^b15, ^b16 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:5)
+    %v66 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":22:5)
+    %lw67 = llvm.load %s4 : !llvm.ptr -> i8 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
+    %v67 = arith.extui %lw67 : i8 to i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
+    %v68 = arith.constant 161 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:24)
+    %v69 = arith.cmpi ne, %v67, %v68 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:8)
+    cf.cond_br %v69, ^b15, ^b16 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:5)
   ^b15:
-    %v69 = arith.constant 2 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":26:16)
-    func.return %v69 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":26:9)
+    %v71 = arith.constant 2 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":26:16)
+    func.return %v71 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":26:9)
   ^b16:
     cf.br ^b17 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:5)
   ^b17:
-    %v74 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:5)
-    %v75 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":28:5)
-    func.return %v75 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":28:5)
+    %v76 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":25:5)
+    %v77 = arith.constant 0 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":28:5)
+    func.return %v77 : i64 loc("tests/text/a_byte_above_ascii_keeps_its_value.lin":28:5)
   }
   func.func private @"lin.std.text;Str.byte"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: i64) attributes {llvm.linkage = #llvm.linkage<internal>} {
     %z0 = arith.constant 1 : i64

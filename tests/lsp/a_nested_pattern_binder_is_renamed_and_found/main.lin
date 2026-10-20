@@ -1,0 +1,9 @@
+struct Point { x: UInt8, y: UInt8 }
+
+fn main() -> UInt8 {
+    let found: Option[Point] = .Some(Point { x = 3, y = 4 })
+    match found {
+        Some(Point { x, y: vertical }) => x + vertical,
+        None => 0,
+    }
+}

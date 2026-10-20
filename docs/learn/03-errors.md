@@ -22,10 +22,7 @@ import std.io
 // or `.None` when there is none.
 fn hours_of(time: Str) -> Option[Str] {
     match time.split_once(":") {
-        Some(parts) => {
-            let (hours, _) = parts
-            .Some(hours)
-        },
+        Some((hours, _)) => .Some(hours),
         None => .None,
     }
 }
@@ -49,8 +46,10 @@ noon: no colon
 
 The two parts are a pair, a tuple
 ([Linea in an hour](01-linea-in-an-hour.md#tuples)), and both are views into
-`time`. Here the `Some` arm takes the pair apart with a tuple pattern, keeps the
-hours and drops the rest.
+`time`. The `Some` arm's pattern takes the pair apart where it matches: a
+pattern can stand inside another, so the tuple pattern `(hours, _)` sits inside
+`Some`'s parentheses, keeps the hours and drops the rest
+([Patterns inside patterns](01-linea-in-an-hour.md#patterns-inside-patterns)).
 
 You cannot use an `Option[Str]` as a `Str`. The type makes you say what
 happens when the value is missing, and `match` makes you cover both cases.
@@ -545,6 +544,43 @@ error[T-Mismatch]: expected a block that leaves or yields `(Str, Str)`, found `S
   |         ^^^^^^ expected a block that leaves or yields `(Str, Str)`, found `Str`
 ```
 
+The pattern takes the success apart as deep as it needs, as any `let`
+pattern does ([Patterns inside patterns](01-linea-in-an-hour.md#patterns-inside-patterns)),
+but it must match every value of the success: `else` runs when the `Option` or
+`Result` failed, never because some part of the pattern did not fit. A pattern
+that could miss is refused, and the compiler names a value it misses:
+
+```linea
+// A server's name and the port it listens on, where it has one.
+fn lookup(name: Str) -> Option[(Str, Option[UInt16])] {
+    if name == "web" {
+        return .Some(("web", .Some(8080)))
+    }
+    .None
+}
+
+fn port(name: Str) -> UInt16 {
+    let (_, Some(number)) = lookup(name) else {
+        return 0
+    }
+    number
+}
+
+fn main() -> UInt8 {
+    UInt8(port("web"))
+}
+```
+
+```
+error[T-Refutable]: this pattern does not match every `(Str, Option[UInt16])`
+  --> letelse_part.lin:10:13
+   |
+10 |     let (_, Some(number)) = lookup(name) else {
+   |             ^^^^^^^^^^^^ `(_, None)` is not matched
+   |
+   = help: take it apart with `match`, which has an arm for every case
+```
+
 Rust's `let … else` must always leave; Linea's may also supply a value, as
 Zig's `catch |e| value` does. And where Rust would need
 `let Ok(x) = f() else { … }` plus a separate `match` to see the error, the
@@ -768,11 +804,9 @@ fn main() -> Result[UInt8, io.IoError] {
                 alarms += 1
                 io.println("Alarm {alarms} rings at minute {count}.")?
             },
-            Err(error) => match error {
-                NoColon => io.println("{time}: write the time as HH:MM.")?,
-                Number(_) => io.println("{time}: the hours and minutes must be numbers.")?,
-                OutOfRange => io.println("{time}: there is no such time of day.")?,
-            },
+            Err(NoColon) => io.println("{time}: write the time as HH:MM.")?,
+            Err(Number(_)) => io.println("{time}: the hours and minutes must be numbers.")?,
+            Err(OutOfRange) => io.println("{time}: there is no such time of day.")?,
         }
     }
     io.println("Alarms set: {alarms}.")?
@@ -788,10 +822,20 @@ noon: write the time as HH:MM.
 Alarms set: 1.
 ```
 
-A pattern in a `match` arm names one level: `Err(error)` binds the error, and
-a second `match` looks inside it. Because the inner `match` must cover every
-`TimeError` variant, adding a variant later makes this program stop compiling
-until the new case has a message.
+Each failure gets its own arm: `Err(NoColon)` is a pattern inside a pattern,
+matching an `Err` that carries `NoColon`. The arms must still cover every
+`TimeError` variant, so adding a variant later makes this program stop
+compiling until the new case has a message. Leave out the `OutOfRange` arm and
+the compiler names the value no arm takes:
+
+<!-- guide: unchecked the error an edit of the program above produces -->
+```
+error[T-Cover]: this `match` does not cover `Err(OutOfRange)`
+  --> alarms.lin:26:9
+   |
+26 |         match minutes(time) {
+   |         ^^^^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`
+```
 
 ## Conversions that can fail
 

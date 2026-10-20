@@ -368,10 +368,8 @@ test fn a_response_body_is_text_only_when_it_is_held_utf8() {
     testing.assert_ok_eq(text(sent.request(), "").unwrap().text(), "", "an empty body was not empty text")?
     let streamed = stream(sent.request(), count_to_three).unwrap()
     testing.assert(match read streamed.text() {
-        Err(reason) => match read reason {
-            Streamed => true,
-            Encoding(_) => false,
-        },
+        Err(Streamed) => true,
+        Err(Encoding(_)) => false,
         Ok(_) => false,
     }, "a streamed body was read as text")?
     var raw: Vec[UInt8, mem.Handle[mem.SystemAllocator]] = Vec.new_in(sent.request().allocator())
@@ -379,10 +377,8 @@ test fn a_response_body_is_text_only_when_it_is_held_utf8() {
     &raw.push(195).unwrap()
     let broken = bytes(sent.request(), raw)
     let invalid_at: Option[UInt64] = match broken.text() {
-        Err(reason) => match reason {
-            Encoding(error) => .Some(error.offset),
-            Streamed => .None,
-        },
+        Err(Encoding(error)) => .Some(error.offset),
+        Err(Streamed) => .None,
         Ok(_) => .None,
     }
     testing.assert_eq(invalid_at, .Some(1), "bytes ending inside a character were text")?
@@ -587,8 +583,7 @@ impl[P: Allocator] BodyWriter[P] {
             Some(error) => .Err(.{ connection = output.abort(), error }),
             None => match output.finish() {
                 Ok(connection) => .Ok(connection),
-                Err(failed) => {
-                    let FinishFailure { writer, failure } = failed
+                Err(FinishFailure { writer, failure }) => {
                     return .Err(.{ connection = writer.abort(), error = failure.into() })
                 },
             },
@@ -710,8 +705,7 @@ test fn a_failed_write_is_reported_by_every_later_write() {
             connection.close().unwrap()
             Option.None
         },
-        Err(failure) => {
-            let ResponseFailure { connection, error } = failure
+        Err(ResponseFailure { connection, error }) => {
             let _closed = connection.close()
             Option.Some(error)
         },

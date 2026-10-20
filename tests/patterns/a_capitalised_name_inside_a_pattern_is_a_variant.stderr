@@ -1,0 +1,5 @@
+error[N-Variant]: the enum has no such variant
+  --> tests/patterns/a_capitalised_name_inside_a_pattern_is_a_variant.lin:13:14
+   |
+13 |         Some(Crimson) => 2,
+   |              ^^^^^^^ not a variant of what is matched

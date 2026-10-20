@@ -1,0 +1,20 @@
+// The values a match misses are named in the order the enum declares its
+// variants, whether or not an arm names the variant.
+enum Reading {
+    Missing,
+    Low(UInt8),
+    High,
+    Spike(UInt8),
+    Off,
+}
+
+fn level(sink reading: Reading) -> UInt8 {
+    match reading {
+        Spike(0..=9) => 3,
+        Low(0) => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    level(.Low(0)) - 1
+}

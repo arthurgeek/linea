@@ -104,8 +104,7 @@ test fn invalid_owned_bytes_are_returned_with_the_sequence_offset() {
             text.release()
             return testing.assert(false, "surrogate encoding became text")
         },
-        Err(failure) => {
-            let Utf8Failure { bytes: returned, error: error } = failure
+        Err(Utf8Failure { bytes: returned, error: error }) => {
             let length = returned.length()
             let retained = returned[1] == 237 && returned[2] == 160 && returned[3] == 128
             returned.release()
@@ -499,10 +498,8 @@ test fn invalid_byte_append_leaves_text_and_input_unchanged() {
     defer var text = "á".to_owned().unwrap()
     let source = "😀".as_bytes().subspan(start: 0, count: 3).unwrap()
     let rejected = match &text.append_bytes(source) {
-        Err(error) => match error {
-            Encoding(problem) => problem.offset == 0,
-            Allocation(_) => false,
-        },
+        Err(Encoding(problem)) => problem.offset == 0,
+        Err(Allocation(_)) => false,
         Ok(_) => false,
     }
     testing.assert(rejected, "byte append did not report invalid encoding")?

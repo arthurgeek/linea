@@ -1,0 +1,53 @@
+// Checking whether nested patterns cover a value is NP-complete, so a `match`
+// whose check would grow past its budget is refused rather than checked at any
+// cost. Eight columns that each arm leaves open but one split the check into
+// every combination of their variants.
+enum Shade {
+    V0,
+    V1,
+    V2,
+    V3,
+    V4,
+}
+
+fn pick(sink a0: Shade, sink a1: Shade, sink a2: Shade, sink a3: Shade, sink a4: Shade, sink a5: Shade, sink a6: Shade, sink a7: Shade) -> UInt8 {
+    match (a0, a1, a2, a3, a4, a5, a6, a7) {
+        (V0, _, _, _, _, _, _, _) => 0,
+        (V1, _, _, _, _, _, _, _) => 0,
+        (V2, _, _, _, _, _, _, _) => 0,
+        (V3, _, _, _, _, _, _, _) => 0,
+        (_, V0, _, _, _, _, _, _) => 1,
+        (_, V1, _, _, _, _, _, _) => 1,
+        (_, V2, _, _, _, _, _, _) => 1,
+        (_, V3, _, _, _, _, _, _) => 1,
+        (_, _, V0, _, _, _, _, _) => 2,
+        (_, _, V1, _, _, _, _, _) => 2,
+        (_, _, V2, _, _, _, _, _) => 2,
+        (_, _, V3, _, _, _, _, _) => 2,
+        (_, _, _, V0, _, _, _, _) => 3,
+        (_, _, _, V1, _, _, _, _) => 3,
+        (_, _, _, V2, _, _, _, _) => 3,
+        (_, _, _, V3, _, _, _, _) => 3,
+        (_, _, _, _, V0, _, _, _) => 4,
+        (_, _, _, _, V1, _, _, _) => 4,
+        (_, _, _, _, V2, _, _, _) => 4,
+        (_, _, _, _, V3, _, _, _) => 4,
+        (_, _, _, _, _, V0, _, _) => 5,
+        (_, _, _, _, _, V1, _, _) => 5,
+        (_, _, _, _, _, V2, _, _) => 5,
+        (_, _, _, _, _, V3, _, _) => 5,
+        (_, _, _, _, _, _, V0, _) => 6,
+        (_, _, _, _, _, _, V1, _) => 6,
+        (_, _, _, _, _, _, V2, _) => 6,
+        (_, _, _, _, _, _, V3, _) => 6,
+        (_, _, _, _, _, _, _, V0) => 7,
+        (_, _, _, _, _, _, _, V1) => 7,
+        (_, _, _, _, _, _, _, V2) => 7,
+        (_, _, _, _, _, _, _, V3) => 7,
+        (V4, V4, V4, V4, V4, V4, V4, V4) => 9,
+    }
+}
+
+fn main() -> UInt8 {
+    pick(.V0, .V0, .V0, .V0, .V0, .V0, .V0, .V0)
+}

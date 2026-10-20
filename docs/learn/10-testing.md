@@ -51,14 +51,10 @@ test fn an_address_without_a_port_is_refused() {
     testing.assert_err(port_of("localhost"), "an address with no colon")?
 }
 
-// `match read` checks the error's shape: a `Syntax` error, at whatever byte.
+// The `match` checks the error's shape: a `Syntax` error, at whatever byte.
 test fn a_letter_in_the_port_is_a_syntax_error() {
-    let refused = match port_of("localhost:80x0") {
-        Ok(_) => return testing.assert(false, "a letter in the port was accepted"),
-        Err(error) => error,
-    }
-    testing.assert(match read refused {
-        Syntax(_) => true,
+    testing.assert(match port_of("localhost:80x0") {
+        Err(Syntax(_)) => true,
         _ => false,
     }, "a letter in the port is not a syntax error")?
 }
@@ -79,9 +75,9 @@ ok    the_port_follows_the_colon
 ```
 
 The report lists the tests by name, in alphabetical order, not in the order
-the file declares them. The third test takes the error out with a `match`
-first, because a pattern names one level ([Errors](03-errors.md#when-to-keep-match)):
-`match read refused` can then look at the error's variant.
+the file declares them. The third test checks the error's variant with a
+pattern inside a pattern, `Err(Syntax(_))`, which matches only an `Err`
+carrying a `Syntax` error ([Errors](03-errors.md#when-to-keep-match)).
 
 ## Helpers that tests share
 

@@ -1,0 +1,13 @@
+// `match read` lends each binder only the part its pattern selects, so a write
+// to another part of the value is allowed while the binder is in use.
+fn main() -> UInt8 {
+    var pair: (Option[UInt8], UInt8) = (.Some(4), 1)
+    let seen = match read pair {
+        (Some(first), _) => {
+            pair._1 = 7
+            first
+        },
+        (None, _) => 0,
+    }
+    seen + pair._1 - 11
+}

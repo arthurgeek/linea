@@ -7121,12 +7121,7 @@ const Resolver = struct {
             else => return,
         }
 
-        // The type's name is used by naming it here, exactly as an annotation
-        // uses one.
-        if (self.ast.exprTag(d.pattern) == .call)
-            try self.usePatternHead(self.ast.exprMain(self.ast.call(d.pattern).callee));
-
-        return self.bindPattern(d.pattern);
+        return self.bindPattern(d.pattern, false);
     }
 
     /// The binding of a member of `owner` with that name, in the namespace one
@@ -14061,57 +14056,63 @@ const Resolver = struct {
         return .{ .reached = b };
     }
 
-    /// Declares the names a match arm's pattern binds.
+    /// Declares the names a pattern binds, at every depth.
     ///
-    /// A bare pattern binds nothing; a call-shaped one binds its arguments,
-    /// which is the shape the parser gives `Circle(n)`. The binder's own
+    /// One spelling space covers the whole pattern, so a name bound twice is
+    /// reported however deep either one sits. `mutable` is whether the
+    /// construct lends its places writably, which reaches every binder.
+    fn bindPattern(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
+        self.pattern_names.restart();
+        try self.bindParts(pattern, mutable);
+    }
+
+    /// The names one pattern node binds. A bare name here is the pattern's
+    /// head, which a match arm reads as a variant and binds nothing by; a bare
+    /// name inside binds by its case (`Ast.partBinds`). The binder's own
     /// `name_ref` is pointed at the binding it declares rather than left
     /// unresolved, so a consumer reaching a pattern finds the binding through
     /// the map it already uses for every other name.
-    fn bindPattern(self: *Resolver, pattern: ExprId) std.mem.Allocator.Error!void {
-        self.pattern_names.restart();
-        // A struct pattern names the type it takes apart, then alternates
-        // field and binder. Only the binders are names this introduces; which
-        // fields a type has is the checker's question.
-        if (self.ast.exprTag(pattern) == .struct_pattern) {
-            const p = self.ast.call(pattern);
-            if (p.callee != ExprId.none) try self.usePatternHead(self.ast.exprMain(p.callee));
-
-            var i: usize = 1;
-            while (i < p.args.len) : (i += 2) {
-                // The shorthand puts the field and the binder at one token,
-                // which the parser records by building two nodes there. What
-                // was written is the tree's answer and nobody else's.
-                const shared = self.ast.exprMain(p.args[i - 1]) == self.ast.exprMain(p.args[i]);
-                try self.bindOne(p.args[i], shared, false);
-            }
-            return;
+    fn bindParts(self: *Resolver, pattern: ExprId, mutable: bool) std.mem.Allocator.Error!void {
+        switch (self.ast.exprTag(pattern)) {
+            // A struct pattern names the type it takes apart, then alternates
+            // field and part. Which fields a type has is the checker's
+            // question.
+            .struct_pattern => {
+                const p = self.ast.call(pattern);
+                if (p.callee != ExprId.none) try self.usePatternHead(self.ast.exprMain(p.callee));
+                var i: usize = 1;
+                while (i < p.args.len) : (i += 2) {
+                    // The shorthand puts the field and the binder at one token,
+                    // which the parser records by building two nodes there.
+                    const shared = self.ast.exprMain(p.args[i - 1]) == self.ast.exprMain(p.args[i]);
+                    try self.bindPart(p.args[i], shared, mutable);
+                }
+            },
+            // A tuple pattern names no type and takes each component by
+            // position.
+            .tuple_pattern => for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable),
+            // A range or a literal pattern's bounds are ordinary expressions --
+            // a name a bound reaches is a name in scope, not a part this
+            // pattern binds -- so they resolve the way any expression does.
+            .range, .int_literal, .negate, .str_literal => try self.expr(pattern),
+            // Most spellings here are a variant, which is not a type and marks
+            // nothing. A newtype's pattern spells the type itself,
+            // indistinguishable from a variant's at this point in the pipeline
+            // -- so the head is offered to the same lookup a struct pattern's
+            // is, which finds a declared type only where the spelling is one.
+            .call => {
+                try self.usePatternHead(self.ast.exprMain(self.ast.call(pattern).callee));
+                for (self.ast.call(pattern).args) |a| try self.bindPart(a, false, mutable);
+            },
+            else => {},
         }
+    }
 
-        // A tuple pattern names no type and binds each component by position.
-        if (self.ast.exprTag(pattern) == .tuple_pattern) {
-            for (self.ast.call(pattern).args) |a| try self.bindOne(a, false, false);
-            return;
-        }
-
-        // A range or a literal pattern's bounds are ordinary expressions -- a
-        // name a bound reaches is a name in scope, not a part this pattern
-        // binds -- so they resolve the way any expression does, through the
-        // same case a range or a literal in expression position already
-        // reaches.
-        if (self.ast.exprTag(pattern) == .range or self.ast.exprTag(pattern) == .int_literal) {
-            try self.expr(pattern);
-            return;
-        }
-
-        if (self.ast.exprTag(pattern) != .call) return;
-        // Most spellings here are a variant, which is not a type and marks
-        // nothing. A newtype's pattern spells the type itself, indistinguishable
-        // from a variant's at this point in the pipeline -- so the head is
-        // offered to the same lookup a struct pattern's is, which finds a
-        // declared type only where the spelling actually is one.
-        try self.usePatternHead(self.ast.exprMain(self.ast.call(pattern).callee));
-        for (self.ast.call(pattern).args) |a| try self.bindOne(a, false, false);
+    /// One part of a pattern: a binder, or a pattern nested there.
+    fn bindPart(self: *Resolver, part: ExprId, names_a_field: bool, mutable: bool) std.mem.Allocator.Error!void {
+        if (self.ast.partBinds(part)) return self.bindOne(part, names_a_field, mutable);
+        if (self.ast.exprTag(part) == .name_ref) return;
+        try self.bindParts(part, mutable);
     }
 
     /// One name a pattern binds to part of what it took apart.
@@ -14296,7 +14297,9 @@ const Resolver = struct {
                         });
                         // Settled at no token: nothing written names it.
                         self.settle(p.argument, argument, .none);
-                        for (self.ast.call(p.pattern).args) |binder| try self.bindOne(binder, false, p.convention == .inout);
+                        // One spelling space with the captures and the other
+                        // parameters, which the restart above opened.
+                        try self.bindParts(p.pattern, p.convention == .inout);
                         continue;
                     }
                     if (self.ast.tokenTag(p.name) != .identifier) continue;
@@ -14503,10 +14506,10 @@ const Resolver = struct {
 
                 // The binder of a writable lend is assignable: writing through
                 // it is what the walk was written for.
-                self.pattern_names.restart();
                 if (self.ast.exprTag(f.args[0]) == .tuple_pattern) {
-                    for (self.ast.call(f.args[0]).args) |component| try self.bindOne(component, false, writes);
+                    try self.bindPattern(f.args[0], writes);
                 } else {
+                    self.pattern_names.restart();
                     try self.bindOne(f.args[0], false, writes);
                 }
                 if (reflected) |reversed| {
@@ -14664,7 +14667,7 @@ const Resolver = struct {
                         );
                         try self.expr(body);
                     } else {
-                        try self.bindPattern(pattern);
+                        try self.bindPattern(pattern, false);
                         try self.expr(body);
                     }
                 }

@@ -76,12 +76,17 @@ module {
     %v1 = llvm.load %v0 : !llvm.ptr -> i64 loc("tests/enums/payload_returned.lin":8:5)
     %v2 = arith.constant 0 : i64 loc("tests/enums/payload_returned.lin":8:5)
     %v3 = arith.cmpi eq, %v1, %v2 : i64 loc("tests/enums/payload_returned.lin":8:5)
-    cf.cond_br %v3, ^b2, ^b3 loc("tests/enums/payload_returned.lin":8:5)
+    cf.cond_br %v3, ^b3, ^b2 loc("tests/enums/payload_returned.lin":8:5)
   ^b1:
-    %lw17 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/enums/payload_returned.lin":8:5)
-    %v17 = arith.extui %lw17 : i8 to i64 loc("tests/enums/payload_returned.lin":8:5)
-    func.return %v17 : i64 loc("tests/enums/payload_returned.lin":8:5)
+    %lw18 = llvm.load %s1 : !llvm.ptr -> i8 loc("tests/enums/payload_returned.lin":8:5)
+    %v18 = arith.extui %lw18 : i8 to i64 loc("tests/enums/payload_returned.lin":8:5)
+    func.return %v18 : i64 loc("tests/enums/payload_returned.lin":8:5)
   ^b2:
+    %v10 = llvm.load %v0 : !llvm.ptr -> i64 loc("tests/enums/payload_returned.lin":8:5)
+    %v11 = arith.constant 1 : i64 loc("tests/enums/payload_returned.lin":8:5)
+    %v12 = arith.cmpi eq, %v10, %v11 : i64 loc("tests/enums/payload_returned.lin":8:5)
+    cf.cond_br %v12, ^b5, ^b4 loc("tests/enums/payload_returned.lin":8:5)
+  ^b3:
     %v5 = arith.constant 8 : i64 loc("tests/enums/payload_returned.lin":8:5)
     %v6 = llvm.getelementptr %v0[%v5] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("tests/enums/payload_returned.lin":8:5)
     %iw7 = llvm.load %v6 : !llvm.ptr -> i8 loc("tests/enums/payload_returned.lin":9:22)
@@ -89,22 +94,18 @@ module {
     %sw8 = arith.trunci %v7 : i64 to i8 loc("tests/enums/payload_returned.lin":8:5)
     llvm.store %sw8, %s1 : i8, !llvm.ptr loc("tests/enums/payload_returned.lin":8:5)
     cf.br ^b1 loc("tests/enums/payload_returned.lin":8:5)
-  ^b3:
-    %v10 = arith.constant 1 : i64 loc("tests/enums/payload_returned.lin":8:5)
-    %v11 = arith.cmpi eq, %v1, %v10 : i64 loc("tests/enums/payload_returned.lin":8:5)
-    cf.cond_br %v11, ^b4, ^b5 loc("tests/enums/payload_returned.lin":8:5)
   ^b4:
-    %v13 = arith.constant 1 : i64 loc("tests/enums/payload_returned.lin":10:19)
-    %sw14 = arith.trunci %v13 : i64 to i8 loc("tests/enums/payload_returned.lin":8:5)
-    llvm.store %sw14, %s1 : i8, !llvm.ptr loc("tests/enums/payload_returned.lin":8:5)
-    cf.br ^b1 loc("tests/enums/payload_returned.lin":8:5)
-  ^b5:
     %tk1 = arith.constant 3 : i32 loc("tests/enums/payload_returned.lin":8:5)
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_returned.lin":8:5)
     %tl1 = arith.constant 8 : i32 loc("tests/enums/payload_returned.lin":8:5)
     %tc1 = arith.constant 5 : i32 loc("tests/enums/payload_returned.lin":8:5)
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_returned.lin":8:5)
     llvm.unreachable loc("tests/enums/payload_returned.lin":8:5)
+  ^b5:
+    %v14 = arith.constant 1 : i64 loc("tests/enums/payload_returned.lin":10:19)
+    %sw15 = arith.trunci %v14 : i64 to i8 loc("tests/enums/payload_returned.lin":8:5)
+    llvm.store %sw15, %s1 : i8, !llvm.ptr loc("tests/enums/payload_returned.lin":8:5)
+    cf.br ^b1 loc("tests/enums/payload_returned.lin":8:5)
   }
   func.func @main(%argc: i32, %argv: !llvm.ptr) -> i32 {
     func.call @linea_set_args(%argc, %argv) : (i32, !llvm.ptr) -> ()

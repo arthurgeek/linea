@@ -1,0 +1,21 @@
+// A refinement admitting no value is refused. Which arms a match on it needs
+// is not judged, since no value of the type could reach any of them.
+type Closed = UInt8 where it in 5..=4
+
+type Gone = UInt8 where it in 0..0
+
+fn _closed_score(sink closed: Closed) -> UInt8 {
+    match closed {
+        Closed(5) => 1,
+    }
+}
+
+fn _gone_score(sink gone: Gone) -> UInt8 {
+    match gone {
+        Gone(_) => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

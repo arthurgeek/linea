@@ -1,0 +1,20 @@
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/an_arm_matching_nothing_leaves_the_missing_values_reported.lin:15:10
+   |
+15 |         (255..=101, A) => 2,
+   |          ^^^^^^^^^ this range matches nothing
+error[T-Cover]: this `match` does not cover `(101..=255, _)`
+  --> tests/patterns/an_arm_matching_nothing_leaves_the_missing_values_reported.lin:13:5
+   |
+13 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/an_arm_matching_nothing_leaves_the_missing_values_reported.lin:22:16
+   |
+22 |         (Digit(12), B) => 2,
+   |                ^^ no `Digit` holds this value
+error[T-Cover]: this `match` does not cover `(Digit(0..=9), B)`, `(Digit(0..=9), C)`
+  --> tests/patterns/an_arm_matching_nothing_leaves_the_missing_values_reported.lin:20:5
+   |
+20 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`

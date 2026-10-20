@@ -287,8 +287,7 @@ fn append_error_segment[A: Allocator](sink error: DecodeError[A], sink segment: 
             segment.release()
             return .Allocation
         },
-        Value(failure) => {
-            let DecodeFailure { cause, path: previous_path } = failure
+        Value(DecodeFailure { cause, path: previous_path }) => {
             var path = previous_path
             // `settled()` releases a segment the path could not hold.
             if &path.push(segment).settled().is_err() {

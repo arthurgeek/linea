@@ -81,10 +81,8 @@ pub enum Failure {
 impl Display for Failure {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         match read self {
-            Refused(message) => match read message {
-                Some(text) => "the handler refused the request: {text}".fmt(&w),
-                None => &w.write_str("the handler refused the request"),
-            },
+            Refused(Some(text)) => "the handler refused the request: {text}".fmt(&w),
+            Refused(None) => &w.write_str("the handler refused the request"),
             Unread(error) => "reading the request failed: {error}".fmt(&w),
             Memory => &w.write_str("there was no memory to answer the request"),
             Timeouts(error) => "setting the connection's timeouts failed: {error}".fmt(&w),

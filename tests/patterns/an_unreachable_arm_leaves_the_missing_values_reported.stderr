@@ -1,0 +1,20 @@
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/an_unreachable_arm_leaves_the_missing_values_reported.lin:13:9
+   |
+13 |         Red => 3,
+   |         ^^^ the arms before it take every value it would
+error[T-Cover]: this `match` does not cover `Amber`, `Green`
+  --> tests/patterns/an_unreachable_arm_leaves_the_missing_values_reported.lin:11:5
+   |
+11 |     match signal {
+   |     ^^^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/an_unreachable_arm_leaves_the_missing_values_reported.lin:20:9
+   |
+20 |         Some(Amber) => 2,
+   |         ^^^^^^^^^^^ the arms before it take every value it would
+error[T-Cover]: this `match` does not cover `Some(Red)`, `Some(Green)`
+  --> tests/patterns/an_unreachable_arm_leaves_the_missing_values_reported.lin:18:5
+   |
+18 |     match seen {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`

@@ -27,16 +27,14 @@ test fn a_scripted_listener_fails_as_scripted_then_accepts_and_reports_its_close
     let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     var script = scripted(listener, [.Some(.Io(copy(exhausted))), .None, .None, .None], .Some(copy(broken)))
     let first: Option[NetError] = match &script.accept() {
-        Ok(accepted) => {
-            let Accepted { connection, address: _ } = accepted
+        Ok(Accepted { connection, address: _ }) => {
             connection.close().unwrap()
             .None
         },
         Err(error) => .Some(error),
     }
     let second_accepted = match &script.accept() {
-        Ok(accepted) => {
-            let Accepted { connection, address: _ } = accepted
+        Ok(Accepted { connection, address: _ }) => {
             connection.close().unwrap()
             true
         },

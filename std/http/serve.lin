@@ -142,8 +142,7 @@ fn serve_announcing[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P:
     var stopped: Option[net.NetError] = .None
     while stopped.is_none() && !net.reached(limits.connections, served) {
         match net.accept_attempt(&accepting, &pause_ms) {
-            Connected(accepted) => {
-                let Accepted { connection, address: _ } = accepted
+            Connected(Accepted { connection, address: _ }) => {
                 match serve_connection(connection, &handler, arena.handle(), &refusal, limits, time.Instant.now()) {
                     Answered => &arena.rewind(),
                     ArenaRefused => mem.exchange(&arena, mem.Arena.open(parent, limits.request_arena_bytes)).release(),
@@ -747,10 +746,8 @@ test fn a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released() {
     log.release()
     held.close().unwrap()
     let refused = match read served {
-        Err(error) => match read error {
-            Listen(_) => true,
-            _ => false,
-        },
+        Err(Listen(_)) => true,
+        Err(_) => false,
         Ok(_) => false,
     }
     testing.assert(refused, "a taken port was not reported as a listen failure")?
@@ -1321,8 +1318,7 @@ fn settle_answer[P: Allocator](sink body: BodyWriter[P], sink written: Result[()
                 close_connection(connection)
                 return .{ delivery = .Whole, body_bytes }
             },
-            Err(failure) => {
-                let ResponseFailure { connection, error } = failure
+            Err(ResponseFailure { connection, error }) => {
                 reset_connection(connection)
                 return .{ delivery = .Write(error), body_bytes }
             },
@@ -1532,14 +1528,8 @@ impl Observer for Recorded {
             Exchanged(exchange) => {
                 self.exchanges += 1
                 match read exchange.failure {
-                    Some(failure) => match read failure {
-                        Unread(error) => match read error {
-                            Io(reason) => match read reason.category { TimedOut => self.timed_out += 1, _ => {} },
-                            _ => {},
-                        },
-                        _ => {},
-                    },
-                    None => {},
+                    Some(Unread(Io(reason))) => match read reason.category { TimedOut => self.timed_out += 1, _ => {} },
+                    _ => {},
                 }
             },
             Listening(_) => {},

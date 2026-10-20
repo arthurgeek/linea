@@ -17,6 +17,20 @@ const resolveTree = resolve_mod.resolveTree;
 const Resolution = resolve_mod.Resolution;
 const BindingId = resolve_mod.BindingId;
 
+/// Gives every binder of an arm's pattern, at any depth, the arm's extent.
+fn armBinders(ast: *const Ast, res: *const Resolution, extent: []?Span, pattern: ExprId, arm: Span) void {
+    var parts = ast.patternParts(pattern);
+    while (parts.next()) |part| {
+        if (!ast.partBinds(part)) {
+            armBinders(ast, res, extent, part, arm);
+            continue;
+        }
+        const b = res.targetOf(part);
+        if (b.index() >= res.bindingCount()) continue;
+        extent[b.index()] = arm;
+    }
+}
+
 /// A use that reaches a binding from outside the region the binding belongs to.
 pub const Escape = struct {
     /// What the use is spelled, which is what makes the report readable.
@@ -75,17 +89,11 @@ pub fn firstEscape(
         var a: usize = 0;
         while (a + 1 < m.args.len) : (a += 2) {
             const pattern = m.args[a];
-            if (ast.exprTag(pattern) != .call) continue;
-
             const arm: Span = .{
                 .start = ast.exprSpan(pattern).start,
                 .end = ast.exprSpan(m.args[a + 1]).end,
             };
-            for (ast.call(pattern).args) |binder| {
-                const b = res.targetOf(binder);
-                if (b.index() >= res.bindingCount()) continue;
-                extent[b.index()] = arm;
-            }
+            armBinders(ast, res, extent, pattern, arm);
         }
     }
 

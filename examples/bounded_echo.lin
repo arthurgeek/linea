@@ -174,23 +174,21 @@ fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: l
     var failed = false
     loop {
         match &reader.read_line_borrowed(max_bytes: max_line_bytes) {
-            Ok(line) => match line {
-                None => break,
-                Some(received) => match io.line(received, &echoed) {
-                    Ok(_) => {
-                        lines += 1
-                        // Text past the limit is refused, and nothing is echoed.
-                        if echoed.length() > bounds.max_echo_bytes {
-                            logger.warn("a connection sent too much", log.field("peer", peer).and("limit", bounds.max_echo_bytes))
-                            failed = true
-                            break
-                        }
-                    },
-                    Err(_) => {
-                        logger.error("cannot hold an echoed line", log.field("peer", peer))
+            Ok(None) => break,
+            Ok(Some(received)) => match io.line(received, &echoed) {
+                Ok(_) => {
+                    lines += 1
+                    // Text past the limit is refused, and nothing is echoed.
+                    if echoed.length() > bounds.max_echo_bytes {
+                        logger.warn("a connection sent too much", log.field("peer", peer).and("limit", bounds.max_echo_bytes))
                         failed = true
                         break
-                    },
+                    }
+                },
+                Err(_) => {
+                    logger.error("cannot hold an echoed line", log.field("peer", peer))
+                    failed = true
+                    break
                 },
             },
             Err(error) => {
@@ -268,11 +266,9 @@ fn send_messages(args: env.Args, first: UInt64, inout connection: net.Connection
 fn print_echo(inout reader: io.BufferedReader[net.Connection]) -> Bool {
     loop {
         match &reader.read_line_borrowed(max_bytes: max_line_bytes) {
-            Ok(line) => match line {
-                None => return true,
-                Some(received) => {
-                    let _printed = io.println(received)
-                },
+            Ok(None) => return true,
+            Ok(Some(received)) => {
+                let _printed = io.println(received)
             },
             Err(error) => {
                 io.eprintln("bounded_echo: reading the echo failed: {error}")

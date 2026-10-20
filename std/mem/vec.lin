@@ -156,8 +156,7 @@ internal fn vector_from_buffer[A: Allocator](sink buffer: Buffer[A], length: UIn
 // Return allocated backing, including initialized bytes beyond Vec.len.
 // A vector that has never allocated has no buffer to return.
 internal fn vector_into_buffer[A: Allocator](sink bytes: Vec[UInt8, A]) -> Option[Buffer[A]] where carries(.Some: bytes) {
-    let Vec { storage: storage, len: _length } = bytes
-    let Storage { buffer, allocator: _, at: _, len: _ } = storage
+    let Vec { storage: Storage { buffer, allocator: _, at: _, len: _ }, len: _length } = bytes
     buffer
 }
 
@@ -496,8 +495,7 @@ test fn vec_from_fn_inout_preserves_state_and_constructs_linear_elements() {
         Ok(_) => {},
         Err(_returned) => panic("draining generated elements left some behind"),
     }
-    let { seed: recovered, calls } = initializer.into_captures()
-    let VecGeneratedElement { index: seed_index } = recovered
+    let { seed: VecGeneratedElement { index: seed_index }, calls } = initializer.into_captures()
     testing.assert(intact, "mutable vector initializer lost state or changed index order")?
     testing.assert_eq(calls, UInt64(4), "mutable vector initializer did not run once per element")?
     testing.assert_eq(seed_index, UInt64(10), "vector construction settled its caller's protocol capture")?
@@ -553,8 +551,7 @@ test fn vec_from_fn_inout_preserves_callbacks_on_empty_overflow_and_refusal() {
         Err(_) => true,
     }
     arena.release()
-    let { seed: recovered, calls } = initializer.into_captures()
-    let VecGeneratedElement { index: seed_index } = recovered
+    let { seed: VecGeneratedElement { index: seed_index }, calls } = initializer.into_captures()
     testing.assert_eq(empty_length, UInt64(0), "empty mutable vector construction gained an element")?
     testing.assert(overflow_refused && allocation_refused, "mutable vector construction ignored allocation refusal")?
     testing.assert_eq(calls, UInt64(0), "mutable initializer ran without a nonempty allocation")?
@@ -726,8 +723,7 @@ test fn vec_push_failure_returns_ownership_without_changing_elements() {
     loop {
         match &values.push(inserted) {
             Ok(_) => inserted += 1,
-            Err(failure) => {
-                let PushFailure { reason: reason, value: returned } = failure
+            Err(PushFailure { reason: reason, value: returned }) => {
                 returned_correctly = reason == Oom.Exhausted && returned == inserted
                 break
             },
@@ -981,10 +977,7 @@ test fn vec_drain_hands_over_linear_elements_first_to_last() {
     }
     let exhausted = match &pending.next() {
         None => true,
-        Some(element) => {
-            let VecGeneratedElement { index: _ } = element
-            false
-        },
+        Some(VecGeneratedElement { index: _ }) => false,
     }
     pending.finish().unwrap()
     testing.assert_eq(order, UInt64(1234), "draining lost, duplicated or reordered linear elements")?
@@ -1025,10 +1018,7 @@ test fn vec_drain_of_an_empty_vector_hands_over_nothing() {
     var pending = values.drain()
     let empty = match &pending.next() {
         None => true,
-        Some(element) => {
-            let VecGeneratedElement { index: _ } = element
-            false
-        },
+        Some(VecGeneratedElement { index: _ }) => false,
     }
     pending.finish().unwrap()
     testing.assert(empty, "an empty vector's drain handed over an element")?

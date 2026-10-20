@@ -240,10 +240,8 @@ test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
     let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Info)
     log.refuse_attempt(log.attempts() + 1)
     let refused = match logger.log(.Info, "refused", ()) {
-        Err(error) => match read error {
-            Memory(_) => true,
-            Sink(_) => false,
-        },
+        Err(Memory(_)) => true,
+        Err(Sink(_)) => false,
         Ok(_) => false,
     }
     logger.info("kept", ())
@@ -261,10 +259,8 @@ test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
 test fn a_line_the_sink_refuses_is_reported() {
     let logger = Logger.open(io.descriptor(-1), minimum: .Info)
     let reported = match logger.log(.Error, "lost", ()) {
-        Err(error) => match read error {
-            Sink(_) => true,
-            Memory(_) => false,
-        },
+        Err(Sink(_)) => true,
+        Err(Memory(_)) => false,
         Ok(_) => false,
     }
     logger.error("lost again", ())
@@ -455,8 +451,7 @@ fn without_times(written: Str) -> String {
     for record in written.lines() {
         let line = record.slice(21, record.length()).unwrap_or("")
         match line.split_once("duration=") {
-            Some(halves) => {
-                let (before, value) = halves
+            Some((before, value)) => {
                 let following = match value.find(" ") {
                     Some(space) => value.slice(space, value.length()).unwrap(),
                     None => "",

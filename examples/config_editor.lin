@@ -157,7 +157,8 @@ test fn rendering_reports_allocation_failure_after_a_short_entry() {
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let value = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd"
     let refused = match render_in(arena.handle(), entries, key: "next", value: value, max_bytes: max_config_bytes) {
-        Err(error) => match read error { Allocation(_) => true, Limit => false },
+        Err(Allocation(_)) => true,
+        Err(Limit) => false,
         Ok(output) => {
             output.release()
             false
@@ -187,7 +188,8 @@ test fn rendering_refuses_a_configuration_larger_than_its_read_limit() {
     defer let exact = render(entries, key: "k", value: "v", max_bytes: 4).unwrap()
     testing.assert_eq(exact.view(), "k=v\n", "a configuration at the limit was refused")?
     let refused = match render(entries, key: "x", value: "y", max_bytes: 4) {
-        Err(error) => match read error { Limit => true, Allocation(_) => false },
+        Err(Limit) => true,
+        Err(Allocation(_)) => false,
         Ok(output) => {
             output.release()
             false

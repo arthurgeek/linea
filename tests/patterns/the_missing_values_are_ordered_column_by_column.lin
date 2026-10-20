@@ -1,0 +1,36 @@
+// The values a match misses are listed in declaration order, column by column,
+// and at most nine of them are named. Where variants no arm names share an arm,
+// the list may name a value of the next of them before every value of the
+// first: `(Off, Six(1..=255))` is missing here, and is not named before
+// `(Idle, Unset)`.
+enum Power {
+    On,
+    Off,
+    Idle,
+}
+
+enum Gear {
+    Unset,
+    One(UInt8),
+    Two(UInt8),
+    Three(UInt8),
+    Four(UInt8),
+    Five(UInt8),
+    Six(UInt8),
+}
+
+fn speed(sink state: (Power, Gear)) -> UInt8 {
+    match state {
+        (On, _) => 0,
+        (_, One(0)) => 1,
+        (_, Two(0)) => 2,
+        (_, Three(0)) => 3,
+        (_, Four(0)) => 4,
+        (_, Five(0)) => 5,
+        (_, Six(0)) => 6,
+    }
+}
+
+fn main() -> UInt8 {
+    speed((.On, .Unset))
+}

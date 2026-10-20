@@ -1,0 +1,6 @@
+error[N-Duplicate]: `value` is already declared by this pattern
+ --> tests/patterns/a_nested_binder_is_declared_once.lin:4:28
+  |
+4 |         (Some(value), Some(value)) => value,
+  |               ----- already declared here
+  |                            ^^^^^ a pattern declares each name once

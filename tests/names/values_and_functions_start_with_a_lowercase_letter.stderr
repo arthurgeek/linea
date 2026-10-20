@@ -74,12 +74,7 @@ error[N-Case]: bindings start with a lowercase letter
 52 |     let halved = half(4) else |Reason| {
    |                                ^^^^^^ rename it `reason`
 error[N-Case]: bindings start with a lowercase letter
-  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:56:14
+  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:59:9
    |
-56 |         Some(Inner) => Inner,
-   |              ^^^^^ rename it `inner`
-error[N-Case]: bindings start with a lowercase letter
-  --> tests/names/values_and_functions_start_with_a_lowercase_letter.lin:59:26
-   |
-59 |     let Counter { Count: Held } = Counter { Count = 1 }
-   |                          ^^^^ rename it `held`
+59 |     let Held = Counter { Count = 1 }.Count
+   |         ^^^^ rename it `held`

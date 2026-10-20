@@ -564,8 +564,7 @@ impl[A: Allocator] Value[A] {
         self = .{ node = .Array(values), height, allocator }
         match result {
             Ok(_) => .Ok(()),
-            Err(failure) => {
-                let PushFailure { reason: _, value } = failure
+            Err(PushFailure { reason: _, value }) => {
                 return .Err(.{ reason = .Allocation, value })
             },
         }
@@ -666,8 +665,7 @@ impl[A: Allocator] Value[A] {
                 previous.release()
                 return .Ok(.None)
             },
-            Err(failure) => {
-                let InsertFailure { reason: _, key: refused_key, value } = failure
+            Err(InsertFailure { reason: _, key: refused_key, value }) => {
                 refused_key.release()
                 return .Err(.{ reason = .Allocation, value })
             },
@@ -836,8 +834,7 @@ test fn json_mutation_allocation_refusals_preserve_destinations_and_return_subtr
                         &destination.remove_element(8).unwrap().unwrap()
                     }
                 },
-                Err(failure) => {
-                    let MutationFailure { reason, value } = failure
+                Err(MutationFailure { reason, value }) => {
                     defer value.release()
                     testing.assert(refusal != 0, "baseline mutation refused an owner")?
                     testing.assert_eq(reason, MutationReason.Allocation, "mutation lost its allocation reason")?
@@ -956,8 +953,7 @@ impl[A: Allocator] Value[A] {
         self = .{ node = .Object(values), height, allocator }
         match removed {
             None => .Ok(.None),
-            Some(entry) => {
-                let Entry { key: stored_key, value } = entry
+            Some(Entry { key: stored_key, value }) => {
                 stored_key.release()
                 return .Ok(.Some(value))
             },

@@ -1,0 +1,13 @@
+// Literals inside a payload cover only the values they name, and the
+// diagnostic names the values no arm takes.
+fn bucket(value: Option[UInt8]) -> UInt8 {
+    match read value {
+        Some(0) => 1,
+        Some(1..=9) => 2,
+        None => 4,
+    }
+}
+
+fn main() -> UInt8 {
+    bucket(.None)
+}

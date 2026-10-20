@@ -181,6 +181,8 @@ pub fn verify(
 
     const z_fns = tracy.beginZone(@src(), "verify.functions");
     defer z_fns.end();
+    var enum_parts: Members.EnumParts = .{ .gpa = gpa };
+    defer enum_parts.deinit();
     for (module.functions, 0..) |*f, i| {
         var v: Function = .{
             .gpa = gpa,
@@ -188,6 +190,7 @@ pub fn verify(
             .sink = sink,
             .mir = f,
             .id = FunctionId.at(@intCast(i)),
+            .enum_parts = &enum_parts,
         };
         if (!try v.verify()) ok = false;
     }
@@ -242,7 +245,7 @@ fn verifyStatics(module: *const Module, sink: *Sink) std.mem.Allocator.Error!boo
                 return staticDefect(sink, "static {d} part {d} covers {d} byte(s) at offset {d}, after byte {d} of {d}", .{ i, j, width, part.offset, end, size });
             }
             end = @as(u64, part.offset) + width;
-            if (!members.isMember(entry.ty, part.offset, width)) {
+            if (!try members.isMember(entry.ty, part.offset, width)) {
                 return staticDefect(sink, "static {d} part {d} at offset {d} is no part of `{s}`", .{ i, j, part.offset, module.types.nameOf(entry.ty) });
             }
             const fits = switch (module.representationOf(part.ty).storage) {
@@ -485,13 +488,39 @@ fn coversType(module: *const Module, t: TypeId) bool {
 /// static's parts, so one answer says what a part is.
 const Members = struct {
     module: *const Module,
+    /// Each enum's variant parts, sorted by where they begin, built the first
+    /// time an access into the enum is asked about. Null where the caller
+    /// asks too few questions to be worth an index, and then every variant is
+    /// searched.
+    enums: ?*EnumParts = null,
+
+    /// The distinct parts every variant of one enum places, by offset, with
+    /// the furthest end of any part up to each: an access is held by a part
+    /// beginning at or before it, and the furthest end says when no earlier
+    /// part can reach it.
+    const EnumParts = struct {
+        gpa: std.mem.Allocator,
+        by_type: std.AutoHashMapUnmanaged(TypeId, Index) = .empty,
+
+        const Part = struct { start: u32, ty: TypeId };
+        const Index = struct { parts: []const Part, reach: []const u32 };
+
+        fn deinit(self: *EnumParts) void {
+            var it = self.by_type.valueIterator();
+            while (it.next()) |index| {
+                self.gpa.free(index.parts);
+                self.gpa.free(index.reach);
+            }
+            self.by_type.deinit(self.gpa);
+        }
+    };
 
     /// Whether a run of bytes is a part of a type, or the whole of it.
     ///
     /// Reads the module's own pool for which parts exist and where, so the
     /// number compared against is the one the constant in the instruction was
     /// supposed to have been taken from.
-    fn isMember(self: Members, declared: TypeId, off: u32, width: u32) bool {
+    fn isMember(self: Members, declared: TypeId, off: u32, width: u32) std.mem.Allocator.Error!bool {
         // A newtype has the same parts and offsets as its base.
         const container = self.module.types.erased(declared);
         const whole = self.module.layoutOf(container);
@@ -522,7 +551,7 @@ const Members = struct {
                 while (at > 0) {
                     at -= 1;
                     const start = types.fieldOffset(container, at);
-                    if (self.partHolds(types.fieldType(container, at), start, off, width)) {
+                    if (try self.partHolds(types.fieldType(container, at), start, off, width)) {
                         break :blk true;
                     }
                     if (start != off) break;
@@ -554,19 +583,18 @@ const Members = struct {
                 if (stride == 0 or a.count == 0) break :blk false;
                 const which = off / stride;
                 if (which >= a.count) break :blk false;
-                if (self.partHolds(a.element, @intCast(which * stride), off, width)) break :blk true;
+                if (try self.partHolds(a.element, @intCast(which * stride), off, width)) break :blk true;
                 break :blk off % stride == 0 and width % stride == 0 and
                     off + width <= a.count * stride;
             },
             .enum_ => blk: {
                 // The tag occupies a full word at the front, and every variant
-                // is overlaid behind it. Each variant's payload is one
-                // non-decreasing placed run, so find the only field offset
-                // that could contain the access instead of scanning every
-                // payload for every indirect access. This costs one binary
-                // search per variant, at most the language's 64 variants,
-                // rather than fields-per-variant work per access.
+                // is overlaid behind it.
                 if (off == 0 and width == Layout.tag_width) break :blk true;
+                if (self.enums) |enums| break :blk try self.enumHolds(enums, container, off, width);
+                // Without an index each variant's payload is searched: one
+                // binary search per variant, for the few accesses a static's
+                // parts make.
                 for (0..types.variantCount(container)) |variant| {
                     const v: u32 = @intCast(variant);
                     const count = types.variantFieldCount(container, v);
@@ -580,7 +608,7 @@ const Members = struct {
                     while (field > 0) {
                         field -= 1;
                         const start = types.variantFieldOffset(container, v, field);
-                        if (self.partHolds(
+                        if (try self.partHolds(
                             types.variantFieldType(container, v, field),
                             start,
                             off,
@@ -661,13 +689,80 @@ const Members = struct {
 
     /// Whether one part accounts for an access: it is that part exactly, or it
     /// lies inside a part that has parts of its own.
+    /// Whether some variant's part holds an access into the enum, read from
+    /// the enum's index. **Bound:** building the index sorts every variant's
+    /// parts once per verification; an access then costs a binary search and
+    /// one check per distinct part reaching it -- not the enum's variant
+    /// count, which an access was otherwise asked against every time.
+    fn enumHolds(self: Members, enums: *EnumParts, container: TypeId, off: u32, width: u32) std.mem.Allocator.Error!bool {
+        const index = enums.by_type.get(container) orelse try self.indexEnum(enums, container);
+        // The last part beginning at or before the access.
+        var lo: usize = 0;
+        var hi: usize = index.parts.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (index.parts[mid].start <= off) lo = mid + 1 else hi = mid;
+        }
+        var at = lo;
+        while (at > 0) {
+            at -= 1;
+            // No part up to here reaches the access.
+            if (index.reach[at] <= off and !(index.parts[at].start == off)) break;
+            const part = index.parts[at];
+            if (try self.partHolds(part.ty, part.start, off, width)) return true;
+        }
+        return false;
+    }
+
+    fn indexEnum(self: Members, enums: *EnumParts, container: TypeId) std.mem.Allocator.Error!EnumParts.Index {
+        const types = &self.module.types;
+        var parts: std.ArrayList(EnumParts.Part) = .empty;
+        errdefer parts.deinit(enums.gpa);
+        for (0..types.variantCount(container)) |variant| {
+            const v: u32 = @intCast(variant);
+            for (0..types.variantFieldCount(container, v)) |field| {
+                try parts.append(enums.gpa, .{
+                    .start = types.variantFieldOffset(container, v, @intCast(field)),
+                    .ty = types.variantFieldType(container, v, @intCast(field)),
+                });
+            }
+        }
+        std.mem.sort(EnumParts.Part, parts.items, {}, struct {
+            fn less(_: void, a: EnumParts.Part, b: EnumParts.Part) bool {
+                if (a.start != b.start) return a.start < b.start;
+                return @intFromEnum(a.ty) < @intFromEnum(b.ty);
+            }
+        }.less);
+        // One entry per place and type: a hundred variants carrying the same
+        // part at the same offset are one candidate.
+        var kept: usize = 0;
+        for (parts.items) |part| {
+            if (kept > 0 and parts.items[kept - 1].start == part.start and parts.items[kept - 1].ty == part.ty) continue;
+            parts.items[kept] = part;
+            kept += 1;
+        }
+        parts.shrinkRetainingCapacity(kept);
+        const owned = try parts.toOwnedSlice(enums.gpa);
+        errdefer enums.gpa.free(owned);
+        const reach = try enums.gpa.alloc(u32, owned.len);
+        errdefer enums.gpa.free(reach);
+        var furthest: u32 = 0;
+        for (owned, reach) |part, *r| {
+            furthest = @max(furthest, part.start + self.module.layoutOf(part.ty).size);
+            r.* = furthest;
+        }
+        const index: EnumParts.Index = .{ .parts = owned, .reach = reach };
+        try enums.by_type.put(enums.gpa, container, index);
+        return index;
+    }
+
     fn partHolds(
         self: Members,
         part: TypeId,
         at: u32,
         off: u32,
         width: u32,
-    ) bool {
+    ) std.mem.Allocator.Error!bool {
         if (!coversType(self.module, part)) return false;
         const l = self.module.layoutOf(part);
         if (off == at and width == l.size) return true;
@@ -686,6 +781,9 @@ const Function = struct {
     id: FunctionId,
     ok: bool = true,
     locations: []const Location = &.{},
+    /// The variant parts of each enum an access reached, indexed once for
+    /// the whole module.
+    enum_parts: *Members.EnumParts,
 
     const Location = struct {
         block: u32 = std.math.maxInt(u32),
@@ -1547,7 +1645,7 @@ const Function = struct {
     }
 
     fn members(self: *const Function) Members {
-        return .{ .module = self.module };
+        return .{ .module = self.module, .enums = self.enum_parts };
     }
 
     fn described(self: *Function, t: TypeId, what: []const u8) std.mem.Allocator.Error!bool {
@@ -2007,7 +2105,7 @@ const Function = struct {
         // at its own alignment -- so an offset that is a member offset is an
         // aligned one, and a second test of it would be this pass asking the
         // table a question it just answered.
-        if (!self.members().isMember(object.ty, off, width)) {
+        if (!try self.members().isMember(object.ty, off, width)) {
             try self.report(span, "%{d} {s} {d} byte(s) at offset {d}, which is no part of `{s}`", .{
                 id.index(), how, width, off, self.module.types.nameOf(object.ty),
             });

@@ -2,4 +2,4 @@ error[T-Unreachable]: no value reaches this arm
  --> tests/enums/match_arm_unreachable.lin:7:9
   |
 7 |         _ => 3,
-  |         ^ every variant is already covered
+  |         ^ the arms before it take every value it would

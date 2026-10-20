@@ -73,13 +73,11 @@ test fn a_file_that_is_not_utf8_fails_to_parse_as_invalid_utf8() {
             document.release()
             false
         },
-        Err(reason) => match reason {
-            Parse(error) => match error.kind {
-                InvalidUtf8 => true,
-                _ => false,
-            },
-            Read(_) => false,
+        Err(Parse(error)) => match error.kind {
+            InvalidUtf8 => true,
+            _ => false,
         },
+        Err(Read(_)) => false,
     }
     testing.assert(invalid_utf8, "a file that is not UTF-8 was not an invalid-UTF-8 parse failure")?
 }
@@ -200,14 +198,11 @@ test fn decoding_a_file_that_is_not_utf8_fails_to_parse() {
         Err(reason) => {
             defer reason.release()
             match read reason {
-                Decode(error) => match read error {
-                    Parse(problem) => match problem.kind {
-                        InvalidUtf8 => true,
-                        _ => false,
-                    },
+                Decode(Parse(problem)) => match problem.kind {
+                    InvalidUtf8 => true,
                     _ => false,
                 },
-                Read(_) => false,
+                _ => false,
             }
         },
     }
@@ -295,10 +290,8 @@ fn failed_at_read(sink result: Result[Value, ParseFileError]) -> Bool {
             document.release()
             false
         },
-        Err(reason) => match read reason {
-            Read(_) => true,
-            Parse(_) => false,
-        },
+        Err(Read(_)) => true,
+        Err(Parse(_)) => false,
     }
 }
 
@@ -309,9 +302,7 @@ fn failed_at_parse(sink result: Result[Value, ParseFileError]) -> Bool {
             document.release()
             false
         },
-        Err(reason) => match read reason {
-            Parse(_) => true,
-            Read(_) => false,
-        },
+        Err(Parse(_)) => true,
+        Err(Read(_)) => false,
     }
 }

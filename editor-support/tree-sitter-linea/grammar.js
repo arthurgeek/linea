@@ -985,22 +985,38 @@ module.exports = grammar({
 
     wildcard_pattern: _ => '_',
 
-    // `(a, b)` binds each component by position to a name or `_`, after
-    // `let`, in a walk's binder, in a match arm and as a lambda parameter.
-    // Nothing nests inside it.
+    // A pattern where a binder may stand: inside a variant's payload, a
+    // tuple's component, or after a struct field's `:`. A bare name binds or
+    // names a variant by its case, which the compiler reads and this grammar
+    // leaves to it.
+    _part_pattern: $ => choice(
+      $.identifier,
+      $.wildcard_pattern,
+      $.struct_pattern,
+      alias($._inferred_struct_pattern, $.struct_pattern),
+      $.variant_pattern,
+      $.range_pattern,
+      $.integer_literal,
+      $.string_literal,
+      $.tuple_pattern,
+    ),
+
+    // `(a, b)` takes each component apart by position, after `let`, in a
+    // walk's binder, in a match arm and as a lambda parameter, and each
+    // component is a pattern.
     // `(a,)` is accepted and left to the compiler to refuse.
     tuple_pattern: $ => seq(
       '(',
-      choice($.identifier, $.wildcard_pattern),
+      $._part_pattern,
       ',',
-      optional(commaSep1(choice($.identifier, $.wildcard_pattern))),
+      optional(commaSep1($._part_pattern)),
       ')',
     ),
 
     variant_pattern: $ => prec(1, seq(
       alias($.identifier, $.type_identifier),
       '(',
-      commaSep(choice($.identifier, $.wildcard_pattern)),
+      commaSep($._part_pattern),
       ')',
     )),
 
@@ -1019,7 +1035,7 @@ module.exports = grammar({
     // out would have written.
     field_pattern: $ => seq(
       field('name', $.identifier),
-      optional(seq(':', choice($.identifier, $.wildcard_pattern))),
+      optional(seq(':', $._part_pattern)),
     ),
 
     // `break` carries a value: a loop's value is what its breaks agree on.

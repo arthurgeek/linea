@@ -1,0 +1,22 @@
+// A refinement reaching past what its base can hold is refused. A match on it
+// is held to the values the base can hold within the range, so arms covering
+// those are enough.
+type Level = UInt8 where it in 0..=300
+
+type Offset = UInt8 where it in -3..=3
+
+fn level_score(sink level: Level) -> UInt8 {
+    match level {
+        Level(0..=255) => 1,
+    }
+}
+
+fn offset_score(sink offset: Offset) -> UInt8 {
+    match offset {
+        Offset(0..=3) => 1,
+    }
+}
+
+fn main() -> UInt8 {
+    level_score(Level(3)) + offset_score(Offset(1)) - 2
+}

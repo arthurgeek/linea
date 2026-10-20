@@ -1,0 +1,13 @@
+// Coverage looks inside the pair: no arm takes a first `None` beside a second
+// `Some`, and the diagnostic names that shape.
+fn pick(sink pair: (Option[UInt8], Option[UInt8])) -> UInt8 {
+    match pair {
+        (Some(a), Some(b)) => a + b,
+        (Some(a), None) => a,
+        (None, None) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    pick((.None, .None))
+}

@@ -1,0 +1,31 @@
+// A bare name at an arm's head names a variant, so over a type with no
+// variants it names nothing. The report says the type is no enum, and how to
+// match its values instead.
+type Digit = UInt8 where it in 0..=9
+
+struct Point {
+    x: UInt8,
+    y: UInt8,
+}
+
+fn digit_score(sink digit: Digit) -> UInt8 {
+    match digit {
+        value => 1,
+    }
+}
+
+fn point_score(sink point: Point) -> UInt8 {
+    match point {
+        Origin => 0,
+    }
+}
+
+fn pair_score(sink pair: (UInt8, UInt8)) -> UInt8 {
+    match pair {
+        both => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    digit_score(Digit(4)) + point_score(Point { x = 0, y = 0 }) + pair_score((1, 2)) - 3
+}

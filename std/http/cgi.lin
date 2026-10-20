@@ -129,8 +129,7 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
             var standard = StandardOutput {}
             answer_cgi(&variables, io.stdin(), .Standard(writer), &standard, &server, arena.handle(), limits)
         },
-        Err(failure) => {
-            let BufferOpenFailure { resource, reason: _ } = failure
+        Err(BufferOpenFailure { resource, reason: _ }) => {
             var standard = resource
             let headers: ResponseHeaders[mem.Handle[P]] = ResponseHeaders.new_in(arena.handle())
             let wrote = write_head(&standard, .ServiceUnavailable, headers, .Cgi)
@@ -604,12 +603,10 @@ fn settle_cgi[P: Allocator, D: CgiOutput](sink body: BodyWriter[P], sink written
             Ok(_) => .{ delivery = .Whole, body_bytes },
             Err(failure) => .{ delivery = .Write(io.IoError.from(failure)), body_bytes },
         },
-        Err(error) => match error {
-            Io(reason) => .{ delivery = .Write(reason), body_bytes },
-            Stream(stopped) => {
-                let noted = copy_message(&note, stopped.message())
-                Sent { delivery = .Stream(stopped.status(), noted), body_bytes }
-            },
+        Err(Io(reason)) => .{ delivery = .Write(reason), body_bytes },
+        Err(Stream(stopped)) => {
+            let noted = copy_message(&note, stopped.message())
+            Sent { delivery = .Stream(stopped.status(), noted), body_bytes }
         },
     }
 }

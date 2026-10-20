@@ -282,8 +282,14 @@ pub const Code = enum {
     /// inside a declaration that declares an allocator parameter of its own.
     t_defaulted_allocator,
     t_cover,
-    t_variants,
+    /// A `match`'s coverage check would build more matrix cells than its
+    /// budget allows. Nested patterns make exhaustiveness NP-complete, so the
+    /// budget is what bounds the cost of checking one `match`.
+    t_cover_limit,
     t_unreachable,
+    /// A pattern that must match every value of its type, in a `let`, a
+    /// `let read`, a `let … else`, a `for` or a lambda parameter, misses one.
+    t_refutable,
     /// A type holds itself inline, so computing its size requires its size.
     /// About layout rather than about recursion: a type that reaches itself
     /// through an indirection is well formed, and this rule outlives the one
@@ -476,8 +482,9 @@ pub const Code = enum {
             .t_argument_default => "T-ArgumentDefault",
             .t_defaulted_allocator => "T-DefaultedAllocator",
             .t_cover => "T-Cover",
-            .t_variants => "T-Variants",
+            .t_cover_limit => "T-CoverLimit",
             .t_unreachable => "T-Unreachable",
+            .t_refutable => "T-Refutable",
             .t_infinite_layout => "T-InfiniteLayout",
             .l_size => "L-Size",
             .t_unknown_field => "T-UnknownField",

@@ -1,0 +1,13 @@
+// `Some(_)` already takes every `Some`, so an arm after it that takes only
+// some of them is reached by no value.
+fn depth(sink value: Option[Option[UInt8]]) -> UInt8 {
+    match value {
+        Some(_) => 1,
+        Some(Some(inner)) => inner,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    depth(.None)
+}

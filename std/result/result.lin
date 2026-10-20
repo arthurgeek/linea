@@ -107,12 +107,12 @@ test fn tag_predicates_preserve_affine_payloads() {
     let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
     let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
     let success_number = match success {
-        Ok(payload) => match payload { Value(value) => value },
-        Err(payload) => match payload { Value(value) => value },
+        Ok(Value(value)) => value,
+        Err(Value(value)) => value,
     }
     let failure_number = match failure {
-        Ok(payload) => match payload { Value(value) => value },
-        Err(payload) => match payload { Value(value) => value },
+        Ok(Value(value)) => value,
+        Err(Value(value)) => value,
     }
     testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
     testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
@@ -125,12 +125,12 @@ test fn tag_predicates_preserve_linear_payloads() {
     let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
     let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
     let success_number = match success {
-        Ok(payload) => match payload { Value(value) => value },
-        Err(payload) => match payload { Value(value) => value },
+        Ok(Value(value)) => value,
+        Err(Value(value)) => value,
     }
     let failure_number = match failure {
-        Ok(payload) => match payload { Value(value) => value },
-        Err(payload) => match payload { Value(value) => value },
+        Ok(Value(value)) => value,
+        Err(Value(value)) => value,
     }
     testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
     testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
@@ -209,7 +209,7 @@ test fn a_mutable_map_calls_its_transform_only_for_ok() {
     let failure: Result[UInt8, ResultTestToken] = .Err(.Number(9))
     let mapped = success.map_inout(&transform).unwrap()
     let preserved = failure.map_inout(&transform)
-    let error_number = match preserved { Ok(value) => UInt8(value), Err(error) => match error { Number(number) => number } }
+    let error_number = match preserved { Ok(value) => UInt8(value), Err(Number(number)) => number }
     testing.assert_eq(mapped, UInt64(5), "mutable Result.map returned the wrong success")?
     testing.assert_eq(error_number, UInt8(9), "mutable Result.map lost its owned error")?
     testing.assert_eq(calls, UInt8(1), "mutable Result.map ran for Err")?
@@ -379,7 +379,7 @@ test fn a_mutable_and_then_calls_its_transform_only_for_ok() {
     let rejected: Result[UInt8, ResultTestToken] = .Err(.Number(11))
     let chained = available.and_then_inout(&chain).unwrap()
     let skipped = rejected.and_then_inout(&chain)
-    let skipped_number = match skipped { Ok(value) => UInt8(value), Err(error) => match error { Number(number) => number } }
+    let skipped_number = match skipped { Ok(value) => UInt8(value), Err(Number(number)) => number }
     testing.assert_eq(chained, UInt64(7), "mutable Result.and_then returned the wrong success")?
     testing.assert_eq(skipped_number, UInt8(11), "mutable Result.and_then lost its owned error")?
     testing.assert_eq(calls, UInt8(1), "mutable Result.and_then ran for Err")?

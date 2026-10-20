@@ -66,7 +66,8 @@ true of a different implementation.
 | [0219](0219-a-function-type-parameter-and-its-parameter-may-default.md) | A function type parameter and its parameter may default | Accepted; extends 0077, 0215 and 0217; extended by 0225 |
 | [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md) | Tuple syntax denotes a positional aggregate whose identity is a prelude declaration | Accepted; builds on 0060, 0129, 0151, 0179 and 0188; extended by 0200 |
 | [0200](0200-a-tuples-arity-is-a-readability-policy-the-parser-enforces.md) | A tuple's arity is a readability policy the parser enforces | Accepted; extends 0199 |
-| [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147 |
+| [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147; nesting clause and lending-walk place superseded by 0224 |
+| [0224](0224-a-pattern-nests-wherever-a-binder-stands.md) | A pattern nests wherever a binder stands | Accepted; supersedes the nesting clause and lending-walk place of 0201; extends 0129, 0147 and 0167 |
 | [0207](0207-linea-converts-nothing-implicitly.md) | Linea converts nothing implicitly | Accepted; extends 0018 and 0061 |
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192 |
@@ -170,7 +171,7 @@ true of a different implementation.
 | [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176 |
 | [0162](0162-question-mark-converts-an-error-through-from.md) | `?` converts a different error through `From` | Accepted; extended by 0184 and 0218 |
 | [0163](0163-a-raw-string-literal-holds-its-bytes.md) | A raw string literal holds its bytes: `r"…"`, with hashes for embedded quotes | Accepted |
-| [0167](0167-a-binding-handles-its-failure-with-else.md) | A binding handles its failure with `else` | Accepted; builds on 0070 and 0106; refines 0041 |
+| [0167](0167-a-binding-handles-its-failure-with-else.md) | A binding handles its failure with `else` | Accepted; builds on 0070 and 0106; refines 0041; extended by 0224 |
 | [0168](0168-multi-line-text-is-a-run-of-backslash-lines.md) | Multi-line text is a run of `\\` lines, raw, joined with line breaks | Accepted |
 | [0227](0227-a-program-embeds-a-files-bytes.md) | A program embeds a file's text or bytes, read when it is compiled: `embed` and `embed_bytes` | Accepted; extends 0075, 0096, 0140 and 0178 |
 | [0169](0169-an-interpolation-lays-out-its-value-through-a-format-spec.md) | An interpolation lays out its value through a format spec checked against its type and applied by `std.fmt` | Accepted |
@@ -259,8 +260,8 @@ ones most likely to be superseded as the compiler grows.
 | [0184](0184-a-failure-holding-an-owned-value-settles-to-its-reason.md) | A failure holding an owned value settles to its reason | Accepted; extends 0104 and 0162; `http.Error` settling clause superseded by 0218 |
 | [0218](0218-the-library-gives-up-no-value-at-question-mark.md) | The library gives up no value at `?`; `.settled()` says so | Accepted; extends 0162; supersedes the `http.Error` settling clause of 0184 |
 | [0128](0128-qualified-enum-constructors-are-contextual-callables.md) | Qualified enum constructors are contextual callables | Accepted; extends 0105 and 0123; extended by 0144 |
-| [0129](0129-struct-destructuring-may-infer-its-type.md) | Struct destructuring may infer its type | Accepted; extended by 0147 and 0201 |
-| [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md) | A borrowed let pattern reads a stable place | Accepted; extends 0129; extended by 0178 and 0201 |
+| [0129](0129-struct-destructuring-may-infer-its-type.md) | Struct destructuring may infer its type | Accepted; extended by 0147, 0201 and 0224 |
+| [0147](0147-a-borrowed-let-pattern-reads-a-stable-place.md) | A borrowed let pattern reads a stable place | Accepted; extends 0129; extended by 0178, 0201 and 0224 |
 | [0130](0130-explicit-captures-use-inline-environments.md) | Explicit captures use inline environments | Accepted; supersedes the capture exclusion in 0105; read-only restriction superseded by 0131; extended by 0173 and 0193 |
 | [0131](0131-closure-invocation-and-capture-ownership-are-independent.md) | Closure invocation and capture ownership are independent | Accepted; supersedes the read-only restriction in 0130; extends 0123 and 0124; extended by 0132, 0158 and 0173; stored inout capture clause superseded by 0193 |
 | [0193](0193-a-closure-may-hold-a-place-lent-inout.md) | A closure may hold a place lent `inout` | Accepted; supersedes the stored inout capture clause of 0131; extends 0123, 0124, 0130 and 0173 |

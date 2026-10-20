@@ -1,0 +1,31 @@
+// A part of a tuple pattern that is no pattern, or a missing comma, is one
+// mistake each. The parts after it are still read, so their binders are
+// declared and the tuple keeps its arity.
+fn after_a_keyword(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
+    match triple {
+        (true, +, count) => count,
+        (_, low, high) => low + high,
+    }
+}
+
+fn after_a_name(sink triple: (UInt8, UInt8, UInt8)) -> UInt8 {
+    match triple {
+        (first, +, last) => first + last,
+        (_, low, high) => low + high,
+    }
+}
+
+fn without_a_comma(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
+    match triple {
+        (flag, low high) => if flag { low } else { high },
+    }
+}
+
+fn in_a_let(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
+    let (true, +, count) = triple
+    count
+}
+
+fn main() -> UInt8 {
+    after_a_keyword((true, 1, 2)) + after_a_name((1, 2, 3)) + without_a_comma((true, 1, 2)) + in_a_let((true, 1, 2))
+}

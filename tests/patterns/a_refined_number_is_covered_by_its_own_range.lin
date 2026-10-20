@@ -1,0 +1,15 @@
+// A newtype's refinement is the range its base can hold, so arms covering
+// `1..=65535` inside a `Port` cover every port: no `Port` holds 0.
+type Port = UInt16 where it in 1..=65535
+
+fn class(sink port: Option[Port]) -> UInt8 {
+    match port {
+        Some(Port(1..=1023)) => 1,
+        Some(Port(1024..=65535)) => 2,
+        None => 3,
+    }
+}
+
+fn main() -> UInt8 {
+    class(.Some(Port(80))) + class(.Some(Port(8080))) + class(.None) - 6
+}

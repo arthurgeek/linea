@@ -1,0 +1,27 @@
+// A `let`, a walk or a lambda's parameter takes its pattern apart with no
+// other case to fall back on, so its pattern must match every value
+// ([T-Refutable]). A part that matches no value, a literal outside a
+// refinement or a range written backwards, is reported that way.
+type Digit = UInt8 where it in 0..=9
+
+fn _second(sink pair: (Digit, UInt8)) -> UInt8 {
+    let (Digit(12), count) = pair
+    count
+}
+
+fn _total(sink pairs: [(UInt8, UInt8); 2]) -> UInt8 {
+    var sum: UInt8 = 0
+    for (9..=1, count) in pairs {
+        sum = sum + count
+    }
+    sum
+}
+
+fn _apply(sink pair: (Digit, UInt8)) -> UInt8 {
+    let pick = |(Digit(12), count): (Digit, UInt8)| count
+    pick(pair)
+}
+
+fn main() -> UInt8 {
+    0
+}

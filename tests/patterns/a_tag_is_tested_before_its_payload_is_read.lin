@@ -1,0 +1,15 @@
+// Each arm tests the outer variant before it reads the payload inside it, so
+// every shape of a nested option reaches its own arm.
+fn classify(sink value: Option[Option[UInt8]]) -> UInt8 {
+    match value {
+        Some(Some(5)) => 1,
+        Some(None) => 2,
+        Some(Some(_)) => 3,
+        None => 4,
+    }
+}
+
+fn main() -> UInt8 {
+    let code = classify(.Some(.Some(5))) * 64 + classify(.Some(.None)) * 16 + classify(.Some(.Some(6))) * 4 + classify(.None)
+    code - 112
+}

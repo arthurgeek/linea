@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `(None, Some)`
+ --> tests/patterns/a_missing_combination_is_named.lin:4:5
+  |
+4 |     match pair {
+  |     ^^^^^^^^^^^^ add the missing arms, or a `_`

@@ -1,0 +1,5 @@
+error[T-Mismatch]: this takes `Some` apart, and the value is a `borrow Option[UInt8]`
+ --> tests/patterns/a_view_is_not_taken_apart_by_a_variant.lin:5:60
+  |
+5 |     let total = found.as_slice().enumerate().map(|sink (i, Some(x))| i + UInt64(x)).fold(0, |sink a, sink b| a + b)
+  |                                                            ^^^^^^^ a pattern takes a value apart, not a view of one
