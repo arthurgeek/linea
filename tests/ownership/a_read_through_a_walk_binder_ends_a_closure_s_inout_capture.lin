@@ -1,0 +1,23 @@
+// `grow` holds `list` lent `inout` until its last call, so reading `list` in
+// between ends that lend, and calling `grow` again is refused: the slice
+// taken in between would be read after `grow` reallocated the list.
+fn main() -> UInt8 {
+    var held: [Vec[UInt8]; 1] = [Vec.new()]
+    var total: UInt64 = 0
+    for inout list in held {
+        var grow = inout [inout list] || {
+            for _ in 0..100 {
+                let _q = &list.push(7)
+            }
+        }
+        &grow()
+        let s = list.as_slice()
+        &grow()
+        &grow()
+        total += UInt64(s[0]) + UInt64(s[99])
+    }
+    for list in held {
+        list.release()
+    }
+    UInt8(total)
+}

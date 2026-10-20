@@ -1911,6 +1911,26 @@ const Analysis = struct {
         return true;
     }
 
+    /// A read through a walk binder reads the element it lends, whose lends
+    /// are recorded at the element's place rather than at the binder: a
+    /// closure capturing the binder `inout` lends `held[*]`, not `list`. So
+    /// the read ends every exclusive lend of the element, the binder's own and
+    /// its enclosing walks' excepted, which are the path the read goes
+    /// through.
+    fn readThroughLend(self: *Analysis, state: *State, read_at: ExprId, at: ExprId) !void {
+        const root = self.res.pathBinding(self.ast, read_at);
+        if (root == .none or state.get(Cell.alias(root)) == null) return;
+        var kept = try self.lendsThrough(state, read_at);
+        defer kept.deinit(self.gpa);
+        for (self.store.facts(try self.actualPlace(state, read_at))) |fact| {
+            if (fact.origin.external) continue;
+            var read = fact.origin.place;
+            if (try self.store.opaqueBoundary(read.path)) |cut| read.path = cut.prefix;
+            try self.invalidateObservations(state, read, at, .lends);
+        }
+        try self.restoreLends(state, kept.items);
+    }
+
     fn restoreLends(self: *Analysis, state: *State, kept: []const KeptLend) !void {
         for (kept) |held| try self.put(state, Cell.alias(held.binding), held.set);
     }
@@ -2430,6 +2450,7 @@ const Analysis = struct {
                         var read = Place{ .root = place.root, .path = (try self.selectedPath(read_at)).path };
                         if (try self.store.opaqueBoundary(read.path)) |cut| read.path = cut.prefix;
                         try self.invalidateObservations(state, read, at, .lends);
+                        try self.readThroughLend(state, read_at, at);
                     }
                 },
                 .consume => {

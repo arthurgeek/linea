@@ -1,0 +1,25 @@
+// The same as for one walk: `list` is lent through `row` and then `grid`, and
+// a read of it between two calls of `grow` ends the closure's lend.
+fn main() -> UInt8 {
+    var grid: [[Vec[UInt8]; 2]; 2] = [[Vec.new(), Vec.new()], [Vec.new(), Vec.new()]]
+    var total: UInt64 = 0
+    for inout row in grid {
+        for inout list in row {
+            var grow = inout [inout list] || {
+                for _ in 0..100 {
+                    let _q = &list.push(7)
+                }
+            }
+            &grow()
+            let s = list.as_slice()
+            &grow()
+            total += UInt64(s[50])
+        }
+    }
+    for row in grid {
+        for list in row {
+            list.release()
+        }
+    }
+    UInt8(total)
+}

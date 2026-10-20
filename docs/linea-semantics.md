@@ -4265,8 +4265,9 @@ call C makes to `add_square` receives it.
 sealed (`@opaque`) in a module its root's manifest grants `extern`, in any root,
 or a newtype over a handle. An `extern` parameter whose type is a handle names
 an object C holds, whichever root's `extern` takes it. A `copyable` newtype is
-never a handle. Written `read`, the parameter promises that C only reads the object. Only an `extern` may write `read` on a
-parameter, and only on a handle; on any other parameter it is redundant
+never a handle. Written `read`, the parameter promises that C only reads the
+object. Only an `extern` may write `read` on a parameter, and only on a handle;
+on any other parameter it is redundant
 ([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C
 change or free the object, so a call lends its argument's place exclusively,
 as an `inout` argument is lent, although C receives the handle by value. The

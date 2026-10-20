@@ -45,6 +45,10 @@ pub const Storage = enum {
     field,
     /// A fixed array, whose storage is the local itself.
     array,
+    /// A vector lent by a `for inout` walk, `for inout owner in owners`: the
+    /// owner is the walk's binder, and every operation and observation sits
+    /// inside the walk's body.
+    walked,
 
     /// How the cell's program names the owner where the template says
     /// `owner`.
@@ -61,6 +65,24 @@ pub const Storage = enum {
         return switch (self) {
             .field => "holder",
             else => "owner",
+        };
+    }
+
+    /// Statements that give a vector or map the three elements an observation
+    /// reads.
+    fn fill(self: Storage) []const u8 {
+        return switch (self) {
+            .vec, .field, .walked =>
+            \\&owner.push(1).unwrap()
+            \\&owner.push(2).unwrap()
+            \\&owner.push(3).unwrap()
+            ,
+            .map =>
+            \\&owner.insert(1, 10).unwrap().release()
+            \\&owner.insert(2, 20).unwrap().release()
+            \\&owner.insert(3, 30).unwrap().release()
+            ,
+            .scalar, .array => unreachable,
         };
     }
 
@@ -100,6 +122,10 @@ pub const Operation = enum {
     element_write,
     /// An assignment of a whole new array.
     array_assign,
+    /// A push through a `for inout` walk's binder.
+    walk_push,
+    /// A clear through a `for inout` walk's binder.
+    walk_clear,
 
     pub fn storage(self: Operation) Storage {
         return switch (self) {
@@ -108,6 +134,7 @@ pub const Operation = enum {
             .assign, .compound_assign => .scalar,
             .reset_holder, .field_push => .field,
             .element_write, .array_assign => .array,
+            .walk_push, .walk_clear => .walked,
         };
     }
 
@@ -133,6 +160,15 @@ pub const Operation = enum {
         try testing.expect(Operation.drain_map.consumes());
         try testing.expect(!Operation.clear.consumes());
         try testing.expect(!Operation.assign.consumes());
+    }
+
+    /// Whether running the operation twice leaves fewer elements than an
+    /// observation made afterwards reads.
+    fn shrinks(self: Operation) bool {
+        return switch (self) {
+            .pop, .remove, .clear, .truncate, .release, .drain, .finish, .release_map, .drain_map, .reset_holder, .walk_clear => true,
+            else => false,
+        };
     }
 
     /// The operation as statements. `owner` names the owner.
@@ -166,6 +202,8 @@ pub const Operation = enum {
             .field_push => "&owner.push(4).unwrap()",
             .element_write => "owner[0] = 9",
             .array_assign => "owner = [UInt64(4), 5, 6]",
+            .walk_push => "&owner.push(4).unwrap()",
+            .walk_clear => "&owner.clear()",
         };
     }
 
@@ -195,7 +233,8 @@ pub const Operation = enum {
             .merge => "&owner.merge(2, 5, |sink held: UInt64, sink incoming: UInt64| held + incoming).unwrap()",
             .update => "match &owner.update(2, |sink value: UInt64| value + 1) { _ => {} }",
             .reset_holder => "reset(&holder)",
-            .field_push => "&owner.push(4).unwrap()",
+            .field_push, .walk_push => "&owner.push(4).unwrap()",
+            .walk_clear => "&owner.clear()",
             .index_write, .assign, .compound_assign, .element_write, .array_assign => null,
         };
     }
@@ -249,9 +288,9 @@ pub const Observation = enum {
     /// pushes.
     pub fn fits(self: Observation, storage: Storage) bool {
         return switch (self) {
-            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture => storage == .vec or storage == .field or storage == .array,
-            .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array,
-            .inout_capture => storage == .vec,
+            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture => storage == .vec or storage == .field or storage == .array or storage == .walked,
+            .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .walked,
+            .inout_capture => storage == .vec or storage == .walked,
             .value_view, .entries, .map_inout_capture, .bare_entries => storage == .map,
             .scalar_inout_capture, .scalar_read_capture => storage == .scalar,
         };
@@ -350,6 +389,13 @@ pub const Meeting = enum {
     for_body,
     while_body,
     closure_body,
+    /// Between two calls of a closure holding the owner lent `inout`: the
+    /// observation is made after the first call and the second call is the
+    /// operation, as `&act(); let seen = ...; &act()`. Reading the owner to
+    /// make the observation ends the closure's lend, so the observation
+    /// cannot end before the second call; the `ended` program instead makes
+    /// it after the closure's last call.
+    closure_between,
     deferred,
     match_arm,
 
@@ -379,6 +425,9 @@ pub const Cell = struct {
         if (self.observation.bare() != null and self.meeting != .for_body) return false;
         if (self.operation.consumes() and self.meeting.loops()) return false;
         if (self.meeting == .deferred and self.operation.expression() == null) return false;
+        // A second `inout` capture of the place the closure holds is refused
+        // whatever the observation does.
+        if (self.meeting == .closure_between and (self.observation == .inout_capture or self.observation == .map_inout_capture or self.observation == .scalar_inout_capture)) return false;
         return true;
     }
 
@@ -427,22 +476,30 @@ test "the matrix holds every applicable cell of the three axes" {
     defer testing.allocator.free(all);
 
     // Ten vector operations meet ten vector observations, six map operations
-    // meet three map observations, and two assignments meet two captures.
-    // Consuming operations leave both loops, and assignments leave `defer`.
-    // Bare walks meet only the non-consuming operations, in a `for` body. A
-    // field and an array meet the nine observations a slice offers, less
-    // `defer` for an array's assignments, and the three bare walks.
-    const vec = 10 * 10 * 6 - 3 * 10 * 2 - 1 * 10 + 7 * 3;
-    const map = 6 * 3 * 6 - 2 * 3 * 2 + 4 * 1;
-    const scalar = 2 * 2 * 6 - 2 * 2;
-    const field = 2 * (9 * 6 + 3);
-    const array = 2 * (9 * 5 + 3);
-    try testing.expectEqual(@as(usize, vec + map + scalar + field + array), all.len);
+    // meet three map observations, and two assignments meet two captures,
+    // at seven meetings. Consuming operations leave both loops, assignments
+    // leave `defer`, and an `inout` capture leaves the meeting between two
+    // calls of a closure already holding the place. Bare walks meet only the
+    // non-consuming operations, in a `for` body. A field and an array meet
+    // the nine observations a slice offers, less `defer` for an array's
+    // assignments, and the three bare walks. A walked owner's two operations
+    // meet everything a vector's do.
+    const vec = 10 * 10 * 7 - 3 * 10 * 2 - 1 * 10 - 10 * 1 + 7 * 3;
+    const map = 6 * 3 * 7 - 2 * 3 * 2 - 6 * 1 + 4 * 1;
+    const scalar = 2 * 2 * 7 - 2 * 2 - 2 * 1;
+    const field = 2 * (9 * 7 + 3);
+    const array = 2 * (9 * 6 + 3);
+    const walked = 2 * (10 * 7 - 1 + 3);
+    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
     var motivating = false;
     for (all) |cell| motivating = motivating or (cell.operation == .push and cell.observation == .bare_slice and cell.meeting == .for_body);
     try testing.expect(motivating);
+    // So are a walk binder captured `inout` and read between two calls.
+    var between = false;
+    for (all) |cell| between = between or (cell.operation == .walk_push and cell.observation == .slice and cell.meeting == .closure_between);
+    try testing.expect(between);
     // So is an owner below the path root, changed through its structure.
     var through_structure = false;
     for (all) |cell| through_structure = through_structure or (cell.operation == .reset_holder and cell.observation == .slice and cell.meeting == .straight);
@@ -465,6 +522,9 @@ fn use(w: Lines, depth: u32, observation: Observation) !void {
 /// Writes indented lines. Text holding several lines is indented line by line.
 const Lines = struct {
     out: *std.Io.Writer,
+    /// Levels every line is indented beyond its depth: one inside the walk a
+    /// walked owner is lent by.
+    extra: u32 = 0,
 
     fn raw(self: Lines, text: []const u8) !void {
         try self.out.writeAll(text);
@@ -473,7 +533,7 @@ const Lines = struct {
     fn line(self: Lines, depth: u32, text: []const u8) !void {
         var lines = std.mem.splitScalar(u8, text, '\n');
         while (lines.next()) |one| {
-            for (0..depth) |_| try self.out.writeAll("    ");
+            for (0..depth + self.extra) |_| try self.out.writeAll("    ");
             try self.out.writeAll(one);
             try self.out.writeByte('\n');
         }
@@ -495,14 +555,14 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
     std.debug.assert(cell.applies());
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
-    const w: Lines = .{ .out = &out.writer };
+    var w: Lines = .{ .out = &out.writer };
     const storage = cell.operation.storage();
     const operation = cell.operation;
     const observation = cell.observation;
     const live = liveness == .live;
 
     switch (storage) {
-        .vec => try w.raw("import std.mem\n\n"),
+        .vec, .walked => try w.raw("import std.mem\n\n"),
         .map => try w.raw("import std.collections\nimport std.mem\n\n"),
         .field => {
             try w.raw("import std.mem\n\nstruct Holder { items: Vec[UInt64, mem.SystemAllocator] }\n\n");
@@ -540,28 +600,28 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
     try w.raw("fn main() -> UInt8 {\n");
     try w.line(1, "var total: UInt64 = 0");
     switch (storage) {
-        .vec => try w.line(1,
-            \\var owner: Vec[UInt64, mem.SystemAllocator] = Vec.new()
-            \\&owner.push(1).unwrap()
-            \\&owner.push(2).unwrap()
-            \\&owner.push(3).unwrap()
-        ),
-        .map => try w.line(1,
-            \\var owner: collections.Map[UInt64, UInt64, mem.SystemAllocator] = collections.Map.new()
-            \\&owner.insert(1, 10).unwrap().release()
-            \\&owner.insert(2, 20).unwrap().release()
-            \\&owner.insert(3, 30).unwrap().release()
-        ),
+        .vec => {
+            try w.line(1, "var owner: Vec[UInt64, mem.SystemAllocator] = Vec.new()");
+            try w.line(1, storage.fill());
+        },
+        .map => {
+            try w.line(1, "var owner: collections.Map[UInt64, UInt64, mem.SystemAllocator] = collections.Map.new()");
+            try w.line(1, storage.fill());
+        },
         .scalar => try w.line(1, "var owner: UInt64 = 1"),
-        .field => try w.line(1,
-            \\var holder = Holder { items = Vec.new() }
-            \\&holder.items.push(1).unwrap()
-            \\&holder.items.push(2).unwrap()
-            \\&holder.items.push(3).unwrap()
-        ),
+        .field => {
+            try w.line(1, "var holder = Holder { items = Vec.new() }");
+            try w.line(1, storage.fill());
+        },
         .array => try w.line(1, "var owner = [UInt64(1), 2, 3]"),
+        .walked => {
+            try w.line(1, "var owners: [Vec[UInt64, mem.SystemAllocator]; 1] = [Vec.new()]");
+            try w.line(1, "for inout owner in owners {");
+            w.extra = 1;
+            try w.line(1, storage.fill());
+        },
     }
-    if (observation.bare() == null) try w.line(1, observation.open());
+    if (observation.bare() == null and cell.meeting != .closure_between) try w.line(1, observation.open());
 
     // Whether the owner is still held once the meeting is over. A deferred
     // consuming operation settles it at the end of the inner scope.
@@ -635,6 +695,19 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             try w.line(1, "&act()");
             if (live) try use(w, 1, observation);
         },
+        .closure_between => {
+            try w.print(1, "var act = inout [inout {s}] || {{", .{storage.root()});
+            try w.line(2, operation.statements());
+            try w.line(1, "}");
+            try w.line(1, "&act()");
+            if (!live) {
+                try w.line(1, "&act()");
+                if (operation.shrinks()) try w.line(1, storage.fill());
+            }
+            try w.line(1, observation.open());
+            if (live) try w.line(1, "&act()");
+            try use(w, 1, observation);
+        },
         .deferred => {
             // Deferred expressions run last scheduled first, so the one
             // written second runs first. The single arm is the scope they run
@@ -673,11 +746,16 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         .vec, .map => if (!settled) try w.line(1, "owner.release()"),
         .field => try w.line(1, "let Holder { items } = holder\nitems.release()"),
         .scalar, .array => {},
+        .walked => {
+            w.extra = 0;
+            try w.line(1, "}");
+            try w.line(1, "for owner in owners {\n    owner.release()\n}");
+        },
     }
     const measured = switch (storage) {
         .scalar => "total + owner",
         .array => "total + owner[0]",
-        .vec, .map, .field => "total",
+        .vec, .map, .field, .walked => "total",
     };
     try w.print(1, "if {s} > {d} {{", .{ measured, total_bound });
     try w.line(2, "1");
