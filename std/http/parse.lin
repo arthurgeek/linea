@@ -188,10 +188,20 @@ test fn each_limit_answers_its_status_at_one_past_the_bound() {
 }
 
 test fn a_read_timeout_answers_408() {
-    let input = "GET / HTTP/1.1\r\n"
     let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
-    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let silent = Fragments { bytes = "".as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
+    var idle_reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: silent).unwrap()
+    let idle_outcome = read_request(&idle_reader, arena.handle(), Limits.default())
+    let _silent = idle_reader.abandon()
+    let idle_error = match idle_outcome {
+        Ok(_) => return testing.assert(false, "an idle connection that timed out was accepted"),
+        Err(error) => error,
+    }
+    testing.assert_eq(idle_error, RequestError.Closed, "a timeout before the first byte was not Closed")?
+    testing.assert_eq(idle_error.status(), .None, "a timeout before the first byte was answered")?
+    let input = "GET / HTTP/1.1\r\n"
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
     var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
     let outcome = read_request(&reader, arena.handle(), Limits.default())
     let _source = reader.abandon()
@@ -442,9 +452,15 @@ fn line_failure[E: Into[io.IoError]](sink error: io.LineError[E], limit_status: 
 }
 
 // A failed read of the connection is `Io`, holding the connection's own error.
+// A read that timed out before the first byte arrived is `Closed`, as a
+// connection the client closed before sending a byte is.
 fn input_failure[E: Into[io.IoError]](sink failure: InputFailure[E]) -> RequestError {
-    let InputFailure { reason, stream_offset: _ } = failure
-    .Io(reason.into())
+    let InputFailure { reason, stream_offset } = failure
+    let error: io.IoError = reason.into()
+    if stream_offset == 0 && error.progress == 0 && error.category == .TimedOut {
+        return .Closed
+    }
+    .Io(error)
 }
 
 // Strip a line's LF and a CR just before it. A line the connection ended

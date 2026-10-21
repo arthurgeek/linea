@@ -405,9 +405,9 @@ fn stored_target[A: Allocator](inout head: String[A], path_info: mem.Slice[UInt8
                 let plain = Str.from_bytes(path.subspan(start: run, count: at - run).unwrap()).unwrap()
                 let _plain = stored_or_refused(&head, plain)?
             }
-            let _escape = stored_or_refused(&head, "%")?
-            let _high = stored_or_refused(&head, hex_digit(byte / 16))?
-            let _low = stored_or_refused(&head, hex_digit(byte % 16))?
+            if write_escape(byte, &head).is_err() {
+                return .Err(.Status(.InternalServerError))
+            }
             run = at + 1
         }
     }
@@ -440,10 +440,9 @@ test fn a_decoded_path_is_encoded_again_into_the_target() {
     .Ok(())
 }
 
-// The ASCII codes of `#`, `%` and `?`, which a path holds only encoded.
+// The ASCII codes of `#` and `?`, which a path holds only encoded, as it
+// holds `%`.
 let ascii_hash: UInt8 = 35
-
-let ascii_percent: UInt8 = 37
 
 let ascii_question: UInt8 = 63
 
@@ -451,12 +450,6 @@ let ascii_question: UInt8 = 63
 // `%XX`: a space, a control byte, a byte above ASCII, `#`, `%` or `?`.
 fn is_encoded_in_path(byte: UInt8) -> Bool {
     byte <= ascii_space || byte >= ascii_delete || byte == ascii_hash || byte == ascii_percent || byte == ascii_question
-}
-
-// `hex_digit` spells `value`, which is below 16, as one uppercase
-// hexadecimal digit.
-fn hex_digit(value: UInt8) -> Str {
-    "0123456789ABCDEF".slice(UInt64(value), UInt64(value) + 1).unwrap()
 }
 
 // The ASCII codes of `_`, `-` and the letters' ranges, which spelling a

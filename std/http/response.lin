@@ -83,6 +83,41 @@ test fn a_text_response_past_the_arena_is_refused() {
     .Ok(())
 }
 
+// `html` answers 200 with `body` rendered into the request's arena and sets
+// `Content-Type: text/html; charset=utf-8`. `body` is any `Display` value, so
+// an interpolated literal or a page type builds the markup in place; it does
+// not escape text on its own, so pass untrusted text through `html.escaped`.
+pub fn html[P: Allocator, T: Display](request: Request[P], body: T) -> Result[Response[P], Error[P]] {
+    var rendered = String.new_in(request.allocator())
+    body.fmt(&rendered)?
+    var response = held(request, rendered.into_bytes())
+    &response.set_header("Content-Type", "text/html; charset=utf-8")?
+    .Ok(response)
+}
+
+test fn an_html_response_holds_its_rendered_body_and_content_type() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let count = 3
+    let response = html(sent.request(), "<p>{count} items</p>").unwrap()
+    testing.assert_eq(response.status(), Status.Ok, "the status changed")?
+    testing.assert_eq(response.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the content type changed")?
+    testing.assert_ok_eq(response.text(), "<p>3 items</p>", "the body changed")?
+    .Ok(())
+}
+
+test fn an_html_response_past_the_arena_is_refused() {
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let long = Vec.filled(512, UInt8(120)).unwrap()
+    let refused = match html(sent.request(), Str.from_bytes(long.as_slice()).unwrap()) {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error.status()),
+    }
+    testing.assert_eq(refused, Option.Some(Status.InternalServerError), "a body past the arena was accepted")?
+    .Ok(())
+}
+
 // A test encodes a `Greeting` as JSON.
 @derive(json_format.Encode)
 struct Greeting {
@@ -121,6 +156,33 @@ test fn a_status_response_has_no_body() {
     let response = status(sent.request(), .NoContent)
     testing.assert_eq(response.status(), Status.NoContent, "the status changed")?
     testing.assert_ok_eq(response.text(), "", "an empty response had a body")?
+    .Ok(())
+}
+
+// `redirect` answers `status` with an empty body and sets `Location` to
+// `location`, which may be any `Display` value. A location holding a control
+// byte or a full arena is refused with `HeaderError`, which `?` converts into
+// a 500 `Error`.
+pub fn redirect[P: Allocator, L: Display](request: Request[P], status: Status, location: L) -> Result[Response[P], Error[P]] {
+    let empty: Vec[UInt8, mem.Handle[P]] = Vec.new_in(request.allocator())
+    var response = held(request, empty).with_status(status)
+    &response.set_header("Location", location)?
+    .Ok(response)
+}
+
+test fn a_redirect_sets_its_status_and_location_and_refuses_a_control_byte() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/sign", body: "").unwrap()
+    let prefix = "/cgi-bin/book"
+    let response = redirect(sent.request(), .SeeOther, "{prefix}/").unwrap()
+    testing.assert_eq(response.status(), Status.SeeOther, "the status changed")?
+    testing.assert_eq(response.header("Location"), Option.Some("/cgi-bin/book/"), "the location changed")?
+    testing.assert_ok_eq(response.text(), "", "a redirect had a body")?
+    let smuggled = match redirect(sent.request(), .TemporaryRedirect, "/\r\nSet-Cookie: a=b") {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error.status()),
+    }
+    testing.assert_eq(smuggled, Option.Some(Status.InternalServerError), "a location with CRLF was accepted")?
     .Ok(())
 }
 
@@ -211,9 +273,10 @@ test fn a_response_takes_another_status() {
 }
 
 impl[P: Allocator] Response[P] {
-    // Replace every value of `name`, compared under ASCII case folding. A
-    // handler that propagates a refusal with `?` answers 500.
-    pub fn set_header(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries() {
+    // Replace every value of `name`, compared under ASCII case folding. `value`
+    // is any `Display` value. A handler that propagates a refusal with `?`
+    // answers 500.
+    pub fn set_header[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries() {
         &self.headers.set(name, value)
     }
 }
@@ -223,8 +286,9 @@ test fn set_header_replaces_every_value_of_a_name() {
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     var response = text(sent.request(), "ok").unwrap()
     let set = &response.set_header("Cache-Control", "no-store")
-    let replaced = &response.set_header("cache-control", "max-age=60")
-    let framing = &response.set_header("Content-Length", "2")
+    let seconds = 60
+    let replaced = &response.set_header("cache-control", "max-age={seconds}")
+    let framing = &response.set_header("Content-Length", 2)
     testing.assert_ok_eq(set, (), "setting failed")?
     testing.assert_ok_eq(replaced, (), "replacing failed")?
     testing.assert_eq(framing, .Err(HeaderError.Framing), "a framing header was accepted")?
@@ -233,8 +297,9 @@ test fn set_header_replaces_every_value_of_a_name() {
 }
 
 impl[P: Allocator] Response[P] {
-    // Append a value, keeping any the name already has.
-    pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries() {
+    // Append a value, keeping any the name already has. `value` is any
+    // `Display` value.
+    pub fn add_header[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries() {
         &self.headers.add(name, value)
     }
 }

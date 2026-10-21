@@ -1,0 +1,352 @@
+import std.fmt
+import std.mem
+import std.testing
+import std.text as strings
+
+// Percent-encoding (RFC 3986, section 2.1) writes a byte as `%` and two
+// hexadecimal digits, so text of any bytes fits where only a few characters
+// may appear: a URL's path segment or query value, or a cookie value.
+//
+// `percent_encoded` leaves only the unreserved bytes of RFC 3986, section
+// 2.3, as they are: the ASCII letters, the digits, `-`, `.`, `_` and `~`.
+// Every other byte is encoded, the reserved ones (`/`, `?`, `#`, `&`, `=`,
+// `+` and the rest) included, so what it writes means the same text in a
+// path segment, a query value and a cookie value alike. The hexadecimal
+// digits are capitals, as RFC 3986 recommends.
+//
+// `percent_decode` and `percent_decode_in` undo it, and accept the digits in
+// either case. They refuse rather than guess: a `%` not followed by two
+// hexadecimal digits is `PercentError.Escape`, because no encoder writes one,
+// so the text was not percent-encoded and passing the `%` through would hand
+// the caller text the sender never meant; decoded bytes that are not UTF-8 are
+// `PercentError.Encoding`, because the result is text. A `+` stays a `+`.
+// Reading `+` as a space is a rule of HTML form encoding
+// (`application/x-www-form-urlencoded`), not of percent-encoding: in a path
+// segment or a cookie `+` is itself, so `/notes/C++` names `C++`. A request's
+// query and form body are decoded under the form rule, `+` as a space, with
+// the same routine.
+
+// A PercentError says why percent-decoding failed: the `%` at the byte
+// offset `Escape` holds is not followed by two hexadecimal digits, the
+// decoded bytes are not UTF-8 (`Encoding`, at an offset into the decoded
+// bytes), or the allocator refused the storage (`Allocation`). `?` wraps an
+// `Oom` in `Allocation` and a `text.Utf8Error` in `Encoding`.
+@(copyable, derive(Equatable, Debug, Release, From[mem.Oom], From[strings.Utf8Error]))
+pub enum PercentError {
+    Escape(UInt64),
+    Encoding(strings.Utf8Error),
+    Allocation(mem.Oom),
+}
+
+impl Display for PercentError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Escape(offset) => {
+                &w.write_str("the % at byte ")?
+                offset.fmt(&w)?
+                &w.write_str(" is not followed by two hexadecimal digits")
+            },
+            Encoding(reason) => {
+                &w.write_str("the decoded text is not UTF-8: ")?
+                reason.fmt(&w)
+            },
+            Allocation(_) => &w.write_str("no memory to hold the decoded text"),
+        }
+    }
+}
+
+test fn a_percent_error_displays_its_reason() {
+    defer let escape = fmt.render_owned(PercentError.Escape(4)).unwrap()
+    defer let encoding = fmt.render_owned(PercentError.Encoding(strings.Utf8Error { offset = 3 })).unwrap()
+    defer let memory = fmt.render_owned(PercentError.Allocation(.Exhausted)).unwrap()
+    testing.assert_eq(escape.view(), "the % at byte 4 is not followed by two hexadecimal digits", "the escape reason changed")?
+    testing.assert_eq(encoding.view(), "the decoded text is not UTF-8: invalid UTF-8 sequence at byte 3", "the encoding reason changed")?
+    testing.assert_eq(memory.view(), "no memory to hold the decoded text", "the memory reason changed")?
+    .Ok(())
+}
+
+// Text that is not percent-encoded UTF-8 came from the client, so a handler
+// that propagates the refusal with `?` answers 400; running out of memory,
+// most often the request's arena, answers 500.
+impl[P: Allocator] From[PercentError] for Error[P] {
+    fn from(sink source: PercentError) -> Error[P] {
+        match read source {
+            Allocation(_) => Error.new(.InternalServerError),
+            _ => Error.new(.BadRequest),
+        }
+    }
+}
+
+test fn text_that_does_not_decode_answers_400() {
+    let escape: Error = PercentError.Escape(0).into()
+    let encoding: Error = PercentError.Encoding(strings.Utf8Error { offset = 0 }).into()
+    let memory: Error = PercentError.Allocation(.Exhausted).into()
+    testing.assert_eq(escape.status(), Status.BadRequest, "a malformed escape did not answer 400")?
+    testing.assert_eq(encoding.status(), Status.BadRequest, "text that is not UTF-8 did not answer 400")?
+    testing.assert_eq(memory.status(), Status.InternalServerError, "running out of memory did not answer 500")?
+    .Ok(())
+}
+
+// `PercentEncoded` is text waiting to be written percent-encoded: it displays
+// as `text` with every byte but the unreserved ones written as `%XX`, so an
+// interpolation can encode what it holds, as in
+// `"/notes/{http.percent_encoded(title)}"`. It borrows the text and allocates
+// nothing.
+@(opaque, copyable)
+struct PercentEncoded {
+    text: Str,
+}
+
+impl Display for PercentEncoded {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let bytes = self.text.as_bytes()
+        // A run of unreserved bytes is ASCII, so it starts and ends on a
+        // scalar boundary and is written whole.
+        var run_start: UInt64 = 0
+        for index in 0..bytes.length() {
+            let byte = bytes[index]
+            if !is_unreserved(byte) {
+                if run_start < index {
+                    &w.write_str(self.text.slice(run_start, index).unwrap())?
+                }
+                write_escape(byte, &w)?
+                run_start = index + 1
+            }
+        }
+        if run_start < bytes.length() {
+            &w.write_str(self.text.slice(run_start, bytes.length()).unwrap())?
+        }
+        .Ok(())
+    }
+}
+
+// `percent_encoded` makes the `PercentEncoded` form of `text`.
+pub fn percent_encoded(text: Str) -> PercentEncoded where carries(text) {
+    .{ text = copy(text) }
+}
+
+test fn percent_encoding_keeps_only_unreserved_bytes() {
+    defer let plain = fmt.render_owned(percent_encoded("AZaz09-._~")).unwrap()
+    defer let spaced = fmt.render_owned(percent_encoded("Zoë <b>")).unwrap()
+    defer let reserved = fmt.render_owned(percent_encoded("a/b?c#d%e+f=g&h;i,j\"k")).unwrap()
+    defer let empty = fmt.render_owned(percent_encoded("")).unwrap()
+    testing.assert_eq(plain.view(), "AZaz09-._~", "an unreserved byte was encoded")?
+    testing.assert_eq(spaced.view(), "Zo%C3%AB%20%3Cb%3E", "a space or a byte outside ASCII was left bare")?
+    testing.assert_eq(reserved.view(), "a%2Fb%3Fc%23d%25e%2Bf%3Dg%26h%3Bi%2Cj%22k", "a reserved byte was left bare")?
+    testing.assert_eq(empty.view(), "", "empty text gained characters")?
+    .Ok(())
+}
+
+test fn percent_encoded_text_reads_in_an_interpolation() {
+    defer let location = fmt.render_owned("/notes/{percent_encoded("Ada López")}?tag={percent_encoded("a&b")}").unwrap()
+    testing.assert_eq(location.view(), "/notes/Ada%20L%C3%B3pez?tag=a%26b", "an interpolated value was not encoded")?
+    .Ok(())
+}
+
+// `is_unreserved` says whether RFC 3986 lets `byte` stand for itself
+// anywhere in a URL: an ASCII letter or digit, `-`, `.`, `_` or `~`.
+fn is_unreserved(byte: UInt8) -> Bool {
+    (byte >= ascii_upper_a && byte <= ascii_upper_z) || (byte >= ascii_lower_a && byte <= ascii_lower_z) || (byte >= ascii_zero && byte <= ascii_nine) || byte == ascii_hyphen || byte == ascii_dot || byte == ascii_underscore || byte == ascii_tilde
+}
+
+test fn the_unreserved_bytes_are_letters_digits_and_four_marks() {
+    var kept = 0
+    for byte in UInt8.min..=UInt8.max {
+        if is_unreserved(byte) {
+            kept += 1
+        }
+    }
+    testing.assert_eq(kept, 66, "the unreserved set is not 26 + 26 + 10 + 4 bytes")?
+    .Ok(())
+}
+
+// The ASCII code of `~`, the one unreserved mark no other rule names.
+let ascii_tilde: UInt8 = 126
+
+// `write_escape` writes `byte` as `%` and two capital hexadecimal digits,
+// the escape `percent_encoded` writes and a CGI request's path is encoded
+// again with.
+fn write_escape[W: Writer](byte: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    "%{byte:02X}".fmt(&w)
+}
+
+test fn an_escape_is_a_percent_and_two_capital_digits() {
+    defer var out = String.new()
+    write_escape(10, &out).unwrap()
+    write_escape(255, &out).unwrap()
+    testing.assert_eq(out.view(), "%0A%FF", "an escape changed")?
+    .Ok(())
+}
+
+// Decode the percent-encoded `text` into a new String allocated from
+// `allocator`. Each `%XX` becomes the byte it spells, in either case, and
+// `+` stays `+`. A `%` not followed by two hexadecimal digits is refused with
+// `Escape`, decoded bytes that are not UTF-8 with `Encoding`, and a refused
+// allocation with `Allocation`; nothing is kept from a refused decode.
+pub fn percent_decode_in[A: Allocator](allocator: A, text: Str) -> Result[String[A], PercentError] where carries(.Ok: allocator) {
+    defer var bytes: Vec[UInt8, A] = Vec.new_in(allocator)
+    // Decoding never lengthens text, so this is the only allocation.
+    &bytes.reserve(text.length())?
+    append_unescaped(&bytes, text, plus_is_space: false)?
+    let decoded = String.from_bytes(bytes).settled()?
+    .Ok(decoded)
+}
+
+test fn percent_decoding_reads_escapes_in_either_case_and_keeps_plus() {
+    defer let arena = mem.Arena.open(mem.system(), size: 256)
+    let decoded = percent_decode_in(arena.handle(), "Zo%C3%ab%20%3Cb%3E+c").unwrap()
+    testing.assert_eq(decoded.view(), "Zoë <b>+c", "an escape was not decoded, or a plus became a space")?
+    let empty = percent_decode_in(arena.handle(), "").unwrap()
+    testing.assert_eq(empty.view(), "", "empty text gained characters")?
+    .Ok(())
+}
+
+test fn percent_decoding_reports_a_full_allocator() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8)
+    let full = match percent_decode_in(arena.handle(), "a longer text than the arena holds") {
+        Ok(text) => {
+            text.release()
+            false
+        },
+        Err(error) => match read error { Allocation(_) => true, _ => false },
+    }
+    testing.assert(full, "a full allocator was not reported")?
+    .Ok(())
+}
+
+// Decode the percent-encoded `text` into a new String allocated from the
+// system allocator. See `percent_decode_in`.
+pub fn percent_decode(text: Str) -> Result[String[mem.SystemAllocator], PercentError] {
+    percent_decode_in(mem.system(), text)
+}
+
+test fn percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits() {
+    for malformed in ["ab%4", "%", "a%zz", "%G0", "ok%2"] {
+        let refused = match percent_decode(malformed) {
+            Ok(text) => {
+                text.release()
+                false
+            },
+            Err(error) => match read error { Escape(_) => true, _ => false },
+        }
+        testing.assert(refused, "a malformed escape was decoded")?
+    }
+    let at = match percent_decode("ab%4") {
+        Ok(text) => {
+            text.release()
+            UInt64.max
+        },
+        Err(error) => match read error { Escape(offset) => offset, _ => UInt64.max },
+    }
+    testing.assert_eq(at, UInt64(2), "a malformed escape was not reported at its %")?
+    .Ok(())
+}
+
+test fn percent_decoding_refuses_bytes_that_are_not_utf8() {
+    let offset = match percent_decode("caf%E9") {
+        Ok(text) => {
+            text.release()
+            UInt64.max
+        },
+        Err(error) => match read error { Encoding(reason) => reason.offset, _ => UInt64.max },
+    }
+    testing.assert_eq(offset, UInt64(3), "a decoded byte that is not UTF-8 was not refused at its offset")?
+    .Ok(())
+}
+
+test fn percent_decoding_undoes_percent_encoding() {
+    let original = "Zoë <b> & 100% \"C++\" 🚀"
+    defer let encoded = fmt.render_owned(percent_encoded(original)).unwrap()
+    defer let decoded = percent_decode(encoded.view()).unwrap()
+    testing.assert_eq(decoded.view(), original, "decoding did not give the encoded text back")?
+    .Ok(())
+}
+
+// `append_decoded` appends `raw` to `stored` decoded as `append_unescaped`
+// decodes it, and returns the range the decoded bytes occupy. Decoded bytes
+// that are not UTF-8 are refused with `Encoding` and leave `stored` as it
+// was. The router decodes a path value with it, `+` kept, and the query and
+// form parser each name and value, `+` as a space.
+fn append_decoded[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_space: Bool) -> Result[Span, PercentError] where carries() {
+    let start = stored.length()
+    append_unescaped(&stored, raw, plus_is_space)?
+    let appended = stored.as_slice().subspan(start: start, count: stored.length() - start).unwrap()
+    let valid = strings.validate_utf8(appended)
+    match valid {
+        Ok(_) => .Ok(.{ start, end = stored.length() }),
+        Err(reason) => {
+            &stored.truncate(start)
+            .Err(.Encoding(reason))
+        },
+    }
+}
+
+test fn decoding_appends_the_bytes_escapes_spell() {
+    defer var stored: Vec[UInt8] = Vec.new()
+    let spaced = append_decoded(&stored, "a%20b+c", plus_is_space: false).unwrap()
+    let formed = append_decoded(&stored, "Ada+L%C3%B3pez", plus_is_space: true).unwrap()
+    let kept = stored.length()
+    let cut = append_decoded(&stored, "ab%4", plus_is_space: true)
+    let lettered = append_decoded(&stored, "%zz", plus_is_space: true)
+    let invalid = append_decoded(&stored, "%FF", plus_is_space: true)
+    let text = Str.from_bytes(stored.as_slice()).unwrap()
+    testing.assert_eq(stored_part(text, spaced), "a b+c", "a path value decoded a plus")?
+    testing.assert_eq(stored_part(text, formed), "Ada López", "a query value was not decoded")?
+    testing.assert(cut.is_err() && lettered.is_err() && invalid.is_err(), "an invalid escape was decoded")?
+    testing.assert_eq(stored.length(), kept, "a refused value was kept")?
+    .Ok(())
+}
+
+// `append_unescaped` appends `raw` to `stored` with each `%XX` escape
+// replaced by the byte it spells, and each `+` by a space when
+// `plus_is_space` is set, as a form encodes one. A `%` not followed by two
+// hexadecimal digits is refused with `Escape` and its offset in `raw`, and a
+// byte `stored` cannot hold with `Allocation`; either leaves `stored` as it
+// was. The bytes appended need not be UTF-8.
+fn append_unescaped[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_space: Bool) -> Result[(), PercentError] where carries() {
+    let start = stored.length()
+    let bytes = raw.as_bytes()
+    var at: UInt64 = 0
+    var outcome: Result[(), PercentError] = .Ok(())
+    while outcome.is_ok() && at < bytes.length() {
+        var byte = bytes[at]
+        if byte == ascii_percent {
+            let escaped = if at + 3 <= bytes.length() {
+                strings.hex_byte(bytes[at + 1], bytes[at + 2])
+            } else {
+                Option.None
+            }
+            match escaped {
+                Some(value) => byte = value,
+                None => outcome = .Err(.Escape(at)),
+            }
+            at += 3
+        } else {
+            if byte == ascii_plus && plus_is_space {
+                byte = ascii_space
+            }
+            at += 1
+        }
+        if outcome.is_ok() && &stored.push(byte).is_err() {
+            outcome = .Err(.Allocation(.Exhausted))
+        }
+    }
+    if outcome.is_err() {
+        &stored.truncate(start)
+    }
+    outcome
+}
+
+test fn unescaping_keeps_bytes_that_are_not_utf8() {
+    defer var stored: Vec[UInt8] = Vec.new()
+    append_unescaped(&stored, "caf%E9", plus_is_space: false).unwrap()
+    testing.assert_eq(stored.length(), UInt64(4), "an escape did not become one byte")?
+    testing.assert_eq(stored[3], UInt8(233), "%E9 did not become the byte 233")?
+    .Ok(())
+}
+
+// The byte `%` begins an escape.
+let ascii_percent: UInt8 = 37
+
+// In a form-encoded query or body, the byte `+` stands for a space.
+let ascii_plus: UInt8 = 43

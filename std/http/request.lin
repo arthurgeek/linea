@@ -259,7 +259,7 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
         fields.release()
         return .Err(.Exhausted)
     }
-    var outcome: Result[(), PathValueError] = .Ok(())
+    var outcome: Result[(), PercentError] = .Ok(())
     var start: UInt64 = 0
     while outcome.is_ok() && start < source.length() {
         let end = source.find("&", start: start).unwrap_or(source.length())
@@ -274,30 +274,22 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
         Err(error) => {
             fields.release()
             return match error {
-                Invalid => .Ok(.None),
-                Allocation => .Err(.Exhausted),
+                Allocation(_) => .Err(.Exhausted),
+                _ => .Ok(.None),
             }
         },
     }
 }
 
-// `pair_count` counts the pairs of `source` that are not empty.
+// `pair_count` counts the pairs of `source` that are not empty. `split`
+// refuses only an empty separator, so splitting at `&` cannot fail.
 fn pair_count(source: Str) -> UInt64 {
-    var pairs: UInt64 = 0
-    var start: UInt64 = 0
-    while start < source.length() {
-        let end = source.find("&", start: start).unwrap_or(source.length())
-        if end > start {
-            pairs += 1
-        }
-        start = end + 1
-    }
-    pairs
+    source.split("&").unwrap().filter(|pair| pair.length() > 0).count()
 }
 
 // `decode_pair` decodes one `name=value` pair into `stored` and records its
 // ranges in `fields`.
-fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
+fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PercentError] {
     let (raw_name, raw_value) = pair.split_once("=") else {
         (copy(pair), "")
     }
@@ -305,7 +297,7 @@ fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Fiel
     let value = append_decoded(&stored, raw_value, plus_is_space: true)?
     match &fields.push(.{ name, value }) {
         Ok(_) => .Ok(()),
-        Err(_) => .Err(.Allocation),
+        Err(_) => .Err(.Allocation(.Exhausted)),
     }
 }
 

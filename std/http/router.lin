@@ -620,8 +620,8 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
                 match record_path_values(&self.matched, &self.matched_fields, pattern, request.path()) {
                     Ok(_) => {},
                     Err(refusal) => return .Err(match refusal {
-                        Invalid => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
-                        Allocation => Error.new(.InternalServerError),
+                        Allocation(_) => Error.new(.InternalServerError),
+                        _ => error(request, .BadRequest, "a path value is not percent-encoded UTF-8"),
                     }),
                 }
                 // Every recorded name and value is UTF-8, so the whole is.
@@ -812,24 +812,18 @@ test fn path_values_belong_to_the_request_answered() {
     .Ok(())
 }
 
-// Recording a path value fails when the value is not percent-encoded UTF-8
-// (`Invalid`) or when no memory holds it (`Allocation`).
-@copyable
-enum PathValueError {
-    Invalid,
-    Allocation,
-}
-
 // Record the value of each `{name}` and `{name...}` in `pattern`, the path of
-// the pattern that matched `path`, percent-decoded, in `matched` with its
-// ranges in `fields`. `pattern` is stored without its leading `/`, and `path`
+// the pattern that matched `path`, percent-decoded with `+` kept, in `matched`
+// with its ranges in `fields`. A value that is not percent-encoded UTF-8 is
+// refused with `Escape` or `Encoding`, and running out of memory with
+// `Allocation`. `pattern` is stored without its leading `/`, and `path`
 // has one; they have the same segments up to the pattern's end, because the
 // one matched the other. Storage for both is reserved once, since the names
 // and values take no more bytes than the pattern and the path.
-fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PathValueError] where carries() {
+fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PercentError] where carries() {
     let reserved = &matched.reserve(pattern.length() + path.length()).is_ok() && &fields.reserve(pattern.length()).is_ok()
     if !reserved {
-        return .Err(.Allocation)
+        return .Err(.Allocation(.Exhausted))
     }
     var pattern_start: UInt64 = 0
     var path_start: UInt64 = 1
@@ -847,7 +841,7 @@ fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: 
                 let decoded = append_decoded(&matched, found.raw, plus_is_space: false)?
                 match &fields.push(.{ name, value = decoded }) {
                     Ok(_) => {},
-                    Err(_) => return .Err(.Allocation),
+                    Err(_) => return .Err(.Allocation(.Exhausted)),
                 }
             },
             None => {},
@@ -859,10 +853,10 @@ fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: 
 }
 
 // Append `bytes` to `stored` and return the range they occupy.
-fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PathValueError] where carries() {
+fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8]) -> Result[Span, PercentError] where carries() {
     let start = stored.length()
     if &stored.append_slice(bytes).is_err() {
-        return .Err(.Allocation)
+        return .Err(.Allocation(.Exhausted))
     }
     .Ok(.{ start, end = stored.length() })
 }
@@ -873,105 +867,6 @@ fn store_bytes[P: Allocator](inout stored: Vec[UInt8, P], bytes: mem.Slice[UInt8
 struct PathValue {
     name: Str,
     raw: Str,
-}
-
-// `append_decoded` appends `raw` to `stored` with each `%XX` escape decoded
-// into the byte it spells, and each `+` into a space when `plus_is_space` is
-// set, as a query encodes one, and returns the range the decoded bytes
-// occupy. An incomplete escape, one that is not hexadecimal, or decoded bytes
-// that are not UTF-8 are invalid, and leave `stored` as it was. Decoding
-// never lengthens the text, so reserving `raw`'s length first means nothing
-// is allocated here.
-fn append_decoded[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_space: Bool) -> Result[Span, PathValueError] where carries() {
-    let start = stored.length()
-    let bytes = raw.as_bytes()
-    var at: UInt64 = 0
-    var outcome: Result[(), PathValueError] = .Ok(())
-    while outcome.is_ok() && at < bytes.length() {
-        var byte = bytes[at]
-        at += 1
-        if byte == percent {
-            let escaped = if at + 2 <= bytes.length() {
-                escape_value(bytes[at], bytes[at + 1])
-            } else {
-                Option.None
-            }
-            match escaped {
-                Some(value) => byte = value,
-                None => outcome = .Err(.Invalid),
-            }
-            at += 2
-        } else if byte == plus && plus_is_space {
-            byte = ascii_space
-        }
-        if outcome.is_ok() && &stored.push(byte).is_err() {
-            outcome = .Err(.Allocation)
-        }
-    }
-    if outcome.is_ok() {
-        let appended = stored.as_slice().subspan(start: start, count: stored.length() - start).unwrap()
-        if Str.from_bytes(appended).is_err() {
-            outcome = .Err(.Invalid)
-        }
-    }
-    match outcome {
-        Ok(_) => .Ok(.{ start, end = stored.length() }),
-        Err(error) => {
-            &stored.truncate(start)
-            return .Err(error)
-        },
-    }
-}
-
-test fn decoding_appends_the_bytes_escapes_spell() {
-    defer var stored: Vec[UInt8] = Vec.new()
-    let spaced = append_decoded(&stored, "a%20b+c", plus_is_space: false).unwrap()
-    let formed = append_decoded(&stored, "Ada+L%C3%B3pez", plus_is_space: true).unwrap()
-    let kept = stored.length()
-    let cut = append_decoded(&stored, "ab%4", plus_is_space: true)
-    let lettered = append_decoded(&stored, "%zz", plus_is_space: true)
-    let invalid = append_decoded(&stored, "%FF", plus_is_space: true)
-    let text = Str.from_bytes(stored.as_slice()).unwrap()
-    testing.assert_eq(stored_part(text, spaced), "a b+c", "a path value decoded a plus")?
-    testing.assert_eq(stored_part(text, formed), "Ada López", "a query value was not decoded")?
-    testing.assert(cut.is_err() && lettered.is_err() && invalid.is_err(), "an invalid escape was decoded")?
-    testing.assert_eq(stored.length(), kept, "a refused value was kept")?
-    .Ok(())
-}
-
-// The byte `%` begins an escape.
-let percent: UInt8 = 37
-
-// In a query, the byte `+` stands for a space.
-let plus: UInt8 = 43
-
-// `escape_value` returns the byte two hexadecimal digits spell, in either case.
-fn escape_value(high: UInt8, low: UInt8) -> Option[UInt8] {
-    let first = hex_value(high)?
-    let second = hex_value(low)?
-    .Some(first * 16 + second)
-}
-
-// `hex_value` returns the value of one hexadecimal digit. The ASCII digits
-// `0` to `9` are 48 through 57, `A` to `F` are 65 through 70, and `a` to `f`
-// are 97 through 102.
-fn hex_value(byte: UInt8) -> Option[UInt8] {
-    if byte >= 48 && byte <= 57 {
-        .Some(byte - 48)
-    } else if byte >= 65 && byte <= 70 {
-        .Some(byte - 55)
-    } else if byte >= 97 && byte <= 102 {
-        .Some(byte - 87)
-    } else {
-        .None
-    }
-}
-
-test fn an_escape_is_two_hexadecimal_digits_in_either_case() {
-    testing.assert_eq(escape_value(50, 70), Option.Some(UInt8(47)), "%2F did not decode")?
-    testing.assert_eq(escape_value(99, 51), Option.Some(UInt8(195)), "%c3 did not decode")?
-    testing.assert_eq(escape_value(71, 48), .None, "a non-hexadecimal digit decoded")?
-    .Ok(())
 }
 
 // `served` describes a 404 this way.

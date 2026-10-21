@@ -45,13 +45,7 @@ let page_end: Str =
 // the form posts to `/reply`.
 fn invitation(request: http.Request) -> Result[http.Response, http.Error] {
     let script = env.variable("SCRIPT_NAME").unwrap_or("")
-    // The page is built in the request's arena, which lives until the answer
-    // has been written.
-    var html = String.new_in(request.allocator())
-    "{page_start}{script}/reply{page_end}".fmt(&html)?
-    var page = http.text(request, html.view())?
-    &page.set_header("Content-Type", "text/html; charset=utf-8")?
-    .Ok(page)
+    http.html(request, "{page_start}{script}/reply{page_end}")
 }
 
 // `Reply` is the form POST /reply expects, such as `name=Ada&guests=2`.

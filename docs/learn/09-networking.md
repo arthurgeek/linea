@@ -998,6 +998,8 @@ The response helpers each build one kind of answer:
 | Helper | Answers with |
 | --- | --- |
 | `http.text(request, value)` | any `Display` value as `text/plain`, interpolations included |
+| `http.html(request, value)` | any `Display` value as `text/html; charset=utf-8` |
+| `http.redirect(request, status, location)` | a redirect with the status and `Location` header |
 | `http.json(request, value)` | any `json.Encode` value as `application/json`; `@derive(json.Encode)` writes the encoder |
 | `http.bytes(request, bytes)` | bytes already built in the request's arena |
 | `http.status(request, .NoContent)` | a status with an empty body |
@@ -1006,9 +1008,40 @@ The response helpers each build one kind of answer:
 
 A response can take extra headers with `&response.set_header(name, value)?`
 before it is returned, and cookies with `&response.set_cookie(name, value)?`
-([Cookies](#cookies)). A page of HTML is `http.text` with a
-`text/html; charset=utf-8` content type, and it escapes the text a visitor
-supplied with [`html.escaped`](08-text.md#escaping-text-for-html).
+([Cookies](#cookies)). `set_header` accepts any `Display` value. A page of HTML
+is built with `http.html`, escaping any text a visitor supplied with
+[`html.escaped`](08-text.md#escaping-text-for-html).
+
+A handler that changes something in answer to a posted form usually answers
+`303 See Other`, `http.Status.SeeOther`, with a `Location` header: the browser
+then fetches that page with a `GET`, so reloading it does not post the form a
+second time. `http.redirect` builds the redirect response:
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Lender
+
+// A posted form is answered with 303, so the browser fetches `/` next with a GET.
+fn signed(request: http.Request) -> Result[http.Response, http.Error] {
+    http.redirect(request, .SeeOther, "/")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let sent = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
+    let response = signed(sent.request()).unwrap()
+    let status = response.status()
+    io.println("{status.code()} {status.reason()}, Location: {response.header("Location").unwrap()}")?
+    .Ok(0)
+}
+```
+
+```
+303 See Other, Location: /
+```
 
 Errors travel with `?` like any other `Result`. The library's own failures —
 a body that is not JSON, an arena that is full, a push that ran out of room —
@@ -1390,16 +1423,68 @@ where a parameter holds the `Path`, and `?` answers the request with the
 refusal. The [calendar
 export](../../examples/calendar-export/main.lin) does this.
 
+### Percent-encoding text for a URL
+
+A path segment, a query value and a cookie can each hold only some
+characters: a space, `/`, `?`, `&` or `é` in a title would end the segment or
+the value early, or not be sent at all. Percent-encoding writes such a byte as
+`%` and two hexadecimal digits, so `Zoë` becomes `Zo%C3%AB`.
+`http.percent_encoded(text)` writes every byte but the ASCII letters, digits,
+`-`, `.`, `_` and `~` that way, which is safe in all three places; like
+`html.escaped`, it is interpolated and allocates nothing. `http.percent_decode`
+reads the text back into a `String`, and `percent_decode_in(allocator, text)`
+into one from another allocator, such as `request.allocator()`:
+
+```linea
+import std.http
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let title = "Zoë & friends: 100%"
+    // Every byte but letters, digits, `-`, `.`, `_` and `~` becomes `%XX`, so
+    // the whole title fits in one path segment.
+    io.println("/notes/{http.percent_encoded(title)}")?
+
+    // Decoding reads each `%XX` back as its byte. A `+` stays a `+`.
+    defer let decoded = http.percent_decode("Zo%C3%AB%20%26%20friends+more").unwrap()
+    io.println(decoded.view())?
+
+    // A `%` that is not followed by two hexadecimal digits is refused.
+    match http.percent_decode("100%") {
+        Ok(text) => text.release(),
+        Err(error) => io.println("refused: {error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+/notes/Zo%C3%AB%20%26%20friends%3A%20100%25
+Zoë & friends+more
+refused: the % at byte 3 is not followed by two hexadecimal digits
+```
+
+Decoding refuses rather than guesses: a `%` without two hexadecimal digits
+after it is `PercentError.Escape`, since no encoder writes one, and bytes that
+are not UTF-8 once decoded are `PercentError.Encoding`, since the result is
+text. Propagated with `?` in a handler, either answers 400, because the text
+came from the client. A `+` means a space only in an HTML form's encoding,
+which the query and a form body use and which `http.Query` and `http.Form`
+decode for you; in a path or a cookie `+` is itself, so `/notes/C++` names
+`C++`, and `percent_decode` keeps it. The router decodes path values with the
+same routine.
+
 ### Cookies
 
 A browser sends the cookies it holds in a `Cookie` header, `theme=dark;
 visits=3`, and a server sets one with a `Set-Cookie` header on a response.
-`request.cookie(name)` returns the value of the cookie with that name, or
-`None`; `request.cookies()` walks every `name=value` pair in the order they
-arrived. Both borrow the request and allocate nothing. Names are case-sensitive,
-whitespace around a pair is ignored, a pair that is not `name=value` is skipped
-without hiding the others, and the value is exactly what the browser sent: no
-decoding, and the quotes dropped if it sent any.
+`request.cookie(name)` returns the value of the cookie with that name, decoded
+into the request's arena, or `None`; `?` passes on the error when the arena is
+full. `request.cookies()` walks every `name=value` pair in the order they
+arrived, borrowing the request and allocating nothing, with each value exactly
+as the browser sent it. Names are case-sensitive, whitespace around a pair is
+ignored, a pair that is not `name=value` is skipped without hiding the others,
+and quotes around a value are dropped.
 
 `&response.set_cookie(name, value, ...)?` adds a `Set-Cookie` header. Its
 attributes are named arguments, each left out unless given: `path` and `domain`,
@@ -1422,8 +1507,8 @@ fn main() -> Result[UInt8, io.IoError] {
     let request = sent.request()
 
     // `cookie` finds one cookie by name; `cookies` walks them all.
-    io.println("theme: {request.cookie("theme"):?}")?
-    io.println("lang: {request.cookie("lang"):?}")?
+    io.println("theme: {request.cookie("theme").unwrap():?}")?
+    io.println("lang: {request.cookie("lang").unwrap():?}")?
     for pair in request.cookies() {
         io.println("{pair.name} = {pair.value}")?
     }
@@ -1432,8 +1517,8 @@ fn main() -> Result[UInt8, io.IoError] {
     &response.set_cookie("visits", "4", path: "/", max_age: .Some(3600), http_only: true, same_site: .Some(.Lax)).unwrap()
     io.println(response.header("Set-Cookie").unwrap())?
 
-    // A value that holds `;` would end the cookie early, so it is refused.
-    match &response.set_cookie("note", "a;b") {
+    // A name must be an HTTP token, so one holding a space is refused.
+    match &response.set_cookie("full name", "Ada") {
         Ok(_) => io.println("accepted")?,
         Err(error) => io.println("refused: {error}")?,
     }
@@ -1447,15 +1532,58 @@ lang: None
 theme = dark
 visits = 3
 visits=4; Path=/; Max-Age=3600; SameSite=Lax; HttpOnly
-refused: the cookie value holds a byte a cookie cannot carry
+refused: the cookie name must be an HTTP token: ASCII letters, digits and !#$%&'*+-.^_`|~, with no space, `=`, `;` or other separator
 ```
 
+A value may hold any text. A cookie value can carry only some ASCII bytes, so
+`set_cookie` writes the value [percent-encoded](#percent-encoding-text-for-a-url)
+and `cookie` decodes it: a name with a space, an `ë` or a `<` comes back as it
+went in.
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Lender
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let signing = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
+    var response = http.text(signing.request(), "signed").unwrap()
+    &response.set_cookie("name", "Zoë Lovelace <b>", path: "/").unwrap()
+    let header = response.header("Set-Cookie").unwrap()
+    io.println(header)?
+
+    // The browser sends back the pair before the first `;` on the next visit.
+    let (pair, _attributes) = header.split_once("; ").unwrap()
+    var visit = http.new_request(arena.handle(), "GET", "/", "").unwrap()
+    &visit.add_header("Cookie", pair).unwrap()
+    let name = visit.request().cookie("name").unwrap().unwrap()
+    io.println("welcome back, {name}")?
+    .Ok(0)
+}
+```
+
+```
+name=Zo%C3%AB%20Lovelace%20%3Cb%3E; Path=/
+welcome back, Zoë Lovelace <b>
+```
+
+A cookie `set_cookie` wrote always decodes. One whose value holds a `%`
+without two hexadecimal digits after it, or bytes that are not UTF-8 once
+decoded, was written by another program on the domain or changed by the
+client, and `cookie` reads it as `None`. The browser keeps sending such a
+cookie until it expires, so refusing the request would lock the visitor out;
+read as absent, the handler takes the path a first visit takes, and its next
+`set_cookie` replaces the cookie. `cookies()` still shows the value as sent,
+and `http.percent_decode` reports what is wrong with it.
+
 `set_cookie` refuses a cookie that would be sent malformed rather than send it,
-with a `CookieError`: a name that is not an HTTP token, a value holding a space,
-`"`, `,`, `;`, `\`, a control byte or anything outside ASCII (encode such text,
-for example in hexadecimal), a path that does not start with `/` or holds a
-space, `;`, a control byte or anything outside ASCII (percent-encode it), and a
-domain that is not letters, digits, hyphens and dots. It also refuses what
+with a `CookieError`: a name that is not an HTTP token, a path that does not
+start with `/` or holds a space, `;`, a control byte or anything outside ASCII
+(percent-encode it), and a domain that is not letters, digits, hyphens and
+dots. It also refuses what
 browsers would silently discard: `SameSite=None` without `secure`, an `expires`
 before 1601, a name starting with `__Secure-` without `secure`, and a name
 starting with `__Host-` without `secure`, with a `domain`, or with a `path`
@@ -1805,6 +1933,7 @@ it was given reaches every request.
 | `max_body_bytes` | 1 MiB | the body |
 | `request_arena_bytes` | 48 MiB | the arena each request is served from; it holds the request, what decoding its JSON body reserves, and the response |
 | `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from the moment the connection is accepted, in milliseconds; a slower one is answered 408 |
+| `first_byte_timeout_ms` | 500 | how long to wait for the first byte of a request, in milliseconds; an idle connection that sends nothing within this time is closed silently without a 408 |
 | `write_timeout_ms` | 5000 | how long one write may wait, in milliseconds |
 | `connections` | `.None` | how many connections to serve before `serve` returns; `.None` serves until the program ends |
 
@@ -1991,7 +2120,8 @@ header, which the response's own status writes; `set_header` refuses it as it
 refuses `Content-Length`. And a 200 response whose `Location` is a path on the
 same server, such as `/thanks`, is a local redirect: the web server answers
 the browser with that path's response instead and drops yours. To send the
-browser elsewhere, answer a redirect status such as 303 with the `Location`.
+browser elsewhere, answer a redirect status such as `.SeeOther`, 303, with the
+`Location`.
 
 ### CGI or `listen_and_serve`
 
@@ -2008,7 +2138,8 @@ Both run the same handler; what differs is who owns the process.
 
 The [party RSVP](../../examples/party_rsvp.lin) example is a complete CGI
 program: an HTML form, a reply checked and confirmed as JSON, and a date read
-with `env.variable`.
+with `env.variable`. [A guest book](12-a-guest-book.md) builds a complete web
+application that runs both ways and stores its entries in SQLite.
 
 ## What you have seen
 
@@ -2021,6 +2152,9 @@ with `env.variable`.
   type of your own that implements `http.Extract` is read straight into its
   parameter. `request.extract[T]()` reads one in a handler's body, which
   `route_raw` registers.
+- `http.percent_encoded(text)` writes text safely into a path segment, a
+  query value or a cookie, and `http.percent_decode` reads it back, refusing
+  a malformed `%`.
 - Every request lives in an arena that `serve` rewinds; `http.new_request`
   and `&router.serve_http(state, request)` drive the same steps by hand.
 - `state: app` hands the state to `listen_and_serve`, which lends it to each

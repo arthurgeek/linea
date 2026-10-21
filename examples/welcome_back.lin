@@ -20,27 +20,25 @@ let visit_limit: UInt32 = 1000
 
 // The count of earlier visits the request's `visits` cookie holds. A browser
 // without the cookie, or with one that is not a number, has made none.
-fn earlier_visits(request: http.Request) -> UInt32 {
-    match request.cookie("visits") {
-        Some(text) => match text.parse[UInt32]() {
-            Ok(count) => count,
-            Err(_) => 0,
-        },
-        None => 0,
+// `cookie` decodes the value into the request's arena, and `?` passes on the
+// error when the arena is full.
+fn earlier_visits(request: http.Request) -> Result[UInt32, mem.Oom] {
+    let text = request.cookie("visits")? else {
+        return .Ok(0)
     }
+    .Ok(text.view().parse[UInt32]().unwrap_or(0))
 }
 
 // The name comes from the address, so it may hold `<` or `"`. `html.escaped`
 // writes those as entities, and the page shows the name instead of running it.
 fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
-    let earlier = earlier_visits(request)
+    let earlier = earlier_visits(request)?
     let visits = if earlier < visit_limit {
         earlier + 1
     } else {
         visit_limit
     }
-    var response = http.text(request, "<h1>Hello, {html.escaped(name.value)}!</h1><p>Visit {visits}.</p>")?
-    &response.set_header("Content-Type", "text/html; charset=utf-8")?
+    var response = http.html(request, "<h1>Hello, {html.escaped(name.value)}!</h1><p>Visit {visits}.</p>")?
     // The cookie lasts a year. `http_only` keeps scripts on the page from
     // reading it, and `Lax` withholds it from requests other sites trigger.
     let count = fmt.render_owned_in(request.allocator(), visits)?

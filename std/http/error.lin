@@ -110,7 +110,7 @@ test fn an_error_reads_its_status_and_message() {
 
 // Set `name: value` in `kept`, opening the list in `allocator` when there is
 // none yet.
-fn set_kept_header[A: Allocator](inout kept: Option[ResponseHeaders[A]], allocator: A, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(kept: allocator) {
+fn set_kept_header[A: Allocator, V: Display](inout kept: Option[ResponseHeaders[A]], allocator: A, name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(kept: allocator) {
     let previous = kept
     var headers = match previous {
         Some(headers) => headers,
@@ -124,11 +124,12 @@ fn set_kept_header[A: Allocator](inout kept: Option[ResponseHeaders[A]], allocat
 impl[P: Allocator] Error[P] {
     // `set_header` sends the header `name: value` with this error, storing
     // both in `request`'s arena, and replaces any value `name` already has,
-    // compared under ASCII case folding. A 401 names the scheme its client
-    // should authenticate with this way, in `WWW-Authenticate`. A name that is
-    // not a token, a value holding a line break, and a header the server
-    // writes itself are refused, as they are for a response.
-    pub fn set_header(inout self: Self, request: Request[P], name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: request) {
+    // compared under ASCII case folding. `value` is any `Display` value. A 401
+    // names the scheme its client should authenticate with this way, in
+    // `WWW-Authenticate`. A name that is not a token, a value holding a line
+    // break, and a header the server writes itself are refused, as they are
+    // for a response.
+    pub fn set_header[V: Display](inout self: Self, request: Request[P], name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(self: request) {
         set_kept_header(&self.headers, request.allocator(), name, value)
     }
 }
