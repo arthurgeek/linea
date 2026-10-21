@@ -2,4 +2,4 @@ error[T-UnknownOperation]: `shapes.Box` has no operation `count`
   --> tests/cmd/fixtures/a_trait_no_import_can_name_is_not_offered/main.lin:11:8
    |
 11 |     if b.count() == 3 {
-   |        ^^^^^^^ no operation of this name is declared for this type
+   |        ^^^^^^^ `Sequence` declares it, and `shapes.Box` does not implement `Sequence`

@@ -396,6 +396,7 @@ The library tests itself.
   ok    http.a_request_extracts_a_form_by_its_field_names
   ok    http.a_request_extracts_any_type_that_implements_extract
   ok    http.a_request_gives_its_form_params_only_when_the_body_is_one
+  ok    http.a_request_gives_its_origin_from_the_host_header
   ok    http.a_request_gives_its_path_params_once_a_router_matched_it
   ok    http.a_request_gives_its_query_params_decoded
   ok    http.a_request_keeps_its_method_token_as_sent
@@ -472,6 +473,10 @@ The library tests itself.
   ok    http.an_html_response_past_the_arena_is_refused
   ok    http.an_http_variable_is_a_header
   ok    http.an_io_error_answers_500
+  ok    http.an_origin_displays_in_canonical_form
+  ok    http.an_origin_parses_ipv6_with_custom_port
+  ok    http.an_origin_parses_normalizes_default_ports_and_folds_ascii_case
+  ok    http.an_origin_refuses_invalid_inputs
   ok    http.an_unknown_version_is_refused
   ok    http.an_upsert_reason_answers_with_its_cause
   ok    http.any_text_is_written_percent_encoded
@@ -522,6 +527,7 @@ The library tests itself.
   ok    http.remove_header_drops_every_value_of_a_name
   ok    http.removing_a_header_drops_every_value
   ok    http.running_out_of_memory_answers_500
+  ok    http.same_origin_policy_validates_requests
   ok    http.serving_in_an_arena_carves_the_exchanges_from_it
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
   ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
@@ -1346,4 +1352,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1343 passed, 0 failed
+  1349 passed, 0 failed

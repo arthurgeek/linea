@@ -263,10 +263,11 @@ impl Origin {
     // Default ports (`:80` for `http`, `:443` for `https`) are normalized.
     // Opaque origins (`"null"`) fail with `OriginError.Opaque`.
     pub fn parse(text: Str) -> Result[Origin, OriginError] where carries(.Ok: text) {
-        if text == "null" {
+        let trimmed = text.trim_ascii()
+        if trimmed == "null" {
             return .Err(.Opaque)
         }
-        let (scheme, authority) = text.split_once("://") else {
+        let (scheme, authority) = trimmed.split_once("://") else {
             return .Err(.MissingScheme)
         }
         let is_http = scheme.equals_ascii_folded("http")
@@ -279,7 +280,7 @@ impl Origin {
 
     // Build an `Origin` from a `Host` header's authority value and scheme.
     pub fn from_authority(authority: Str, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: authority) {
-        parse_authority(authority, is_https)
+        parse_authority(authority.trim_ascii(), is_https)
     }
 
     // Compare two origins for same-origin equivalence.
@@ -459,13 +460,10 @@ pub fn check_same_origin[P: Allocator](
 // it must match the request's `Host` header and scheme (`is_https`).
 // When `Sec-Fetch-Site` is present, it must be `"same-origin"` or `"none"`.
 // Requests without these headers (such as `curl` or non-browser clients) are
-// accepted under the standard policy.
+// accepted under the standard policy, provided a `Host` header is present.
 pub fn same_origin[P: Allocator](request: Request[P], is_https: Bool) -> Bool {
     let host = request.header("Host") else {
-        match request.header("Origin") {
-            Some(_) => return false,
-            None => return SameOriginPolicy.standard().allow_missing_both,
-        }
+        return false
     }
     let expected = Origin.from_authority(host.trim_ascii(), is_https) else |_| {
         return false
@@ -542,5 +540,9 @@ test fn same_origin_policy_validates_requests() {
     &conflict.add_header("Origin", "http://example.test").unwrap()
     &conflict.add_header("Sec-Fetch-Site", "cross-site").unwrap()
     testing.assert(!check_same_origin(conflict.request(), expected, SameOriginPolicy.standard()), "conflicting cross-site accepted")?
+
+    // Missing Host header is always refused by same_origin helper.
+    let missing_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    testing.assert(!same_origin(missing_host.request(), false), "missing host header was accepted by same_origin")?
     .Ok(())
 }

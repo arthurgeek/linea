@@ -292,6 +292,10 @@ impl Database {
             return .Err(.EmptySql)
         }
         let statement = Statement { handle = StatementHandle(address) }
+        if unused < 0 || UInt64(unused) > sql.length() {
+            statement.finish()
+            return .Err(.TrailingSql)
+        }
         let rest = sql.slice(sql.length() - UInt64(unused), sql.length()).unwrap()
         if rest.trim_ascii().length() != 0 {
             statement.finish()
@@ -752,6 +756,14 @@ test fn column_out_of_bounds_is_refused() {
     }
     testing.assert(text_invalid, "select.text(1) accepted out-of-bounds column")?
     testing.assert(int_invalid, "select.integer(1) accepted out-of-bounds column")?
+    .Ok(())
+}
+
+test fn column_count_reports_number_of_columns() {
+    defer var database = Database.open_in_memory().unwrap()
+    &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
+    defer var select = &database.prepare("SELECT a, b, c FROM t").unwrap()
+    testing.assert_eq(select.column_count(), UInt32(3), "column count changed")?
     .Ok(())
 }
 

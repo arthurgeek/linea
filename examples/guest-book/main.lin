@@ -125,20 +125,17 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 }
 
 fn main() -> UInt8 {
-    if env.args().count() > 2 {
-        io.eprintln("usage: guest-book [PORT]")
+    let port_arg = env.args().at(1) else {
+        io.eprintln("usage: guest-book PORT")
         return 64
     }
-    var port: UInt16 = 8080
-    match env.args().at(1) {
-        Some(arg) => {
-            let number = arg.parse[UInt16]() else |_| {
-                io.eprintln("usage: guest-book [PORT]")
-                return 64
-            }
-            port = number
-        },
-        None => {},
+    if env.args().count() > 2 {
+        io.eprintln("usage: guest-book PORT")
+        return 64
+    }
+    let port = port_arg.parse[UInt16]() else |_| {
+        io.eprintln("usage: guest-book PORT")
+        return 64
     }
     let logger = log.to_stderr(minimum: .Info)
     var router: http.Router[App] = http.Router.new()
@@ -172,13 +169,16 @@ test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
     defer var app = App.in_memory().unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 131072)
 
-    let post = http.new_request(
+    var post = http.new_request(
         arena.handle(),
         "POST",
         "/sign",
         body: "name=Ren%C3%A9+%3Cscript%3E&message=Hello+%26+welcome",
         content_type: "application/x-www-form-urlencoded",
     ).unwrap()
+    &post.add_header("Host", "example.test").unwrap()
+    &post.add_header("Origin", "http://example.test").unwrap()
+    &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
     let redirect = &router.serve_http(&app, post.request()).unwrap()
     testing.assert_eq(redirect.status(), http.Status.SeeOther, "POST /sign did not answer 303")?
     testing.assert_eq(redirect.header("Location"), Option.Some("/"), "Location header changed")?
@@ -216,7 +216,9 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     }
     defer var ok_body = String.new()
     "name={http.percent_encoded(ok_name.view())}&message={ok_msg.view()}".fmt(&ok_body).unwrap()
-    let at_limit = http.new_request(arena.handle(), "POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    var at_limit = http.new_request(arena.handle(), "POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    &at_limit.add_header("Host", "example.test").unwrap()
+    &at_limit.add_header("Origin", "http://example.test").unwrap()
     let accepted = &router.serve_http(&app, at_limit.request()).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "exact scalar limits were refused")?
 
@@ -225,10 +227,14 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     "name={http.percent_encoded(ok_name.view())}a&message=hello".fmt(&over_name).unwrap()
     defer var over_msg = String.new()
     "name=Ada&message={ok_msg.view()}m".fmt(&over_msg).unwrap()
-    let empty_name = http.new_request(arena.handle(), "POST", "/sign", body: "name=+++&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    let empty_message = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=+++", content_type: "application/x-www-form-urlencoded").unwrap()
-    let long_name = http.new_request(arena.handle(), "POST", "/sign", body: over_name.view(), content_type: "application/x-www-form-urlencoded").unwrap()
-    let long_message = http.new_request(arena.handle(), "POST", "/sign", body: over_msg.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    var empty_name = http.new_request(arena.handle(), "POST", "/sign", body: "name=+++&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
+    &empty_name.add_header("Host", "example.test").unwrap()
+    var empty_message = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=+++", content_type: "application/x-www-form-urlencoded").unwrap()
+    &empty_message.add_header("Host", "example.test").unwrap()
+    var long_name = http.new_request(arena.handle(), "POST", "/sign", body: over_name.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    &long_name.add_header("Host", "example.test").unwrap()
+    var long_message = http.new_request(arena.handle(), "POST", "/sign", body: over_msg.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    &long_message.add_header("Host", "example.test").unwrap()
     for sent in [empty_name, empty_message, long_name, long_message] {
         let refused = match &router.serve_http(&app, sent.request()) {
             Ok(_) => return testing.assert(false, "an invalid signature was accepted"),
@@ -247,9 +253,11 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
     defer let arena = mem.Arena.open(mem.system(), size: 131072)
 
     var cross_site = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
+    &cross_site.add_header("Host", "example.test").unwrap()
     &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
 
     var same_site_subdomain = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
+    &same_site_subdomain.add_header("Host", "example.test").unwrap()
     &same_site_subdomain.add_header("Sec-Fetch-Site", "same-site").unwrap()
 
     var null_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()

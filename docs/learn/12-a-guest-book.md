@@ -444,20 +444,17 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 }
 
 fn main() -> UInt8 {
-    if env.args().count() > 2 {
-        io.eprintln("usage: guest-book [PORT]")
+    let port_arg = env.args().at(1) else {
+        io.eprintln("usage: guest-book PORT")
         return 64
     }
-    var port: UInt16 = 8080
-    match env.args().at(1) {
-        Some(arg) => {
-            let number = arg.parse[UInt16]() else |_| {
-                io.eprintln("usage: guest-book [PORT]")
-                return 64
-            }
-            port = number
-        },
-        None => {},
+    if env.args().count() > 2 {
+        io.eprintln("usage: guest-book PORT")
+        return 64
+    }
+    let port = port_arg.parse[UInt16]() else |_| {
+        io.eprintln("usage: guest-book PORT")
+        return 64
     }
     let logger = log.to_stderr(minimum: .Info)
     var router: http.Router[App] = http.Router.new()
