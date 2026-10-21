@@ -19,11 +19,11 @@ finishing it is refused at compile time.
 And a program whose manifest does not consent to the library's C declarations
 is refused before any code is checked.
 
-  $ printf '{ "dependencies": { "sqlite": { "path": "%s/examples/guest-book/sqlite" } } }\n' "$LINEA_ROOT" > app/linea.json
+  $ printf '{\n  "dependencies": {\n    "sqlite": {\n      "path": "%s/examples/guest-book/sqlite"\n    }\n  }\n}\n' "$LINEA_ROOT" > app/linea.json
   $ linea check app
   error[M-Dependency]: the manifest of `sqlite` grants it `extern`, and this entry does not consent to it
-   --> app/linea.json:1:21
+   --> app/linea.json:3:5
     |
-  1 | { "dependencies": { "sqlite": { "path": "$LINEA_ROOT/examples/guest-book ...
-    |                     ^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
+  3 |     "sqlite": {
+    |     ^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
   [1]
