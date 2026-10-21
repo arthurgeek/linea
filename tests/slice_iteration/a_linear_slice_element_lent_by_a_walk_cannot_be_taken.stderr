@@ -1,0 +1,5 @@
+error[O-Move]: `ticket` is a lend, and this takes it
+  --> tests/slice_iteration/a_linear_slice_element_lent_by_a_walk_cannot_be_taken.lin:13:33
+   |
+13 |         let Ticket { number } = ticket
+   |                                 ^^^^^^ `copy` it, or use the plain form of the construct, which does take the value

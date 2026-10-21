@@ -1,0 +1,13 @@
+// Pushing onto a vector may move its elements to new storage, so a vector
+// cannot grow while a walk lends places in a view of it.
+fn main() -> UInt8 {
+    var values = Vec.filled(count: 2, value: UInt8(7)).unwrap()
+    defer values.release()
+    let view = values.as_slice()
+    var total: UInt8 = 0
+    for read value in view {
+        total += value
+        &values.push(value).unwrap()
+    }
+    total
+}

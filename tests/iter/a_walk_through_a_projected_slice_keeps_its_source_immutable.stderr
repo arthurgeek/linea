@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/iter/a_walk_through_a_projected_slice_keeps_its_source_immutable.lin:29:9
+   |
+28 |         total += value
+   |                  ----- the observation is still used here
+29 |         &values.push(value).unwrap()
+   |         ^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation

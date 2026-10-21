@@ -1,0 +1,25 @@
+// `count` drops the iterator it walked once it ends, so it cannot count an
+// iterator that must be settled; walk it lent with `for _ in &cursor` instead.
+@linear
+struct Cursor {
+    at: UInt8,
+    stop: UInt8,
+}
+
+impl Iterator for Cursor {
+    type Item = UInt8
+
+    fn next(inout self: Cursor) -> Option[UInt8] {
+        if self.at >= self.stop {
+            .None
+        } else {
+            self.at += 1
+            .Some(self.at)
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let cursor: Cursor = .{ at = 0, stop = 3 }
+    UInt8(cursor.count())
+}

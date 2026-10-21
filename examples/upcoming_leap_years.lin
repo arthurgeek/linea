@@ -1,0 +1,53 @@
+// List the next five leap years after 2024 from a walk of years that never
+// ends. A chain of `filter` and `take` does no work until something walks it,
+// and then only as much as the walk asks for, so an endless source is safe.
+import std.io
+import std.testing
+
+// `YearsAfter` yields every year after `last`, one at a time, forever: its
+// `next` always answers `.Some`.
+struct YearsAfter {
+    last: UInt64,
+}
+
+impl Iterator for YearsAfter {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        self.last += 1
+        .Some(self.last)
+    }
+}
+
+// A year is a leap year when 4 divides it, except a century year, which must
+// also be divisible by 400.
+fn is_leap(year: UInt64) -> Bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+test fn leap_years_follow_the_gregorian_rule() {
+    testing.assert(is_leap(2028), "2028 is a leap year")?
+    testing.assert(!is_leap(2027), "2027 is not a leap year")?
+    testing.assert(!is_leap(2100), "a century year is not a leap year")?
+    testing.assert(is_leap(2000), "a year divisible by 400 is a leap year")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var examined: UInt64 = 0
+    // `filter` keeps the leap years, and its closure counts every year it is
+    // asked about through the `inout` capture of `examined`. `take(5)` stops
+    // asking for years once it has five, so the endless walk stops too.
+    let leap_years = YearsAfter { last = 2024 }
+        .filter(
+            inout [inout examined] |year| {
+                examined += 1
+                is_leap(year)
+            },
+        )
+        .take(5)
+    for year in leap_years {
+        io.println("{year}")?
+    }
+    io.println("examined {examined} years to find five leap years")?
+    .Ok(0)
+}

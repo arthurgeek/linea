@@ -158,6 +158,25 @@ impl[T] Index[UInt64] for Slice[T] {
     }
 }
 
+impl[T] Slice[T] {
+    // Traversing a view visits its positions, 0 through len - 1, so
+    // `for read x in view` lends each element it views. The bracket above
+    // declares `read self`, so a walk cannot lend an element writably: a view
+    // may be copied freely and may observe storage nothing may write.
+    trav positions(self: Self) = 0..self.len
+}
+
+test fn a_read_walk_lends_each_viewed_element() {
+    let values = [UInt64(3), 5, 8, 13]
+    let view = values.as_slice().subspan(start: 1, count: 2).unwrap()
+    var total: UInt64 = 0
+    for read value in view {
+        total += value
+    }
+    testing.assert_eq(total, UInt64(13), "a walk over a view reached past it or missed an element")?
+    .Ok(())
+}
+
 test fn releasing_a_slice_leaves_its_storage_owned() {
     var values = Vec.filled(count: 3, value: UInt64(7)).unwrap()
     let view = values.as_slice()

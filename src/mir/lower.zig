@@ -6048,6 +6048,9 @@ const Lowerer = struct {
             try self.emit(.constant, .u64, span, .{ .constant = format.width }),
             try self.emit(.constant, .bool_, span, .{ .constant = @intFromBool(format.has_precision) }),
             try self.emit(.constant, .u64, span, .{ .constant = format.precision }),
+            // The hexadecimal choice's ordinal is none, lower, upper, which is
+            // the order `spec_of` reads 0 through 2 in.
+            try self.emit(.constant, .u8, span, .{ .constant = @intFromEnum(format.hex) }),
             writer,
         };
         return self.callLibrary(layout.decl, args, &parts, answer, span);

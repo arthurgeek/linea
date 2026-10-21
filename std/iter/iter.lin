@@ -152,6 +152,28 @@ pub trait Sequence {
         accumulator
     }
 
+    // Walk every item and return how many there were. Each item is dropped
+    // once it is counted and the iterator once it ends, so both must be
+    // Discardable. A slice of linear elements yields borrows of them, which
+    // are. The count is checked arithmetic, so counting past the greatest
+    // UInt64 traps like any other overflowing addition.
+    fn count(sink self: Self) -> UInt64 where
+        Self.Iter: Discardable,
+        Self.Iter.Item: Discardable
+    {
+        var walking = self.iterate()
+        var counted: UInt64 = 0
+        loop {
+            match &walking.next() {
+                Some(_) => counted += 1,
+                None => {
+                    break
+                },
+            }
+        }
+        counted
+    }
+
     // Return the first Some that `select` returns, stopping there. `select`
     // is dropped at the end.
     fn find_map[U, F: inout fn(sink item: Self.Iter.Item) -> Option[U]](sink self: Self, sink select: F) -> Option[U] where
@@ -1496,6 +1518,42 @@ test fn fold_takes_a_closure_that_changes_a_lent_count() {
     )
     testing.assert_eq(sum, UInt8(6), "fold did not combine every item")?
     testing.assert_eq(combined, UInt8(3), "fold did not call its callback once per item")?
+}
+
+test fn count_answers_how_many_items_a_sequence_yields() {
+    testing.assert_eq((UInt8(0)..5).count(), UInt64(5), "count missed an item of a range")?
+    testing.assert_eq((UInt8(0)..0).count(), UInt64(0), "count found an item in an empty range")?
+    testing.assert_eq("Olá".scalars().count(), UInt64(3), "count miscounted the scalars of a text")?
+    testing.assert_eq((UInt8(0)..9).filter(|item| item % 3 == 0).count(), UInt64(3), "count miscounted a filtered sequence")?
+}
+
+test fn count_walks_what_an_iterator_has_left() {
+    var arrivals = AskedSource { at = 0, stop = 5, asked = 0 }
+    let _first = &arrivals.next()
+    testing.assert_eq(arrivals.count(), UInt64(4), "count did not start where the iterator stood")?
+}
+
+test fn count_keeps_no_borrowed_items_external_owner() {
+    let owned = "one,two,three".to_owned().unwrap()
+    let words = owned.split(",").unwrap().count()
+    owned.release()
+    testing.assert_eq(words, UInt64(3), "count miscounted borrowed items")?
+}
+
+test fn count_observes_linear_elements_without_settling_them() {
+    var tickets: Vec[TransactionCursor] = Vec.new()
+    &tickets.push(.{ at = 1, stop = 4 }).unwrap()
+    &tickets.push(.{ at = 2, stop = 5 }).unwrap()
+    let counted = tickets.as_slice().count()
+    var settled: UInt8 = 0
+    var pending = tickets.drain()
+    for ticket in &pending {
+        settled += ticket.at
+        rollback_cursor(ticket)
+    }
+    pending.finish().unwrap()
+    testing.assert_eq(counted, UInt64(2), "count miscounted borrowed Linear elements")?
+    testing.assert_eq(settled, UInt8(3), "count settled or lost a Linear source element")?
 }
 
 // Combine one item into the accumulator with a stateful callback.

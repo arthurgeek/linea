@@ -882,6 +882,11 @@ const Analysis = struct {
     inspected_sets: std.AutoHashMapUnmanaged(SetId, void) = .empty,
     contract_sources: std.AutoHashMapUnmanaged(BindingId, std.ArrayList(u32)) = .empty,
     contracts_indexed: bool = false,
+    /// The lending walks' binders whose elements sit in storage the walked
+    /// value observes rather than owns, keyed by binder. Filled on first use;
+    /// sized by the function's lending binders.
+    walk_sources: std.AutoHashMapUnmanaged(BindingId, WalkSource) = .empty,
+    walk_sources_indexed: bool = false,
     /// Where a dependency on `owner` first reached `cell`: the source of a
     /// control-flow join into an expression's value, or the write into a
     /// binding. [O-Escapes] and [O-Borrow] reports follow these back to the
@@ -935,6 +940,7 @@ const Analysis = struct {
         self.escape_exits.deinit(self.gpa);
         self.escaped_owners.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
+        self.walk_sources.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
         self.dependents.deinit(self.gpa);
@@ -968,6 +974,51 @@ const Analysis = struct {
     /// Whether a use of this binding reads the place its alias cell names: a
     /// lend's binder, or a read capture, whose alias stands for the captured
     /// environment.
+    /// A lending walk's binder whose element sits in storage the walked
+    /// value observes: `head` is the walk's head and `path` selects the part
+    /// of its value that observes the storage. The binder then depends on
+    /// that part as `view[i]` depends on `view`, so a use of the binder needs
+    /// the part's observations intact and a borrow of it observes the storage.
+    const WalkSource = struct { head: ExprId, path: PathId };
+
+    fn walkSource(self: *Analysis, binder: BindingId) Allocator.Error!?WalkSource {
+        if (!self.walk_sources_indexed) {
+            self.walk_sources_indexed = true;
+            for (self.cfg.blocks[self.function.blocks.start..self.function.blocks.end]) |block| {
+                var ops = self.cfg.opsOf(block);
+                while (ops.next()) |op| {
+                    if (self.cfg.opTag(op) != .lent) continue;
+                    const root = self.cfg.opPlace(op).root;
+                    if (root == .none) continue;
+                    const walk = switch (self.cfg.ops.items(.projection)[op.index()]) {
+                        .index => |walk| walk,
+                        else => continue,
+                    };
+                    const head = self.cfg.ops.items(.source)[op.index()];
+                    const path = try self.observedWalkPath(walk, head) orelse continue;
+                    try self.walk_sources.put(self.gpa, root, .{ .head = head, .path = path });
+                }
+            }
+        }
+        return self.walk_sources.get(binder);
+    }
+
+    /// The part of a lending walk's head that observes the storage its
+    /// elements sit in, or null where the head owns that storage. A slice
+    /// observes its elements, so walking one reaches them through the whole
+    /// value; a projection whose body indexes a slice reaches them through
+    /// the receiver's part that holds the slice.
+    fn observedWalkPath(self: *Analysis, walk: ExprId, head: ExprId) Allocator.Error!?PathId {
+        const slice = self.typing.raw_accesses.slice;
+        if (slice != .none and self.typing.declOfType(self.typing.exprType(self.ast.withoutGroups(head))) == slice) return .root;
+        const expansion = self.typing.call_index.projectionOf(self.typing, walk) orelse return null;
+        if (expansion.delegation != null) return null;
+        const substitution: IndexSubstitution = .{ .binding = expansion.index, .index = null };
+        const selected = try self.selectedPathWithIndex(expansion.path, substitution);
+        if (selected.carried_source == .none) return null;
+        return (try self.selectedPathWithIndex(selected.carried_source, substitution)).path;
+    }
+
     fn readsThroughAlias(self: *const Analysis, binding: BindingId) bool {
         return self.cfg.isLend(binding) and (self.res.kindOf(binding) != .capture or self.isReadCapture(binding));
     }
@@ -1455,6 +1506,9 @@ const Analysis = struct {
             if (root != .none and self.cfg.isLastingLend(root)) {
                 if (state.get(Cell.alias(root))) |origins| try self.stale(origins, .{ .used = expr }, report);
             }
+            if (root != .none) if (try self.walkSource(root)) |walked| {
+                try self.stale(try self.store.select(try self.value(state, walked.head), walked.path), .{ .used = expr }, report);
+            };
         }
         const cut = try self.store.boundary(selected.path, false);
         if (cut.remaining == .root and !self.canCarry(self.typing.exprType(expr))) return;
@@ -2508,6 +2562,19 @@ const Analysis = struct {
                             target.origin.place.path = try self.store.concat(target.origin.place.path, alias_path);
                             try aliases.append(self.gpa, target);
                         }
+                        // An element the head observes sits in that storage,
+                        // so a borrow of the binder observes it too, as a
+                        // borrow of `view[i]` does.
+                        if (try self.walkSource(place.root)) |walked| {
+                            for (self.store.facts(try self.store.select(try self.value(state, walked.head), walked.path))) |fact| {
+                                var target = fact;
+                                target.path = .root;
+                                target.ambient = false;
+                                target.exclusions = .empty;
+                                target.symbolic = false;
+                                try aliases.append(self.gpa, target);
+                            }
+                        }
                         try self.put(state, Cell.alias(place.root), try self.store.intern(aliases.items));
                     }
                     if (assignment) try self.invalidate(state, .{ .root = place.root, .path = path }, null, at);
@@ -2556,6 +2623,7 @@ const Analysis = struct {
             if (root != .none) {
                 if (self.readsThroughAlias(root)) try uses.append(self.gpa, Cell.alias(root));
                 if (self.canCarry(self.typing.bindingType(root))) try uses.append(self.gpa, Cell.binding(root));
+                if (try self.walkSource(root)) |walked| try self.addUses(uses, walked.head);
             }
         }
         if (!self.ast.refersToBinding(selected.root)) {
