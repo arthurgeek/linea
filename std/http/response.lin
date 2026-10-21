@@ -870,10 +870,16 @@ test fn a_streamed_body_follows_the_head() {
 test fn bodyless_statuses_emit_no_content_type_and_no_body() {
     let no_content_reply = Reply { target = "/no-content", body = "", produce = .None }
     let not_modified_reply = Reply { target = "/not-modified", body = "", produce = .None }
+    let no_content_custom = Reply { target = "/no-content-with-headers", body = "", produce = .None }
+    let not_modified_custom = Reply { target = "/not-modified-with-headers", body = "", produce = .None }
     defer let received_no_content = exchanged(.Get, no_content_reply)
     defer let received_not_modified = exchanged(.Get, not_modified_reply)
+    defer let received_no_content_custom = exchanged(.Get, no_content_custom)
+    defer let received_not_modified_custom = exchanged(.Get, not_modified_custom)
     testing.assert_eq(received_no_content.view(), "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n", "204 response emitted headers or body")?
     testing.assert_eq(received_not_modified.view(), "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", "304 response emitted headers or body")?
+    testing.assert_eq(received_no_content_custom.view(), "HTTP/1.1 204 No Content\r\nConnection: close\r\nX-Custom: kept\r\n\r\n", "204 response did not suppress illegal Content-Type or body")?
+    testing.assert_eq(received_not_modified_custom.view(), "HTTP/1.1 304 Not Modified\r\nConnection: close\r\nETag: \"xyz\"\r\n\r\n", "304 response emitted unexpected headers or body")?
     .Ok(())
 }
 
@@ -977,6 +983,16 @@ fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, h
         Cgi => put(&writer, &written, "\r\n")?,
     }
     for header in headers.fields.as_slice() {
+        if status.is_bodyless() {
+            if header.name.view().equals_ascii_folded("Content-Type") {
+                continue
+            }
+        }
+        if status == .NoContent || (status.code() >= 100 && status.code() < 200) {
+            if header.name.view().equals_ascii_folded("Content-Length") {
+                continue
+            }
+        }
         put(&writer, &written, header.name.view())?
         put(&writer, &written, ": ")?
         put(&writer, &written, header.value.view())?
@@ -1119,8 +1135,18 @@ fn answered(request: Request, answer: Reply) -> Result[Response, Error] where ca
     if answer.target == "/no-content" {
         return .Ok(no_content(request))
     }
+    if answer.target == "/no-content-with-headers" {
+        var res = text(request, "unexpected body")?.with_status(.NoContent)
+        &res.add_header("X-Custom", "kept")?
+        return .Ok(res)
+    }
     if answer.target == "/not-modified" {
         return .Ok(status(request, .NotModified))
+    }
+    if answer.target == "/not-modified-with-headers" {
+        var res = text(request, "unexpected body")?.with_status(.NotModified)
+        &res.add_header("ETag", "\"xyz\"")?
+        return .Ok(res)
     }
     if answer.target == "/challenged" {
         var refusal = error(request, .Unauthorized, "sign in first")

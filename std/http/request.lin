@@ -388,7 +388,13 @@ impl[P: Allocator] Message[P] {
             Some(earlier) => .Some(content_length(earlier, .None)?),
             None => .None,
         }
-        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count = 0 }
+        var host_count: UInt64 = 0
+        for field in self.header_fields.as_slice() {
+            if stored_part(self.head.view(), field.name).equals_ascii_folded("Host") {
+                host_count += 1
+            }
+        }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count }
         add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 }
@@ -417,6 +423,10 @@ test fn headers_added_one_at_a_time_are_checked_together() {
     let disagreeing = &sent.add_header("Content-Length", "4")
     testing.assert_eq(agreeing, .Ok(()), "a second length that agrees was refused")?
     testing.assert_eq(disagreeing, .Err(.Status(.BadRequest)), "a second length that disagrees was accepted")?
+    var with_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &with_host.add_header("Host", "example.test").unwrap()
+    let second_host = &with_host.add_header("Host", "other.test")
+    testing.assert_eq(second_host, .Err(.Status(.BadRequest)), "a second Host header was accepted")?
     var many = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     for _ in 0..standard_limits.max_headers {
         &many.add_header("X-Note", "a").unwrap()
@@ -480,6 +490,19 @@ test fn a_request_allocates_in_its_arena() {
     .Ok(())
 }
 
+// Policy for trusting reverse-proxy transport headers when determining scheme.
+// - `None`: do not trust client-supplied forwarded headers (the default).
+// - `XForwardedProto`: trust the immediate hop from `X-Forwarded-Proto`.
+// - `Forwarded`: trust the immediate hop from RFC 7239 `Forwarded`.
+// - `All`: trust either `Forwarded` or `X-Forwarded-Proto`.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ProxyTrust {
+    None,
+    XForwardedProto,
+    Forwarded,
+    All,
+}
+
 impl[P: Allocator] Request[P] {
     // `method` returns the request's method, or `Other` for a token `Method`
     // does not name.
@@ -501,69 +524,146 @@ impl[P: Allocator] Request[P] {
         }
     }
 
-    // Return whether this request was received over HTTPS, checking
-    // `X-Forwarded-Proto`, `Forwarded` (RFC 7239), and the CGI `HTTPS` environment
-    // variable.
-    pub fn is_https(self: Self) -> Bool {
-        match self.header("X-Forwarded-Proto") {
-            Some(proto) => {
-                let first = match proto.split_once(",") {
-                    Some((head, _)) => head,
-                    None => proto,
-                }
-                if first.trim_ascii().equals_ascii_folded("https") {
+    // Return whether this request was received over HTTPS. By default, this
+    // inspects only direct transport evidence (and the CGI `HTTPS` environment
+    // variable); client-controlled proxy headers are not trusted without an
+    // explicit trust policy.
+    //
+    // For `Forwarded` (RFC 7239), the last proxy hop's `proto` parameter is
+    // inspected (representing the immediate reverse-proxy). Conflicting or
+    // non-HTTPS values evaluate to `false`.
+    //
+    // For `X-Forwarded-Proto`, the last comma-separated entry is inspected
+    // (representing the immediate reverse-proxy).
+    pub fn is_https(self: Self, trust: ProxyTrust = .None) -> Bool {
+        match env.variable("HTTPS") {
+            Some(val) => {
+                if val == "on" || val == "1" || val.equals_ascii_folded("true") {
                     return true
                 }
             },
             None => {},
         }
-        match self.header("Forwarded") {
-            Some(forwarded) => {
-                let parts = forwarded.split(";") else |_| {
-                    return false
-                }
-                for part in parts {
-                    let items = part.split(",") else |_| {
-                        continue
+        if trust == .None {
+            return false
+        }
+        if trust == .Forwarded || trust == .All {
+            match self.header("Forwarded") {
+                Some(forwarded) => {
+                    let elements = match forwarded.split(",") {
+                        Ok(elts) => elts,
+                        Err(_) => return false,
                     }
-                    for item in items {
-                        let trimmed = item.trim_ascii()
-                        if trimmed.length() >= 6 && trimmed.slice(0, 6).unwrap().equals_ascii_folded("proto=") {
-                            let proto = trimmed.slice(6, trimmed.length()).unwrap().trim_ascii()
-                            let unquoted = if proto.starts_with("\"") && proto.ends_with("\"") && proto.length() >= 2 {
-                                proto.slice(1, proto.length() - 1).unwrap().trim_ascii()
-                            } else {
-                                proto
-                            }
-                            if unquoted.equals_ascii_folded("https") {
-                                return true
-                            }
+                    var last_element: Option[Str] = .None
+                    for elt in elements {
+                        let trimmed = elt.trim_ascii()
+                        if trimmed.length() > 0 {
+                            last_element = .Some(trimmed)
                         }
                     }
-                }
-            },
-            None => {},
+                    match last_element {
+                        Some(target_hop) => {
+                            let params = match target_hop.split(";") {
+                                Ok(p) => p,
+                                Err(_) => return false,
+                            }
+                            var found_proto: Option[Str] = .None
+                            for param in params {
+                                let trimmed = param.trim_ascii()
+                                if trimmed.length() >= 6 && trimmed.slice(0, 6).unwrap().equals_ascii_folded("proto=") {
+                                    let val = trimmed.slice(6, trimmed.length()).unwrap().trim_ascii()
+                                    let unquoted = if val.starts_with("\"") && val.ends_with("\"") && val.length() >= 2 {
+                                        val.slice(1, val.length() - 1).unwrap().trim_ascii()
+                                    } else {
+                                        val
+                                    }
+                                    match read found_proto {
+                                        Some(earlier) => {
+                                            if !earlier.equals_ascii_folded(unquoted) {
+                                                return false
+                                            }
+                                        },
+                                        None => found_proto = .Some(unquoted),
+                                    }
+                                }
+                            }
+                            match found_proto {
+                                Some(proto) => {
+                                    return proto.equals_ascii_folded("https")
+                                },
+                                None => {},
+                            }
+                        },
+                        None => {},
+                    }
+                },
+                None => {},
+            }
         }
-        match env.variable("HTTPS") {
-            Some(val) => val == "on" || val == "1" || val.equals_ascii_folded("true"),
-            None => false,
+        if trust == .XForwardedProto || trust == .All {
+            match self.header("X-Forwarded-Proto") {
+                Some(proto_header) => {
+                    let parts = match proto_header.split(",") {
+                        Ok(p) => p,
+                        Err(_) => return false,
+                    }
+                    var last_proto: Option[Str] = .None
+                    for part in parts {
+                        let trimmed = part.trim_ascii()
+                        if trimmed.length() > 0 {
+                            last_proto = .Some(trimmed)
+                        }
+                    }
+                    match last_proto {
+                        Some(proto) => {
+                            return proto.equals_ascii_folded("https")
+                        },
+                        None => {},
+                    }
+                },
+                None => {},
+            }
         }
+        false
     }
 }
 
 test fn request_is_https_checks_forwarded_headers_and_env() {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    var req1 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &req1.add_header("X-Forwarded-Proto", "https, http").unwrap()
-    testing.assert(req1.request().is_https(), "multi-value X-Forwarded-Proto was not recognised")?
 
-    var req2 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &req2.add_header("Forwarded", "for=192.0.2.60;proto=\"HTTPS\"").unwrap()
-    testing.assert(req2.request().is_https(), "quoted uppercase Forwarded proto was not recognised")?
+    // Untrusted by default: client-supplied headers do not make request HTTPS.
+    var untrusted = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &untrusted.add_header("X-Forwarded-Proto", "https").unwrap()
+    &untrusted.add_header("Forwarded", "proto=https").unwrap()
+    testing.assert(!untrusted.request().is_https(), "untrusted proxy headers made request HTTPS by default")?
+    testing.assert(!untrusted.request().is_https(trust: .None), "ProxyTrust.None trusted proxy headers")?
 
-    var req3 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &req3.add_header("Forwarded", "for=192.0.2.60;proto=http").unwrap()
-    testing.assert(!req3.request().is_https(), "http Forwarded proto was treated as https")?
+    // Multi-hop X-Forwarded-Proto: immediate proxy is the last comma-separated entry.
+    var xfp_https = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &xfp_https.add_header("X-Forwarded-Proto", "http, https").unwrap()
+    testing.assert(xfp_https.request().is_https(trust: .XForwardedProto), "immediate https hop in X-Forwarded-Proto was refused")?
+
+    var xfp_http = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &xfp_http.add_header("X-Forwarded-Proto", "https, http").unwrap()
+    testing.assert(!xfp_http.request().is_https(trust: .XForwardedProto), "immediate http hop was treated as https")?
+
+    // Forwarded RFC 7239: immediate proxy is the last comma-separated element.
+    var fwd_https = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_https.add_header("Forwarded", "for=1.2.3.4;proto=http, for=5.6.7.8;proto=\"HTTPS\"").unwrap()
+    testing.assert(fwd_https.request().is_https(trust: .Forwarded), "immediate https hop in Forwarded was refused")?
+
+    var fwd_http = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_http.add_header("Forwarded", "for=1.2.3.4;proto=https, for=5.6.7.8;proto=http").unwrap()
+    testing.assert(!fwd_http.request().is_https(trust: .Forwarded), "earlier https hop overrode immediate http hop")?
+
+    // Conflicting proto parameters in same hop are refused.
+    var fwd_conflict = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_conflict.add_header("Forwarded", "for=1.2.3.4;proto=http;proto=https").unwrap()
+    testing.assert(!fwd_conflict.request().is_https(trust: .Forwarded), "conflicting proto parameters were accepted")?
+
+    // Mismatched trust policy ignores other headers.
+    testing.assert(!xfp_https.request().is_https(trust: .Forwarded), "Forwarded trust policy accepted X-Forwarded-Proto")?
+    testing.assert(!fwd_https.request().is_https(trust: .XForwardedProto), "XForwardedProto trust policy accepted Forwarded")?
     .Ok(())
 }
 

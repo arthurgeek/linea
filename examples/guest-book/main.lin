@@ -44,6 +44,23 @@ fn database_path() -> Str {
     }
 }
 
+fn proxy_trust() -> http.ProxyTrust {
+    match env.variable("TRUST_PROXY") {
+        Some(val) => {
+            if val == "1" || val.equals_ascii_folded("true") || val.equals_ascii_folded("all") {
+                .All
+            } else if val.equals_ascii_folded("forwarded") {
+                .Forwarded
+            } else if val.equals_ascii_folded("x-forwarded-proto") {
+                .XForwardedProto
+            } else {
+                .None
+            }
+        },
+        None => .None,
+    }
+}
+
 // Log the storage error to standard error, which a web server records in its
 // error log, and answer the visitor with a generic 500 message.
 fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
@@ -59,19 +76,24 @@ fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
 @(linear, derive(Release))
 struct App {
     book: Book,
+    proxy_trust: http.ProxyTrust,
 }
 
 impl App {
     fn open(path: Str) -> Result[App, BookError] where carries(path) {
-        .Ok(App { book = Book.open(path)? })
+        .Ok(App { book = Book.open(path)?, proxy_trust = proxy_trust() })
     }
 
     fn in_memory() -> Result[App, BookError] {
-        .Ok(App { book = Book.open_in_memory()? })
+        .Ok(App { book = Book.open_in_memory()?, proxy_trust = .None })
+    }
+
+    fn in_memory_with_trust(trust: http.ProxyTrust) -> Result[App, BookError] {
+        .Ok(App { book = Book.open_in_memory()?, proxy_trust = trust })
     }
 
     fn close(sink self: Self) -> Result[(), BookError] {
-        let App { book } = self
+        let App { book, proxy_trust: _ } = self
         book.close()
     }
 }
@@ -100,7 +122,7 @@ struct Signature {
 }
 
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !http.same_origin(request) {
+    if !http.same_origin(request, trust: app.proxy_trust) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -314,7 +336,8 @@ test fn favicon_answers_204_no_content() {
 test fn forwarded_proto_https_is_recognised_for_same_origin() {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
-    defer var app = App.in_memory().unwrap()
+    defer var app_untrusted = App.in_memory().unwrap()
+    defer var app_trusted = App.in_memory_with_trust(.All).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var post = http.new_request(
         arena.handle(),
@@ -327,8 +350,17 @@ test fn forwarded_proto_https_is_recognised_for_same_origin() {
     &post.add_header("Origin", "https://example.test").unwrap()
     &post.add_header("X-Forwarded-Proto", "https").unwrap()
     &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
-    let response = &router.serve_http(&app, post.request()).unwrap()
-    testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused")?
+
+    // Without proxy trust, client-supplied proxy headers are not trusted and 403 is answered.
+    let refused = match &router.serve_http(&app_untrusted, post.request()) {
+        Ok(_) => return testing.assert(false, "untrusted forwarded proto was accepted"),
+        Err(err) => err,
+    }
+    testing.assert_eq(refused.status(), http.Status.Forbidden, "untrusted forwarded proto was not refused 403")?
+
+    // With explicit proxy trust configured, forwarded https is recognized and 303 is answered.
+    let response = &router.serve_http(&app_trusted, post.request()).unwrap()
+    testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
     .Ok(())
 }
 

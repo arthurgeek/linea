@@ -408,7 +408,7 @@ trimmed name and message fit the scalar limits:
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !http.same_origin(request) {
+    if !http.same_origin(request, trust: app.proxy_trust) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()

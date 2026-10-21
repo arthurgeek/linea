@@ -35,6 +35,11 @@ impl Display for OriginError {
 // Default ports (80 for http, 443 for https) are normalized so origins with and
 // without explicit default ports compare equal. Host equality is ASCII
 // case-insensitive.
+//
+// IPv6 host literals are syntax-validated against RFC 3986 / RFC 4291 and
+// compared by their normalized text; different compression spellings of the
+// same address (such as `[::1]` and `[0:0:0:0:0:0:0:1]`) are distinct textual
+// authorities.
 @(copyable, derive(Debug, Release))
 pub struct Origin {
     is_https: Bool,
@@ -474,9 +479,23 @@ test fn an_origin_parses_ipv6_with_custom_port() {
     let ipv6 = Origin.parse("http://[::1]:8080").unwrap()
     testing.assert_eq(ipv6.host(), "[::1]", "host changed")?
     testing.assert_eq(ipv6.port(), UInt16(8080), "port changed")?
+
+    // Embedded IPv4: compressed and uncompressed.
     let embedded_ipv4 = Origin.parse("http://[::ffff:192.0.2.1]").unwrap()
     testing.assert_eq(embedded_ipv4.host(), "[::ffff:192.0.2.1]", "embedded ipv4 host changed")?
     testing.assert_eq(embedded_ipv4.port(), UInt16(80), "embedded ipv4 port changed")?
+
+    let uncompressed_ipv4 = Origin.parse("http://[0:0:0:0:0:ffff:192.0.2.1]").unwrap()
+    testing.assert_eq(uncompressed_ipv4.host(), "[0:0:0:0:0:ffff:192.0.2.1]", "uncompressed embedded ipv4 host changed")?
+
+    // Full 8 groups uncompressed.
+    let full = Origin.parse("http://[2001:db8:0:0:0:0:2:1]").unwrap()
+    testing.assert_eq(full.host(), "[2001:db8:0:0:0:0:2:1]", "full uncompressed host changed")?
+
+    // Compressed equivalent compares by textual representation.
+    let compressed = Origin.parse("http://[2001:db8::2:1]").unwrap()
+    testing.assert_eq(compressed.host(), "[2001:db8::2:1]", "compressed host changed")?
+    testing.assert(full != compressed, "different textual spellings compared equal")?
     .Ok(())
 }
 
@@ -495,6 +514,9 @@ test fn an_origin_refuses_invalid_inputs() {
     testing.assert_eq(Origin.parse("http://[1:2:3]"), .Err(OriginError.InvalidAuthority), "incomplete ipv6 was accepted")?
     testing.assert_eq(Origin.parse("http://[1::2::3]"), .Err(OriginError.InvalidAuthority), "multiple double colons were accepted")?
     testing.assert_eq(Origin.parse("http://[:::1]"), .Err(OriginError.InvalidAuthority), "triple colon was accepted")?
+    testing.assert_eq(Origin.parse("http://[1:2:3:4::5:6:7:8]"), .Err(OriginError.InvalidAuthority), "compression with 8 groups was accepted")?
+    testing.assert_eq(Origin.parse("http://[1:2:3:4:5:6:7:8::]"), .Err(OriginError.InvalidAuthority), "compression with 8 groups was accepted")?
+    testing.assert_eq(Origin.parse("http://[1:2:3:4:5:6:7:8:9]"), .Err(OriginError.InvalidAuthority), "9 groups was accepted")?
     testing.assert_eq(Origin.parse("http://[::ffff:192.0.2.256]"), .Err(OriginError.InvalidAuthority), "overflowing ipv4 octet was accepted")?
     testing.assert_eq(Origin.parse("http://example.test,evil.test"), .Err(OriginError.InvalidAuthority), "comma in host was accepted")?
     testing.assert_eq(Origin.parse("http://exa_mple.test"), .Err(OriginError.InvalidAuthority), "underscore in host was accepted")?
@@ -621,15 +643,19 @@ pub fn check_same_origin[P: Allocator](
 }
 
 // Convenience check for standard web applications: when `Origin` is present,
-// it must match the request's `Host` header and scheme (`request.is_https()`).
+// it must match the request's `Host` header and scheme (`request.is_https(trust)`).
 // When `Sec-Fetch-Site` is present, it must be `"same-origin"` or `"none"`.
 // Requests without these headers (such as `curl` or non-browser clients) are
 // accepted under the standard policy, provided a `Host` header is present.
-pub fn same_origin[P: Allocator](request: Request[P]) -> Bool {
+//
+// By default, `trust` is `ProxyTrust.None`, so client-supplied proxy headers
+// are not trusted without an explicit policy. Pass `trust = .All` or
+// `trust = .Forwarded` when running behind a TLS-terminating reverse proxy.
+pub fn same_origin[P: Allocator](request: Request[P], trust: ProxyTrust = .None) -> Bool {
     let host = request.header("Host") else {
         return false
     }
-    let expected = Origin.from_authority(host.trim_ascii(), request.is_https()) else |_| {
+    let expected = Origin.from_authority(host.trim_ascii(), request.is_https(trust)) else |_| {
         return false
     }
     check_same_origin(request, expected, SameOriginPolicy.standard())
@@ -705,12 +731,14 @@ test fn same_origin_policy_validates_requests() {
     &conflict.add_header("Sec-Fetch-Site", "cross-site").unwrap()
     testing.assert(!check_same_origin(conflict.request(), expected, SameOriginPolicy.standard()), "conflicting cross-site accepted")?
 
-    // Forwarded HTTPS matches an https origin.
+    // Forwarded HTTPS requires explicit proxy trust to match an https origin.
     var forwarded_https = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &forwarded_https.add_header("Host", "example.test").unwrap()
     &forwarded_https.add_header("Origin", "https://example.test").unwrap()
     &forwarded_https.add_header("X-Forwarded-Proto", "https").unwrap()
-    testing.assert(same_origin(forwarded_https.request()), "forwarded https was refused")?
+    testing.assert(!same_origin(forwarded_https.request()), "untrusted forwarded https was accepted by default")?
+    testing.assert(same_origin(forwarded_https.request(), trust: .XForwardedProto), "explicitly trusted XForwardedProto was refused")?
+    testing.assert(same_origin(forwarded_https.request(), trust: .All), "explicitly trusted .All was refused")?
 
     // Missing Host header is always refused by same_origin helper.
     let missing_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
