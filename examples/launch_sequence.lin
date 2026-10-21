@@ -17,21 +17,21 @@ impl Checklist {
     // `trav positions` tells `for` which indices to visit: the inclusive range
     // `4..=0` counts down, so the checklist runs from its last step to ignition.
     trav positions = 4..=0
+
+    test fn launch_preparations_finish_before_ignition() {
+        let launch = checklist()
+        let sequence = ["hold released", "arms retracted", "tanks pressurised", "gimbal check", "ignition"]
+        var next: UInt64 = 0
+        for read step in launch {
+            testing.assert_eq(step, sequence[next], "launch preparations ran out of order")?
+            next += 1
+        }
+        testing.assert_eq(next, 5, "launch preparations ended before ignition")?
+    }
 }
 
 fn checklist() -> Checklist {
     .{ steps = ["ignition", "gimbal check", "tanks pressurised", "arms retracted", "hold released"] }
-}
-
-test fn launch_preparations_finish_before_ignition() {
-    let launch = checklist()
-    let sequence = ["hold released", "arms retracted", "tanks pressurised", "gimbal check", "ignition"]
-    var next: UInt64 = 0
-    for read step in launch {
-        testing.assert_eq(step, sequence[next], "launch preparations ran out of order")?
-        next += 1
-    }
-    testing.assert_eq(next, 5, "launch preparations ended before ignition")?
 }
 
 fn main() -> Result[UInt8, IoError] {

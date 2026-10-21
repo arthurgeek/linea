@@ -83,15 +83,13 @@ impl[T] Slice[T] {
     pub fn length(self: Self) -> UInt64 {
         self.len
     }
-}
 
-test fn length_counts_the_viewed_elements() {
-    let values = [UInt64(3), 5, 8]
-    testing.assert_eq(values.as_slice().length(), UInt64(3), "a view miscounted its elements")?
-    .Ok(())
-}
+    test fn length_counts_the_viewed_elements() {
+        let values = [UInt64(3), 5, 8]
+        testing.assert_eq(values.as_slice().length(), UInt64(3), "a view miscounted its elements")?
+        .Ok(())
+    }
 
-impl[T] Slice[T] {
     // Borrow element `i`, or answer None when `i` is past the end.
     pub fn get(self: Self, i: UInt64) -> Option[borrow T] where carries(self) {
         if i >= self.len {
@@ -100,17 +98,15 @@ impl[T] Slice[T] {
             .Some(borrow self[i])
         }
     }
-}
 
-test fn get_borrows_an_element_or_answers_none_past_the_end() {
-    let values = [UInt64(3), 5]
-    let view = values.as_slice()
-    testing.assert_eq(*view.get(1).unwrap(), UInt64(5), "get borrowed the wrong element")?
-    testing.assert(view.get(2).is_none(), "get reached past the end")?
-    .Ok(())
-}
+    test fn get_borrows_an_element_or_answers_none_past_the_end() {
+        let values = [UInt64(3), 5]
+        let view = values.as_slice()
+        testing.assert_eq(*view.get(1).unwrap(), UInt64(5), "get borrowed the wrong element")?
+        testing.assert(view.get(2).is_none(), "get reached past the end")?
+        .Ok(())
+    }
 
-impl[T] Slice[T] {
     // Return the `count` elements from `start`, or None when they do not all
     // lie within the view. An empty span at the end of the view is accepted.
     pub fn subspan(self: Self, start: UInt64, count: UInt64) -> Option[Slice[T]] where carries(self) {
@@ -122,31 +118,59 @@ impl[T] Slice[T] {
             .Some(slice_subspan(self, start, count))
         }
     }
-}
 
-test fn a_slice_observes_only_its_initialized_extent() {
-    defer var values: Vec[UInt64] = Vec.new()
-    &values.reserve(100).unwrap()
-    &values.push(11).unwrap()
-    &values.push(22).unwrap()
-    let view = values.as_slice()
-    testing.assert_eq(view.length(), UInt64(2), "slice exposed spare capacity")?
-    testing.assert_eq(*view.get(1).unwrap(), UInt64(22), "slice observed another element")?
-    testing.assert(view.get(2).is_none(), "slice exposed an uninitialized slot")?
-    let tail = view.subspan(start: 1, count: 1).unwrap()
-    testing.assert_eq(*tail.get(0).unwrap(), UInt64(22), "subspan changed the element")?
-    testing.assert(view.subspan(start: 2, count: 1).is_none(), "subspan exceeded the initialized extent")?
-    .Ok(())
-}
+    test fn a_slice_observes_only_its_initialized_extent() {
+        defer var values: Vec[UInt64] = Vec.new()
+        &values.reserve(100).unwrap()
+        &values.push(11).unwrap()
+        &values.push(22).unwrap()
+        let view = values.as_slice()
+        testing.assert_eq(view.length(), UInt64(2), "slice exposed spare capacity")?
+        testing.assert_eq(*view.get(1).unwrap(), UInt64(22), "slice observed another element")?
+        testing.assert(view.get(2).is_none(), "slice exposed an uninitialized slot")?
+        let tail = view.subspan(start: 1, count: 1).unwrap()
+        testing.assert_eq(*tail.get(0).unwrap(), UInt64(22), "subspan changed the element")?
+        testing.assert(view.subspan(start: 2, count: 1).is_none(), "subspan exceeded the initialized extent")?
+        .Ok(())
+    }
 
-test fn an_empty_slice_accepts_its_empty_subspan() {
-    defer let values: Vec[UInt8] = Vec.new()
-    let view = values.as_slice()
-    testing.assert_eq(view.length(), UInt64(0), "empty slice gained an element")?
-    testing.assert_eq(view.subspan(start: 0, count: 0).unwrap().length(), UInt64(0), "empty subspan failed")?
-    testing.assert(view.get(0).is_none(), "empty slice yielded an element")?
-    testing.assert(view.subspan(start: UInt64.max, count: 1).is_none(), "extreme subspan wrapped its extent")?
-    .Ok(())
+    test fn an_empty_slice_accepts_its_empty_subspan() {
+        defer let values: Vec[UInt8] = Vec.new()
+        let view = values.as_slice()
+        testing.assert_eq(view.length(), UInt64(0), "empty slice gained an element")?
+        testing.assert_eq(view.subspan(start: 0, count: 0).unwrap().length(), UInt64(0), "empty subspan failed")?
+        testing.assert(view.get(0).is_none(), "empty slice yielded an element")?
+        testing.assert(view.subspan(start: UInt64.max, count: 1).is_none(), "extreme subspan wrapped its extent")?
+        .Ok(())
+    }
+
+    // Traversing a view visits its positions, 0 through len - 1, so
+    // `for read x in view` lends each element it views. The bracket above
+    // declares `read self`, so a walk cannot lend an element writably: a view
+    // may be copied freely and may observe storage nothing may write.
+    trav positions(self: Self) = 0..self.len
+
+    test fn a_read_walk_lends_each_viewed_element() {
+        let values = [UInt64(3), 5, 8, 13]
+        let view = values.as_slice().subspan(start: 1, count: 2).unwrap()
+        var total: UInt64 = 0
+        for read value in view {
+            total += value
+        }
+        testing.assert_eq(total, UInt64(13), "a walk over a view reached past it or missed an element")?
+        .Ok(())
+    }
+
+    test fn releasing_a_slice_leaves_its_storage_owned() {
+        var values = Vec.filled(count: 3, value: UInt64(7)).unwrap()
+        let view = values.as_slice()
+        view.release()
+        values[0] = 8
+        let changed = values[0] == 8 && values.length() == 3
+        values.release()
+        testing.assert(changed, "slice release disposed of its backing storage")?
+        .Ok(())
+    }
 }
 
 // Indexing a view names element `i` in place; an index past the end traps.
@@ -156,36 +180,6 @@ impl[T] Index[UInt64] for Slice[T] {
     proj at(self: Self, i: UInt64) -> T where carries(self) {
         slice_place(self, i)
     }
-}
-
-impl[T] Slice[T] {
-    // Traversing a view visits its positions, 0 through len - 1, so
-    // `for read x in view` lends each element it views. The bracket above
-    // declares `read self`, so a walk cannot lend an element writably: a view
-    // may be copied freely and may observe storage nothing may write.
-    trav positions(self: Self) = 0..self.len
-}
-
-test fn a_read_walk_lends_each_viewed_element() {
-    let values = [UInt64(3), 5, 8, 13]
-    let view = values.as_slice().subspan(start: 1, count: 2).unwrap()
-    var total: UInt64 = 0
-    for read value in view {
-        total += value
-    }
-    testing.assert_eq(total, UInt64(13), "a walk over a view reached past it or missed an element")?
-    .Ok(())
-}
-
-test fn releasing_a_slice_leaves_its_storage_owned() {
-    var values = Vec.filled(count: 3, value: UInt64(7)).unwrap()
-    let view = values.as_slice()
-    view.release()
-    values[0] = 8
-    let changed = values[0] == 8 && values.length() == 3
-    values.release()
-    testing.assert(changed, "slice release disposed of its backing storage")?
-    .Ok(())
 }
 
 // Two views are equal when they hold equal elements in the same order. Where

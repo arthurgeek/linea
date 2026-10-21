@@ -57,16 +57,16 @@ impl RequestError {
             },
         }
     }
-}
 
-test fn a_request_error_names_the_status_that_answers_it() {
-    let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
-    let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
-    testing.assert_eq(RequestError.Closed.status(), .None, "a closed connection was answered")?
-    testing.assert_eq(RequestError.Status(.UriTooLong).status(), Option.Some(Status.UriTooLong), "a refusal changed its status")?
-    testing.assert_eq(RequestError.Io(timeout).status(), Option.Some(Status.RequestTimeout), "a timeout")?
-    testing.assert_eq(RequestError.Io(reset).status(), .None, "a reset connection was answered")?
-    .Ok(())
+    test fn a_request_error_names_the_status_that_answers_it() {
+        let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
+        let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
+        testing.assert_eq(RequestError.Closed.status(), .None, "a closed connection was answered")?
+        testing.assert_eq(RequestError.Status(.UriTooLong).status(), Option.Some(Status.UriTooLong), "a refusal changed its status")?
+        testing.assert_eq(RequestError.Io(timeout).status(), Option.Some(Status.RequestTimeout), "a timeout")?
+        testing.assert_eq(RequestError.Io(reset).status(), .None, "a reset connection was answered")?
+        .Ok(())
+    }
 }
 
 // The request grammar names these ASCII bytes.

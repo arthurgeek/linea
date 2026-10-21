@@ -25,14 +25,14 @@ impl Str {
         }
         true
     }
-}
 
-test fn ascii_folding_ignores_case_and_nothing_else() {
-    testing.assert("Content-Length".equals_ascii_folded("content-length"), "case mattered")?
-    testing.assert(!"Content-Length".equals_ascii_folded("content-lengths"), "length ignored")?
-    testing.assert(!"É".equals_ascii_folded("é"), "non-ASCII folded")?
-    testing.assert(!"[".equals_ascii_folded(r"{"), "punctuation folded")?
-    testing.assert(!"@".equals_ascii_folded("`"), "the byte below A folded with the byte below a")?
-    testing.assert(!"A".equals_ascii_folded("@"), "A folded with the byte just below it")?
-    .Ok(())
+    test fn ascii_folding_ignores_case_and_nothing_else() {
+        testing.assert("Content-Length".equals_ascii_folded("content-length"), "case mattered")?
+        testing.assert(!"Content-Length".equals_ascii_folded("content-lengths"), "length ignored")?
+        testing.assert(!"É".equals_ascii_folded("é"), "non-ASCII folded")?
+        testing.assert(!"[".equals_ascii_folded(r"{"), "punctuation folded")?
+        testing.assert(!"@".equals_ascii_folded("`"), "the byte below A folded with the byte below a")?
+        testing.assert(!"A".equals_ascii_folded("@"), "A folded with the byte just below it")?
+        .Ok(())
+    }
 }

@@ -16,6 +16,13 @@ struct Storage[phantom T, A: Allocator] {
     len: UInt64,
 }
 
+// SlotTestPair is a linear aggregate moved through a slot.
+@linear
+struct SlotTestPair {
+    first: UInt8,
+    second: UInt64,
+}
+
 impl[T, A: Allocator] Storage[T, A] {
     // Take a buffer's bytes as slot storage.
     fn from_buffer(sink buffer: Buffer[A]) -> Self where carries(buffer) {
@@ -30,6 +37,30 @@ impl[T, A: Allocator] Storage[T, A] {
     fn dispose(sink self: Self) {
         let Storage { buffer, allocator: _, at: _, len: _ } = self
         buffer.release()
+    }
+
+    test fn typed_slots_move_an_aggregate_to_independent_storage() {
+        let allocator = system()
+        let shape: SlotType[SlotTestPair] = .Type
+        match allocator.acquire(slot_stride(shape)) {
+            Err(_) => testing.assert(false, "slot allocation failed")?,
+            Ok(acquired) => {
+                var storage: Storage[SlotTestPair, SystemAllocator] = Storage.from_buffer(acquired)
+                let at = storage.at
+                let extent = storage.len
+                let initial = SlotTestPair { first = 7, second = 900 }
+                slot_put(&storage, at, extent, 0, initial)
+                let first: SlotTestPair = slot_take(&storage, at, extent, 0)
+                let replacement = SlotTestPair { first = 8, second = 901 }
+                slot_put(&storage, at, extent, 0, replacement)
+                let second: SlotTestPair = slot_take(&storage, at, extent, 0)
+                storage.dispose()
+                let SlotTestPair { first: a, second: b } = first
+                let SlotTestPair { first: c, second: d } = second
+                testing.assert(a == 7 && b == 900 && c == 8 && d == 901, "typed slot transfer aliased its source")?
+            },
+        }
+        .Ok(())
     }
 }
 
@@ -46,34 +77,3 @@ extern fn slot_put[T, A: Allocator](inout owner: Storage[T, A], at: UInt64, len:
 extern fn slot_place[T, A: Allocator](owner: Storage[T, A], at: UInt64, len: UInt64, live: UInt64, i: UInt64) -> T
 
 extern fn slot_span[T, A: Allocator](owner: Storage[T, A], live: UInt64, start: UInt64, count: UInt64) -> Slice[T] where borrows(owner)
-
-// SlotTestPair is a linear aggregate moved through a slot.
-@linear
-struct SlotTestPair {
-    first: UInt8,
-    second: UInt64,
-}
-
-test fn typed_slots_move_an_aggregate_to_independent_storage() {
-    let allocator = system()
-    let shape: SlotType[SlotTestPair] = .Type
-    match allocator.acquire(slot_stride(shape)) {
-        Err(_) => testing.assert(false, "slot allocation failed")?,
-        Ok(acquired) => {
-            var storage: Storage[SlotTestPair, SystemAllocator] = Storage.from_buffer(acquired)
-            let at = storage.at
-            let extent = storage.len
-            let initial = SlotTestPair { first = 7, second = 900 }
-            slot_put(&storage, at, extent, 0, initial)
-            let first: SlotTestPair = slot_take(&storage, at, extent, 0)
-            let replacement = SlotTestPair { first = 8, second = 901 }
-            slot_put(&storage, at, extent, 0, replacement)
-            let second: SlotTestPair = slot_take(&storage, at, extent, 0)
-            storage.dispose()
-            let SlotTestPair { first: a, second: b } = first
-            let SlotTestPair { first: c, second: d } = second
-            testing.assert(a == 7 && b == 900 && c == 8 && d == 901, "typed slot transfer aliased its source")?
-        },
-    }
-    .Ok(())
-}

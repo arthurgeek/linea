@@ -43,6 +43,40 @@ impl Iterator for Split {
     }
 }
 
+// Lines yields the lines of a text without their terminators.
+@opaque
+struct Lines {
+    text: Str,
+    at: UInt64,
+}
+
+impl Iterator for Lines {
+    type Item = Str
+
+    fn next(inout self: Self) -> Option[Str] where carries(.Some: self.text) {
+        if self.at >= self.text.length() {
+            return .None
+        }
+        let from = self.at
+        match self.text.find("\n", start: from) {
+            Some(end) => {
+                self.at = end + 1
+                // A carriage return before the newline belongs to the terminator.
+                let stop = if end > from && self.text.byte(end - 1) == Option.Some(UInt8(13)) {
+                    end - 1
+                } else {
+                    end
+                }
+                self.text.slice(from, stop)
+            },
+            None => {
+                self.at = self.text.length()
+                self.text.slice(from, self.at)
+            },
+        }
+    }
+}
+
 // Return whether `needle` occurs in `s` at byte offset `at`. Callers establish
 // that the complete needle lies within the haystack.
 fn matches_at(s: Str, needle: Str, at: UInt64) -> Bool {
@@ -84,43 +118,39 @@ impl Str {
         }
         .None
     }
-}
 
-test fn find_respects_boundaries_and_empty_needles() {
-    testing.assert_eq("olá olá".find("á", start: 0), Option.Some(UInt64(2)), "search lost the byte offset")?
-    testing.assert_eq("olá olá".find("á", start: 4), Option.Some(UInt64(7)), "search ignored its start")?
-    testing.assert("olá".find("", start: 3).is_none(), "search accepted a continuation boundary")?
-    testing.assert_eq("olá".find("", start: 4), Option.Some(UInt64(4)), "empty needle did not match the end")?
-    testing.assert("a".find("", start: 2).is_none(), "search accepted a start past the end")?
-    testing.assert("aaa".find("aaaa").is_none(), "long needle matched")?
-    testing.assert("é".find("e\u{301}").is_none(), "search normalized its input")?
-    testing.assert_eq("a\u{0}b".find("\u{0}"), Option.Some(UInt64(1)), "search treated NUL as the end")?
-    .Ok(())
-}
+    test fn find_respects_boundaries_and_empty_needles() {
+        testing.assert_eq("olá olá".find("á", start: 0), Option.Some(UInt64(2)), "search lost the byte offset")?
+        testing.assert_eq("olá olá".find("á", start: 4), Option.Some(UInt64(7)), "search ignored its start")?
+        testing.assert("olá".find("", start: 3).is_none(), "search accepted a continuation boundary")?
+        testing.assert_eq("olá".find("", start: 4), Option.Some(UInt64(4)), "empty needle did not match the end")?
+        testing.assert("a".find("", start: 2).is_none(), "search accepted a start past the end")?
+        testing.assert("aaa".find("aaaa").is_none(), "long needle matched")?
+        testing.assert("é".find("e\u{301}").is_none(), "search normalized its input")?
+        testing.assert_eq("a\u{0}b".find("\u{0}"), Option.Some(UInt64(1)), "search treated NUL as the end")?
+        .Ok(())
+    }
 
-test fn a_search_position_outlives_the_text_that_was_searched() {
-    let source = "before:after".to_owned().unwrap()
-    let position = source.view().find(":")
-    source.release()
-    testing.assert_eq(position.unwrap(), UInt64(6), "search position depended on released text")?
-    .Ok(())
-}
+    test fn a_search_position_outlives_the_text_that_was_searched() {
+        let source = "before:after".to_owned().unwrap()
+        let position = source.view().find(":")
+        source.release()
+        testing.assert_eq(position.unwrap(), UInt64(6), "search position depended on released text")?
+        .Ok(())
+    }
 
-impl Str {
     // Return whether the text begins with `prefix`.
     pub fn starts_with(self: Self, prefix: Str) -> Bool {
         prefix.length() <= self.length() && matches_at(self, prefix, 0)
     }
-}
 
-test fn starts_with_compares_the_leading_bytes() {
-    testing.assert("ábc".starts_with("á"), "a prefix did not match")?
-    testing.assert("abc".starts_with(""), "the empty prefix did not match")?
-    testing.assert(!"a".starts_with("aa"), "a longer prefix matched")?
-    .Ok(())
-}
+    test fn starts_with_compares_the_leading_bytes() {
+        testing.assert("ábc".starts_with("á"), "a prefix did not match")?
+        testing.assert("abc".starts_with(""), "the empty prefix did not match")?
+        testing.assert(!"a".starts_with("aa"), "a longer prefix matched")?
+        .Ok(())
+    }
 
-impl Str {
     // Return whether the text ends with `suffix`.
     pub fn ends_with(self: Self, suffix: Str) -> Bool {
         if suffix.length() > self.length() {
@@ -129,16 +159,14 @@ impl Str {
             matches_at(self, suffix, self.length() - suffix.length())
         }
     }
-}
 
-test fn ends_with_compares_the_trailing_bytes() {
-    testing.assert("ábc".ends_with("bc"), "a suffix did not match")?
-    testing.assert("abc".ends_with(""), "the empty suffix did not match")?
-    testing.assert(!"a".ends_with("aa"), "a longer suffix matched")?
-    .Ok(())
-}
+    test fn ends_with_compares_the_trailing_bytes() {
+        testing.assert("ábc".ends_with("bc"), "a suffix did not match")?
+        testing.assert("abc".ends_with(""), "the empty suffix did not match")?
+        testing.assert(!"a".ends_with("aa"), "a longer suffix matched")?
+        .Ok(())
+    }
 
-impl Str {
     // Return an iterator over the fields between occurrences of `separator`,
     // keeping empty ones, or refuse an empty separator. The iterator keeps both
     // descriptors so a separator can itself borrow dynamic text.
@@ -149,44 +177,42 @@ impl Str {
             .Ok(.{ text = copy(self), separator = copy(separator), at = 0, finished = false })
         }
     }
-}
 
-test fn split_preserves_empty_fields_and_stays_finished() {
-    var cursor = ",á,,".split(",") else |_| {
-        return testing.assert(false, "nonempty separator was rejected")
+    test fn split_preserves_empty_fields_and_stays_finished() {
+        var cursor = ",á,,".split(",") else |_| {
+            return testing.assert(false, "nonempty separator was rejected")
+        }
+        testing.assert_eq(&cursor.next(), Option.Some(""), "leading empty field disappeared")?
+        testing.assert_eq(&cursor.next(), Option.Some("á"), "split lost text")?
+        testing.assert_eq(&cursor.next(), Option.Some(""), "interior empty field disappeared")?
+        testing.assert_eq(&cursor.next(), Option.Some(""), "trailing empty field disappeared")?
+        testing.assert(&cursor.next().is_none(), "split continued after its last field")?
+        testing.assert(&cursor.next().is_none(), "finished split restarted")?
+        testing.assert("text".split("").is_err(), "empty separator was accepted")?
+        .Ok(())
     }
-    testing.assert_eq(&cursor.next(), Option.Some(""), "leading empty field disappeared")?
-    testing.assert_eq(&cursor.next(), Option.Some("á"), "split lost text")?
-    testing.assert_eq(&cursor.next(), Option.Some(""), "interior empty field disappeared")?
-    testing.assert_eq(&cursor.next(), Option.Some(""), "trailing empty field disappeared")?
-    testing.assert(&cursor.next().is_none(), "split continued after its last field")?
-    testing.assert(&cursor.next().is_none(), "finished split restarted")?
-    testing.assert("text".split("").is_err(), "empty separator was accepted")?
-    .Ok(())
-}
 
-test fn split_handles_empty_input_and_multibyte_delimiters() {
-    var empty = "".split(",").unwrap()
-    testing.assert_eq(&empty.next(), Option.Some(""), "empty input did not yield an empty field")?
-    testing.assert(&empty.next().is_none(), "empty input yielded multiple fields")?
-    var count: UInt64 = 0
-    for field in "a€b€".split("€").unwrap() {
-        if count == 0 {
-            testing.assert_eq(field, "a", "first field changed")?
+    test fn split_handles_empty_input_and_multibyte_delimiters() {
+        var empty = "".split(",").unwrap()
+        testing.assert_eq(&empty.next(), Option.Some(""), "empty input did not yield an empty field")?
+        testing.assert(&empty.next().is_none(), "empty input yielded multiple fields")?
+        var count: UInt64 = 0
+        for field in "a€b€".split("€").unwrap() {
+            if count == 0 {
+                testing.assert_eq(field, "a", "first field changed")?
+            }
+            if count == 1 {
+                testing.assert_eq(field, "b", "second field changed")?
+            }
+            if count == 2 {
+                testing.assert_eq(field, "", "trailing field disappeared")?
+            }
+            count += 1
         }
-        if count == 1 {
-            testing.assert_eq(field, "b", "second field changed")?
-        }
-        if count == 2 {
-            testing.assert_eq(field, "", "trailing field disappeared")?
-        }
-        count += 1
+        testing.assert_eq(count, UInt64(3), "multibyte delimiter split an incorrect number of fields")?
+        .Ok(())
     }
-    testing.assert_eq(count, UInt64(3), "multibyte delimiter split an incorrect number of fields")?
-    .Ok(())
-}
 
-impl Str {
     // Split the text at the first occurrence of `separator`, returning the
     // part before it and the part after it, or None when it does not occur.
     // An empty separator occurs at the start, so it yields an empty first part
@@ -195,110 +221,74 @@ impl Str {
         let at = self.find(separator)?
         .Some((self.slice(0, at).unwrap(), self.slice(at + separator.length(), self.length()).unwrap()))
     }
-}
 
-test fn split_once_cuts_at_the_first_separator_of_any_width() {
-    let (key, value) = "name: a: b".split_once(": ") else {
-        return testing.assert(false, "a present separator was not found")
-    }
-    testing.assert_eq(key, "name", "the part before the separator changed")?
-    testing.assert_eq(value, "a: b", "the part after the first separator changed")?
-    let (left, right) = "a€b".split_once("€") else {
-        return testing.assert(false, "a multi-byte separator was not found")
-    }
-    testing.assert_eq(left, "a", "a multi-byte separator kept a byte before it")?
-    testing.assert_eq(right, "b", "a multi-byte separator kept a byte after it")?
-    let (head, tail) = "key=".split_once("=") else {
-        return testing.assert(false, "a separator at the end was not found")
-    }
-    testing.assert_eq(head, "key", "text before a final separator changed")?
-    testing.assert_eq(tail, "", "nothing after the separator was not empty")?
-    let (open, rest) = "abc".split_once("") else {
-        return testing.assert(false, "an empty separator was not found")
-    }
-    testing.assert_eq(open, "", "an empty separator did not occur at the start")?
-    testing.assert_eq(rest, "abc", "an empty separator removed text")?
-    testing.assert("abc".split_once("=").is_none(), "an absent separator was found")?
-    testing.assert("".split_once("=").is_none(), "empty text held a separator")?
-    .Ok(())
-}
-
-// Lines yields the lines of a text without their terminators.
-@opaque
-struct Lines {
-    text: Str,
-    at: UInt64,
-}
-
-impl Iterator for Lines {
-    type Item = Str
-
-    fn next(inout self: Self) -> Option[Str] where carries(.Some: self.text) {
-        if self.at >= self.text.length() {
-            return .None
+    test fn split_once_cuts_at_the_first_separator_of_any_width() {
+        let (key, value) = "name: a: b".split_once(": ") else {
+            return testing.assert(false, "a present separator was not found")
         }
-        let from = self.at
-        match self.text.find("\n", start: from) {
-            Some(end) => {
-                self.at = end + 1
-                // A carriage return before the newline belongs to the terminator.
-                let stop = if end > from && self.text.byte(end - 1) == Option.Some(UInt8(13)) {
-                    end - 1
-                } else {
-                    end
-                }
-                self.text.slice(from, stop)
-            },
-            None => {
-                self.at = self.text.length()
-                self.text.slice(from, self.at)
-            },
+        testing.assert_eq(key, "name", "the part before the separator changed")?
+        testing.assert_eq(value, "a: b", "the part after the first separator changed")?
+        let (left, right) = "a€b".split_once("€") else {
+            return testing.assert(false, "a multi-byte separator was not found")
         }
+        testing.assert_eq(left, "a", "a multi-byte separator kept a byte before it")?
+        testing.assert_eq(right, "b", "a multi-byte separator kept a byte after it")?
+        let (head, tail) = "key=".split_once("=") else {
+            return testing.assert(false, "a separator at the end was not found")
+        }
+        testing.assert_eq(head, "key", "text before a final separator changed")?
+        testing.assert_eq(tail, "", "nothing after the separator was not empty")?
+        let (open, rest) = "abc".split_once("") else {
+            return testing.assert(false, "an empty separator was not found")
+        }
+        testing.assert_eq(open, "", "an empty separator did not occur at the start")?
+        testing.assert_eq(rest, "abc", "an empty separator removed text")?
+        testing.assert("abc".split_once("=").is_none(), "an absent separator was found")?
+        testing.assert("".split_once("=").is_none(), "empty text held a separator")?
+        .Ok(())
     }
-}
 
-impl Str {
     // Return an iterator over the lines of the text. A line ends at `\n` or
     // `\r\n`, and the terminator is not part of it. Text ending in a
     // terminator has no empty final line, and empty text has no lines.
     pub fn lines(self: Self) -> Lines where carries(self) {
         .{ text = copy(self), at = 0 }
     }
-}
 
-test fn lines_split_at_newlines_and_drop_the_terminator() {
-    var cursor = "a\r\nb\n\nc\rd\ne".lines()
-    testing.assert_eq(&cursor.next(), Option.Some("a"), "a carriage return stayed in a line")?
-    testing.assert_eq(&cursor.next(), Option.Some("b"), "the second line changed")?
-    testing.assert_eq(&cursor.next(), Option.Some(""), "a blank line disappeared")?
-    testing.assert_eq(&cursor.next(), Option.Some("c\rd"), "a lone carriage return ended a line")?
-    testing.assert_eq(&cursor.next(), Option.Some("e"), "an unterminated final line disappeared")?
-    testing.assert(&cursor.next().is_none(), "lines continued after the last line")?
-    .Ok(())
-}
+    test fn lines_split_at_newlines_and_drop_the_terminator() {
+        var cursor = "a\r\nb\n\nc\rd\ne".lines()
+        testing.assert_eq(&cursor.next(), Option.Some("a"), "a carriage return stayed in a line")?
+        testing.assert_eq(&cursor.next(), Option.Some("b"), "the second line changed")?
+        testing.assert_eq(&cursor.next(), Option.Some(""), "a blank line disappeared")?
+        testing.assert_eq(&cursor.next(), Option.Some("c\rd"), "a lone carriage return ended a line")?
+        testing.assert_eq(&cursor.next(), Option.Some("e"), "an unterminated final line disappeared")?
+        testing.assert(&cursor.next().is_none(), "lines continued after the last line")?
+        .Ok(())
+    }
 
-test fn lines_have_no_empty_final_line() {
-    var terminated = "a\n".lines()
-    testing.assert_eq(&terminated.next(), Option.Some("a"), "the terminated line changed")?
-    testing.assert(&terminated.next().is_none(), "a final terminator started another line")?
-    var crlf = "a\r\n".lines()
-    testing.assert_eq(&crlf.next(), Option.Some("a"), "a CRLF terminator stayed in the line")?
-    testing.assert(&crlf.next().is_none(), "a final CRLF started another line")?
-    var empty = "".lines()
-    testing.assert(&empty.next().is_none(), "empty text had a line")?
-    var blank = "\n".lines()
-    testing.assert_eq(&blank.next(), Option.Some(""), "a lone newline is one empty line")?
-    testing.assert(&blank.next().is_none(), "a lone newline is more than one line")?
-    var lone = "\r\n\r\n".lines()
-    testing.assert_eq(&lone.next(), Option.Some(""), "a bare CRLF is not an empty line")?
-    testing.assert_eq(&lone.next(), Option.Some(""), "the second bare CRLF is not an empty line")?
-    testing.assert(&lone.next().is_none(), "bare CRLFs yielded a third line")?
-    // Only a carriage return directly before a newline is a terminator.
-    var unterminated = "a\r".lines()
-    testing.assert_eq(&unterminated.next(), Option.Some("a\r"), "a final carriage return without a newline was dropped")?
-    testing.assert(&unterminated.next().is_none(), "a final carriage return started another line")?
-    var doubled = "a\r\r\n".lines()
-    testing.assert_eq(&doubled.next(), Option.Some("a\r"), "a carriage return before the terminator was dropped")?
-    testing.assert(&doubled.next().is_none(), "a doubled carriage return started another line")?
-    .Ok(())
+    test fn lines_have_no_empty_final_line() {
+        var terminated = "a\n".lines()
+        testing.assert_eq(&terminated.next(), Option.Some("a"), "the terminated line changed")?
+        testing.assert(&terminated.next().is_none(), "a final terminator started another line")?
+        var crlf = "a\r\n".lines()
+        testing.assert_eq(&crlf.next(), Option.Some("a"), "a CRLF terminator stayed in the line")?
+        testing.assert(&crlf.next().is_none(), "a final CRLF started another line")?
+        var empty = "".lines()
+        testing.assert(&empty.next().is_none(), "empty text had a line")?
+        var blank = "\n".lines()
+        testing.assert_eq(&blank.next(), Option.Some(""), "a lone newline is one empty line")?
+        testing.assert(&blank.next().is_none(), "a lone newline is more than one line")?
+        var lone = "\r\n\r\n".lines()
+        testing.assert_eq(&lone.next(), Option.Some(""), "a bare CRLF is not an empty line")?
+        testing.assert_eq(&lone.next(), Option.Some(""), "the second bare CRLF is not an empty line")?
+        testing.assert(&lone.next().is_none(), "bare CRLFs yielded a third line")?
+        // Only a carriage return directly before a newline is a terminator.
+        var unterminated = "a\r".lines()
+        testing.assert_eq(&unterminated.next(), Option.Some("a\r"), "a final carriage return without a newline was dropped")?
+        testing.assert(&unterminated.next().is_none(), "a final carriage return started another line")?
+        var doubled = "a\r\r\n".lines()
+        testing.assert_eq(&doubled.next(), Option.Some("a\r"), "a carriage return before the terminator was dropped")?
+        testing.assert(&doubled.next().is_none(), "a doubled carriage return started another line")?
+        .Ok(())
+    }
 }

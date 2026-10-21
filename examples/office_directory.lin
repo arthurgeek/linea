@@ -26,6 +26,23 @@ impl Index[FromEnd] for Rolodex via cards
 // implementing `Index` alone does not make a type traversable.
 impl Rolodex {
     trav positions via cards
+
+    test fn an_updated_contact_is_found_by_name() {
+        var directory = Rolodex { cards = [
+            .{ name = "Reception", extension = 100 },
+            .{ name = "Facilities", extension = 210 },
+            .{ name = "Accounts", extension = 320 },
+            .{ name = "Support", extension = 400 },
+        ] }
+
+        directory[1].extension = 218
+        directory[^1].extension = 405
+
+        testing.assert_eq(extension_for(directory, "Facilities"), .Some(218), "Facilities must use its updated extension")?
+        testing.assert_eq(extension_for(directory, "Support"), .Some(405), "Support must use its updated extension")?
+        testing.assert_eq(extension_for(directory, "Reception"), .Some(100), "updating other contacts must preserve Reception")?
+        testing.assert_eq(extension_for(directory, "Shipping"), .None, "Shipping has no card in this directory")?
+    }
 }
 
 // `break card.extension` gives the `for` loop the value `Some(extension)`; a
@@ -36,23 +53,6 @@ fn extension_for(directory: Rolodex, name: Str) -> Option[UInt16] {
             break card.extension
         }
     }
-}
-
-test fn an_updated_contact_is_found_by_name() {
-    var directory = Rolodex { cards = [
-        .{ name = "Reception", extension = 100 },
-        .{ name = "Facilities", extension = 210 },
-        .{ name = "Accounts", extension = 320 },
-        .{ name = "Support", extension = 400 },
-    ] }
-
-    directory[1].extension = 218
-    directory[^1].extension = 405
-
-    testing.assert_eq(extension_for(directory, "Facilities"), .Some(218), "Facilities must use its updated extension")?
-    testing.assert_eq(extension_for(directory, "Support"), .Some(405), "Support must use its updated extension")?
-    testing.assert_eq(extension_for(directory, "Reception"), .Some(100), "updating other contacts must preserve Reception")?
-    testing.assert_eq(extension_for(directory, "Shipping"), .None, "Shipping has no card in this directory")?
 }
 
 fn main() -> Result[UInt8, IoError] {

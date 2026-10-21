@@ -50,21 +50,21 @@ impl Spec {
     pub fn padded(width: UInt64) -> Spec {
         Spec { width, ..Spec.default() }
     }
-}
 
-test fn a_default_spec_adds_no_padding() {
-    let plain = Spec.default()
-    testing.assert_eq(plain.width, UInt64(0), "a default spec has a width")?
-    testing.assert_eq(plain.align, .None, "a default spec chose an alignment")?
-    expect_display("ab", plain, "ab", "a default spec changed its value")?
-    .Ok(())
-}
+    test fn a_default_spec_adds_no_padding() {
+        let plain = Spec.default()
+        testing.assert_eq(plain.width, UInt64(0), "a default spec has a width")?
+        testing.assert_eq(plain.align, .None, "a default spec chose an alignment")?
+        expect_display("ab", plain, "ab", "a default spec changed its value")?
+        .Ok(())
+    }
 
-test fn a_padded_spec_sets_only_the_width() {
-    let spec = Spec.padded(6)
-    let expected = Spec { width = 6, ..Spec.default() }
-    testing.assert_eq(spec, expected, "a padded spec changed more than its width")?
-    .Ok(())
+    test fn a_padded_spec_sets_only_the_width() {
+        let spec = Spec.padded(6)
+        let expected = Spec { width = 6, ..Spec.default() }
+        testing.assert_eq(spec, expected, "a padded spec changed more than its width")?
+        .Ok(())
+    }
 }
 
 // ScalarCount counts the Unicode scalars written to it and keeps none of them,

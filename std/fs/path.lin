@@ -37,59 +37,55 @@ impl Path {
         }
         .Ok(.{ bytes = copy(bytes) })
     }
-}
 
-// Path validation preserves bytes independently of text encoding.
-test fn paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset() {
-    let allocator = mem.system()
-    defer var bytes = allocator.acquire(3).unwrap()
-    &bytes.store_byte(0, 255)
-    &bytes.store_byte(1, 47)
-    &bytes.store_byte(2, 120)
-    let path = Path.from_bytes(bytes.as_slice()).unwrap()
-    testing.assert_eq(path.as_bytes()[0], UInt8(255), "path validation changed an undecodable byte")?
-    testing.assert_eq(path.as_bytes().length(), UInt64(3), "path validation changed its extent")?
-    &bytes.store_byte(1, 0)
-    match Path.from_bytes(bytes.as_slice()) {
-        Ok(_) => return testing.assert(false, "a path accepted NUL"),
-        Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+    // Path validation preserves bytes independently of text encoding.
+    test fn paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset() {
+        let allocator = mem.system()
+        defer var bytes = allocator.acquire(3).unwrap()
+        &bytes.store_byte(0, 255)
+        &bytes.store_byte(1, 47)
+        &bytes.store_byte(2, 120)
+        let path = Path.from_bytes(bytes.as_slice()).unwrap()
+        testing.assert_eq(path.as_bytes()[0], UInt8(255), "path validation changed an undecodable byte")?
+        testing.assert_eq(path.as_bytes().length(), UInt64(3), "path validation changed its extent")?
+        &bytes.store_byte(1, 0)
+        match Path.from_bytes(bytes.as_slice()) {
+            Ok(_) => return testing.assert(false, "a path accepted NUL"),
+            Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn path_errors_are_independent_of_released_input_bytes() {
-    let allocator = mem.system()
-    let bytes = allocator.acquire(2).unwrap()
-    let error = match Path.from_bytes(bytes.as_slice()) {
-        Err(error) => error,
-        Ok(_) => {
-            bytes.release()
-            return testing.assert(false, "NUL-containing bytes became a path")
-        },
+    test fn path_errors_are_independent_of_released_input_bytes() {
+        let allocator = mem.system()
+        let bytes = allocator.acquire(2).unwrap()
+        let error = match Path.from_bytes(bytes.as_slice()) {
+            Err(error) => error,
+            Ok(_) => {
+                bytes.release()
+                return testing.assert(false, "NUL-containing bytes became a path")
+            },
+        }
+        bytes.release()
+        testing.assert(match read error { Nul(offset) => offset == 0, _ => false }, "owned path error depended on input storage")?
+        .Ok(())
     }
-    bytes.release()
-    testing.assert(match read error { Nul(offset) => offset == 0, _ => false }, "owned path error depended on input storage")?
-    .Ok(())
-}
 
-impl Path {
     // Accept text as a path, refusing it at its first NUL byte.
     pub fn from_str(source: Str) -> Result[Path, PathError] where carries(.Ok: source) {
         Path.from_bytes(source.as_bytes())
     }
-}
 
-test fn from_str_accepts_text_and_refuses_an_embedded_nul() {
-    let path = Path.from_str("logs/today.txt").unwrap()
-    testing.assert_eq(path.as_bytes().length(), UInt64(14), "a text path changed its extent")?
-    match Path.from_str("a\0b") {
-        Ok(_) => return testing.assert(false, "a text path accepted NUL"),
-        Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+    test fn from_str_accepts_text_and_refuses_an_embedded_nul() {
+        let path = Path.from_str("logs/today.txt").unwrap()
+        testing.assert_eq(path.as_bytes().length(), UInt64(14), "a text path changed its extent")?
+        match Path.from_str("a\0b") {
+            Ok(_) => return testing.assert(false, "a text path accepted NUL"),
+            Err(error) => testing.assert(match read error { Nul(offset) => offset == 1, _ => false }, "NUL error lost its byte offset")?,
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-impl Path {
     // Take process argument `i` as a path, from its exact bytes: an argument
     // that is not valid UTF-8 still names a file. None means there is no such
     // argument. An argument ends at its first NUL byte, as every C string
@@ -97,31 +93,27 @@ impl Path {
     pub fn from_arg(args: env.Args, i: UInt64) -> Option[Path] where carries() {
         .Some(.{ bytes = args.bytes_at(i)? })
     }
-}
 
-test fn from_arg_takes_an_argument_as_a_path_and_refuses_a_missing_one() {
-    let args = env.args()
-    let program = Path.from_arg(args, 0).unwrap()
-    testing.assert_eq(program.as_bytes(), args.bytes_at(0).unwrap(), "an argument path changed its bytes")?
-    testing.assert(Path.from_arg(args, args.count()).is_none(), "an index at the count named a path")?
-    testing.assert(Path.from_arg(args, UInt64.max).is_none(), "an out-of-range index named a path")?
-}
+    test fn from_arg_takes_an_argument_as_a_path_and_refuses_a_missing_one() {
+        let args = env.args()
+        let program = Path.from_arg(args, 0).unwrap()
+        testing.assert_eq(program.as_bytes(), args.bytes_at(0).unwrap(), "an argument path changed its bytes")?
+        testing.assert(Path.from_arg(args, args.count()).is_none(), "an index at the count named a path")?
+        testing.assert(Path.from_arg(args, UInt64.max).is_none(), "an out-of-range index named a path")?
+    }
 
-impl Path {
     // Return the bytes the path was made from.
     pub fn as_bytes(self: Self) -> mem.Slice[UInt8] where carries(self) {
         copy(self.bytes)
     }
-}
 
-test fn as_bytes_returns_the_bytes_the_path_was_made_from() {
-    let text = "notes/a.txt"
-    let path = Path.from_str(text).unwrap()
-    testing.assert_eq(path.as_bytes(), text.as_bytes(), "a path changed its bytes")?
-    .Ok(())
-}
+    test fn as_bytes_returns_the_bytes_the_path_was_made_from() {
+        let text = "notes/a.txt"
+        let path = Path.from_str(text).unwrap()
+        testing.assert_eq(path.as_bytes(), text.as_bytes(), "a path changed its bytes")?
+        .Ok(())
+    }
 
-impl Path {
     // Split the path at its last slash into a parent directory and a final
     // name. A path with no slash has the parent ".", and "/a" keeps "/" as its
     // parent. An empty name, "." or ".." names no file and is refused.
@@ -147,19 +139,19 @@ impl Path {
         }
         .Ok(.{ parent = parent, name = name })
     }
-}
 
-test fn path_components_preserve_a_root_parent_and_reject_special_final_names() {
-    let path = Path.from_str("/a").unwrap()
-    let parts = path.components().unwrap()
-    testing.assert_eq(parts.parent.length(), UInt64(1), "root parent was removed")?
-    testing.assert_eq(parts.name[0], UInt8(97), "final component changed")?
-    let relative = Path.from_str("a").unwrap().components().unwrap()
-    testing.assert_eq(relative.parent[0], UInt8(46), "relative parent was not dot")?
-    for source in ["", "/", "a/", ".", "..", "a/.."] {
-        testing.assert(Path.from_str(source).unwrap().components().is_err(), "an invalid final component was accepted")?
+    test fn path_components_preserve_a_root_parent_and_reject_special_final_names() {
+        let path = Path.from_str("/a").unwrap()
+        let parts = path.components().unwrap()
+        testing.assert_eq(parts.parent.length(), UInt64(1), "root parent was removed")?
+        testing.assert_eq(parts.name[0], UInt8(97), "final component changed")?
+        let relative = Path.from_str("a").unwrap().components().unwrap()
+        testing.assert_eq(relative.parent[0], UInt8(46), "relative parent was not dot")?
+        for source in ["", "/", "a/", ".", "..", "a/.."] {
+            testing.assert(Path.from_str(source).unwrap().components().is_err(), "an invalid final component was accepted")?
+        }
+        .Ok(())
     }
-    .Ok(())
 }
 
 impl Display for PathError {

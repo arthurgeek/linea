@@ -52,18 +52,18 @@ impl Failure {
     pub fn is_refusal(self: Self) -> Bool {
         self.refusal
     }
-}
 
-test fn a_refused_failure_is_a_refusal_and_an_assertion_is_not() -> Result[(), Failure] {
-    let refusal = refused("the arena was refused")
-    let assertion = match assert(false, "a wrong answer") {
-        Err(failure) => failure,
-        Ok(_) => return assert(false, "a false assertion passed"),
+    test fn a_refused_failure_is_a_refusal_and_an_assertion_is_not() -> Result[(), Failure] {
+        let refusal = refused("the arena was refused")
+        let assertion = match assert(false, "a wrong answer") {
+            Err(failure) => failure,
+            Ok(_) => return assert(false, "a false assertion passed"),
+        }
+        assert(refusal.is_refusal(), "a refused failure was not a refusal")?
+        assert(!assertion.is_refusal(), "a failed assertion was a refusal")?
+        assert(refusal.said == "the arena was refused", "a refused failure lost its message")?
+        .Ok(())
     }
-    assert(refusal.is_refusal(), "a refused failure was not a refusal")?
-    assert(!assertion.is_refusal(), "a failed assertion was a refusal")?
-    assert(refusal.said == "the arena was refused", "a refused failure lost its message")?
-    .Ok(())
 }
 
 // Return Ok when the condition holds, or Failure with the supplied message.
@@ -491,6 +491,33 @@ struct Recorder[A: Allocator] {
     len: UInt64,
 }
 
+impl Recorder[mem.SystemAllocator] {
+    // Allocate a buffer with the requested capacity from the system
+    // allocator, as `of_in` does.
+    pub fn of(bytes: UInt64) -> Result[Recorder[mem.SystemAllocator], Oom] {
+        Recorder.of_in(mem.system(), bytes)
+    }
+
+    test fn a_recorder_records_into_the_system_allocator() -> Result[(), Failure] {
+        var recorder = Recorder.of(16) else |_| {
+            return assert(false, "a recorder of sixteen bytes was refused")
+        }
+        let wrote = &recorder.write_str("tea").is_ok()
+        let kept = recorder.holds("tea")
+        recorder.release()
+        assert(wrote && kept, "a system recorder lost what was written into it")
+    }
+
+    test fn a_new_recorder_holds_nothing() -> Result[(), Failure] {
+        var recorder = Recorder.of(8) else |_| {
+            return assert(false, "a recorder of eight bytes was refused")
+        }
+        let empty = recorder.length() == 0 && recorder.holds("")
+        recorder.release()
+        assert(empty, "a new recorder held something")
+    }
+}
+
 impl[A: Allocator] Recorder[A] {
     // Allocate a buffer with the requested capacity from `allocator`. The
     // recorder does not grow: writing beyond that capacity traps at the
@@ -499,67 +526,36 @@ impl[A: Allocator] Recorder[A] {
         let held = allocator.acquire(bytes)?
         .Ok(.{ held = held, len = 0 })
     }
-}
 
-test fn a_recorder_records_into_an_arena() -> Result[(), Failure] {
-    defer let arena = mem.Arena.open(mem.system(), 64)
-    var recorder = Recorder.of_in(arena.handle(), 16) else |_| {
-        return assert(false, "an arena recorder of sixteen bytes was refused")
+    test fn a_recorder_records_into_an_arena() -> Result[(), Failure] {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        var recorder = Recorder.of_in(arena.handle(), 16) else |_| {
+            return assert(false, "an arena recorder of sixteen bytes was refused")
+        }
+        let wrote = &recorder.write_str("olá").is_ok()
+        let kept = recorder.holds("olá")
+        recorder.release()
+        assert(wrote, "a write into an arena recorder failed")?
+        assert(kept, "an arena recorder lost what was written into it")
     }
-    let wrote = &recorder.write_str("olá").is_ok()
-    let kept = recorder.holds("olá")
-    recorder.release()
-    assert(wrote, "a write into an arena recorder failed")?
-    assert(kept, "an arena recorder lost what was written into it")
-}
 
-impl Recorder[mem.SystemAllocator] {
-    // Allocate a buffer with the requested capacity from the system
-    // allocator, as `of_in` does.
-    pub fn of(bytes: UInt64) -> Result[Recorder[mem.SystemAllocator], Oom] {
-        Recorder.of_in(mem.system(), bytes)
-    }
-}
-
-test fn a_recorder_records_into_the_system_allocator() -> Result[(), Failure] {
-    var recorder = Recorder.of(16) else |_| {
-        return assert(false, "a recorder of sixteen bytes was refused")
-    }
-    let wrote = &recorder.write_str("tea").is_ok()
-    let kept = recorder.holds("tea")
-    recorder.release()
-    assert(wrote && kept, "a system recorder lost what was written into it")
-}
-
-test fn a_new_recorder_holds_nothing() -> Result[(), Failure] {
-    var recorder = Recorder.of(8) else |_| {
-        return assert(false, "a recorder of eight bytes was refused")
-    }
-    let empty = recorder.length() == 0 && recorder.holds("")
-    recorder.release()
-    assert(empty, "a new recorder held something")
-}
-
-impl[A: Allocator] Recorder[A] {
     // Return how many bytes were written.
     pub fn length(self: Self) -> UInt64 {
         self.len
     }
-}
 
-test fn length_counts_the_bytes_written() -> Result[(), Failure] {
-    var recorder = Recorder.of(8) else |_| {
-        return assert(false, "a recorder of eight bytes was refused")
+    test fn length_counts_the_bytes_written() -> Result[(), Failure] {
+        var recorder = Recorder.of(8) else |_| {
+            return assert(false, "a recorder of eight bytes was refused")
+        }
+        let wrote = &recorder.write_str("olá").is_ok()
+        let counted = recorder.length()
+        recorder.release()
+        assert(wrote, "a write into a recorder failed")?
+        // "olá" is four bytes: á takes two in UTF-8.
+        assert_eq(counted, UInt64(4), "a recorder counted characters rather than bytes")
     }
-    let wrote = &recorder.write_str("olá").is_ok()
-    let counted = recorder.length()
-    recorder.release()
-    assert(wrote, "a write into a recorder failed")?
-    // "olá" is four bytes: á takes two in UTF-8.
-    assert_eq(counted, UInt64(4), "a recorder counted characters rather than bytes")
-}
 
-impl[A: Allocator] Recorder[A] {
     // Return the byte at `i`, or None when `i` is past what was written.
     pub fn byte(self: Self, i: UInt64) -> Option[UInt8] {
         if i >= self.len {
@@ -568,23 +564,21 @@ impl[A: Allocator] Recorder[A] {
             .Some(self.held.load_byte(i))
         }
     }
-}
 
-test fn byte_reads_a_written_byte_and_nothing_past_the_end() -> Result[(), Failure] {
-    var recorder = Recorder.of(8) else |_| {
-        return assert(false, "a recorder of eight bytes was refused")
+    test fn byte_reads_a_written_byte_and_nothing_past_the_end() -> Result[(), Failure] {
+        var recorder = Recorder.of(8) else |_| {
+            return assert(false, "a recorder of eight bytes was refused")
+        }
+        let wrote = &recorder.write_str("hi").is_ok()
+        let second = recorder.byte(1)
+        let past = recorder.byte(2)
+        recorder.release()
+        assert(wrote, "a write into a recorder failed")?
+        // ASCII i is byte 105.
+        assert_eq(second, Option.Some(UInt8(105)), "a recorder read the wrong byte")?
+        assert(past.is_none(), "a recorder read a byte past what was written")
     }
-    let wrote = &recorder.write_str("hi").is_ok()
-    let second = recorder.byte(1)
-    let past = recorder.byte(2)
-    recorder.release()
-    assert(wrote, "a write into a recorder failed")?
-    // ASCII i is byte 105.
-    assert_eq(second, Option.Some(UInt8(105)), "a recorder read the wrong byte")?
-    assert(past.is_none(), "a recorder read a byte past what was written")
-}
 
-impl[A: Allocator] Recorder[A] {
     // Compare all recorded bytes with expected, including their lengths.
     pub fn holds(self: Self, expected: Str) -> Bool {
         if self.len != expected.length() {
@@ -602,37 +596,37 @@ impl[A: Allocator] Recorder[A] {
         }
         same
     }
-}
 
-// Recorded output can be checked as complete text, a byte count, or a byte
-// at a particular index.
-test fn a_recorder_keeps_what_was_rendered_into_it() -> Result[(), Failure] {
-    // Sixty-four bytes leave spare capacity beyond the five-byte word.
-    var w = Recorder.of(64) else |_| {
-        return assert(false, "a recorder of sixty-four bytes was refused")
+    // Recorded output can be checked as complete text, a byte count, or a byte
+    // at a particular index.
+    test fn a_recorder_keeps_what_was_rendered_into_it() -> Result[(), Failure] {
+        // Sixty-four bytes leave spare capacity beyond the five-byte word.
+        var w = Recorder.of(64) else |_| {
+            return assert(false, "a recorder of sixty-four bytes was refused")
+        }
+        let wrote = "hello".fmt(&w).is_ok()
+
+        let kept = w.holds("hello")
+        let counted = w.length()
+        // A missing byte must differ from the expected ASCII h.
+        let first = w.byte(0).unwrap_or(0)
+        let past = w.byte(5).is_some()
+        let wrong = w.holds("hellp")
+        let short = w.holds("hell")
+
+        w.release()
+
+        assert(wrote, "a render into a recorder failed")?
+        assert(kept, "a recorder does not hold what was rendered into it")?
+        assert(counted == 5, "a recorder counted the wrong number of bytes")?
+        // ASCII h is byte 104; ASCII has the same single-byte UTF-8 form.
+        assert(first == 104, "the first byte rendered is not the first byte held")?
+        assert(!past, "a recorder holds a byte past what was written")?
+        assert(!wrong, "a recorder holds text differing in a byte")?
+        assert(!short, "a recorder holds text of another length")?
+
+        .Ok(())
     }
-    let wrote = "hello".fmt(&w).is_ok()
-
-    let kept = w.holds("hello")
-    let counted = w.length()
-    // A missing byte must differ from the expected ASCII h.
-    let first = w.byte(0).unwrap_or(0)
-    let past = w.byte(5).is_some()
-    let wrong = w.holds("hellp")
-    let short = w.holds("hell")
-
-    w.release()
-
-    assert(wrote, "a render into a recorder failed")?
-    assert(kept, "a recorder does not hold what was rendered into it")?
-    assert(counted == 5, "a recorder counted the wrong number of bytes")?
-    // ASCII h is byte 104; ASCII has the same single-byte UTF-8 form.
-    assert(first == 104, "the first byte rendered is not the first byte held")?
-    assert(!past, "a recorder holds a byte past what was written")?
-    assert(!wrong, "a recorder holds text differing in a byte")?
-    assert(!short, "a recorder holds text of another length")?
-
-    .Ok(())
 }
 
 // Writing appends bytes in order; a write past the capacity traps at the

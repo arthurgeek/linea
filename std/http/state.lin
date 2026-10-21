@@ -43,20 +43,20 @@ impl[S, H] Stated[S, H] {
     pub fn state(self: Self) -> borrow S where borrows(self) {
         borrow self.state
     }
-}
 
-test fn a_stated_handler_reads_its_state() {
-    var router: Router[Visits] = Router.new()
-    &router.route_raw("GET /visit", visit).unwrap()
-    defer var server = with_state(Visits { count = 0 }, router)
-    let before = server.state().count
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-    let _answered = &server.serve_http(&nothing, sent.request()).unwrap()
-    testing.assert_eq(before, UInt64(0), "a new state changed")?
-    testing.assert_eq(server.state().count, UInt64(1), "the state did not show the visit")?
-    .Ok(())
+    test fn a_stated_handler_reads_its_state() {
+        var router: Router[Visits] = Router.new()
+        &router.route_raw("GET /visit", visit).unwrap()
+        defer var server = with_state(Visits { count = 0 }, router)
+        let before = server.state().count
+        defer let arena = mem.Arena.open(mem.system(), size: 65536)
+        var nothing = ()
+        let sent = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
+        let _answered = &server.serve_http(&nothing, sent.request()).unwrap()
+        testing.assert_eq(before, UInt64(0), "a new state changed")?
+        testing.assert_eq(server.state().count, UInt64(1), "the state did not show the visit")?
+        .Ok(())
+    }
 }
 
 impl[S, H: Release] Stated[S, H] {
@@ -67,19 +67,19 @@ impl[S, H: Release] Stated[S, H] {
         handler.release()
         state
     }
-}
 
-test fn into_state_returns_the_state_and_releases_the_handler() {
-    let router: Router[Visits] = Router.new()
-    var server = with_state(Visits { count = 3 }, router)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/nowhere", body: "").unwrap()
-    let _missing = &server.serve_http(&nothing, sent.request())
-    let visits = server.into_state()
-    testing.assert_eq(visits.count, UInt64(3), "the state changed")?
-    visits.release()
-    .Ok(())
+    test fn into_state_returns_the_state_and_releases_the_handler() {
+        let router: Router[Visits] = Router.new()
+        var server = with_state(Visits { count = 3 }, router)
+        defer let arena = mem.Arena.open(mem.system(), size: 65536)
+        var nothing = ()
+        let sent = new_request(arena.handle(), "GET", "/nowhere", body: "").unwrap()
+        let _missing = &server.serve_http(&nothing, sent.request())
+        let visits = server.into_state()
+        testing.assert_eq(visits.count, UInt64(3), "the state changed")?
+        visits.release()
+        .Ok(())
+    }
 }
 
 // A `Stated` answers a request by lending its state to the handler it holds.

@@ -198,8 +198,12 @@ fn read_entry(select: Statement) -> Result[Entry, BookError] {
     }
     .Ok(Entry { name, message, signed })
 }
+```
 
-impl Book {
+and in `Book.newest`:
+
+<!-- guide: excerpt examples/guest-book/book/book.lin -->
+```linea
     // Read up to `limit` entries, newest first. `defer var select` finishes the
     // statement when `newest` returns, and `defer var entries` releases any
     // entries already read if a later row or push fails; `.Ok(entries)` moves
@@ -217,7 +221,6 @@ impl Book {
         }
         .Ok(entries)
     }
-}
 ```
 
 ## Errors as values

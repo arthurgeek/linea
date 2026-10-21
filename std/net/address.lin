@@ -61,16 +61,14 @@ impl Address {
     pub fn v4(a: UInt8, b: UInt8, c: UInt8, d: UInt8, port: UInt16) -> Address {
         .{ octets = [a, b, c, d], port = port }
     }
-}
 
-test fn an_address_keeps_the_parts_it_was_built_from() {
-    let address = Address.v4(192, 168, 1, 254, 443)
-    testing.assert_eq(address.octets, [192, 168, 1, 254], "the octets changed")?
-    testing.assert_eq(address.port, 443, "the port changed")?
-    .Ok(())
-}
+    test fn an_address_keeps_the_parts_it_was_built_from() {
+        let address = Address.v4(192, 168, 1, 254, 443)
+        testing.assert_eq(address.octets, [192, 168, 1, 254], "the octets changed")?
+        testing.assert_eq(address.port, 443, "the port changed")?
+        .Ok(())
+    }
 
-impl Address {
     // Accept exactly four decimal octets and a decimal port: "127.0.0.1:8080".
     pub fn parse(text: Str) -> Result[Address, NetError] {
         var octets: [UInt8; 4] = [0, 0, 0, 0]
@@ -102,37 +100,35 @@ impl Address {
         }
         .Ok(.{ octets = octets, port = UInt16(port.value) })
     }
-}
 
-test fn an_address_parses_and_prints_the_same() {
-    let address = Address.parse("127.0.0.1:8080").unwrap()
-    testing.assert_eq(address, Address.v4(127, 0, 0, 1, 8080), "parse lost a part")?
-    testing.assert_eq(address.port, 8080, "the port changed")?
-    var writer = testing.Recorder.of(32).unwrap()
-    let wrote = address.fmt(&writer).is_ok()
-    let printed = writer.holds("127.0.0.1:8080")
-    writer.release()
-    testing.assert(wrote && printed, "display changed the address")?
-    .Ok(())
-}
+    test fn an_address_parses_and_prints_the_same() {
+        let address = Address.parse("127.0.0.1:8080").unwrap()
+        testing.assert_eq(address, Address.v4(127, 0, 0, 1, 8080), "parse lost a part")?
+        testing.assert_eq(address.port, 8080, "the port changed")?
+        var writer = testing.Recorder.of(32).unwrap()
+        let wrote = address.fmt(&writer).is_ok()
+        let printed = writer.holds("127.0.0.1:8080")
+        writer.release()
+        testing.assert(wrote && printed, "display changed the address")?
+        .Ok(())
+    }
 
-test fn an_address_refuses_what_is_not_ipv4() {
-    testing.assert(Address.parse("256.0.0.1:80").is_err(), "an octet past 255 parsed")?
-    testing.assert(Address.parse("127.0.0.1").is_err(), "a missing port parsed")?
-    testing.assert(Address.parse("127.0.0.1:65536").is_err(), "a port past 65535 parsed")?
-    testing.assert(Address.parse("127.0.0:80").is_err(), "three octets parsed")?
-    testing.assert(Address.parse("127.0.0.1.1:80").is_err(), "five octets parsed")?
-    testing.assert(Address.parse("127..0.1:80").is_err(), "an empty octet parsed")?
-    testing.assert(Address.parse("127.0.0.1:").is_err(), "an empty port parsed")?
-    testing.assert(Address.parse("127.0.0.1:80x").is_err(), "a trailing byte parsed")?
-    testing.assert(Address.parse("127.0.0.1:0000080").is_err(), "a seven-digit port parsed")?
-    testing.assert(Address.parse("010.0.0.1:80").is_err(), "an octet with a leading zero parsed")?
-    testing.assert(Address.parse("1.2.3.4:080").is_err(), "a port with a leading zero parsed")?
-    testing.assert_eq(Address.parse("0.0.0.0:0").unwrap(), any(0), "a zero field was refused")?
-    .Ok(())
-}
+    test fn an_address_refuses_what_is_not_ipv4() {
+        testing.assert(Address.parse("256.0.0.1:80").is_err(), "an octet past 255 parsed")?
+        testing.assert(Address.parse("127.0.0.1").is_err(), "a missing port parsed")?
+        testing.assert(Address.parse("127.0.0.1:65536").is_err(), "a port past 65535 parsed")?
+        testing.assert(Address.parse("127.0.0:80").is_err(), "three octets parsed")?
+        testing.assert(Address.parse("127.0.0.1.1:80").is_err(), "five octets parsed")?
+        testing.assert(Address.parse("127..0.1:80").is_err(), "an empty octet parsed")?
+        testing.assert(Address.parse("127.0.0.1:").is_err(), "an empty port parsed")?
+        testing.assert(Address.parse("127.0.0.1:80x").is_err(), "a trailing byte parsed")?
+        testing.assert(Address.parse("127.0.0.1:0000080").is_err(), "a seven-digit port parsed")?
+        testing.assert(Address.parse("010.0.0.1:80").is_err(), "an octet with a leading zero parsed")?
+        testing.assert(Address.parse("1.2.3.4:080").is_err(), "a port with a leading zero parsed")?
+        testing.assert_eq(Address.parse("0.0.0.0:0").unwrap(), any(0), "a zero field was refused")?
+        .Ok(())
+    }
 
-impl Address {
     // The runtime packs the host-order address above a 16-bit port.
     fn packed(self: Self) -> UInt64 {
         var host: UInt64 = 0
@@ -152,12 +148,12 @@ impl Address {
         let d = UInt8(host % octet_span)
         Address.v4(a, b, c, d, UInt16(bits % port_span))
     }
-}
 
-test fn an_address_survives_the_runtime_packing() {
-    let address = Address.v4(192, 168, 1, 254, 65535)
-    testing.assert_eq(Address.unpacked(Int64(address.packed())), address, "packing lost a part")?
-    .Ok(())
+    test fn an_address_survives_the_runtime_packing() {
+        let address = Address.v4(192, 168, 1, 254, 65535)
+        testing.assert_eq(Address.unpacked(Int64(address.packed())), address, "packing lost a part")?
+        .Ok(())
+    }
 }
 
 // An octet holds 2^8 values.

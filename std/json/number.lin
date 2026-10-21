@@ -64,11 +64,33 @@ impl Number[mem.SystemAllocator] {
     pub fn parse(input: Str) -> Result[Self, NumberError] where carries() {
         Number.parse_in(mem.system(), input)
     }
-}
 
-test fn number_parse_keeps_the_token_in_the_system_allocator() {
-    defer let number = Number.parse("-1.5e3").unwrap()
-    testing.assert_eq(number.text(), "-1.5e3", "number spelling changed")?
+    test fn number_parse_keeps_the_token_in_the_system_allocator() {
+        defer let number = Number.parse("-1.5e3").unwrap()
+        testing.assert_eq(number.text(), "-1.5e3", "number spelling changed")?
+    }
+
+    // Make the number whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
+        Number.from_int_in(mem.system(), value)
+    }
+
+    test fn from_int_keeps_the_token_in_the_system_allocator() {
+        defer let number = Number.from_int(-42).unwrap()
+        testing.assert_eq(number.text(), "-42", "signed constructor changed decimal text")?
+    }
+
+    // Make the number whose token is the decimal text of `value`, in the
+    // system allocator.
+    pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
+        Number.from_uint_in(mem.system(), value)
+    }
+
+    test fn from_uint_keeps_the_token_in_the_system_allocator() {
+        defer let number = Number.from_uint(42).unwrap()
+        testing.assert_eq(number.text(), "42", "unsigned constructor changed decimal text")?
+    }
 }
 
 test fn number_requires_one_complete_json_token() {
@@ -145,90 +167,58 @@ impl[A: Allocator] Number[A] {
     pub fn text(self: Self) -> Str where borrows(self) {
         self.token.view()
     }
-}
 
-test fn text_returns_the_token_as_it_was_written() {
-    defer let number = Number.parse("-1.50E+3").unwrap()
-    testing.assert_eq(number.text(), "-1.50E+3", "the token was rewritten")?
-    .Ok(())
-}
+    test fn text_returns_the_token_as_it_was_written() {
+        defer let number = Number.parse("-1.50E+3").unwrap()
+        testing.assert_eq(number.text(), "-1.50E+3", "the token was rewritten")?
+        .Ok(())
+    }
 
-impl[A: Allocator] Number[A] {
     // Make the number whose token is the decimal text of `value`.
     pub fn from_int_in(allocator: A, value: Int64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
         .Ok(.{ token = fmt.render_owned_in(allocator, value)? })
     }
-}
 
-test fn from_int_uses_the_exact_decimal_text() {
-    defer let signed = Number.from_int(Int64.min).unwrap()
-    testing.assert_eq(signed.text(), "-9223372036854775808", "signed constructor changed decimal text")?
-    defer let arena = mem.Arena.open(mem.system(), 8)
-    match Number.from_int_in(arena.handle(), Int64.min) {
-        Ok(number) => {
-            number.release()
-            testing.assert(false, "full arena formatted an integer")?
-        },
-        Err(_) => {},
+    test fn from_int_uses_the_exact_decimal_text() {
+        defer let signed = Number.from_int(Int64.min).unwrap()
+        testing.assert_eq(signed.text(), "-9223372036854775808", "signed constructor changed decimal text")?
+        defer let arena = mem.Arena.open(mem.system(), 8)
+        match Number.from_int_in(arena.handle(), Int64.min) {
+            Ok(number) => {
+                number.release()
+                testing.assert(false, "full arena formatted an integer")?
+            },
+            Err(_) => {},
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-impl Number[mem.SystemAllocator] {
-    // Make the number whose token is the decimal text of `value`, in the
-    // system allocator.
-    pub fn from_int(value: Int64) -> Result[Self, mem.Oom] {
-        Number.from_int_in(mem.system(), value)
+    test fn an_integer_number_keeps_its_token_in_an_arena() {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        defer let number = Number.from_int_in(arena.handle(), -42).unwrap()
+        testing.assert_eq(number.text(), "-42", "an integer formatted into an arena changed its token")?
+        .Ok(())
     }
-}
 
-test fn from_int_keeps_the_token_in_the_system_allocator() {
-    defer let number = Number.from_int(-42).unwrap()
-    testing.assert_eq(number.text(), "-42", "signed constructor changed decimal text")?
-}
-
-test fn an_integer_number_keeps_its_token_in_an_arena() {
-    defer let arena = mem.Arena.open(mem.system(), 64)
-    defer let number = Number.from_int_in(arena.handle(), -42).unwrap()
-    testing.assert_eq(number.text(), "-42", "an integer formatted into an arena changed its token")?
-    .Ok(())
-}
-
-impl[A: Allocator] Number[A] {
     // Make the number whose token is the decimal text of `value`.
     pub fn from_uint_in(allocator: A, value: UInt64) -> Result[Self, mem.Oom] where carries(.Ok: allocator) {
         .Ok(.{ token = fmt.render_owned_in(allocator, value)? })
     }
-}
 
-test fn from_uint_uses_the_exact_decimal_text() {
-    defer let unsigned = Number.from_uint(UInt64.max).unwrap()
-    testing.assert_eq(unsigned.text(), "18446744073709551615", "unsigned constructor changed decimal text")?
-    defer let arena = mem.Arena.open(mem.system(), 8)
-    match Number.from_uint_in(arena.handle(), UInt64.max) {
-        Ok(number) => {
-            number.release()
-            testing.assert(false, "full arena formatted an unsigned integer")?
-        },
-        Err(_) => {},
+    test fn from_uint_uses_the_exact_decimal_text() {
+        defer let unsigned = Number.from_uint(UInt64.max).unwrap()
+        testing.assert_eq(unsigned.text(), "18446744073709551615", "unsigned constructor changed decimal text")?
+        defer let arena = mem.Arena.open(mem.system(), 8)
+        match Number.from_uint_in(arena.handle(), UInt64.max) {
+            Ok(number) => {
+                number.release()
+                testing.assert(false, "full arena formatted an unsigned integer")?
+            },
+            Err(_) => {},
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-impl Number[mem.SystemAllocator] {
-    // Make the number whose token is the decimal text of `value`, in the
-    // system allocator.
-    pub fn from_uint(value: UInt64) -> Result[Self, mem.Oom] {
-        Number.from_uint_in(mem.system(), value)
-    }
-}
-
-test fn from_uint_keeps_the_token_in_the_system_allocator() {
-    defer let number = Number.from_uint(42).unwrap()
-    testing.assert_eq(number.text(), "42", "unsigned constructor changed decimal text")?
-}
-
-impl[A: Allocator] Number[A] {
     // Read the number as an Int64. A fraction or exponent is NotInteger even
     // when its value is whole, and a value outside Int64 is OutOfRange.
     pub fn as_int64(self: Self) -> Result[Int64, NumberAccessError] where carries() {
@@ -242,27 +232,25 @@ impl[A: Allocator] Number[A] {
             Err(_) => .Err(.OutOfRange),
         }
     }
-}
 
-test fn as_int64_checks_kind_and_range() {
-    defer let signed = Number.parse("-9223372036854775808").unwrap()
-    defer let positive = Number.parse("9223372036854775807").unwrap()
-    defer let negative_zero = Number.parse("-0").unwrap()
-    defer let unsigned = Number.parse("18446744073709551615").unwrap()
-    defer let too_small = Number.parse("-9223372036854775809").unwrap()
-    testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed minimum changed")?
-    testing.assert_eq(positive.as_int64().unwrap(), Int64.max, "signed maximum changed")?
-    testing.assert_eq(negative_zero.as_int64().unwrap(), Int64(0), "signed negative zero changed")?
-    testing.assert(match unsigned.as_int64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "large unsigned integer became signed")?
-    testing.assert(match too_small.as_int64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "signed overflow was accepted")?
-    for input in ["1.00", "1e0", "1E+0"] {
-        defer let number = Number.parse(input).unwrap()
-        testing.assert(match number.as_int64() { Err(reason) => reason == NumberAccessError.NotInteger, _ => false }, "fraction or exponent became signed integer")?
+    test fn as_int64_checks_kind_and_range() {
+        defer let signed = Number.parse("-9223372036854775808").unwrap()
+        defer let positive = Number.parse("9223372036854775807").unwrap()
+        defer let negative_zero = Number.parse("-0").unwrap()
+        defer let unsigned = Number.parse("18446744073709551615").unwrap()
+        defer let too_small = Number.parse("-9223372036854775809").unwrap()
+        testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed minimum changed")?
+        testing.assert_eq(positive.as_int64().unwrap(), Int64.max, "signed maximum changed")?
+        testing.assert_eq(negative_zero.as_int64().unwrap(), Int64(0), "signed negative zero changed")?
+        testing.assert(match unsigned.as_int64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "large unsigned integer became signed")?
+        testing.assert(match too_small.as_int64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "signed overflow was accepted")?
+        for input in ["1.00", "1e0", "1E+0"] {
+            defer let number = Number.parse(input).unwrap()
+            testing.assert(match number.as_int64() { Err(reason) => reason == NumberAccessError.NotInteger, _ => false }, "fraction or exponent became signed integer")?
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-impl[A: Allocator] Number[A] {
     // Read the number as the nearest Float64. A value too large or too small
     // for Float64 to hold is OutOfRange.
     pub fn as_float64(self: Self) -> Result[Float64, NumberAccessError] where carries() {
@@ -271,25 +259,23 @@ impl[A: Allocator] Number[A] {
             Err(_) => .Err(.OutOfRange),
         }
     }
-}
 
-test fn number_float_access_rounds_without_changing_the_token() {
-    let number = Number.parse("9007199254740993.0").unwrap()
-    let rounded = number.as_float64().unwrap()
-    let token_unchanged = number.text() == "9007199254740993.0"
-    number.release()
-    testing.assert(token_unchanged, "float conversion changed the token")?
-    testing.assert_eq(rounded, 9007199254740992.0, "float conversion did not round to even")?
-    defer let negative_zero = Number.parse("-0.0e12").unwrap()
-    testing.assert(1.0 / negative_zero.as_float64().unwrap() < 0.0, "float conversion lost negative zero")?
-    for input in ["1e400", "1e-400"] {
-        defer let outside = Number.parse(input).unwrap()
-        testing.assert(match outside.as_float64() { Err(error) => error == NumberAccessError.OutOfRange, Ok(_) => false }, "float conversion accepted range loss")?
-        testing.assert_eq(outside.text(), input, "failed float conversion changed the token")?
+    test fn number_float_access_rounds_without_changing_the_token() {
+        let number = Number.parse("9007199254740993.0").unwrap()
+        let rounded = number.as_float64().unwrap()
+        let token_unchanged = number.text() == "9007199254740993.0"
+        number.release()
+        testing.assert(token_unchanged, "float conversion changed the token")?
+        testing.assert_eq(rounded, 9007199254740992.0, "float conversion did not round to even")?
+        defer let negative_zero = Number.parse("-0.0e12").unwrap()
+        testing.assert(1.0 / negative_zero.as_float64().unwrap() < 0.0, "float conversion lost negative zero")?
+        for input in ["1e400", "1e-400"] {
+            defer let outside = Number.parse(input).unwrap()
+            testing.assert(match outside.as_float64() { Err(error) => error == NumberAccessError.OutOfRange, Ok(_) => false }, "float conversion accepted range loss")?
+            testing.assert_eq(outside.text(), input, "failed float conversion changed the token")?
+        }
     }
-}
 
-impl[A: Allocator] Number[A] {
     // Read the number as a UInt64. A fraction or exponent is NotInteger even
     // when its value is whole, and a negative value or one past UInt64.max is
     // OutOfRange.
@@ -308,20 +294,20 @@ impl[A: Allocator] Number[A] {
             Err(_) => .Err(.OutOfRange),
         }
     }
-}
 
-test fn as_uint64_checks_kind_sign_and_range() {
-    defer let unsigned = Number.parse("18446744073709551615").unwrap()
-    defer let signed = Number.parse("-9223372036854775808").unwrap()
-    defer let negative_zero = Number.parse("-0").unwrap()
-    defer let too_large = Number.parse("18446744073709551616").unwrap()
-    testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned maximum changed")?
-    testing.assert(match negative_zero.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "negative zero became unsigned")?
-    testing.assert(match signed.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "negative integer became unsigned")?
-    testing.assert(match too_large.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "unsigned overflow was accepted")?
-    for input in ["1.00", "1e0", "1E+0"] {
-        defer let number = Number.parse(input).unwrap()
-        testing.assert(match number.as_uint64() { Err(reason) => reason == NumberAccessError.NotInteger, _ => false }, "fraction or exponent became unsigned integer")?
+    test fn as_uint64_checks_kind_sign_and_range() {
+        defer let unsigned = Number.parse("18446744073709551615").unwrap()
+        defer let signed = Number.parse("-9223372036854775808").unwrap()
+        defer let negative_zero = Number.parse("-0").unwrap()
+        defer let too_large = Number.parse("18446744073709551616").unwrap()
+        testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned maximum changed")?
+        testing.assert(match negative_zero.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "negative zero became unsigned")?
+        testing.assert(match signed.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "negative integer became unsigned")?
+        testing.assert(match too_large.as_uint64() { Err(reason) => reason == NumberAccessError.OutOfRange, _ => false }, "unsigned overflow was accepted")?
+        for input in ["1.00", "1e0", "1E+0"] {
+            defer let number = Number.parse(input).unwrap()
+            testing.assert(match number.as_uint64() { Err(reason) => reason == NumberAccessError.NotInteger, _ => false }, "fraction or exponent became unsigned integer")?
+        }
+        .Ok(())
     }
-    .Ok(())
 }
