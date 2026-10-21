@@ -36,14 +36,9 @@ fn primes_below(limit: UInt64) -> Result[UInt64, Oom] {
         }
         prime += 1
     }
-    // Count the candidates still marked prime.
-    var count: UInt64 = 0
-    for read candidate in candidates {
-        if candidate {
-            count += 1
-        }
-    }
-    .Ok(count)
+    // `filter` keeps the candidates still marked prime, and `count` says how
+    // many there are.
+    .Ok(candidates.as_slice().filter(|candidate| *candidate).count())
 }
 
 test fn a_sieve_counts_the_primes_below_its_limit() {

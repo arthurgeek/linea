@@ -2243,6 +2243,111 @@ test "the guide gate: a program without pasted output is only checked, and outpu
     try testing.expectEqual(@as(usize, 3), loose.problems[0].line);
 }
 
+test "the guide gate: an excerpt marker holds a fragment to consecutive lines of its file" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "examples/guest-book");
+    try tmp.dir.writeFile(
+        io,
+        .{
+            .sub_path = "examples/guest-book/main.lin",
+            .data =
+            \\import std.http
+            \\
+            \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+            \\    &router.route("GET /", home)?
+            \\    &router.route("POST /sign", sign)
+            \\}
+            \\
+            \\fn main() -> UInt8 {
+            \\    0
+            \\}
+            \\
+            ,
+        },
+    );
+
+    const readWithRoot = struct {
+        fn call(a: std.mem.Allocator, i: std.Io, dir: std.Io.Dir, text: []const u8) source.GuideReading {
+            var chapter = guide_chapter;
+            chapter.text = text;
+            chapter.root = .{ .io = i, .dir = dir };
+            return source.readGuideChapter(a, chapter);
+        }
+    }.call;
+
+    const matching = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+        \\    &router.route("GET /", home)?
+        \\    &router.route("POST /sign", sign)
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    0
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), matching.problems.len);
+    try testing.expectEqual(@as(usize, 0), matching.programs.len);
+    try testing.expectEqual(@as(usize, 1), matching.fragments);
+
+    const altered = readWithRoot(gpa, io, tmp.dir,
+        \\Prose.
+        \\
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```linea
+        \\fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+        \\    &router.route("GET /", home)?
+        \\    &router.route("POST /changed", sign)
+        \\}
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), altered.problems.len);
+    try testing.expectEqual(@as(usize, 4), altered.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, altered.problems[0].message, "examples/guest-book/main.lin") != null);
+
+    const missing = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/missing.lin -->
+        \\```linea
+        \\let x = 1
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), missing.problems.len);
+    try testing.expectEqual(@as(usize, 2), missing.problems[0].line);
+    try testing.expect(std.mem.indexOf(u8, missing.problems[0].message, "examples/guest-book/missing.lin") != null);
+
+    const above_sh = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```sh
+        \\linea run examples/guest-book
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), above_sh.problems.len);
+    try testing.expectEqual(@as(usize, 2), above_sh.problems[0].line);
+
+    const above_output = readWithRoot(gpa, io, tmp.dir,
+        \\<!-- guide: excerpt examples/guest-book/main.lin -->
+        \\```
+        \\some output
+        \\```
+        \\
+    );
+    try testing.expect(above_output.problems.len >= 1);
+    try testing.expectEqual(@as(usize, 2), above_output.problems[0].line);
+}
+
 test "a sequential run orders exactly the heavy steps its suite selects" {
     // The unit tests come first: they fail most often, and a failure stops
     // every step ordered after it.

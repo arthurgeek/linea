@@ -1237,7 +1237,9 @@ error[M-Dependency]: the manifest of `pallets` grants it `extern`, and this entr
 
 When two libraries link the same C library, or a program and its library
 both name it, the link names it in each place it is asked for, so a static
-archive is found after everything that needs it.
+archive is found after everything that needs it. [A guest book](12-a-guest-book.md)
+wraps SQLite in a library of this shape and builds a web application on top of
+it.
 
 ## Callbacks: C calling Linea
 
@@ -1575,3 +1577,6 @@ trusted can neither declare C nor read a `std.ffi` value, and every borrow a
 declaration states is checked like any other. Keep the wrapper small and keep
 these checks next to the declarations, and the rest of the program gets
 Linea's guarantees about C as it does about everything else.
+
+Next: [A guest book](12-a-guest-book.md) — a SQLite wrapper library, embedded
+templates, and a CGI or standalone web application.

@@ -98,9 +98,11 @@ until it is green.
   `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers, `= help:`/`= note:` lines and underline
   labels must still read like ones the compiler prints (wording found in the
   gate's own runs or in the `.stderr` goldens under `tests/`), so a new message
-  shown only there needs a corpus case that prints it. A fenced block that is
-  neither compiled nor marked fails the gate. A location inside `std/` is
-  compared by file alone.
+  shown only there needs a corpus case that prints it. A `linea` block carrying
+  `<!-- guide: excerpt PATH -->` above it is counted as a fragment and held to
+  be consecutive lines of `PATH` relative to the repository root. A fenced block
+  that is neither compiled nor marked fails the gate. A location inside `std/`
+  is compared by file alone.
 - A case is a `.lin` file or a directory holding `main.lin`; a module is a
   directory, and its goldens sit beside the directory under its own name.
   Examples keep only what a reader wants: their goldens sit in `tests/examples/`

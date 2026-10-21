@@ -105,6 +105,11 @@ error[O-Move]: `scores` has already been moved
 
 Files, sockets and connections follow the same rule with `close()`.
 
+For a whole application that combines a C library wrapper, linear handles,
+embedded SQL and HTML templates, cookies, and HTTP routing, see the
+[guest book example](examples/guest-book) and the guide chapter
+[A guest book](docs/learn/12-a-guest-book.md).
+
 Linea is unreleased and changes without notice.
 
 ## Get started

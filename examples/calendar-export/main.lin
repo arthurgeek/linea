@@ -251,12 +251,8 @@ test fn a_year_streams_one_line_per_day() {
     let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
     let csv = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
     let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
-    var lines: UInt64 = 0
-    for byte in calendar_text.as_bytes() {
-        if *byte == 10 {
-            lines += 1
-        }
-    }
+    // `filter` keeps the newline bytes, and `count` says how many there are.
+    let lines = calendar_text.as_bytes().filter(|byte| *byte == 10).count()
     testing.assert(calendar_text.starts_with("date,weekday,day_of_year\n2024-01-01,Monday,1\n"), "the calendar's first lines changed")?
     testing.assert(calendar_text.ends_with("2024-12-31,Tuesday,366\n"), "the calendar's last line changed")?
     testing.assert_eq(lines, 367, "a leap year did not have 366 days and a header")?

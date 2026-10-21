@@ -71,6 +71,7 @@ true of a different implementation.
 | [0207](0207-linea-converts-nothing-implicitly.md) | Linea converts nothing implicitly | Accepted; extends 0018 and 0061 |
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192 |
+| [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Proposed; would extend 0192 and 0203 |
 | [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106 |
 | [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152 and 0207 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
@@ -161,6 +162,7 @@ true of a different implementation.
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
 | [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
+| [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |
@@ -175,7 +177,8 @@ true of a different implementation.
 | [0167](0167-a-binding-handles-its-failure-with-else.md) | A binding handles its failure with `else` | Accepted; builds on 0070 and 0106; refines 0041; extended by 0224 |
 | [0168](0168-multi-line-text-is-a-run-of-backslash-lines.md) | Multi-line text is a run of `\\` lines, raw, joined with line breaks | Accepted |
 | [0227](0227-a-program-embeds-a-files-bytes.md) | A program embeds a file's text or bytes, read when it is compiled: `embed` and `embed_bytes` | Accepted; extends 0075, 0096, 0140 and 0178 |
-| [0169](0169-an-interpolation-lays-out-its-value-through-a-format-spec.md) | An interpolation lays out its value through a format spec checked against its type and applied by `std.fmt` | Accepted |
+| [0169](0169-an-interpolation-lays-out-its-value-through-a-format-spec.md) | An interpolation lays out its value through a format spec checked against its type and applied by `std.fmt` | Accepted; extended by 0231 |
+| [0231](0231-a-format-spec-writes-an-integer-in-hexadecimal.md) | A format spec writes an integer in hexadecimal with `x` or `X`, and the library has one hexadecimal alphabet: `text.hex_encoded`, `hex_decode` | Accepted; extends 0169 |
 | [0170](0170-a-marked-postfix-call-lends-its-receiver.md) | A marked postfix call lends its receiver | Accepted; extended by 0195 |
 | [0195](0195-a-walk-may-borrow-the-iterator-it-advances.md) | A walk may borrow the iterator it advances | Accepted; extends 0170 |
 | [0175](0175-a-borrowed-temporary-lives-until-the-end-of-its-statement.md) | A borrowed temporary lives until the end of its statement, and an interpolation borrows what it renders | Accepted; refines 0123 |

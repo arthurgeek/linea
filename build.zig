@@ -1249,6 +1249,7 @@ const HeavySteps = struct {
         if (toolchain.sanitizeVariable(self.sanitize.flag())) |variable| run.setEnvironmentVariable(variable.name, variable.value);
         run.addArg(b.pathJoin(&.{ self.scratch, "guide" }));
         run.addArg(b.pathFromRoot("tests"));
+        run.addArg(b.pathFromRoot("."));
         if (self.walkers) |n| run.addArg(b.fmt("{d}", .{n}));
         run.has_side_effects = true;
         return run;

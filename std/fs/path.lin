@@ -1,6 +1,7 @@
 import std.env
 import std.mem
 import std.testing
+import std.text
 
 // A path is the byte string the operating system resolves. The runtime passes
 // paths NUL-terminated, so a path holds no NUL byte; any other bytes, including
@@ -175,8 +176,6 @@ impl Display for Path {
         match Str.from_bytes(self.bytes) {
             Ok(value) => value.fmt(&w),
             Err(_) => {
-                // Index each four-bit nibble into the lowercase hexadecimal alphabet.
-                let digits = "0123456789abcdef"
                 for index in 0..self.bytes.length() {
                     let byte = self.bytes[index]
                     // Printable ASCII is 32..126; escape backslash (92) too.
@@ -185,10 +184,7 @@ impl Display for Path {
                         &w.write_str(Str.from_bytes(one).unwrap())?
                     } else {
                         &w.write_str(r"\x")?
-                        let high = UInt64(byte / 16)
-                        let low = UInt64(byte % 16)
-                        &w.write_str(digits.slice(from: high, to: high + 1).unwrap())?
-                        &w.write_str(digits.slice(from: low, to: low + 1).unwrap())?
+                        text.hex_encoded(self.bytes.subspan(start: index, count: 1).unwrap()).fmt(&w)?
                     }
                 }
                 return .Ok(())

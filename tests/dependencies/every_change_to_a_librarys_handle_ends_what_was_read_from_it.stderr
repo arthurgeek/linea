@@ -1,63 +1,63 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:36:9
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:34:9
    |
-36 |         named_reset(self.handle)
+34 |         named_reset(self.handle)
    |         ^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-37 |         let length = name.length()
+35 |         let length = name.length()
    |                      ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:44:9
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:42:9
    |
-44 |         named_replace(&self.handle)
+42 |         named_replace(&self.handle)
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-45 |         let length = name.length()
+43 |         let length = name.length()
    |                      ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:54:5
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:52:5
    |
-54 |     named_reset(held)
+52 |     named_reset(held)
    |     ^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-55 |     let length = name.length()
+53 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:64:5
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:62:5
    |
-64 |     named_replace(&held)
+62 |     named_replace(&held)
    |     ^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-65 |     let length = name.length()
+63 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:74:17
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:72:17
    |
-74 |     named_close(held)
+72 |     named_close(held)
    |                 ^^^^ keep this place available until the last use of its observation
-75 |     let length = name.length()
+73 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:83:5
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:81:5
    |
-83 |     named_reset(box.handle)
+81 |     named_reset(box.handle)
    |     ^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-84 |     let length = name.length()
+82 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:92:5
+  --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:90:5
    |
-92 |     named_reset(handle)
+90 |     named_reset(handle)
    |     ^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-93 |     let length = name.length()
+91 |     let length = name.length()
    |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-   --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:108:5
+   --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:106:5
     |
-108 |     named_replace(&box.handle)
+106 |     named_replace(&box.handle)
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-109 |     let length = name.length()
+107 |     let length = name.length()
     |                  ---- the observation is still used here
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-   --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:117:5
+   --> tests/dependencies/every_change_to_a_librarys_handle_ends_what_was_read_from_it/named/named.lin:115:5
     |
-117 |     named_replace(&handle)
+115 |     named_replace(&handle)
     |     ^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-118 |     let length = name.length()
+116 |     let length = name.length()
     |                  ---- the observation is still used here

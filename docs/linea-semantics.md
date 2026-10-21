@@ -531,9 +531,9 @@ argument are refused. Both words are reserved and written with their
 parentheses; neither is a callable value.
 
 **[S-Format]** An expression inside an interpolation may be followed by a
-colon and a format spec, `[[fill]align][+][0][width][.precision][?]`, each
-part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
-`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`. A colon begins a spec only
+colon and a format spec, `[[fill]align][+][0][width][.precision][x|X|?]`,
+each part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
+`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`, `"{color:06x}"`. A colon begins a spec only
 outside every parenthesis, bracket and brace of the value, so the colon in
 `"{f(n: 1)}"` names an argument. Spaces around the spec are not part of it.
 
@@ -555,17 +555,22 @@ outside every parenthesis, bracket and brace of the value, so the colon in
   occupies, counted in Unicode scalars: `"café"` occupies four. A value wider
   than its width is written whole.
 - `.precision` is the number of digits after a Float64's point.
+- `x` writes an integer's digits in base 16 with the letters `a` to `f`, and
+  `X` with `A` to `F`. A negative integer is written as `-` and the digits of
+  its magnitude, so `-255` with `:x` is `-ff` whatever its type, and zero
+  padding goes between the two: `-000ff` with `:06x`.
 
-A colon with no spec after it, a part out of order, an alignment or `0`
-without a width, a width or precision above 65535, and `0` beside an alignment
-are refused. A width and a precision are literal numbers; a width chosen at run
+A colon with no spec after it, a part out of order, more than one of `x`, `X`
+and `?`, an alignment or `0` without a width, a width or precision above
+65535, and `0` beside an alignment are refused. A width and a precision are literal numbers; a width chosen at run
 time is written through `std.fmt.Spec` instead.
 
 **[T-Format]** A spec's parts must suit the value's type. A sign and zero
-padding lay out integers and `Float64`, and a precision lays out `Float64`
-only; fill, alignment and width lay out any value. A generic value is a number
-when it has `Integer` evidence. `"{name:.2}"` on a `Str` and `"{count:.2}"` on
-an integer are refused.
+padding lay out integers and `Float64`, a precision lays out `Float64` only,
+and `x` and `X` write integers only; fill, alignment and width lay out any
+value. A generic value is a number, and an integer, when it has `Integer`
+evidence. `"{name:.2}"` on a `Str`, `"{count:.2}"` on an integer and
+`"{price:x}"` on a `Float64` are refused.
 
 **[T-Interpolation]** The compiler creates a type for each interpolated
 literal. Its value contains the surrounding text and the interpolated values.
@@ -3670,6 +3675,14 @@ capability at every projection, just as assignment through a bracket does.
 [T-Lend] defines the type requirements for a lending traversal. The binder has
 the place's element type, is rebound once per position, and is scoped to the
 body.
+
+A walked value may observe the storage its places sit in rather than own it: a
+`mem.Slice[T]` views elements another value owns, and a type whose projection
+indexes a slice it holds reaches them the same way. Each binder of such a walk
+then depends on what the walked value observes, as `view[i]` depends on
+`view`. Writing, growing or releasing that storage while a binder, or a borrow
+of one, is still used is [O-Borrow]. A slice's projection declares `read self`,
+so `for inout` over a slice is [N-Immutable].
 
 A range takes its endpoint type from an expected `Range[T]` or a known opposite
 endpoint. Otherwise numeric literals use their ordinary default. Known endpoints

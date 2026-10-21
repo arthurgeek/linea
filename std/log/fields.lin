@@ -113,8 +113,8 @@ test fn added_fields_are_written_in_order() {
 test fn a_value_is_quoted_when_it_could_not_be_read_back_otherwise() {
     defer let text = fields_text(field("empty", "").and("spaced", "not found").and("equals", "a=b").and("plain", "/items/7"))
     testing.assert_eq(text.view(), r#" empty="" spaced="not found" equals="a=b" plain=/items/7"#, "quoting changed")?
-    defer let escaped = fields_text(field("text", "say \"hi\"\n\ttab\\ \u{1}"))
-    testing.assert_eq(escaped.view(), r#" text="say \"hi\"\n\ttab\\ \u0001""#, "escaping changed")?
+    defer let escaped = fields_text(field("text", "say \"hi\"\n\ttab\\ \u{1}\u{1f}\u{7f}"))
+    testing.assert_eq(escaped.view(), r#" text="say \"hi\"\n\ttab\\ \u0001\u001f\u007f""#, "escaping changed")?
     .Ok(())
 }
 
@@ -261,10 +261,6 @@ impl Writer for Scan {
     }
 }
 
-// `hex_digits` spells a byte of a `\u00XX` escape as two lowercase
-// hexadecimal digits.
-let hex_digits: Str = "0123456789abcdef"
-
 // Append `s` to `text` escaped for a quoted value. Runs of bytes that need no
 // escape are appended whole.
 fn append_escaped[A: Allocator](inout text: String[A], s: Str) -> Result[(), mem.Oom] where carries() {
@@ -276,17 +272,13 @@ fn append_escaped[A: Allocator](inout text: String[A], s: Str) -> Result[(), mem
         let needs_escape = b < ascii_space || b == ascii_delete || b == ascii_quote || b == ascii_backslash
         if needs_escape {
             &text.append(s.slice(start, at).unwrap())?
-            &text.append(match read b {
-                9 => r"\t",
-                10 => r"\n",
-                13 => r"\r",
-                34 => r#"\""#,
-                92 => r"\\",
-                _ => r"\u00",
-            })?
-            if b != 9 && b != 10 && b != 13 && b != ascii_quote && b != ascii_backslash {
-                &text.append(hex_digits.slice(UInt64(b / 16), UInt64(b / 16) + 1).unwrap())?
-                &text.append(hex_digits.slice(UInt64(b % 16), UInt64(b % 16) + 1).unwrap())?
+            match read b {
+                9 => &text.append(r"\t")?,
+                10 => &text.append(r"\n")?,
+                13 => &text.append(r"\r")?,
+                34 => &text.append(r#"\""#)?,
+                92 => &text.append(r"\\")?,
+                _ => "\\u{b:04x}".fmt(&text)?,
             }
             start = at + 1
         }

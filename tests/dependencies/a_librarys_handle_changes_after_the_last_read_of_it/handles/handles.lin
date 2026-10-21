@@ -1,5 +1,3 @@
-// Written by tests/ffi/make-handle-matrix.py, which writes the whole matrix;
-// change the script and run it rather than editing this file.
 // A handle to an object C holds, sealed so only this library makes one.
 @(opaque, linear)
 type Name = UInt64
