@@ -56,12 +56,10 @@ fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
 // `App.open` opens `Book` once before accepting connections; because
 // `http.listen_and_serve` answers one connection at a time, every request shares
 // that single connection and `app.close()` closes it on shutdown.
-@linear
+@(linear, derive(Release))
 struct App {
     book: Book,
 }
-
-derive Release for App
 
 impl App {
     fn open(path: Str) -> Result[App, BookError] where carries(path) {
