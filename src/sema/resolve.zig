@@ -5188,10 +5188,10 @@ pub fn reachedWithoutACall(ast: *const Ast, d: DeclId, in_root: bool) bool {
     if (!ast.declIsTest(d)) return false;
 
     // The same two conditions the entry point is held to. A test the parser
-    // refused -- inside an `impl`, or on something that is not a function --
+    // refused -- inside a trait impl, or on something that is not a function --
     // is not a body anything runs, so it is not exempt from being unused
     // either.
-    return ast.declTag(d) == .function and ast.declOwner(d) == TokenId.none;
+    return ast.declTag(d) == .function and ast.declTrait(d) == TokenId.none;
 }
 
 /// What a compilation is for.
@@ -6677,7 +6677,13 @@ const Resolver = struct {
             // A declaration inside a type is reached through the type's name,
             // so it is not a name in the module. Its binding is made all the
             // same: the unused rule applies to it like any other.
+            // A test inside an inherent impl is organized at module scope
+            // rather than becoming a callable member of the type.
             if (self.ast.declOwner(d) != TokenId.none) {
+                if (self.ast.declIsTest(d)) {
+                    try self.declareTop(d);
+                    continue;
+                }
                 try self.declareMember(d);
                 continue;
             }
@@ -11477,7 +11483,7 @@ const Resolver = struct {
                 // top-level name, an import's included, of another in its
                 // module's run -- the two places [N-Duplicate] asks.
                 const module = self.program.moduleOf(d);
-                const namespace: Namespace = if (source.declOwner(d) == TokenId.none)
+                const namespace: Namespace = if (source.declOwner(d) == TokenId.none or source.declIsTest(d))
                     .{ .module_run = module }
                 else
                     .{ .members = .{ .module = module, .owner = source.tokenName(source.declOwner(d)) } };
@@ -12336,6 +12342,7 @@ const Resolver = struct {
         @memset(of_decl, DeclId.none);
         for (0..self.ast.declCount()) |i| {
             const d = DeclId.at(@intCast(i));
+            if (self.ast.declIsTest(d)) continue;
             const of = self.ast.declOwner(d);
             if (of == TokenId.none) continue;
             of_decl[i] = self.impl_of_head.get(of) orelse DeclId.none;

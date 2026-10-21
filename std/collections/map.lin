@@ -377,17 +377,17 @@ impl[K, V, A: Allocator] Map[K, V, A] {
     pub fn new_in(allocator: A) -> Self where carries(allocator) {
         .{ slots = Vec.new_in(allocator), allocator = copy(allocator), len = 0, used = 0 }
     }
-}
 
-test fn a_map_built_in_an_allocator_holds_no_entries() {
-    let arena = mem.Arena.open(mem.system(), size: 8)
-    let values: Map[UInt64, UInt64, mem.Handle] = Map.new_in(arena.handle())
-    let length = values.length()
-    let absent = values.get(1).is_none()
-    values.finish().unwrap()
-    arena.release()
-    testing.assert_eq(length, UInt64(0), "a new map holds an entry")?
-    testing.assert(absent, "a new map found a key")?
+    test fn a_map_built_in_an_allocator_holds_no_entries() {
+        let arena = mem.Arena.open(mem.system(), size: 8)
+        let values: Map[UInt64, UInt64, mem.Handle] = Map.new_in(arena.handle())
+        let length = values.length()
+        let absent = values.get(1).is_none()
+        values.finish().unwrap()
+        arena.release()
+        testing.assert_eq(length, UInt64(0), "a new map holds an entry")?
+        testing.assert(absent, "a new map found a key")?
+    }
 }
 
 impl[K, V] Map[K, V, mem.SystemAllocator] {
@@ -395,35 +395,33 @@ impl[K, V] Map[K, V, mem.SystemAllocator] {
     pub fn new() -> Self {
         Map.new_in(mem.system())
     }
-}
 
-test fn a_new_map_holds_no_entries() {
-    let values: Map[UInt64, UInt64, mem.SystemAllocator] = Map.new()
-    let length = values.length()
-    let absent = values.get(1).is_none()
-    values.finish().unwrap()
-    testing.assert_eq(length, UInt64(0), "a new map holds an entry")?
-    testing.assert(absent, "a new map found a key")?
+    test fn a_new_map_holds_no_entries() {
+        let values: Map[UInt64, UInt64, mem.SystemAllocator] = Map.new()
+        let length = values.length()
+        let absent = values.get(1).is_none()
+        values.finish().unwrap()
+        testing.assert_eq(length, UInt64(0), "a new map holds an entry")?
+        testing.assert(absent, "a new map found a key")?
+    }
 }
 
 impl[K, V, A: Allocator] Map[K, V, A] {
     pub fn length(self: Self) -> UInt64 {
         self.len
     }
-}
 
-test fn length_counts_live_entries_through_replacement_and_removal() {
-    defer var values: Map[UInt64, UInt64] = Map.new()
-    &values.insert(1, 10).unwrap().release()
-    &values.insert(2, 20).unwrap().release()
-    testing.assert_eq(values.length(), UInt64(2), "insertion did not count each new key")?
-    &values.insert(1, 11).unwrap().release()
-    testing.assert_eq(values.length(), UInt64(2), "replacement counted an entry twice")?
-    &values.remove(2).unwrap().release()
-    testing.assert_eq(values.length(), UInt64(1), "removal did not reduce the count")?
-}
+    test fn length_counts_live_entries_through_replacement_and_removal() {
+        defer var values: Map[UInt64, UInt64] = Map.new()
+        &values.insert(1, 10).unwrap().release()
+        &values.insert(2, 20).unwrap().release()
+        testing.assert_eq(values.length(), UInt64(2), "insertion did not count each new key")?
+        &values.insert(1, 11).unwrap().release()
+        testing.assert_eq(values.length(), UInt64(2), "replacement counted an entry twice")?
+        &values.remove(2).unwrap().release()
+        testing.assert_eq(values.length(), UInt64(1), "removal did not reduce the count")?
+    }
 
-impl[K, V, A: Allocator] Map[K, V, A] {
     // Rebuild the table with `capacity` empty buckets, which drops every
     // tombstone. Allocate before transferring entries, so allocation refusal
     // leaves self intact.

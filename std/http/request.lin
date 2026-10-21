@@ -756,16 +756,14 @@ impl[P: Allocator] Request[P] {
     pub fn method_text(self: Self) -> Str where carries(self) {
         stored_part(self.head, self.method_token)
     }
-}
 
-test fn a_request_keeps_its_method_token_as_sent() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
-    .Ok(())
-}
+    test fn a_request_keeps_its_method_token_as_sent() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `path` returns the target up to its `?`, not percent-decoded.
     pub fn path(self: Self) -> Str where carries(self) {
         let target = stored_part(self.head, self.target)
@@ -774,55 +772,51 @@ impl[P: Allocator] Request[P] {
         }
         path
     }
-}
 
-test fn a_path_ends_at_the_query() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
-    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(bare.request().path(), "/a/b", "a path without a query changed")?
-    .Ok(())
-}
+    test fn a_path_ends_at_the_query() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
+        let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(bare.request().path(), "/a/b", "a path without a query changed")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `query` returns the target after its first `?`, not percent-decoded.
     pub fn query(self: Self) -> Option[Str] where carries(.Some: self) {
         let target = stored_part(self.head, self.target)
         let (_, query) = target.split_once("?")?
         .Some(query)
     }
-}
 
-test fn a_query_follows_the_first_question_mark() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
-    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(empty.request().query(), Option.Some(""), "an empty query was absent")?
-    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_eq(none.request().query(), .None, "a target without a query had one")?
-    .Ok(())
-}
+    test fn a_query_follows_the_first_question_mark() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
+        let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(empty.request().query(), Option.Some(""), "an empty query was absent")?
+        let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_eq(none.request().query(), .None, "a target without a query had one")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `header` returns the first value of the header `name`, compared under ASCII
     // case folding. The scan is bounded by the request's header count, which the
     // parser holds to `Limits.max_headers`.
     pub fn header(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
         header_value(self.head, self.header_fields, name)
     }
-}
 
-test fn a_header_is_found_by_its_folded_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nHost: b\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
-    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
-    let request = sent.request()
-    testing.assert_eq(request.header("ACCEPT"), Option.Some("text/plain"), "the first value was not found")?
-    testing.assert_eq(request.header("x-empty"), Option.Some(""), "an empty value was absent")?
-    testing.assert_eq(request.header("Accept-Language"), .None, "an absent header was found")?
-    .Ok(())
+    test fn a_header_is_found_by_its_folded_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let input = "GET / HTTP/1.1\r\nHost: b\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
+        let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+        let request = sent.request()
+        testing.assert_eq(request.header("ACCEPT"), Option.Some("text/plain"), "the first value was not found")?
+        testing.assert_eq(request.header("x-empty"), Option.Some(""), "an empty value was absent")?
+        testing.assert_eq(request.header("Accept-Language"), .None, "an absent header was found")?
+        .Ok(())
+    }
 }
 
 // `Headers` walks a request's headers in arrival order.
@@ -851,81 +845,73 @@ impl[P: Allocator] Request[P] {
     pub fn headers(self: Self) -> Headers where carries(self) {
         .{ stored = copy(self.head), fields = copy(self.header_fields), index = 0 }
     }
-}
 
-test fn headers_walk_in_arrival_order() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nAccept: text/plain\r\n\r\n"
-    let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
-    var walk = sent.request().headers()
-    let first = &walk.next()
-    let second = &walk.next()
-    let third = &walk.next()
-    let fourth = &walk.next()
-    testing.assert_eq(first, Option.Some(Header { name = "Host", value = "example.com" }), "the first header changed")?
-    testing.assert_eq(second, Option.Some(Header { name = "Accept", value = "*/*" }), "the second header changed")?
-    testing.assert_eq(third, Option.Some(Header { name = "Accept", value = "text/plain" }), "the third header changed")?
-    testing.assert_eq(fourth, .None, "the walk continued past the last header")?
-    .Ok(())
-}
+    test fn headers_walk_in_arrival_order() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nAccept: text/plain\r\n\r\n"
+        let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
+        var walk = sent.request().headers()
+        let first = &walk.next()
+        let second = &walk.next()
+        let third = &walk.next()
+        let fourth = &walk.next()
+        testing.assert_eq(first, Option.Some(Header { name = "Host", value = "example.com" }), "the first header changed")?
+        testing.assert_eq(second, Option.Some(Header { name = "Accept", value = "*/*" }), "the second header changed")?
+        testing.assert_eq(third, Option.Some(Header { name = "Accept", value = "text/plain" }), "the third header changed")?
+        testing.assert_eq(fourth, .None, "the walk continued past the last header")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `body` returns the body's bytes, exactly as many as `Content-Length`
     // gave.
     pub fn body(self: Self) -> mem.Slice[UInt8] where carries(self) {
         copy(self.payload)
     }
-}
 
-test fn a_body_holds_exactly_its_length() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Length: 3\r\n\r\nabcdef"
-    let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
-    var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
-    let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
-    let rest = &reader.read_exact_in(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
-    let ended = match &reader.read_raw_line_borrowed(1) {
-        Ok(line) => line.is_none(),
-        Err(_) => false,
+    test fn a_body_holds_exactly_its_length() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Length: 3\r\n\r\nabcdef"
+        let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
+        var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
+        let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
+        let rest = &reader.read_exact_in(allocator: arena.handle(), count: 3, max_bytes: 3).unwrap()
+        let ended = match &reader.read_raw_line_borrowed(1) {
+            Ok(line) => line.is_none(),
+            Err(_) => false,
+        }
+        let _source = reader.abandon()
+        testing.assert_ok_eq(sent.request().text(), "abc", "the body changed")?
+        testing.assert_ok_eq(Str.from_bytes(rest.as_slice()), "def", "the bytes after the body left the reader")?
+        testing.assert(ended, "the reader held more than the bytes after the body")?
+        .Ok(())
     }
-    let _source = reader.abandon()
-    testing.assert_ok_eq(sent.request().text(), "abc", "the body changed")?
-    testing.assert_ok_eq(Str.from_bytes(rest.as_slice()), "def", "the bytes after the body left the reader")?
-    testing.assert(ended, "the reader held more than the bytes after the body")?
-    .Ok(())
-}
 
-impl[P: Allocator] Request[P] {
     // `text` returns the body as text, or the offset of its first byte that
     // does not begin valid UTF-8.
     pub fn text(self: Self) -> Result[Str, strings.Utf8Error] where carries(.Ok: self) {
         Str.from_bytes(self.payload)
     }
-}
 
-test fn a_body_is_text_only_when_it_is_utf8() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
-    testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
-    // Two bytes end inside `é`, so the scalar starting at byte 1 is incomplete.
-    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
-    let invalid_at: Option[UInt64] = match cut.request().text() {
-        Ok(_) => .None,
-        Err(error) => .Some(error.offset),
+    test fn a_body_is_text_only_when_it_is_utf8() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+        testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
+        // Two bytes end inside `é`, so the scalar starting at byte 1 is incomplete.
+        let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+        let invalid_at: Option[UInt64] = match cut.request().text() {
+            Ok(_) => .None,
+            Err(error) => .Some(error.offset),
+        }
+        testing.assert_eq(invalid_at, .Some(1), "an incomplete scalar was text")?
+        .Ok(())
     }
-    testing.assert_eq(invalid_at, .Some(1), "an incomplete scalar was text")?
-    .Ok(())
-}
 
-impl[P: Allocator] Request[P] {
     // `routed` returns this request with the path values a router matched, whose
     // ranges `fields` gives in `matched`.
     fn routed(self: Self, matched: Str, fields: mem.Slice[Field]) -> Request[P] where carries(self, matched, fields) {
         Self { matched = copy(matched), path_values = .Some(copy(fields)), ..copy(self) }
     }
-}
 
-impl[P: Allocator] Request[P] {
     // `path_value` returns the value the router matched for `{name}`, already
     // percent-decoded.
     pub fn path_value(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
@@ -939,28 +925,26 @@ impl[P: Allocator] Request[P] {
         }
         .None
     }
-}
 
-test fn a_path_value_is_found_by_its_exact_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
-    var matched = String.new_in(arena.handle())
-    let id_name = store_part(&matched, "id").unwrap()
-    let id_value = store_part(&matched, "42").unwrap()
-    let rest_name = store_part(&matched, "rest").unwrap()
-    let rest_value = store_part(&matched, "a b").unwrap()
-    let id = Field { name = id_name, value = id_value }
-    let rest = Field { name = rest_name, value = rest_value }
-    let fields = [id, rest]
-    let request = sent.request().routed(matched.view(), fields.as_slice())
-    testing.assert_eq(request.path_value("id"), Option.Some("42"), "the value changed")?
-    testing.assert_eq(request.path_value("rest"), Option.Some("a b"), "the second value changed")?
-    testing.assert_eq(request.path_value("ID"), .None, "a path value matched a folded name")?
-    testing.assert_eq(request.method_text(), "GET", "routing disturbed the method")?
-    .Ok(())
-}
+    test fn a_path_value_is_found_by_its_exact_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
+        var matched = String.new_in(arena.handle())
+        let id_name = store_part(&matched, "id").unwrap()
+        let id_value = store_part(&matched, "42").unwrap()
+        let rest_name = store_part(&matched, "rest").unwrap()
+        let rest_value = store_part(&matched, "a b").unwrap()
+        let id = Field { name = id_name, value = id_value }
+        let rest = Field { name = rest_name, value = rest_value }
+        let fields = [id, rest]
+        let request = sent.request().routed(matched.view(), fields.as_slice())
+        testing.assert_eq(request.path_value("id"), Option.Some("42"), "the value changed")?
+        testing.assert_eq(request.path_value("rest"), Option.Some("a b"), "the second value changed")?
+        testing.assert_eq(request.path_value("ID"), .None, "a path value matched a folded name")?
+        testing.assert_eq(request.method_text(), "GET", "routing disturbed the method")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `path_params` returns the path values the router matched, which
     // `http.Params` reads a struct from, or `None` when no router matched the
     // request.
@@ -970,22 +954,20 @@ impl[P: Allocator] Request[P] {
             None => .None,
         }
     }
-}
 
-test fn a_request_gives_its_path_params_once_a_router_matched_it() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
-    var matched = String.new_in(arena.handle())
-    let id_name = store_part(&matched, "id").unwrap()
-    let id_value = store_part(&matched, "42").unwrap()
-    let fields = [Field { name = id_name, value = id_value }]
-    let routed = sent.request().routed(matched.view(), fields.as_slice())
-    testing.assert_eq(sent.request().path_params().is_none(), true, "an unrouted request had path values")?
-    testing.assert_eq(routed.path_params().unwrap().get("id"), .Ok(.Some("42")), "the path value was lost")?
-    .Ok(())
-}
+    test fn a_request_gives_its_path_params_once_a_router_matched_it() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
+        var matched = String.new_in(arena.handle())
+        let id_name = store_part(&matched, "id").unwrap()
+        let id_value = store_part(&matched, "42").unwrap()
+        let fields = [Field { name = id_name, value = id_value }]
+        let routed = sent.request().routed(matched.view(), fields.as_slice())
+        testing.assert_eq(sent.request().path_params().is_none(), true, "an unrouted request had path values")?
+        testing.assert_eq(routed.path_params().unwrap().get("id"), .Ok(.Some("42")), "the path value was lost")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `query_params` returns the query's names and values, decoded as an HTML
     // form encodes them, or `None` when the query is not percent-encoded
     // UTF-8.
@@ -995,18 +977,16 @@ impl[P: Allocator] Request[P] {
             None => .None,
         }
     }
-}
 
-test fn a_request_gives_its_query_params_decoded() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/items?sort=new+first", body: "").unwrap()
-    let broken = new_request(arena.handle(), "GET", "/items?sort=%zz", body: "").unwrap()
-    testing.assert_eq(sent.request().query_params().unwrap().get("sort"), .Ok(.Some("new first")), "the query was not decoded")?
-    testing.assert_eq(broken.request().query_params().is_none(), true, "a broken query had values")?
-    .Ok(())
-}
+    test fn a_request_gives_its_query_params_decoded() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/items?sort=new+first", body: "").unwrap()
+        let broken = new_request(arena.handle(), "GET", "/items?sort=%zz", body: "").unwrap()
+        testing.assert_eq(sent.request().query_params().unwrap().get("sort"), .Ok(.Some("new first")), "the query was not decoded")?
+        testing.assert_eq(broken.request().query_params().is_none(), true, "a broken query had values")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `form_params` returns the body's names and values, decoded as an HTML
     // form encodes them, or `None` when the body is not percent-encoded UTF-8.
     // It is also `None` when `Content-Type` does not name
@@ -1022,22 +1002,20 @@ impl[P: Allocator] Request[P] {
             None => .None,
         }
     }
-}
 
-test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
-    let untyped = new_request(arena.handle(), "POST", "/signup", body: "name=Ada").unwrap()
-    let json = new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
-    let broken = new_request(arena.handle(), "POST", "/signup", body: "name=%zz", content_type: "application/x-www-form-urlencoded").unwrap()
-    testing.assert_eq(sent.request().form_params().unwrap().get("name"), .Ok(.Some("Ada López")), "the form was not decoded")?
-    testing.assert_eq(untyped.request().form_params().is_none(), true, "a body sent without a type was read as a form")?
-    testing.assert_eq(json.request().form_params().is_none(), true, "a JSON body was read as a form")?
-    testing.assert_eq(broken.request().form_params().is_none(), true, "a broken form body had values")?
-    .Ok(())
-}
+    test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
+        let untyped = new_request(arena.handle(), "POST", "/signup", body: "name=Ada").unwrap()
+        let json = new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
+        let broken = new_request(arena.handle(), "POST", "/signup", body: "name=%zz", content_type: "application/x-www-form-urlencoded").unwrap()
+        testing.assert_eq(sent.request().form_params().unwrap().get("name"), .Ok(.Some("Ada López")), "the form was not decoded")?
+        testing.assert_eq(untyped.request().form_params().is_none(), true, "a body sent without a type was read as a form")?
+        testing.assert_eq(json.request().form_params().is_none(), true, "a JSON body was read as a form")?
+        testing.assert_eq(broken.request().form_params().is_none(), true, "a broken form body had values")?
+        .Ok(())
+    }
 
-impl[P: Allocator] Request[P] {
     // `origin` parses the request's `Host` header as an `Origin` with the
     // given scheme.
     pub fn origin(self: Self, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: self) {
@@ -1046,18 +1024,18 @@ impl[P: Allocator] Request[P] {
         }
         Origin.from_authority(host.trim_ascii(), is_https)
     }
-}
 
-test fn a_request_gives_its_origin_from_the_host_header() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var req = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    &req.add_header("Host", "example.test:8080").unwrap()
-    let origin = req.request().origin(false).unwrap()
-    testing.assert_eq(origin.is_https, false, "scheme changed")?
-    testing.assert_eq(origin.host, "example.test", "host changed")?
-    testing.assert_eq(origin.port, UInt16(8080), "port changed")?
+    test fn a_request_gives_its_origin_from_the_host_header() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        var req = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &req.add_header("Host", "example.test:8080").unwrap()
+        let origin = req.request().origin(false).unwrap()
+        testing.assert_eq(origin.is_https, false, "scheme changed")?
+        testing.assert_eq(origin.host, "example.test", "host changed")?
+        testing.assert_eq(origin.port, UInt16(8080), "port changed")?
 
-    let no_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    testing.assert_eq(no_host.request().origin(false), .Err(OriginError.InvalidAuthority), "missing host header succeeded")?
-    .Ok(())
+        let no_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        testing.assert_eq(no_host.request().origin(false), .Err(OriginError.InvalidAuthority), "missing host header succeeded")?
+        .Ok(())
+    }
 }
