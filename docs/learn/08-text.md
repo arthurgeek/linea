@@ -24,11 +24,9 @@ import std.io
 
 fn main() -> Result[UInt8, io.IoError] {
     let greeting = "Olá, mundo"
-    // `scalars()` walks the text one Unicode scalar at a time.
-    var letters: UInt64 = 0
-    for _scalar in greeting.scalars() {
-        letters += 1
-    }
+    // `scalars()` walks the text one Unicode scalar at a time, and `count()`
+    // walks it to the end and says how many scalars it found.
+    let letters = greeting.scalars().count()
     io.println("{greeting.length()} bytes, {letters} scalars")?
     let comma = greeting.find(",").unwrap()
     let first = greeting.slice(0, comma).unwrap()
@@ -56,7 +54,8 @@ into the literal; `owned` is a `String` that copies bytes into memory from
 `mem.system()`, and `owned.view()` lends them back out as a `Str`.
 
 `scalars()` walks the text one Unicode scalar — one code point — at a time,
-which is how you count them. A scalar is not always what a reader sees as one
+and `count()`, which every sequence offers, walks it to the end and answers how
+many there were, so `greeting.scalars().count()` counts them. A scalar is not always what a reader sees as one
 character: an emoji with a skin tone, or a letter followed by a combining
 accent, is several scalars. Walking text by user-perceived characters, called
 grapheme clusters, is not available.
@@ -392,8 +391,8 @@ jam         12    0.40
 date 07/03, stock change +3, ***thanks***
 ```
 
-A spec is written `[[fill]align][+][0][width][.precision][?]`, every part
-optional:
+A spec is written `[[fill]align][+][0][width][.precision][x|X|?]`, every
+part optional:
 
 | Spec | Meaning | Example |
 | --- | --- | --- |
@@ -403,7 +402,8 @@ optional:
 | `:02` | pad a number with zeros to 2 digits | `{day:02}` → `07` |
 | `:+` | write `+` before a number that is not negative | `{change:+}` → `+3` |
 | `:.2` | two digits after a `Float64`'s point | `{price:.2}` → `2.50` |
-| `:?` | write through `Debug`; combines with the rest, as in `:>12?` | `{today:?}` |
+| `:x`, `:X` | an integer's digits in base 16, lowercase or capital | `{byte:02X}` → `0A` |
+| `:?` | write through `Debug`; combines with every part but `x` and `X`, as in `:>12?` | `{today:?}` |
 
 Width counts Unicode scalars, so `"café"` takes four columns. A value wider
 than its width is written whole. Parts that make no sense for the value are
@@ -472,6 +472,80 @@ fn main() -> Result[UInt8, io.IoError] {
 coffee   |
 croissant|
 jam      |
+```
+
+## Hexadecimal: numbers and bytes in base 16
+
+Colours, checksums and byte dumps are written in hexadecimal, base 16, where
+the digits ten to fifteen are the letters `a` to `f`. An `x` at the end of a
+format spec writes an integer that way and `X` uses capital letters. The other
+parts lay the digits out as they lay out decimal ones, so `{color:06x}` pads
+with zeros to six digits. To write the bytes of text or a slice, two digits a
+byte, interpolate `text.hex_encoded(bytes)`; like `html.escaped`, it borrows
+what it writes and allocates nothing. `text.hex_decode(digits)` reads such
+digits back into bytes, in either case:
+
+```linea
+import std.io
+import std.text
+
+fn main() -> Result[UInt8, io.IoError] {
+    let color: UInt32 = 16737945
+    let byte: UInt8 = 10
+    io.println("#{color:06x} 0x{byte:02X} [{byte:>4x}] [{-255:x}]")?
+
+    // `hex_encoded` writes each byte of the slice as two digits.
+    let name = "Zoë"
+    io.println("{name} is {text.hex_encoded(name.as_bytes())}")?
+
+    // `hex_decode` returns the bytes, which become text again when they are UTF-8.
+    let decoded = text.hex_decode("5a6fC3AB").unwrap()
+    defer let again = String.from_bytes(decoded).unwrap()
+    io.println("and back: {again}")?
+
+    // A byte that is not a hexadecimal digit is refused, with where it is.
+    match text.hex_decode("5g") {
+        Ok(bytes) => bytes.release(),
+        Err(error) => io.println("refused: {error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+#ff6699 0x0A [   a] [-ff]
+Zoë is 5a6fc3ab
+and back: Zoë
+refused: the byte at 1 is not a hexadecimal digit
+```
+
+A negative integer is written as its sign and its digits, `-ff`, rather than
+as the bits of its type the way Rust's `{:x}` writes it, so the text does not
+depend on whether the integer is an `Int8` or an `Int64`. A program that wants
+the bits converts to the unsigned type first. No `0x` is written; put it in
+the literal, as above. An odd count of digits is refused too, since each byte
+is two.
+
+Hexadecimal digits are a way of writing an integer, so a spec that asks for
+them on any other value is refused, and the message names the function that
+writes bytes:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let price = 2.5
+    io.println("{price:x}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-Format]: `Float64` is not an integer, so its format spec cannot ask for hexadecimal digits
+ --> hex_bad.lin:5:18
+  |
+5 |     io.println("{price:x}")?
+  |                  ^^^^^ `x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`
 ```
 
 ## Cutting text apart: `lines` and `split_once`
@@ -774,12 +848,8 @@ import std.io
 let stations = embed_bytes("stations.csv")
 
 fn main() -> Result[UInt8, io.IoError] {
-    var lines: UInt64 = 0
-    for byte in stations {
-        if *byte == 10 {
-            lines = lines + 1
-        }
-    }
+    // `filter` keeps the line breaks, and `count` says how many it kept.
+    let lines = stations.filter(|byte| *byte == 10).count()
     io.println("{stations.length()} bytes in {lines} lines")?
     .Ok(0)
 }
@@ -925,12 +995,14 @@ server](../../examples/welcome_back.lin) escapes a name taken from the address.
 | --- | --- |
 | a view of text | `Str`; slice with `line.slice(from, to)` |
 | text you own and can grow | `String.new_in(allocator)`, then `&s.append(…)` |
-| to count Unicode scalars (code points) | `for _scalar in text.scalars()` |
+| to count Unicode scalars (code points) | `text.scalars().count()` |
 | a value inside text | `"{value}"`, or `"{value:?}"` for `Debug` |
 | an interpolation in a `String` | `Display.fmt("…{value}…", &string)` |
 | an interpolation as a new `String` | `fmt.render_owned("…")`, or `fmt.render_owned_in(allocator, "…")` |
 | a function that takes any displayable value | `fn f[D: Display](value: D)` |
 | a column, padding or decimals | `{value:>8}`, `{day:02}`, `{price:.2}` |
+| an integer in hexadecimal | `{color:06x}`, `{byte:02X}` |
+| bytes as hexadecimal digits, and back | `text.hex_encoded(bytes)`, `text.hex_decode(digits)` |
 | a layout chosen at run time | `fmt.write_display(value, spec, &writer)` with a `fmt.Spec` |
 | a view of a computed value past its statement | bind the value with `let` first; a temporary lasts to the end of its statement |
 | the lines of a text, without their terminators | `for line in text.lines()` |

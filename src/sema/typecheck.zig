@@ -23446,9 +23446,10 @@ const Checker = struct {
     }
 
     /// Check that a value's format spec asks only for parts its type takes. A
-    /// sign and zero padding lay out a number, and a precision counts the
-    /// digits after a Float64's point; fill, alignment and width lay out any
-    /// value. Reports the first part the type does not take.
+    /// sign and zero padding lay out a number, a precision counts the digits
+    /// after a Float64's point, and hexadecimal digits write an integer; fill,
+    /// alignment and width lay out any value. Reports the first part the type
+    /// does not take.
     fn layoutFits(self: *Checker, piece: ExprId, t: TypeId, format: node.InterpolationFormat) bool {
         const shape = self.builder.view().layoutShape(self.generic, t);
         if ((format.plus or format.zero) and shape == .general) {
@@ -23458,6 +23459,16 @@ const Checker = struct {
                 "`{s}` is not a number, so its format spec cannot ask for {s}",
                 .{ self.typeName(t) catch return false, if (format.plus) "a `+` sign" else "zero padding" },
                 "these lay out integers and Float64; pad other values with an alignment and a width, as in `>4`",
+            );
+            return false;
+        }
+        if (format.hex != .none and shape != .integer) {
+            _ = self.report(
+                .t_format,
+                piece,
+                "`{s}` is not an integer, so its format spec cannot ask for hexadecimal digits",
+                .{self.typeName(t) catch return false},
+                "`x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`",
             );
             return false;
         }

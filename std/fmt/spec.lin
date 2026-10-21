@@ -1,4 +1,7 @@
 import std.testing
+import std.text
+
+use text.LetterCase
 
 // An alignment places a value inside its width.
 @(copyable, derive(Debug, Equatable))
@@ -21,7 +24,11 @@ pub enum Align {
 // left and numbers on the right. `plus` writes `+` before a number that is not
 // negative, and `zero` pads a number with zeros between its sign and its
 // digits in place of the fill and alignment. `precision` is the number of
-// digits after a Float64's point.
+// digits after a Float64's point. `hex` writes an integer's digits in base 16
+// with lowercase letters or capitals, so 255 is `ff` or `FF`; a negative
+// integer is written as its sign and magnitude, `-ff`, whatever its type.
+// `None` writes decimal digits. `write_integer` alone reads `hex`, as
+// `write_float` alone reads `precision`.
 //
 // `Spec.default()` is the layout an interpolation without a colon uses: no
 // padding, no sign for a positive number, and the shortest digits for a
@@ -35,6 +42,7 @@ pub struct Spec {
     zero: Bool,
     width: UInt64,
     precision: Option[UInt64],
+    hex: Option[LetterCase],
 }
 
 impl Spec {
@@ -70,33 +78,9 @@ impl Writer for ScalarCount {
     type Error = Never
 
     fn write_str(inout self: Self, s: Str) -> Result[(), Never] where carries() {
-        self.scalars += scalars_in(s)
+        self.scalars += s.scalars().count()
         .Ok(())
     }
-}
-
-// A scalar is one leading byte and its continuation bytes; a continuation
-// byte has the bit pattern 10xxxxxx, 128 through 191.
-fn scalars_in(s: Str) -> UInt64 {
-    var count: UInt64 = 0
-    let span: Range[UInt64] = 0..s.length()
-    for i in span {
-        match s.byte(i) {
-            Some(b) => if b < 128 || b > 191 {
-                count += 1
-            },
-            None => {},
-        }
-    }
-    count
-}
-
-test fn scalars_count_characters_rather_than_bytes() {
-    testing.assert_eq(scalars_in(""), UInt64(0), "empty text has scalars")?
-    testing.assert_eq(scalars_in("abc"), UInt64(3), "ASCII counted wrongly")?
-    testing.assert_eq(scalars_in("café"), UInt64(4), "a two-byte scalar counted twice")?
-    testing.assert_eq(scalars_in("🚀→"), UInt64(2), "four- and three-byte scalars counted wrongly")?
-    .Ok(())
 }
 
 // Padding counts the columns written before and after a value.
@@ -153,7 +137,7 @@ fn write_repeated[W: Writer](text: Str, count: UInt64, inout w: W) -> Result[(),
 // repeats as a pattern, and the last copy is cut to the columns left, so the
 // padding never grows past the width. An empty fill pads with spaces.
 fn write_fill[W: Writer](fill: Str, columns: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    let width = scalars_in(fill)
+    let width = fill.scalars().count()
     if width == 0 {
         return write_repeated(" ", columns, &w)
     }
@@ -281,7 +265,7 @@ test fn write_debug_appends_to_what_the_writer_holds() {
 // Write a number's sign and digits in the spec's layout. `sign` is empty,
 // "-" or "+", and `digits` is how many columns `body` writes.
 fn write_number_parts[W: Writer](spec: Spec, sign: Str, digits: UInt64, body: NumberBody, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    let used = scalars_in(sign) + digits
+    let used = sign.scalars().count() + digits
     // Zeros go between the sign and the digits, so -5 in five columns is
     // -0005. Infinity and NaN have no digits to pad, so they take spaces.
     if spec.zero && body.finite() {
@@ -298,11 +282,13 @@ fn write_number_parts[W: Writer](spec: Spec, sign: Str, digits: UInt64, body: Nu
     write_fill(spec.fill, padding.after, &w)
 }
 
-// A NumberBody is the unsigned part of a number: an integer's magnitude, or a
-// Float64's magnitude with the digits its precision asks for.
+// A NumberBody is the unsigned part of a number: an integer's magnitude in
+// decimal or in hexadecimal of a letter case, or a Float64's magnitude with
+// the digits its precision asks for.
 @copyable
 enum NumberBody {
     Whole(UInt64),
+    Hexadecimal(UInt64, LetterCase),
     Fraction(Float64, Option[UInt64]),
 }
 
@@ -311,6 +297,7 @@ impl NumberBody {
     fn finite(self: Self) -> Bool {
         match read self {
             Whole(_) => true,
+            Hexadecimal(_, _) => true,
             Fraction(magnitude, _) => magnitude == magnitude && magnitude != 1.0 / 0.0,
         }
     }
@@ -319,13 +306,15 @@ impl NumberBody {
     fn write[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
         match read self {
             Whole(magnitude) => format_unsigned(magnitude, &w),
+            Hexadecimal(magnitude, case) => write_hexadecimal(magnitude, case, &w),
             Fraction(magnitude, precision) => write_float_magnitude(magnitude, precision, &w),
         }
     }
 }
 
-// Write an integer with the spec's sign, zero padding and alignment. Numbers
-// are right-aligned unless the spec says otherwise; `precision` is ignored.
+// Write an integer with the spec's sign, zero padding, alignment and digits,
+// decimal or the hexadecimal `hex` asks for. Numbers are right-aligned unless
+// the spec says otherwise; `precision` is ignored.
 pub fn write_integer[T: Integer, W: Writer](value: T, spec: Spec, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     let negative = value < T(0)
     // The magnitude of the most negative value does not fit its own type, so
@@ -342,7 +331,10 @@ pub fn write_integer[T: Integer, W: Writer](value: T, spec: Spec, inout w: W) ->
     } else {
         ""
     }
-    write_number_parts(spec, sign, decimal_digits(magnitude), .Whole(magnitude), &w)
+    match read spec.hex {
+        Some(case) => write_number_parts(spec, sign, hexadecimal_digits(magnitude), .Hexadecimal(magnitude, case), &w),
+        None => write_number_parts(spec, sign, decimal_digits(magnitude), .Whole(magnitude), &w),
+    }
 }
 
 test fn write_integer_right_aligns_and_pads_after_the_sign() {
@@ -357,6 +349,60 @@ test fn write_integer_right_aligns_and_pads_after_the_sign() {
     expect_integer(-7, signed, "-7", "plus replaced a minus")?
     let left = Spec { align = .Some(.Left), ..Spec.padded(4) }
     expect_integer(-7, left, "-7  ", "explicit left alignment lost")?
+    .Ok(())
+}
+
+test fn write_integer_writes_hexadecimal_digits_in_the_case_asked() {
+    let lower = Spec { hex = .Some(.Lower), ..Spec.default() }
+    let upper = Spec { hex = .Some(.Upper), ..Spec.default() }
+    expect_integer(UInt8(255), lower, "ff", "a byte did not write two lowercase digits")?
+    expect_integer(UInt32(48879), upper, "BEEF", "capitals were not written")?
+    expect_integer(0, lower, "0", "zero lost its digit")?
+    expect_integer(16, lower, "10", "sixteen did not carry into a second digit")?
+    expect_integer(-255, lower, "-ff", "a negative integer did not write its sign and magnitude")?
+    let most: UInt64 = 18446744073709551615
+    let lowest: Int64 = -9223372036854775808
+    expect_integer(most, lower, "ffffffffffffffff", "UInt64.max lost a digit")?
+    expect_integer(lowest, upper, "-8000000000000000", "Int64.min lost its magnitude")?
+    let zeros = Spec { zero = true, hex = .Some(.Upper), ..Spec.padded(6) }
+    expect_integer(255, zeros, "0000FF", "zero padding did not count hexadecimal digits")?
+    expect_integer(-255, zeros, "-000FF", "zero padding went before the sign")?
+    expect_integer(255, Spec { plus = true, ..lower }, "+ff", "plus lost its sign")?
+    expect_integer(171, Spec { hex = .Some(.Lower), ..Spec.padded(4) }, "  ab", "hexadecimal digits were not right-aligned")?
+    .Ok(())
+}
+
+// Count the base-16 digits of `n`: one for zero, and one more for each
+// further four bits.
+fn hexadecimal_digits(n: UInt64) -> UInt64 {
+    var count: UInt64 = 1
+    var rest = n / 16
+    while rest > 0 {
+        count += 1
+        rest /= 16
+    }
+    count
+}
+
+test fn hexadecimal_digits_count_every_place() {
+    testing.assert_eq(hexadecimal_digits(0), UInt64(1), "zero has one digit")?
+    testing.assert_eq(hexadecimal_digits(15), UInt64(1), "fifteen has one digit")?
+    testing.assert_eq(hexadecimal_digits(16), UInt64(2), "sixteen has two digits")?
+    testing.assert_eq(hexadecimal_digits(18446744073709551615), UInt64(16), "UInt64.max has sixteen digits")?
+    .Ok(())
+}
+
+// Write `n` in base 16, most significant digit first, with no leading zeros.
+fn write_hexadecimal[W: Writer](n: UInt64, case: LetterCase, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    var place: UInt64 = 1
+    for _ in UInt64(1)..hexadecimal_digits(n) {
+        place *= 16
+    }
+    while place > 0 {
+        let digit = UInt8(n / place % 16)
+        &w.write_str(text.hex_digit(digit, case: case).unwrap())?
+        place /= 16
+    }
     .Ok(())
 }
 
@@ -462,9 +508,10 @@ test fn write_float_appends_to_what_the_writer_holds() {
 // functions below with the parts the spec wrote, and they pass a Spec to the
 // matching `write_` function. The compiler picks one by the value's type:
 // integers, Float64, and the Display or Debug text of anything else. `align`
-// is 0 for none, then 1, 2 and 3 for left, right and center, and `places`
-// counts only when `fraction` is set.
-fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64) -> Spec {
+// is 0 for none, then 1, 2 and 3 for left, right and center, `places`
+// counts only when `fraction` is set, and `hex` is 0 for decimal digits, then
+// 1 and 2 for lowercase and capital hexadecimal ones.
+fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8) -> Spec {
     let side: Option[Align] = match read align {
         1 => .Some(.Left),
         2 => .Some(.Right),
@@ -476,30 +523,37 @@ fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fract
     } else {
         .None
     }
-    Spec { fill = copy(fill), align = side, plus, zero, width, precision }
+    let digits: Option[LetterCase] = match read hex {
+        1 => .Some(.Lower),
+        2 => .Some(.Upper),
+        _ => .None,
+    }
+    Spec { fill = copy(fill), align = side, plus, zero, width, precision, hex = digits }
 }
 
-fn interpolate_display[T: Display, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    write_display(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+fn interpolate_display[T: Display, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_display(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
 
-fn interpolate_debug[T: Debug, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    write_debug(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+fn interpolate_debug[T: Debug, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_debug(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
 
-fn interpolate_integer[T: Integer, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    write_integer(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+fn interpolate_integer[T: Integer, W: Writer](value: T, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_integer(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
 
-fn interpolate_float[W: Writer](value: Float64, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
-    write_float(value, spec_of(fill, align, plus, zero, width, fraction, places), &w)
+fn interpolate_float[W: Writer](value: Float64, fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fraction: Bool, places: UInt64, hex: UInt8, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+    write_float(value, spec_of(fill, align, plus, zero, width, fraction, places, hex), &w)
 }
 
 test fn a_spec_of_the_written_parts_names_each_one() {
-    let spec = spec_of("*", 3, true, false, 9, true, 2)
-    let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2) }
+    let spec = spec_of("*", 3, true, false, 9, true, 2, 0)
+    let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2), hex = .None }
     testing.assert_eq(spec, expected, "a written part was lost")?
-    testing.assert_eq(spec_of(" ", 0, false, true, 4, false, 7), Spec { fill = " ", align = .None, plus = false, zero = true, width = 4, precision = .None }, "an absent part was set")?
+    testing.assert_eq(spec_of(" ", 0, false, true, 4, false, 7, 0), Spec { fill = " ", align = .None, plus = false, zero = true, width = 4, precision = .None, hex = .None }, "an absent part was set")?
+    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 1).hex, .Some(.Lower), "lowercase hexadecimal was lost")?
+    testing.assert_eq(spec_of(" ", 0, false, false, 0, false, 0, 2).hex, .Some(.Upper), "capital hexadecimal was lost")?
     .Ok(())
 }
 
