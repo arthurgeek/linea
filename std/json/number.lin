@@ -30,34 +30,6 @@ fn integer_token(input: Str) -> Bool where carries() {
     true
 }
 
-impl[A: Allocator] Number[A] {
-    // Validate `input` as one complete JSON number and keep a copy of it.
-    pub fn parse_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
-        let end = scan_number(input, 0, hard_number_bytes) else |error| {
-            return .Err(match read error.kind {
-                NumberLimit => .TokenLimit,
-                _ => .Syntax(error.offset),
-            })
-        }
-        if end != input.length() {
-            return .Err(.Syntax(end))
-        }
-        match number_from_scanned(allocator, input) {
-            Ok(number) => .Ok(number),
-            Err(_) => .Err(.Allocation),
-        }
-    }
-}
-
-test fn number_preserves_validated_decimal_spelling() {
-    let cases = ["0", "-0", "-9223372036854775808", "18446744073709551615", "9007199254740993", "1.00", "1e400", "-12.34E+56"]
-    for input in cases {
-        defer let number = Number.parse(input).unwrap()
-        testing.assert_eq(number.text(), input, "number spelling changed")?
-    }
-    .Ok(())
-}
-
 impl Number[mem.SystemAllocator] {
     // Validate `input` as one complete JSON number and keep a copy of it in
     // the system allocator.
@@ -93,76 +65,102 @@ impl Number[mem.SystemAllocator] {
     }
 }
 
-test fn number_requires_one_complete_json_token() {
-    let cases = ["", "+1", "01", "-01", "1.", "1e", "1e+", "NaN", "Infinity", " 1", "1 ", "1,2", "--1"]
-    for input in cases {
-        match Number.parse(input) {
-            Ok(number) => {
-                number.release()
-                testing.assert(false, "invalid number was accepted")?
-            },
-            Err(reason) => testing.assert(match reason { Syntax(_) => true, _ => false }, "invalid grammar did not report syntax")?,
+impl[A: Allocator] Number[A] {
+    // Validate `input` as one complete JSON number and keep a copy of it.
+    pub fn parse_in(allocator: A, input: Str) -> Result[Self, NumberError] where carries(.Ok: allocator) {
+        let end = scan_number(input, 0, hard_number_bytes) else |error| {
+            return .Err(match read error.kind {
+                NumberLimit => .TokenLimit,
+                _ => .Syntax(error.offset),
+            })
+        }
+        if end != input.length() {
+            return .Err(.Syntax(end))
+        }
+        match number_from_scanned(allocator, input) {
+            Ok(number) => .Ok(number),
+            Err(_) => .Err(.Allocation),
         }
     }
-    match Number.parse("1e+") {
-        Ok(number) => {
-            number.release()
-            testing.assert(false, "unfinished exponent was accepted")?
-        },
-        Err(reason) => testing.assert_eq(reason, NumberError.Syntax(3), "missing exponent digit lost its EOF offset")?,
+
+    test fn number_preserves_validated_decimal_spelling() {
+        let cases = ["0", "-0", "-9223372036854775808", "18446744073709551615", "9007199254740993", "1.00", "1e400", "-12.34E+56"]
+        for input in cases {
+            defer let number = Number.parse(input).unwrap()
+            testing.assert_eq(number.text(), input, "number spelling changed")?
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn number_owns_its_token_independently_of_input() {
-    defer let number = {
-        let input = "9007199254740993".to_owned().unwrap()
-        let parsed = Number.parse(input.view()).unwrap()
-        input.release()
-        parsed
+    test fn number_requires_one_complete_json_token() {
+        let cases = ["", "+1", "01", "-01", "1.", "1e", "1e+", "NaN", "Infinity", " 1", "1 ", "1,2", "--1"]
+        for input in cases {
+            match Number.parse(input) {
+                Ok(number) => {
+                    number.release()
+                    testing.assert(false, "invalid number was accepted")?
+                },
+                Err(reason) => testing.assert(match reason { Syntax(_) => true, _ => false }, "invalid grammar did not report syntax")?,
+            }
+        }
+        match Number.parse("1e+") {
+            Ok(number) => {
+                number.release()
+                testing.assert(false, "unfinished exponent was accepted")?
+            },
+            Err(reason) => testing.assert_eq(reason, NumberError.Syntax(3), "missing exponent digit lost its EOF offset")?,
+        }
+        .Ok(())
     }
-    testing.assert_eq(number.text(), "9007199254740993", "releasing input changed the number")?
-    .Ok(())
-}
 
-test fn number_constructor_enforces_the_hard_token_limit() {
-    let bytes = Vec.filled(count: hard_number_bytes, value: UInt8(49)).unwrap()
-    defer var input = String.from_bytes(bytes).unwrap()
-    let number = Number.parse(input.view()).unwrap()
-    let length = number.text().length()
-    number.release()
-    testing.assert_eq(length, hard_number_bytes, "number at the limit was shortened")?
-    &input.append("1").unwrap()
-    match Number.parse(input.view()) {
-        Ok(unbounded) => {
-            unbounded.release()
-            testing.assert(false, "oversized token was accepted")?
-        },
-        Err(reason) => testing.assert_eq(reason, NumberError.TokenLimit, "oversized token did not report its limit")?,
+    test fn number_owns_its_token_independently_of_input() {
+        defer let number = {
+            let input = "9007199254740993".to_owned().unwrap()
+            let parsed = Number.parse(input.view()).unwrap()
+            input.release()
+            parsed
+        }
+        testing.assert_eq(number.text(), "9007199254740993", "releasing input changed the number")?
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn number_allocation_failure_is_a_value() {
-    defer let arena = mem.Arena.open(mem.system(), 8)
-    match Number.parse_in(arena.handle(), "12") {
-        Ok(number) => {
-            number.release()
-            testing.assert(false, "full arena allocated number text")?
-        },
-        Err(reason) => testing.assert_eq(reason, NumberError.Allocation, "allocation refusal changed error kind")?,
+    test fn number_constructor_enforces_the_hard_token_limit() {
+        let bytes = Vec.filled(count: hard_number_bytes, value: UInt8(49)).unwrap()
+        defer var input = String.from_bytes(bytes).unwrap()
+        let number = Number.parse(input.view()).unwrap()
+        let length = number.text().length()
+        number.release()
+        testing.assert_eq(length, hard_number_bytes, "number at the limit was shortened")?
+        &input.append("1").unwrap()
+        match Number.parse(input.view()) {
+            Ok(unbounded) => {
+                unbounded.release()
+                testing.assert(false, "oversized token was accepted")?
+            },
+            Err(reason) => testing.assert_eq(reason, NumberError.TokenLimit, "oversized token did not report its limit")?,
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn a_parsed_number_keeps_its_token_in_an_arena() {
-    defer let arena = mem.Arena.open(mem.system(), 64)
-    defer let number = Number.parse_in(arena.handle(), "-1.50E+3").unwrap()
-    testing.assert_eq(number.text(), "-1.50E+3", "a number parsed into an arena changed its token")?
-    .Ok(())
-}
+    test fn number_allocation_failure_is_a_value() {
+        defer let arena = mem.Arena.open(mem.system(), 8)
+        match Number.parse_in(arena.handle(), "12") {
+            Ok(number) => {
+                number.release()
+                testing.assert(false, "full arena allocated number text")?
+            },
+            Err(reason) => testing.assert_eq(reason, NumberError.Allocation, "allocation refusal changed error kind")?,
+        }
+        .Ok(())
+    }
 
-impl[A: Allocator] Number[A] {
+    test fn a_parsed_number_keeps_its_token_in_an_arena() {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        defer let number = Number.parse_in(arena.handle(), "-1.50E+3").unwrap()
+        testing.assert_eq(number.text(), "-1.50E+3", "a number parsed into an arena changed its token")?
+        .Ok(())
+    }
+
     // Return the token as it was written.
     pub fn text(self: Self) -> Str where borrows(self) {
         self.token.view()

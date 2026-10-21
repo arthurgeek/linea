@@ -563,6 +563,9 @@ impl[T, A: Allocator] Vec[T, A] {
         self.len
     }
 
+    // Traversing a vector visits its live indexes, 0 through len - 1.
+    trav positions(self: Self) = 0..self.len
+
     test fn vec_length_tracks_insertions_and_removals() {
         defer var values: Vec[UInt8] = Vec.new()
         testing.assert_eq(values.length(), 0, "empty length differs")?
@@ -898,42 +901,7 @@ impl[T, A: Allocator] Vec[T, A] {
             },
         }
     }
-}
 
-// A Drain hands a vector's elements over first to last. It owns the vector's
-// storage; the elements at positions `next` through `len - 1` have not been
-// handed over yet. Taking from the front moves no other element.
-//
-// A `for` takes a drain and walks it directly when abandoning it is allowed:
-// its elements need no settling and its storage came from an arena. A drain
-// that holds linear elements or system storage is walked lent instead,
-// `for item in &pending`, so it stays with its owner, who ends it with
-// `finish` or `release` after the loop.
-@opaque
-struct Drain[T, A: Allocator = SystemAllocator] {
-    storage: Storage[T, A],
-    next: UInt64,
-    len: UInt64,
-}
-
-impl[T, A: Allocator] Iterator for Drain[T, A] {
-    type Item = T
-
-    fn next(inout self: Self) -> Option[T] where carries(.Some: self) {
-        if self.next == self.len {
-            return .None
-        }
-        let shape: SlotType[T] = .Type
-        let stride = slot_stride(shape)
-        let at = self.storage.at
-        let extent = self.storage.len
-        let taken: T = slot_take(&self.storage, at, extent, self.next * stride)
-        self.next += 1
-        .Some(taken)
-    }
-}
-
-impl[T, A: Allocator] Vec[T, A] {
     // Consume the vector and hand its elements over first to last. Each
     // element is handed over once and never shifted.
     pub fn drain(sink self: Self) -> Drain[T, A] where carries(self) {
@@ -1019,101 +987,6 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(walked, UInt64(12), "a lent walk handed over the wrong elements")?
         testing.assert_eq(rest, UInt64(34), "a lent walk advanced its owner's drain by the wrong amount")?
     }
-}
-
-impl[T, A: Allocator] Drain[T, A] {
-    // Consume the drain and succeed only if every element was handed over.
-    // `Ok` disposes the storage. A drain stopped early is returned intact as
-    // `Err`, so its owner can resume it.
-    pub fn finish(sink self: Self) -> Result[(), Self] where carries(.Err: self) {
-        if self.next != self.len {
-            return .Err(self)
-        }
-        let Drain { storage, next: _, len: _ } = self
-        storage.dispose()
-        .Ok(())
-    }
-
-    test fn a_drain_stopped_early_is_returned_by_finish_and_resumes() {
-        defer let arena = Arena.open(system(), 256)
-        let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 4, initializer: vec_generated_element)
-        var pending = built.unwrap().drain()
-        var order: UInt64 = 0
-        for element in &pending {
-            let VecGeneratedElement { index } = element
-            order = order * 10 + index + 1
-            if index == 1 {
-                break
-            }
-        }
-        let stopped = order
-        var resumed = match pending.finish() {
-            Ok(_) => return testing.assert(false, "a drain with elements left was disposed"),
-            Err(returned) => returned,
-        }
-        for element in &resumed {
-            let VecGeneratedElement { index } = element
-            order = order * 10 + index + 1
-        }
-        resumed.finish().unwrap()
-        testing.assert_eq(stopped, UInt64(12), "a stopped drain handed over the wrong elements")?
-        testing.assert_eq(order, UInt64(1234), "a resumed drain lost, duplicated or reordered elements")?
-    }
-
-    test fn a_system_drain_stopped_early_is_returned_by_finish_with_its_storage() {
-        let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 3, initializer: vec_generated_element)
-        var pending = built.unwrap().drain()
-        let VecGeneratedElement { index: first } = &pending.next().unwrap()
-        var resumed = match pending.finish() {
-            Ok(_) => return testing.assert(false, "a system drain with elements left was disposed"),
-            Err(returned) => returned,
-        }
-        var rest: UInt64 = 0
-        for element in &resumed {
-            let VecGeneratedElement { index } = element
-            rest = rest * 10 + index + 1
-        }
-        resumed.finish().unwrap()
-        testing.assert_eq(first, UInt64(0), "a system drain did not start at the first element")?
-        testing.assert_eq(rest, UInt64(23), "a returned system drain lost, duplicated or reordered elements")?
-    }
-}
-
-impl[T: Release, A: Allocator] Release for Drain[T, A] {
-    // Release the elements not yet handed over, last first, then the storage.
-    fn release(sink self: Self) {
-        let Drain { storage: owned, next, len } = self
-        var storage = owned
-        release_from(&storage, next, len)
-        storage.dispose()
-    }
-}
-
-test fn releasing_a_drain_stopped_early_releases_only_what_remains() {
-    // Nine UInt64 words: the event count, release tags from byte 8, and the
-    // allocation count at byte 64.
-    defer let log = system().acquire(72).unwrap()
-    let allocator = VecTestAllocator { log_at = log.at, log_len = log.len }
-    var values: Vec[VecTestElement, VecTestAllocator] = Vec.new_in(allocator)
-    &values.reserve(4).unwrap()
-    for number in UInt64(0)..4 {
-        &values.push(VecTestElement { value = number, log_at = log.at, log_len = log.len }).unwrap()
-    }
-    var pending = values.drain()
-    let first = &pending.next().unwrap()
-    let first_value = first.value
-    first.release()
-    pending.release()
-    testing.assert_eq(first_value, UInt64(0), "the drain did not start at the first element")?
-    testing.assert_eq(log.load(0), UInt64(5), "release did not settle three elements and one buffer after the first")?
-    testing.assert(log.load(8) == 0 && log.load(16) == 3 && log.load(24) == 2 && log.load(32) == 1, "the remaining elements were not released last first")?
-    testing.assert_eq(log.load(40), UInt64(99), "the storage was not disposed after its elements")?
-    testing.assert_eq(log.load(64), UInt64(1), "draining allocated")?
-}
-
-impl[T, A: Allocator] Vec[T, A] {
-    // Traversing a vector visits its live indexes, 0 through len - 1.
-    trav positions(self: Self) = 0..self.len
 }
 
 impl[T: Copyable + Owned, A: Allocator] Vec[T, A] {
@@ -1431,4 +1304,127 @@ test fn vec_release_disposes_backing_once_after_its_elements() {
         ordered = ordered && log.load((position + 1) * 8) == 4 - position
     }
     testing.assert(ordered && log.load(48) == 99, "backing was disposed before its elements")?
+}
+
+// A Drain hands a vector's elements over first to last. It owns the vector's
+// storage; the elements at positions `next` through `len - 1` have not been
+// handed over yet. Taking from the front moves no other element.
+//
+// A `for` takes a drain and walks it directly when abandoning it is allowed:
+// its elements need no settling and its storage came from an arena. A drain
+// that holds linear elements or system storage is walked lent instead,
+// `for item in &pending`, so it stays with its owner, who ends it with
+// `finish` or `release` after the loop.
+@opaque
+struct Drain[T, A: Allocator = SystemAllocator] {
+    storage: Storage[T, A],
+    next: UInt64,
+    len: UInt64,
+}
+
+impl[T, A: Allocator] Iterator for Drain[T, A] {
+    type Item = T
+
+    fn next(inout self: Self) -> Option[T] where carries(.Some: self) {
+        if self.next == self.len {
+            return .None
+        }
+        let shape: SlotType[T] = .Type
+        let stride = slot_stride(shape)
+        let at = self.storage.at
+        let extent = self.storage.len
+        let taken: T = slot_take(&self.storage, at, extent, self.next * stride)
+        self.next += 1
+        .Some(taken)
+    }
+}
+
+impl[T, A: Allocator] Drain[T, A] {
+    // Consume the drain and succeed only if every element was handed over.
+    // `Ok` disposes the storage. A drain stopped early is returned intact as
+    // `Err`, so its owner can resume it.
+    pub fn finish(sink self: Self) -> Result[(), Self] where carries(.Err: self) {
+        if self.next != self.len {
+            return .Err(self)
+        }
+        let Drain { storage, next: _, len: _ } = self
+        storage.dispose()
+        .Ok(())
+    }
+
+    test fn a_drain_stopped_early_is_returned_by_finish_and_resumes() {
+        defer let arena = Arena.open(system(), 256)
+        let built: Result[Vec[VecGeneratedElement, Handle], Oom] = Vec.from_fn_in(arena.handle(), count: 4, initializer: vec_generated_element)
+        var pending = built.unwrap().drain()
+        var order: UInt64 = 0
+        for element in &pending {
+            let VecGeneratedElement { index } = element
+            order = order * 10 + index + 1
+            if index == 1 {
+                break
+            }
+        }
+        let stopped = order
+        var resumed = match pending.finish() {
+            Ok(_) => return testing.assert(false, "a drain with elements left was disposed"),
+            Err(returned) => returned,
+        }
+        for element in &resumed {
+            let VecGeneratedElement { index } = element
+            order = order * 10 + index + 1
+        }
+        resumed.finish().unwrap()
+        testing.assert_eq(stopped, UInt64(12), "a stopped drain handed over the wrong elements")?
+        testing.assert_eq(order, UInt64(1234), "a resumed drain lost, duplicated or reordered elements")?
+    }
+
+    test fn a_system_drain_stopped_early_is_returned_by_finish_with_its_storage() {
+        let built: Result[Vec[VecGeneratedElement], Oom] = Vec.from_fn(count: 3, initializer: vec_generated_element)
+        var pending = built.unwrap().drain()
+        let VecGeneratedElement { index: first } = &pending.next().unwrap()
+        var resumed = match pending.finish() {
+            Ok(_) => return testing.assert(false, "a system drain with elements left was disposed"),
+            Err(returned) => returned,
+        }
+        var rest: UInt64 = 0
+        for element in &resumed {
+            let VecGeneratedElement { index } = element
+            rest = rest * 10 + index + 1
+        }
+        resumed.finish().unwrap()
+        testing.assert_eq(first, UInt64(0), "a system drain did not start at the first element")?
+        testing.assert_eq(rest, UInt64(23), "a returned system drain lost, duplicated or reordered elements")?
+    }
+}
+
+impl[T: Release, A: Allocator] Release for Drain[T, A] {
+    // Release the elements not yet handed over, last first, then the storage.
+    fn release(sink self: Self) {
+        let Drain { storage: owned, next, len } = self
+        var storage = owned
+        release_from(&storage, next, len)
+        storage.dispose()
+    }
+}
+
+test fn releasing_a_drain_stopped_early_releases_only_what_remains() {
+    // Nine UInt64 words: the event count, release tags from byte 8, and the
+    // allocation count at byte 64.
+    defer let log = system().acquire(72).unwrap()
+    let allocator = VecTestAllocator { log_at = log.at, log_len = log.len }
+    var values: Vec[VecTestElement, VecTestAllocator] = Vec.new_in(allocator)
+    &values.reserve(4).unwrap()
+    for number in UInt64(0)..4 {
+        &values.push(VecTestElement { value = number, log_at = log.at, log_len = log.len }).unwrap()
+    }
+    var pending = values.drain()
+    let first = &pending.next().unwrap()
+    let first_value = first.value
+    first.release()
+    pending.release()
+    testing.assert_eq(first_value, UInt64(0), "the drain did not start at the first element")?
+    testing.assert_eq(log.load(0), UInt64(5), "release did not settle three elements and one buffer after the first")?
+    testing.assert(log.load(8) == 0 && log.load(16) == 3 && log.load(24) == 2 && log.load(32) == 1, "the remaining elements were not released last first")?
+    testing.assert_eq(log.load(40), UInt64(99), "the storage was not disposed after its elements")?
+    testing.assert_eq(log.load(64), UInt64(1), "draining allocated")?
 }
