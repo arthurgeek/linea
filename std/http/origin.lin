@@ -1,0 +1,546 @@
+import std.fmt
+import std.mem
+import std.testing
+
+// Why parsing an HTTP origin or authority failed:
+// - `Opaque` when the origin text is `"null"`, indicating a unique or sandboxed
+//   opaque origin that is never same-origin with any tuple origin;
+// - `InvalidScheme` when the scheme is not `"http"` or `"https"`;
+// - `MissingScheme` when `://` is missing;
+// - `InvalidAuthority` when the authority is empty, malformed, or holds an invalid
+//   host, path, query, fragment, userinfo or control byte;
+// - `InvalidPort` when the port is not a decimal integer in 1..=65535.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum OriginError {
+    Opaque,
+    InvalidScheme,
+    MissingScheme,
+    InvalidAuthority,
+    InvalidPort,
+}
+
+impl Display for OriginError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(match read self {
+            Opaque => "opaque origin",
+            InvalidScheme => "scheme must be http or https",
+            MissingScheme => "missing scheme separator ://",
+            InvalidAuthority => "invalid authority",
+            InvalidPort => "port must be between 1 and 65535",
+        })
+    }
+}
+
+// An HTTP tuple origin: scheme, host, and port.
+// Default ports (80 for http, 443 for https) are normalized so origins with and
+// without explicit default ports compare equal. Host equality is ASCII
+// case-insensitive.
+@(copyable, derive(Debug, Release))
+pub struct Origin {
+    is_https: Bool,
+    host: Str,
+    port: UInt16,
+}
+
+impl Equatable for Origin {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.is_https == other.is_https && self.port == other.port && self.host.equals_ascii_folded(other.host)
+    }
+}
+
+impl Equivalent for Origin {}
+
+impl Display for Origin {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let scheme = if self.is_https {
+            "https"
+        } else {
+            "http"
+        }
+        let default_port = if self.is_https {
+            UInt16(443)
+        } else {
+            UInt16(80)
+        }
+        if self.port == default_port {
+            "{scheme}://{self.host}".fmt(&w)
+        } else {
+            "{scheme}://{self.host}:{self.port}".fmt(&w)
+        }
+    }
+}
+
+impl Origin {
+    // Whether this origin uses HTTPS.
+    pub fn is_https(self: Self) -> Bool {
+        self.is_https
+    }
+
+    // The scheme name: `"https"` or `"http"`.
+    pub fn scheme(self: Self) -> Str {
+        if self.is_https {
+            "https"
+        } else {
+            "http"
+        }
+    }
+
+    // The host name or bracketed IPv6 address.
+    pub fn host(self: Self) -> Str where carries(self) {
+        copy(self.host)
+    }
+
+    // The effective port number (defaulting to 80 for http and 443 for https).
+    pub fn port(self: Self) -> UInt16 {
+        self.port
+    }
+}
+
+// Parse a port number: decimal digits in 1..=65535.
+fn parse_port(text: Str) -> Option[UInt16] {
+    if text.length() == 0 || text.length() > 5 {
+        return .None
+    }
+    var value: UInt32 = 0
+    for byte in text.as_bytes() {
+        let code = *byte
+        if code < 48 || code > 57 {
+            return .None
+        }
+        value = value * 10 + UInt32(code - 48)
+        if value > 65535 {
+            return .None
+        }
+    }
+    if value == 0 {
+        return .None
+    }
+    .Some(UInt16(value))
+}
+
+fn is_hex_digit(byte: UInt8) -> Bool {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
+}
+
+fn is_valid_ipv6_char(byte: UInt8) -> Bool {
+    is_hex_digit(byte) || byte == 58
+}
+
+fn is_valid_ipv6_interior(interior: Str) -> Bool {
+    if interior.length() < 2 || interior.length() > 45 {
+        return false
+    }
+    if interior.find(":", 0).is_none() {
+        return false
+    }
+    if interior.find(":::", 0).is_some() {
+        return false
+    }
+    for byte in interior.as_bytes() {
+        if !is_valid_ipv6_char(*byte) {
+            return false
+        }
+    }
+    true
+}
+
+fn is_valid_host_char(byte: UInt8) -> Bool {
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 46
+}
+
+fn is_valid_hostname(host: Str) -> Bool {
+    if host.length() == 0 || host.length() > 253 {
+        return false
+    }
+    for byte in host.as_bytes() {
+        if !is_valid_host_char(*byte) {
+            return false
+        }
+    }
+    let first = host.byte(0).unwrap()
+    if first == 46 || first == 45 {
+        return false
+    }
+    if host.find("..", 0).is_some() {
+        return false
+    }
+    var at: UInt64 = 0
+    while at < host.length() {
+        let end = match host.find(".", at) {
+            Some(dot) => dot,
+            None => host.length(),
+        }
+        let label = host.slice(at, end).unwrap()
+        if label.length() == 0 && end != host.length() {
+            return false
+        }
+        if label.length() > 63 {
+            return false
+        }
+        if label.length() > 0 {
+            let label_first = label.byte(0).unwrap()
+            let label_last = label.byte(label.length() - 1).unwrap()
+            if label_first == 45 || label_last == 45 {
+                return false
+            }
+        }
+        at = end + 1
+    }
+    true
+}
+
+// Parse `authority` (`host[:port]`) into an `Origin` with the given scheme.
+fn parse_authority(authority: Str, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: authority) {
+    if authority.length() == 0 {
+        return .Err(.InvalidAuthority)
+    }
+    let default_port = if is_https {
+        UInt16(443)
+    } else {
+        UInt16(80)
+    }
+
+    // Reject path, query, fragment, userinfo, and control / space bytes.
+    for byte in authority.as_bytes() {
+        let code = *byte
+        if code == 47 || code == 63 || code == 35 || code == 64 || code <= 32 || code == 127 {
+            return .Err(.InvalidAuthority)
+        }
+    }
+
+    // IPv6 literal: `[::1]` or `[::1]:8080`.
+    if authority.starts_with("[") {
+        let closing = authority.find("]", 1) else {
+            return .Err(.InvalidAuthority)
+        }
+        let host = authority.slice(0, closing + 1).unwrap()
+        let interior = authority.slice(1, closing).unwrap()
+        if !is_valid_ipv6_interior(interior) {
+            return .Err(.InvalidAuthority)
+        }
+        if closing + 1 == authority.length() {
+            return .Ok(.{ is_https, host, port = default_port })
+        }
+        let rest = authority.slice(closing + 1, authority.length()).unwrap()
+        if !rest.starts_with(":") {
+            return .Err(.InvalidAuthority)
+        }
+        let port_text = rest.slice(1, rest.length()).unwrap()
+        let port = parse_port(port_text) else {
+            return .Err(.InvalidPort)
+        }
+        return .Ok(.{ is_https, host, port })
+    }
+
+    // Domain name or IPv4 address.
+    let (raw_host, port_text) = authority.split_once(":") else {
+        var normalized = copy(authority)
+        if normalized.ends_with(".") && normalized.length() > 1 {
+            normalized = normalized.slice(0, normalized.length() - 1).unwrap()
+        }
+        if !is_valid_hostname(normalized) {
+            return .Err(.InvalidAuthority)
+        }
+        return .Ok(.{ is_https, host = normalized, port = default_port })
+    }
+
+    var normalized = raw_host
+    if normalized.ends_with(".") && normalized.length() > 1 {
+        normalized = normalized.slice(0, normalized.length() - 1).unwrap()
+    }
+    if !is_valid_hostname(normalized) {
+        return .Err(.InvalidAuthority)
+    }
+
+    let port = parse_port(port_text) else {
+        return .Err(.InvalidPort)
+    }
+    .Ok(.{ is_https, host = normalized, port })
+}
+
+impl Origin {
+    // Parse an HTTP origin `scheme://authority`.
+    // Default ports (`:80` for `http`, `:443` for `https`) are normalized.
+    // Opaque origins (`"null"`) fail with `OriginError.Opaque`.
+    pub fn parse(text: Str) -> Result[Origin, OriginError] where carries(.Ok: text) {
+        if text == "null" {
+            return .Err(.Opaque)
+        }
+        let (scheme, authority) = text.split_once("://") else {
+            return .Err(.MissingScheme)
+        }
+        let is_http = scheme.equals_ascii_folded("http")
+        let is_https = scheme.equals_ascii_folded("https")
+        if !is_http && !is_https {
+            return .Err(.InvalidScheme)
+        }
+        parse_authority(authority, is_https)
+    }
+
+    // Build an `Origin` from a `Host` header's authority value and scheme.
+    pub fn from_authority(authority: Str, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: authority) {
+        parse_authority(authority, is_https)
+    }
+
+    // Compare two origins for same-origin equivalence.
+    pub fn same_origin(self: Self, other: Self) -> Bool {
+        self == other
+    }
+}
+
+test fn an_origin_parses_normalizes_default_ports_and_folds_ascii_case() {
+    let plain = Origin.parse("http://example.test").unwrap()
+    let plain_port = Origin.parse("HTTP://EXAMPLE.TEST:80").unwrap()
+    let plain_dot = Origin.parse("http://example.test.:80").unwrap()
+    let secure = Origin.parse("https://example.test").unwrap()
+    let secure_port = Origin.parse("HTTPS://example.test:443").unwrap()
+    let custom_port = Origin.parse("http://example.test:8080").unwrap()
+    let ipv6 = Origin.parse("http://[::1]").unwrap()
+    let ipv6_port = Origin.parse("http://[::1]:80").unwrap()
+
+    testing.assert_eq(plain, plain_port, "http default port was not normalized")?
+    testing.assert_eq(plain, plain_dot, "trailing dot in hostname was not normalized")?
+    testing.assert_eq(secure, secure_port, "https default port was not normalized")?
+    testing.assert_eq(ipv6, ipv6_port, "ipv6 default port was not normalized")?
+    testing.assert(plain != secure, "schemes differed but compared equal")?
+    testing.assert(plain != custom_port, "ports differed but compared equal")?
+    testing.assert(plain.same_origin(plain_port), "same_origin method disagrees with ==")?
+    testing.assert_eq(plain.scheme(), "http", "scheme changed")?
+    testing.assert_eq(secure.scheme(), "https", "scheme changed")?
+    testing.assert_eq(plain.host(), "example.test", "host changed")?
+    testing.assert_eq(plain.port(), UInt16(80), "port changed")?
+    .Ok(())
+}
+
+test fn an_origin_parses_ipv6_with_custom_port() {
+    let ipv6 = Origin.parse("http://[::1]:8080").unwrap()
+    testing.assert_eq(ipv6.host(), "[::1]", "host changed")?
+    testing.assert_eq(ipv6.port(), UInt16(8080), "port changed")?
+    .Ok(())
+}
+
+test fn an_origin_refuses_invalid_inputs() {
+    testing.assert_eq(Origin.parse("null"), .Err(OriginError.Opaque), "null was not opaque")?
+    testing.assert_eq(Origin.parse("ftp://example.test"), .Err(OriginError.InvalidScheme), "ftp was accepted")?
+    testing.assert_eq(Origin.parse("example.test"), .Err(OriginError.MissingScheme), "missing scheme was accepted")?
+    testing.assert_eq(Origin.parse("http://example.test:0"), .Err(OriginError.InvalidPort), "port 0 was accepted")?
+    testing.assert_eq(Origin.parse("http://example.test:70000"), .Err(OriginError.InvalidPort), "port 70000 was accepted")?
+    testing.assert_eq(Origin.parse("http://example.test:80abc"), .Err(OriginError.InvalidPort), "trailing text in port was accepted")?
+    testing.assert_eq(Origin.parse("http://example.test/path"), .Err(OriginError.InvalidAuthority), "path was accepted in origin")?
+    testing.assert_eq(Origin.parse("http://user@example.test"), .Err(OriginError.InvalidAuthority), "userinfo was accepted in origin")?
+    testing.assert_eq(Origin.parse("http://:8080"), .Err(OriginError.InvalidAuthority), "empty host was accepted")?
+    testing.assert_eq(Origin.parse("http://[::1"), .Err(OriginError.InvalidAuthority), "unclosed ipv6 bracket was accepted")?
+    testing.assert_eq(Origin.parse("http://[not-ipv6]"), .Err(OriginError.InvalidAuthority), "non-hex ipv6 literal was accepted")?
+    testing.assert_eq(Origin.parse("http://example.test,evil.test"), .Err(OriginError.InvalidAuthority), "comma in host was accepted")?
+    testing.assert_eq(Origin.parse("http://exa_mple.test"), .Err(OriginError.InvalidAuthority), "underscore in host was accepted")?
+    testing.assert_eq(Origin.parse(r"http://evil\test"), .Err(OriginError.InvalidAuthority), "backslash in host was accepted")?
+    testing.assert_eq(Origin.parse("http://evil%20test"), .Err(OriginError.InvalidAuthority), "percent sign in host was accepted")?
+    .Ok(())
+}
+
+test fn an_origin_displays_in_canonical_form() {
+    defer let plain = fmt.render_owned(Origin.parse("http://example.test:80").unwrap()).unwrap()
+    defer let custom = fmt.render_owned(Origin.parse("http://example.test:8080").unwrap()).unwrap()
+    defer let secure = fmt.render_owned(Origin.parse("https://example.test:443").unwrap()).unwrap()
+    testing.assert_eq(plain.view(), "http://example.test", "default port 80 was not omitted")?
+    testing.assert_eq(custom.view(), "http://example.test:8080", "custom port was not rendered")?
+    testing.assert_eq(secure.view(), "https://example.test", "default port 443 was not omitted")?
+    .Ok(())
+}
+
+// Policy configuring same-origin / CSRF verification.
+@(copyable, derive(Equatable, Debug, Release))
+pub struct SameOriginPolicy {
+    // When both `Sec-Fetch-Site` and `Origin` are absent (such as requests from
+    // command-line tools like `curl`), allow the request.
+    allow_missing_both: Bool,
+    // When `Sec-Fetch-Site` is absent but `Origin` is present and matches, allow
+    // the request (supporting browsers without Fetch Metadata).
+    allow_missing_fetch_site: Bool,
+    // When `Origin` is absent but `Sec-Fetch-Site` is `same-origin` or `none`,
+    // allow the request (supporting top-level navigations or GETs).
+    allow_missing_origin: Bool,
+    // When `Sec-Fetch-Site` is `"same-site"` (a sibling subdomain), allow the
+    // request. Defaults to `false` for strict same-origin isolation.
+    allow_same_site: Bool,
+}
+
+impl SameOriginPolicy {
+    // Standard web application policy: accepts requests with a matching
+    // `Origin` or valid Fetch Metadata, and permits non-browser clients when
+    // both headers are absent.
+    pub fn standard() -> SameOriginPolicy {
+        .{
+            allow_missing_both = true,
+            allow_missing_fetch_site = true,
+            allow_missing_origin = true,
+            allow_same_site = false,
+        }
+    }
+
+    // Strict policy: requires at least one verified signal (`Sec-Fetch-Site`
+    // of `same-origin`/`none`, or a matching `Origin`). Refuses requests when
+    // both headers are missing.
+    pub fn strict() -> SameOriginPolicy {
+        .{
+            allow_missing_both = false,
+            allow_missing_fetch_site = true,
+            allow_missing_origin = true,
+            allow_same_site = false,
+        }
+    }
+}
+
+// Verify that a request originated from the expected origin according to `policy`:
+// 1. When both `Sec-Fetch-Site` and `Origin` are absent:
+//    - Accepted only when `policy.allow_missing_both` is true.
+// 2. When `Sec-Fetch-Site` is present:
+//    - `"same-origin"` and `"none"` are accepted.
+//    - `"same-site"` is accepted only when `policy.allow_same_site` is true.
+//    - `"cross-site"` and any other value are refused.
+// 3. When `Origin` is present:
+//    - Parses as an `Origin` and compares against `expected`.
+// 4. When only one signal is present:
+//    - The missing header is accepted if allowed by policy.
+// 5. When both signals are present:
+//    - Both must pass their respective checks.
+pub fn check_same_origin[P: Allocator](
+    request: Request[P],
+    expected: Origin,
+    policy: SameOriginPolicy,
+) -> Bool {
+    let fetch_site = request.header("Sec-Fetch-Site")
+    let origin_header = request.header("Origin")
+
+    let has_fetch = fetch_site.is_some()
+    let has_origin = origin_header.is_some()
+    if !has_fetch && !has_origin {
+        return policy.allow_missing_both
+    }
+
+    var fetch_ok = false
+    match fetch_site {
+        Some(site) => if site == "same-origin" || site == "none" {
+            fetch_ok = true
+        } else if site == "same-site" && policy.allow_same_site {
+            fetch_ok = true
+        } else {
+            return false
+        },
+        None => {},
+    }
+
+    var origin_ok = false
+    match origin_header {
+        Some(origin_text) => {
+            let actual = Origin.parse(origin_text) else |_| {
+                return false
+            }
+            if !actual.same_origin(expected) {
+                return false
+            }
+            origin_ok = true
+        },
+        None => {},
+    }
+
+    if !has_origin {
+        return fetch_ok && policy.allow_missing_origin
+    }
+
+    if !has_fetch {
+        return origin_ok && policy.allow_missing_fetch_site
+    }
+
+    fetch_ok && origin_ok
+}
+
+// Convenience check for standard web applications: when `Origin` is present,
+// it must match the request's `Host` header and scheme (`is_https`).
+// When `Sec-Fetch-Site` is present, it must be `"same-origin"` or `"none"`.
+// Requests without these headers (such as `curl` or non-browser clients) are
+// accepted under the standard policy.
+pub fn same_origin[P: Allocator](request: Request[P], is_https: Bool) -> Bool {
+    let host = request.header("Host") else {
+        match request.header("Origin") {
+            Some(_) => return false,
+            None => return SameOriginPolicy.standard().allow_missing_both,
+        }
+    }
+    let expected = Origin.from_authority(host.trim_ascii(), is_https) else |_| {
+        return false
+    }
+    check_same_origin(request, expected, SameOriginPolicy.standard())
+}
+
+test fn same_origin_policy_validates_requests() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let expected = Origin.parse("http://example.test").unwrap()
+
+    // Missing both headers passes under standard policy, fails under strict.
+    let bare = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    testing.assert(check_same_origin(bare.request(), expected, SameOriginPolicy.standard()), "bare request was refused under standard policy")?
+    testing.assert(!check_same_origin(bare.request(), expected, SameOriginPolicy.strict()), "bare request was accepted under strict policy")?
+
+    // Matching Origin alone passes under both standard and strict policy.
+    var matching_alone = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &matching_alone.add_header("Host", "example.test").unwrap()
+    &matching_alone.add_header("Origin", "http://example.test").unwrap()
+    testing.assert(check_same_origin(matching_alone.request(), expected, SameOriginPolicy.standard()), "matching origin refused under standard policy")?
+    testing.assert(check_same_origin(matching_alone.request(), expected, SameOriginPolicy.strict()), "matching origin refused under strict policy")?
+    testing.assert(same_origin(matching_alone.request(), false), "same_origin helper refused matching request")?
+
+    // Sec-Fetch-Site same-origin alone passes under both.
+    var fetch_alone = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &fetch_alone.add_header("Host", "example.test").unwrap()
+    &fetch_alone.add_header("Sec-Fetch-Site", "same-origin").unwrap()
+    testing.assert(check_same_origin(fetch_alone.request(), expected, SameOriginPolicy.standard()), "fetch same-origin refused under standard policy")?
+    testing.assert(check_same_origin(fetch_alone.request(), expected, SameOriginPolicy.strict()), "fetch same-origin refused under strict policy")?
+
+    // Default port and uppercase host match.
+    var matching_folded = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &matching_folded.add_header("Host", "EXAMPLE.TEST").unwrap()
+    &matching_folded.add_header("Origin", "HTTP://example.test:80").unwrap()
+    testing.assert(same_origin(matching_folded.request(), false), "folded origin refused")?
+
+    // Mismatched scheme, port, or host fail.
+    var wrong_scheme = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &wrong_scheme.add_header("Host", "example.test").unwrap()
+    &wrong_scheme.add_header("Origin", "https://example.test").unwrap()
+    testing.assert(!same_origin(wrong_scheme.request(), false), "wrong scheme accepted")?
+
+    var wrong_port = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &wrong_port.add_header("Host", "example.test:8080").unwrap()
+    &wrong_port.add_header("Origin", "http://example.test:8081").unwrap()
+    testing.assert(!same_origin(wrong_port.request(), false), "wrong port accepted")?
+
+    var wrong_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &wrong_host.add_header("Host", "example.test").unwrap()
+    &wrong_host.add_header("Origin", "http://evil.test").unwrap()
+    testing.assert(!same_origin(wrong_host.request(), false), "wrong host accepted")?
+
+    // Sec-Fetch-Site none passes.
+    var fetch_none = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &fetch_none.add_header("Host", "example.test").unwrap()
+    &fetch_none.add_header("Sec-Fetch-Site", "none").unwrap()
+    testing.assert(same_origin(fetch_none.request(), false), "Sec-Fetch-Site none refused")?
+
+    // Sec-Fetch-Site cross-site and same-site fail under standard policy.
+    var cross_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &cross_site.add_header("Host", "example.test").unwrap()
+    &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
+    testing.assert(!same_origin(cross_site.request(), false), "cross-site accepted")?
+
+    var same_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &same_site.add_header("Host", "example.test").unwrap()
+    &same_site.add_header("Sec-Fetch-Site", "same-site").unwrap()
+    testing.assert(!same_origin(same_site.request(), false), "same-site accepted under standard policy")?
+
+    // Conflicting: valid Origin but cross-site Sec-Fetch-Site fails.
+    var conflict = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &conflict.add_header("Host", "example.test").unwrap()
+    &conflict.add_header("Origin", "http://example.test").unwrap()
+    &conflict.add_header("Sec-Fetch-Site", "cross-site").unwrap()
+    testing.assert(!check_same_origin(conflict.request(), expected, SameOriginPolicy.standard()), "conflicting cross-site accepted")?
+    .Ok(())
+}

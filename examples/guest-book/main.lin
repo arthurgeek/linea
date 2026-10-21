@@ -8,7 +8,6 @@
 // to the page with `303 See Other`.
 import book
 import page
-import sqlite
 import std.env
 import std.http
 import std.io
@@ -19,6 +18,7 @@ import std.net
 import std.testing
 
 use book.Book
+use book.BookError
 use http.Handler
 use iter.Iterator
 use mem.Lender
@@ -31,12 +31,22 @@ let longest_message: UInt64 = 500
 let newest_shown: Int64 = 50
 
 fn database_path() -> Str {
-    env.variable("GUEST_BOOK_DATABASE").unwrap_or("guest-book.db")
+    match env.variable("GUEST_BOOK_DATABASE") {
+        Some(path) => {
+            let trimmed = path.trim_ascii()
+            if trimmed.length() == 0 {
+                "guest-book.db"
+            } else {
+                path
+            }
+        },
+        None => "guest-book.db",
+    }
 }
 
-// Log SQLite's sentence to standard error, which a web server records in its
+// Log the storage error to standard error, which a web server records in its
 // error log, and answer the visitor with a generic 500 message.
-fn unavailable(request: http.Request, sink error: sqlite.Error) -> http.Error {
+fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
     io.eprintln("guest-book: {error}")
     error.release()
     http.error(request, .InternalServerError, "the guest book is unavailable")
@@ -54,15 +64,15 @@ struct App {
 derive Release for App
 
 impl App {
-    fn open(path: Str) -> Result[App, sqlite.Error] where carries(path) {
+    fn open(path: Str) -> Result[App, BookError] where carries(path) {
         .Ok(App { book = Book.open(path)? })
     }
 
-    fn in_memory() -> Result[App, sqlite.Error] {
+    fn in_memory() -> Result[App, BookError] {
         .Ok(App { book = Book.open_in_memory()? })
     }
 
-    fn close(sink self: Self) -> Result[(), sqlite.Error] {
+    fn close(sink self: Self) -> Result[(), BookError] {
         let App { book } = self
         book.close()
     }
@@ -87,85 +97,8 @@ struct Signature {
     message: Str,
 }
 
-// Strip `:80` on `http` and `:443` on `https` so `http://example.test:80` and
-// `http://example.test` compare as the same authority.
-fn without_default_port(authority: Str, is_https: Bool) -> Str where carries(authority) {
-    let default_port = if is_https {
-        ":443"
-    } else {
-        ":80"
-    }
-    if authority.ends_with(default_port) {
-        return authority.slice(0, authority.length() - default_port.length()).unwrap_or(copy(authority))
-    }
-    copy(authority)
-}
-
-// Check that `origin` is `http://authority` or `https://authority` with no
-// path, query, fragment or userinfo, that its scheme matches the request's
-// scheme when `X-Forwarded-Proto` or `HTTPS` names one, and that its authority
-// matches `Host` under ASCII case folding.
-fn origin_matches_host(request: http.Request, origin: Str) -> Bool {
-    let (scheme, authority) = origin.split_once("://") else {
-        return false
-    }
-    let is_http = scheme.equals_ascii_folded("http")
-    let is_https = scheme.equals_ascii_folded("https")
-    if (!is_http && !is_https) || authority.length() == 0 {
-        return false
-    }
-    for byte in authority.as_bytes() {
-        let code = *byte
-        if code == 47 || code == 63 || code == 35 || code == 64 || code <= 32 {
-            return false
-        }
-    }
-    match request.header("X-Forwarded-Proto") {
-        Some(proto) => if !scheme.equals_ascii_folded(proto.trim_ascii()) {
-            return false
-        },
-        None => match env.variable("HTTPS") {
-            Some(https) => if https.length() != 0 && !https.equals_ascii_folded("off") && !is_https {
-                return false
-            },
-            None => if !is_http {
-                return false
-            },
-        },
-    }
-    let host = request.header("Host").unwrap_or("").trim_ascii()
-    if host.length() == 0 {
-        return false
-    }
-    let expected = without_default_port(host, is_https)
-    let actual = without_default_port(authority, is_https)
-    actual.equals_ascii_folded(expected)
-}
-
-// Refuse a `POST` sent from another site's page:
-// 1. When `Sec-Fetch-Site` is present, only `"same-origin"` and `"none"` are
-//    accepted; `"cross-site"` and `"same-site"` (a sibling subdomain) are
-//    refused.
-// 2. When `Origin` is present, its `scheme://authority` must match `Host` (with
-//    default-port normalization and ASCII case folding); `"null"` or any path,
-//    port or scheme mismatch is refused.
-// 3. When neither header is sent (such as `curl` from a shell), the request is
-//    accepted.
-fn same_origin(request: http.Request) -> Bool {
-    match request.header("Sec-Fetch-Site") {
-        Some(site) => if site != "same-origin" && site != "none" {
-            return false
-        },
-        None => {},
-    }
-    match request.header("Origin") {
-        Some(origin) => origin_matches_host(request, origin),
-        None => true,
-    }
-}
-
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !same_origin(request) {
+    if !http.same_origin(request, false) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -192,6 +125,10 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 }
 
 fn main() -> UInt8 {
+    if env.args().count() > 2 {
+        io.eprintln("usage: guest-book [PORT]")
+        return 64
+    }
     var port: UInt16 = 8080
     match env.args().at(1) {
         Some(arg) => {
@@ -217,11 +154,11 @@ fn main() -> UInt8 {
         return 1
     }
     let limits = http.Limits { max_body_bytes = 4096, ..http.Limits.default() }
-    let served = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits) else |error| {
+    let app = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits) else |error| {
         io.eprintln("guest-book: {error}")
         return 1
     }
-    let _ = served.close() else |error| {
+    let _ = app.close() else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1
@@ -268,26 +205,26 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     defer let arena = mem.Arena.open(mem.system(), size: 131072)
 
     // 60 scalars (including a two-byte UTF-8 `é`) and 500 scalars are accepted.
-    var name_60 = String.new_in(arena.handle())
-    &name_60.append("é").unwrap()
+    defer var ok_name = String.new()
+    &ok_name.append("é").unwrap()
     for _ in 0..59 {
-        &name_60.append("a").unwrap()
+        &ok_name.append("a").unwrap()
     }
-    var msg_500 = String.new_in(arena.handle())
+    defer var ok_msg = String.new()
     for _ in 0..500 {
-        &msg_500.append("m").unwrap()
+        &ok_msg.append("m").unwrap()
     }
-    var valid_body = String.new_in(arena.handle())
-    "name={http.percent_encoded(name_60.view())}&message={msg_500.view()}".fmt(&valid_body).unwrap()
-    let at_limit = http.new_request(arena.handle(), "POST", "/sign", body: valid_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var ok_body = String.new()
+    "name={http.percent_encoded(ok_name.view())}&message={ok_msg.view()}".fmt(&ok_body).unwrap()
+    let at_limit = http.new_request(arena.handle(), "POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     let accepted = &router.serve_http(&app, at_limit.request()).unwrap()
-    testing.assert_eq(accepted.status(), http.Status.SeeOther, "a 60-scalar name and 500-scalar message were refused")?
+    testing.assert_eq(accepted.status(), http.Status.SeeOther, "exact scalar limits were refused")?
 
-    // 61 scalars in `name`, 501 scalars in `message`, or whitespace-only fields answer 422.
-    var over_name = String.new_in(arena.handle())
-    "name={http.percent_encoded(name_60.view())}a&message=ok".fmt(&over_name).unwrap()
-    var over_msg = String.new_in(arena.handle())
-    "name=Ada&message={msg_500.view()}m".fmt(&over_msg).unwrap()
+    // 61 scalars for name and 501 for message: refused with 422.
+    defer var over_name = String.new()
+    "name={http.percent_encoded(ok_name.view())}a&message=hello".fmt(&over_name).unwrap()
+    defer var over_msg = String.new()
+    "name=Ada&message={ok_msg.view()}m".fmt(&over_msg).unwrap()
     let empty_name = http.new_request(arena.handle(), "POST", "/sign", body: "name=+++&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     let empty_message = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=+++", content_type: "application/x-www-form-urlencoded").unwrap()
     let long_name = http.new_request(arena.handle(), "POST", "/sign", body: over_name.view(), content_type: "application/x-www-form-urlencoded").unwrap()
@@ -333,14 +270,9 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
 
     var scheme_mismatch = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     &scheme_mismatch.add_header("Host", "example.test").unwrap()
-    &scheme_mismatch.add_header("X-Forwarded-Proto", "https").unwrap()
-    &scheme_mismatch.add_header("Origin", "http://example.test").unwrap()
+    &scheme_mismatch.add_header("Origin", "https://example.test").unwrap()
 
-    var unforwarded_https = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &unforwarded_https.add_header("Host", "example.test").unwrap()
-    &unforwarded_https.add_header("Origin", "https://example.test").unwrap()
-
-    for sent in [cross_site, same_site_subdomain, null_origin, suffix_spoof, path_spoof, port_mismatch, scheme_mismatch, unforwarded_https] {
+    for sent in [cross_site, same_site_subdomain, null_origin, suffix_spoof, path_spoof, port_mismatch, scheme_mismatch] {
         let refused = match &router.serve_http(&app, sent.request()) {
             Ok(_) => return testing.assert(false, "a forged origin was accepted"),
             Err(error) => error,

@@ -16,6 +16,31 @@ use sqlite.Statement
 // so deploying the program copies one executable and no SQL file beside it.
 let schema = embed("../schema.sql")
 
+// Why a guest-book operation failed:
+// - `Sqlite` when SQLite or its wrapper refused an operation;
+// - `NegativeLimit` when `Book.newest` is called with a negative limit;
+// - `InvalidTimestamp` when a stored Unix timestamp is outside Linea's
+//   representable range (years 0000..9999);
+// - `OutOfMemory` when allocating an entry or growing a collection fails.
+@derive(Debug, Release, From[sqlite.Error])
+pub enum BookError {
+    Sqlite(sqlite.Error),
+    NegativeLimit(Int64),
+    InvalidTimestamp(Int64),
+    OutOfMemory,
+}
+
+impl Display for BookError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Sqlite(error) => error.fmt(&w),
+            NegativeLimit(limit) => "the limit {limit} is negative".fmt(&w),
+            InvalidTimestamp(seconds) => "the timestamp {seconds} cannot be represented".fmt(&w),
+            OutOfMemory => "out of memory".fmt(&w),
+        }
+    }
+}
+
 // One signature read back from the `entries` table.
 @derive(Debug, Release)
 pub struct Entry {
@@ -33,10 +58,10 @@ struct Book {
 
 impl Book {
     // Open the guest book at `path`, creating its file and `entries` table if
-    // neither exists yet. `wait_when_busy` makes two CGI processes signing at
+    // neither exists yet. `wait_when_busy` makes two processes signing at
     // once wait up to two seconds for each other rather than failing with
     // `SQLITE_BUSY`.
-    pub fn open(path: Str) -> Result[Book, sqlite.Error] {
+    pub fn open(path: Str) -> Result[Book, BookError] {
         defer var database = Database.open(path)?
         &database.wait_when_busy(2000)?
         &database.execute(schema)?
@@ -48,16 +73,20 @@ test fn open_creates_the_entries_table_in_a_file() {
     let stamp = time.now().nanoseconds()
     defer let path_text = fmt.render_owned("/tmp/linea-guest-book-{stamp}.db").unwrap()
     let path = fs.Path.from_str(path_text.view()).unwrap()
+    defer {
+        let _ = fs.remove_file(path) else |_| {
+            ()
+        }
+    }
     var book = Book.open(path_text.view()).unwrap()
     &book.sign("Ada", "First note").unwrap()
     book.close().unwrap()
-    let _removed = fs.remove_file(path)
     .Ok(())
 }
 
 impl Book {
     // Open a fresh guest book in memory, with its `entries` table created.
-    pub fn open_in_memory() -> Result[Book, sqlite.Error] {
+    pub fn open_in_memory() -> Result[Book, BookError] {
         Book.open(":memory:")
     }
 }
@@ -73,11 +102,12 @@ impl Book {
     // Record a visitor's signature. `?1` and `?2` bind the name and message as
     // parameters, so quotes or SQL keywords in what a visitor wrote are stored
     // as text and never read as SQL.
-    pub fn sign(inout self: Self, name: Str, message: Str) -> Result[(), sqlite.Error] {
+    pub fn sign(inout self: Self, name: Str, message: Str) -> Result[(), BookError] {
         defer var insert = &self.database.prepare("INSERT INTO entries (name, message) VALUES (?1, ?2)")?
         &insert.bind_text(1, name)?
         &insert.bind_text(2, message)?
-        &insert.run()
+        &insert.run()?
+        .Ok(())
     }
 }
 
@@ -93,12 +123,15 @@ test fn sign_stores_text_holding_quotes_and_sql() {
 
 // Read one row's three columns into an `Entry`. `defer let` releases `name` or
 // `message` if reading a later column fails, and skips that release when all
-// three move into the returned `Entry`.
-fn read_entry(select: Statement) -> Result[Entry, sqlite.Error] {
+// three move into the returned `Entry`. Out-of-range timestamps return
+// `BookError.InvalidTimestamp` rather than fabricating a current time.
+fn read_entry(select: Statement) -> Result[Entry, BookError] {
     defer let name = select.text(0)?
     defer let message = select.text(1)?
     let seconds = select.integer(2)?
-    let signed = time.Timestamp.from_unix(seconds, 0).unwrap_or(time.now())
+    let signed = time.Timestamp.from_unix(seconds, 0) else {
+        return .Err(.InvalidTimestamp(seconds))
+    }
     .Ok(Entry { name, message, signed })
 }
 
@@ -107,7 +140,7 @@ impl Book {
     // statement when `newest` returns, and `defer var entries` releases any
     // entries already read if a later row or push fails; `.Ok(entries)` moves
     // the completed vector to the caller.
-    pub fn newest(inout self: Self, limit: Int64) -> Result[Vec[Entry], sqlite.Error] {
+    pub fn newest(inout self: Self, limit: Int64) -> Result[Vec[Entry], BookError] {
         if limit < 0 {
             return .Err(.NegativeLimit(limit))
         }
@@ -116,7 +149,7 @@ impl Book {
         defer var entries: Vec[Entry] = Vec.new()
         while &select.step()? {
             let entry = read_entry(select)?
-            &entries.push(entry).settled().map_err(|sink _| sqlite.Error.OutOfMemory)?
+            &entries.push(entry).settled().map_err(|sink _| BookError.OutOfMemory)?
         }
         .Ok(entries)
     }
@@ -154,6 +187,40 @@ test fn newest_refuses_a_negative_limit() {
     .Ok(())
 }
 
+test fn newest_zero_returns_no_entries() {
+    defer var book = Book.open_in_memory().unwrap()
+    &book.sign("Ada", "Hello").unwrap()
+    defer let listed = &book.newest(0).unwrap()
+    testing.assert_eq(listed.length(), UInt64(0), "newest(0) returned entries")?
+    .Ok(())
+}
+
+test fn invalid_timestamps_are_refused_rather_than_faked() {
+    defer var book = Book.open_in_memory().unwrap()
+    // Year 10000+ Unix timestamp is outside Linea's representable range.
+    let invalid_stamp: Int64 = 300000000000
+    defer var insert = &book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
+    &insert.bind_integer(1, invalid_stamp).unwrap()
+    &insert.run().unwrap()
+
+    let refused = match &book.newest(10) {
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+        Err(error) => {
+            let matches_stamp = match read error {
+                InvalidTimestamp(seconds) => seconds == invalid_stamp,
+                _ => false,
+            }
+            error.release()
+            matches_stamp
+        },
+    }
+    testing.assert(refused, "an invalid timestamp was silently accepted")?
+    .Ok(())
+}
+
 test fn a_refused_entry_push_settles_the_rejected_entry_and_earlier_rows() {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     var entries: Vec[Entry, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(log.allocator())
@@ -178,9 +245,10 @@ test fn a_refused_entry_push_settles_the_rejected_entry_and_earlier_rows() {
 
 impl Book {
     // Close the guest book and its underlying SQLite connection.
-    pub fn close(sink self: Self) -> Result[(), sqlite.Error] {
+    pub fn close(sink self: Self) -> Result[(), BookError] {
         let Book { database } = self
-        database.close()
+        database.close()?
+        .Ok(())
     }
 }
 

@@ -187,12 +187,15 @@ release partial row or vector allocations if a later step fails:
 ```linea
 // Read one row's three columns into an `Entry`. `defer let` releases `name` or
 // `message` if reading a later column fails, and skips that release when all
-// three move into the returned `Entry`.
-fn read_entry(select: Statement) -> Result[Entry, sqlite.Error] {
+// three move into the returned `Entry`. Out-of-range timestamps return
+// `BookError.InvalidTimestamp` rather than fabricating a current time.
+fn read_entry(select: Statement) -> Result[Entry, BookError] {
     defer let name = select.text(0)?
     defer let message = select.text(1)?
     let seconds = select.integer(2)?
-    let signed = time.Timestamp.from_unix(seconds, 0).unwrap_or(time.now())
+    let signed = time.Timestamp.from_unix(seconds, 0) else {
+        return .Err(.InvalidTimestamp(seconds))
+    }
     .Ok(Entry { name, message, signed })
 }
 
@@ -201,7 +204,7 @@ impl Book {
     // statement when `newest` returns, and `defer var entries` releases any
     // entries already read if a later row or push fails; `.Ok(entries)` moves
     // the completed vector to the caller.
-    pub fn newest(inout self: Self, limit: Int64) -> Result[Vec[Entry], sqlite.Error] {
+    pub fn newest(inout self: Self, limit: Int64) -> Result[Vec[Entry], BookError] {
         if limit < 0 {
             return .Err(.NegativeLimit(limit))
         }
@@ -210,7 +213,7 @@ impl Book {
         defer var entries: Vec[Entry] = Vec.new()
         while &select.step()? {
             let entry = read_entry(select)?
-            &entries.push(entry).settled().map_err(|sink _| sqlite.Error.OutOfMemory)?
+            &entries.push(entry).settled().map_err(|sink _| BookError.OutOfMemory)?
         }
         .Ok(entries)
     }
@@ -236,23 +239,24 @@ pub enum Error {
     NotUtf8(UInt32),
     InteriorNul(UInt64),
     TooLong,
-    NegativeLimit(Int64),
+    InvalidParameter(UInt32),
+    InvalidColumn(UInt32),
     OutOfMemory,
     TrailingSql,
     EmptySql,
 }
 ```
 
-In `examples/guest-book/main.lin`, `unavailable` logs SQLite's sentence to
+In `examples/guest-book/main.lin`, `unavailable` logs the error to
 standard error (where a web server records it in its error log), releases the
-`sqlite.Error`, and answers the visitor with a generic `500 Internal Server
+`BookError`, and answers the visitor with a generic `500 Internal Server
 Error`:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Log SQLite's sentence to standard error, which a web server records in its
+// Log the storage error to standard error, which a web server records in its
 // error log, and answer the visitor with a generic 500 message.
-fn unavailable(request: http.Request, sink error: sqlite.Error) -> http.Error {
+fn unavailable(request: http.Request, sink error: BookError) -> http.Error {
     io.eprintln("guest-book: {error}")
     error.release()
     http.error(request, .InternalServerError, "the guest book is unavailable")
@@ -302,22 +306,23 @@ the entire page and all entries in a single pass:
 //   through `entry_template` directly into the writer, with every column
 //   escaped as `Text` or written as `Timestamp`.
 @(copyable, derive(Debug))
-pub enum Value {
+enum Value {
     Text(Str),
     Timestamp(time.Timestamp),
     Entries(Slice[Entry]),
 }
 
 @(copyable, derive(Debug))
-pub struct Field {
+struct Field {
     name: Str,
     value: Value,
 }
 
-// Copy `form` to `w`, replacing each `{{name}}` with the matching field in
-// `fields`. A `{{word}}` that names no field is copied unchanged, and a test
-// checks that filling each template leaves no `{{` behind.
-pub fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
+// Copy `form` to `w`, replacing each `{{name}}` with the first matching field in
+// `fields`. Unknown placeholders (`{{unknown}}`) and unclosed delimiters (`{{unclosed`)
+// are intentionally preserved as literal text. A test checks that filling each production
+// template leaves no `{{` behind.
+fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
     var rest = copy(form)
     loop {
         let (before, opened) = rest.split_once(r"{{") else {
@@ -348,6 +353,7 @@ pub fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), 
                         )?
                     },
                 }
+                break
             }
         }
         if !found {
@@ -395,36 +401,14 @@ opens `Book` once before accepting connections; because `http.listen_and_serve`
 answers one connection at a time, every request shares that connection.
 
 `POST /sign` extracts the URL-encoded form into `Signature` through
-`http.Form[Signature]`. Before touching the database, `same_origin` and `sign`
-in `examples/guest-book/main.lin` check that the request came from the guest
-book's own origin and that the trimmed name and message fit the scalar limits:
+`http.Form[Signature]`. Before touching the database, `sign` in
+`examples/guest-book/main.lin` checks `http.same_origin` and verifies that the
+trimmed name and message fit the scalar limits:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Refuse a `POST` sent from another site's page:
-// 1. When `Sec-Fetch-Site` is present, only `"same-origin"` and `"none"` are
-//    accepted; `"cross-site"` and `"same-site"` (a sibling subdomain) are
-//    refused.
-// 2. When `Origin` is present, its `scheme://authority` must match `Host` (with
-//    default-port normalization and ASCII case folding); `"null"` or any path,
-//    port or scheme mismatch is refused.
-// 3. When neither header is sent (such as `curl` from a shell), the request is
-//    accepted.
-fn same_origin(request: http.Request) -> Bool {
-    match request.header("Sec-Fetch-Site") {
-        Some(site) => if site != "same-origin" && site != "none" {
-            return false
-        },
-        None => {},
-    }
-    match request.header("Origin") {
-        Some(origin) => origin_matches_host(request, origin),
-        None => true,
-    }
-}
-
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !same_origin(request) {
+    if !http.same_origin(request, false) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -450,7 +434,7 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
 
 `main` in `examples/guest-book/main.lin` registers the two routes on
 `http.Router[App]`, caps request bodies at 4096 bytes, serves the loopback port,
-and closes `served` when finished:
+and closes `app` when finished:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -460,6 +444,10 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 }
 
 fn main() -> UInt8 {
+    if env.args().count() > 2 {
+        io.eprintln("usage: guest-book [PORT]")
+        return 64
+    }
     var port: UInt16 = 8080
     match env.args().at(1) {
         Some(arg) => {
@@ -485,11 +473,11 @@ fn main() -> UInt8 {
         return 1
     }
     let limits = http.Limits { max_body_bytes = 4096, ..http.Limits.default() }
-    let served = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits) else |error| {
+    let app = http.listen_and_serve(net.loopback(port), http.logged(logger, router), state: app, limits: limits) else |error| {
         io.eprintln("guest-book: {error}")
         return 1
     }
-    let _ = served.close() else |error| {
+    let _ = app.close() else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1

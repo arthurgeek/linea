@@ -23,22 +23,23 @@ let entry_template = embed("../templates/entry.html")
 //   through `entry_template` directly into the writer, with every column
 //   escaped as `Text` or written as `Timestamp`.
 @(copyable, derive(Debug))
-pub enum Value {
+enum Value {
     Text(Str),
     Timestamp(time.Timestamp),
     Entries(Slice[Entry]),
 }
 
 @(copyable, derive(Debug))
-pub struct Field {
+struct Field {
     name: Str,
     value: Value,
 }
 
-// Copy `form` to `w`, replacing each `{{name}}` with the matching field in
-// `fields`. A `{{word}}` that names no field is copied unchanged, and a test
-// checks that filling each template leaves no `{{` behind.
-pub fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
+// Copy `form` to `w`, replacing each `{{name}}` with the first matching field in
+// `fields`. Unknown placeholders (`{{unknown}}`) and unclosed delimiters (`{{unclosed`)
+// are intentionally preserved as literal text. A test checks that filling each production
+// template leaves no `{{` behind.
+fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
     var rest = copy(form)
     loop {
         let (before, opened) = rest.split_once(r"{{") else {
@@ -69,6 +70,7 @@ pub fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), 
                         )?
                     },
                 }
+                break
             }
         }
         if !found {
@@ -127,5 +129,35 @@ test fn fill_escapes_text_and_streams_entries_without_unreplaced_placeholders() 
     // Every placeholder in both templates was replaced.
     testing.assert(row.view().find(r"{{").is_none(), "entry.html left an unreplaced placeholder")?
     testing.assert(rendered.view().find(r"{{").is_none(), "page.html left an unreplaced placeholder")?
+    .Ok(())
+}
+
+test fn duplicate_fields_render_only_the_first_match() {
+    defer var out = String.new()
+    fill(
+        &out,
+        r"Hello {{name}}!",
+        [
+            Field { name = "name", value = .Text("Ada") },
+            Field { name = "name", value = .Text("Grace") },
+            Field { name = "other", value = .Text("x") },
+        ],
+    ).unwrap()
+    testing.assert_eq(out.view(), "Hello Ada!", "duplicate field was rendered multiple times")?
+    .Ok(())
+}
+
+test fn unknown_and_unclosed_placeholders_are_preserved_verbatim() {
+    defer var out = String.new()
+    fill(
+        &out,
+        r"Hello {{unknown}} and {{unclosed!",
+        [
+            Field { name = "known", value = .Text("Ada") },
+            Field { name = "other", value = .Text("x") },
+            Field { name = "unused", value = .Text("y") },
+        ],
+    ).unwrap()
+    testing.assert_eq(out.view(), r"Hello {{unknown}} and {{unclosed!", "placeholders were not preserved verbatim")?
     .Ok(())
 }

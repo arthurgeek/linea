@@ -780,3 +780,28 @@ test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
     testing.assert_eq(broken.request().form_params().is_none(), true, "a broken form body had values")?
     .Ok(())
 }
+
+impl[P: Allocator] Request[P] {
+    // `origin` parses the request's `Host` header as an `Origin` with the
+    // given scheme.
+    pub fn origin(self: Self, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: self) {
+        let host = self.header("Host") else {
+            return .Err(.InvalidAuthority)
+        }
+        Origin.from_authority(host.trim_ascii(), is_https)
+    }
+}
+
+test fn a_request_gives_its_origin_from_the_host_header() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var req = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &req.add_header("Host", "example.test:8080").unwrap()
+    let origin = req.request().origin(false).unwrap()
+    testing.assert_eq(origin.is_https, false, "scheme changed")?
+    testing.assert_eq(origin.host, "example.test", "host changed")?
+    testing.assert_eq(origin.port, UInt16(8080), "port changed")?
+
+    let no_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    testing.assert_eq(no_host.request().origin(false), .Err(OriginError.InvalidAuthority), "missing host header succeeded")?
+    .Ok(())
+}

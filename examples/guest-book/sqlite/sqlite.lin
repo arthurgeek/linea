@@ -5,7 +5,7 @@
 //
 // What this library does not do:
 // - no floating-point, blob or NULL binding, and no reads of those columns;
-// - no named parameters, and no column names or counts;
+// - no named parameters, and no column names;
 // - no `reset`, so a compiled statement is run once and finished;
 // - no transaction helper (`execute("BEGIN")` works);
 // - no busy handler beyond `wait_when_busy`;
@@ -78,6 +78,8 @@ extern fn sqlite3_column_text(read statement: StatementHandle, column: Int32) ->
 
 extern fn sqlite3_column_bytes(read statement: StatementHandle, column: Int32) -> Int32
 
+extern fn sqlite3_column_count(read statement: StatementHandle) -> Int32
+
 extern fn sqlite3_column_int64(read statement: StatementHandle, column: Int32) -> Int64
 
 extern fn sqlite_shim_statement_message(read statement: StatementHandle) -> ffi.CText where borrows(statement)
@@ -112,7 +114,8 @@ pub enum Error {
     NotUtf8(UInt32),
     InteriorNul(UInt64),
     TooLong,
-    NegativeLimit(Int64),
+    InvalidParameter(UInt32),
+    InvalidColumn(UInt32),
     OutOfMemory,
     TrailingSql,
     EmptySql,
@@ -121,12 +124,19 @@ pub enum Error {
 impl Display for Error {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         match read self {
-            Refused(code, message) => "{message.view()} (SQLite code {code})".fmt(&w),
+            Refused(code, message) => {
+                if message.length() == 0 {
+                    "(SQLite code {code})".fmt(&w)
+                } else {
+                    "{message.view()} (SQLite code {code})".fmt(&w)
+                }
+            },
             NullColumn(column) => "column {column} is NULL".fmt(&w),
             NotUtf8(column) => "column {column} is not UTF-8 text".fmt(&w),
             InteriorNul(offset) => "the text holds a NUL byte at {offset}".fmt(&w),
-            TooLong => "the text or index exceeds SQLite's 32-bit limit".fmt(&w),
-            NegativeLimit(limit) => "the limit {limit} is negative".fmt(&w),
+            TooLong => "the text exceeds SQLite's 32-bit limit".fmt(&w),
+            InvalidParameter(parameter) => "parameter {parameter} is out of bounds (parameter index must be in 1..2147483647)".fmt(&w),
+            InvalidColumn(column) => "column {column} is out of bounds".fmt(&w),
             OutOfMemory => "out of memory".fmt(&w),
             TrailingSql => "prepare takes one statement, and text follows it".fmt(&w),
             EmptySql => "the SQL string contains no statement".fmt(&w),
@@ -441,7 +451,10 @@ impl Statement {
     // Bind `text` to the 1-based `?` or `?N` parameter at `parameter`. SQLite
     // copies the bytes before returning, including any NUL byte inside `text`.
     pub fn bind_text(inout self: Self, parameter: UInt32, text: Str) -> Result[(), Error] {
-        if parameter > max_int32_index || text.length() > max_int32_length {
+        if parameter == 0 || parameter > max_int32_index {
+            return .Err(.InvalidParameter(parameter))
+        }
+        if text.length() > max_int32_length {
             return .Err(.TooLong)
         }
         let code = sqlite_shim_bind_text(self.handle, Int32(parameter), ffi.bytes(text), Int32(text.length()))
@@ -469,8 +482,8 @@ test fn bind_text_preserves_a_nul_byte_inside_the_string() {
 impl Statement {
     // Bind `value` to the 1-based parameter at `parameter`.
     pub fn bind_integer(inout self: Self, parameter: UInt32, value: Int64) -> Result[(), Error] {
-        if parameter > max_int32_index {
-            return .Err(.TooLong)
+        if parameter == 0 || parameter > max_int32_index {
+            return .Err(.InvalidParameter(parameter))
         }
         let code = sqlite3_bind_int64(self.handle, Int32(parameter), value)
         if code != ok {
@@ -478,6 +491,37 @@ impl Statement {
         }
         .Ok(())
     }
+}
+
+test fn binding_parameter_zero_is_refused() {
+    defer var database = Database.open_in_memory().unwrap()
+    &database.execute("CREATE TABLE t (n INTEGER, s TEXT);").unwrap()
+    defer var insert = &database.prepare("INSERT INTO t VALUES (?1, ?2)").unwrap()
+    let text_is_refused = match &insert.bind_text(0, "val") {
+        Ok(_) => false,
+        Err(error) => {
+            let is_param = match read error {
+                InvalidParameter(param) => param == 0,
+                _ => false,
+            }
+            error.release()
+            is_param
+        },
+    }
+    let int_is_refused = match &insert.bind_integer(0, 42) {
+        Ok(_) => false,
+        Err(error) => {
+            let is_param = match read error {
+                InvalidParameter(param) => param == 0,
+                _ => false,
+            }
+            error.release()
+            is_param
+        },
+    }
+    testing.assert(text_is_refused, "bind_text accepted parameter 0")?
+    testing.assert(int_is_refused, "bind_integer accepted parameter 0")?
+    .Ok(())
 }
 
 test fn bind_integer_binds_a_64_bit_value() {
@@ -544,11 +588,26 @@ test fn run_reports_a_constraint_with_sqlite_s_sentence() {
 }
 
 impl Statement {
+    // The number of columns in the current result set.
+    pub fn column_count(self: Self) -> UInt32 {
+        let count = sqlite3_column_count(self.handle)
+        if count <= 0 {
+            0
+        } else {
+            UInt32(count)
+        }
+    }
+
     // Copy the text at 0-based `column` of the current row into `allocator`,
-    // checking that it is UTF-8. Answers `NullColumn` when the column is NULL.
+    // checking that it is UTF-8. Answers `InvalidColumn` if `column` is out of
+    // bounds, or `NullColumn` when the column is NULL.
     pub fn text_in[A: Allocator](self: Self, allocator: A, column: UInt32) -> Result[String[A], Error] where carries(.Ok: allocator) {
         if column > max_int32_index {
             return .Err(.TooLong)
+        }
+        let count = sqlite3_column_count(self.handle)
+        if count <= 0 || column >= UInt32(count) {
+            return .Err(.InvalidColumn(column))
         }
         let index = Int32(column)
         if sqlite3_column_type(self.handle, index) == null_type {
@@ -619,11 +678,17 @@ test fn text_reads_a_column_into_a_system_string() {
 }
 
 impl Statement {
-    // Read the 64-bit integer at 0-based `column` of the current row. Answers
-    // `NullColumn` when the column is NULL.
+    // Read the 64-bit integer at 0-based `column` of the current row, converting
+    // text or floating-point values according to SQLite's casting rules.
+    // Answers `InvalidColumn` if `column` is out of bounds, or `NullColumn`
+    // when the column is NULL.
     pub fn integer(self: Self, column: UInt32) -> Result[Int64, Error] {
         if column > max_int32_index {
             return .Err(.TooLong)
+        }
+        let count = sqlite3_column_count(self.handle)
+        if count <= 0 || column >= UInt32(count) {
+            return .Err(.InvalidColumn(column))
         }
         let index = Int32(column)
         if sqlite3_column_type(self.handle, index) == null_type {
@@ -652,6 +717,50 @@ test fn integer_reads_a_value_and_refuses_null() {
         },
     }
     testing.assert(null_refused, "a NULL integer column was not refused with NullColumn")?
+    .Ok(())
+}
+
+test fn column_out_of_bounds_is_refused() {
+    defer var database = Database.open_in_memory().unwrap()
+    &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);").unwrap()
+    defer var select = &database.prepare("SELECT n FROM t").unwrap()
+    testing.assert(&select.step().unwrap(), "no row")?
+    let text_invalid = match select.text(1) {
+        Ok(text) => {
+            text.release()
+            false
+        },
+        Err(error) => {
+            let is_invalid = match read error {
+                InvalidColumn(col) => col == 1,
+                _ => false,
+            }
+            error.release()
+            is_invalid
+        },
+    }
+    let int_invalid = match select.integer(1) {
+        Ok(_) => false,
+        Err(error) => {
+            let is_invalid = match read error {
+                InvalidColumn(col) => col == 1,
+                _ => false,
+            }
+            error.release()
+            is_invalid
+        },
+    }
+    testing.assert(text_invalid, "select.text(1) accepted out-of-bounds column")?
+    testing.assert(int_invalid, "select.integer(1) accepted out-of-bounds column")?
+    .Ok(())
+}
+
+test fn integer_converts_numeric_text_according_to_sqlite_rules() {
+    defer var database = Database.open_in_memory().unwrap()
+    &database.execute("CREATE TABLE t (s TEXT); INSERT INTO t VALUES ('42');").unwrap()
+    defer var select = &database.prepare("SELECT s FROM t").unwrap()
+    testing.assert(&select.step().unwrap(), "no row")?
+    testing.assert_eq(select.integer(0).unwrap(), Int64(42), "sqlite casting did not convert text to integer")?
     .Ok(())
 }
 
