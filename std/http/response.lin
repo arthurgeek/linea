@@ -983,11 +983,14 @@ fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, h
         Cgi => put(&writer, &written, "\r\n")?,
     }
     for header in headers.fields.as_slice() {
+        // Content-Type is suppressed for all bodyless statuses.
         if status.is_bodyless() {
             if header.name.view().equals_ascii_folded("Content-Type") {
                 continue
             }
         }
+        // Content-Length is prohibited on 204 and 1xx. ResponseHeaders already
+        // refuses Content-Length as framing, but write_head defensively filters it too.
         if status == .NoContent || (status.code() >= 100 && status.code() < 200) {
             if header.name.view().equals_ascii_folded("Content-Length") {
                 continue

@@ -429,14 +429,8 @@ fn read_headers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A
         let value = trim_optional_whitespace(raw_value)
         add_header_field(&stored, &header_fields, &tally, name, value, limits)?
     }
-    if is_http_11 {
-        if tally.host_count != 1 {
-            return .Err(.Status(.BadRequest))
-        }
-    } else {
-        if tally.host_count > 1 {
-            return .Err(.Status(.BadRequest))
-        }
+    if is_http_11 && tally.host_count != 1 {
+        return .Err(.Status(.BadRequest))
     }
     body_length(tally)
 }
