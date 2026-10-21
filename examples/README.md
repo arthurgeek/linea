@@ -4,7 +4,8 @@ Every program here is complete: it compiles, runs, and carries its own tests.
 Their expected exit status and output live in `tests/examples/`. The programs
 show what a task looks like in Linea; the [guide](../docs/learn/README.md)
 explains each construct. Within a level the programs run from simplest to most
-involved, so reading top to bottom is a path through the language.
+involved, so reading top to bottom is a path through the language, ending with
+[guest-book](guest-book/main.lin), a complete web application backed by SQLite.
 
 ## First programs
 
@@ -36,6 +37,7 @@ Strings, collections, parsing, and files.
 - [warehouse_stock.lin](warehouse_stock.lin): totals deliveries per warehouse; `Map` and `@derive`.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.
 - [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest; `filter`, `collect`, and lent counters.
+- [upcoming_leap_years.lin](upcoming_leap_years.lin): lists the next five leap years from a walk of years that never ends; lazy `filter` and `take`.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.
 - [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; reading `lines()`, counting with a `Map`, and sorting with `Vec.sort_by`.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
@@ -89,8 +91,8 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.
 - [http-json-echo](http-json-echo/main.lin): a JSON service with headers, forms, and shared counters; the largest example.
 
-## Calling C
+## A whole application
 
-A trusted module that wraps a C library and hands the rest of the program ordinary Linea values.
+A complete program combining a C library wrapper, embedded assets, and HTTP routing.
 
-- [file-sizes](file-sizes/main.lin): prints how many bytes each file holds; a private `extern`, a `@linear` descriptor closed on every path, `ffi.CString`, C's text copied back, and `ffi.Errno` for C's reason.
+- [guest-book](guest-book/main.lin): signs and lists a guest book stored in SQLite, served as a CGI program; a library trusted with C, linear statements, embedded templates, a cookie and escaped HTML.

@@ -1,0 +1,2 @@
+guest-book: REQUEST_METHOD is not set, so no web server started this program to answer a request
+run it from a web server, or serve it yourself: guest-book PORT

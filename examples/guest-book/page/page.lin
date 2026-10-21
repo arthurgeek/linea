@@ -1,0 +1,131 @@
+// HTML rendering for the guest book. Both templates are embedded at compile
+// time, and placeholders are written `{{name}}` with double braces so the CSS
+// rules in `page.html` keep their ordinary single braces.
+import book
+import std.fmt
+import std.html
+import std.mem
+import std.testing
+import std.time
+
+use book.Entry
+use mem.Slice
+
+let page_template = embed("../templates/page.html")
+
+let entry_template = embed("../templates/entry.html")
+
+// What replaces a `{{field}}` placeholder in a template:
+// - `Text` is text a visitor wrote, a cookie, or a SQLite column; `fill` writes
+//   it through `html.escape`, so `<`, `>`, `&`, `"` and `'` become entities.
+// - `Timestamp` is a UTC timestamp, formatted directly as RFC 3339.
+// - `Entries` is the slice of guest-book signatures; `fill` expands each row
+//   through `entry_template` directly into the writer, with every column
+//   escaped as `Text` or written as `Timestamp`.
+@(copyable, derive(Debug))
+pub enum Value {
+    Text(Str),
+    Timestamp(time.Timestamp),
+    Entries(Slice[Entry]),
+}
+
+@(copyable, derive(Debug))
+pub struct Field {
+    name: Str,
+    value: Value,
+}
+
+// Copy `form` to `w`, replacing each `{{name}}` with the matching field in
+// `fields`. A `{{word}}` that names no field is copied unchanged, and a test
+// checks that filling each template leaves no `{{` behind.
+pub fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
+    var rest = copy(form)
+    loop {
+        let (before, opened) = rest.split_once(r"{{") else {
+            break
+        }
+        &w.write_str(before)?
+        let (name, after) = opened.split_once(r"}}") else {
+            &w.write_str(r"{{")?
+            rest = opened
+            continue
+        }
+        var found = false
+        for read field in fields {
+            if field.name == name {
+                found = true
+                match read field.value {
+                    Text(text) => html.escape(&w, text)?,
+                    Timestamp(stamp) => stamp.fmt(&w)?,
+                    Entries(entries) => for read entry in entries {
+                        fill(
+                            &w,
+                            entry_template,
+                            [
+                                Field { name = "name", value = .Text(entry.name.view()) },
+                                Field { name = "signed", value = .Timestamp(copy(entry.signed)) },
+                                Field { name = "message", value = .Text(entry.message.view()) },
+                            ],
+                        )?
+                    },
+                }
+            }
+        }
+        if !found {
+            &w.write_str(r"{{")?
+            &w.write_str(name)?
+            &w.write_str(r"}}")?
+        }
+        rest = after
+    }
+    &w.write_str(rest)
+}
+
+// The complete guest-book page, streamed directly into `http.html` through
+// `Display` without building an intermediate `entries` string.
+@(copyable, derive(Debug))
+pub struct Page {
+    action: Str,
+    name: Str,
+    entries: Slice[Entry],
+}
+
+impl Display for Page {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        fill(
+            &w,
+            page_template,
+            [
+                Field { name = "action", value = .Text(copy(self.action)) },
+                Field { name = "name", value = .Text(copy(self.name)) },
+                Field { name = "entries", value = .Entries(copy(self.entries)) },
+            ],
+        )
+    }
+}
+
+test fn fill_escapes_text_and_streams_entries_without_unreplaced_placeholders() {
+    let stamp = time.Timestamp.from_unix(1792497600, 0).unwrap()
+    defer var row = String.new()
+    fill(
+        &row,
+        entry_template,
+        [
+            Field { name = "name", value = .Text("<b>Eve</b>") },
+            Field { name = "signed", value = .Timestamp(copy(stamp)) },
+            Field { name = "message", value = .Text("a & b") },
+        ],
+    ).unwrap()
+    testing.assert_eq(row.view(), "<li><b>&lt;b&gt;Eve&lt;/b&gt;</b> <time>2026-10-20T12:00:00Z</time><p>a &amp; b</p></li>\n", "Text was not escaped")?
+
+    defer var entries: Vec[Entry] = Vec.new()
+    &entries.push(Entry { name = "<b>Eve</b>".to_owned().unwrap(), message = "a & b".to_owned().unwrap(), signed = stamp }).settled().unwrap()
+    defer let rendered = fmt.render_owned(Page { action = "/sign", name = "Ada\"<", entries = entries.as_slice() }).unwrap()
+    testing.assert(rendered.view().find("value=\"Ada&quot;&lt;\"").is_some(), "the name attribute was not escaped")?
+    testing.assert(rendered.view().find("<li><b>&lt;b&gt;Eve&lt;/b&gt;</b>").is_some(), "the entry was not streamed")?
+    testing.assert(rendered.view().find("<time>2026-10-20T12:00:00Z</time>").is_some(), "the timestamp was not rendered")?
+    // Every placeholder in both templates was replaced.
+    testing.assert(row.view().find(r"{{").is_none(), "entry.html left an unreplaced placeholder")?
+    testing.assert(rendered.view().find(r"{{").is_none(), "page.html left an unreplaced placeholder")?
+    .Ok(())
+}
