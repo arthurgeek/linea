@@ -2,7 +2,7 @@
 // reorders declarations to prove that nothing observes it. Handing one across
 // to C would fix that layout at the boundary and make it observable, so what
 // crosses is what the language fixes the representation of: an integer, whose
-// width and signedness are the whole of it.
+// width and signedness are the whole of it, a `Float64`, or a newtype over one.
 struct Pair {
     a: UInt64,
     b: UInt64,

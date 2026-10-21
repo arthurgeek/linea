@@ -1,0 +1,9 @@
+import std.io
+import squares
+
+fn main() -> Result[UInt8, io.IoError] {
+    let (total, visited) = squares.sum_past(50)
+    let counted = squares.count_squares(7)
+    io.println("{visited} squares sum to {total}; a lambda counted {counted}")?
+    .Ok(0)
+}

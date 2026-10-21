@@ -531,9 +531,9 @@ argument are refused. Both words are reserved and written with their
 parentheses; neither is a callable value.
 
 **[S-Format]** An expression inside an interpolation may be followed by a
-colon and a format spec, `[[fill]align][+][0][width][.precision][?]`, each
-part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
-`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`. A colon begins a spec only
+colon and a format spec, `[[fill]align][+][0][width][.precision][x|X|?]`,
+each part optional and in that order: `"{day:02}"`, `"{count:>4}"`,
+`"{price:.2}"`, `"{name:<10}"`, `"{name:*^9?}"`, `"{color:06x}"`. A colon begins a spec only
 outside every parenthesis, bracket and brace of the value, so the colon in
 `"{f(n: 1)}"` names an argument. Spaces around the spec are not part of it.
 
@@ -555,17 +555,22 @@ outside every parenthesis, bracket and brace of the value, so the colon in
   occupies, counted in Unicode scalars: `"café"` occupies four. A value wider
   than its width is written whole.
 - `.precision` is the number of digits after a Float64's point.
+- `x` writes an integer's digits in base 16 with the letters `a` to `f`, and
+  `X` with `A` to `F`. A negative integer is written as `-` and the digits of
+  its magnitude, so `-255` with `:x` is `-ff` whatever its type, and zero
+  padding goes between the two: `-000ff` with `:06x`.
 
-A colon with no spec after it, a part out of order, an alignment or `0`
-without a width, a width or precision above 65535, and `0` beside an alignment
-are refused. A width and a precision are literal numbers; a width chosen at run
+A colon with no spec after it, a part out of order, more than one of `x`, `X`
+and `?`, an alignment or `0` without a width, a width or precision above
+65535, and `0` beside an alignment are refused. A width and a precision are literal numbers; a width chosen at run
 time is written through `std.fmt.Spec` instead.
 
 **[T-Format]** A spec's parts must suit the value's type. A sign and zero
-padding lay out integers and `Float64`, and a precision lays out `Float64`
-only; fill, alignment and width lay out any value. A generic value is a number
-when it has `Integer` evidence. `"{name:.2}"` on a `Str` and `"{count:.2}"` on
-an integer are refused.
+padding lay out integers and `Float64`, a precision lays out `Float64` only,
+and `x` and `X` write integers only; fill, alignment and width lay out any
+value. A generic value is a number, and an integer, when it has `Integer`
+evidence. `"{name:.2}"` on a `Str`, `"{count:.2}"` on an integer and
+`"{price:x}"` on a `Float64` are refused.
 
 **[T-Interpolation]** The compiler creates a type for each interpolated
 literal. Its value contains the surrounding text and the interpolated values.
@@ -1588,7 +1593,7 @@ already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
 when the library's `source` leaves the directory holding its manifest, or
 shares modules with another root's source (they are one directory, or one holds
-the other without the inner root's manifest between them); or when the library's manifest grants `"extern": true` and the
+the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the
@@ -1750,8 +1755,24 @@ entry point.
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
 `"library"`; `"name"` names a library, and the name `std` makes the root the
 standard library every program depends on, so only a library may take it;
-`"extern": true` grants [M-Extern]'s capability. The standard library's
-manifest is `{ "kind": "library", "name": "std", "extern": true }`. Whether a
+`"extern"` lists the modules granted [M-Extern]'s capability, each spelled as
+an import inside the root names it (`"store"`, `"io.core"`), with `"."` for the
+root module. A grant of another shape, or one naming a directory of the root
+that holds no source, stops the command before anything is checked. The
+standard library's manifest is
+`{ "kind": "library", "name": "std", "extern": ["fmt", "fs", "io.core", "mem", "net", "scalar", "time"] }`.
+`"native"` lists C sources, relative to the manifest, that a build compiles
+with the same `cc` at the same level and links into the program, and `"link"`
+lists libraries the build links, each a name `cc` takes after `-l`
+(`["sqlite3"]`). Either requires an `"extern"` grant, since only a granted
+module can call what they build. A library may name both, its sources relative
+to its own manifest: a program builds and links the C of every root it loads,
+its own first and then each dependency's in the order the dependency graph
+numbers them; a source named twice is built once, and libraries keep each
+manifest's order, named again wherever another manifest names them. A
+dependency granted `extern` is loaded, and its C built, only where its
+consumers consent ([M-Dependency]).
+Whether a
 root is the standard library is read from its manifest and never from its
 directory's name or location.
 
@@ -1889,16 +1910,39 @@ constructed from their parts, destructured, or inspected through those parts.
 struct Account { id: UInt8, balance: UInt8 }
 ```
 
-**[M-Extern]** An `extern` declaration appears only in a root whose manifest
-grants it, with `"extern": true`; the grant is any root's, program or library.
-A dependency's grant takes effect only where every manifest naming it, and the
-primary root's manifest, consent with `"extern": true` in an entry
-([M-Dependency]).
-The standard library's manifest grants it; a root whose manifest does not is
-refused. The compiler trusts an `extern` signature without inspecting its
-implementation, so the grant bounds that trust to roots that declare it
+**[M-Extern]** An `extern` declaration appears only in a module that its root's
+manifest lists under `"extern"`; any root, program or library, may grant its
+own modules. A dependency's grant takes effect only where every manifest
+naming it, and the primary root's manifest, consent with `"extern": true` in
+an entry ([M-Dependency]). A module the manifest does not list is refused. An
+`extern` is private to its module: `pub` or `internal` on one is refused,
+because another module calling C directly would be trusted with C too. The
+granted module publishes ordinary functions that call it. The compiler
+trusts an `extern` signature without inspecting its implementation, so the
+grant bounds that trust to the modules a reviewer was told to read
 ([ADR 0068](adr/0068-a-declaration-may-name-a-symbol-the-runtime-provides.md),
-[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
+[ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md),
+[ADR 0228](adr/0228-a-granted-module-calls-c.md)).
+
+**[M-Foreign]** Only a module its root's manifest grants `extern` may use
+`std.ffi`: import it, call any function or method `std.ffi` declares, or take
+one as a value, whatever `std.ffi` value it is handed. A trait's operation
+reached through one of `std.ffi`'s implementations, such as `release` on a
+`CString`, reads no C memory and is not refused. A module that is not granted may
+hold such a value and pass it on, which reads nothing. A granted module also
+publishes none of its types, as an earlier and plainer report: no function that
+is not private names one in its signature, no `pub use` or alias names one, and
+no struct or enum whose representation another module can reach holds one in a
+field or payload.
+`std.ffi` holds what crosses to C as an address: `Bytes` lends a view's bytes,
+`CText` is NUL-terminated text, `CTextList` is C's `char **`, and `CString`
+owns text with a NUL after it. A `Bytes`, `CText` or `CTextList` is a copyable
+newtype over the address whose dependencies originate at the value, as a
+`mem.Slice`'s do, so a contract ties it to what it views: `ffi.bytes(text)`
+carries `text`, and an `extern` answering a pointer into a handle declares
+`borrows(handle)`. Their operations trust what C supplied, such as a length,
+which is why they stay inside the module the grant names
+([ADR 0228](adr/0228-a-granted-module-calls-c.md)).
 
 **[M-Export]** An `export` declaration designates exactly one concrete foreign
 ABI entry point. Six declaration forms are excluded.
@@ -3632,6 +3676,14 @@ capability at every projection, just as assignment through a bracket does.
 the place's element type, is rebound once per position, and is scoped to the
 body.
 
+A walked value may observe the storage its places sit in rather than own it: a
+`mem.Slice[T]` views elements another value owns, and a type whose projection
+indexes a slice it holds reaches them the same way. Each binder of such a walk
+then depends on what the walked value observes, as `view[i]` depends on
+`view`. Writing, growing or releasing that storage while a binder, or a borrow
+of one, is still used is [O-Borrow]. A slice's projection declares `read self`,
+so `for inout` over a slice is [N-Immutable].
+
 A range takes its endpoint type from an expected `Range[T]` or a known opposite
 endpoint. Otherwise numeric literals use their ordinary default. Known endpoints
 must agree without numeric coercion, and each literal must fit the selected type.
@@ -4134,13 +4186,46 @@ substituted fields and payloads. A type argument occurring only behind `borrow`
 is observed, so its referent contributes no ownership obligation to the
 aggregate.
 
-**[T-Extern]** An `extern` accepts only integer parameters and returns an integer
-or Unit. Integer width and signedness define the representation shared across the
-boundary. Aggregates cannot cross because doing so would expose the layout kept
-private by [L-Layout]; linear values cannot cross because ownership cannot
-inspect paths through foreign code; callables cannot cross because their
-code-pointer representation and calling convention are not part of the foreign
-ABI contract.
+**[T-Extern]** An `extern`'s parameters and result cross the foreign boundary,
+and the result may also be Unit. What crosses is an integer of 8, 16, 32 or 64
+bits, a `Float64`, or an unrefined newtype whose base crosses, which crosses as
+its base:
+every bit pattern of these is a value on both sides, so nothing C hands back
+is a value Linea does not define. Integer width and signedness define the
+integer's representation, and an 8- or 16-bit integer is extended to a full
+register by whichever side produces it. A `Float64` is a C `double`. A newtype
+crosses whatever its ownership policy, because the parameter convention says
+what C does with the value: `read` and `inout` lend it for the call, and
+`sink` hands it to C, which consumes it. An `inout` parameter crosses as the
+address of its slot, which is C's `T *`: C reads the value there and may write
+another, as an out-parameter does. The compiler believes these statements as
+it believes the rest of the signature, so a linear newtype over `UInt64` is how
+a module holds a C object it must release, and a `UInt64` lent `inout` is how
+it receives one from a function that writes it through a pointer. An `extern`
+whose result can carry a dependency, such as a `std.ffi` view, writes a
+contract saying what the result points into, `borrows(handle)` or
+`carries()`: no body is read to infer one, and a handle parameter carries none
+by default, so a declaration that writes none is refused. A `borrows(p)` contract names
+a parameter `p` that is a handle ([T-ExternHandle]) whose type is not
+`copyable`, or a `std.ffi` view: an integer, an unsealed newtype or a type of
+an untrusted module could be copied or rebuilt to name the memory after `p`'s
+place changed, so it is refused. A refined newtype cannot cross,
+because C could hand back a value outside its range. `Bool` cannot cross,
+because no C ABI fixes which bytes are true. Aggregates cannot cross because
+doing so would expose the layout kept private by [L-Layout]. A callable crosses
+only as an `extern`'s callback, in the form [T-ExternCallback] checks; nothing
+else hands C a code pointer, because the convention a Linea function is called
+in is not part of the foreign ABI contract.
+
+An `extern` may instead answer `std.ffi`'s `Errno[R]`, where `R` crosses as a
+result does. C's function returns `R`, and the call evaluates to an `Errno`
+holding that value and the `errno` the call left set, read with no other
+evaluation between the call's return and the read. `Errno` is an opaque
+copyable type: its value is `value()`, and its code is reachable only through
+`failed_at(failure)`, which is `.Err(code)` when the value equals `failure` and
+`.Ok(value)` otherwise, or `failed_when(failed)`, which is `.Err(code)` when
+`failed` is true. `Errno` is not itself a type that crosses, so it is never a
+parameter and never an exported function's result.
 
 The private `std.mem` declarations `slot_stride`, `slot_take`, `slot_put`, and
 `slot_place` are typed storage primitives, not foreign calls. A recognized
@@ -4152,14 +4237,64 @@ The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
 `linea_math_cos`, `linea_math_ln`, and `linea_math_exp` have the exact signature
 `(value: Float64) -> Float64`; `linea_math_pow` additionally takes
-`exponent: Float64`. These checked primitives are the sole Float64 exception.
-They are private, nongeneric externs with read parameters, no defaults and no
+`exponent: Float64`. These checked primitives are compiler-owned rather than
+foreign calls. They are private, nongeneric externs with read parameters, no defaults and no
 contracts or where predicates. A malformed trusted declaration is [T-Extern],
 even when its substituted signature would fit the ordinary integer boundary. A
 declaration of one of these symbols anywhere else, even in a root granted
 `extern`, is [T-Extern]: the symbols are compiler-owned. An ordinary body with
 the same name remains an ordinary function. The runtime symbols are reserved
 against exports.
+
+**[T-ExternCallback]** An `extern` may take a callback, a parameter of a plain
+`fn` type that C calls during the call through a C function pointer. Its
+parameters and result cross the boundary, apart from a leading `inout`
+parameter, which is a context: the `extern` takes exactly one `inout` parameter
+of the same type, which C receives as a `void *` and hands back on every call.
+The callback is declared without a convention, is a plain `fn` rather than an
+`inout fn` or `sink fn`, and promises to retain nothing. At a call, its
+argument names a function or is a lambda that captures nothing, because C calls
+an entry generated for one fixed function; a function value whose target is
+known only at run time is refused. The entry takes the callback's parameters in
+their C widths and calls the function, and nothing but an `extern` call is
+handed one. The compiler believes the declaration: C calls the callback only
+during the call, on the calling thread, with the context it was lent.
+
+```linea
+struct Tally { total: Int64 }
+
+extern fn squares_visit(count: Int32, visit: fn(inout tally: Tally, square: Int32) -> Int32, inout tally: Tally) -> Int32
+
+fn add_square(inout tally: Tally, square: Int32) -> Int32 {
+    tally.total += Int64(square)
+    0
+}
+```
+
+`squares_visit(5, add_square, &tally)` lends `tally` for the call, and every
+call C makes to `add_square` receives it.
+
+**[T-ExternHandle]** A handle is a newtype that is not `copyable` and is either
+sealed (`@opaque`) in a module its root's manifest grants `extern`, in any root,
+or a newtype over a handle. An `extern` parameter whose type is a handle names
+an object C holds, whichever root's `extern` takes it. A `copyable` newtype is
+never a handle. Written `read`, the parameter promises that C only reads the
+object. Only an `extern` may write `read` on a parameter, and only on a handle;
+on any other parameter it is redundant
+([S-Entry]). A handle parameter taken by a plain lend, without `read`, lets C
+change or free the object, so a call lends its argument's place exclusively,
+as an `inout` argument is lent, although C receives the handle by value. The
+argument must be a place that may change: a mutable binding, an `inout`
+parameter, a mutable capture, the binder of a `for inout` walk, or a field of
+one. Every observation of the place made before the call, such as a `CText`
+read from the object, ends at the call, and a later use of it is [O-Borrow];
+another argument of the same call naming the place is [N-Aliased]. A handle
+taken `inout` is lent as any `inout` argument is, and one taken `sink` is
+moved. The compiler believes a
+written `read`, and believes that each handle is the only one naming its
+object: an `extern` answering a handle answers a new or handed-over object,
+and the module trusted with C never builds a handle from an address another
+handle holds.
 
 **[T-ExternAgreement]** Every `extern` declaration of one symbol names the one
 function the runtime provides under that symbol, so each module may declare the
@@ -4182,9 +4317,10 @@ signature agrees with every other declaration of the symbol, so
 [T-ExternAgreement] does not also report a `linea_` symbol
 ([ADR 0171](adr/0171-the-standard-library-is-an-ordinary-library.md)).
 
-**[T-Export]** An `export` accepts only integer parameters and returns an integer
-or Unit. It applies the same boundary restriction as [T-Extern], using the same
-predicate; the separate rule names the export site that violates it.
+**[T-Export]** An `export`'s parameters and result cross the foreign boundary
+as an `extern`'s do, and the result may also be Unit. It applies the same
+boundary restriction as [T-Extern], using the same predicate; the separate rule
+names the export site that violates it.
 
 **[T-Try]** The operand of `?` must be the prelude's `Option` or `Result`,
 recognized by declaration identity. A user type with variants named `Ok` and
@@ -5328,7 +5464,9 @@ value the lend is a read observation. A `let read` binder observes the part its
 pattern selected in the same way, whatever that part's type, until the binder's
 last use. Copies and stored observations preserve the restriction. Disjoint
 record fields remain independent; an observation of a container element protects
-its container. Scope exits and deferred actions participate in the same check.
+its container, and the binders of a lending walk's pattern share the walked
+element's place, so a change through one ends an observation made through
+another. Scope exits and deferred actions participate in the same check.
 
 **[O-Escapes]** A returned or retained observation must depend only on the
 sources its callable contract permits. A place lent `inout` to a closure never

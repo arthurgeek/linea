@@ -1,0 +1,5 @@
+error[T-Extern]: `note_text` answers C memory, so its declaration says what it points into
+ --> tests/ffi/c_text_from_c_says_what_it_points_into/notes/notes.lin:9:11
+  |
+9 | extern fn note_text(read note: Handle) -> ffi.CText
+  |           ^^^^^^^^^ write `where borrows(handle)` when it points into what a parameter holds, or `where carries()` when C keeps it for the program's life

@@ -1,0 +1,42 @@
+import std.ffi
+
+@(opaque, linear)
+type Handle = UInt64
+
+extern fn greeter_open() -> UInt64
+
+extern fn greeter_name(read greeter: Handle) -> ffi.CText where borrows(greeter)
+
+extern fn greeter_rename(greeter: Handle)
+
+extern fn greeter_close(sink greeter: Handle)
+
+@(opaque, linear)
+struct Greeter { handle: Handle }
+
+impl Greeter {
+    pub fn open() -> Option[Greeter] {
+        let address = greeter_open()
+        if address == 0 {
+            return .None
+        }
+        .Some(.{ handle = Handle(address) })
+    }
+
+    // Renaming rewrites the bytes `name` points at, so the name is refused
+    // once the greeter has been lent to `rename`.
+    pub fn stale_name(inout self: Self) -> Bool {
+        let name = greeter_name(self.handle)
+        &self.rename()
+        name.is_null()
+    }
+
+    pub fn rename(inout self: Self) {
+        greeter_rename(self.handle)
+    }
+
+    pub fn close(sink self: Self) {
+        let Greeter { handle: handle } = self
+        greeter_close(handle)
+    }
+}

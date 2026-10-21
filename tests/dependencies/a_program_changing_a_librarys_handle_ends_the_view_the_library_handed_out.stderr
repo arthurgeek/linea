@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/dependencies/a_program_changing_a_librarys_handle_ends_the_view_the_library_handed_out/main.lin:12:5
+   |
+12 |     n_reset(h)
+   |     ^^^^^^^^^^ keep this place available until the last use of its observation
+13 |     io.println("first byte after reset: {name.first()}")?
+   |                                          ---- the observation is still used here

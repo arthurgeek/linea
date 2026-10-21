@@ -663,6 +663,9 @@ pub const Resolution = struct {
     /// at one token, so the token that declares the binder is also the one
     /// naming the field.
     field_shorthand: FinishedBindingBits,
+    /// Whether each binder may be written through, indexed by `BindingId`:
+    /// the binder of a `for inout` walk, which lends each place writably.
+    writable_binders: FinishedBindingBits,
     /// How far each binding's own module passes the name on, indexed by
     /// `BindingId`. This is the alias declaration's reach for a re-export,
     /// rather than the visibility of the declaration it holds.
@@ -1027,6 +1030,7 @@ pub const Resolution = struct {
         gpa.free(self.tokens);
         self.reexported.deinit(gpa);
         self.field_shorthand.deinit(gpa);
+        self.writable_binders.deinit(gpa);
         gpa.free(self.reach);
         self.referenced.deinit(gpa);
         self.ambient.deinit(gpa);
@@ -2128,16 +2132,14 @@ pub const Resolution = struct {
     /// Whether writing through this binding is accepted at all: a local's
     /// own `var` (never a `let`), a parameter's own `inout`, or a capture
     /// taken `sink` into a closure whose own invocation is `inout` -- the one
-    /// shape the resolver lets write back through a captured name. Every
-    /// other kind, including a binder, answers `false`: a binder's writable
-    /// cases depend on the construct that bound it (a `for inout` walk, and
-    /// no other), which is decided at bind time and kept nowhere a later
-    /// question can read it back, so this asks only what it can answer for
-    /// certain rather than assume the answer is yes.
+    /// shape the resolver lets write back through a captured name -- or the
+    /// binder of a `for inout` walk, which lends each place writably. Every
+    /// other kind answers `false`.
     ///
     /// Read from what each kind's own declaration already settled -- the
     /// statement's keyword, the parameter list's convention, the capture
-    /// list's convention and the lambda's own invocation -- so a
+    /// list's convention and the lambda's own invocation, and for a binder
+    /// the walk that bound it, recorded at bind time -- so a
     /// semantic-tokens modifier and a completion offer answer from the same
     /// rule instead of each keeping its own copy of "can this be written".
     pub fn bindingIsMutable(self: *const Resolution, ast: *const Ast, b: BindingId) bool {
@@ -2153,6 +2155,7 @@ pub const Resolution = struct {
                 const lambda = ast.lambda(self.closures.exprOf(loc.closure));
                 break :capture captureIsMutable(taken.convention, lambda.invocation);
             },
+            .binder => b.index() < self.writable_binders.len() and self.writable_binders.get(b),
             else => false,
         };
     }
@@ -4431,6 +4434,8 @@ fn resolveInternal(
     errdefer reexported.deinit(gpa);
     var field_shorthand = try BindingBits.initEmpty(gpa, r.bindings.items.len);
     errdefer field_shorthand.deinit(gpa);
+    var writable_binders = try BindingBits.initEmpty(gpa, r.bindings.items.len);
+    errdefer writable_binders.deinit(gpa);
     const reaches = try gpa.alloc(Reach, r.bindings.items.len);
     errdefer gpa.free(reaches);
     var ambient_names = try BindingBits.initEmpty(gpa, r.bindings.items.len);
@@ -4457,6 +4462,7 @@ fn resolveInternal(
         tokens[i] = b.at;
         reexported.set(id, b.reexported);
         field_shorthand.set(id, b.names_a_field);
+        writable_binders.set(id, b.kind == .binder and b.mutable);
         reaches[i] = b.reach;
         ambient_names.set(id, b.ambient);
         referenced.set(id, b.used);
@@ -4667,6 +4673,8 @@ fn resolveInternal(
     errdefer finished_reexported.deinit(gpa);
     var finished_field_shorthand = field_shorthand.freeze();
     errdefer finished_field_shorthand.deinit(gpa);
+    var finished_writable_binders = writable_binders.freeze();
+    errdefer finished_writable_binders.deinit(gpa);
     var finished_ambient = ambient_names.freeze();
     errdefer finished_ambient.deinit(gpa);
     var finished_referenced = referenced.freeze();
@@ -4715,6 +4723,7 @@ fn resolveInternal(
         .tokens = tokens,
         .reexported = finished_reexported,
         .field_shorthand = finished_field_shorthand,
+        .writable_binders = finished_writable_binders,
         .reach = reaches,
         .ambient = finished_ambient,
         .referenced = finished_referenced,
@@ -7298,7 +7307,9 @@ const Resolver = struct {
         for (self.program.modules) |*m| {
             for (m.decls.start..m.decls.end) |i| {
                 const d = DeclId.at(@intCast(i));
-                for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
+                // An `extern` says with `read` that C only reads a handle it
+                // is given, which a default would not say ([T-ExternHandle]).
+                if (!self.ast.declIsExtern(d)) for (self.ast.declParams(d)) |param| try self.refuseRedundantRead(param);
                 // A member carries only `pub`, and a signature carries
                 // nothing: the parser accepts no other word inside either
                 // pair of braces, so there is nothing here that it let past.
@@ -16141,7 +16152,7 @@ fn bindingSpelled(ast: *const Ast, res: *const Resolution, name: []const u8, nth
 }
 
 test "resolution flags and reach are typed by bindings and preserve public answers" {
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         const Field = @FieldType(Resolution, field);
         try testing.expect(Field == FinishedBindingBits);
         try testing.expect(!@hasDecl(Field, "set"));
@@ -16161,7 +16172,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
         \\}
     );
     try testing.expectEqual(@as(u32, 0), r.errors);
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         try testing.expectEqual(@as(usize, r.res.bindingCount()), @field(r.res, field).len());
     }
     try testing.expectEqual(@as(usize, r.res.bindingCount()), r.res.reach.len);
@@ -16233,7 +16244,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
     const module_result = try resolve(arena.allocator(), &program, &interner, &sink, .program);
     const module_res = module_result.resolution;
     try testing.expectEqual(@as(u32, 0), sink.error_count - before);
-    inline for (.{ "reexported", "field_shorthand", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
         try testing.expectEqual(@as(usize, module_res.bindingCount()), @field(module_res, field).len());
     }
     try testing.expectEqual(@as(usize, module_res.bindingCount()), module_res.reach.len);

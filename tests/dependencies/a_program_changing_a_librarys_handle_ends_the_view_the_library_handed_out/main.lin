@@ -1,0 +1,15 @@
+import std.io
+import c
+
+// `c.Named` is sealed in a module `c`'s manifest trusts with C, so it is a
+// handle wherever an `extern` takes it, this program's included: resetting
+// it ends what `c` read from the object.
+extern fn n_reset(h: c.Named)
+
+fn main() -> Result[UInt8, io.IoError] {
+    var h = c.open()
+    let name = c.Name.of(h)
+    n_reset(h)
+    io.println("first byte after reset: {name.first()}")?
+    .Ok(0)
+}

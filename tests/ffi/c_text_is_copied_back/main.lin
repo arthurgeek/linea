@@ -1,0 +1,35 @@
+import std.io
+import std.mem
+import greeter
+
+use greeter.Greeter
+use greeter.Problem
+
+fn show(label: Str, result: Result[String, Problem]) -> Result[(), io.IoError] {
+    match read result {
+        Ok(text) => io.println("{label}: {text}"),
+        Err(problem) => io.println("{label}: {problem:?}"),
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var person = Greeter.open() else {
+        return .Ok(1)
+    }
+    defer let before = person.name()
+    &person.rename()
+    defer let after = person.name()
+    defer let nothing = person.nothing()
+    defer let garbled = person.garbled()
+    defer let record: Result[mem.Vec[UInt8], Problem] = person.record()
+    person.close()
+    show("before", before)?
+    show("after", after)?
+    show("nothing", nothing)?
+    show("garbled", garbled)?
+    match read record {
+        Ok(bytes) => io.println("record: {bytes.length()} bytes, the third is {bytes[2]}")?,
+        Err(problem) => io.println("record: {problem:?}")?,
+    }
+    .Ok(0)
+}

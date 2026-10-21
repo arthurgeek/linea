@@ -37,7 +37,7 @@ module {
     %v0 = arith.extui %lw0 : i8 to i64 loc("tests/traits/parameter_heads/no_main_does_not_instantiate_open_members/main.lin":7:9)
     func.return %v0 : i64 loc("tests/traits/parameter_heads/no_main_does_not_instantiate_open_members/main.lin":7:9)
   }
-  func.func @retain(%p0: i8) -> i8 {
+  func.func @retain(%p0: i8 {llvm.zeroext}) -> (i8 {llvm.zeroext}) {
     %w0 = arith.extui %p0 : i8 to i64
     %answer = func.call @"lin.;retain"(%w0) : (i64) -> i64
     %narrow = arith.trunci %answer : i64 to i8

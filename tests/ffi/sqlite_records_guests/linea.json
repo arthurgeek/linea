@@ -1,0 +1,1 @@
+{ "extern": ["sqlite"], "native": ["sqlite/bind.c"], "link": ["sqlite3"] }

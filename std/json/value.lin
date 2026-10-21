@@ -417,10 +417,7 @@ test fn members_walk_only_an_objects_entries() {
     defer var object = Value.object()
     &object.insert("a", Value.null()).unwrap().release()
     &object.insert("b", Value.null()).unwrap().release()
-    var count: UInt64 = 0
-    for _entry in object.members().unwrap() {
-        count += 1
-    }
+    let count = object.members().unwrap().count()
     defer let array = Value.array()
     testing.assert_eq(count, UInt64(2), "an object lost a member")?
     testing.assert(array.members().is_none(), "an array had members")?

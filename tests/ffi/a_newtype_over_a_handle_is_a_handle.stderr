@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ffi/a_newtype_over_a_handle_is_a_handle/named/named.lin:25:5
+   |
+25 |     named_reset(label)
+   |     ^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+26 |     let length = name.length()
+   |                  ---- the observation is still used here

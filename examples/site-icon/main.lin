@@ -22,8 +22,8 @@ let page = embed("page.html")
 // not text, so it is a `mem.Slice[UInt8]`, a view of bytes that lives as long
 // as the program.
 //
-// `favicon.ico` is a 16 by 16 icon of an orange disc, 1150 bytes, written by
-// `make-icon.py` beside this file.
+// `favicon.ico` is a 16 by 16 icon of an orange disc ringed in dark brown,
+// 1150 bytes.
 let favicon = embed_bytes("favicon.ico")
 
 // `home` answers the page as HTML. Its `<link rel="icon">` names the icon

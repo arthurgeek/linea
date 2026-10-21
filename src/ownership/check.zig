@@ -469,6 +469,8 @@ const Checker = struct {
     /// failures, so all three read this and differ only in which type they
     /// hand it -- a binding's, a written place's, or a discarded value's.
     fn owes(self: *const Checker, t: TypeId) bool {
+        // A type [T-Bound] refused promises no capability to judge a value by.
+        if (self.typing.broken_types.contains(t)) return false;
         return self.typing.mustConsumeWithin(self.current_owner, t);
     }
 
@@ -1262,6 +1264,10 @@ const Checker = struct {
                 if (self.ast.declParams(op).len > 1) "…" else "",
             }) catch return error.OutOfMemory;
             if (apart) |hint| w.print(", or take it apart with {s}", .{hint}) catch return error.OutOfMemory;
+        } else if (try self.releasingFunction(t)) |release| {
+            // A handle a module wraps is taken apart only by forgetting what
+            // it holds, so the function that releases it leads.
+            w.print("{s} `{s}({s})`", .{ lead, self.ast.tokenText(self.ast.declName(release)), receiver orelse "…" }) catch return error.OutOfMemory;
         } else if (apart) |hint| {
             w.print("take it apart with {s}, or give it to something that takes it", .{hint}) catch return error.OutOfMemory;
         } else {
@@ -1343,6 +1349,27 @@ const Checker = struct {
                 const name = self.ast.tokenName(self.ast.declName(sig));
                 if (try self.reach().elsewhere(self.gpa, t, name) != trait) continue;
                 return .{ .sig = sig, .trait = trait };
+            }
+        }
+        return null;
+    }
+
+    /// The function that takes a sealed newtype `t` by `sink` in the module
+    /// that declares it, such as an `extern` that closes a C handle the
+    /// newtype holds, where this function sits in that module; null
+    /// elsewhere. Bounded by the declarations of that one module.
+    fn releasingFunction(self: *const Checker, t: TypeId) std.mem.Allocator.Error!?node.DeclId {
+        const d = self.typing.declOfType(t) orelse return null;
+        if (self.ast.declTag(d) != .newtype or self.ast.declVisibility(d) != .opaque_) return null;
+        if (self.current_owner == .none) return null;
+        const module = self.program.moduleOf(d);
+        if (self.program.moduleOf(self.current_owner) != module) return null;
+        for (self.program.declsOf(module)) |candidate| {
+            if (self.ast.declTag(candidate) != .function) continue;
+            const signature = self.typing.declSignature(candidate);
+            if (signature == .poison or self.typing.get(signature) != .callable) continue;
+            for (self.typing.callableParams(self.typing.get(signature).callable)) |param| {
+                if (param.convention == .sink and param.ty == t) return candidate;
             }
         }
         return null;

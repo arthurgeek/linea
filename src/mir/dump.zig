@@ -89,9 +89,10 @@ fn writeInst(
     const tag = mir.tagOf(id);
     const ty = mir.typeOf(id);
 
-    if (tag == .function_addr) {
-        try w.print("  %{d} = function_addr @f{d} : {s}\n", .{
+    if (tag == .function_addr or tag == .foreign_function_addr) {
+        try w.print("  %{d} = {s} @f{d} : {s}\n", .{
             id.index(),
+            @tagName(tag),
             mir.functionOf(id).index(),
             module.types.nameOf(ty),
         });
@@ -184,7 +185,7 @@ fn writeInst(
             }
             try w.writeAll(")");
         },
-        .function_addr, .call_indirect, .call_indirect_noreturn => unreachable,
+        .function_addr, .foreign_function_addr, .call_indirect, .call_indirect_noreturn => unreachable,
     }
 
     try w.writeByte('\n');

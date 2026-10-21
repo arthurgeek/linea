@@ -1,0 +1,24 @@
+import wrap
+
+use wrap.Env
+
+// `main` is not granted, so whatever `std.ffi` value reaches it, it can call
+// none of `std.ffi`'s operations on it: each would trust a promise only a
+// granted module can make.
+fn main() -> UInt8 {
+    let Env(text) = wrap.home()
+    text.copy_bytes(length: 4096).unwrap().release()
+    let found = wrap.found()
+    let _length = found.inner.text.length()
+    for item in wrap.once() {
+        item.to_owned().unwrap().release()
+    }
+    let _visited = wrap.with_home(
+        |visited| if visited.is_null() {
+            1
+        } else {
+            0
+        },
+    )
+    0
+}

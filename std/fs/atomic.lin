@@ -1,6 +1,7 @@
 import std.mem
 import std.io
 import std.testing
+import std.text
 
 use io.Reader
 
@@ -252,8 +253,6 @@ let temporary_name_attempts: UInt64 = 64
 // `temporary_name_size` bytes.
 fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoError] where carries() {
     let prefix = ".linea-save-"
-    // Nibble values 0..15 index the lowercase hexadecimal alphabet.
-    let digits = "0123456789abcdef"
     for index in 0..prefix.length() {
         &buffer.store_byte(index, prefix.byte(index).unwrap())
     }
@@ -271,12 +270,18 @@ fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoErr
     for index in UInt64(0)..16 {
         let source = UInt64(15) - index
         let byte = buffer.load_byte(12 + source)
-        &buffer.store_byte(12 + source * 2, digits.byte(UInt64(byte / 16)).unwrap())
-        &buffer.store_byte(13 + source * 2, digits.byte(UInt64(byte % 16)).unwrap())
+        &buffer.store_byte(12 + source * 2, digit_byte(byte / 16))
+        &buffer.store_byte(13 + source * 2, digit_byte(byte % 16))
     }
     // Twelve prefix bytes plus 32 hex digits put the terminating NUL at 44.
     &buffer.store_byte(44, 0)
     .Ok(())
+}
+
+// `digit_byte` is the ASCII byte of the lowercase hexadecimal digit that
+// spells `nibble`, which is below 16.
+fn digit_byte(nibble: UInt8) -> UInt8 {
+    text.hex_digit(nibble).unwrap().byte(0).unwrap()
 }
 
 test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {

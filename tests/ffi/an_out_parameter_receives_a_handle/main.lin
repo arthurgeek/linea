@@ -1,0 +1,24 @@
+import std.io
+import ledger
+
+use ledger.Ledger
+
+fn main() -> Result[UInt8, io.IoError] {
+    let opened = Ledger.open(250) else |_| {
+        return .Ok(1)
+    }
+    let opening = opened.opening()
+    opened.close()
+    io.println("opened with {opening}")?
+    match Ledger.open(-1) {
+        Ok(refused) => {
+            refused.close()
+            return .Ok(2)
+        },
+        Err(reason) => match reason {
+            NegativeOpening => io.println("a negative opening is refused")?,
+            OutOfMemory => return .Ok(3),
+        },
+    }
+    .Ok(0)
+}

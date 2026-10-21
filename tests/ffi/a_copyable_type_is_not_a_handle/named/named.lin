@@ -1,0 +1,31 @@
+import std.ffi
+
+// A copy of a copyable type names the same object, so it is not a handle:
+// `read` says nothing about it, and text read from the object cannot be tied
+// to it, since changing the object through one copy would leave text read
+// through another dangling.
+@(opaque, copyable)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+
+extern fn named_reset(handle: Name)
+
+@(opaque, copyable)
+struct Named { handle: Name }
+
+impl Named {
+    pub fn open() -> Named {
+        .{ handle = named_open() }
+    }
+
+    pub fn length(self: Self) -> UInt64 {
+        named_name(self.handle).length()
+    }
+
+    pub fn reset(inout self: Self) {
+        named_reset(self.handle)
+    }
+}

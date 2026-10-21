@@ -1,0 +1,17 @@
+==================
+A module trusted with C publishes an extern
+==================
+
+pub extern fn counter_square(value: Int32) -> Int32
+
+---
+
+(source_file
+  (extern_declaration
+    (visibility)
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (type_identifier)))

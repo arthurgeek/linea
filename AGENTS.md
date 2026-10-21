@@ -89,16 +89,20 @@ until it is green.
   shows. A `linea` block with `fn main`, a `test fn` or a `` `path.lin`: ``
   label is a program; the bare or `text` block after it (past an optional `sh`
   block holding `linea run|check|test PATH`) is its output, and is all of what
-  the compiler prints. A block showing only the first diagnostics carries
-  `<!-- guide: first N diagnostics -->` on the line above it and must be exactly
-  those N with at least one more after them. Output that follows no program, or
-  a program that cannot run, carries `<!-- guide: unchecked REASON -->` above
-  its block; its diagnostic headers, `= help:`/`= note:` lines and underline
+  the compiler prints. A fenced block labelled `` `path/linea.json`: ``,
+  `` `path.c`: `` or `` `path.h`: `` is a file of the labelled project around
+  it, so a program that builds and calls C runs. A block showing only the
+  first diagnostics carries `<!-- guide: first N diagnostics -->` on the line
+  above it and must be exactly those N with at least one more after them.
+  Output that follows no program, or a program that cannot run, carries
+  `<!-- guide: unchecked REASON -->` above its block; its diagnostic headers, `= help:`/`= note:` lines and underline
   labels must still read like ones the compiler prints (wording found in the
   gate's own runs or in the `.stderr` goldens under `tests/`), so a new message
-  shown only there needs a corpus case that prints it. A fenced block that is
-  neither compiled nor marked fails the gate. A location inside `std/` is
-  compared by file alone.
+  shown only there needs a corpus case that prints it. A `linea` block carrying
+  `<!-- guide: excerpt PATH -->` above it is counted as a fragment and held to
+  be consecutive lines of `PATH` relative to the repository root. A fenced block
+  that is neither compiled nor marked fails the gate. A location inside `std/`
+  is compared by file alone.
 - A case is a `.lin` file or a directory holding `main.lin`; a module is a
   directory, and its goldens sit beside the directory under its own name.
   Examples keep only what a reader wants: their goldens sit in `tests/examples/`

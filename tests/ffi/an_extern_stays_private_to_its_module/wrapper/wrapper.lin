@@ -1,0 +1,9 @@
+// A module trusted with C publishes Linea functions, never the C itself: a
+// public `extern` would let every caller hand C whatever it likes.
+pub extern fn abs(value: Int32) -> Int32
+
+internal extern fn labs(value: Int64) -> Int64
+
+pub fn distance(from: Int64, to: Int64) -> Int64 {
+    labs(to - from) + Int64(abs(0))
+}

@@ -1,0 +1,8 @@
+// The library builds `tally.c`, named in its own manifest relative to its own
+// directory, and the program that depends on it links the object.
+extern fn tally_sum_of_squares(count: Int32) -> Int64
+
+// The sum of the squares from 1 to `count`.
+pub fn sum_of_squares(count: Int32) -> Int64 {
+    tally_sum_of_squares(count)
+}

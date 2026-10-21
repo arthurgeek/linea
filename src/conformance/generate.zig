@@ -151,6 +151,8 @@ pub const interpolation_specs = [_]struct { text: []const u8, format: node.Inter
     .{ .text = ":>4", .format = .{ .alignment = .right, .width = 4 } },
     .{ .text = ":02", .format = .{ .zero = true, .width = 2 } },
     .{ .text = ":*^+6?", .format = .{ .fill = '*', .alignment = .center, .plus = true, .width = 6, .debug = true } },
+    .{ .text = ":02x", .format = .{ .zero = true, .width = 2, .hex = .lower } },
+    .{ .text = ":>3X", .format = .{ .alignment = .right, .width = 3, .hex = .upper } },
 };
 
 pub const InterpolationShape = struct {

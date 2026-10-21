@@ -1,0 +1,10 @@
+error[M-Extern]: an `extern` is private to the module trusted with C
+ --> tests/ffi/an_extern_stays_private_to_its_module/wrapper/wrapper.lin:3:15
+  |
+3 | pub extern fn abs(value: Int32) -> Int32
+  |               ^^^ drop the visibility, and publish a function that calls it
+error[M-Extern]: an `extern` is private to the module trusted with C
+ --> tests/ffi/an_extern_stays_private_to_its_module/wrapper/wrapper.lin:5:20
+  |
+5 | internal extern fn labs(value: Int64) -> Int64
+  |                    ^^^^ drop the visibility, and publish a function that calls it

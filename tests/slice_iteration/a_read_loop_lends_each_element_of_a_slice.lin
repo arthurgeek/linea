@@ -1,0 +1,58 @@
+// A `for read` over a slice lends each element the slice views. The view
+// owns nothing, so the elements stay with the vector or array behind it, and
+// a linear element is looked at without being settled.
+import std.mem
+
+struct Reading {
+    station: Str,
+    millimetres: UInt64,
+}
+
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+// Add up the rainfall a view of readings records.
+fn rainfall(readings: mem.Slice[Reading]) -> UInt64 {
+    var total: UInt64 = 0
+    for read reading in readings {
+        total += reading.millimetres
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    let readings = [
+        Reading { station = "north", millimetres = 12 },
+        Reading { station = "south", millimetres = 30 },
+        Reading { station = "east", millimetres = 7 },
+    ]
+    let all = rainfall(readings.as_slice())
+    let last_two = rainfall(readings.as_slice().subspan(start: 1, count: 2).unwrap())
+
+    var tickets: Vec[Ticket] = Vec.new()
+    &tickets.push(.{ number = 4 }).unwrap()
+    &tickets.push(.{ number = 5 }).unwrap()
+    var looked: UInt64 = 0
+    for read ticket in tickets.as_slice() {
+        looked += ticket.number
+    }
+    var settled: UInt64 = 0
+    var pending = tickets.drain()
+    for ticket in &pending {
+        let Ticket { number } = ticket
+        settled += number
+    }
+    pending.finish().unwrap()
+
+    var named: UInt64 = 0
+    for read reading in readings.as_slice() {
+        named += reading.station.length()
+    }
+    if all == 49 && last_two == 37 && looked == 9 && settled == 9 && named == 14 {
+        0
+    } else {
+        1
+    }
+}

@@ -43,6 +43,39 @@ pub const FloatMath = struct {
     }
 };
 
+/// Whether `t` is a handle to an object C holds ([T-ExternHandle]): a newtype
+/// that is not `copyable` and is either sealed in a module its root's
+/// manifest grants `extern`, in any root, or a newtype over a handle. Only a
+/// module trusted with C makes the innermost one from an address, and a newtype
+/// around it names the same object, so each is a handle wherever it crosses an
+/// `extern`. A copyable newtype is never one: anyone holding a copy names the
+/// object, so nothing read through it can be kept alive by its place. Asked of
+/// a pool being built or of a finished typing.
+pub fn isForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, t: TypeId) bool {
+    var at = t;
+    while (true) {
+        if (at == .poison) return false;
+        const newtype = switch (pool.get(at)) {
+            .newtype => |newtype| newtype,
+            else => return false,
+        };
+        const declared = pool.declOfType(at) orelse return false;
+        if (ast.declOwnershipPolicy(declared) == .copyable) return false;
+        if (ast.declVisibility(declared) == .opaque_ and program.get(program.moduleOf(declared)).externs) return true;
+        at = newtype.base;
+    }
+}
+
+/// Whether parameter `k` of the `extern` `d`, of type `t`, lends C a handle
+/// it may change: a handle taken by a plain lend, without `read`. C receives
+/// the handle by value, so the call lends the argument's place as `inout`
+/// would, and only a place that may change can be lent so.
+pub fn changesForeignHandle(program: *const ExpandedProgram, ast: *const Ast, pool: anytype, d: DeclId, k: usize, t: TypeId) bool {
+    const param = ast.declParams(d)[k];
+    if (param.convention != .read or ast.paramConventionToken(param) != .none) return false;
+    return isForeignHandle(program, ast, pool, t);
+}
+
 pub const RawAccesses = struct {
     storage: DeclId = .none,
     buffer: DeclId = .none,
@@ -84,6 +117,14 @@ pub const RawAccesses = struct {
     closure_entry: DeclId = .none,
     closure_settle: DeclId = .none,
     closure_size: DeclId = .none,
+    /// `ffi.Bytes`, `ffi.CText` and `ffi.CTextList`: copyable newtypes over a
+    /// C address whose dependencies originate at the value, as a
+    /// `mem.Slice`'s do, so a contract can tie one to what it views.
+    foreign_views: [3]DeclId = .{ .none, .none, .none },
+    /// `ffi.Errno`, which an `extern` answers to have `errno` read after the
+    /// call, and the runtime's `linea_errno` that reads it.
+    errno: DeclId = .none,
+    errno_read: DeclId = .none,
 
     /// Identify private storage declarations before checking their generic signatures.
     pub fn init(program: *const ExpandedProgram, ast: *const Ast) RawAccesses {
@@ -108,6 +149,12 @@ pub const RawAccesses = struct {
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
+            .foreign_views = .{
+                program.libraryDeclIn("ffi", "Bytes") orelse .none,
+                program.libraryDeclIn("ffi", "CText") orelse .none,
+                program.libraryDeclIn("ffi", "CTextList") orelse .none,
+            },
+            .errno = program.libraryDeclIn("ffi", "Errno") orelse .none,
         };
     }
 
@@ -120,6 +167,7 @@ pub const RawAccesses = struct {
         checked.environment_count = libraryExternDecl(program, ast, typing, "linea_env_count");
         checked.environment_at = libraryExternDecl(program, ast, typing, "linea_env_at");
         checked.environment_len = libraryExternDecl(program, ast, typing, "linea_env_len");
+        checked.errno_read = libraryExternDecl(program, ast, typing, "linea_errno");
         checked.store = libraryExternDecl(program, ast, typing, "linea_raw_store");
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
         checked.store8 = libraryExternDecl(program, ast, typing, "linea_raw_store8");
@@ -129,6 +177,30 @@ pub const RawAccesses = struct {
 
     /// Whether `d` opens a closure: its first type parameter is the callback,
     /// which must be callable as the closure's `S`.
+    /// The `R` of `ffi.Errno[R]` where `t` is one, asked of a pool being
+    /// built or of a finished typing. An `extern` answering `t` returns `R`
+    /// from C.
+    pub fn errnoValue(self: RawAccesses, pool: anytype, t: TypeId) ?TypeId {
+        if (self.errno == .none) return null;
+        const instance = pool.instanceOf(t) orelse return null;
+        if (instance.decl != self.errno) return null;
+        return pool.appliedTo(t)[0];
+    }
+
+    /// The signature C is called with for an `extern` of `signature`: the
+    /// same parameters answering `R` where it answers `ffi.Errno[R]`, or null
+    /// where it answers anything else. Discovery interns it before the pool
+    /// closes and lowering finds it there.
+    pub fn errnoSignature(self: RawAccesses, gpa: std.mem.Allocator, pool: *Typing.Builder, signature: TypeId) std.mem.Allocator.Error!?TypeId {
+        const declared = pool.get(signature).callable;
+        const value = self.errnoValue(pool, declared.result) orelse return null;
+        const params = try gpa.dupe(types_mod.CallableParam, pool.callableParams(declared));
+        defer gpa.free(params);
+        const contracts = try gpa.dupe(types_mod.CallableContract, declared.contracts);
+        defer gpa.free(contracts);
+        return try pool.internCallable(params, value, contracts, declared.invocation);
+    }
+
     pub fn opensClosure(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }

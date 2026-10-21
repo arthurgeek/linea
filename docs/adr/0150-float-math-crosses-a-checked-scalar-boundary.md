@@ -1,6 +1,6 @@
 # 142. Float math crosses a checked scalar boundary
 
-Status: Accepted — 2026-09-21. Extends 0068.
+Status: Accepted — 2026-09-21. Extends 0068. "General Float64 foreign calls remain unsupported" is superseded by [0228](0228-a-granted-module-calls-c.md).
 
 ## Context
 

@@ -1,3 +1,4 @@
+import std.env
 import std.io
 import std.mem
 import std.testing
@@ -42,6 +43,7 @@ pub struct Header {
 struct Message[P: Allocator = mem.SystemAllocator] {
     memory: mem.Handle[P],
     known_method: Method,
+    is_http_11: Bool,
     head: String[mem.Handle[P]],
     method_token: Span,
     target: Span,
@@ -153,7 +155,7 @@ pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str
         Ok(_) => {},
         Err(_) => return .Err(.Status(.InternalServerError)),
     }
-    let line = RequestLine { method = method_of(method), method_token, target = target_span }
+    let line = RequestLine { method = method_of(method), method_token, target = target_span, is_http_11 = true }
     assembled(memory, head, line, header_fields, payload.into_bytes(), standard_limits)
 }
 
@@ -259,7 +261,7 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
         fields.release()
         return .Err(.Exhausted)
     }
-    var outcome: Result[(), PathValueError] = .Ok(())
+    var outcome: Result[(), PercentError] = .Ok(())
     var start: UInt64 = 0
     while outcome.is_ok() && start < source.length() {
         let end = source.find("&", start: start).unwrap_or(source.length())
@@ -274,30 +276,22 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
         Err(error) => {
             fields.release()
             return match error {
-                Invalid => .Ok(.None),
-                Allocation => .Err(.Exhausted),
+                Allocation(_) => .Err(.Exhausted),
+                _ => .Ok(.None),
             }
         },
     }
 }
 
-// `pair_count` counts the pairs of `source` that are not empty.
+// `pair_count` counts the pairs of `source` that are not empty. `split`
+// refuses only an empty separator, so splitting at `&` cannot fail.
 fn pair_count(source: Str) -> UInt64 {
-    var pairs: UInt64 = 0
-    var start: UInt64 = 0
-    while start < source.length() {
-        let end = source.find("&", start: start).unwrap_or(source.length())
-        if end > start {
-            pairs += 1
-        }
-        start = end + 1
-    }
-    pairs
+    source.split("&").unwrap().filter(|pair| pair.length() > 0).count()
 }
 
 // `decode_pair` decodes one `name=value` pair into `stored` and records its
 // ranges in `fields`.
-fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PathValueError] {
+fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Field, A], pair: Str) -> Result[(), PercentError] {
     let (raw_name, raw_value) = pair.split_once("=") else {
         (copy(pair), "")
     }
@@ -305,7 +299,7 @@ fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Fiel
     let value = append_decoded(&stored, raw_value, plus_is_space: true)?
     match &fields.push(.{ name, value }) {
         Ok(_) => .Ok(()),
-        Err(_) => .Err(.Allocation),
+        Err(_) => .Err(.Allocation(.Exhausted)),
     }
 }
 
@@ -343,6 +337,7 @@ impl[P: Allocator] Message[P] {
         .{
             memory = copy(self.memory),
             known_method = self.known_method,
+            is_http_11 = self.is_http_11,
             head = self.head.view(),
             method_token = copy(self.method_token),
             target = copy(self.target),
@@ -393,7 +388,13 @@ impl[P: Allocator] Message[P] {
             Some(earlier) => .Some(content_length(earlier, .None)?),
             None => .None,
         }
-        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false }
+        var host_count: UInt64 = 0
+        for field in self.header_fields.as_slice() {
+            if stored_part(self.head.view(), field.name).equals_ascii_folded("Host") {
+                host_count += 1
+            }
+        }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count }
         add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 }
@@ -422,6 +423,10 @@ test fn headers_added_one_at_a_time_are_checked_together() {
     let disagreeing = &sent.add_header("Content-Length", "4")
     testing.assert_eq(agreeing, .Ok(()), "a second length that agrees was refused")?
     testing.assert_eq(disagreeing, .Err(.Status(.BadRequest)), "a second length that disagrees was accepted")?
+    var with_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &with_host.add_header("Host", "example.test").unwrap()
+    let second_host = &with_host.add_header("Host", "other.test")
+    testing.assert_eq(second_host, .Err(.Status(.BadRequest)), "a second Host header was accepted")?
     var many = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     for _ in 0..standard_limits.max_headers {
         &many.add_header("X-Note", "a").unwrap()
@@ -442,6 +447,7 @@ test fn headers_added_one_at_a_time_are_checked_together() {
 struct Request[P: Allocator = mem.SystemAllocator] {
     memory: mem.Handle[P],
     known_method: Method,
+    is_http_11: Bool,
     head: Str,
     method_token: Span,
     target: Span,
@@ -484,20 +490,262 @@ test fn a_request_allocates_in_its_arena() {
     .Ok(())
 }
 
+// Policy for trusting reverse-proxy transport headers when determining scheme.
+// - `None`: do not trust client-supplied forwarded headers (the default).
+// - `XForwardedProto`: trust the immediate hop from `X-Forwarded-Proto`.
+// - `Forwarded`: trust the immediate hop from RFC 7239 `Forwarded`.
+// - `All`: trust either `Forwarded` or `X-Forwarded-Proto`.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ProxyTrust {
+    None,
+    XForwardedProto,
+    Forwarded,
+    All,
+}
+
 impl[P: Allocator] Request[P] {
     // `method` returns the request's method, or `Other` for a token `Method`
     // does not name.
     pub fn method(self: Self) -> Method {
         self.known_method
     }
+
+    // Return whether this request was made with HTTP/1.1 (otherwise HTTP/1.0).
+    pub fn is_http_11(self: Self) -> Bool {
+        self.is_http_11
+    }
+
+    // Return the request HTTP version string: "HTTP/1.1" or "HTTP/1.0".
+    pub fn version(self: Self) -> Str {
+        if self.is_http_11 {
+            "HTTP/1.1"
+        } else {
+            "HTTP/1.0"
+        }
+    }
+}
+
+// Determine whether the immediate reverse-proxy hop indicates HTTPS from RFC 7239 `Forwarded`.
+// Inspects the last comma-separated element across all `Forwarded` header lines.
+fn forwarded_proto_is_https(stored: Str, sink fields: mem.Slice[Field]) -> Option[Bool] {
+    var last_element: Option[Str] = .None
+    for field in fields {
+        if stored_part(stored, field.name).equals_ascii_folded("Forwarded") {
+            let val = stored_part(stored, field.value)
+            let elements = match val.split(",") {
+                Ok(elts) => elts,
+                Err(_) => return .Some(false),
+            }
+            for elt in elements {
+                let trimmed = elt.trim_ascii()
+                if trimmed.length() > 0 {
+                    last_element = .Some(trimmed)
+                }
+            }
+        }
+    }
+    match last_element {
+        Some(target_hop) => {
+            let params = match target_hop.split(";") {
+                Ok(p) => p,
+                Err(_) => return .Some(false),
+            }
+            var found_proto: Option[Str] = .None
+            for param in params {
+                let trimmed = param.trim_ascii()
+                if trimmed.length() >= 6 && trimmed.slice(0, 6).unwrap().equals_ascii_folded("proto=") {
+                    let val = trimmed.slice(6, trimmed.length()).unwrap().trim_ascii()
+                    let unquoted = if val.starts_with("\"") && val.ends_with("\"") && val.length() >= 2 {
+                        val.slice(1, val.length() - 1).unwrap().trim_ascii()
+                    } else {
+                        val
+                    }
+                    match read found_proto {
+                        Some(earlier) => {
+                            if !earlier.equals_ascii_folded(unquoted) {
+                                return .Some(false)
+                            }
+                        },
+                        None => found_proto = .Some(unquoted),
+                    }
+                }
+            }
+            match found_proto {
+                Some(proto) => .Some(proto.equals_ascii_folded("https")),
+                None => .None,
+            }
+        },
+        None => .None,
+    }
+}
+
+// Determine whether the immediate reverse-proxy hop indicates HTTPS from `X-Forwarded-Proto`.
+// Inspects the last comma-separated entry across all `X-Forwarded-Proto` header lines.
+fn x_forwarded_proto_is_https(stored: Str, sink fields: mem.Slice[Field]) -> Option[Bool] {
+    var last_proto: Option[Str] = .None
+    for field in fields {
+        if stored_part(stored, field.name).equals_ascii_folded("X-Forwarded-Proto") {
+            let val = stored_part(stored, field.value)
+            let parts = match val.split(",") {
+                Ok(p) => p,
+                Err(_) => return .Some(false),
+            }
+            for part in parts {
+                let trimmed = part.trim_ascii()
+                if trimmed.length() > 0 {
+                    last_proto = .Some(trimmed)
+                }
+            }
+        }
+    }
+    match last_proto {
+        Some(proto) => .Some(proto.equals_ascii_folded("https")),
+        None => .None,
+    }
+}
+
+fn env_https_is_set() -> Option[Bool] {
+    match env.variable("HTTPS") {
+        Some(val) => {
+            if val == "on" || val == "1" || val.equals_ascii_folded("true") {
+                .Some(true)
+            } else if val == "off" || val == "0" || val.equals_ascii_folded("false") {
+                .Some(false)
+            } else {
+                .None
+            }
+        },
+        None => .None,
+    }
+}
+
+impl[P: Allocator] Request[P] {
+    // Return whether this request was made securely (HTTPS).
+    //
+    // By default (`ProxyTrust.None`), proxy headers and the environment are
+    // untrusted, and direct transport is assumed cleartext.
+    //
+    // When proxy trust is explicitly configured:
+    // - `ProxyTrust.XForwardedProto`: inspects the immediate reverse-proxy hop
+    //   (the last comma-separated entry across all `X-Forwarded-Proto` header lines).
+    // - `ProxyTrust.Forwarded`: inspects the immediate reverse-proxy hop (the last
+    //   element across all RFC 7239 `Forwarded` header lines) for its `proto` parameter.
+    //   Conflicting or non-HTTPS values evaluate to `false`.
+    // - `ProxyTrust.All`: inspects `Forwarded`, `X-Forwarded-Proto`, and the
+    //   process environment `HTTPS` variable. If any present signal is non-HTTPS,
+    //   or if signals disagree, evaluates to `false`.
+    pub fn is_https(self: Self, trust: ProxyTrust = .None) -> Bool {
+        if trust == .None {
+            return false
+        }
+        if trust == .Forwarded {
+            return forwarded_proto_is_https(self.head, copy(self.header_fields)).unwrap_or(false)
+        }
+        if trust == .XForwardedProto {
+            return x_forwarded_proto_is_https(self.head, copy(self.header_fields)).unwrap_or(false)
+        }
+        if trust == .All {
+            let fwd = forwarded_proto_is_https(self.head, copy(self.header_fields))
+            let xfp = x_forwarded_proto_is_https(self.head, copy(self.header_fields))
+            let env_https = env_https_is_set()
+
+            var saw_https = false
+            match fwd {
+                Some(is_secure) => {
+                    if !is_secure {
+                        return false
+                    }
+                    saw_https = true
+                },
+                None => {},
+            }
+            match xfp {
+                Some(is_secure) => {
+                    if !is_secure {
+                        return false
+                    }
+                    saw_https = true
+                },
+                None => {},
+            }
+            match env_https {
+                Some(is_secure) => {
+                    if !is_secure {
+                        return false
+                    }
+                    saw_https = true
+                },
+                None => {},
+            }
+            return saw_https
+        }
+        false
+    }
+}
+
+test fn request_is_https_checks_forwarded_headers_and_env() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+
+    // Untrusted by default: client-supplied headers do not make request HTTPS.
+    var untrusted = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &untrusted.add_header("X-Forwarded-Proto", "https").unwrap()
+    &untrusted.add_header("Forwarded", "proto=https").unwrap()
+    testing.assert(!untrusted.request().is_https(), "untrusted proxy headers made request HTTPS by default")?
+    testing.assert(!untrusted.request().is_https(trust: .None), "ProxyTrust.None trusted proxy headers")?
+
+    // Multi-hop X-Forwarded-Proto: immediate proxy is the last comma-separated entry.
+    var xfp_https = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &xfp_https.add_header("X-Forwarded-Proto", "http, https").unwrap()
+    testing.assert(xfp_https.request().is_https(trust: .XForwardedProto), "immediate https hop in X-Forwarded-Proto was refused")?
+
+    var xfp_http = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &xfp_http.add_header("X-Forwarded-Proto", "https, http").unwrap()
+    testing.assert(!xfp_http.request().is_https(trust: .XForwardedProto), "immediate http hop was treated as https")?
+
+    // Forwarded RFC 7239: immediate proxy is the last comma-separated element.
+    var fwd_https = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_https.add_header("Forwarded", "for=1.2.3.4;proto=http, for=5.6.7.8;proto=\"HTTPS\"").unwrap()
+    testing.assert(fwd_https.request().is_https(trust: .Forwarded), "immediate https hop in Forwarded was refused")?
+
+    var fwd_http = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_http.add_header("Forwarded", "for=1.2.3.4;proto=https, for=5.6.7.8;proto=http").unwrap()
+    testing.assert(!fwd_http.request().is_https(trust: .Forwarded), "earlier https hop overrode immediate http hop")?
+
+    // Conflicting proto parameters in same hop are refused.
+    var fwd_conflict = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_conflict.add_header("Forwarded", "for=1.2.3.4;proto=http;proto=https").unwrap()
+    testing.assert(!fwd_conflict.request().is_https(trust: .Forwarded), "conflicting proto parameters were accepted")?
+
+    // Multi-line X-Forwarded-Proto: immediate proxy is the last occurrence across lines.
+    var xfp_multiline = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &xfp_multiline.add_header("X-Forwarded-Proto", "https").unwrap()
+    &xfp_multiline.add_header("X-Forwarded-Proto", "http").unwrap()
+    testing.assert(!xfp_multiline.request().is_https(trust: .XForwardedProto), "multi-line X-Forwarded-Proto used first line instead of last")?
+
+    // Multi-line Forwarded: immediate proxy is the last element across lines.
+    var fwd_multiline = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &fwd_multiline.add_header("Forwarded", "proto=https").unwrap()
+    &fwd_multiline.add_header("Forwarded", "for=proxy;proto=http").unwrap()
+    testing.assert(!fwd_multiline.request().is_https(trust: .Forwarded), "multi-line Forwarded used first line instead of last")?
+
+    // ProxyTrust.All refuses conflicting proxy headers.
+    var conflicting = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &conflicting.add_header("Forwarded", "proto=https").unwrap()
+    &conflicting.add_header("X-Forwarded-Proto", "http").unwrap()
+    testing.assert(!conflicting.request().is_https(trust: .All), "ProxyTrust.All accepted conflicting Forwarded and X-Forwarded-Proto")?
+
+    // Mismatched trust policy ignores other headers.
+    testing.assert(!xfp_https.request().is_https(trust: .Forwarded), "Forwarded trust policy accepted X-Forwarded-Proto")?
+    testing.assert(!fwd_https.request().is_https(trust: .XForwardedProto), "XForwardedProto trust policy accepted Forwarded")?
+    .Ok(())
 }
 
 test fn a_request_names_its_method() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     let method = request.request().method()
     testing.assert_eq(method, Method.Patch, "the method changed")?
-    let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     let unknown = other.request().method()
     testing.assert_eq(unknown, Method.Other, "an unknown method was named")?
     .Ok(())
@@ -512,7 +760,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_request_keeps_its_method_token_as_sent() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
     .Ok(())
 }
@@ -530,9 +778,9 @@ impl[P: Allocator] Request[P] {
 
 test fn a_path_ends_at_the_query() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
-    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(bare.request().path(), "/a/b", "a path without a query changed")?
     .Ok(())
 }
@@ -548,11 +796,11 @@ impl[P: Allocator] Request[P] {
 
 test fn a_query_follows_the_first_question_mark() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
-    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(empty.request().query(), Option.Some(""), "an empty query was absent")?
-    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(none.request().query(), .None, "a target without a query had one")?
     .Ok(())
 }
@@ -568,7 +816,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_header_is_found_by_its_folded_name() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
+    let input = "GET / HTTP/1.1\r\nHost: b\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
     let request = sent.request()
     testing.assert_eq(request.header("ACCEPT"), Option.Some("text/plain"), "the first value was not found")?
@@ -607,7 +855,7 @@ impl[P: Allocator] Request[P] {
 
 test fn headers_walk_in_arrival_order() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nhost: again\r\n\r\n"
+    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nAccept: text/plain\r\n\r\n"
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
     var walk = sent.request().headers()
     let first = &walk.next()
@@ -616,7 +864,7 @@ test fn headers_walk_in_arrival_order() {
     let fourth = &walk.next()
     testing.assert_eq(first, Option.Some(Header { name = "Host", value = "example.com" }), "the first header changed")?
     testing.assert_eq(second, Option.Some(Header { name = "Accept", value = "*/*" }), "the second header changed")?
-    testing.assert_eq(third, Option.Some(Header { name = "host", value = "again" }), "the third header changed")?
+    testing.assert_eq(third, Option.Some(Header { name = "Accept", value = "text/plain" }), "the third header changed")?
     testing.assert_eq(fourth, .None, "the walk continued past the last header")?
     .Ok(())
 }
@@ -631,7 +879,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_body_holds_exactly_its_length() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcdef"
+    let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Length: 3\r\n\r\nabcdef"
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
     var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
     let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
@@ -657,10 +905,10 @@ impl[P: Allocator] Request[P] {
 
 test fn a_body_is_text_only_when_it_is_utf8() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
     // Two bytes end inside `é`, so the scalar starting at byte 1 is incomplete.
-    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
     let invalid_at: Option[UInt64] = match cut.request().text() {
         Ok(_) => .None,
         Err(error) => .Some(error.offset),
@@ -786,5 +1034,30 @@ test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
     testing.assert_eq(untyped.request().form_params().is_none(), true, "a body sent without a type was read as a form")?
     testing.assert_eq(json.request().form_params().is_none(), true, "a JSON body was read as a form")?
     testing.assert_eq(broken.request().form_params().is_none(), true, "a broken form body had values")?
+    .Ok(())
+}
+
+impl[P: Allocator] Request[P] {
+    // `origin` parses the request's `Host` header as an `Origin` with the
+    // given scheme.
+    pub fn origin(self: Self, is_https: Bool) -> Result[Origin, OriginError] where carries(.Ok: self) {
+        let host = self.header("Host") else {
+            return .Err(.InvalidAuthority)
+        }
+        Origin.from_authority(host.trim_ascii(), is_https)
+    }
+}
+
+test fn a_request_gives_its_origin_from_the_host_header() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    var req = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &req.add_header("Host", "example.test:8080").unwrap()
+    let origin = req.request().origin(false).unwrap()
+    testing.assert_eq(origin.is_https, false, "scheme changed")?
+    testing.assert_eq(origin.host, "example.test", "host changed")?
+    testing.assert_eq(origin.port, UInt16(8080), "port changed")?
+
+    let no_host = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    testing.assert_eq(no_host.request().origin(false), .Err(OriginError.InvalidAuthority), "missing host header succeeded")?
     .Ok(())
 }

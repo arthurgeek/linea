@@ -1,0 +1,5 @@
+error[T-ExternCallback]: C calls a callback through an entry made for one function, and this value has none fixed
+  --> tests/ffi/a_callback_needs_a_fixed_target/squares/squares.lin:11:37
+   |
+11 |     let _visited = squares_visit(3, visit, &tally)
+   |                                     ^^^^^ pass a function by name, or a lambda that captures nothing

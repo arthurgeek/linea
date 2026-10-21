@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/slice_iteration/a_slice_element_lent_by_a_walk_cannot_outlive_its_source.lin:9:5
+   |
+9  |     values.release()
+   |     ^^^^^^ keep this place available until the last use of its observation
+10 |     *kept.unwrap()
+   |      ---- the observation is still used here

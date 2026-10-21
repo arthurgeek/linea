@@ -1,0 +1,7 @@
+// The library's manifest names this module `inner`, as an import inside the
+// library does, not `c.inner`, which is how a program reaches it.
+extern fn c_squares(count: Int32) -> Int64
+
+pub fn squares(n: Int32) -> Int64 {
+    c_squares(n)
+}

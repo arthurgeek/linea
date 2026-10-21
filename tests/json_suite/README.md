@@ -6,23 +6,20 @@ The accompanying MIT [license](LICENSE) is retained. The archive uses sorted
 basenames, mode 0644, zero timestamps and gzip mtime zero; its SHA-256 is
 `31d35123cfbff5adbdeda4b397df235b81666927e955b5f19b006526490d1b69`.
 
-Run from the repository root inside the Nix development shell, after building
-the compiler and runtime:
-
-```sh
-zig-out/bin/linea build tests/json_suite/validate.lin -o /tmp/linea-json-validator
-python3 tests/json_suite/run.py /tmp/linea-json-validator
-```
-
-The corpus walk runs the same check through the transcript
+The corpus walk runs the suite through the transcript
 [the_parser_classifies_every_suite_input.cmd](the_parser_classifies_every_suite_input.cmd),
 so `zig build test` fails when any verdict disagrees with its class; it takes
-about ten seconds, building the validator included. The transcript needs only
-`sh`, `tar` and the validator, and reports each wrong verdict with the
-validator's reason. `run.py` makes no network requests, and additionally
-verifies the archive hash and complete, unique classification before
-execution. Each native process has a five-second timeout;
-crashes, file failures and usage failures cannot count as valid rejection.
+about ten seconds, building the validator included. To run this suite alone
+inside the Nix development shell:
+
+```sh
+zig build conformance -- tests/json_suite
+```
+
+The transcript needs only `sh`, `tar` and the validator, verifies that the
+classification covers every archive member with no duplicates, and reports each
+wrong verdict with the validator's reason. Crashes, file failures and usage
+failures cannot count as valid rejection.
 
 [classification.tsv](classification.tsv) records the policy for every input.
 `y_` inputs are accepted except the two duplicate-key objects: Linea rejects

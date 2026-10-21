@@ -1,6 +1,6 @@
 # 13. No operation has undefined behaviour
 
-Status: Accepted — 2026-07-25
+Status: Accepted — 2026-07-25. Extended by [0228](0228-a-granted-module-calls-c.md), the boundary with C.
 
 ## Context
 

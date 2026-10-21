@@ -1,0 +1,10 @@
+import std.io
+import a
+import b
+
+// `a` and `b` both reach `c`, whose manifest grants it `extern`. The program
+// consents to neither path, so each entry is refused where it is written.
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{a.squares(4)} {b.squares(4)}")?
+    .Ok(0)
+}

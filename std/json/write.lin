@@ -23,14 +23,7 @@ fn write_string[W: Writer](inout writer: W, value: Str) -> Result[(), W.Error] w
                 10 => &writer.write_str(r"\n")?,
                 12 => &writer.write_str(r"\f")?,
                 13 => &writer.write_str(r"\r")?,
-                _ => {
-                    let digits = "0123456789abcdef"
-                    let high = UInt64(byte) / 16
-                    let low = UInt64(byte) % 16
-                    &writer.write_str(r"\u00")?
-                    &writer.write_str(digits.slice(high, high + 1).unwrap())?
-                    &writer.write_str(digits.slice(low, low + 1).unwrap())?
-                },
+                _ => "\\u{byte:04x}".fmt(&writer)?,
             }
             start = offset + 1
         }
@@ -147,9 +140,9 @@ test fn render_allocates_the_text_from_the_system_allocator() {
 }
 
 test fn document_output_preserves_number_tokens_and_escapes_text() {
-    defer let document = parse(r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#).unwrap()
+    defer let document = parse(r#"[null,true,false,-0,1.00,1e400,"a\u0000\u000b\u001f\n\t\b\f\r\"\\/é"]"#).unwrap()
     defer let output = render(document).unwrap()
-    testing.assert_eq(output.view(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\n\t\b\f\r\"\\/é"]"#, "JSON output changed values or token spelling")?
+    testing.assert_eq(output.view(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\u000b\u001f\n\t\b\f\r\"\\/é"]"#, "JSON output changed values or token spelling")?
 }
 
 test fn rendered_text_is_independent_of_the_document() {
@@ -204,11 +197,7 @@ fn same_document[A: Allocator, B: Allocator](left: Value[A], right: Value[B]) ->
             true
         },
         Object(values) => {
-            var count: UInt64 = 0
-            for _entry in right.members().unwrap() {
-                count += 1
-            }
-            if count != values.length() {
+            if right.members().unwrap().count() != values.length() {
                 return false
             }
             for entry in values.entries() {

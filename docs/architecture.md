@@ -1374,7 +1374,12 @@ collect their field facts before one canonical set union.
 Callable result bounds remain compact ambient facts. At a return or inout
 boundary, ownership checks whether declared target prefixes collectively cover
 every component that typing says may carry dependencies. A value's direct
-dependency seed cannot be discharged through its physical fields. This permits
+dependency seed cannot be discharged through its physical fields. The seeds
+are an observation, a type parameter, and the declarations the checker
+recognises by identity: `mem.Slice`, `mem.Buffer` and `mem.Storage`, and
+`std.ffi`'s `Bytes`, `CText` and `CTextList`, newtypes over a C address whose
+contracts tie them to what they view. A seeded newtype is not a
+dependency-free scalar, so a `carries` contract into one is kept. This permits
 an optional payload to be unpacked and restored while preserving distinct
 record-field obligations. Target suffixes are grouped by path step; immediate
 capable-component counts are cached by mentioned type within the function, so
@@ -1793,6 +1798,26 @@ proof paths before machine code. These facts permit no allocation elision,
 byte GEPs over their recorded base and offset, preserving pointer relationships
 and the existing overflow, bounds and alignment checks.
 
+A callback an `extern` takes lowers to `foreign_function_addr`, the address of
+a C-callable entry to one concrete function; the verifier refuses the value
+anywhere but as an argument of a direct call to an `extern`. The backend writes
+one private entry per function so passed, with the routine that writes an
+export's thunk: both take the declared types' C widths, widen them, call the
+body and narrow its answer. A crossing value is rendered from its storage
+representation, and a callback crosses as `!llvm.ptr`.
+
+An `extern` answering `ffi.Errno[R]` is lowered with a signature answering `R`,
+interned by discovery through `RawAccesses.errnoSignature` before the pool
+closes. Each call to it lowers to that call, then a call to the runtime's
+`linea_errno`, which discovery reaches with it, and then the `Errno` built from
+the two values. Lowering emits the two calls next to each other, so no
+instruction between them can change `errno`.
+
+An `extern` declaration and an export thunk mark every 8- or 16-bit integer
+parameter and result `llvm.signext` or `llvm.zeroext`, by the declared type's
+signedness. Both supported C ABIs leave the bits above a narrow value to its
+producer, and C compiled by Clang reads the whole register.
+
 A `Never`-returning function has no MLIR result and is marked noreturn. A
 noreturn call is followed by `llvm.unreachable`, and no conversion or storage
 operation is emitted for `Never`. Panic passes the recorded `Str` address and
@@ -1810,6 +1835,15 @@ file directly and produces textual LLVM IR (ADR 0116). The intermediate remains
 a real file, including when build artefacts are kept after a failure. Decode it
 with `mlir-opt` to inspect it. Linea implements no bytecode format, and the tool
 and verification boundaries are unchanged.
+
+A program's manifest may name C sources (`"native"`) and libraries
+(`"link"`). The loader records both on `Program` (`native`, `link`), with each
+source joined to the manifest's directory. `toolchain.build` compiles each
+source to an object beside the LLVM IR at the build's level, with the
+sanitizer flags when the runtime has them, and links the objects before the
+runtime archive and `-l<name>` after it. The conformance runner carries a
+case's C files with its source and writes them under the build's scratch
+directory, and the outcome cache keys on their bytes.
 
 A build links one of two runtime archives that differ only in the allocator.
 `liblinea_rt_checked.a` compiles `runtime/linea_rt.c` with

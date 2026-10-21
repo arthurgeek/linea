@@ -1,0 +1,9 @@
+// A handle to a named object C holds.
+@(opaque)
+type Named = UInt64
+
+extern fn n_open() -> Named
+
+pub fn open() -> Named {
+    n_open()
+}

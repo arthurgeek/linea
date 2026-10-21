@@ -1,0 +1,89 @@
+import std.mem
+import std.testing
+
+use mem.Lender
+
+// Text copied into storage of its own with a NUL after it, which is what a C
+// function taking a `const char *` reads. `text()` lends it to C.
+@opaque
+struct CString[A: Allocator = mem.SystemAllocator] {
+    bytes: mem.Buffer[A],
+}
+
+// Why text could not become a `CString`: it holds a NUL of its own, which
+// would end it early in C, or the allocator refused the copy.
+@derive(Debug, Release, From[mem.Oom])
+pub enum CStringError {
+    InteriorNul(UInt64),
+    Allocation(mem.Oom),
+}
+
+impl[A: Allocator] CString[A] {
+    // Copy `text` and a terminating NUL into storage from `allocator`.
+    pub fn open_in(allocator: A, text: Str) -> Result[CString[A], CStringError] where carries(.Ok: allocator) {
+        let view = text.as_bytes()
+        let count = view.length()
+        for i in 0..count {
+            if view[i] == 0 {
+                return .Err(.InteriorNul(i))
+            }
+        }
+        var buffer = allocator.acquire(count + 1)?
+        for i in 0..count {
+            &buffer.store_byte(i, view[i])
+        }
+        &buffer.store_byte(count, 0)
+        .Ok(.{ bytes = buffer })
+    }
+}
+
+test fn text_is_copied_with_a_terminator() {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    defer let held = CString.open_in(arena.handle(), "Ada").unwrap()
+    testing.assert_eq(held.text().length(), UInt64(3), "the terminator was not after the text")?
+    .Ok(())
+}
+
+impl CString[mem.SystemAllocator] {
+    // Copy `text` and a terminating NUL into the system allocator.
+    pub fn open(text: Str) -> Result[CString[mem.SystemAllocator], CStringError] where carries() {
+        CString.open_in(mem.system(), text)
+    }
+}
+
+test fn text_holding_a_nul_is_refused_where_the_nul_is() {
+    let offset = match CString.open("ab\0c") {
+        Ok(held) => {
+            held.release()
+            0
+        },
+        Err(failure) => match failure {
+            InteriorNul(at) => at,
+            Allocation(_) => 0,
+        },
+    }
+    testing.assert_eq(offset, UInt64(2), "the interior NUL was not found where it is")?
+    .Ok(())
+}
+
+impl[A: Allocator] CString[A] {
+    // Lend the text to C as a `const char *`. The result borrows the
+    // `CString`, so it cannot be released while C may still read it.
+    pub fn text(self: Self) -> CText where borrows(self) {
+        CText(mem.foreign_address(self.bytes.as_slice()))
+    }
+}
+
+test fn lent_text_reads_back_as_the_original() {
+    defer let held = CString.open("Grace").unwrap()
+    defer let copied = held.text().to_owned().unwrap()
+    testing.assert_eq(copied.view(), "Grace", "the lent text read back differently")?
+    .Ok(())
+}
+
+impl[A: Allocator] Release for CString[A] {
+    fn release(sink self: Self) {
+        let CString { bytes: bytes } = self
+        bytes.release()
+    }
+}

@@ -1,1 +1,1 @@
-{ "kind": "library", "extern": true }
+{ "kind": "library", "extern": ["a", "b"] }

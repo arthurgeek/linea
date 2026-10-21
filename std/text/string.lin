@@ -14,7 +14,7 @@ struct String[A: Allocator = mem.SystemAllocator] {
 
 // A Utf8Error is the byte offset where an invalid or truncated encoded
 // sequence starts.
-@(copyable, derive(Debug, Release))
+@(copyable, derive(Equatable, Debug, Release))
 pub struct Utf8Error {
     offset: UInt64,
 }

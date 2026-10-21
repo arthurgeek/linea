@@ -1,0 +1,8 @@
+import named
+
+fn main() -> UInt8 {
+    let first = named.Named.open()
+    var twin = copy(first)
+    &twin.reset()
+    UInt8(first.length())
+}

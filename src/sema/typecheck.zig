@@ -1,4 +1,5 @@
 const std = @import("std");
+const module_route = @import("../support/module_route.zig");
 const builtin = @import("builtin");
 const tracy = @import("../support/tracy.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
@@ -141,6 +142,18 @@ const CheckSeed = struct {
     declarations: []const bool,
     call_impls: []const types_mod.CallImpl,
 };
+
+/// The standard library's `ffi` module, or `.none` where the program did not
+/// load it. Found by its import route, which the loader records.
+fn foreignModuleOf(program: *const ExpandedProgram) ModuleId {
+    for (0..program.modules.len) |i| {
+        const m = ModuleId.from(i);
+        // Found as `RawAccesses` finds the module's types: the library
+        // module named `ffi`.
+        if (program.get(m).library and std.mem.eql(u8, program.get(m).name, "ffi")) return m;
+    }
+    return .none;
+}
 
 pub fn typecheckLibraryPrefix(
     backing: std.mem.Allocator,
@@ -441,6 +454,7 @@ fn typecheckInternal(
     c.builder.certified_storage = c.raw_accesses.storage;
     c.builder.certified_buffer = c.raw_accesses.buffer;
     c.builder.certified_slice = c.raw_accesses.slice;
+    c.builder.certified_foreign_views = c.raw_accesses.foreign_views;
     c.builder.certified_closure_entry = c.raw_accesses.closure_entry_type;
     // The resolver settled which declarations tuple syntax names; the pool
     // spells their instances as tuples.
@@ -470,6 +484,7 @@ fn typecheckInternal(
     defer c.receivers_checked.deinit(gpa);
     defer c.array_lengths.deinit(gpa);
     defer c.refused.deinit(gpa);
+    defer c.broken_types.deinit(gpa);
     defer c.folded_indices.deinit(gpa);
     defer c.constant_values.deinit(gpa);
     defer c.constant_groundness.deinit(gpa);
@@ -1311,11 +1326,15 @@ fn typecheckInternal(
             try c.checkDelegatedTraversal(d);
     }
     const z_bodies = tracy.beginZone(@src(), "tc.bodies");
+    const foreign_module = foreignModuleOf(program);
     for (program.modules, 0..) |*m, mi| {
         c.current = ModuleId.from(mi);
+        try c.checkForeignImports(m, foreign_module);
         for (program.declsOf(c.current)) |d| {
             if (c.isRetained(d)) continue;
             if (ast.declIsExtern(d)) try c.checkExtern(d, m.externs, m.library);
+            if (m.externs and foreign_module != .none and c.current != foreign_module)
+                try c.checkForeignPublished(d, foreign_module);
             if (c.program.publishesExport(d)) try c.checkExport(d);
             if (ast.declTag(d) == .function) try c.checkLibraryFunctionDefaults(d);
 
@@ -1416,6 +1435,9 @@ fn typecheckInternal(
     try c.checkProjectedIndexRanges();
     try c.checkEntryAnswer();
     try c.checkTestAnswers();
+    try c.checkForeignCallbacks();
+    try c.checkHandleChanges();
+    try c.checkForeignUses(foreign_module);
 
     // Last, because a body and an implementation both write types too, and a
     // bound reads an argument's capability: every instantiation the program
@@ -1573,6 +1595,8 @@ fn typecheckInternal(
     c.interpolation_positions = .empty;
     typing.refused = c.refused;
     c.refused = .empty;
+    typing.broken_types = c.broken_types;
+    c.broken_types = .empty;
     typing.folded_indices = c.folded_indices;
     c.folded_indices = .empty;
     typing.selected_places = c.selected_places;
@@ -5323,6 +5347,9 @@ const Checker = struct {
     array_lengths: std.AutoHashMapUnmanaged(ExprId, ?u32) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The written types `reportBrokenBounds` refused; `Typing.broken_types`
+    /// holds them.
+    broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
     /// The expression the last mismatch report poisoned. That poison is a
     /// built value that does not fit its context, so `checkInner` does not
     /// count it a refusal.
@@ -7803,6 +7830,13 @@ const Checker = struct {
         defer types_mod.freeContracts(self.gpa, contracts);
         if (outcome.declined) try self.declined_contracts.put(self.gpa, d, {});
         if (outcome.carrier) |parameter| try self.defaulted_contracts.put(self.gpa, d, parameter);
+        // A Linea body that lends a parameter's place to its result needs the
+        // place to stay put, so that parameter arrives by address. C receives
+        // every crossing value itself, so an `extern`'s `borrows` contract
+        // states the dependency without moving the argument into memory.
+        if (self.ast.declIsExtern(d)) for (callable_params) |*param| {
+            param.stable_address = false;
+        };
         return self.builder.internCallable(callable_params, result, contracts, .read);
     }
 
@@ -9811,6 +9845,31 @@ const Checker = struct {
     /// the one being walked -- and without it a parameter cannot discharge a
     /// bound it carries, which would make a bounded generic type writable and
     /// unusable from any generic function.
+    /// Whether one of `args` lacks the capability the bound on its own
+    /// parameter of `d` asks for. A type whose argument lacks the capability
+    /// its bound asks promises no capability, while one lacking only a trait
+    /// keeps the capabilities its arguments give it. Asked of this
+    /// declaration's bounds, so a refusal elsewhere in the program decides
+    /// nothing here.
+    fn lacksBoundCapability(self: *Checker, d: node.DeclId, args: []const TypeId) std.mem.Allocator.Error!bool {
+        const range = self.constraints.rangeOfDeclaration(d);
+        for (range.start..range.end) |at| {
+            const constraint = self.constraints.records[at];
+            const i = switch (constraint.subject) {
+                .parameter => |i| i,
+                .written => continue,
+            };
+            if (i >= args.len) continue;
+            const bounds = self.constraints.requirementsOf(constraint);
+            const admits = try self.traitsBounding(null, bounds);
+            defer types_mod.freeBoundTraits(self.gpa, admits);
+            const requirement = capabilityDemandedBy(self.ast, self.res, bounds, admits);
+            if (requirement == .unrestricted) continue;
+            if (!try self.builder.meetsCapabilityWithin(self.generic, args[i], requirement)) return true;
+        }
+        return false;
+    }
+
     fn reportBrokenBounds(self: *Checker) std.mem.Allocator.Error!void {
         const outer = self.generic;
         const outer_module = self.current;
@@ -9834,12 +9893,10 @@ const Checker = struct {
                 continue;
             }
             const inst = self.builder.instanceOf(site.ty) orelse continue;
-            try self.checkArgumentBounds(
-                inst.decl,
-                self.builder.argsOf(inst),
-                null,
-                site.at,
-            );
+            if (self.refusedBefore(site.at)) continue;
+            if (try self.argumentBoundsUnmet(inst.decl, self.builder.argsOf(inst), null, site.at, &.{}, .report) and
+                try self.lacksBoundCapability(inst.decl, self.builder.argsOf(inst)))
+                try self.broken_types.put(self.gpa, site.ty, {});
         }
         try self.reportBrokenTraitBounds();
     }
@@ -17730,15 +17787,175 @@ const Checker = struct {
         try self.checkForeignSignature(d, .t_export);
     }
 
+    /// [M-Foreign]: only a module its root grants `extern` may import
+    /// `std.ffi`. Its types hold C addresses whose validity the granted
+    /// module vouches for, and some of its operations trust a length C
+    /// supplied.
+    fn checkForeignImports(self: *Checker, m: *const program_mod.Module, foreign_module: ModuleId) std.mem.Allocator.Error!void {
+        if (foreign_module == .none or m.externs) return;
+        for (m.imports) |imported| {
+            if (imported.module != foreign_module or self.isRetained(imported.decl)) continue;
+            try self.sink.addError(
+                .m_foreign,
+                self.ast.fileOfDecl(imported.decl),
+                self.ast.rangeSpan(self.ast.declPath(imported.decl)),
+                "only a module its root's manifest grants may import `std.ffi`",
+                "call a module that is granted, or list this one under \"extern\" in linea.json",
+            );
+        }
+    }
+
+    /// [M-Foreign]: a granted module publishes no `std.ffi` type. A `CText`
+    /// or `Bytes` is valid only while what it borrows lives and is read only
+    /// through operations that trust C, so it stays where the grant is. A
+    /// function or constant that is not private, and a field or payload of a
+    /// struct or enum whose representation another module can reach, may not
+    /// name one.
+    fn checkForeignPublished(self: *Checker, d: node.DeclId, foreign_module: ModuleId) std.mem.Allocator.Error!void {
+        const visibility = self.ast.declVisibility(d);
+        switch (self.ast.declTag(d)) {
+            .function => {
+                if (visibility == .private) return;
+                for (self.ast.declParams(d), 0..) |p, k| {
+                    const t = try self.declaredParamType(d, k);
+                    if (self.mentionsForeign(t, foreign_module)) try self.reportForeignPublished(d, self.ast.tokenSpan(p.name), t);
+                }
+                const answers = try self.declaredResultType(d);
+                if (self.mentionsForeign(answers, foreign_module)) try self.reportForeignPublished(d, self.ast.tokenSpan(self.ast.declName(d)), answers);
+            },
+            // A re-export or an alias would let another module name the type.
+            .use_ => {
+                if (visibility == .private) return;
+                var last: TokenId = .none;
+                var walk = self.ast.pathElements(d);
+                while (walk.next()) |element| last = element;
+                const binding = self.res.writtenAt(last);
+                if (binding == .none) return;
+                const target = self.res.declIfDeclared(binding);
+                if (target == .none or self.program.moduleOf(target) != foreign_module) return;
+                try self.sink.addErrorFmt(
+                    .m_foreign,
+                    self.ast.fileOfDecl(d),
+                    self.ast.tokenSpan(last),
+                    "keep it private, or copy what it holds into an ordinary Linea value here",
+                    "`{s}` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it",
+                    .{self.ast.tokenText(last)},
+                );
+            },
+            .alias => {
+                if (visibility == .private) return;
+                const t = try self.aliasedType(d);
+                if (self.mentionsForeign(t, foreign_module)) try self.reportForeignPublished(d, self.ast.tokenSpan(self.ast.declName(d)), t);
+            },
+            .struct_, .enum_ => {
+                if (visibility != .pub_ and visibility != .internal_) return;
+                const t = self.builder.typeOfDecl(d) orelse return;
+                switch (self.builder.get(t)) {
+                    .struct_ => |layout| {
+                        const fields = self.ast.declFields(d);
+                        for (self.builder.fields.items(.ty)[layout.first_field..][0..layout.field_count], 0..) |field, i| {
+                            if (!self.mentionsForeign(field, foreign_module)) continue;
+                            const at = if (i < fields.len) self.ast.tokenSpan(fields[i].name) else self.ast.tokenSpan(self.ast.declName(d));
+                            try self.reportForeignPublished(d, at, field);
+                        }
+                    },
+                    .enum_ => |sum| {
+                        const variants = self.ast.declVariants(d);
+                        for (sum.first_variant..sum.first_variant + sum.variant_count, 0..) |variant, i| {
+                            const first = self.builder.variants.items(.first_field)[variant];
+                            const len = self.builder.variants.items(.field_count)[variant];
+                            for (self.builder.fields.items(.ty)[first..][0..len]) |field| {
+                                if (!self.mentionsForeign(field, foreign_module)) continue;
+                                const at = if (i < variants.len) self.ast.tokenSpan(variants[i].name) else self.ast.tokenSpan(self.ast.declName(d));
+                                try self.reportForeignPublished(d, at, field);
+                                break;
+                            }
+                        }
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+
+    fn reportForeignPublished(self: *Checker, d: node.DeclId, span: @import("../support/span.zig").Span, t: TypeId) std.mem.Allocator.Error!void {
+        try self.sink.addErrorFmt(
+            .m_foreign,
+            self.ast.fileOfDecl(d),
+            span,
+            "keep it private, or copy what it holds into an ordinary Linea value here",
+            "`{s}` comes from `std.ffi` and is read only where C is trusted, so this module may not publish it",
+            .{try self.typeName(t)},
+        );
+    }
+
+    /// Whether `t` is or holds a type `std.ffi` declares: itself, a type
+    /// argument, an observed referent, an array element, or a callable's
+    /// parameter or result. Bounded by the type's own structure, which the
+    /// pool holds acyclically apart from nominal recursion that stops at a
+    /// declared type.
+    fn mentionsForeign(self: *Checker, t: TypeId, foreign_module: ModuleId) bool {
+        if (t == .poison) return false;
+        const pool = self.builder.view();
+        if (pool.declOfType(t)) |declared| {
+            if (self.program.moduleOf(declared) == foreign_module) return true;
+        }
+        switch (self.builder.get(t)) {
+            .borrow => |observation| return self.mentionsForeign(observation.referent, foreign_module),
+            .array => |array| return self.mentionsForeign(array.element, foreign_module),
+            .callable => |signature| {
+                for (self.builder.callableParams(signature)) |param| {
+                    if (self.mentionsForeign(param.ty, foreign_module)) return true;
+                }
+                return self.mentionsForeign(signature.result, foreign_module);
+            },
+            else => {},
+        }
+        if (self.builder.instanceOf(t)) |instance| {
+            for (self.builder.argsOf(instance)) |argument| {
+                if (self.mentionsForeign(argument, foreign_module)) return true;
+            }
+        }
+        return false;
+    }
+
     fn checkExtern(self: *Checker, d: node.DeclId, granted: bool, library: bool) std.mem.Allocator.Error!void {
         if (!granted) {
+            // Spelled as the root's own manifest writes it: a library's module
+            // is reached through the library's name, which its manifest omits.
+            const module = self.program.get(self.current);
+            const roots = self.program.source.roots;
+            const root_name = if (module.root.isDependency() and module.root.index() < roots.len)
+                roots[module.root.index()].name
+            else
+                "";
+            const relative = module_route.withinRoot(self.program.modulePath(self.current), root_name);
+            const shown = if (relative.len == 0) "." else relative;
+            const manifest = if (root_name.len == 0)
+                "linea.json"
+            else
+                try std.fmt.allocPrint(self.sink.arena, "the linea.json of `{s}`", .{root_name});
+            const help = try std.fmt.allocPrint(self.sink.arena, "list this module under \"extern\" in {s} to trust it with C, or call a module that is granted", .{manifest});
             try self.sink.addErrorFmt(
                 .m_extern,
                 self.ast.fileOf(self.ast.declName(d)),
                 self.ast.tokenSpan(self.ast.declName(d)),
-                "call it through the standard library, which declares the ones that exist",
-                "an `extern` is only declared in a root whose manifest grants `\"extern\": true`",
-                .{},
+                help,
+                "an `extern` is declared only in a module its root's manifest grants, and {s} does not list \"{s}\"",
+                .{ manifest, shown },
+            );
+        }
+        // Another module calling C directly would be trusted with it too, so
+        // an `extern` is private, and its module publishes a Linea function
+        // that calls it.
+        if (self.ast.declVisibility(d) != .private) {
+            try self.sink.addError(
+                .m_extern,
+                self.ast.fileOf(self.ast.declName(d)),
+                self.ast.tokenSpan(self.ast.declName(d)),
+                "an `extern` is private to the module trusted with C",
+                "drop the visibility, and publish a function that calls it",
             );
         }
 
@@ -18138,14 +18355,47 @@ const Checker = struct {
             return;
         }
 
-        // `foreignWidth` and not an arithmetic predicate: what may cross is
-        // decided by what a boundary can agree about, not by what an operator
-        // accepts. The two differ on `Float64`, which every operator takes and
-        // no ABI here fixes -- and the backend, which asks `foreignWidth`,
-        // would have been handed a type it cannot print.
+        // A callback an `extern` takes, and the context it hands back, are
+        // checked as a pair ([T-ExternCallback]); what remains crosses alone.
+        var contexts: std.ArrayList(TypeId) = .empty;
+        defer contexts.deinit(self.gpa);
+        if (category == .t_extern) {
+            for (self.ast.declParams(d), 0..) |_, k| {
+                const t = try self.declaredParamType(d, k);
+                if (t == .poison or self.builder.get(t) != .callable) continue;
+                if (try self.checkCallbackParam(d, k, t)) |context| try contexts.append(self.gpa, context);
+            }
+        }
+
+        // `read` says C leaves a handle's object as it was, which is a promise
+        // only about a handle ([T-ExternHandle]).
+        if (category == .t_extern) {
+            const pool = self.builder.view();
+            for (self.ast.declParams(d), 0..) |p, k| {
+                const t = try self.declaredParamType(d, k);
+                const marked = p.convention == .read and self.ast.paramConventionToken(p) != .none;
+                if (marked and t != .poison and !intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) {
+                    const token = self.ast.paramConventionToken(p);
+                    try self.sink.addError(
+                        .s_entry,
+                        self.ast.fileOf(token),
+                        self.ast.tokenSpan(token),
+                        "`read` on an `extern` parameter marks a handle, a newtype sealed in a module trusted with C that is not `copyable`, whose object C only reads",
+                        "omit `read`; parameters are read by default",
+                    );
+                }
+            }
+            try self.checkForeignViewSources(d);
+        }
+
+        // What may cross is decided by what both sides of a boundary agree a
+        // value's bits mean, not by what an operator accepts: `Bool` takes
+        // every logical operator and no C ABI fixes its byte.
         for (self.ast.declParams(d), 0..) |p, k| {
             const t = try self.declaredParamType(d, k);
-            if (t == .poison or t.foreignWidth() != null) continue;
+            if (t == .poison or self.crossesForeign(t)) continue;
+            if (category == .t_extern and self.builder.get(t) == .callable) continue;
+            if (p.convention == .inout and std.mem.indexOfScalar(TypeId, contexts.items, t) != null) continue;
             if (p.written.kind == .callable) {
                 const name = try spellWrittenOwned(self.gpa, self.ast, p.written);
                 defer self.gpa.free(name);
@@ -18156,8 +18406,30 @@ const Checker = struct {
         }
 
         const written_answer = self.ast.declReturnRef(d);
-        const answers = try self.declaredResultType(d);
-        if (answers != .poison and answers != .unit and answers.foreignWidth() == null) {
+        // An `extern` answering `ffi.Errno[R]` returns `R` from C; the
+        // `errno` beside it is read by the runtime after the call.
+        const declared_answer = try self.declaredResultType(d);
+        const answers = if (category == .t_extern)
+            self.raw_accesses.errnoValue(&self.builder, declared_answer) orelse declared_answer
+        else
+            declared_answer;
+        // An answer that can point somewhere, such as a `CText`, gets its
+        // dependencies from the contract alone: C's body is not read, and no
+        // parameter of a handle type carries one by default. So the
+        // declaration states where it points.
+        if (category == .t_extern and answers != .poison and self.ast.declContracts(d).len == 0 and
+            self.crossesForeign(answers) and try self.builder.mayCarryDependencies(answers))
+        {
+            try self.sink.addErrorFmt(
+                .t_extern,
+                self.ast.fileOf(self.ast.declName(d)),
+                self.ast.tokenSpan(self.ast.declName(d)),
+                "write `where borrows(handle)` when it points into what a parameter holds, or `where carries()` when C keeps it for the program's life",
+                "`{s}` answers C memory, so its declaration says what it points into",
+                .{self.ast.tokenText(self.ast.declName(d))},
+            );
+        }
+        if (answers != .poison and answers != .unit and !self.crossesForeign(answers)) {
             if (written_answer.kind == .callable) {
                 const name = try spellWrittenOwned(self.gpa, self.ast, written_answer);
                 defer self.gpa.free(name);
@@ -18305,6 +18577,243 @@ const Checker = struct {
     /// Said the same way in both directions, because what is wrong is the same
     /// thing: the language does not fix this type's representation, so the two
     /// sides could not agree about it whichever way it travelled.
+    /// [T-ExternCallback]: the callback parameter `k` of the `extern` `d` is a
+    /// plain `fn` C may call any number of times during the call. Its
+    /// parameters and result cross, apart from a leading `inout` parameter,
+    /// which is a context: the `extern` takes exactly one `inout` parameter of
+    /// the same type, and C hands its address back as a `void *`. Answers the
+    /// context's type, or null where the callback takes none or was refused.
+    fn checkCallbackParam(self: *Checker, d: node.DeclId, k: usize, t: TypeId) std.mem.Allocator.Error!?TypeId {
+        const p = self.ast.declParams(d)[k];
+        const file = self.ast.fileOf(self.ast.declName(d));
+        const span = self.ast.writtenSpan(p.written);
+        const signature = self.builder.get(t).callable;
+        if (p.convention != .read) {
+            try self.sink.addError(.t_extern_callback, file, span, "C receives a callback as a function pointer it calls during the call", "drop the parameter's convention");
+            return null;
+        }
+        if (signature.invocation != .read) {
+            try self.sink.addError(.t_extern_callback, file, span, "C may call a callback any number of times, so it is a plain `fn`", "write `fn(...)`, without `inout` or `sink`");
+            return null;
+        }
+        for (signature.contracts) |contract| if (contract.kind == .retains) {
+            try self.sink.addError(.t_extern_callback, file, span, "a callback keeps nothing C hands it past the call", "drop the `retains` clause");
+            return null;
+        };
+        var context: ?TypeId = null;
+        for (self.builder.callableParams(signature), 0..) |param, j| {
+            if (j == 0 and param.convention == .inout) {
+                context = param.ty;
+                continue;
+            }
+            if (param.convention == .inout or !self.crossesForeign(param.ty)) {
+                const label = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot come from C", .{param.spelling});
+                try self.sink.addError(.t_extern_callback, file, span, "a callback takes only what crosses the boundary, with a context as its first, `inout` parameter", label);
+                return null;
+            }
+        }
+        if (signature.result != .unit and !self.crossesForeign(signature.result)) {
+            const label = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot go back to C", .{try self.typeName(signature.result)});
+            try self.sink.addError(.t_extern_callback, file, span, "C reads what a callback answers, so it crosses the boundary", label);
+            return null;
+        }
+        const wanted = context orelse return null;
+        var paired: usize = 0;
+        for (self.ast.declParams(d), 0..) |other, i| {
+            if (i == k or other.convention != .inout) continue;
+            if (try self.declaredParamType(d, i) == wanted) paired += 1;
+        }
+        if (paired != 1) {
+            const label = try std.fmt.allocPrint(self.sink.arena, "give the `extern` exactly one `inout` parameter of type `{s}` to lend it", .{try self.typeName(wanted)});
+            try self.sink.addError(.t_extern_callback, file, span, "C hands a callback back the context the call lent it", label);
+            return null;
+        }
+        return wanted;
+    }
+
+    /// [M-Foreign] where `std.ffi` is used: a module its root does not grant
+    /// calls none of its functions or methods and takes none as a value,
+    /// however it came to hold one of its types. Holding a `CText` is
+    /// harmless; reading one trusts what C promised, which only a granted
+    /// module may vouch for. Checked at the use rather than where a granted
+    /// module publishes, because a type reaches a module through inference,
+    /// bounds, associated types and fields that no publishing rule can list.
+    fn checkForeignUses(self: *Checker, foreign_module: ModuleId) std.mem.Allocator.Error!void {
+        if (foreign_module == .none) return;
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            try self.refuseForeignUse(call.at, callee, foreign_module);
+        }
+        for (self.function_values.items) |value| {
+            const target = switch (value.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            try self.refuseForeignUse(value.at, target, foreign_module);
+        }
+    }
+
+    fn refuseForeignUse(self: *Checker, at: ExprId, target: node.DeclId, foreign_module: ModuleId) std.mem.Allocator.Error!void {
+        if (self.program.moduleOf(target) != foreign_module) return;
+        const file = self.ast.fileOfExpr(at);
+        const user = self.res.moduleOfFile(file);
+        if (user == .none or user == foreign_module or self.program.get(user).externs) return;
+        // A module importing `std.ffi` without a grant is already refused at
+        // its import, and each use through it is a consequence of that.
+        for (self.program.get(user).imports) |imported| {
+            if (imported.module == foreign_module) return;
+        }
+        try self.sink.addErrorFmt(
+            .m_foreign,
+            file,
+            self.ast.exprSpan(at),
+            "leave this to a module that is granted, which copies what C holds into an ordinary Linea value",
+            "`{s}` is `std.ffi`'s, and only a module its root's manifest grants may use it",
+            .{self.ast.tokenText(self.ast.declName(target))},
+        );
+    }
+
+    /// [T-Extern]: an `extern` answering memory a parameter lends, written
+    /// `borrows(p)`, takes that parameter as a handle -- a sealed, non-copyable
+    /// type of a module trusted with C -- or as a `std.ffi` view. Ownership
+    /// keeps the answer alive only while `p`'s place is, so `p` must be a value
+    /// nothing else can copy or rebuild to name the same memory.
+    fn checkForeignViewSources(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
+        const signature = self.decl_signatures.get(d);
+        if (signature == .poison or self.builder.get(signature) != .callable) return;
+        const pool = self.builder.view();
+        const params = self.ast.declParams(d);
+        for (self.builder.get(signature).callable.contracts) |contract| {
+            if (contract.kind != .borrows and !contract.borrows_source) continue;
+            const k = switch (contract.source.root) {
+                .parameter => |k| k,
+                else => continue,
+            };
+            if (k >= params.len) continue;
+            const t = try self.declaredParamType(d, k);
+            if (t == .poison) continue;
+            if (self.isForeignView(t)) continue;
+            if (intrinsics.isForeignHandle(self.program, self.ast, &pool, t)) continue;
+            try self.sink.addErrorFmt(
+                .t_extern,
+                self.ast.fileOf(params[k].name),
+                self.ast.tokenSpan(params[k].name),
+                "take a handle: a type sealed with `@opaque` in a module trusted with C and not `copyable`; or write `where carries()` when C keeps the memory for the program's life",
+                "`{s}` answers memory `{s}` lends, so `{s}` must be a handle or a `std.ffi` view, and `{s}` is neither",
+                .{ self.ast.tokenText(self.ast.declName(d)), self.ast.tokenText(params[k].name), self.ast.tokenText(params[k].name), try self.typeName(t) },
+            );
+        }
+    }
+
+    fn isForeignView(self: *const Checker, t: TypeId) bool {
+        const declared = self.builder.view().declOfType(t) orelse return false;
+        for (self.raw_accesses.foreign_views) |foreign| {
+            if (foreign != .none and declared == foreign) return true;
+        }
+        return false;
+    }
+
+    /// [T-ExternHandle] at a call: an `extern` that takes a handle without
+    /// `read` may change the object it holds, so the call lends the
+    /// argument's place as `inout` would, and the place must be one that may
+    /// change. Ownership ends the place's earlier observations at the call.
+    /// One walk over the calls.
+    fn checkHandleChanges(self: *Checker) std.mem.Allocator.Error!void {
+        const pool = self.builder.view();
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const declared = self.ast.declParams(callee);
+            for (call.args, 0..) |arg, k| {
+                if (arg == ExprId.none or k >= declared.len) continue;
+                const t = try self.declaredParamType(callee, k);
+                if (!intrinsics.changesForeignHandle(self.program, self.ast, &pool, callee, k, t)) continue;
+                if (self.res.placeIsMutable(self.ast, arg)) {
+                    // Lent to change, the place is this call's only path to
+                    // the object, as an `&` argument's is ([N-Aliased]).
+                    for (call.args, 0..) |other, j| {
+                        if (j == k or other == ExprId.none) continue;
+                        if (!self.namesPlace(other, arg, false, BindingId.none)) continue;
+                        _ = self.reportWithOrigin(
+                            .n_aliased,
+                            other,
+                            "this names a handle another argument lends C to change",
+                            "pass two different handles, or mark the changing parameter `read` if C only reads it",
+                            .{
+                                .file = self.ast.fileOfExpr(arg),
+                                .span = self.ast.exprSpan(arg),
+                                .message = "lent to change here",
+                                .style = .secondary,
+                            },
+                        );
+                    }
+                    continue;
+                }
+                const label = try std.fmt.allocPrint(
+                    self.sink.arena,
+                    "pass a handle held in a `var` or an `inout` parameter, or mark `{s}` `read` if C only reads it",
+                    .{self.ast.tokenText(declared[k].name)},
+                );
+                try self.sink.addErrorFmt(
+                    .t_extern_handle,
+                    self.ast.fileOfExpr(arg),
+                    self.ast.exprSpan(arg),
+                    label,
+                    "`{s}` may change the object this handle holds, so the handle is lent from a place that may change",
+                    .{self.ast.tokenText(self.ast.declName(callee))},
+                );
+            }
+        }
+    }
+
+    /// [T-ExternCallback] at a call: C calls a callback through an entry made
+    /// for one function, so the argument names a function, or is a lambda
+    /// that captures nothing. One walk over the calls, after one over the
+    /// function values the checker recorded.
+    fn checkForeignCallbacks(self: *Checker) std.mem.Allocator.Error!void {
+        var fixed: std.AutoHashMapUnmanaged(ExprId, void) = .empty;
+        defer fixed.deinit(self.gpa);
+        var indexed = false;
+        for (self.calls.items) |call| {
+            const callee = switch (call.target) {
+                .declared => |decl| decl,
+                else => continue,
+            };
+            if (!self.ast.declIsExtern(callee)) continue;
+            const declared = self.ast.declParams(callee);
+            for (call.args, 0..) |arg, i| {
+                if (arg == ExprId.none or i >= declared.len) continue;
+                // The declaration's own parameter, so a generic storage
+                // primitive given a callable type argument is not taken for
+                // a callback.
+                if (self.builder.get(try self.declaredParamType(callee, i)) != .callable) continue;
+                if (!indexed) {
+                    for (self.function_values.items) |value| try fixed.put(self.gpa, value.at, {});
+                    indexed = true;
+                }
+                const at = self.ast.withoutGroups(arg);
+                if (fixed.contains(at)) continue;
+                try self.sink.addError(
+                    .t_extern_callback,
+                    self.ast.fileOfExpr(at),
+                    self.ast.exprSpan(at),
+                    "C calls a callback through an entry made for one function, and this value has none fixed",
+                    "pass a function by name, or a lambda that captures nothing",
+                );
+            }
+        }
+    }
+
+    fn crossesForeign(self: *const Checker, t: TypeId) bool {
+        return types_mod.crossesForeign(&self.builder, t);
+    }
+
     fn reportForeignType(
         self: *Checker,
         d: node.DeclId,
@@ -18316,8 +18825,8 @@ const Checker = struct {
             category,
             self.ast.fileOf(self.ast.declName(d)),
             span,
-            "pass what it is made of, as integers",
-            "`{s}` may not cross the foreign boundary: only an integer's representation is the language's to fix",
+            "pass what it is made of, as integers or `Float64`",
+            "`{s}` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes",
             .{name},
         );
     }
@@ -22937,9 +23446,10 @@ const Checker = struct {
     }
 
     /// Check that a value's format spec asks only for parts its type takes. A
-    /// sign and zero padding lay out a number, and a precision counts the
-    /// digits after a Float64's point; fill, alignment and width lay out any
-    /// value. Reports the first part the type does not take.
+    /// sign and zero padding lay out a number, a precision counts the digits
+    /// after a Float64's point, and hexadecimal digits write an integer; fill,
+    /// alignment and width lay out any value. Reports the first part the type
+    /// does not take.
     fn layoutFits(self: *Checker, piece: ExprId, t: TypeId, format: node.InterpolationFormat) bool {
         const shape = self.builder.view().layoutShape(self.generic, t);
         if ((format.plus or format.zero) and shape == .general) {
@@ -22949,6 +23459,16 @@ const Checker = struct {
                 "`{s}` is not a number, so its format spec cannot ask for {s}",
                 .{ self.typeName(t) catch return false, if (format.plus) "a `+` sign" else "zero padding" },
                 "these lay out integers and Float64; pad other values with an alignment and a width, as in `>4`",
+            );
+            return false;
+        }
+        if (format.hex != .none and shape != .integer) {
+            _ = self.report(
+                .t_format,
+                piece,
+                "`{s}` is not an integer, so its format spec cannot ask for hexadecimal digits",
+                .{self.typeName(t) catch return false},
+                "`x` and `X` write an integer in base 16; to write the bytes of text or a slice in base 16, interpolate `text.hex_encoded(bytes)`",
             );
             return false;
         }

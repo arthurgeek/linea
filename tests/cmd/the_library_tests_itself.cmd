@@ -130,6 +130,22 @@ The library tests itself.
   ok    env.every_entry_has_a_name
   ok    env.every_variable_has_a_name_and_no_equals_sign_in_it
   ok    env.raw_arguments_preserve_existing_storage_and_missing_indices
+  ok    ffi.a_view_of_nothing_is_lent_at_an_address
+  ok    ffi.bytes_are_copied_from_an_address
+  ok    ffi.bytes_past_a_nul_are_copied_by_length
+  ok    ffi.entries_are_read_where_the_list_holds_them
+  ok    ffi.errno_is_answered_only_when_the_call_failed
+  ok    ffi.lent_text_reads_back_as_the_original
+  ok    ffi.no_bytes_are_copied_from_a_null_pointer_of_no_length
+  ok    ffi.null_text_is_refused_rather_than_read
+  ok    ffi.only_a_zero_address_is_null
+  ok    ffi.text_holding_a_nul_is_refused_where_the_nul_is
+  ok    ffi.text_is_copied_into_the_given_allocator
+  ok    ffi.text_is_copied_with_a_terminator
+  ok    ffi.text_is_lent_at_its_first_byte
+  ok    ffi.the_failure_value_selects_errno
+  ok    ffi.the_length_stops_at_the_terminator
+  ok    ffi.the_value_is_what_c_returned
   ok    fmt.a_default_spec_adds_no_padding
   ok    fmt.a_fill_of_several_scalars_stays_within_the_width
   ok    fmt.a_nullary_parse_error_renders_its_reason
@@ -157,6 +173,7 @@ The library tests itself.
   ok    fmt.float_display_propagates_the_first_writer_failure
   ok    fmt.float_display_renders_the_shortest_round_trip_decimal
   ok    fmt.float_display_uses_an_exponent_outside_the_fixed_range
+  ok    fmt.hexadecimal_digits_count_every_place
   ok    fmt.int16_renderers_preserve_decimal_boundaries
   ok    fmt.int32_renderers_preserve_decimal_boundaries
   ok    fmt.int64_renderers_preserve_decimal_boundaries
@@ -172,7 +189,6 @@ The library tests itself.
   ok    fmt.power_of_ten_multiplies_by_ten_each_step
   ok    fmt.renderers_stop_at_the_first_writer_failure
   ok    fmt.result_display_renders_both_payloads
-  ok    fmt.scalars_count_characters_rather_than_bytes
   ok    fmt.string_debug_quotes_escapes_and_preserves_utf8_scalars
   ok    fmt.string_display_preserves_empty_and_unicode_text
   ok    fmt.text_errors_render_the_reason_and_byte_offset
@@ -192,6 +208,7 @@ The library tests itself.
   ok    fmt.write_integer_appends_to_what_the_writer_holds
   ok    fmt.write_integer_reaches_both_ends_of_every_width
   ok    fmt.write_integer_right_aligns_and_pads_after_the_sign
+  ok    fmt.write_integer_writes_hexadecimal_digits_in_the_case_asked
   ok    fs.a_direct_file_write_reports_scratch_allocation_failure
   ok    fs.a_direct_file_write_takes_its_path_scratch_from_an_arena
   ok    fs.a_file_close_failure_returns_all_successfully_read_bytes
@@ -276,6 +293,8 @@ The library tests itself.
   ok    http.a_cookie_is_cleared_with_an_empty_expired_value
   ok    http.a_cookie_is_set_with_the_attributes_given
   ok    http.a_cookie_refused_for_memory_leaves_no_header
+  ok    http.a_cookie_that_does_not_decode_reads_as_none
+  ok    http.a_cookie_value_reads_back_as_it_was_set
   ok    http.a_dead_end_literal_gives_way_to_a_parameter
   ok    http.a_decode_error_answers_by_whose_mistake_it_is
   ok    http.a_decoded_path_is_encoded_again_into_the_target
@@ -347,6 +366,7 @@ The library tests itself.
   ok    http.a_path_value_is_found_by_its_exact_name
   ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
   ok    http.a_pattern_splits_into_its_method_and_path
+  ok    http.a_percent_error_displays_its_reason
   ok    http.a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released
   ok    http.a_prefixed_cookie_is_cleared_with_secure
   ok    http.a_prefixed_cookie_keeps_the_rules_its_prefix_names
@@ -359,6 +379,7 @@ The library tests itself.
   ok    http.a_query_that_is_not_percent_encoded_utf8_has_no_pairs
   ok    http.a_read_timeout_answers_408
   ok    http.a_recorded_body_is_what_a_client_would_read
+  ok    http.a_redirect_sets_its_status_and_location_and_refuses_a_control_byte
   ok    http.a_refused_arena_is_answered_503
   ok    http.a_refused_body_left_unread_does_not_lose_the_answer
   ok    http.a_refused_buffer_answers_500_before_the_handler
@@ -375,6 +396,7 @@ The library tests itself.
   ok    http.a_request_extracts_a_form_by_its_field_names
   ok    http.a_request_extracts_any_type_that_implements_extract
   ok    http.a_request_gives_its_form_params_only_when_the_body_is_one
+  ok    http.a_request_gives_its_origin_from_the_host_header
   ok    http.a_request_gives_its_path_params_once_a_router_matched_it
   ok    http.a_request_gives_its_query_params_decoded
   ok    http.a_request_keeps_its_method_token_as_sent
@@ -425,7 +447,6 @@ The library tests itself.
   ok    http.a_test_request_carries_the_headers_added_to_it
   ok    http.a_text_response_holds_its_rendered_body
   ok    http.a_text_response_past_the_arena_is_refused
-  ok    http.a_value_a_cookie_cannot_carry_is_refused
   ok    http.a_value_may_hold_equals_signs_and_quotes_around_it_are_dropped
   ok    http.a_variable_that_is_not_utf8_is_read_as_its_bytes
   ok    http.a_walk_of_the_headers_shows_one_number
@@ -444,17 +465,27 @@ The library tests itself.
   ok    http.an_error_renders_its_message_into_the_arena
   ok    http.an_error_sends_the_headers_it_is_given
   ok    http.an_error_whose_message_does_not_fit_keeps_its_status
-  ok    http.an_escape_is_two_hexadecimal_digits_in_either_case
+  ok    http.an_escape_is_a_percent_and_two_capital_digits
   ok    http.an_exchange_is_logged_at_the_level_its_status_calls_for
   ok    http.an_expiry_before_1601_is_refused
   ok    http.an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_read
+  ok    http.an_html_response_holds_its_rendered_body_and_content_type
+  ok    http.an_html_response_past_the_arena_is_refused
   ok    http.an_http_variable_is_a_header
   ok    http.an_io_error_answers_500
+  ok    http.an_origin_displays_in_canonical_form
+  ok    http.an_origin_parses_ipv6_with_custom_port
+  ok    http.an_origin_parses_normalizes_default_ports_and_folds_ascii_case
+  ok    http.an_origin_refuses_invalid_inputs
   ok    http.an_unknown_version_is_refused
   ok    http.an_upsert_reason_answers_with_its_cause
+  ok    http.any_text_is_written_percent_encoded
   ok    http.arena_arithmetic_stops_at_the_largest_integer
+  ok    http.bodyless_statuses_are_recognised
+  ok    http.bodyless_statuses_emit_no_content_type_and_no_body
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
+  ok    http.cookie_decodes_the_percent_encoded_value
   ok    http.cookie_finds_a_cookie_by_name
   ok    http.cookies_walk_the_pairs_of_a_cookie_header_in_order
   ok    http.count_includes_every_value_a_repeated_name_holds
@@ -476,6 +507,7 @@ The library tests itself.
   ok    http.headers_added_one_at_a_time_are_checked_together
   ok    http.headers_go_out_in_order_before_the_default_content_type
   ok    http.headers_walk_in_arrival_order
+  ok    http.http_11_host_header_is_strictly_enforced
   ok    http.identical_shapes_are_a_duplicate
   ok    http.into_state_returns_the_state_and_releases_the_handler
   ok    http.json_decodes_the_body_or_names_what_is_wrong
@@ -484,19 +516,29 @@ The library tests itself.
   ok    http.limits_beyond_every_arena_are_refused_without_overflowing
   ok    http.listening_in_an_arena_carves_the_exchanges_from_it
   ok    http.no_match_is_404
-  ok    http.non_ascii_values_are_returned_as_sent
+  ok    http.non_ascii_values_without_escapes_read_as_sent
   ok    http.one_connection_is_served_and_serve_returns
   ok    http.only_reads_the_single_value_whatever_its_name
   ok    http.path_values_belong_to_the_request_answered
+  ok    http.percent_decoding_reads_escapes_in_either_case_and_keeps_plus
+  ok    http.percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits
+  ok    http.percent_decoding_refuses_bytes_that_are_not_utf8
+  ok    http.percent_decoding_reports_a_full_allocator
+  ok    http.percent_decoding_undoes_percent_encoding
+  ok    http.percent_encoded_text_reads_in_an_interpolation
+  ok    http.percent_encoding_keeps_only_unreserved_bytes
   ok    http.remove_header_drops_every_value_of_a_name
   ok    http.removing_a_header_drops_every_value
+  ok    http.request_is_https_checks_forwarded_headers_and_env
   ok    http.running_out_of_memory_answers_500
+  ok    http.same_origin_policy_validates_requests
   ok    http.serving_in_an_arena_carves_the_exchanges_from_it
   ok    http.serving_reports_an_accept_failure_when_closing_the_listener_fails_too
   ok    http.serving_that_cannot_begin_announces_nothing_and_releases_the_handler
   ok    http.set_header_replaces_every_value_of_a_name
   ok    http.setting_a_header_replaces_every_value
   ok    http.status_returns_the_status_the_error_answers_with
+  ok    http.text_that_does_not_decode_answers_400
   ok    http.the_bound_address_is_logged_as_listening
   ok    http.the_default_arena_holds_every_request_the_default_limits_admit
   ok    http.the_default_limits_bound_lines_headers_and_bodies
@@ -507,8 +549,10 @@ The library tests itself.
   ok    http.the_protocol_the_client_spoke_is_not_the_programs
   ok    http.the_root_pattern_matches_the_root_alone
   ok    http.the_state_is_returned_when_serving_ends
+  ok    http.the_unreserved_bytes_are_letters_digits_and_four_marks
   ok    http.transfer_encoding_is_not_implemented
   ok    http.transient_accept_failures_are_retried_until_a_connection_is_served
+  ok    http.unescaping_keeps_bytes_that_are_not_utf8
   ok    http.whitespace_around_pairs_is_tolerated_and_names_match_exactly
   ok    http.with_state_lends_its_state_to_every_request
   ok    index.a_from_end_index_displays_its_source_notation
@@ -649,6 +693,10 @@ The library tests itself.
   ok    iter.collect_first_push_refusal_returns_the_item_and_advanced_linear_captures
   ok    iter.collect_preserves_result_items_and_returns_exhausted_state
   ok    iter.collect_returns_linear_elements_and_captures_after_success_or_refusal
+  ok    iter.count_answers_how_many_items_a_sequence_yields
+  ok    iter.count_keeps_no_borrowed_items_external_owner
+  ok    iter.count_observes_linear_elements_without_settling_them
+  ok    iter.count_walks_what_an_iterator_has_left
   ok    iter.counted_find_borrows_a_linear_iterator_and_resource_owning_callback
   ok    iter.counted_find_observes_linear_elements_without_settling_them
   ok    iter.counted_find_preserves_a_borrowed_items_external_owner
@@ -907,9 +955,13 @@ The library tests itself.
   ok    mem.a_closure_keeps_its_captures_in_an_arena
   ok    mem.a_closure_opened_in_the_system_allocator_calls_what_it_captured
   ok    mem.a_drain_stopped_early_is_returned_by_finish_and_resumes
+  ok    mem.a_foreign_address_is_where_the_bytes_are
+  ok    mem.a_foreign_byte_is_read_at_its_offset
+  ok    mem.a_foreign_word_is_read_at_its_offset
   ok    mem.a_handle_written_without_a_parent_is_a_handle_over_the_system
   ok    mem.a_lambda_that_captures_nothing_allocates_nothing
   ok    mem.a_new_release_log_holds_no_releases
+  ok    mem.a_read_walk_lends_each_viewed_element
   ok    mem.a_refused_allocation_releases_the_callback
   ok    mem.a_refused_overflowing_reservation_keeps_the_cursor
   ok    mem.a_release_log_holds_its_codes_in_release_order
@@ -1171,6 +1223,8 @@ The library tests itself.
   ok    testing.equality_checks_result_variants_and_payloads
   ok    testing.length_counts_the_bytes_written
   ok    testing.oom_is_a_refusal_accepts_each_refused_allocation
+  ok    text.a_hex_digit_has_its_value_in_either_case
+  ok    text.a_hex_error_displays_its_reason
   ok    text.a_length_counts_bytes_and_not_characters
   ok    text.a_scalar_value_outlives_the_text_that_encoded_it
   ok    text.a_search_position_outlives_the_text_that_was_searched
@@ -1178,6 +1232,7 @@ The library tests itself.
   ok    text.a_string_is_a_text_writer
   ok    text.a_string_written_without_an_allocator_is_the_system_string
   ok    text.a_user_type_implements_parse_by_splitting_once
+  ok    text.a_value_below_16_is_one_hex_digit
   ok    text.an_argument_past_the_count_is_nothing
   ok    text.an_empty_allocator_refuses_owned_text
   ok    text.an_empty_str_has_no_bytes
@@ -1198,6 +1253,11 @@ The library tests itself.
   ok    text.float_parsing_refuses_range_loss_and_invalid_decimal_tokens
   ok    text.float_parsing_results_and_errors_outlive_input
   ok    text.from_bytes_accepts_valid_utf8_and_refuses_the_rest
+  ok    text.hex_decoding_reads_two_digits_a_byte_in_either_case
+  ok    text.hex_decoding_refuses_an_odd_count_or_a_letter_past_f
+  ok    text.hex_decoding_reports_a_full_allocator
+  ok    text.hex_encoded_bytes_read_in_an_interpolation
+  ok    text.hex_encoding_writes_two_digits_a_byte
   ok    text.initial_copy_refusal_releases_the_empty_owner
   ok    text.int16_parse_checks_limits
   ok    text.int32_parse_checks_limits
@@ -1252,6 +1312,7 @@ The library tests itself.
   ok    text.text_queries_compare_contents
   ok    text.trim_ascii_removes_only_ascii_whitespace_at_the_ends
   ok    text.trim_unicode_removes_white_space_at_the_ends
+  ok    text.two_hex_digits_spell_one_byte
   ok    text.uint16_parse_checks_limits
   ok    text.uint32_parse_checks_limits
   ok    text.uint64_parse_checks_limits
@@ -1295,4 +1356,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1292 passed, 0 failed
+  1353 passed, 0 failed

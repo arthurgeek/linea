@@ -1,0 +1,5 @@
+{
+    "dependencies": {
+        "tally": { "path": "tally", "extern": true }
+    }
+}

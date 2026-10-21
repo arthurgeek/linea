@@ -1,1 +1,1 @@
-{ "kind": "program", "extern": true }
+{ "kind": "program", "extern": ["."] }

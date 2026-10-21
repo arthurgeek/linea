@@ -1,0 +1,14 @@
+import std.mem
+
+// A newtype holds what it wraps, so a view wrapped in one still borrows the
+// vector, and so does the view taken back out of it.
+type View = mem.Slice[UInt8]
+
+fn main() -> UInt8 {
+    var v: mem.Vec[UInt8] = mem.Vec.new()
+    &v.push(7).unwrap()
+    let w = View(v.as_slice())
+    let View(s) = w
+    v.release()
+    s[0]
+}

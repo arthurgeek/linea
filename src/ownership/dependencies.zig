@@ -10,8 +10,10 @@ const ExpandedProgram = @import("../syntax/expanded_program.zig").ExpandedProgra
 const node = @import("../syntax/node.zig");
 const ExprId = node.ExprId;
 const BindingId = @import("../sema/ids.zig").BindingId;
-const Resolution = @import("../sema/resolve.zig").Resolution;
+const resolve_mod = @import("../sema/resolve.zig");
+const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
+const intrinsics = @import("../sema/intrinsics.zig");
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
 const diagnostics = @import("../diagnostics/diagnostic.zig");
@@ -880,6 +882,11 @@ const Analysis = struct {
     inspected_sets: std.AutoHashMapUnmanaged(SetId, void) = .empty,
     contract_sources: std.AutoHashMapUnmanaged(BindingId, std.ArrayList(u32)) = .empty,
     contracts_indexed: bool = false,
+    /// The lending walks' binders whose elements sit in storage the walked
+    /// value observes rather than owns, keyed by binder. Filled on first use;
+    /// sized by the function's lending binders.
+    walk_sources: std.AutoHashMapUnmanaged(BindingId, WalkSource) = .empty,
+    walk_sources_indexed: bool = false,
     /// Where a dependency on `owner` first reached `cell`: the source of a
     /// control-flow join into an expression's value, or the write into a
     /// binding. [O-Escapes] and [O-Borrow] reports follow these back to the
@@ -933,6 +940,7 @@ const Analysis = struct {
         self.escape_exits.deinit(self.gpa);
         self.escaped_owners.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
+        self.walk_sources.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
         self.dependents.deinit(self.gpa);
@@ -966,6 +974,51 @@ const Analysis = struct {
     /// Whether a use of this binding reads the place its alias cell names: a
     /// lend's binder, or a read capture, whose alias stands for the captured
     /// environment.
+    /// A lending walk's binder whose element sits in storage the walked
+    /// value observes: `head` is the walk's head and `path` selects the part
+    /// of its value that observes the storage. The binder then depends on
+    /// that part as `view[i]` depends on `view`, so a use of the binder needs
+    /// the part's observations intact and a borrow of it observes the storage.
+    const WalkSource = struct { head: ExprId, path: PathId };
+
+    fn walkSource(self: *Analysis, binder: BindingId) Allocator.Error!?WalkSource {
+        if (!self.walk_sources_indexed) {
+            self.walk_sources_indexed = true;
+            for (self.cfg.blocks[self.function.blocks.start..self.function.blocks.end]) |block| {
+                var ops = self.cfg.opsOf(block);
+                while (ops.next()) |op| {
+                    if (self.cfg.opTag(op) != .lent) continue;
+                    const root = self.cfg.opPlace(op).root;
+                    if (root == .none) continue;
+                    const walk = switch (self.cfg.ops.items(.projection)[op.index()]) {
+                        .index => |walk| walk,
+                        else => continue,
+                    };
+                    const head = self.cfg.ops.items(.source)[op.index()];
+                    const path = try self.observedWalkPath(walk, head) orelse continue;
+                    try self.walk_sources.put(self.gpa, root, .{ .head = head, .path = path });
+                }
+            }
+        }
+        return self.walk_sources.get(binder);
+    }
+
+    /// The part of a lending walk's head that observes the storage its
+    /// elements sit in, or null where the head owns that storage. A slice
+    /// observes its elements, so walking one reaches them through the whole
+    /// value; a projection whose body indexes a slice reaches them through
+    /// the receiver's part that holds the slice.
+    fn observedWalkPath(self: *Analysis, walk: ExprId, head: ExprId) Allocator.Error!?PathId {
+        const slice = self.typing.raw_accesses.slice;
+        if (slice != .none and self.typing.declOfType(self.typing.exprType(self.ast.withoutGroups(head))) == slice) return .root;
+        const expansion = self.typing.call_index.projectionOf(self.typing, walk) orelse return null;
+        if (expansion.delegation != null) return null;
+        const substitution: IndexSubstitution = .{ .binding = expansion.index, .index = null };
+        const selected = try self.selectedPathWithIndex(expansion.path, substitution);
+        if (selected.carried_source == .none) return null;
+        return (try self.selectedPathWithIndex(selected.carried_source, substitution)).path;
+    }
+
     fn readsThroughAlias(self: *const Analysis, binding: BindingId) bool {
         return self.cfg.isLend(binding) and (self.res.kindOf(binding) != .capture or self.isReadCapture(binding));
     }
@@ -1150,12 +1203,17 @@ const Analysis = struct {
         const location = try self.actualPlace(state, source);
         var lent: std.ArrayList(Fact) = .empty;
         defer lent.deinit(self.gpa);
+        // A capture lending a `for inout` binder keeps the walk's lends, as a
+        // change through the binder does.
+        var kept = try self.lendsThrough(state, source);
+        defer kept.deinit(self.gpa);
         for (self.store.facts(location)) |fact| {
             if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, source);
             var exclusive = fact;
             exclusive.origin.lent = source;
             try lent.append(self.gpa, exclusive);
         }
+        try self.restoreLends(state, kept.items);
         const contained = try self.store.prefixed(try self.value(state, source), try self.store.prepend(observed, .root));
         return self.store.join(try self.store.intern(lent.items), contained);
     }
@@ -1448,6 +1506,9 @@ const Analysis = struct {
             if (root != .none and self.cfg.isLastingLend(root)) {
                 if (state.get(Cell.alias(root))) |origins| try self.stale(origins, .{ .used = expr }, report);
             }
+            if (root != .none) if (try self.walkSource(root)) |walked| {
+                try self.stale(try self.store.select(try self.value(state, walked.head), walked.path), .{ .used = expr }, report);
+            };
         }
         const cut = try self.store.boundary(selected.path, false);
         if (cut.remaining == .root and !self.canCarry(self.typing.exprType(expr))) return;
@@ -1634,6 +1695,11 @@ const Analysis = struct {
                         const prefix = try self.store.prepend(payloadHead(variant, @intCast(index)), .root);
                         result = try self.store.join(result, try self.store.prefixed(try self.value(state, arg), prefix));
                     }
+                } else if (resolve_mod.constructionOf(self.ast, self.res, id) != null) {
+                    // A newtype holds its one operand whole, so it carries
+                    // everything the operand carries.
+                    const args = self.ast.call(id).args;
+                    if (args.len == 1) result = try self.value(state, args[0]);
                 } else result = try self.callResult(state, id);
             },
             // A literal observes each piece it borrows and carries what each
@@ -1834,6 +1900,95 @@ const Analysis = struct {
         }
     }
 
+    /// A call changes the place `place` names: every observation of it ends,
+    /// except the lend `place` is reached through. A `for inout` binder is
+    /// itself an observation of the element it lends, recorded in its alias
+    /// cell, and changing the element through the binder is what the walk is
+    /// for: the binder stays the element's one path, as an `inout` parameter
+    /// does, and observations made through it before the change still end.
+    fn changeThrough(self: *Analysis, state: *State, place: ExprId, at: ExprId) !void {
+        var kept = try self.lendsThrough(state, place);
+        defer kept.deinit(self.gpa);
+        for (self.store.facts(try self.actualPlace(state, place))) |fact| {
+            if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, at);
+        }
+        try self.restoreLends(state, kept.items);
+    }
+
+    const KeptLend = struct { binding: BindingId, set: SetId };
+
+    /// The lends a change through `place` passes through: the walk binder
+    /// it is rooted in, and every walk binder lending a region that holds
+    /// what the change reaches, as a nested `for inout` lends a row of the
+    /// grid and then a list of that row. Each stays the one path to what it
+    /// names, as an `inout` parameter does, so the change ends none of them.
+    ///
+    /// **Bound:** the sets the change's own invalidation visits, through the
+    /// same owner index, and the cells holding each.
+    fn lendsThrough(self: *Analysis, state: *const State, place: ExprId) !std.ArrayList(KeptLend) {
+        var kept: std.ArrayList(KeptLend) = .empty;
+        errdefer kept.deinit(self.gpa);
+        const root = self.res.pathBinding(self.ast, place);
+        if (root == .none) return kept;
+        const own = state.get(Cell.alias(root)) orelse return kept;
+        try kept.append(self.gpa, .{ .binding = root, .set = own });
+        for (self.store.facts(own)) |reached| {
+            if (reached.origin.external) continue;
+            const owner = Owner.binding(reached.origin.place.root);
+            const sets = try self.dependents.owners.setsOverlapping(self.gpa, &self.store, owner, reached.origin.place.path);
+            defer self.gpa.free(sets);
+            for (sets) |set| {
+                const cells = self.dependents.active.get(set) orelse continue;
+                var holders = cells.keyIterator();
+                while (holders.next()) |cell| {
+                    const raw = @intFromEnum(cell.*);
+                    if (raw & 3 != 2) continue;
+                    const binding: BindingId = @enumFromInt(@as(u32, @intCast(raw >> 2)));
+                    if (binding == root) continue;
+                    if (!self.enclosesAll(set, reached.origin.place)) continue;
+                    if (for (kept.items) |held| {
+                        if (held.binding == binding) break true;
+                    } else false) continue;
+                    try kept.append(self.gpa, .{ .binding = binding, .set = set });
+                }
+            }
+        }
+        return kept;
+    }
+
+    /// Whether every fact of `set` lends a region holding `place`.
+    fn enclosesAll(self: *Analysis, set: SetId, place: Place) bool {
+        for (self.store.facts(set)) |fact| {
+            if (fact.origin.external or fact.origin.place.root != place.root) return false;
+            if (self.store.strip(place.path, fact.origin.place.path) == null) return false;
+        }
+        return true;
+    }
+
+    /// A read through a walk binder reads the element it lends, whose lends
+    /// are recorded at the element's place rather than at the binder: a
+    /// closure capturing the binder `inout` lends `held[*]`, not `list`. So
+    /// the read ends every exclusive lend of the element, the binder's own and
+    /// its enclosing walks' excepted, which are the path the read goes
+    /// through.
+    fn readThroughLend(self: *Analysis, state: *State, read_at: ExprId, at: ExprId) !void {
+        const root = self.res.pathBinding(self.ast, read_at);
+        if (root == .none or state.get(Cell.alias(root)) == null) return;
+        var kept = try self.lendsThrough(state, read_at);
+        defer kept.deinit(self.gpa);
+        for (self.store.facts(try self.actualPlace(state, read_at))) |fact| {
+            if (fact.origin.external) continue;
+            var read = fact.origin.place;
+            if (try self.store.opaqueBoundary(read.path)) |cut| read.path = cut.prefix;
+            try self.invalidateObservations(state, read, at, .lends);
+        }
+        try self.restoreLends(state, kept.items);
+    }
+
+    fn restoreLends(self: *Analysis, state: *State, kept: []const KeptLend) !void {
+        for (kept) |held| try self.put(state, Cell.alias(held.binding), held.set);
+    }
+
     fn applyCall(self: *Analysis, state: *State, id: ExprId, report: bool) !void {
         const normalized = self.typing.call_index.callOf(self.typing, id) orelse return;
         const signature = switch (self.typing.get(normalized.signature)) {
@@ -1843,16 +1998,19 @@ const Analysis = struct {
         // Without a live local origin, an inout call cannot invalidate an
         // observation. Avoid constructing place facts solely for that check.
         if (self.dependents.owners.by_owner.count() != 0) {
-            if (normalized.callee_convention == .inout) {
-                for (self.store.facts(try self.actualPlace(state, self.ast.call(id).callee))) |fact| {
-                    if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
-                }
-            }
-            for (self.typing.callableParams(signature), normalized.args) |param, arg| {
-                if (arg == .none or param.convention != .inout) continue;
-                for (self.store.facts(try self.actualPlace(state, arg))) |fact| {
-                    if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, id);
-                }
+            if (normalized.callee_convention == .inout) try self.changeThrough(state, self.ast.call(id).callee, id);
+            // An `extern` taking a handle without `read` may change the object
+            // it holds, so the call lends the argument's place as `inout`
+            // would although C receives the handle by value.
+            const foreign: ?node.DeclId = switch (normalized.target) {
+                .declared => |d| if (self.ast.declIsExtern(d)) d else null,
+                else => null,
+            };
+            for (self.typing.callableParams(signature), normalized.args, 0..) |param, arg, k| {
+                if (arg == .none) continue;
+                const changes = if (foreign) |d| intrinsics.changesForeignHandle(self.program, self.ast, self.typing, d, k, param.ty) else false;
+                if (param.convention != .inout and !changes) continue;
+                try self.changeThrough(state, arg, id);
             }
         }
         // The callable is invoked after its arguments finish evaluating.
@@ -2346,6 +2504,7 @@ const Analysis = struct {
                         var read = Place{ .root = place.root, .path = (try self.selectedPath(read_at)).path };
                         if (try self.store.opaqueBoundary(read.path)) |cut| read.path = cut.prefix;
                         try self.invalidateObservations(state, read, at, .lends);
+                        try self.readThroughLend(state, read_at, at);
                     }
                 },
                 .consume => {
@@ -2403,6 +2562,19 @@ const Analysis = struct {
                             target.origin.place.path = try self.store.concat(target.origin.place.path, alias_path);
                             try aliases.append(self.gpa, target);
                         }
+                        // An element the head observes sits in that storage,
+                        // so a borrow of the binder observes it too, as a
+                        // borrow of `view[i]` does.
+                        if (try self.walkSource(place.root)) |walked| {
+                            for (self.store.facts(try self.store.select(try self.value(state, walked.head), walked.path))) |fact| {
+                                var target = fact;
+                                target.path = .root;
+                                target.ambient = false;
+                                target.exclusions = .empty;
+                                target.symbolic = false;
+                                try aliases.append(self.gpa, target);
+                            }
+                        }
                         try self.put(state, Cell.alias(place.root), try self.store.intern(aliases.items));
                     }
                     if (assignment) try self.invalidate(state, .{ .root = place.root, .path = path }, null, at);
@@ -2451,6 +2623,7 @@ const Analysis = struct {
             if (root != .none) {
                 if (self.readsThroughAlias(root)) try uses.append(self.gpa, Cell.alias(root));
                 if (self.canCarry(self.typing.bindingType(root))) try uses.append(self.gpa, Cell.binding(root));
+                if (try self.walkSource(root)) |walked| try self.addUses(uses, walked.head);
             }
         }
         if (!self.ast.refersToBinding(selected.root)) {

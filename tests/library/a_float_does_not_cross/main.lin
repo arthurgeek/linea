@@ -1,3 +1,0 @@
-export fn scale(num: Float64) -> Float64 {
-    num
-}

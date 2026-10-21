@@ -1,0 +1,5 @@
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "arithmetic"
+ --> tests/library/a_module_its_root_does_not_grant_declares_none/arithmetic/negate.lin:2:11
+  |
+2 | extern fn labs(value: Int64) -> Int64
+  |           ^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted

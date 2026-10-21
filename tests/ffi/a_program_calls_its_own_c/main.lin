@@ -1,0 +1,9 @@
+import std.io
+import arithmetic
+
+fn main() -> Result[UInt8, io.IoError] {
+    let squared = arithmetic.square(12)
+    let total = arithmetic.sum(40, 2)
+    io.println("{squared} {total}")?
+    .Ok(0)
+}

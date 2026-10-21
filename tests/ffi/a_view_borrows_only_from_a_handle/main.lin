@@ -1,0 +1,5 @@
+import named
+
+fn main() -> UInt8 {
+    named.ready()
+}

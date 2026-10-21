@@ -122,6 +122,7 @@ module.exports = grammar({
     // An `extern` declares an operation without a source body, so
     // it is a header ended by a line break the way a trait's signature is.
     extern_declaration: $ => seq(
+      optional($.visibility),
       'extern',
       'fn',
       field('name', $.identifier),
@@ -1128,7 +1129,8 @@ module.exports = grammar({
     ),
     // The text after the colon, up to the closing brace, is one token: its
     // characters are the parts of a format spec, `[[fill]align][+][0][width]
-    // [.precision][?]`, rather than operators, as the compiler's lexer reads it.
+    // [.precision][x|X|?]`, rather than operators, as the compiler's lexer
+    // reads it.
     format_selector: $ => seq(':', $.format_spec),
     // Spaces before the closing brace are not part of the spec.
     format_spec: _ => /[^\s}"]([^}"\n]*[^\s}"])?/,

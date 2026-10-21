@@ -1089,6 +1089,11 @@ fn lowerFunction(
     var b = Mir.Builder.init(gpa);
     errdefer b.deinit();
     b.signature = try instance.through(&mono.pool, source.signature);
+    // An `extern` answering `ffi.Errno[R]` returns `R` from C. Each call to it
+    // builds the `Errno` from that and the `errno` read after it.
+    if (instance.body == .declaration and ast.declIsExtern(d)) {
+        if (try typing.raw_accesses.errnoSignature(gpa, &mono.pool, b.signature)) |answered| b.signature = answered;
+    }
 
     const entry_block = try b.addBlock();
 
@@ -1533,6 +1538,7 @@ const Lowerer = struct {
             .float_math,
             .check,
             .function_addr,
+            .foreign_function_addr,
             => .value,
         };
         return self.b.addInst(self.block, .{ .tag = tag, .result_role = role, .ty = ty, .span = span, .data = data });
@@ -5195,6 +5201,16 @@ const Lowerer = struct {
                     }
                 }
             }
+            // C calls a callback through an entry in its own convention, so an
+            // `extern`'s callback argument is that entry's address. The checker
+            // gave every such argument a fixed target ([T-ExternCallback]).
+            if (self.ast.declIsExtern(named) and self.typing.get(param.ty) == .callable) {
+                const value = self.calls.functionValueOf(self.typing, self.ast.withoutGroups(a)) orelse
+                    @panic("compiler defect: a callback passed to C has no fixed target");
+                const target = try self.functionTarget(value);
+                try args.append(self.gpa, try self.b.addForeignFunctionAddr(self.block, try self.substituted(value.signature), self.ast.exprSpan(a), target));
+                continue;
+            }
             if (try self.appendCallArgument(&args, a, param)) |stopped| return stopped;
         }
 
@@ -5280,7 +5296,25 @@ const Lowerer = struct {
             return self.loadLocal(local, element, span);
         }
         const callee = self.mono.idFor(d, settled, held, impl_args);
+        if (self.ast.declIsExtern(d)) {
+            if (self.library.raw.errnoValue(&self.mono.pool, ty)) |value| return self.errnoCall(id, ty, value, span, callee, args.items);
+        }
         return self.sourceCall(id, ty, span, callee, args.items);
+    }
+
+    /// A call to an `extern` answering `ffi.Errno[R]`: C's `R`, then the
+    /// runtime's read of `errno`, emitted next so no code between the two can
+    /// change it, and the `Errno` built from both.
+    fn errnoCall(self: *Lowerer, written: ExprId, ty: TypeId, value_ty: TypeId, span: Span, callee: FunctionId, args: []const InstId) !InstId {
+        const value = try self.sourceCall(written, value_ty, span, callee, args);
+        const read = self.mono.idFor(self.library.raw.errno_read, &.{}, .poison, &.{});
+        const code = try self.directCall(.i32, span, read, &.{});
+        const base = try self.baseFor(ty, span, null);
+        const value_field = self.types().lookupField(ty, "value") orelse return self.poison(span);
+        const code_field = self.types().lookupField(ty, "code") orelse return self.poison(span);
+        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, span), value_field.ty, value, span);
+        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, span), code_field.ty, code, span);
+        return base;
     }
 
     fn fieldValue(self: *Lowerer, base: InstId, ty: TypeId, name: []const u8, span: Span) !InstId {
@@ -6014,6 +6048,9 @@ const Lowerer = struct {
             try self.emit(.constant, .u64, span, .{ .constant = format.width }),
             try self.emit(.constant, .bool_, span, .{ .constant = @intFromBool(format.has_precision) }),
             try self.emit(.constant, .u64, span, .{ .constant = format.precision }),
+            // The hexadecimal choice's ordinal is none, lower, upper, which is
+            // the order `spec_of` reads 0 through 2 in.
+            try self.emit(.constant, .u8, span, .{ .constant = @intFromEnum(format.hex) }),
             writer,
         };
         return self.callLibrary(layout.decl, args, &parts, answer, span);

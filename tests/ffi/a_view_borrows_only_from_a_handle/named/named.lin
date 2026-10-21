@@ -1,0 +1,24 @@
+import std.ffi
+import types
+
+// Unsealed: any module may build one from an integer, so it says nothing
+// about which object the text lives in.
+@linear
+type Loose = UInt64
+
+// A view borrows from a handle, a sealed type of a module trusted with C. An
+// integer, an unsealed newtype or a type of an untrusted module can be copied
+// or rebuilt, so the text could outlive what it points into.
+extern fn named_name_of_address(handle: UInt64) -> ffi.CText where borrows(handle)
+
+extern fn named_name_of_loose(handle: Loose) -> ffi.CText where borrows(handle)
+
+extern fn named_name_of_outside(handle: types.Outside) -> ffi.CText where borrows(handle)
+
+pub fn lengths(address: UInt64, inout loose: Loose, inout outside: types.Outside) -> UInt64 {
+    named_name_of_address(address).length() + named_name_of_loose(loose).length() + named_name_of_outside(outside).length()
+}
+
+pub fn ready() -> UInt8 {
+    0
+}

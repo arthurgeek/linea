@@ -1,0 +1,12 @@
+// The slice a `for read` walks observes the vector behind it, so the vector
+// cannot change while the walk still needs the view.
+fn main() -> UInt8 {
+    var values = Vec.filled(count: 3, value: UInt8(7)).unwrap()
+    defer values.release()
+    var total: UInt8 = 0
+    for read value in values.as_slice() {
+        values[0] = 9
+        total += value
+    }
+    total
+}

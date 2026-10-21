@@ -120,6 +120,49 @@ To walk a vector, pick the form that says what should happen to its elements:
 - `for x in v.drain()`, or a walk lent `&pending`, to take them out, which the
   last sections of this chapter cover.
 
+A slice is walked with `for read` too. A function that takes a
+`mem.Slice[T]` serves an array and a vector alike, and `for read` lends it
+each element the view sees:
+
+```linea
+import std.io
+import std.mem
+
+// `for read` lends each amount the slice views; the amounts stay with the
+// array or vector behind it.
+fn wettest(rainfall: mem.Slice[UInt64]) -> UInt64 {
+    var most: UInt64 = 0
+    for read millimetres in rainfall {
+        if millimetres > most {
+            most = millimetres
+        }
+    }
+    most
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let week = [UInt64(12), 30, 7]
+    io.println("wettest day this week: {wettest(week.as_slice())} mm")?
+    defer var today: Vec[UInt64] = Vec.new()
+    for millimetres in [UInt64(3), 5, 1] {
+        if &today.push(millimetres).is_err() {
+            return .Ok(1)
+        }
+    }
+    io.println("wettest hour today: {wettest(today.as_slice())} mm")?
+    .Ok(0)
+}
+```
+
+```
+wettest day this week: 30 mm
+wettest hour today: 5 mm
+```
+
+A slice is a view: it can be copied freely and may look at storage nothing may
+write, so it lends its elements only for reading. `for inout` over a slice is
+refused; change the elements through the array or vector itself.
+
 ## What a `for` can walk: sequences and iterators
 
 A range, such as `1..=3`, and a slice, such as `highs.as_slice()`, are
@@ -241,6 +284,72 @@ The second chain puts each step on a line of its own. A line that opens with
 `.` and a lowercase name continues the expression on the line above ([Linea in
 an hour](01-linea-in-an-hour.md#where-a-statement-ends)), so a chain reads top
 to bottom, one step per line.
+
+## Nothing runs until something walks it
+
+An adapter does its work only when the walk asks it for an item, and only as
+much as that item needs. A source that never runs out is therefore safe to
+chain, as long as something in the chain stops asking. This program squares
+the natural numbers, keeps the even squares, and takes five:
+
+```linea
+import std.io
+
+// Naturals counts up from `at` and never runs out: `next` always answers Some.
+struct Naturals { at: UInt64 }
+
+impl Iterator for Naturals {
+    type Item = UInt64
+
+    fn next(inout self: Self) -> Option[UInt64] where carries() {
+        let value = self.at
+        self.at += 1
+        .Some(value)
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var squared: UInt64 = 0
+    var tested: UInt64 = 0
+    // Each stage counts its calls, so the totals show how much ran.
+    let firsts = Naturals { at = 0 }
+        .map(inout [inout squared] |sink n| {
+            squared += 1
+            n * n
+        })
+        .filter(inout [inout tested] |square| {
+            tested += 1
+            square % 2 == 0
+        })
+        .take(5)
+    for square in firsts {
+        io.println("took {square}")?
+    }
+    io.println("map ran {squared} times, filter ran {tested} times")?
+    .Ok(0)
+}
+```
+
+```
+took 0
+took 4
+took 16
+took 36
+took 64
+map ran 9 times, filter ran 9 times
+```
+
+`Naturals` never answers `.None`, yet the walk ends: `take(5)` asked `filter`
+for five items and then stopped asking. To find five even squares, `filter`
+pulled the squares of 0 through 8, nine items, and rejected the odd ones, 1,
+9, 25 and 49. `map` ran once for each item `filter` pulled, so it ran nine
+times too, and never for 9 or anything after it. Building the chain ran
+nothing at all: both counters were still 0 when the `for` began.
+
+Each stage counts its calls through an `inout` capture, because a lambda
+cannot print as it goes: `io.println` answers a `Result`, which may not be
+dropped ([T-Discard]), and the lambda returns a number, so `?` has no
+`Result` to hand the failure to.
 
 ## Pairs from `enumerate` and `zip`
 
@@ -568,16 +677,20 @@ pastry: true, all under 300 cents: true
 bulk item: jam
 ```
 
-| Operation | Answers | Lambda takes the item with `sink`? |
-| --- | --- | --- |
-| `map(f)` | a chain of what `f` returns | yes |
-| `filter(p)` | a chain of the items `p` accepts | no |
-| `fold(start, f)` | `start` combined with every item by `f` | yes |
-| `any(p)` | whether some item satisfies `p`, stopping at the first that does | yes |
-| `all(p)` | whether every item satisfies `p`, stopping at the first that does not | yes |
-| `find(p)` | the first item `p` accepts, as an `Option` | no |
-| `find_map(f)` | the first `.Some` that `f` returns | yes |
-| `for_each(f)` | nothing: it hands every item to `f`, as a `for` loop would | yes |
+| Operation | Adapter or terminal | Answers | Lambda takes the item with `sink`? |
+| --- | --- | --- | --- |
+| `map(f)` | adapter | a chain of what `f` returns | yes |
+| `filter(p)` | adapter | a chain of the items `p` accepts | no |
+| `fold(start, f)` | terminal | `start` combined with every item by `f` | yes |
+| `any(p)` | terminal | whether some item satisfies `p`, stopping at the first that does | yes |
+| `all(p)` | terminal | whether every item satisfies `p`, stopping at the first that does not | yes |
+| `find(p)` | terminal | the first item `p` accepts, as an `Option` | no |
+| `find_map(f)` | terminal | the first `.Some` that `f` returns | yes |
+| `for_each(f)` | terminal | nothing: it hands every item to `f`, as a `for` loop would | yes |
+| `count()` | terminal | how many items there are, as a `UInt64` | no lambda |
+
+An adapter answers a new chain and runs nothing until that chain is walked; a
+terminal walks the chain as soon as it is called.
 
 The rule behind the last column is one question: does the operation still need
 the item after the lambda has seen it? `filter` passes the item on and `find`
@@ -608,6 +721,33 @@ written on `filter`'s or `find`'s lambda.
 Each chain starts again from `order.as_slice()`, because walking a chain takes
 it: once `any` has walked the slice, the slice is gone. A slice is only a
 view, so making another costs nothing.
+
+### Counting with `count`
+
+`count()` walks a chain to its end and answers how many items it yielded. It
+takes no lambda; put a `filter` in front of it to count only some items:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let temperatures = [Int64(18), 24, 31, 27, 16, 33]
+    // `count` walks the whole chain and answers how many items reached it.
+    let days = temperatures.as_slice().count()
+    let hot = temperatures.as_slice().filter(|degrees| *degrees > 25).count()
+    io.println("{hot} of {days} days were above 25 degrees.")?
+    .Ok(0)
+}
+```
+
+```
+3 of 6 days were above 25 degrees.
+```
+
+`count` drops each item once it has counted it, and then the iterator it
+walked, so it needs both to be Discardable, as `fold` does. To count the items
+of an iterator that must be settled, lend it to a `for x in &it` loop, which
+the last sections of this chapter cover, and count in the body.
 
 ## `filter` drops what it rejects; `filter_map` hands it to you
 
@@ -1311,7 +1451,7 @@ operation they offer, and not a protocol the language asks of every type.
 | You want | Write |
 | --- | --- |
 | to take the elements of an array, a range or a sequence | `for x in xs` |
-| to look at each element | `for read x in xs`, on an array or a `Vec` |
+| to look at each element | `for read x in xs`, on an array, a `Vec` or a slice |
 | to walk a `Vec` | `for read` or `for inout`; `v.as_slice()` for a view; `v.drain()` to take its elements |
 | to change each element in place | `for inout x in xs` |
 | a type a `for` can walk | `impl Iterator for T`, with `type Item` and `next` |
@@ -1320,6 +1460,7 @@ operation they offer, and not a protocol the language asks of every type.
 | to keep some items and deal with the rest | `xs.filter_map(\|sink x\| …)`, answering `.Some` or `.None` |
 | one value from all the items | `xs.fold(start, \|sink value, sink x\| …)` |
 | to ask about the items | `any`, `all`, `find`, `find_map` |
+| how many items there are | `xs.count()`, or `xs.filter(\|x\| …).count()` for some of them |
 | the items in a new `Vec` | `xs.collect().settled()`, or `xs.collect_in(allocator).settled()` |
 | a vector in ascending order | `&v.sort()`, for `Ordered` elements |
 | a vector in an order you choose | `&v.sort_by(\|left, right\| …)`, true when `left` comes first |
@@ -1329,14 +1470,17 @@ operation they offer, and not a protocol the language asks of every type.
 | each item with its position | `for (i, x) in xs.enumerate()` |
 | the items of two sequences, paired | `for (a, b) in xs.zip(ys)`, with Discardable items in `xs` |
 | the first few items, or all but the first few | `xs.take(n)`, `xs.skip(n)` |
+| a chain over a source that never ends | an adapter runs only as the walk asks, so end it with `take(n)` |
 | a vector's last element | `&v.pop()` |
 | a vector's elements, first to last | `v.drain()` |
 | to walk a drain of values that must be consumed | `var pending = v.drain()`, `for x in &pending`, then `pending.finish()` |
 
 The [payment batch](../../examples/payment_batch.lin) commits or declines a
 queue of payments with a lent walk, the [savings
-planner](../../examples/savings_planner.lin) folds a range, and the [parcel
-manifest](../../examples/parcel_manifest.lin) filters and collects a shipment.
+planner](../../examples/savings_planner.lin) folds a range, the [parcel
+manifest](../../examples/parcel_manifest.lin) filters and collects a shipment,
+and the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
+from a walk of years that never ends.
 
 Next: [Borrowing](06-borrowing.md) — the views that chains hand out, and the
 `borrows`, `carries` and `retains` clauses that say where a view points.

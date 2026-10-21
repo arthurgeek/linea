@@ -1,0 +1,11 @@
+error[O-Borrow]: this operation uses a place lent `inout` to a value that is still used
+  --> tests/ownership/a_closure_holding_a_walk_binder_inout_cannot_grow_what_a_read_walk_reads.lin:16:23
+   |
+11 |         var grow = inout [inout list] || {
+   |                                 ---- lent `inout` here
+16 |         for read x in list {
+   |                       ^^^^ this uses the place while it is lent
+17 |             &grow()
+   |              ---- a value holding the lend is still used here
+   |
+   = help: a place lent `inout` is reached only through what holds the lend until that value's last use; use it after that, or through the closure
