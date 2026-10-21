@@ -1,6 +1,6 @@
 // Serve a guest book stored in SQLite on a TCP port.
 //
-// `guest-book [PORT]` serves the guest book on loopback (default 8080).
+// `guest-book PORT` serves the guest book on loopback.
 //
 // `GET /` renders the page and the 50 newest signatures. `POST /sign` checks
 // that the form came from the same origin and fits the length limits, stores
@@ -89,6 +89,10 @@ fn home(inout app: App, request: http.Request) -> Result[http.Response, http.Err
     http.html(request, Page { action = "/sign", name, entries = entries.as_slice() })
 }
 
+fn favicon(inout _app: App, request: http.Request) -> Result[http.Response, http.Error] {
+    .Ok(http.no_content(request))
+}
+
 @derive(http.Params, Release)
 struct Signature {
     name: Str,
@@ -96,7 +100,7 @@ struct Signature {
 }
 
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !http.same_origin(request, false) {
+    if !http.same_origin(request) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -119,6 +123,7 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
 
 fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
     &router.route("GET /", home)?
+    &router.route("GET /favicon.ico", favicon)?
     &router.route("POST /sign", sign)
 }
 
@@ -186,7 +191,6 @@ test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
     var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
     &get.add_header("Cookie", cookie_pair).unwrap()
     let home_page = &router.serve_http(&app, get.request()).unwrap()
-    app.close().unwrap()
     testing.assert_eq(home_page.status(), http.Status.Ok, "GET / did not answer 200")?
     testing.assert_eq(home_page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "Content-Type was not HTML")?
     let html_body = home_page.text().unwrap()
@@ -240,7 +244,6 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
         }
         testing.assert_eq(refused.status(), http.Status.UnprocessableContent, "the status was not 422")?
     }
-    app.close().unwrap()
     .Ok(())
 }
 
@@ -291,7 +294,46 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
     &matching_origin.add_header("Host", "example.test").unwrap()
     &matching_origin.add_header("Origin", "HTTP://EXAMPLE.TEST:80").unwrap()
     let allowed = &router.serve_http(&app, matching_origin.request()).unwrap()
-    app.close().unwrap()
     testing.assert_eq(allowed.status(), http.Status.SeeOther, "a matching origin with default port was refused")?
+    .Ok(())
+}
+
+test fn favicon_answers_204_no_content() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer var app = App.in_memory().unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 16384)
+    var req = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
+    &req.add_header("Host", "example.test").unwrap()
+    let response = &router.serve_http(&app, req.request()).unwrap()
+    testing.assert_eq(response.status(), http.Status.NoContent, "favicon status was not 204")?
+    testing.assert_ok_eq(response.text(), "", "favicon had a body")?
+    .Ok(())
+}
+
+test fn forwarded_proto_https_is_recognised_for_same_origin() {
+    defer var router: http.Router[App] = http.Router.new()
+    routes(&router).unwrap()
+    defer var app = App.in_memory().unwrap()
+    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    var post = http.new_request(
+        arena.handle(),
+        "POST",
+        "/sign",
+        body: "name=Grace&message=Hello",
+        content_type: "application/x-www-form-urlencoded",
+    ).unwrap()
+    &post.add_header("Host", "example.test").unwrap()
+    &post.add_header("Origin", "https://example.test").unwrap()
+    &post.add_header("X-Forwarded-Proto", "https").unwrap()
+    &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
+    let response = &router.serve_http(&app, post.request()).unwrap()
+    testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused")?
+    .Ok(())
+}
+
+test fn app_close_settles_database() {
+    let app = App.in_memory().unwrap()
+    app.close().unwrap()
     .Ok(())
 }

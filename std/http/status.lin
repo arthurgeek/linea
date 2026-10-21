@@ -123,6 +123,14 @@ impl Status {
             Other(Code(value)) => value,
         }
     }
+
+    // Return whether responses with this status code must never include a
+    // message body (RFC 9110 §6.4.1 / §6.5.5: 1xx Informational, 204 No Content,
+    // and 304 Not Modified).
+    pub fn is_bodyless(self: Self) -> Bool {
+        let code = self.code()
+        (code >= 100 && code < 200) || code == 204 || code == 304
+    }
 }
 
 test fn a_status_has_its_code() {
@@ -131,6 +139,17 @@ test fn a_status_has_its_code() {
     for index in 0..codes.length() {
         testing.assert_eq(statuses[index].code(), codes[index], "a status changed its code")?
     }
+    .Ok(())
+}
+
+test fn bodyless_statuses_are_recognised() {
+    testing.assert(Status.NoContent.is_bodyless(), "204 is bodyless")?
+    testing.assert(Status.NotModified.is_bodyless(), "304 is bodyless")?
+    testing.assert(Status.Other(Code(100)).is_bodyless(), "100 Continue is bodyless")?
+    testing.assert(Status.Other(Code(101)).is_bodyless(), "101 Switching Protocols is bodyless")?
+    testing.assert(!Status.Ok.is_bodyless(), "200 OK has a body")?
+    testing.assert(!Status.NotFound.is_bodyless(), "404 Not Found has a body")?
+    testing.assert(!Status.InternalServerError.is_bodyless(), "500 Internal Server Error has a body")?
     .Ok(())
 }
 

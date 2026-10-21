@@ -408,7 +408,7 @@ trimmed name and message fit the scalar limits:
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
 fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Result[http.Response, http.Error] {
-    if !http.same_origin(request, false) {
+    if !http.same_origin(request) {
         return .Err(http.error(request, .Forbidden, "a signature is accepted only from this guest book's own page"))
     }
     let name = form.value.name.trim_ascii()
@@ -432,7 +432,7 @@ fn sign(inout app: App, form: http.Form[Signature], request: http.Request) -> Re
 
 ## Running it
 
-`main` in `examples/guest-book/main.lin` registers the two routes on
+`main` in `examples/guest-book/main.lin` registers the routes on
 `http.Router[App]`, caps request bodies at 4096 bytes, serves the loopback port,
 and closes `app` when finished:
 
@@ -440,6 +440,7 @@ and closes `app` when finished:
 ```linea
 fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
     &router.route("GET /", home)?
+    &router.route("GET /favicon.ico", favicon)?
     &router.route("POST /sign", sign)
 }
 

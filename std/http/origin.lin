@@ -122,26 +122,169 @@ fn is_hex_digit(byte: UInt8) -> Bool {
     (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
 }
 
-fn is_valid_ipv6_char(byte: UInt8) -> Bool {
-    is_hex_digit(byte) || byte == 58
+fn is_valid_h16(text: Str) -> Bool {
+    if text.length() == 0 || text.length() > 4 {
+        return false
+    }
+    for byte in text.as_bytes() {
+        if !is_hex_digit(*byte) {
+            return false
+        }
+    }
+    true
+}
+
+fn count_valid_h16(text: Str) -> Option[UInt64] {
+    if text.length() == 0 {
+        return .Some(0)
+    }
+    var count: UInt64 = 0
+    var parts = text.split(":") else |_| {
+        return .None
+    }
+    loop {
+        match &parts.next() {
+            Some(part) => {
+                if !is_valid_h16(part) {
+                    return .None
+                }
+                count += 1
+            },
+            None => break,
+        }
+    }
+    .Some(count)
+}
+
+fn is_valid_ipv4_octet(text: Str) -> Bool {
+    if text.length() == 0 || text.length() > 3 {
+        return false
+    }
+    if text.length() > 1 && text.byte(0).unwrap() == 48 {
+        return false
+    }
+    var val: UInt32 = 0
+    for byte in text.as_bytes() {
+        let code = *byte
+        if code < 48 || code > 57 {
+            return false
+        }
+        val = val * 10 + UInt32(code - 48)
+    }
+    val <= 255
+}
+
+fn is_valid_ipv4(text: Str) -> Bool {
+    var dots: UInt64 = 0
+    for byte in text.as_bytes() {
+        if *byte == 46 {
+            dots += 1
+        }
+    }
+    if dots != 3 {
+        return false
+    }
+    var parts = text.split(".") else |_| {
+        return false
+    }
+    var count: UInt64 = 0
+    loop {
+        match &parts.next() {
+            Some(part) => {
+                if !is_valid_ipv4_octet(part) {
+                    return false
+                }
+                count += 1
+            },
+            None => break,
+        }
+    }
+    count == 4
+}
+
+fn find_last_colon(text: Str) -> Option[UInt64] {
+    if text.length() == 0 {
+        return .None
+    }
+    var i = text.length()
+    while i > 0 {
+        i -= 1
+        if text.byte(i).unwrap() == 58 {
+            return .Some(i)
+        }
+    }
+    .None
 }
 
 fn is_valid_ipv6_interior(interior: Str) -> Bool {
     if interior.length() < 2 || interior.length() > 45 {
         return false
     }
-    if interior.find(":", 0).is_none() {
-        return false
-    }
     if interior.find(":::", 0).is_some() {
         return false
     }
-    for byte in interior.as_bytes() {
-        if !is_valid_ipv6_char(*byte) {
-            return false
-        }
+    let dc_index = interior.find("::", 0)
+    match dc_index {
+        Some(first_dc) => {
+            if interior.find("::", first_dc + 2).is_some() {
+                return false
+            }
+            let left = interior.slice(0, first_dc).unwrap()
+            let right = interior.slice(first_dc + 2, interior.length()).unwrap()
+            let left_groups = count_valid_h16(left) else {
+                return false
+            }
+            let right_groups: UInt64 = if right.find(".", 0).is_some() {
+                match find_last_colon(right) {
+                    Some(colon) => {
+                        let h16_part = right.slice(0, colon).unwrap()
+                        let ipv4_part = right.slice(colon + 1, right.length()).unwrap()
+                        if !is_valid_ipv4(ipv4_part) {
+                            return false
+                        }
+                        let h_count = count_valid_h16(h16_part) else {
+                            return false
+                        }
+                        h_count + 2
+                    },
+                    None => {
+                        if !is_valid_ipv4(right) {
+                            return false
+                        }
+                        2
+                    },
+                }
+            } else {
+                let h_count = count_valid_h16(right) else {
+                    return false
+                }
+                h_count
+            }
+            let total = left_groups + right_groups
+            total <= 7
+        },
+        None => {
+            if interior.find(".", 0).is_some() {
+                let colon = find_last_colon(interior) else {
+                    return false
+                }
+                let h16_part = interior.slice(0, colon).unwrap()
+                let ipv4_part = interior.slice(colon + 1, interior.length()).unwrap()
+                if !is_valid_ipv4(ipv4_part) {
+                    return false
+                }
+                let h_count = count_valid_h16(h16_part) else {
+                    return false
+                }
+                h_count + 2 == 8
+            } else {
+                let h_count = count_valid_h16(interior) else {
+                    return false
+                }
+                h_count == 8
+            }
+        },
     }
-    true
 }
 
 fn is_valid_host_char(byte: UInt8) -> Bool {
@@ -283,10 +426,24 @@ impl Origin {
         parse_authority(authority.trim_ascii(), is_https)
     }
 
+    // Return whether `authority` is a syntactically valid HTTP authority (`host` or `host:port`).
+    pub fn is_valid_authority(authority: Str) -> Bool {
+        let trimmed = authority.trim_ascii()
+        if trimmed.length() == 0 {
+            return false
+        }
+        parse_authority(trimmed, false).is_ok()
+    }
+
     // Compare two origins for same-origin equivalence.
     pub fn same_origin(self: Self, other: Self) -> Bool {
         self == other
     }
+}
+
+// Return whether `authority` is a syntactically valid HTTP authority (`host` or `host:port`).
+pub fn is_valid_authority(authority: Str) -> Bool {
+    Origin.is_valid_authority(authority)
 }
 
 test fn an_origin_parses_normalizes_default_ports_and_folds_ascii_case() {
@@ -317,6 +474,9 @@ test fn an_origin_parses_ipv6_with_custom_port() {
     let ipv6 = Origin.parse("http://[::1]:8080").unwrap()
     testing.assert_eq(ipv6.host(), "[::1]", "host changed")?
     testing.assert_eq(ipv6.port(), UInt16(8080), "port changed")?
+    let embedded_ipv4 = Origin.parse("http://[::ffff:192.0.2.1]").unwrap()
+    testing.assert_eq(embedded_ipv4.host(), "[::ffff:192.0.2.1]", "embedded ipv4 host changed")?
+    testing.assert_eq(embedded_ipv4.port(), UInt16(80), "embedded ipv4 port changed")?
     .Ok(())
 }
 
@@ -332,6 +492,10 @@ test fn an_origin_refuses_invalid_inputs() {
     testing.assert_eq(Origin.parse("http://:8080"), .Err(OriginError.InvalidAuthority), "empty host was accepted")?
     testing.assert_eq(Origin.parse("http://[::1"), .Err(OriginError.InvalidAuthority), "unclosed ipv6 bracket was accepted")?
     testing.assert_eq(Origin.parse("http://[not-ipv6]"), .Err(OriginError.InvalidAuthority), "non-hex ipv6 literal was accepted")?
+    testing.assert_eq(Origin.parse("http://[1:2:3]"), .Err(OriginError.InvalidAuthority), "incomplete ipv6 was accepted")?
+    testing.assert_eq(Origin.parse("http://[1::2::3]"), .Err(OriginError.InvalidAuthority), "multiple double colons were accepted")?
+    testing.assert_eq(Origin.parse("http://[:::1]"), .Err(OriginError.InvalidAuthority), "triple colon was accepted")?
+    testing.assert_eq(Origin.parse("http://[::ffff:192.0.2.256]"), .Err(OriginError.InvalidAuthority), "overflowing ipv4 octet was accepted")?
     testing.assert_eq(Origin.parse("http://example.test,evil.test"), .Err(OriginError.InvalidAuthority), "comma in host was accepted")?
     testing.assert_eq(Origin.parse("http://exa_mple.test"), .Err(OriginError.InvalidAuthority), "underscore in host was accepted")?
     testing.assert_eq(Origin.parse(r"http://evil\test"), .Err(OriginError.InvalidAuthority), "backslash in host was accepted")?
@@ -457,15 +621,15 @@ pub fn check_same_origin[P: Allocator](
 }
 
 // Convenience check for standard web applications: when `Origin` is present,
-// it must match the request's `Host` header and scheme (`is_https`).
+// it must match the request's `Host` header and scheme (`request.is_https()`).
 // When `Sec-Fetch-Site` is present, it must be `"same-origin"` or `"none"`.
 // Requests without these headers (such as `curl` or non-browser clients) are
 // accepted under the standard policy, provided a `Host` header is present.
-pub fn same_origin[P: Allocator](request: Request[P], is_https: Bool) -> Bool {
+pub fn same_origin[P: Allocator](request: Request[P]) -> Bool {
     let host = request.header("Host") else {
         return false
     }
-    let expected = Origin.from_authority(host.trim_ascii(), is_https) else |_| {
+    let expected = Origin.from_authority(host.trim_ascii(), request.is_https()) else |_| {
         return false
     }
     check_same_origin(request, expected, SameOriginPolicy.standard())
@@ -486,7 +650,7 @@ test fn same_origin_policy_validates_requests() {
     &matching_alone.add_header("Origin", "http://example.test").unwrap()
     testing.assert(check_same_origin(matching_alone.request(), expected, SameOriginPolicy.standard()), "matching origin refused under standard policy")?
     testing.assert(check_same_origin(matching_alone.request(), expected, SameOriginPolicy.strict()), "matching origin refused under strict policy")?
-    testing.assert(same_origin(matching_alone.request(), false), "same_origin helper refused matching request")?
+    testing.assert(same_origin(matching_alone.request()), "same_origin helper refused matching request")?
 
     // Sec-Fetch-Site same-origin alone passes under both.
     var fetch_alone = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
@@ -499,40 +663,40 @@ test fn same_origin_policy_validates_requests() {
     var matching_folded = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &matching_folded.add_header("Host", "EXAMPLE.TEST").unwrap()
     &matching_folded.add_header("Origin", "HTTP://example.test:80").unwrap()
-    testing.assert(same_origin(matching_folded.request(), false), "folded origin refused")?
+    testing.assert(same_origin(matching_folded.request()), "folded origin refused")?
 
     // Mismatched scheme, port, or host fail.
     var wrong_scheme = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &wrong_scheme.add_header("Host", "example.test").unwrap()
     &wrong_scheme.add_header("Origin", "https://example.test").unwrap()
-    testing.assert(!same_origin(wrong_scheme.request(), false), "wrong scheme accepted")?
+    testing.assert(!same_origin(wrong_scheme.request()), "wrong scheme accepted")?
 
     var wrong_port = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &wrong_port.add_header("Host", "example.test:8080").unwrap()
     &wrong_port.add_header("Origin", "http://example.test:8081").unwrap()
-    testing.assert(!same_origin(wrong_port.request(), false), "wrong port accepted")?
+    testing.assert(!same_origin(wrong_port.request()), "wrong port accepted")?
 
     var wrong_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &wrong_host.add_header("Host", "example.test").unwrap()
     &wrong_host.add_header("Origin", "http://evil.test").unwrap()
-    testing.assert(!same_origin(wrong_host.request(), false), "wrong host accepted")?
+    testing.assert(!same_origin(wrong_host.request()), "wrong host accepted")?
 
     // Sec-Fetch-Site none passes.
     var fetch_none = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &fetch_none.add_header("Host", "example.test").unwrap()
     &fetch_none.add_header("Sec-Fetch-Site", "none").unwrap()
-    testing.assert(same_origin(fetch_none.request(), false), "Sec-Fetch-Site none refused")?
+    testing.assert(same_origin(fetch_none.request()), "Sec-Fetch-Site none refused")?
 
     // Sec-Fetch-Site cross-site and same-site fail under standard policy.
     var cross_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &cross_site.add_header("Host", "example.test").unwrap()
     &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
-    testing.assert(!same_origin(cross_site.request(), false), "cross-site accepted")?
+    testing.assert(!same_origin(cross_site.request()), "cross-site accepted")?
 
     var same_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
     &same_site.add_header("Host", "example.test").unwrap()
     &same_site.add_header("Sec-Fetch-Site", "same-site").unwrap()
-    testing.assert(!same_origin(same_site.request(), false), "same-site accepted under standard policy")?
+    testing.assert(!same_origin(same_site.request()), "same-site accepted under standard policy")?
 
     // Conflicting: valid Origin but cross-site Sec-Fetch-Site fails.
     var conflict = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
@@ -541,8 +705,15 @@ test fn same_origin_policy_validates_requests() {
     &conflict.add_header("Sec-Fetch-Site", "cross-site").unwrap()
     testing.assert(!check_same_origin(conflict.request(), expected, SameOriginPolicy.standard()), "conflicting cross-site accepted")?
 
+    // Forwarded HTTPS matches an https origin.
+    var forwarded_https = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    &forwarded_https.add_header("Host", "example.test").unwrap()
+    &forwarded_https.add_header("Origin", "https://example.test").unwrap()
+    &forwarded_https.add_header("X-Forwarded-Proto", "https").unwrap()
+    testing.assert(same_origin(forwarded_https.request()), "forwarded https was refused")?
+
     // Missing Host header is always refused by same_origin helper.
     let missing_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
-    testing.assert(!same_origin(missing_host.request(), false), "missing host header was accepted by same_origin")?
+    testing.assert(!same_origin(missing_host.request()), "missing host header was accepted by same_origin")?
     .Ok(())
 }

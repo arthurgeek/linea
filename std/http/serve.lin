@@ -269,7 +269,7 @@ test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served(
 
 test fn a_refused_body_left_unread_does_not_lose_the_answer() {
     let listener = net.listen(net.loopback(0)).unwrap()
-    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nContent-Length: 20000\r\n\r\n")
+    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 20000\r\n\r\n")
     // 200 writes of 100 bytes send the whole 20000-byte body.
     let chunk = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     for _ in 0..200 {
@@ -306,15 +306,15 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
     let bound = listener.local_address().unwrap()
     let requests = [
         health_request,
-        "GET /count HTTP/1.1\r\n\r\n",
-        "GET /broken HTTP/1.1\r\n\r\n",
-        "GET /nowhere HTTP/1.1\r\n\r\n",
-        "GET /echo/a%20b HTTP/1.1\r\n\r\n",
-        "HEAD /count HTTP/1.1\r\n\r\n",
+        "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /broken HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /echo/a%20b HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "HEAD /count HTTP/1.1\r\nHost: loopback\r\n\r\n",
         "garbage\r\n\r\n",
         "",
         "GET /health ",
-        "GET /fill HTTP/1.1\r\n\r\n",
+        "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n",
     ]
     var clients: Vec[net.Connection] = Vec.new()
     for request in requests {
@@ -360,7 +360,7 @@ test fn an_arena_parent_serves_every_exchange_from_one_request_arena() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
-    let second = send(bound, "GET /echo/tea HTTP/1.1\r\n\r\n")
+    let second = send(bound, "GET /echo/tea HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -450,8 +450,8 @@ fn status_lines(answers: Vec[String]) -> String {
 test fn a_streamed_answer_goes_out_as_it_is_written() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let counted = send(bound, "GET /count HTTP/1.1\r\n\r\n")
-    let broken = send(bound, "GET /broken HTTP/1.1\r\n\r\n")
+    let counted = send(bound, "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let broken = send(bound, "GET /broken HTTP/1.1\r\nHost: loopback\r\n\r\n")
     defer var router = exchanges_router(mem.system())
     let served = serve(listener, &router, limits: serving(2))
     defer let full = read_to_end(counted)
@@ -558,7 +558,7 @@ fn exchanged_in_small_arena(headers: UInt64, length: UInt64) -> String {
     var listener = net.listen(net.loopback(0)).unwrap()
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     var request = String.new()
-    &request.append("POST /health HTTP/1.1\r\nContent-Length: 8192\r\n").unwrap()
+    &request.append("POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 8192\r\n").unwrap()
     for index in 0..headers {
         "X-{index}: ".fmt(&request).unwrap()
         for _ in 0..length {
@@ -1042,7 +1042,7 @@ fn served_form_at_limits(sink limits: Limits, pair_part: Str) -> String {
     }
     var request = String.new()
     let length = body.length()
-    "POST /health HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {length}\r\n\r\n".fmt(&request).unwrap()
+    "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {length}\r\n\r\n".fmt(&request).unwrap()
     &request.append(body.view()).unwrap()
     body.release()
     let _sent = io.write_all(&client, request.as_bytes()).unwrap()
@@ -1066,7 +1066,7 @@ test fn a_short_header_after_a_long_line_is_answered_in_the_smallest_arena() {
 
 // `served_at_limits` sends `GET /health` with a request line of
 // `line_length` bytes, whose query is `query_part` repeated, `header_lines`
-// header lines of `line_length` bytes, a short `Y: b` header,
+// header lines of `line_length` bytes, a short `Host: loopback` header,
 // `Content-Length` and a body at the body limit, serves it in
 // `smallest_arena(limits)`, and returns what the client read. Each line
 // counts its CRLF.
@@ -1098,7 +1098,7 @@ fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt
         &request.append("\r\n").unwrap()
     }
     let body = limits.max_body_bytes
-    "Y: b\r\nContent-Length: {body}\r\n\r\n".fmt(&request).unwrap()
+    "Host: loopback\r\nContent-Length: {body}\r\n\r\n".fmt(&request).unwrap()
     for _ in 0..body {
         &request.append("b").unwrap()
     }
@@ -1505,7 +1505,7 @@ fn reset_connection(sink connection: net.Connection) {
 }
 
 // A test sends this GET of `/health` and nothing else.
-let health_request: Str = "GET /health HTTP/1.1\r\n\r\n"
+let health_request: Str = "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n"
 
 // A client reads this answer to `health_request`.
 let health_answer: Str = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok"

@@ -481,6 +481,8 @@ The library tests itself.
   ok    http.an_upsert_reason_answers_with_its_cause
   ok    http.any_text_is_written_percent_encoded
   ok    http.arena_arithmetic_stops_at_the_largest_integer
+  ok    http.bodyless_statuses_are_recognised
+  ok    http.bodyless_statuses_emit_no_content_type_and_no_body
   ok    http.content_length_alone_frames_the_body
   ok    http.content_length_must_be_digits_and_agree
   ok    http.cookie_decodes_the_percent_encoded_value
@@ -505,6 +507,7 @@ The library tests itself.
   ok    http.headers_added_one_at_a_time_are_checked_together
   ok    http.headers_go_out_in_order_before_the_default_content_type
   ok    http.headers_walk_in_arrival_order
+  ok    http.http_11_host_header_is_strictly_enforced
   ok    http.identical_shapes_are_a_duplicate
   ok    http.into_state_returns_the_state_and_releases_the_handler
   ok    http.json_decodes_the_body_or_names_what_is_wrong
@@ -526,6 +529,7 @@ The library tests itself.
   ok    http.percent_encoding_keeps_only_unreserved_bytes
   ok    http.remove_header_drops_every_value_of_a_name
   ok    http.removing_a_header_drops_every_value
+  ok    http.request_is_https_checks_forwarded_headers_and_env
   ok    http.running_out_of_memory_answers_500
   ok    http.same_origin_policy_validates_requests
   ok    http.serving_in_an_arena_carves_the_exchanges_from_it
@@ -1352,4 +1356,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1349 passed, 0 failed
+  1353 passed, 0 failed

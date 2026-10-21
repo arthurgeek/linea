@@ -379,7 +379,7 @@ fn described_line[A: Allocator](inout head: String[A], method: Str, path_info: m
     if method.length() + target_text.length() + request_line_framing_bytes > limits.max_line_bytes {
         return .Err(.Status(.UriTooLong))
     }
-    .Ok(.{ method = method_of(method), method_token, target })
+    .Ok(.{ method = method_of(method), method_token, target, is_http_11 = true })
 }
 
 // `stored_target` stores the target a client sent for `path_info` and

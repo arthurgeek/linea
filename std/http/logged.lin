@@ -194,8 +194,8 @@ test fn the_bound_address_is_logged_as_listening() {
 test fn a_logged_router_logs_each_exchange_it_serves() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\n\r\n")
-    let missing = send(bound, "GET /nowhere HTTP/1.1\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), health_router())

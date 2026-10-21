@@ -1,3 +1,4 @@
+import std.env
 import std.io
 import std.mem
 import std.testing
@@ -42,6 +43,7 @@ pub struct Header {
 struct Message[P: Allocator = mem.SystemAllocator] {
     memory: mem.Handle[P],
     known_method: Method,
+    is_http_11: Bool,
     head: String[mem.Handle[P]],
     method_token: Span,
     target: Span,
@@ -153,7 +155,7 @@ pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str
         Ok(_) => {},
         Err(_) => return .Err(.Status(.InternalServerError)),
     }
-    let line = RequestLine { method = method_of(method), method_token, target = target_span }
+    let line = RequestLine { method = method_of(method), method_token, target = target_span, is_http_11 = true }
     assembled(memory, head, line, header_fields, payload.into_bytes(), standard_limits)
 }
 
@@ -335,6 +337,7 @@ impl[P: Allocator] Message[P] {
         .{
             memory = copy(self.memory),
             known_method = self.known_method,
+            is_http_11 = self.is_http_11,
             head = self.head.view(),
             method_token = copy(self.method_token),
             target = copy(self.target),
@@ -385,7 +388,7 @@ impl[P: Allocator] Message[P] {
             Some(earlier) => .Some(content_length(earlier, .None)?),
             None => .None,
         }
-        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count = 0 }
         add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 }
@@ -434,6 +437,7 @@ test fn headers_added_one_at_a_time_are_checked_together() {
 struct Request[P: Allocator = mem.SystemAllocator] {
     memory: mem.Handle[P],
     known_method: Method,
+    is_http_11: Bool,
     head: Str,
     method_token: Span,
     target: Span,
@@ -482,14 +486,93 @@ impl[P: Allocator] Request[P] {
     pub fn method(self: Self) -> Method {
         self.known_method
     }
+
+    // Return whether this request was made with HTTP/1.1 (otherwise HTTP/1.0).
+    pub fn is_http_11(self: Self) -> Bool {
+        self.is_http_11
+    }
+
+    // Return the request HTTP version string: "HTTP/1.1" or "HTTP/1.0".
+    pub fn version(self: Self) -> Str {
+        if self.is_http_11 {
+            "HTTP/1.1"
+        } else {
+            "HTTP/1.0"
+        }
+    }
+
+    // Return whether this request was received over HTTPS, checking
+    // `X-Forwarded-Proto`, `Forwarded` (RFC 7239), and the CGI `HTTPS` environment
+    // variable.
+    pub fn is_https(self: Self) -> Bool {
+        match self.header("X-Forwarded-Proto") {
+            Some(proto) => {
+                let first = match proto.split_once(",") {
+                    Some((head, _)) => head,
+                    None => proto,
+                }
+                if first.trim_ascii().equals_ascii_folded("https") {
+                    return true
+                }
+            },
+            None => {},
+        }
+        match self.header("Forwarded") {
+            Some(forwarded) => {
+                let parts = forwarded.split(";") else |_| {
+                    return false
+                }
+                for part in parts {
+                    let items = part.split(",") else |_| {
+                        continue
+                    }
+                    for item in items {
+                        let trimmed = item.trim_ascii()
+                        if trimmed.length() >= 6 && trimmed.slice(0, 6).unwrap().equals_ascii_folded("proto=") {
+                            let proto = trimmed.slice(6, trimmed.length()).unwrap().trim_ascii()
+                            let unquoted = if proto.starts_with("\"") && proto.ends_with("\"") && proto.length() >= 2 {
+                                proto.slice(1, proto.length() - 1).unwrap().trim_ascii()
+                            } else {
+                                proto
+                            }
+                            if unquoted.equals_ascii_folded("https") {
+                                return true
+                            }
+                        }
+                    }
+                }
+            },
+            None => {},
+        }
+        match env.variable("HTTPS") {
+            Some(val) => val == "on" || val == "1" || val.equals_ascii_folded("true"),
+            None => false,
+        }
+    }
+}
+
+test fn request_is_https_checks_forwarded_headers_and_env() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    var req1 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &req1.add_header("X-Forwarded-Proto", "https, http").unwrap()
+    testing.assert(req1.request().is_https(), "multi-value X-Forwarded-Proto was not recognised")?
+
+    var req2 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &req2.add_header("Forwarded", "for=192.0.2.60;proto=\"HTTPS\"").unwrap()
+    testing.assert(req2.request().is_https(), "quoted uppercase Forwarded proto was not recognised")?
+
+    var req3 = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    &req3.add_header("Forwarded", "for=192.0.2.60;proto=http").unwrap()
+    testing.assert(!req3.request().is_https(), "http Forwarded proto was treated as https")?
+    .Ok(())
 }
 
 test fn a_request_names_its_method() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     let method = request.request().method()
     testing.assert_eq(method, Method.Patch, "the method changed")?
-    let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let other = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     let unknown = other.request().method()
     testing.assert_eq(unknown, Method.Other, "an unknown method was named")?
     .Ok(())
@@ -504,7 +587,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_request_keeps_its_method_token_as_sent() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
     .Ok(())
 }
@@ -522,9 +605,9 @@ impl[P: Allocator] Request[P] {
 
 test fn a_path_ends_at_the_query() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
-    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let bare = read_in_steps(arena.handle(), "GET /a/b HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(bare.request().path(), "/a/b", "a path without a query changed")?
     .Ok(())
 }
@@ -540,11 +623,11 @@ impl[P: Allocator] Request[P] {
 
 test fn a_query_follows_the_first_question_mark() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
-    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let empty = read_in_steps(arena.handle(), "GET /a? HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(empty.request().query(), Option.Some(""), "an empty query was absent")?
-    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
+    let none = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_eq(none.request().query(), .None, "a target without a query had one")?
     .Ok(())
 }
@@ -560,7 +643,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_header_is_found_by_its_folded_name() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
+    let input = "GET / HTTP/1.1\r\nHost: b\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
     let request = sent.request()
     testing.assert_eq(request.header("ACCEPT"), Option.Some("text/plain"), "the first value was not found")?
@@ -599,7 +682,7 @@ impl[P: Allocator] Request[P] {
 
 test fn headers_walk_in_arrival_order() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nhost: again\r\n\r\n"
+    let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nAccept: text/plain\r\n\r\n"
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
     var walk = sent.request().headers()
     let first = &walk.next()
@@ -608,7 +691,7 @@ test fn headers_walk_in_arrival_order() {
     let fourth = &walk.next()
     testing.assert_eq(first, Option.Some(Header { name = "Host", value = "example.com" }), "the first header changed")?
     testing.assert_eq(second, Option.Some(Header { name = "Accept", value = "*/*" }), "the second header changed")?
-    testing.assert_eq(third, Option.Some(Header { name = "host", value = "again" }), "the third header changed")?
+    testing.assert_eq(third, Option.Some(Header { name = "Accept", value = "text/plain" }), "the third header changed")?
     testing.assert_eq(fourth, .None, "the walk continued past the last header")?
     .Ok(())
 }
@@ -623,7 +706,7 @@ impl[P: Allocator] Request[P] {
 
 test fn a_body_holds_exactly_its_length() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let input = "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcdef"
+    let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Length: 3\r\n\r\nabcdef"
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
     var reader = io.BufferedReader.open_in(arena.handle(), capacity: 16, reader: source).unwrap()
     let sent = read_request(&reader, arena.handle(), Limits.default()).unwrap()
@@ -649,10 +732,10 @@ impl[P: Allocator] Request[P] {
 
 test fn a_body_is_text_only_when_it_is_utf8() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
     testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
     // Two bytes end inside `é`, so the scalar starting at byte 1 is incomplete.
-    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
+    let cut = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 2\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
     let invalid_at: Option[UInt64] = match cut.request().text() {
         Ok(_) => .None,
         Err(error) => .Some(error.offset),
