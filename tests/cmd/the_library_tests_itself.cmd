@@ -2,6 +2,55 @@ The library tests itself.
 
   $ linea test "$LINEA_ROOT"/std > out
   $ cat out
+  ok    cli.custom_usage_overrides_usage_output
+  ok    cli.duplicate_opt_creates_expected_variant
+  ok    cli.expect_end_verifies_all_tokens_consumed
+  ok    cli.find_flag_searches_hierarchically
+  ok    cli.find_option_searches_hierarchically
+  ok    cli.flag_registers_boolean_switches
+  ok    cli.flag_reports_presence_of_flags
+  ok    cli.format_help_returns_subcommand_or_root_help
+  ok    cli.from_slice_creates_cursor_from_slice
+  ok    cli.get_optional_parses_present_and_absent_options
+  ok    cli.get_parses_typed_option_values
+  ok    cli.get_positional_parses_typed_positionals
+  ok    cli.has_next_reports_available_tokens
+  ok    cli.help_command_reports_active_help_target
+  ok    cli.invalid_value_creates_expected_variant
+  ok    cli.is_help_reports_help_request
+  ok    cli.is_supplied_distinguishes_user_options_from_defaults
+  ok    cli.missing_arg_creates_expected_variant
+  ok    cli.missing_value_creates_expected_variant
+  ok    cli.new_creates_cursor_from_args
+  ok    cli.new_creates_system_command
+  ok    cli.new_in_creates_custom_allocator_command
+  ok    cli.next_advances_and_returns_tokens
+  ok    cli.option_registers_valued_options
+  ok    cli.option_retrieves_matched_option_value
+  ok    cli.optional_parsed_converts_present_option_or_none
+  ok    cli.options_all_collects_repeatable_options
+  ok    cli.parse_args_parses_process_arguments
+  ok    cli.parse_cursor_aliases_parse
+  ok    cli.parse_handles_optional_and_variadic_positionals
+  ok    cli.parse_handles_subcommand_variadic_positionals
+  ok    cli.parse_parses_cursor_into_matches
+  ok    cli.peek_inspects_token_without_advancing
+  ok    cli.positional_as_parses_typed_positional
+  ok    cli.positional_registers_positional_arguments
+  ok    cli.positional_retrieves_positional_arguments
+  ok    cli.positionals_all_collects_variadic_positionals
+  ok    cli.require_value_extracts_value_or_fails
+  ok    cli.required_option_extracts_value_or_fails
+  ok    cli.required_parsed_converts_present_option_or_fails
+  ok    cli.required_positional_extracts_value_or_fails
+  ok    cli.subcommand_matches_returns_child_matches
+  ok    cli.subcommand_name_returns_subcommand_identifier
+  ok    cli.subcommand_registers_nested_commands
+  ok    cli.subcommand_returns_matched_subcommand_record
+  ok    cli.unexpected_arg_creates_expected_variant
+  ok    cli.unknown_cmd_creates_expected_variant
+  ok    cli.unknown_opt_creates_expected_variant
+  ok    cli.usage_formats_aligned_help_documentation
   ok    cmp.unit_values_are_equivalent
   ok    collections.a_deleted_collision_bucket_is_reused_without_allocation
   ok    collections.a_drain_settles_linear_values_without_a_release_implementation
@@ -1356,4 +1405,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1353 passed, 0 failed
+  1402 passed, 0 failed

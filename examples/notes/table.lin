@@ -1,0 +1,203 @@
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+// Helper to write text followed by padding spaces up to width.
+fn write_padded[W: io.Writer](inout w: W, text: Str, width: UInt64) -> Result[(), W.Error] where carries(.Err: w) {
+    &w.write_str(text)?
+    if text.length() < width {
+        let remaining = width - text.length()
+        for _ in 0..remaining {
+            &w.write_str(" ")?
+        }
+    }
+    .Ok(())
+}
+
+// Serialize note as JSON object using json.encode to guarantee RFC-compliant string escaping.
+fn write_note_json[W: io.Writer](inout writer: W, note: borrow Note) {
+    &writer.write_str(r#"{"id":"#).unwrap()
+    note.id.fmt(&writer).unwrap()
+    &writer.write_str(r#","title":"#).unwrap()
+    json.encode(&writer, note.title.view()).unwrap()
+    &writer.write_str(r#","status":""#).unwrap()
+    &writer.write_str(note.status.as_str()).unwrap()
+    &writer.write_str(r#"","priority":""#).unwrap()
+    &writer.write_str(note.priority.as_str()).unwrap()
+    &writer.write_str(r#"","tags":["#).unwrap()
+    var first = true
+    for read tag in note.tags {
+        if !first {
+            &writer.write_str(",").unwrap()
+        }
+        first = false
+        json.encode(&writer, tag.view()).unwrap()
+    }
+    &writer.write_str("]}").unwrap()
+}
+
+// TableFormatter renders notes into aligned tabular text or detailed views.
+pub struct TableFormatter {}
+
+impl TableFormatter {
+    // Render single note detailed view.
+    pub fn render_detail(note: borrow Note) -> String {
+        var result = String.new()
+        &result.append("ID:          ").unwrap()
+        note.id.fmt(&result).unwrap()
+        &result.append("\nStatus:      ").unwrap()
+        &result.append(note.status.as_str()).unwrap()
+        &result.append("\nPriority:    ").unwrap()
+        &result.append(note.priority.as_str()).unwrap()
+        &result.append("\nTitle:       ").unwrap()
+        &result.append(note.title.view()).unwrap()
+        &result.append("\nTags:        ").unwrap()
+        defer let tags_str = note.tags_display()
+        &result.append(tags_str.view()).unwrap()
+        &result.append("\n").unwrap()
+        result
+    }
+
+    // Render single note as JSON.
+    pub fn render_detail_json(note: borrow Note) -> String {
+        var output = String.new()
+        write_note_json(&output, note)
+        output
+    }
+
+    // Render list of notes as aligned text table with optional filters.
+    pub fn render_filtered_table(notes: mem.Slice[Note], status_filter: Option[Status], tag_filter: Option[Str]) -> String {
+        var output = String.new()
+
+        // Check if any matching notes exist and compute dynamic column widths
+        var match_count: UInt64 = 0
+        var max_title_len: UInt64 = 16
+        var max_id_digits: UInt64 = 2
+        var i: UInt64 = 0
+        while i < notes.length() {
+            let note = notes.get(i).unwrap()
+            if note.matches_status(status_filter) && note.matches_tag(tag_filter) {
+                match_count += 1
+                if note.title.length() > max_title_len {
+                    max_title_len = note.title.length()
+                }
+                var temp_id = note.id
+                var digits: UInt64 = 1
+                while temp_id >= 10 {
+                    digits += 1
+                    temp_id = temp_id / 10
+                }
+                if digits > max_id_digits {
+                    max_id_digits = digits
+                }
+            }
+            i += 1
+        }
+
+        if match_count == 0 {
+            &output.append("No notes found.\n").unwrap()
+            return output
+        }
+
+        let title_col_width = max_title_len + 2
+        let id_col_width = if max_id_digits + 2 > 4 {
+            max_id_digits + 2
+        } else {
+            4
+        }
+
+        // Header: ID (id_col_width), STATUS (8), PRIORITY (10), TITLE (title_col_width), TAGS
+        write_padded(&output, "ID", id_col_width).unwrap()
+        write_padded(&output, "STATUS", 8).unwrap()
+        write_padded(&output, "PRIORITY", 10).unwrap()
+        write_padded(&output, "TITLE", title_col_width).unwrap()
+        &output.append("TAGS\n").unwrap()
+
+        var j: UInt64 = 0
+        while j < notes.length() {
+            let note = notes.get(j).unwrap()
+            if note.matches_status(status_filter) && note.matches_tag(tag_filter) {
+                var id_buf = String.new()
+                note.id.fmt(&id_buf).unwrap()
+                write_padded(&output, id_buf.view(), id_col_width).unwrap()
+                id_buf.release()
+
+                defer var status_str = String.new()
+                &status_str.append("[").unwrap()
+                &status_str.append(note.status.as_str()).unwrap()
+                &status_str.append("]").unwrap()
+                write_padded(&output, status_str.view(), 8).unwrap()
+
+                write_padded(&output, note.priority.as_str(), 10).unwrap()
+                write_padded(&output, note.title.view(), title_col_width).unwrap()
+
+                defer let tags = note.tags_display()
+                &output.append(tags.view()).unwrap()
+                &output.append("\n").unwrap()
+            }
+            j += 1
+        }
+
+        output
+    }
+
+    // Render list of notes as aligned text table.
+    pub fn render_table(notes: mem.Slice[Note]) -> String {
+        TableFormatter.render_filtered_table(notes, .None, .None)
+    }
+
+    // Render list of notes as JSON array with optional filters.
+    pub fn render_filtered_json(notes: mem.Slice[Note], status_filter: Option[Status], tag_filter: Option[Str]) -> String {
+        var output = String.new()
+        &output.append("[").unwrap()
+        var first = true
+        var i: UInt64 = 0
+        while i < notes.length() {
+            let note = notes.get(i).unwrap()
+            if note.matches_status(status_filter) && note.matches_tag(tag_filter) {
+                if !first {
+                    &output.append(",").unwrap()
+                }
+                first = false
+                write_note_json(&output, note)
+            }
+            i += 1
+        }
+        &output.append("]").unwrap()
+        output
+    }
+
+    test fn json_serialization_escapes_special_characters() {
+        var tags: Vec[String] = Vec.new()
+        &tags.push("tag\"with\"quotes".to_owned().unwrap()).unwrap()
+        let note = Note.new(42, "Title with \"quotes\" and \n newline", .Normal, tags).unwrap()
+        defer note.release()
+        defer let json_str = TableFormatter.render_detail_json(borrow note)
+        let expected = r#"{"id":42,"title":"Title with \"quotes\" and \n newline","status":"open","priority":"normal","tags":["tag\"with\"quotes"]}"#
+        testing.assert_eq(json_str.view(), expected, "JSON output was not properly escaped")?
+        .Ok(())
+    }
+
+    test fn table_formatter_renders_aligned_rows() {
+        var tags1: Vec[String] = Vec.new()
+        &tags1.push("work".to_owned().unwrap()).unwrap()
+        &tags1.push("spec".to_owned().unwrap()).unwrap()
+        let note1 = Note.new(1, "Write design doc", .High, tags1).unwrap()
+
+        var tags2: Vec[String] = Vec.new()
+        &tags2.push("home".to_owned().unwrap()).unwrap()
+        &tags2.push("errands".to_owned().unwrap()).unwrap()
+        let note2 = Note.new(2, "Buy groceries", .Low, tags2).unwrap()
+
+        defer var notes_vec: Vec[Note] = Vec.new()
+        &notes_vec.push(note1).unwrap()
+        &notes_vec.push(note2).unwrap()
+
+        defer let table = TableFormatter.render_table(notes_vec.as_slice())
+
+        let expected = "ID  STATUS  PRIORITY  TITLE             TAGS\n1   [open]  high      Write design doc  work, spec\n2   [open]  low       Buy groceries     home, errands\n"
+        testing.assert_eq(table.view(), expected, "table output differed from expected alignment")?
+        .Ok(())
+    }
+}

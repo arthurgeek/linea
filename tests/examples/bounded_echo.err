@@ -1,2 +1,8 @@
-usage: bounded_echo serve --port PORT [--connections N]
-       bounded_echo send --port PORT MESSAGE...
+usage: bounded_echo <command>
+
+Bounded echo server and client
+
+commands:
+  serve                run the bounded echo server
+  send <message>...    send lines to an echo server
+

@@ -1,0 +1,99 @@
+import std.json
+import std.mem
+import std.testing
+
+// A single note entry.
+@derive(Release, json.Encode, json.Decode[A])
+pub struct Note[A: Allocator = mem.SystemAllocator] {
+    id: UInt64,
+    title: String[A],
+    status: Status,
+    priority: Priority,
+    tags: Vec[String[A], A],
+}
+
+impl Note[mem.SystemAllocator] {
+    // Construct a new note using the system allocator.
+    pub fn new(id: UInt64, title: Str, priority: Priority, sink tags: Vec[String]) -> Result[Self, mem.Oom] {
+        Note.new_in(mem.system(), id, title, priority, tags)
+    }
+
+    test fn note_constructs_and_matches_filters() {
+        var tags: Vec[String] = Vec.new()
+        &tags.push("work".to_owned().unwrap()).unwrap()
+        &tags.push("urgent".to_owned().unwrap()).unwrap()
+
+        defer let note = Note.new(1, "Finish report", .High, tags).unwrap()
+        testing.assert_eq(note.id, UInt64(1), "note id changed")?
+        testing.assert_eq(note.title.view(), "Finish report", "note title changed")?
+        testing.assert_eq(note.status, Status.Open, "initial status is not open")?
+        testing.assert_eq(note.priority, Priority.High, "note priority changed")?
+
+        testing.assert(note.matches_status(.Some(.Open)), "did not match open status")?
+        testing.assert(!note.matches_status(.Some(.Done)), "matched done status")?
+        testing.assert(note.matches_status(.None), "did not match none status filter")?
+
+        testing.assert(note.matches_tag(.Some("work")), "did not match work tag")?
+        testing.assert(note.matches_tag(.Some("urgent")), "did not match urgent tag")?
+        testing.assert(!note.matches_tag(.Some("home")), "matched missing home tag")?
+        testing.assert(note.matches_tag(.None), "did not match none tag filter")?
+
+        defer let display = note.tags_display()
+        testing.assert_eq(display.view(), "work, urgent", "tags display formatted incorrectly")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] Note[A] {
+    // Construct a new note with a specified allocator.
+    pub fn new_in(allocator: A, id: UInt64, title: Str, priority: Priority, sink tags: Vec[String[A], A]) -> Result[Self, mem.Oom] where carries(.Ok: allocator, tags) {
+        let title_owned = title.to_owned_in(allocator) else |oom| {
+            tags.release()
+            return .Err(oom)
+        }
+        .Ok(.{
+            id,
+            title = title_owned,
+            status = .Open,
+            priority,
+            tags,
+        })
+    }
+
+    // Check if the note matches an optional status filter.
+    pub fn matches_status(self: Self, filter: Option[Status]) -> Bool {
+        match read filter {
+            Some(wanted) => self.status == wanted,
+            None => true,
+        }
+    }
+
+    // Check if the note has a matching tag (case-insensitive).
+    pub fn matches_tag(self: Self, filter: Option[Str]) -> Bool {
+        match read filter {
+            Some(wanted) => {
+                for read tag in self.tags {
+                    if tag.view().equals_ascii_folded(wanted) {
+                        return true
+                    }
+                }
+                false
+            },
+            None => true,
+        }
+    }
+
+    // Format tags as a comma-separated string: "tag1, tag2".
+    pub fn tags_display(self: Self) -> String[mem.SystemAllocator] {
+        var result = String.new()
+        var first = true
+        for read tag in self.tags {
+            if !first {
+                &result.append(", ").unwrap()
+            }
+            &result.append(tag.view()).unwrap()
+            first = false
+        }
+        result
+    }
+}

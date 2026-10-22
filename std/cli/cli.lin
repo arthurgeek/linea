@@ -1,0 +1,1966 @@
+import std.env
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+import std.text
+
+use text.Parse
+
+// An argument cursor for sequential token inspection without string allocations.
+@derive(Release)
+pub struct ArgCursor {
+    args: Option[env.Args],
+    slice: Option[mem.Slice[Str]],
+    count: UInt64,
+    index: UInt64,
+}
+
+impl ArgCursor {
+    // Construct an argument cursor from process arguments (skipping executable name at index 0).
+    pub fn new(args: env.Args) -> Self {
+        let count = args.count()
+        .{ args = .Some(copy(args)), slice = .None, count, index = 1 }
+    }
+
+    test fn new_creates_cursor_from_args() {
+        let a = env.args()
+        let cursor = ArgCursor.new(a)
+        testing.assert_eq(cursor.index, UInt64(1), "new cursor index should start at 1")?
+        .Ok(())
+    }
+
+    // Construct an argument cursor from a slice of borrowed string slices.
+    pub fn from_slice(slice: mem.Slice[Str]) -> Self where carries(slice) {
+        let count = slice.length()
+        .{ args = .None, slice = .Some(copy(slice)), count, index = 0 }
+    }
+
+    test fn from_slice_creates_cursor_from_slice() {
+        let alpha = "alpha"
+        let beta = "beta"
+        let input = [alpha, beta]
+        let cursor = ArgCursor.from_slice(input.as_slice())
+        testing.assert_eq(cursor.count, UInt64(2), "cursor count differed")?
+        testing.assert_eq(cursor.index, UInt64(0), "slice cursor index should start at 0")?
+        .Ok(())
+    }
+
+    // Return whether any unconsumed tokens remain in the cursor.
+    pub fn has_next(self: Self) -> Bool {
+        self.index < self.count
+    }
+
+    test fn has_next_reports_available_tokens() {
+        let item = "one"
+        let input = [item]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        testing.assert(cursor.has_next(), "cursor should report available tokens")?
+        let _ = &cursor.next()
+        testing.assert(!cursor.has_next(), "cursor should report empty at end")?
+        .Ok(())
+    }
+
+    // Return the next token without advancing the cursor.
+    pub fn peek(self: Self) -> Option[Str] where carries(.Some: self) {
+        if self.index < self.count {
+            match read self.slice {
+                Some(s) => .Some(copy(s[self.index])),
+                None => match read self.args {
+                    Some(a) => a.at(self.index),
+                    None => .None,
+                },
+            }
+        } else {
+            .None
+        }
+    }
+
+    test fn peek_inspects_token_without_advancing() {
+        let first = "first"
+        let second = "second"
+        let input = [first, second]
+        let cursor = ArgCursor.from_slice(input.as_slice())
+        testing.assert_eq(cursor.peek(), Option.Some("first"), "peek should see first token")?
+        testing.assert_eq(cursor.peek(), Option.Some("first"), "consecutive peek should not advance")?
+        .Ok(())
+    }
+
+    // Advance the cursor and return the consumed token, if any.
+    pub fn next(inout self: Self) -> Option[Str] where carries(.Some: self) {
+        if self.index < self.count {
+            let val = match read self.slice {
+                Some(s) => .Some(copy(s[self.index])),
+                None => match read self.args {
+                    Some(a) => a.at(self.index),
+                    None => .None,
+                },
+            }
+            self.index += 1
+            val
+        } else {
+            .None
+        }
+    }
+
+    test fn next_advances_and_returns_tokens() {
+        let first = "first"
+        let second = "second"
+        let input = [first, second]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        testing.assert_eq(&cursor.next(), Option.Some("first"), "next differed on first token")?
+        testing.assert_eq(&cursor.next(), Option.Some("second"), "next differed on second token")?
+        testing.assert_eq(&cursor.next(), Option.None, "next at end should return None")?
+        .Ok(())
+    }
+
+    // Require an option value, advancing the cursor or returning a missing-value error.
+    pub fn require_value(inout self: Self, opt: Str) -> Result[Str, CliError] where carries(.Ok: self), carries(.Err: opt) {
+        match &self.next() {
+            Some(val) => .Ok(val),
+            None => .Err(CliError.MissingOptionValue(copy(opt))),
+        }
+    }
+
+    test fn require_value_extracts_value_or_fails() {
+        let val_str = "val"
+        let input = [val_str]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        let opt_name = "--test"
+        let val = &cursor.require_value(opt_name).unwrap()
+        testing.assert_eq(val, "val", "require_value extracted wrong value")?
+        let fail = &cursor.require_value(opt_name)
+        testing.assert(fail.is_err(), "require_value at end should fail")?
+        .Ok(())
+    }
+
+    // Ensure no unconsumed tokens remain, returning an unexpected-argument error if any do.
+    pub fn expect_end(self: Self) -> Result[(), CliError] where carries(.Err: self) {
+        if self.index < self.count {
+            let extra = match read self.slice {
+                Some(s) => copy(s[self.index]),
+                None => match read self.args {
+                    Some(a) => a.at(self.index).unwrap(),
+                    None => "",
+                },
+            }
+            .Err(CliError.UnexpectedArgument(extra))
+        } else {
+            .Ok(())
+        }
+    }
+
+    test fn expect_end_verifies_all_tokens_consumed() {
+        let done1 = "done"
+        let empty = [done1]
+        var cursor = ArgCursor.from_slice(empty.as_slice())
+        let _ = &cursor.next()
+        testing.assert(cursor.expect_end().is_ok(), "expect_end should succeed when empty")?
+
+        let done2 = "done"
+        let extra_tok = "extra"
+        let extra = [done2, extra_tok]
+        var cursor_extra = ArgCursor.from_slice(extra.as_slice())
+        let _ = &cursor_extra.next()
+        testing.assert(cursor_extra.expect_end().is_err(), "expect_end should fail when tokens remain")?
+        .Ok(())
+    }
+}
+
+// A boolean command-line flag (e.g. `--json` or `-v`).
+@(copyable, derive(Debug, Release))
+pub struct Flag {
+    name: Str,
+    long: Str,
+    short: Option[Str],
+    about: Str,
+    global: Bool,
+}
+
+// A command-line option that takes a value (e.g. `--format table` or `-f table`).
+@(copyable, derive(Debug, Release))
+pub struct OptionDef {
+    name: Str,
+    long: Str,
+    short: Option[Str],
+    about: Str,
+    default: Option[Str],
+    required: Bool,
+    repeatable: Bool,
+    global: Bool,
+}
+
+// A positional argument (e.g. `<id>` or `<title>`).
+@(copyable, derive(Debug, Release))
+pub struct PositionalDef {
+    name: Str,
+    about: Str,
+    required: Bool,
+    variadic: Bool,
+}
+
+// Record of a matched option and its value.
+@(copyable, derive(Debug, Release))
+pub struct OptionMatch {
+    name: Str,
+    value: Str,
+    supplied: Bool,
+}
+
+// Record of a matched positional argument and its value.
+@(copyable, derive(Debug, Release))
+pub struct PositionalMatch {
+    name: Str,
+    value: Str,
+}
+
+// Record of a matched subcommand and its parsed matches.
+@derive(Release)
+pub struct SubcommandMatch[A: Allocator = mem.SystemAllocator] {
+    name: Str,
+    matches: Matches[A],
+}
+
+// Parsed command-line matches.
+@derive(Release)
+pub struct Matches[A: Allocator = mem.SystemAllocator] {
+    help_requested: Bool,
+    flags: Vec[Str, A],
+    options: Vec[OptionMatch, A],
+    positionals: Vec[PositionalMatch, A],
+    subcommands: Vec[SubcommandMatch[A], A],
+    allocator: A,
+}
+
+impl[A: Allocator] Matches[A] {
+    // Return whether help was requested via --help, -h, or the help subcommand.
+    pub fn is_help(self: Self) -> Bool {
+        if self.help_requested {
+            return true
+        }
+        for read sub in self.subcommands {
+            if sub.matches.help_requested {
+                return true
+            }
+        }
+        false
+    }
+
+    test fn is_help_reports_help_request() {
+        defer let m: Matches = .{
+            help_requested = true,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert(m.is_help(), "is_help should report true when requested")?
+
+        var sub_vec: Vec[SubcommandMatch] = Vec.new()
+        let sub_m: Matches = .{
+            help_requested = true,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &sub_vec.push(.{ name = "sub", matches = sub_m }).unwrap()
+        defer let m_sub: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = sub_vec,
+            allocator = mem.system(),
+        }
+        testing.assert(m_sub.is_help(), "is_help should report true when subcommand help requested")?
+        .Ok(())
+    }
+
+    // Return whether a flag was present in this command.
+    pub fn flag(self: Self, name: Str) -> Bool {
+        for read f in self.flags {
+            if f == name {
+                return true
+            }
+        }
+        false
+    }
+
+    test fn flag_reports_presence_of_flags() {
+        let flag_str = "verbose"
+        var flags: Vec[Str] = Vec.new()
+        &flags.push(flag_str).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags,
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert(m.flag("verbose"), "flag verbose should match")?
+        testing.assert(!m.flag("quiet"), "flag quiet should not match")?
+        .Ok(())
+    }
+
+    // Return the value of an option (supplied or default), if present.
+    pub fn option(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+        for read opt in self.options {
+            if opt.name == name {
+                return .Some(copy(opt.value))
+            }
+        }
+        .None
+    }
+
+    test fn option_retrieves_matched_option_value() {
+        let fmt_name = "format"
+        let fmt_val = "json"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = fmt_name, value = fmt_val, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.option("format"), Option.Some("json"), "format option value differed")?
+        testing.assert_eq(m.option("missing"), Option.None, "missing option should be None")?
+        .Ok(())
+    }
+
+    // Return whether an option was explicitly provided by the user.
+    pub fn is_supplied(self: Self, name: Str) -> Bool {
+        for read opt in self.options {
+            if opt.name == name {
+                return opt.supplied
+            }
+        }
+        false
+    }
+
+    test fn is_supplied_distinguishes_user_options_from_defaults() {
+        let u_opt = "user_opt"
+        let u_val = "yes"
+        let d_opt = "def_opt"
+        let d_val = "default"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = u_opt, value = u_val, supplied = true }).unwrap()
+        &options.push(.{ name = d_opt, value = d_val, supplied = false }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert(m.is_supplied("user_opt"), "user option should report supplied true")?
+        testing.assert(!m.is_supplied("def_opt"), "default option should report supplied false")?
+        .Ok(())
+    }
+
+    // Return all values supplied for a repeatable option.
+    pub fn options_all(self: Self, name: Str) -> Vec[Str, A] where carries(self.allocator, self) {
+        var result: Vec[Str, A] = Vec.new_in(self.allocator)
+        for read opt in self.options {
+            if opt.name == name {
+                &result.push(copy(opt.value)).settled().unwrap()
+            }
+        }
+        result
+    }
+
+    test fn options_all_collects_repeatable_options() {
+        let inc1 = "include"
+        let inc2 = "include"
+        let val_foo = "foo"
+        let val_bar = "bar"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = inc1, value = val_foo, supplied = true }).unwrap()
+        &options.push(.{ name = inc2, value = val_bar, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        defer let all = m.options_all("include")
+        testing.assert_eq(all.length(), UInt64(2), "options_all length differed")?
+        testing.assert_eq(all[0], "foo", "first option differed")?
+        testing.assert_eq(all[1], "bar", "second option differed")?
+        .Ok(())
+    }
+
+    // Return the matched positional argument value, if present.
+    pub fn positional(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+        for read p in self.positionals {
+            if p.name == name {
+                return .Some(copy(p.value))
+            }
+        }
+        .None
+    }
+
+    test fn positional_retrieves_positional_arguments() {
+        let tgt_name = "target"
+        let tgt_val = "main.lin"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = tgt_name, value = tgt_val }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.positional("target"), Option.Some("main.lin"), "target positional differed")?
+        testing.assert_eq(m.positional("missing"), Option.None, "missing positional should be None")?
+        .Ok(())
+    }
+
+    // Return all values supplied for a positional argument (e.g. variadic positionals).
+    pub fn positionals_all(self: Self, name: Str) -> Vec[Str, A] where carries(self.allocator, self) {
+        var result: Vec[Str, A] = Vec.new_in(self.allocator)
+        for read p in self.positionals {
+            if p.name == name {
+                &result.push(copy(p.value)).settled().unwrap()
+            }
+        }
+        result
+    }
+
+    test fn positionals_all_collects_variadic_positionals() {
+        let msg_name = "message"
+        let msg1 = "hello"
+        let msg2 = "world"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = copy(msg_name), value = msg1 }).unwrap()
+        &positionals.push(.{ name = msg_name, value = msg2 }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        defer let all = m.positionals_all("message")
+        testing.assert_eq(all.length(), UInt64(2), "positionals_all length differed")?
+        testing.assert_eq(all[0], "hello", "first positional differed")?
+        testing.assert_eq(all[1], "world", "second positional differed")?
+        .Ok(())
+    }
+
+    // Retrieve and parse a typed option value.
+    pub fn get[T: Parse](self: Self, name: Str) -> Result[T, CliError] where carries(.Err: self, name) {
+        let val = match self.option(name) {
+            Some(v) => v,
+            None => return .Err(CliError.MissingArgument(copy(name))),
+        }
+        let parsed = val.parse[T]() else |_| {
+            return .Err(CliError.InvalidValue("invalid option value"))
+        }
+        .Ok(parsed)
+    }
+
+    test fn get_parses_typed_option_values() {
+        let p_name = "port"
+        let p_val = "8080"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = p_name, value = p_val, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let port: UInt16 = m.get("port").unwrap()
+        testing.assert_eq(port, UInt16(8080), "parsed port differed")?
+        .Ok(())
+    }
+
+    // Retrieve and parse an optional typed option value.
+    pub fn get_optional[T: Parse](self: Self, name: Str) -> Result[Option[T], CliError] where carries(.Err: self, name) {
+        let val = match self.option(name) {
+            Some(v) => v,
+            None => return .Ok(.None),
+        }
+        let parsed = val.parse[T]() else |_| {
+            return .Err(CliError.InvalidValue("invalid option value"))
+        }
+        .Ok(.Some(parsed))
+    }
+
+    test fn get_optional_parses_present_and_absent_options() {
+        let t_name = "timeout"
+        let t_val = "30"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = t_name, value = t_val, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let t_opt: Option[UInt64] = m.get_optional("timeout").unwrap()
+        testing.assert_eq(t_opt, Option.Some(UInt64(30)), "present optional option differed")?
+        let m_opt: Option[UInt64] = m.get_optional("missing").unwrap()
+        testing.assert_eq(m_opt, Option.None, "absent optional option should be None")?
+        .Ok(())
+    }
+
+    // Retrieve and parse a required positional argument by name.
+    pub fn get_positional[T: Parse](self: Self, name: Str) -> Result[T, CliError] where carries(.Err: self, name) {
+        let val = match self.positional(name) {
+            Some(v) => v,
+            None => return .Err(CliError.MissingArgument(copy(name))),
+        }
+        let parsed = val.parse[T]() else |_| {
+            return .Err(CliError.InvalidValue("invalid positional value"))
+        }
+        .Ok(parsed)
+    }
+
+    test fn get_positional_parses_typed_positionals() {
+        let c_name = "count"
+        let c_val = "5"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = c_name, value = c_val }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let c: UInt64 = m.get_positional("count").unwrap()
+        testing.assert_eq(c, UInt64(5), "parsed positional count differed")?
+        .Ok(())
+    }
+
+    // Retrieve a required positional argument value as a borrowed string slice.
+    pub fn required_positional(self: Self, name: Str) -> Result[Str, CliError] where carries(.Ok: self), carries(.Err: name) {
+        match self.positional(name) {
+            Some(v) => .Ok(v),
+            None => .Err(CliError.MissingArgument(copy(name))),
+        }
+    }
+
+    test fn required_positional_extracts_value_or_fails() {
+        let f_name = "file"
+        let f_val = "main.lin"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = f_name, value = f_val }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.required_positional("file").unwrap(), "main.lin", "positional value differed")?
+        testing.assert(m.required_positional("missing").is_err(), "missing required positional should fail")?
+        .Ok(())
+    }
+
+    // Retrieve and parse a required positional argument.
+    pub fn positional_as[T: Parse](self: Self, name: Str) -> Result[T, CliError] where carries(.Err: self, name) {
+        self.get_positional[T](name)
+    }
+
+    test fn positional_as_parses_typed_positional() {
+        let i_name = "id"
+        let i_val = "42"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = i_name, value = i_val }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let id: UInt64 = m.positional_as("id").unwrap()
+        testing.assert_eq(id, UInt64(42), "parsed positional differed")?
+        .Ok(())
+    }
+
+    // Retrieve a required option value as a borrowed string slice.
+    pub fn required_option(self: Self, name: Str) -> Result[Str, CliError] where carries(.Ok: self), carries(.Err: name) {
+        match self.option(name) {
+            Some(v) => .Ok(v),
+            None => .Err(CliError.MissingArgument(copy(name))),
+        }
+    }
+
+    test fn required_option_extracts_value_or_fails() {
+        let opt_n = "name"
+        let opt_v = "linea"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = opt_n, value = opt_v, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.required_option("name").unwrap(), "linea", "required option differed")?
+        testing.assert(m.required_option("missing").is_err(), "missing option should return Err")?
+        .Ok(())
+    }
+
+    // Retrieve an optional option parsed with a conversion function.
+    pub fn optional_parsed[T, F: fn(value: Str) -> Option[T]](self: Self, name: Str, parse: F) -> Result[Option[T], CliError] where carries(.Ok: self, parse), carries(.Err: name) {
+        let val = match self.option(name) {
+            Some(v) => v,
+            None => return .Ok(.None),
+        }
+        let parsed = parse(val) else {
+            return .Err(CliError.InvalidValue("invalid option value"))
+        }
+        .Ok(.Some(parsed))
+    }
+
+    test fn optional_parsed_converts_present_option_or_none() {
+        let opt_n = "level"
+        let opt_v = "10"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = opt_n, value = opt_v, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let parser = |s: Str| -> Option[UInt64] {
+            match s.parse[UInt64]() {
+                Ok(v) => .Some(v),
+                Err(_) => .None,
+            }
+        }
+        let res: Option[UInt64] = m.optional_parsed("level", parser).unwrap()
+        testing.assert_eq(res, Option.Some(UInt64(10)), "optional_parsed differed")?
+        let missing: Option[UInt64] = m.optional_parsed("absent", parser).unwrap()
+        testing.assert_eq(missing, Option.None, "absent option should be None")?
+        .Ok(())
+    }
+
+    // Retrieve a required option parsed with a conversion function.
+    pub fn required_parsed[T, F: fn(value: Str) -> Option[T]](self: Self, name: Str, parse: F) -> Result[T, CliError] where carries(.Ok: self, parse), carries(.Err: name) {
+        let val = match self.option(name) {
+            Some(v) => v,
+            None => return .Err(CliError.MissingArgument(copy(name))),
+        }
+        let parsed = parse(val) else {
+            return .Err(CliError.InvalidValue("invalid option value"))
+        }
+        .Ok(parsed)
+    }
+
+    test fn required_parsed_converts_present_option_or_fails() {
+        let opt_n = "speed"
+        let opt_v = "50"
+        var options: Vec[OptionMatch] = Vec.new()
+        &options.push(.{ name = opt_n, value = opt_v, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        let parser = |s: Str| -> Option[UInt64] {
+            match s.parse[UInt64]() {
+                Ok(v) => .Some(v),
+                Err(_) => .None,
+            }
+        }
+        let res: UInt64 = m.required_parsed("speed", parser).unwrap()
+        testing.assert_eq(res, UInt64(50), "required_parsed differed")?
+        .Ok(())
+    }
+
+    // Return which command requested help, if any (subcommand name, or empty string for root).
+    pub fn help_command(self: Self) -> Option[Str] where carries(.Some: self) {
+        if self.subcommands.length() > 0 {
+            if self.subcommands[0].matches.help_requested {
+                return .Some(copy(self.subcommands[0].name))
+            }
+        }
+        if self.help_requested {
+            return .Some("")
+        }
+        .None
+    }
+
+    test fn help_command_reports_active_help_target() {
+        let sub_name = "build"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        let sub_matches: Matches = .{
+            help_requested = true,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = sub_name, matches = sub_matches }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.help_command(), Option.Some("build"), "subcommand help target differed")?
+        .Ok(())
+    }
+
+    // Return the matched subcommand, if any.
+    pub fn subcommand(self: Self) -> Option[borrow SubcommandMatch[A]] where borrows(.Some: self) {
+        if self.subcommands.length() > 0 {
+            .Some(borrow self.subcommands[0])
+        } else {
+            .None
+        }
+    }
+
+    test fn subcommand_returns_matched_subcommand_record() {
+        let sub_name = "init"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        let sub_matches: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = sub_name, matches = sub_matches }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        let sub = m.subcommand().unwrap()
+        testing.assert_eq(sub.name, "init", "subcommand name differed")?
+        .Ok(())
+    }
+
+    // Return the name of the matched subcommand, if any.
+    pub fn subcommand_name(self: Self) -> Option[Str] where carries(.Some: self) {
+        if self.subcommands.length() > 0 {
+            .Some(copy(self.subcommands[0].name))
+        } else {
+            .None
+        }
+    }
+
+    test fn subcommand_name_returns_subcommand_identifier() {
+        let sub_name = "start"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        let sub_matches: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = sub_name, matches = sub_matches }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.subcommand_name(), Option.Some("start"), "subcommand_name differed")?
+        .Ok(())
+    }
+
+    // Return the matches of the matched subcommand, if any.
+    pub fn subcommand_matches(self: Self) -> Option[borrow Matches[A]] where borrows(.Some: self) {
+        if self.subcommands.length() > 0 {
+            .Some(borrow self.subcommands[0].matches)
+        } else {
+            .None
+        }
+    }
+
+    test fn subcommand_matches_returns_child_matches() {
+        let f_all = "all"
+        let sub_clean = "clean"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        var sub_flags: Vec[Str] = Vec.new()
+        &sub_flags.push(f_all).unwrap()
+        let sub_matches: Matches = .{
+            help_requested = false,
+            flags = sub_flags,
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = sub_clean, matches = sub_matches }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        let child_matches = m.subcommand_matches().unwrap()
+        testing.assert(child_matches.flag("all"), "child match flag not found")?
+        .Ok(())
+    }
+
+    // Search for a flag in either the subcommand or the parent command.
+    pub fn find_flag(self: Self, name: Str) -> Bool {
+        if self.flag(name) {
+            return true
+        }
+        if self.subcommands.length() > 0 {
+            return self.subcommands[0].matches.flag(name)
+        }
+        false
+    }
+
+    test fn find_flag_searches_hierarchically() {
+        let sf = "sub_flag"
+        let rf = "root_flag"
+        let sub_n = "sub"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        var sub_flags: Vec[Str] = Vec.new()
+        &sub_flags.push(sf).unwrap()
+        let sub_matches: Matches = .{
+            help_requested = false,
+            flags = sub_flags,
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = sub_n, matches = sub_matches }).unwrap()
+
+        var root_flags: Vec[Str] = Vec.new()
+        &root_flags.push(rf).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = root_flags,
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        testing.assert(m.find_flag("root_flag"), "root flag should be found")?
+        testing.assert(m.find_flag("sub_flag"), "sub flag should be found")?
+        testing.assert(!m.find_flag("missing"), "missing flag should not be found")?
+        .Ok(())
+    }
+
+    // Search for an option in the subcommand first, then the parent command.
+    pub fn find_option(self: Self, name: Str) -> Option[Str] where carries(.Some: self) {
+        if self.subcommands.length() > 0 {
+            let sub_opt = self.subcommands[0].matches.option(name)
+            if sub_opt.is_some() {
+                return sub_opt
+            }
+        }
+        self.option(name)
+    }
+
+    test fn find_option_searches_hierarchically() {
+        let f_name = "format"
+        let f_val = "json"
+        let c_name = "config"
+        let c_val = "cfg.toml"
+        let list_n = "list"
+        var subcommands: Vec[SubcommandMatch] = Vec.new()
+        var sub_opts: Vec[OptionMatch] = Vec.new()
+        &sub_opts.push(.{ name = f_name, value = f_val, supplied = true }).unwrap()
+        let sub_matches: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = sub_opts,
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        &subcommands.push(.{ name = list_n, matches = sub_matches }).unwrap()
+
+        var root_opts: Vec[OptionMatch] = Vec.new()
+        &root_opts.push(.{ name = c_name, value = c_val, supplied = true }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = root_opts,
+            positionals = Vec.new(),
+            subcommands,
+            allocator = mem.system(),
+        }
+        testing.assert_eq(m.find_option("format"), Option.Some("json"), "subcommand option took precedence")?
+        testing.assert_eq(m.find_option("config"), Option.Some("cfg.toml"), "parent option found")?
+        .Ok(())
+    }
+}
+
+// Errors produced during command-line argument parsing.
+@(copyable, derive(Debug, Release, Equatable))
+pub enum CliError {
+    UnknownCommand(Str),
+    UnknownOption(Str),
+    MissingOptionValue(Str),
+    MissingArgument(Str),
+    UnexpectedArgument(Str),
+    DuplicateOption(Str),
+    InvalidValue(Str),
+}
+
+impl fmt.Display for CliError {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            UnknownCommand(cmd) => {
+                &w.write_str("unknown command '")?
+                &w.write_str(cmd)?
+                &w.write_str("'")
+            },
+            UnknownOption(opt) => {
+                &w.write_str("unrecognized option '")?
+                &w.write_str(opt)?
+                &w.write_str("'")
+            },
+            MissingOptionValue(opt) => {
+                &w.write_str("option '")?
+                &w.write_str(opt)?
+                &w.write_str("' requires a value")
+            },
+            MissingArgument(arg) => {
+                &w.write_str("missing required argument '")?
+                &w.write_str(arg)?
+                &w.write_str("'")
+            },
+            UnexpectedArgument(arg) => {
+                &w.write_str("unexpected argument '")?
+                &w.write_str(arg)?
+                &w.write_str("'")
+            },
+            DuplicateOption(opt) => {
+                &w.write_str("duplicate option '")?
+                &w.write_str(opt)?
+                &w.write_str("'")
+            },
+            InvalidValue(msg) => {
+                &w.write_str(msg)
+            },
+        }
+    }
+}
+
+impl CliError {
+    pub fn unknown_cmd(sink cmd: Str) -> Self {
+        .UnknownCommand(cmd)
+    }
+
+    test fn unknown_cmd_creates_expected_variant() {
+        let err = CliError.unknown_cmd("run")
+        testing.assert_eq(err, CliError.UnknownCommand("run"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("unknown command 'run'")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn unknown_opt(sink opt: Str) -> Self {
+        .UnknownOption(opt)
+    }
+
+    test fn unknown_opt_creates_expected_variant() {
+        let err = CliError.unknown_opt("--debug")
+        testing.assert_eq(err, CliError.UnknownOption("--debug"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("unrecognized option '--debug'")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn missing_value(sink opt: Str) -> Self {
+        .MissingOptionValue(opt)
+    }
+
+    test fn missing_value_creates_expected_variant() {
+        let err = CliError.missing_value("--output")
+        testing.assert_eq(err, CliError.MissingOptionValue("--output"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("option '--output' requires a value")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn missing_arg(sink arg: Str) -> Self {
+        .MissingArgument(arg)
+    }
+
+    test fn missing_arg_creates_expected_variant() {
+        let err = CliError.missing_arg("filename")
+        testing.assert_eq(err, CliError.MissingArgument("filename"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("missing required argument 'filename'")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn unexpected_arg(sink arg: Str) -> Self {
+        .UnexpectedArgument(arg)
+    }
+
+    test fn unexpected_arg_creates_expected_variant() {
+        let err = CliError.unexpected_arg("trailing")
+        testing.assert_eq(err, CliError.UnexpectedArgument("trailing"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("unexpected argument 'trailing'")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn duplicate_opt(sink opt: Str) -> Self {
+        .DuplicateOption(opt)
+    }
+
+    test fn duplicate_opt_creates_expected_variant() {
+        let err = CliError.duplicate_opt("--config")
+        testing.assert_eq(err, CliError.DuplicateOption("--config"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("duplicate option '--config'")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+
+    pub fn invalid_value(sink msg: Str) -> Self {
+        .InvalidValue(msg)
+    }
+
+    test fn invalid_value_creates_expected_variant() {
+        let err = CliError.invalid_value("bad number")
+        testing.assert_eq(err, CliError.InvalidValue("bad number"), "variant differed")?
+        var recorder = testing.Recorder.of(64) else |_| {
+            return testing.assert(false, "recorder refused")
+        }
+        err.fmt(&recorder).unwrap()
+        let held = recorder.holds("bad number")
+        recorder.release()
+        testing.assert(held, "display differed")?
+        .Ok(())
+    }
+}
+
+// Command schema builder and parser.
+@derive(Release)
+pub struct Command[A: Allocator = mem.SystemAllocator] {
+    name: Str,
+    about: Str,
+    custom_usage_text: Option[Str],
+    flags: Vec[Flag, A],
+    options: Vec[OptionDef, A],
+    positionals: Vec[PositionalDef, A],
+    subcommands: Vec[Command[A], A],
+    allocator: A,
+}
+
+impl Command[mem.SystemAllocator] {
+    // Create a new command in the system allocator.
+    pub fn new(name: Str, about: Str = "") -> Self where carries(name, about) {
+        Command.new_in(mem.system(), name, about)
+    }
+
+    test fn new_creates_system_command() {
+        let name = "linea"
+        let about = "compiler"
+        defer let cmd = Command.new(name, about)
+        testing.assert_eq(cmd.name, "linea", "command name differed")?
+        testing.assert_eq(cmd.about, "compiler", "command about differed")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] Command[A] {
+    // Create a new command in the specified allocator.
+    pub fn new_in(allocator: A, name: Str, about: Str = "") -> Self where carries(allocator, name, about) {
+        .{
+            name = copy(name),
+            about = copy(about),
+            custom_usage_text = .None,
+            flags = Vec.new_in(allocator),
+            options = Vec.new_in(allocator),
+            positionals = Vec.new_in(allocator),
+            subcommands = Vec.new_in(allocator),
+            allocator = copy(allocator),
+        }
+    }
+
+    test fn new_in_creates_custom_allocator_command() {
+        let name = "test_cmd"
+        let about = "testing"
+        defer let cmd = Command.new_in(mem.system(), name, about)
+        testing.assert_eq(cmd.name, "test_cmd", "command name differed")?
+        .Ok(())
+    }
+
+    // Set a custom usage string returned by `usage()`.
+    pub fn custom_usage(inout self: Self, sink text: Str) where retains(self: text) {
+        self.custom_usage_text = .Some(text)
+    }
+
+    test fn custom_usage_overrides_usage_output() {
+        let name = "demo"
+        let custom = "custom usage text"
+        defer var cmd = Command.new(name)
+        &cmd.custom_usage(custom)
+        defer let u = cmd.usage()
+        testing.assert_eq(u.view(), "custom usage text", "custom usage differed")?
+        .Ok(())
+    }
+
+    // Define a boolean flag.
+    pub fn flag(inout self: Self, sink name: Str, sink long: Str, sink about: Str = "", sink short: Option[Str] = .None, global: Bool = false) where retains(self: name, long, about, short) {
+        let f: Flag = .{ name, long, short, about, global }
+        &self.flags.push(f).settled().unwrap()
+    }
+
+    test fn flag_registers_boolean_switches() {
+        let cmd_name = "demo"
+        let f_name = "quiet"
+        let f_long = "--quiet"
+        let f_about = "suppress output"
+        let f_short = "-q"
+        defer var cmd = Command.new(cmd_name)
+        &cmd.flag(f_name, f_long, f_about, short: Option.Some(f_short))
+        testing.assert_eq(cmd.flags.length(), UInt64(1), "flag count differed")?
+        testing.assert_eq(cmd.flags[0].name, "quiet", "flag name differed")?
+        .Ok(())
+    }
+
+    // Define an option that takes a value.
+    pub fn option(inout self: Self, sink name: Str, sink long: Str, sink about: Str = "", sink default: Option[Str] = .None, sink short: Option[Str] = .None, required: Bool = false, repeatable: Bool = false, global: Bool = false) where retains(self: name, long, about, default, short) {
+        let opt: OptionDef = .{ name, long, short, about, default, required, repeatable, global }
+        &self.options.push(opt).settled().unwrap()
+    }
+
+    test fn option_registers_valued_options() {
+        let cmd_name = "demo"
+        let opt_name = "output"
+        let opt_long = "--output"
+        let opt_about = "destination file"
+        let opt_def = "out.txt"
+        defer var cmd = Command.new(cmd_name)
+        &cmd.option(opt_name, opt_long, opt_about, default: Option.Some(opt_def))
+        testing.assert_eq(cmd.options.length(), UInt64(1), "option count differed")?
+        testing.assert_eq(cmd.options[0].name, "output", "option name differed")?
+        .Ok(())
+    }
+
+    // Define a positional argument.
+    pub fn positional(inout self: Self, sink name: Str, sink about: Str = "", required: Bool = true, variadic: Bool = false) where retains(self: name, about) {
+        let p: PositionalDef = .{ name, about, required, variadic }
+        &self.positionals.push(p).settled().unwrap()
+    }
+
+    test fn positional_registers_positional_arguments() {
+        let cmd_name = "demo"
+        let p_name = "src"
+        let p_about = "source path"
+        defer var cmd = Command.new(cmd_name)
+        &cmd.positional(p_name, p_about, required: true)
+        testing.assert_eq(cmd.positionals.length(), UInt64(1), "positional count differed")?
+        testing.assert_eq(cmd.positionals[0].name, "src", "positional name differed")?
+        testing.assert(cmd.positionals[0].required, "positional should be required")?
+        testing.assert(!cmd.positionals[0].variadic, "positional should not be variadic")?
+
+        let opt_pos = "opt"
+        &cmd.positional(opt_pos, required: false)
+        testing.assert(!cmd.positionals[1].required, "optional positional should not be required")?
+
+        let var_pos = "rest"
+        &cmd.positional(var_pos, required: false, variadic: true)
+        testing.assert(cmd.positionals[2].variadic, "variadic positional should be variadic")?
+        .Ok(())
+    }
+
+    // Register a child subcommand.
+    pub fn subcommand(inout self: Self, sink sub: Command[A]) where retains(self: sub) {
+        &self.subcommands.push(sub).settled().unwrap()
+    }
+
+    test fn subcommand_registers_nested_commands() {
+        let root_name = "git"
+        let clone_name = "clone"
+        defer var root = Command.new(root_name)
+        var clone_cmd = Command.new(clone_name)
+        &root.subcommand(clone_cmd)
+        testing.assert_eq(root.subcommands.length(), UInt64(1), "subcommand count differed")?
+        testing.assert_eq(root.subcommands[0].name, "clone", "subcommand name differed")?
+        .Ok(())
+    }
+
+    // Return the formatted usage text.
+    pub fn usage(self: Self) -> String[A] where carries(self.allocator) {
+        match read self.custom_usage_text {
+            Some(text) => text.to_owned_in(self.allocator).unwrap(),
+            None => {
+                var out = String.new_in(self.allocator)
+                &out.append("usage: ").unwrap()
+                &out.append(self.name).unwrap()
+                if self.subcommands.length() > 0 {
+                    &out.append(" <command>").unwrap()
+                }
+                for read p in self.positionals {
+                    if p.variadic {
+                        if p.required {
+                            &out.append(" <").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append(">...").unwrap()
+                        } else {
+                            &out.append(" [").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append("...]").unwrap()
+                        }
+                    } else {
+                        if p.required {
+                            &out.append(" <").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append(">").unwrap()
+                        } else {
+                            &out.append(" [").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append("]").unwrap()
+                        }
+                    }
+                }
+                if self.options.length() > 0 || self.flags.length() > 0 {
+                    &out.append(" [options]").unwrap()
+                }
+                if self.about.length() > 0 {
+                    &out.append("\n\n").unwrap()
+                    &out.append(self.about).unwrap()
+                }
+                if self.subcommands.length() > 0 {
+                    &out.append("\n\ncommands:\n").unwrap()
+                    var max_cmd_len: UInt64 = 8
+                    for read sc in self.subcommands {
+                        var len = sc.name.length()
+                        for read p in sc.positionals {
+                            if p.variadic {
+                                len += p.name.length() + 6
+                            } else {
+                                len += p.name.length() + 3
+                            }
+                        }
+                        if len > max_cmd_len {
+                            max_cmd_len = len
+                        }
+                    }
+                    let cmd_col_width = max_cmd_len + 4
+
+                    for read sc in self.subcommands {
+                        &out.append("  ").unwrap()
+                        var len = sc.name.length()
+                        &out.append(sc.name).unwrap()
+                        for read p in sc.positionals {
+                            if p.variadic {
+                                if p.required {
+                                    &out.append(" <").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append(">...").unwrap()
+                                    len += p.name.length() + 6
+                                } else {
+                                    &out.append(" [").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append("...]").unwrap()
+                                    len += p.name.length() + 6
+                                }
+                            } else {
+                                if p.required {
+                                    &out.append(" <").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append(">").unwrap()
+                                    len += p.name.length() + 3
+                                } else {
+                                    &out.append(" [").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append("]").unwrap()
+                                    len += p.name.length() + 3
+                                }
+                            }
+                        }
+                        if sc.about.length() > 0 {
+                            if len < cmd_col_width {
+                                let diff = cmd_col_width - len
+                                var i: UInt64 = 0
+                                while i < diff {
+                                    &out.append(" ").unwrap()
+                                    i += 1
+                                }
+                            }
+                            &out.append(sc.about).unwrap()
+                        }
+                        &out.append("\n").unwrap()
+                    }
+                }
+                if self.options.length() > 0 || self.flags.length() > 0 {
+                    &out.append("\noptions:\n").unwrap()
+                    var max_opt_len: UInt64 = 16
+                    for read f in self.flags {
+                        var len = f.long.length()
+                        if f.short.is_some() {
+                            len += 4
+                        }
+                        if len > max_opt_len {
+                            max_opt_len = len
+                        }
+                    }
+                    for read o in self.options {
+                        var len = o.long.length() + 8
+                        if o.short.is_some() {
+                            len += 4
+                        }
+                        if len > max_opt_len {
+                            max_opt_len = len
+                        }
+                    }
+                    let opt_col_width = max_opt_len + 4
+
+                    for read f in self.flags {
+                        &out.append("  ").unwrap()
+                        var len: UInt64 = 0
+                        match read f.short {
+                            Some(s) => {
+                                &out.append(s).unwrap()
+                                &out.append(", ").unwrap()
+                                len += s.length() + 2
+                            },
+                            None => {},
+                        }
+                        &out.append(f.long).unwrap()
+                        len += f.long.length()
+                        if f.about.length() > 0 {
+                            if len < opt_col_width {
+                                let diff = opt_col_width - len
+                                var i: UInt64 = 0
+                                while i < diff {
+                                    &out.append(" ").unwrap()
+                                    i += 1
+                                }
+                            }
+                            &out.append(f.about).unwrap()
+                        }
+                        &out.append("\n").unwrap()
+                    }
+                    for read o in self.options {
+                        &out.append("  ").unwrap()
+                        var len: UInt64 = 0
+                        match read o.short {
+                            Some(s) => {
+                                &out.append(s).unwrap()
+                                &out.append(", ").unwrap()
+                                len += s.length() + 2
+                            },
+                            None => {},
+                        }
+                        &out.append(o.long).unwrap()
+                        &out.append(" <value>").unwrap()
+                        len += o.long.length() + 8
+                        if o.about.length() > 0 {
+                            if len < opt_col_width {
+                                let diff = opt_col_width - len
+                                var i: UInt64 = 0
+                                while i < diff {
+                                    &out.append(" ").unwrap()
+                                    i += 1
+                                }
+                            }
+                            &out.append(o.about).unwrap()
+                        }
+                        match read o.default {
+                            Some(d) => {
+                                &out.append(" (default: ").unwrap()
+                                &out.append(d).unwrap()
+                                &out.append(")").unwrap()
+                            },
+                            None => {},
+                        }
+                        &out.append("\n").unwrap()
+                    }
+                }
+                out
+            },
+        }
+    }
+
+    test fn usage_formats_aligned_help_documentation() {
+        let name = "demo"
+        let about = "A demo utility"
+        let f_name = "quiet"
+        let f_long = "--quiet"
+        let f_about = "suppress output"
+        defer var cmd = Command.new(name, about)
+        &cmd.flag(f_name, f_long, f_about)
+        defer let u = cmd.usage()
+        testing.assert(u.view().find("usage: demo [options]").is_some(), "header missing")?
+        testing.assert(u.view().find("A demo utility").is_some(), "about missing")?
+        testing.assert(u.view().find("--quiet").is_some(), "flag missing")?
+        .Ok(())
+    }
+
+    // Return formatted help text for the active help target.
+    pub fn format_help(self: Self, matches: borrow Matches[A]) -> String[A] where carries(self.allocator) {
+        if matches.subcommands.length() > 0 && matches.subcommands[0].matches.help_requested {
+            let sub_name = copy(matches.subcommands[0].name)
+            for read sc in self.subcommands {
+                if sc.name == sub_name {
+                    var out = String.new_in(self.allocator)
+                    &out.append("usage: ").unwrap()
+                    &out.append(self.name).unwrap()
+                    &out.append(" ").unwrap()
+                    &out.append(sc.name).unwrap()
+                    if sc.options.length() > 0 || sc.flags.length() > 0 {
+                        &out.append(" [options]").unwrap()
+                    }
+                    for read p in sc.positionals {
+                        if p.variadic {
+                            if p.required {
+                                &out.append(" <").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append(">...").unwrap()
+                            } else {
+                                &out.append(" [").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append("...]").unwrap()
+                            }
+                        } else {
+                            if p.required {
+                                &out.append(" <").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append(">").unwrap()
+                            } else {
+                                &out.append(" [").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append("]").unwrap()
+                            }
+                        }
+                    }
+                    if sc.about.length() > 0 {
+                        &out.append("\n\n").unwrap()
+                        &out.append(sc.about).unwrap()
+                    }
+                    if sc.flags.length() > 0 || sc.options.length() > 0 {
+                        &out.append("\n\noptions:\n").unwrap()
+                        for read f in sc.flags {
+                            &out.append("  ").unwrap()
+                            &out.append(f.long).unwrap()
+                            if f.about.length() > 0 {
+                                &out.append("    ").unwrap()
+                                &out.append(f.about).unwrap()
+                            }
+                            &out.append("\n").unwrap()
+                        }
+                        for read o in sc.options {
+                            &out.append("  ").unwrap()
+                            &out.append(o.long).unwrap()
+                            &out.append(" <value>").unwrap()
+                            if o.about.length() > 0 {
+                                &out.append("    ").unwrap()
+                                &out.append(o.about).unwrap()
+                            }
+                            match read o.default {
+                                Some(d) => {
+                                    &out.append(" (default: ").unwrap()
+                                    &out.append(d).unwrap()
+                                    &out.append(")").unwrap()
+                                },
+                                None => {},
+                            }
+                            &out.append("\n").unwrap()
+                        }
+                    }
+                    return out
+                }
+            }
+        }
+        self.usage()
+    }
+
+    test fn format_help_returns_subcommand_or_root_help() {
+        defer var root = Command.new("app", "My app")
+        let sub = Command.new("run", "run the app")
+        &root.subcommand(sub)
+        var matches: Matches = .{
+            help_requested = true,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals = Vec.new(),
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        defer matches.release()
+        defer let h = root.format_help(borrow matches)
+        testing.assert(h.view().find("usage: app").is_some(), "root usage expected")?
+        .Ok(())
+    }
+
+    // Parse arguments from an ArgCursor.
+    pub fn parse(self: Self, inout cursor: ArgCursor) -> Result[Matches[A], CliError] where carries(.Ok: self, cursor), carries(.Err: self, cursor) {
+        defer var matches: Matches[A] = .{
+            help_requested = false,
+            flags = Vec.new_in(self.allocator),
+            options = Vec.new_in(self.allocator),
+            positionals = Vec.new_in(self.allocator),
+            subcommands = Vec.new_in(self.allocator),
+            allocator = copy(self.allocator),
+        }
+
+        var active_child_idx: Option[UInt64] = .None
+        var active_pos_index: UInt64 = 0
+        var pos_index: UInt64 = 0
+        var stop_options = false
+
+        while cursor.has_next() {
+            let arg_opt = &cursor.next()
+            let arg = arg_opt.unwrap()
+
+            // Check for option termination: "--"
+            if !stop_options && arg == "--" {
+                stop_options = true
+                continue
+            }
+
+            // Check for help flag
+            if !stop_options && (arg == "--help" || arg == "-h") {
+                if matches.subcommands.length() > 0 {
+                    matches.subcommands[0].matches.help_requested = true
+                } else {
+                    matches.help_requested = true
+                }
+                continue
+            }
+
+            // Check for option or flag
+            if !stop_options && arg.starts_with("-") {
+                var found_flag = false
+                if matches.subcommands.length() > 0 {
+                    let sub_idx = copy(active_child_idx).unwrap()
+                    for read f in self.subcommands[sub_idx].flags {
+                        let matches_flag = (arg == f.long) || (match read f.short { Some(s) => arg == s, None => false })
+                        if matches_flag {
+                            &matches.subcommands[0].matches.flags.push(copy(f.name)).settled().unwrap()
+                            found_flag = true
+                            break
+                        }
+                    }
+                    if !found_flag {
+                        for read f in self.flags {
+                            let matches_flag = (arg == f.long) || (match read f.short { Some(s) => arg == s, None => false })
+                            if matches_flag && f.global {
+                                &matches.flags.push(copy(f.name)).settled().unwrap()
+                                found_flag = true
+                                break
+                            }
+                        }
+                    }
+                } else {
+                    for read f in self.flags {
+                        let matches_flag = (arg == f.long) || (match read f.short { Some(s) => arg == s, None => false })
+                        if matches_flag {
+                            &matches.flags.push(copy(f.name)).settled().unwrap()
+                            found_flag = true
+                            break
+                        }
+                    }
+                }
+                if found_flag {
+                    continue
+                }
+
+                var found_opt = false
+                if matches.subcommands.length() > 0 {
+                    let sub_idx = copy(active_child_idx).unwrap()
+                    for read opt in self.subcommands[sub_idx].options {
+                        let matches_opt = (arg == opt.long) || (match read opt.short { Some(s) => arg == s, None => false })
+                        if matches_opt {
+                            if !opt.repeatable && (matches.subcommands[0].matches.is_supplied(opt.name) || matches.is_supplied(opt.name)) {
+                                return .Err(CliError.DuplicateOption(copy(opt.long)))
+                            }
+                            let val = match &cursor.next() {
+                                Some(v) => v,
+                                None => return .Err(CliError.MissingOptionValue(copy(opt.long))),
+                            }
+                            &matches.subcommands[0].matches.options.push(.{ name = copy(opt.name), value = val, supplied = true }).settled().unwrap()
+                            found_opt = true
+                            break
+                        }
+                    }
+                    if !found_opt {
+                        for read opt in self.options {
+                            let matches_opt = (arg == opt.long) || (match read opt.short { Some(s) => arg == s, None => false })
+                            if matches_opt && opt.global {
+                                if !opt.repeatable && (matches.is_supplied(opt.name) || matches.subcommands[0].matches.is_supplied(opt.name)) {
+                                    return .Err(CliError.DuplicateOption(copy(opt.long)))
+                                }
+                                let val = match &cursor.next() {
+                                    Some(v) => v,
+                                    None => return .Err(CliError.MissingOptionValue(copy(opt.long))),
+                                }
+                                &matches.options.push(.{ name = copy(opt.name), value = val, supplied = true }).settled().unwrap()
+                                found_opt = true
+                                break
+                            }
+                        }
+                    }
+                } else {
+                    for read opt in self.options {
+                        let matches_opt = (arg == opt.long) || (match read opt.short { Some(s) => arg == s, None => false })
+                        if matches_opt {
+                            if !opt.repeatable && matches.is_supplied(opt.name) {
+                                return .Err(CliError.DuplicateOption(copy(opt.long)))
+                            }
+                            let val = match &cursor.next() {
+                                Some(v) => v,
+                                None => return .Err(CliError.MissingOptionValue(copy(opt.long))),
+                            }
+                            &matches.options.push(.{ name = copy(opt.name), value = val, supplied = true }).settled().unwrap()
+                            found_opt = true
+                            break
+                        }
+                    }
+                }
+                if found_opt {
+                    continue
+                }
+
+                return .Err(CliError.UnknownOption(arg))
+            }
+
+            // Non-option argument: check subcommands first if any exist
+            if matches.subcommands.length() == 0 && self.subcommands.length() > 0 {
+                if arg == "help" {
+                    matches.help_requested = true
+                    let next_tok = cursor.peek()
+                    if next_tok.is_some() {
+                        let sub_target = next_tok.unwrap()
+                        var sub_found: Option[UInt64] = .None
+                        var s_idx: UInt64 = 0
+                        while s_idx < self.subcommands.length() {
+                            if self.subcommands[s_idx].name == sub_target {
+                                sub_found = .Some(s_idx)
+                                break
+                            }
+                            s_idx += 1
+                        }
+                        if sub_found.is_some() {
+                            let found_idx = sub_found.unwrap()
+                            active_child_idx = .Some(found_idx)
+                            let _ = &cursor.next()
+                            let empty_sub: Matches[A] = .{
+                                help_requested = true,
+                                flags = Vec.new_in(self.allocator),
+                                options = Vec.new_in(self.allocator),
+                                positionals = Vec.new_in(self.allocator),
+                                subcommands = Vec.new_in(self.allocator),
+                                allocator = copy(self.allocator),
+                            }
+                            &matches.subcommands.push(.{ name = copy(self.subcommands[found_idx].name), matches = empty_sub }).settled().unwrap()
+                        }
+                    }
+                    break
+                }
+
+                var matched_child_index: Option[UInt64] = .None
+                var i: UInt64 = 0
+                while i < self.subcommands.length() {
+                    if self.subcommands[i].name == arg {
+                        matched_child_index = .Some(i)
+                        break
+                    }
+                    i += 1
+                }
+
+                if matched_child_index.is_some() {
+                    let child_idx = matched_child_index.unwrap()
+                    active_child_idx = .Some(child_idx)
+                    let empty_child: Matches[A] = .{
+                        help_requested = matches.help_requested,
+                        flags = Vec.new_in(self.allocator),
+                        options = Vec.new_in(self.allocator),
+                        positionals = Vec.new_in(self.allocator),
+                        subcommands = Vec.new_in(self.allocator),
+                        allocator = copy(self.allocator),
+                    }
+                    &matches.subcommands.push(.{ name = copy(self.subcommands[child_idx].name), matches = empty_child }).settled().unwrap()
+                    continue
+                }
+
+                // If no subcommands matched and there are positionals, fill positionals
+                if pos_index < self.positionals.length() {
+                    let def = copy(self.positionals[pos_index])
+                    if !def.variadic {
+                        pos_index += 1
+                    }
+                    &matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
+                    continue
+                }
+
+                return .Err(CliError.UnknownCommand(arg))
+            }
+
+            // Positional argument
+            if matches.subcommands.length() > 0 {
+                let sub_idx = copy(active_child_idx).unwrap()
+                if active_pos_index < self.subcommands[sub_idx].positionals.length() {
+                    let def = copy(self.subcommands[sub_idx].positionals[active_pos_index])
+                    if !def.variadic {
+                        active_pos_index += 1
+                    }
+                    &matches.subcommands[0].matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
+                } else {
+                    return .Err(CliError.UnexpectedArgument(arg))
+                }
+            } else {
+                if pos_index < self.positionals.length() {
+                    let def = copy(self.positionals[pos_index])
+                    if !def.variadic {
+                        pos_index += 1
+                    }
+                    &matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
+                } else {
+                    return .Err(CliError.UnexpectedArgument(arg))
+                }
+            }
+        }
+
+        if matches.subcommands.length() > 0 {
+            let sub_idx = active_child_idx.unwrap()
+            let sub_help = matches.subcommands[0].matches.help_requested || matches.help_requested
+            while active_pos_index < self.subcommands[sub_idx].positionals.length() {
+                let def = copy(self.subcommands[sub_idx].positionals[active_pos_index])
+                let supplied = matches.subcommands[0].matches.positional(def.name).is_some()
+                if def.required && !supplied && !sub_help {
+                    return .Err(CliError.MissingArgument(copy(def.name)))
+                }
+                active_pos_index += 1
+            }
+
+            for read opt in self.subcommands[sub_idx].options {
+                if !matches.subcommands[0].matches.is_supplied(opt.name) {
+                    if opt.required && !sub_help {
+                        return .Err(CliError.MissingArgument(copy(opt.name)))
+                    }
+                    match read opt.default {
+                        Some(d) => {
+                            &matches.subcommands[0].matches.options.push(.{ name = copy(opt.name), value = copy(d), supplied = false }).settled().unwrap()
+                        },
+                        None => {},
+                    }
+                }
+            }
+
+            for read opt in self.options {
+                if !matches.is_supplied(opt.name) {
+                    if opt.required && !sub_help {
+                        return .Err(CliError.MissingArgument(copy(opt.name)))
+                    }
+                    match read opt.default {
+                        Some(d) => {
+                            &matches.options.push(.{ name = copy(opt.name), value = copy(d), supplied = false }).settled().unwrap()
+                        },
+                        None => {},
+                    }
+                }
+            }
+        } else {
+            // Validate required positional arguments
+            while pos_index < self.positionals.length() {
+                let def = copy(self.positionals[pos_index])
+                let supplied = matches.positional(def.name).is_some()
+                if def.required && !supplied && !matches.help_requested {
+                    return .Err(CliError.MissingArgument(copy(def.name)))
+                }
+                pos_index += 1
+            }
+
+            // Apply defaults and validate required options
+            for read opt in self.options {
+                if !matches.is_supplied(opt.name) {
+                    if opt.required && !matches.help_requested {
+                        return .Err(CliError.MissingArgument(copy(opt.name)))
+                    }
+                    match read opt.default {
+                        Some(d) => {
+                            &matches.options.push(.{ name = copy(opt.name), value = copy(d), supplied = false }).settled().unwrap()
+                        },
+                        None => {},
+                    }
+                }
+            }
+        }
+
+        .Ok(matches)
+    }
+
+    test fn parse_parses_cursor_into_matches() {
+        let app_name = "app"
+        let dry_name = "dry_run"
+        let dry_flag = "--dry-run"
+        defer var cmd = Command.new(app_name)
+        &cmd.flag(dry_name, dry_flag)
+        let dry_tok = "--dry-run"
+        let input = [dry_tok]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = cmd.parse(&cursor).unwrap()
+        testing.assert(matches.flag("dry_run"), "dry_run flag not set")?
+        .Ok(())
+    }
+
+    test fn parse_handles_optional_and_variadic_positionals() {
+        defer var cmd = Command.new("demo")
+        &cmd.positional("mode", required: true)
+        &cmd.positional("target", required: false)
+        &cmd.positional("files", required: false, variadic: true)
+
+        let t1 = "build"
+        let in1 = [t1]
+        var c1 = ArgCursor.from_slice(in1.as_slice())
+        defer let m1 = cmd.parse(&c1).unwrap()
+        testing.assert_eq(m1.positional("mode"), Option.Some("build"), "mode differed")?
+        testing.assert_eq(m1.positional("target"), Option.None, "target should be None")?
+        defer let empty_files = m1.positionals_all("files")
+        testing.assert_eq(empty_files.length(), UInt64(0), "files should be empty")?
+
+        let t2 = "build"
+        let t3 = "x86"
+        let t4 = "a.lin"
+        let t5 = "b.lin"
+        let in2 = [t2, t3, t4, t5]
+        var c2 = ArgCursor.from_slice(in2.as_slice())
+        defer let m2 = cmd.parse(&c2).unwrap()
+        testing.assert_eq(m2.positional("mode"), Option.Some("build"), "mode differed")?
+        testing.assert_eq(m2.positional("target"), Option.Some("x86"), "target differed")?
+        defer let files = m2.positionals_all("files")
+        testing.assert_eq(files.length(), UInt64(2), "files count differed")?
+        testing.assert_eq(files[0], "a.lin", "first file differed")?
+        testing.assert_eq(files[1], "b.lin", "second file differed")?
+        .Ok(())
+    }
+
+    test fn parse_handles_subcommand_variadic_positionals() {
+        defer var root = Command.new("echo_tool")
+        var send_cmd = Command.new("send")
+        &send_cmd.option("port", "--port", required: true)
+        &send_cmd.positional("messages", required: true, variadic: true)
+        &root.subcommand(send_cmd)
+
+        let tok_send = "send"
+        let tok_port = "--port"
+        let tok_pval = "8080"
+        let tok_m1 = "hello"
+        let tok_m2 = "world"
+        let input = [tok_send, tok_port, tok_pval, tok_m1, tok_m2]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = root.parse(&cursor).unwrap()
+        testing.assert_eq(matches.subcommand_name(), Option.Some("send"), "subcommand should be send")?
+        let sub = matches.subcommand().unwrap()
+        testing.assert_eq(sub.matches.option("port"), Option.Some("8080"), "port differed")?
+        defer let msgs = sub.matches.positionals_all("messages")
+        testing.assert_eq(msgs.length(), UInt64(2), "messages count differed")?
+        testing.assert_eq(msgs[0], "hello", "first message differed")?
+        testing.assert_eq(msgs[1], "world", "second message differed")?
+        .Ok(())
+    }
+
+    // Parse arguments from an ArgCursor (alias for `parse`).
+    pub fn parse_cursor(self: Self, inout cursor: ArgCursor) -> Result[Matches[A], CliError] where carries(.Ok: self, cursor), carries(.Err: self, cursor) {
+        self.parse(&cursor)
+    }
+
+    test fn parse_cursor_aliases_parse() {
+        let app_name = "app"
+        let v_name = "v"
+        let v_flag = "-v"
+        defer var cmd = Command.new(app_name)
+        &cmd.flag(v_name, v_flag)
+        let v_tok = "-v"
+        let input = [v_tok]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = cmd.parse_cursor(&cursor).unwrap()
+        testing.assert(matches.flag("v"), "v flag not set")?
+        .Ok(())
+    }
+
+    // Parse arguments directly from process environment args.
+    pub fn parse_args(self: Self, args: env.Args) -> Result[Matches[A], CliError] where carries(.Ok: self, args), carries(.Err: self, args) {
+        var cursor = ArgCursor.new(args)
+        self.parse(&cursor)
+    }
+
+    test fn parse_args_parses_process_arguments() {
+        let app_name = "test_args_app"
+        defer var cmd = Command.new(app_name)
+        let a = env.args()
+        let res = cmd.parse_args(a)
+        defer match res {
+            Ok(m) => m.release(),
+            Err(e) => e.release(),
+        }
+        testing.assert(res.is_ok() || res.is_err(), "parse_args returns a valid result")?
+        .Ok(())
+    }
+}

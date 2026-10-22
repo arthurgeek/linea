@@ -781,11 +781,14 @@ ordinary literal, and let `Display.fmt` write both into one `String`, as the
 letter above does. `{advice}` interpolates the whole constant.
 
 A multi-line literal is an ordinary `Str`, and it can be a module constant, as
-`usage` and `advice` are. The [TCP echo example](../../examples/tcp_echo.lin)
+`usage` and `advice` are. The [frequency report example](../../examples/frequency_report.lin)
 keeps its usage text this way. Text longer than a few lines can also live in a
 file of its own, as the next section shows, and the
 [form letters example](../../examples/form-letters/main.lin) keeps its letter
-and its orders that way.
+and its orders that way. For a command-line tool with flags, options, and
+subcommands, `std.cli` formats usage and option tables from a schema instead
+(see the [notes example](../../examples/notes/) and
+[TCP echo example](../../examples/tcp_echo.lin)).
 
 ## Text from a file the program carries
 

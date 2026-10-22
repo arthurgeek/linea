@@ -739,7 +739,11 @@ A few things to notice:
   here 64, the conventional status for a usage mistake, and 1 for a time that
   does not read.
 - `env.args().at(1)` is the first argument after the program's name, or
-  `.None` when there is none.
+  `.None` when there is none. When a tool accepts flags, named options, or
+  subcommands, `std.cli` builds a command schema over `env.args()`, generates
+  aligned `--help` text, and validates required arguments (see [Declaring
+  command-line options and commands](patterns.md#declaring-command-line-options-and-commands)
+  and the [notes example](../../examples/notes/)).
 
 ### Which `main` to write
 

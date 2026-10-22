@@ -1,0 +1,17 @@
+usage: notes <command> [options]
+
+Manage personal notes
+
+commands:
+  add <title>    add a new note
+  list           list matching notes
+  done <id>      mark a note as completed
+  remove <id>    delete a note by ID
+  show <id>      display single note details
+  help           display this help message
+
+options:
+  --json              shortcut for --format json
+  --table             shortcut for --format table
+  --format <value>    output format: table or json
+  --config <value>    path to configuration file (default: notes.cfg)

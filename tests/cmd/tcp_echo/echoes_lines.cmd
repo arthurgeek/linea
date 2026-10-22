@@ -4,8 +4,22 @@ A command that is not a mode and a port prints the usage and exits with 64.
 
   $ linea build "$LINEA_ROOT"/examples/tcp_echo.lin -o echo
   $ ./echo serve
-  usage: tcp_echo serve PORT [CLIENTS]
-         tcp_echo send PORT MESSAGE...
+  usage: tcp_echo <command>
+  
+  Echo text over TCP
+  
+  commands:
+    serve <port> [clients]      listen for and echo connections
+    send <port> <message>...    send messages to an echo server
+  
+  [64]
+
+  Echo text over TCP
+
+  commands:
+    serve <port> [clients]      listen for and echo connections
+    send <port> <message>...    send messages to an echo server
+
   [64]
 
 The echo server sends back everything the client sent.
