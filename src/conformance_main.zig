@@ -5229,6 +5229,9 @@ fn ratio(after: u64, before: u64) f64 {
 
 /// The faster of two readings of one size, with the CPU time of that same run.
 fn faster(a: Cost, b: Cost) Cost {
+    if (a.cpu_nanos > 0 and b.cpu_nanos > 0) {
+        return if (b.cpu_nanos < a.cpu_nanos) b else a;
+    }
     return if (b.nanos < a.nanos) b else a;
 }
 
@@ -5248,7 +5251,9 @@ fn balancedCurve(forward: Curve, reverse: Curve) !Curve {
 }
 
 fn curveSteepness(curve: Curve) f64 {
-    return @log2(ratio(curve[2].nanos, curve[1].nanos));
+    const after = if (curve[2].cpu_nanos > 0) curve[2].cpu_nanos else curve[2].nanos;
+    const before = if (curve[1].cpu_nanos > 0) curve[1].cpu_nanos else curve[1].nanos;
+    return @log2(ratio(after, before));
 }
 
 /// The fastest reading of each size across `samples`, which allocate alike.
@@ -5293,7 +5298,8 @@ const Measured = struct {
     /// Whether the smaller of the two readings it is judged on is long enough
     /// to divide.
     fn timed(self: Measured) bool {
-        return self.at[1].nanos >= sweep_enough;
+        const t1 = if (self.at[1].cpu_nanos > 0) self.at[1].cpu_nanos else self.at[1].nanos;
+        return t1 >= sweep_enough;
     }
 
     fn allocationWork(self: Measured) [2]f64 {
@@ -5301,7 +5307,10 @@ const Measured = struct {
     }
 
     fn time(self: Measured) [2]f64 {
-        return .{ ratio(self.at[1].nanos, self.at[0].nanos), ratio(self.at[2].nanos, self.at[1].nanos) };
+        const t0 = if (self.at[0].cpu_nanos > 0) self.at[0].cpu_nanos else self.at[0].nanos;
+        const t1 = if (self.at[1].cpu_nanos > 0) self.at[1].cpu_nanos else self.at[1].nanos;
+        const t2 = if (self.at[2].cpu_nanos > 0) self.at[2].cpu_nanos else self.at[2].nanos;
+        return .{ ratio(t1, t0), ratio(t2, t1) };
     }
 };
 
