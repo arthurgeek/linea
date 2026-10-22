@@ -1,0 +1,80 @@
+import std.fmt
+import std.io
+import std.json
+import std.testing
+
+// Priority level of a note.
+@(copyable, derive(Debug, Equatable, Release))
+pub enum Priority {
+    Low,
+    Normal,
+    High,
+}
+
+impl Priority {
+    // Parse priority from string: "low", "normal", or "high" (case-insensitive).
+    pub fn parse(text: Str) -> Option[Priority] {
+        if text.equals_ascii_folded("low") {
+            .Some(.Low)
+        } else if text.equals_ascii_folded("normal") || text.equals_ascii_folded("med") || text.equals_ascii_folded("medium") {
+            .Some(.Normal)
+        } else if text.equals_ascii_folded("high") {
+            .Some(.High)
+        } else {
+            .None
+        }
+    }
+
+    // Return the canonical lowercase representation.
+    pub fn as_str(self: Self) -> Str {
+        match read self {
+            Low => "low",
+            Normal => "normal",
+            High => "high",
+        }
+    }
+
+    test fn priority_parses_case_insensitively_and_serializes() {
+        testing.assert_eq(Priority.parse("low"), Option.Some(Priority.Low), "low was not parsed")?
+        testing.assert_eq(Priority.parse("LOW"), Option.Some(Priority.Low), "uppercase LOW was not parsed")?
+        testing.assert_eq(Priority.parse("normal"), Option.Some(Priority.Normal), "normal was not parsed")?
+        testing.assert_eq(Priority.parse("med"), Option.Some(Priority.Normal), "med was not parsed")?
+        testing.assert_eq(Priority.parse("medium"), Option.Some(Priority.Normal), "medium was not parsed")?
+        testing.assert_eq(Priority.parse("high"), Option.Some(Priority.High), "high was not parsed")?
+        testing.assert_eq(Priority.parse("HIGH"), Option.Some(Priority.High), "uppercase HIGH was not parsed")?
+        testing.assert(Priority.parse("critical").is_none(), "unknown priority was accepted")?
+
+        testing.assert_eq(Priority.Low.as_str(), "low", "low serialized incorrectly")?
+        testing.assert_eq(Priority.Normal.as_str(), "normal", "normal serialized incorrectly")?
+        testing.assert_eq(Priority.High.as_str(), "high", "high serialized incorrectly")?
+        .Ok(())
+    }
+}
+
+impl fmt.Display for Priority {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(self.as_str())
+    }
+}
+
+impl json.Encode for Priority {
+    fn encode[W: io.Writer](self: Self, inout encoder: json.Encoder, inout writer: W) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+        &encoder.string(&writer, self.as_str())
+    }
+}
+
+impl[A: Allocator] json.Decode[A] for Priority {
+    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] {
+        let text = value.as_str() else {
+            return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
+        }
+        match Priority.parse(text) {
+            Some(priority) => .Ok(priority),
+            None => .Err(json.DecodeError.failure_in(allocator, .OutOfRange)),
+        }
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}
