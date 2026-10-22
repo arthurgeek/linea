@@ -196,6 +196,7 @@ pub struct PositionalDef {
     name: Str,
     about: Str,
     required: Bool,
+    variadic: Bool,
 }
 
 // Record of a matched option and its value.
@@ -423,6 +424,39 @@ impl[A: Allocator] Matches[A] {
         }
         testing.assert_eq(m.positional("target"), Option.Some("main.lin"), "target positional differed")?
         testing.assert_eq(m.positional("missing"), Option.None, "missing positional should be None")?
+        .Ok(())
+    }
+
+    // Return all values supplied for a positional argument (e.g. variadic positionals).
+    pub fn positionals_all(self: Self, name: Str) -> Vec[Str, A] where carries(self.allocator, self) {
+        var result: Vec[Str, A] = Vec.new_in(self.allocator)
+        for read p in self.positionals {
+            if p.name == name {
+                &result.push(copy(p.value)).settled().unwrap()
+            }
+        }
+        result
+    }
+
+    test fn positionals_all_collects_variadic_positionals() {
+        let msg_name = "message"
+        let msg1 = "hello"
+        let msg2 = "world"
+        var positionals: Vec[PositionalMatch] = Vec.new()
+        &positionals.push(.{ name = copy(msg_name), value = msg1 }).unwrap()
+        &positionals.push(.{ name = msg_name, value = msg2 }).unwrap()
+        defer let m: Matches = .{
+            help_requested = false,
+            flags = Vec.new(),
+            options = Vec.new(),
+            positionals,
+            subcommands = Vec.new(),
+            allocator = mem.system(),
+        }
+        defer let all = m.positionals_all("message")
+        testing.assert_eq(all.length(), UInt64(2), "positionals_all length differed")?
+        testing.assert_eq(all[0], "hello", "first positional differed")?
+        testing.assert_eq(all[1], "world", "second positional differed")?
         .Ok(())
     }
 
@@ -1177,8 +1211,8 @@ impl[A: Allocator] Command[A] {
     }
 
     // Define a positional argument.
-    pub fn positional(inout self: Self, sink name: Str, sink about: Str = "", required: Bool = true) where retains(self: name, about) {
-        let p: PositionalDef = .{ name, about, required }
+    pub fn positional(inout self: Self, sink name: Str, sink about: Str = "", required: Bool = true, variadic: Bool = false) where retains(self: name, about) {
+        let p: PositionalDef = .{ name, about, required, variadic }
         &self.positionals.push(p).settled().unwrap()
     }
 
@@ -1190,6 +1224,16 @@ impl[A: Allocator] Command[A] {
         &cmd.positional(p_name, p_about, required: true)
         testing.assert_eq(cmd.positionals.length(), UInt64(1), "positional count differed")?
         testing.assert_eq(cmd.positionals[0].name, "src", "positional name differed")?
+        testing.assert(cmd.positionals[0].required, "positional should be required")?
+        testing.assert(!cmd.positionals[0].variadic, "positional should not be variadic")?
+
+        let opt_pos = "opt"
+        &cmd.positional(opt_pos, required: false)
+        testing.assert(!cmd.positionals[1].required, "optional positional should not be required")?
+
+        let var_pos = "rest"
+        &cmd.positional(var_pos, required: false, variadic: true)
+        testing.assert(cmd.positionals[2].variadic, "variadic positional should be variadic")?
         .Ok(())
     }
 
@@ -1221,14 +1265,26 @@ impl[A: Allocator] Command[A] {
                     &out.append(" <command>").unwrap()
                 }
                 for read p in self.positionals {
-                    if p.required {
-                        &out.append(" <").unwrap()
-                        &out.append(p.name).unwrap()
-                        &out.append(">").unwrap()
+                    if p.variadic {
+                        if p.required {
+                            &out.append(" <").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append(">...").unwrap()
+                        } else {
+                            &out.append(" [").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append("...]").unwrap()
+                        }
                     } else {
-                        &out.append(" [").unwrap()
-                        &out.append(p.name).unwrap()
-                        &out.append("]").unwrap()
+                        if p.required {
+                            &out.append(" <").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append(">").unwrap()
+                        } else {
+                            &out.append(" [").unwrap()
+                            &out.append(p.name).unwrap()
+                            &out.append("]").unwrap()
+                        }
                     }
                 }
                 if self.options.length() > 0 || self.flags.length() > 0 {
@@ -1244,7 +1300,11 @@ impl[A: Allocator] Command[A] {
                     for read sc in self.subcommands {
                         var len = sc.name.length()
                         for read p in sc.positionals {
-                            len += p.name.length() + 3
+                            if p.variadic {
+                                len += p.name.length() + 6
+                            } else {
+                                len += p.name.length() + 3
+                            }
                         }
                         if len > max_cmd_len {
                             max_cmd_len = len
@@ -1257,16 +1317,30 @@ impl[A: Allocator] Command[A] {
                         var len = sc.name.length()
                         &out.append(sc.name).unwrap()
                         for read p in sc.positionals {
-                            if p.required {
-                                &out.append(" <").unwrap()
-                                &out.append(p.name).unwrap()
-                                &out.append(">").unwrap()
-                                len += p.name.length() + 3
+                            if p.variadic {
+                                if p.required {
+                                    &out.append(" <").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append(">...").unwrap()
+                                    len += p.name.length() + 6
+                                } else {
+                                    &out.append(" [").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append("...]").unwrap()
+                                    len += p.name.length() + 6
+                                }
                             } else {
-                                &out.append(" [").unwrap()
-                                &out.append(p.name).unwrap()
-                                &out.append("]").unwrap()
-                                len += p.name.length() + 3
+                                if p.required {
+                                    &out.append(" <").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append(">").unwrap()
+                                    len += p.name.length() + 3
+                                } else {
+                                    &out.append(" [").unwrap()
+                                    &out.append(p.name).unwrap()
+                                    &out.append("]").unwrap()
+                                    len += p.name.length() + 3
+                                }
                             }
                         }
                         if sc.about.length() > 0 {
@@ -1403,14 +1477,26 @@ impl[A: Allocator] Command[A] {
                         &out.append(" [options]").unwrap()
                     }
                     for read p in sc.positionals {
-                        if p.required {
-                            &out.append(" <").unwrap()
-                            &out.append(p.name).unwrap()
-                            &out.append(">").unwrap()
+                        if p.variadic {
+                            if p.required {
+                                &out.append(" <").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append(">...").unwrap()
+                            } else {
+                                &out.append(" [").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append("...]").unwrap()
+                            }
                         } else {
-                            &out.append(" [").unwrap()
-                            &out.append(p.name).unwrap()
-                            &out.append("]").unwrap()
+                            if p.required {
+                                &out.append(" <").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append(">").unwrap()
+                            } else {
+                                &out.append(" [").unwrap()
+                                &out.append(p.name).unwrap()
+                                &out.append("]").unwrap()
+                            }
                         }
                     }
                     if sc.about.length() > 0 {
@@ -1666,7 +1752,9 @@ impl[A: Allocator] Command[A] {
                 // If no subcommands matched and there are positionals, fill positionals
                 if pos_index < self.positionals.length() {
                     let def = copy(self.positionals[pos_index])
-                    pos_index += 1
+                    if !def.variadic {
+                        pos_index += 1
+                    }
                     &matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
                     continue
                 }
@@ -1679,7 +1767,9 @@ impl[A: Allocator] Command[A] {
                 let sub_idx = copy(active_child_idx).unwrap()
                 if active_pos_index < self.subcommands[sub_idx].positionals.length() {
                     let def = copy(self.subcommands[sub_idx].positionals[active_pos_index])
-                    active_pos_index += 1
+                    if !def.variadic {
+                        active_pos_index += 1
+                    }
                     &matches.subcommands[0].matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
                 } else {
                     return .Err(CliError.UnexpectedArgument(arg))
@@ -1687,7 +1777,9 @@ impl[A: Allocator] Command[A] {
             } else {
                 if pos_index < self.positionals.length() {
                     let def = copy(self.positionals[pos_index])
-                    pos_index += 1
+                    if !def.variadic {
+                        pos_index += 1
+                    }
                     &matches.positionals.push(.{ name = copy(def.name), value = arg }).settled().unwrap()
                 } else {
                     return .Err(CliError.UnexpectedArgument(arg))
@@ -1700,7 +1792,8 @@ impl[A: Allocator] Command[A] {
             let sub_help = matches.subcommands[0].matches.help_requested || matches.help_requested
             while active_pos_index < self.subcommands[sub_idx].positionals.length() {
                 let def = copy(self.subcommands[sub_idx].positionals[active_pos_index])
-                if def.required && !sub_help {
+                let supplied = matches.subcommands[0].matches.positional(def.name).is_some()
+                if def.required && !supplied && !sub_help {
                     return .Err(CliError.MissingArgument(copy(def.name)))
                 }
                 active_pos_index += 1
@@ -1737,7 +1830,8 @@ impl[A: Allocator] Command[A] {
             // Validate required positional arguments
             while pos_index < self.positionals.length() {
                 let def = copy(self.positionals[pos_index])
-                if def.required && !matches.help_requested {
+                let supplied = matches.positional(def.name).is_some()
+                if def.required && !supplied && !matches.help_requested {
                     return .Err(CliError.MissingArgument(copy(def.name)))
                 }
                 pos_index += 1
@@ -1773,6 +1867,62 @@ impl[A: Allocator] Command[A] {
         var cursor = ArgCursor.from_slice(input.as_slice())
         defer let matches = cmd.parse(&cursor).unwrap()
         testing.assert(matches.flag("dry_run"), "dry_run flag not set")?
+        .Ok(())
+    }
+
+    test fn parse_handles_optional_and_variadic_positionals() {
+        defer var cmd = Command.new("demo")
+        &cmd.positional("mode", required: true)
+        &cmd.positional("target", required: false)
+        &cmd.positional("files", required: false, variadic: true)
+
+        let t1 = "build"
+        let in1 = [t1]
+        var c1 = ArgCursor.from_slice(in1.as_slice())
+        defer let m1 = cmd.parse(&c1).unwrap()
+        testing.assert_eq(m1.positional("mode"), Option.Some("build"), "mode differed")?
+        testing.assert_eq(m1.positional("target"), Option.None, "target should be None")?
+        defer let empty_files = m1.positionals_all("files")
+        testing.assert_eq(empty_files.length(), UInt64(0), "files should be empty")?
+
+        let t2 = "build"
+        let t3 = "x86"
+        let t4 = "a.lin"
+        let t5 = "b.lin"
+        let in2 = [t2, t3, t4, t5]
+        var c2 = ArgCursor.from_slice(in2.as_slice())
+        defer let m2 = cmd.parse(&c2).unwrap()
+        testing.assert_eq(m2.positional("mode"), Option.Some("build"), "mode differed")?
+        testing.assert_eq(m2.positional("target"), Option.Some("x86"), "target differed")?
+        defer let files = m2.positionals_all("files")
+        testing.assert_eq(files.length(), UInt64(2), "files count differed")?
+        testing.assert_eq(files[0], "a.lin", "first file differed")?
+        testing.assert_eq(files[1], "b.lin", "second file differed")?
+        .Ok(())
+    }
+
+    test fn parse_handles_subcommand_variadic_positionals() {
+        defer var root = Command.new("echo_tool")
+        var send_cmd = Command.new("send")
+        &send_cmd.option("port", "--port", required: true)
+        &send_cmd.positional("messages", required: true, variadic: true)
+        &root.subcommand(send_cmd)
+
+        let tok_send = "send"
+        let tok_port = "--port"
+        let tok_pval = "8080"
+        let tok_m1 = "hello"
+        let tok_m2 = "world"
+        let input = [tok_send, tok_port, tok_pval, tok_m1, tok_m2]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = root.parse(&cursor).unwrap()
+        testing.assert_eq(matches.subcommand_name(), Option.Some("send"), "subcommand should be send")?
+        let sub = matches.subcommand().unwrap()
+        testing.assert_eq(sub.matches.option("port"), Option.Some("8080"), "port differed")?
+        defer let msgs = sub.matches.positionals_all("messages")
+        testing.assert_eq(msgs.length(), UInt64(2), "messages count differed")?
+        testing.assert_eq(msgs[0], "hello", "first message differed")?
+        testing.assert_eq(msgs[1], "world", "second message differed")?
         .Ok(())
     }
 
