@@ -1,3 +1,5 @@
+import std.testing
+
 // `@opaque` exports Account but keeps its fields private to ledger.
 // `@linear` requires each account to be consumed, here by closing it and
 // returning its remaining funds. Balances are stored as whole cents.
@@ -18,5 +20,10 @@ impl Account {
     pub fn close(sink self: Self) -> UInt64 {
         let Account { balance: funds } = self
         funds
+    }
+
+    test fn an_empty_account_can_be_opened_and_closed() {
+        let account = Account.open(0)
+        testing.assert_eq(account.close(), 0, "empty account returns no funds")?
     }
 }

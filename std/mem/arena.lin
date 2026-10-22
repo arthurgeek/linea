@@ -27,123 +27,227 @@ impl[H: Allocator] Arena[H] {
             Ok(b) => .{ slab = .Some(b) },
         }
     }
-}
 
-// Release resources before assertions: a failing assertion returns early.
-test fn an_arena_hands_out_storage_and_gives_the_slab_back() {
-    let arena = Arena.open(system(), 4096)
-    let a = arena.handle()
+    // Release resources before assertions: a failing assertion returns early.
+    test fn an_arena_hands_out_storage_and_gives_the_slab_back() {
+        let arena = Arena.open(system(), 4096)
+        let a = arena.handle()
 
-    var refused = true
-    var fresh: UInt64 = 1
-    var one: UInt64 = 0
-    var two: UInt64 = 0
-    var length: UInt64 = 0
+        var refused = true
+        var fresh: UInt64 = 1
+        var one: UInt64 = 0
+        var two: UInt64 = 0
+        var length: UInt64 = 0
 
-    match a.acquire(64) {
-        Err(_) => {},
-        Ok(first_buffer) => {
-            var first = first_buffer
-            match a.acquire(32) {
-                Err(_) => first.release(),
-                Ok(second_buffer) => {
-                    var second = second_buffer
-                    refused = false
-                    fresh = first.load(0)
-                    &first.store(0, 111)
-                    &second.store(0, 222)
-                    one = first.load(0)
-                    two = second.load(0)
-                    length = first.length()
-                    second.release()
-                    first.release()
-                },
-            }
-        },
+        match a.acquire(64) {
+            Err(_) => {},
+            Ok(first_buffer) => {
+                var first = first_buffer
+                match a.acquire(32) {
+                    Err(_) => first.release(),
+                    Ok(second_buffer) => {
+                        var second = second_buffer
+                        refused = false
+                        fresh = first.load(0)
+                        &first.store(0, 111)
+                        &second.store(0, 222)
+                        one = first.load(0)
+                        two = second.load(0)
+                        length = first.length()
+                        second.release()
+                        first.release()
+                    },
+                }
+            },
+        }
+
+        arena.release()
+
+        testing.assert(!refused, "an arena of four thousand bytes refused ninety-six")?
+        testing.assert_eq(fresh, 0, "an arena hands out storage holding something")?
+        testing.assert_eq(one, 111, "an allocation lost what was stored in it")?
+        testing.assert_eq(two, 222, "two allocations out of one arena overlap")?
+        testing.assert_eq(length, 64, "an allocation is not as long as it was asked for")?
+
+        .Ok(())
     }
 
-    arena.release()
-
-    testing.assert(!refused, "an arena of four thousand bytes refused ninety-six")?
-    testing.assert_eq(fresh, 0, "an arena hands out storage holding something")?
-    testing.assert_eq(one, 111, "an allocation lost what was stored in it")?
-    testing.assert_eq(two, 222, "two allocations out of one arena overlap")?
-    testing.assert_eq(length, 64, "an allocation is not as long as it was asked for")?
-
-    .Ok(())
-}
-
-test fn a_handle_written_without_a_parent_is_a_handle_over_the_system() {
-    let arena = Arena.open(system(), 64)
-    let short: Handle = arena.handle()
-    let long: Handle[SystemAllocator] = short
-    var acquired = false
-    match long.acquire(8) {
-        Err(_) => {},
-        Ok(buffer) => {
-            var held = buffer
-            acquired = true
-            held.release()
-        },
-    }
-    arena.release()
-    testing.assert(acquired, "a handle over the system allocator refused eight bytes")?
-}
-
-// Release the inner arena before the outer arena that owns its storage.
-test fn an_arena_backs_another_arena() {
-    let outer = Arena.open(system(), 4096)
-    let a = outer.handle()
-
-    let inner = Arena.open(a, 1024)
-    let b = inner.handle()
-
-    var refused = true
-    var fresh: UInt64 = 1
-    var kept: UInt64 = 0
-
-    match b.acquire(128) {
-        Err(_) => {},
-        Ok(buffer) => {
-            var held = buffer
-            refused = false
-            fresh = held.load(8)
-            &held.store(8, 999)
-            kept = held.load(8)
-            held.release()
-        },
+    test fn a_handle_written_without_a_parent_is_a_handle_over_the_system() {
+        let arena = Arena.open(system(), 64)
+        let short: Handle = arena.handle()
+        let long: Handle[SystemAllocator] = short
+        var acquired = false
+        match long.acquire(8) {
+            Err(_) => {},
+            Ok(buffer) => {
+                var held = buffer
+                acquired = true
+                held.release()
+            },
+        }
+        arena.release()
+        testing.assert(acquired, "a handle over the system allocator refused eight bytes")?
     }
 
-    inner.release()
-    outer.release()
+    // Release the inner arena before the outer arena that owns its storage.
+    test fn an_arena_backs_another_arena() {
+        let outer = Arena.open(system(), 4096)
+        let a = outer.handle()
 
-    testing.assert(!refused, "an arena over an arena refused what its slab holds")?
-    testing.assert_eq(fresh, 0, "an arena over an arena hands out storage holding something")?
-    testing.assert_eq(kept, 999, "an allocation out of a nested arena lost what was stored in it")?
+        let inner = Arena.open(a, 1024)
+        let b = inner.handle()
 
-    .Ok(())
-}
+        var refused = true
+        var fresh: UInt64 = 1
+        var kept: UInt64 = 0
 
-test fn an_arena_the_backing_refused_refuses_everything() {
-    // The largest byte count cannot be reserved as one addressable allocation.
-    let arena = Arena.open(system(), UInt64.max)
-    let a = arena.handle()
+        match b.acquire(128) {
+            Err(_) => {},
+            Ok(buffer) => {
+                var held = buffer
+                refused = false
+                fresh = held.load(8)
+                &held.store(8, 999)
+                kept = held.load(8)
+                held.release()
+            },
+        }
 
-    var handed = false
+        inner.release()
+        outer.release()
 
-    match a.acquire(8) {
-        Err(_) => {},
-        Ok(b) => {
-            handed = true
-            b.release()
-        },
+        testing.assert(!refused, "an arena over an arena refused what its slab holds")?
+        testing.assert_eq(fresh, 0, "an arena over an arena hands out storage holding something")?
+        testing.assert_eq(kept, 999, "an allocation out of a nested arena lost what was stored in it")?
+
+        .Ok(())
     }
 
-    arena.release()
+    test fn an_arena_the_backing_refused_refuses_everything() {
+        // The largest byte count cannot be reserved as one addressable allocation.
+        let arena = Arena.open(system(), UInt64.max)
+        let a = arena.handle()
 
-    testing.assert(!handed, "an arena holding no slab handed out storage")?
+        var handed = false
 
-    .Ok(())
+        match a.acquire(8) {
+            Err(_) => {},
+            Ok(b) => {
+                handed = true
+                b.release()
+            },
+        }
+
+        arena.release()
+
+        testing.assert(!handed, "an arena holding no slab handed out storage")?
+
+        .Ok(())
+    }
+
+    test fn an_arena_refuses_what_it_cannot_hold() {
+        let arena = Arena.open(system(), 256)
+        let a = arena.handle()
+
+        var handed = false
+        var refused = true
+        var length: UInt64 = 0
+
+        match a.acquire(4096) {
+            Err(_) => {},
+            Ok(b) => {
+                handed = true
+                b.release()
+            },
+        }
+
+        match a.acquire(16) {
+            Err(_) => {},
+            Ok(b) => {
+                refused = false
+                length = b.length()
+                b.release()
+            },
+        }
+
+        arena.release()
+
+        testing.assert(!handed, "an arena answered with more storage than it holds")?
+        testing.assert(!refused, "an arena refused sixteen bytes it holds")?
+        testing.assert_eq(length, 16, "an allocation is not as long as it was asked for")?
+
+        .Ok(())
+    }
+
+    test fn allocating_again_preserves_a_live_buffer_view() {
+        defer let arena = Arena.open(system(), 64)
+        let handle = arena.handle()
+        defer var first = handle.acquire(8).unwrap()
+        &first.store_byte(0, 91)
+        let view = first.as_slice()
+        defer let second = handle.acquire(8).unwrap()
+        testing.assert_eq(view[0], UInt8(91), "allocation bookkeeping changed observed bytes")?
+        .Ok(())
+    }
+
+    test fn a_refused_overflowing_reservation_keeps_the_cursor() {
+        // The eight-byte cursor leaves exactly 24 bytes available in this slab.
+        defer let arena = Arena.open(system(), 32)
+        let handle = arena.handle()
+        let refused = match handle.acquire(UInt64.max) {
+            Err(_) => true,
+            Ok(buffer) => {
+                buffer.release()
+                false
+            },
+        }
+        defer let buffer = handle.acquire(24).unwrap()
+        testing.assert(refused, "an overflowing reservation was accepted")?
+        testing.assert_eq(buffer.length(), UInt64(24), "refusal advanced the allocation cursor")?
+        .Ok(())
+    }
+
+    // Take back everything the arena handed out so its whole slab can be
+    // handed out again. Reservations are zeroed when handed out only because
+    // the unused part of the slab is kept zeroed, so rewinding zeroes the
+    // bytes that were used and no others: its cost is what was used, not the
+    // slab's size. It takes the arena `inout`, so no handle or allocation
+    // from it can still be live.
+    pub fn rewind(inout self: Self) {
+        match read self.slab {
+            None => {},
+            Some(buffer) => {
+                let used = linea_raw_load(buffer.at, buffer.len, 0)
+                var offset: UInt64 = 0
+                while offset < used {
+                    linea_raw_store(buffer.at, buffer.len, arena_header + offset, 0)
+                    offset += arena_header
+                }
+                linea_raw_store(buffer.at, buffer.len, 0, 0)
+            },
+        }
+    }
+
+    test fn a_rewound_arena_hands_out_its_slab_again_zeroed() {
+        // The eight-byte cursor leaves 56 bytes to hand out.
+        defer var arena = Arena.open(system(), 64)
+        var first = arena.handle().acquire(56).unwrap()
+        &first.store(0, 7)
+        &first.store(48, 9)
+        first.release()
+        let full = arena.handle().acquire(8).is_err()
+        &arena.rewind()
+        let again = arena.handle().acquire(56).unwrap()
+        let zeroed = again.load(0) == 0 && again.load(48) == 0
+        again.release()
+        &arena.rewind()
+        &arena.rewind()
+        let twice = arena.handle().acquire(56).is_ok()
+        testing.assert(full, "a full arena handed out more")?
+        testing.assert(zeroed, "a rewound arena handed out bytes it had not zeroed")?
+        testing.assert(twice, "rewinding an empty arena lost its slab")?
+        .Ok(())
+    }
 }
 
 impl[H: Allocator] Release for Arena[H] {
@@ -239,110 +343,4 @@ impl[H: Allocator] Allocator for Handle[H] {
             },
         }
     }
-}
-
-test fn an_arena_refuses_what_it_cannot_hold() {
-    let arena = Arena.open(system(), 256)
-    let a = arena.handle()
-
-    var handed = false
-    var refused = true
-    var length: UInt64 = 0
-
-    match a.acquire(4096) {
-        Err(_) => {},
-        Ok(b) => {
-            handed = true
-            b.release()
-        },
-    }
-
-    match a.acquire(16) {
-        Err(_) => {},
-        Ok(b) => {
-            refused = false
-            length = b.length()
-            b.release()
-        },
-    }
-
-    arena.release()
-
-    testing.assert(!handed, "an arena answered with more storage than it holds")?
-    testing.assert(!refused, "an arena refused sixteen bytes it holds")?
-    testing.assert_eq(length, 16, "an allocation is not as long as it was asked for")?
-
-    .Ok(())
-}
-
-test fn allocating_again_preserves_a_live_buffer_view() {
-    defer let arena = Arena.open(system(), 64)
-    let handle = arena.handle()
-    defer var first = handle.acquire(8).unwrap()
-    &first.store_byte(0, 91)
-    let view = first.as_slice()
-    defer let second = handle.acquire(8).unwrap()
-    testing.assert_eq(view[0], UInt8(91), "allocation bookkeeping changed observed bytes")?
-    .Ok(())
-}
-
-test fn a_refused_overflowing_reservation_keeps_the_cursor() {
-    // The eight-byte cursor leaves exactly 24 bytes available in this slab.
-    defer let arena = Arena.open(system(), 32)
-    let handle = arena.handle()
-    let refused = match handle.acquire(UInt64.max) {
-        Err(_) => true,
-        Ok(buffer) => {
-            buffer.release()
-            false
-        },
-    }
-    defer let buffer = handle.acquire(24).unwrap()
-    testing.assert(refused, "an overflowing reservation was accepted")?
-    testing.assert_eq(buffer.length(), UInt64(24), "refusal advanced the allocation cursor")?
-    .Ok(())
-}
-
-impl[H: Allocator] Arena[H] {
-    // Take back everything the arena handed out so its whole slab can be
-    // handed out again. Reservations are zeroed when handed out only because
-    // the unused part of the slab is kept zeroed, so rewinding zeroes the
-    // bytes that were used and no others: its cost is what was used, not the
-    // slab's size. It takes the arena `inout`, so no handle or allocation
-    // from it can still be live.
-    pub fn rewind(inout self: Self) {
-        match read self.slab {
-            None => {},
-            Some(buffer) => {
-                let used = linea_raw_load(buffer.at, buffer.len, 0)
-                var offset: UInt64 = 0
-                while offset < used {
-                    linea_raw_store(buffer.at, buffer.len, arena_header + offset, 0)
-                    offset += arena_header
-                }
-                linea_raw_store(buffer.at, buffer.len, 0, 0)
-            },
-        }
-    }
-}
-
-test fn a_rewound_arena_hands_out_its_slab_again_zeroed() {
-    // The eight-byte cursor leaves 56 bytes to hand out.
-    defer var arena = Arena.open(system(), 64)
-    var first = arena.handle().acquire(56).unwrap()
-    &first.store(0, 7)
-    &first.store(48, 9)
-    first.release()
-    let full = arena.handle().acquire(8).is_err()
-    &arena.rewind()
-    let again = arena.handle().acquire(56).unwrap()
-    let zeroed = again.load(0) == 0 && again.load(48) == 0
-    again.release()
-    &arena.rewind()
-    &arena.rewind()
-    let twice = arena.handle().acquire(56).is_ok()
-    testing.assert(full, "a full arena handed out more")?
-    testing.assert(zeroed, "a rewound arena handed out bytes it had not zeroed")?
-    testing.assert(twice, "rewinding an empty arena lost its slab")?
-    .Ok(())
 }

@@ -79,6 +79,63 @@ the file declares them. The third test checks the error's variant with a
 pattern inside a pattern, `Err(Syntax(_))`, which matches only an `Err`
 carrying a `Syntax` error ([Errors](03-errors.md#when-to-keep-match)).
 
+## Tests inside an implementation
+
+A `test fn` can sit at the top level of a module, beside the functions it tests,
+and it can also sit directly inside an inherent `impl Type { … }` block beside
+the methods:
+
+```linea
+import std.io
+import std.testing
+
+struct Counter {
+    value: UInt64,
+}
+
+impl Counter {
+    pub fn new() -> Counter {
+        Counter { value = 0 }
+    }
+
+    test fn a_new_counter_starts_at_zero() {
+        let counter = Counter.new()
+        testing.assert_eq(counter.value, 0, "initial value")?
+    }
+
+    pub fn bump(inout self: Self) {
+        self.value += 1
+    }
+
+    test fn bump_increments_the_counter() {
+        var counter = Counter.new()
+        &counter.bump()
+        testing.assert_eq(counter.value, 1, "value after one bump")?
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var counter = Counter.new()
+    &counter.bump()
+    io.println("count: {counter.value}")?
+    .Ok(0)
+}
+```
+
+```
+ok    a_new_counter_starts_at_zero
+ok    bump_increments_the_counter
+
+2 passed, 0 failed
+```
+
+This keeps each method and its unit tests together without having to close and
+reopen the `impl` block around them. A test declared inside an `impl Type` is not
+a callable member of `Type` (it cannot be called as `Counter.a_new_counter_starts_at_zero`
+or `counter.bump_increments_the_counter`), and does not inherit generic type parameters
+from the enclosing `impl`. Because trait implementations supply behaviour that a trait
+declares, tests sit in inherent implementations, not in trait implementations (`impl Trait for Type`).
+
 ## Helpers that tests share
 
 Tests often need the same data: a sample order, a request, a configured

@@ -1,0 +1,10 @@
+error[S-Test]: a test declares no visibility
+  --> tests/decl/a_test_in_an_impl_declares_no_visibility.lin:11:5
+   |
+11 |     pub test fn a_thing_holds() -> Result[(), IoError] {
+   |     ^^^ the compiler writes the only call to a test, so nothing can import it
+error[N-Unused]: `Box` is never used
+ --> tests/decl/a_test_in_an_impl_declares_no_visibility.lin:5:8
+  |
+5 | struct Box {
+  |        ^^^ name it in an annotation, or remove it

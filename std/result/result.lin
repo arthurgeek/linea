@@ -80,116 +80,129 @@ struct ResultAffineValue { number: UInt8 }
 
 struct ResultAffineError { code: UInt8 }
 
+// ResultMappedError is a caller's error enum that `map_err` wraps an error in.
+@derive(Equatable, Debug)
+enum ResultMappedError {
+    Code(UInt8),
+}
+
+// Panic when called, for a fallback that must not run.
+fn result_test_fallback_must_not_run(sink error: ResultTestToken) -> UInt8 {
+    match error {
+        Number(_) => panic("unwrap_or_else called its fallback for Ok"),
+    }
+}
+
+// Release an owned arena error and answer 7.
+fn result_test_close_error_arena(sink error: mem.Arena[mem.SystemAllocator]) -> UInt8 where carries() {
+    error.release()
+    7
+}
+
 impl[T, E] Result[T, E] {
     // Return whether this is a success, leaving its payload in place.
     pub fn is_ok(self: Self) -> Bool {
         match read self { Ok(_) => true, Err(_) => false }
     }
-}
 
-test fn is_ok_answers_whether_this_is_a_success() {
-    let success: Result[UInt8, UInt8] = .Ok(1)
-    let failure: Result[UInt8, UInt8] = .Err(1)
-    testing.assert(success.is_ok(), "a success was not Ok")?
-    testing.assert(!failure.is_ok(), "an error was Ok")?
-}
+    test fn is_ok_answers_whether_this_is_a_success() {
+        let success: Result[UInt8, UInt8] = .Ok(1)
+        let failure: Result[UInt8, UInt8] = .Err(1)
+        testing.assert(success.is_ok(), "a success was not Ok")?
+        testing.assert(!failure.is_ok(), "an error was Ok")?
+    }
 
-impl[T, E] Result[T, E] {
     // Return whether this is an error, leaving its payload in place.
     pub fn is_err(self: Self) -> Bool {
         match read self { Ok(_) => false, Err(_) => true }
     }
-}
 
-test fn tag_predicates_preserve_affine_payloads() {
-    let success: Result[ResultPredicateAffine, ResultPredicateAffine] = .Ok(.Value(7))
-    let failure: Result[ResultPredicateAffine, ResultPredicateAffine] = .Err(.Value(9))
-    let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
-    let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
-    let success_number = match success {
-        Ok(Value(value)) => value,
-        Err(Value(value)) => value,
+    test fn tag_predicates_preserve_affine_payloads() {
+        let success: Result[ResultPredicateAffine, ResultPredicateAffine] = .Ok(.Value(7))
+        let failure: Result[ResultPredicateAffine, ResultPredicateAffine] = .Err(.Value(9))
+        let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
+        let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
+        let success_number = match success {
+            Ok(Value(value)) => value,
+            Err(Value(value)) => value,
+        }
+        let failure_number = match failure {
+            Ok(Value(value)) => value,
+            Err(Value(value)) => value,
+        }
+        testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
+        testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
+        testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
     }
-    let failure_number = match failure {
-        Ok(Value(value)) => value,
-        Err(Value(value)) => value,
-    }
-    testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
-    testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
-    testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
-}
 
-test fn tag_predicates_preserve_linear_payloads() {
-    let success: Result[ResultPredicateLinear, ResultPredicateLinear] = .Ok(.Value(7))
-    let failure: Result[ResultPredicateLinear, ResultPredicateLinear] = .Err(.Value(9))
-    let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
-    let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
-    let success_number = match success {
-        Ok(Value(value)) => value,
-        Err(Value(value)) => value,
+    test fn tag_predicates_preserve_linear_payloads() {
+        let success: Result[ResultPredicateLinear, ResultPredicateLinear] = .Ok(.Value(7))
+        let failure: Result[ResultPredicateLinear, ResultPredicateLinear] = .Err(.Value(9))
+        let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
+        let failure_tags = failure.is_err() && !failure.is_ok() && failure.is_err()
+        let success_number = match success {
+            Ok(Value(value)) => value,
+            Err(Value(value)) => value,
+        }
+        let failure_number = match failure {
+            Ok(Value(value)) => value,
+            Err(Value(value)) => value,
+        }
+        testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
+        testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
+        testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
     }
-    let failure_number = match failure {
-        Ok(Value(value)) => value,
-        Err(Value(value)) => value,
-    }
-    testing.assert(success_tags && failure_tags, "Result predicates changed a tag")?
-    testing.assert_eq(success_number, 7, "Result predicates consumed or changed the Ok payload")?
-    testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
-}
 
-impl[T, E] Result[T, E] {
     // Transform a success with `transform`; an error passes through unchanged.
     // The callback is dropped at the end; `map_inout` borrows one instead.
     pub fn map[U, F: inout fn(sink value: T) -> U](sink self: Self, sink transform: F) -> Result[U, E] where carries(.Ok: self, transform), carries(.Err: self), F: Discardable {
         var transforming = transform
         self.map_inout(&transforming)
     }
-}
 
-test fn map_takes_a_transform_that_changes_a_lent_count() {
-    var calls = UInt8(0)
-    let succeeded: Result[UInt8, UInt8] = .Ok(4)
-    let mapped = succeeded.map(
-        inout [inout calls] |sink value| {
-            calls += 1
-            value + 3
-        },
-    )
-    testing.assert_eq(mapped, .Ok(7), "map did not transform Ok")?
-    testing.assert_eq(calls, UInt8(1), "map did not call its transform once")?
-}
-
-test fn map_transforms_ok_and_preserves_err() {
-    let success: Result[UInt8, UInt8] = .Ok(5)
-    let mapped_success: Result[UInt8, UInt8] = success.map(|sink value| value * 2)
-    match mapped_success {
-        Ok(value) => testing.assert_eq(value, 10, "mapping Ok did not transform its payload")?,
-        Err(_) => testing.assert(false, "mapping Ok produced Err")?,
+    test fn map_takes_a_transform_that_changes_a_lent_count() {
+        var calls = UInt8(0)
+        let succeeded: Result[UInt8, UInt8] = .Ok(4)
+        let mapped = succeeded.map(
+            inout [inout calls] |sink value| {
+                calls += 1
+                value + 3
+            },
+        )
+        testing.assert_eq(mapped, .Ok(7), "map did not transform Ok")?
+        testing.assert_eq(calls, UInt8(1), "map did not call its transform once")?
     }
 
-    let failure: Result[UInt8, UInt8] = .Err(9)
-    let mapped_failure: Result[UInt8, UInt8] = failure.map(|sink value| value * 2)
-    match mapped_failure {
-        Ok(_) => testing.assert(false, "mapping Err produced Ok")?,
-        Err(error) => testing.assert_eq(error, 9, "mapping Err changed its error")?,
+    test fn map_transforms_ok_and_preserves_err() {
+        let success: Result[UInt8, UInt8] = .Ok(5)
+        let mapped_success: Result[UInt8, UInt8] = success.map(|sink value| value * 2)
+        match mapped_success {
+            Ok(value) => testing.assert_eq(value, 10, "mapping Ok did not transform its payload")?,
+            Err(_) => testing.assert(false, "mapping Ok produced Err")?,
+        }
+
+        let failure: Result[UInt8, UInt8] = .Err(9)
+        let mapped_failure: Result[UInt8, UInt8] = failure.map(|sink value| value * 2)
+        match mapped_failure {
+            Ok(_) => testing.assert(false, "mapping Err produced Ok")?,
+            Err(error) => testing.assert_eq(error, 9, "mapping Err changed its error")?,
+        }
     }
-}
 
-test fn result_combinators_preserve_borrowed_payloads() {
-    let source: UInt64 = 17
-    let other: UInt64 = 23
-    let success: Result[borrow UInt64, borrow UInt64] = .Ok(borrow source)
-    let mapped: Result[borrow UInt64, borrow UInt64] = success.map(|sink value| value)
-    let chained: Result[borrow UInt64, borrow UInt64] = mapped.and_then(|sink value| .Ok(value))
-    testing.assert_eq(*chained.unwrap(), UInt64(17), "result transformation changed its borrowed success")?
+    test fn result_combinators_preserve_borrowed_payloads() {
+        let source: UInt64 = 17
+        let other: UInt64 = 23
+        let success: Result[borrow UInt64, borrow UInt64] = .Ok(borrow source)
+        let mapped: Result[borrow UInt64, borrow UInt64] = success.map(|sink value| value)
+        let chained: Result[borrow UInt64, borrow UInt64] = mapped.and_then(|sink value| .Ok(value))
+        testing.assert_eq(*chained.unwrap(), UInt64(17), "result transformation changed its borrowed success")?
 
-    let failure: Result[borrow UInt64, borrow UInt64] = .Err(borrow other)
-    let changed: Result[borrow UInt64, borrow UInt64] = failure.map_err(|sink error| error)
-    let recovered = changed.unwrap_or_else(|sink error| error)
-    testing.assert_eq(*recovered, UInt64(23), "result fallback changed its borrowed error")?
-}
+        let failure: Result[borrow UInt64, borrow UInt64] = .Err(borrow other)
+        let changed: Result[borrow UInt64, borrow UInt64] = failure.map_err(|sink error| error)
+        let recovered = changed.unwrap_or_else(|sink error| error)
+        testing.assert_eq(*recovered, UInt64(23), "result fallback changed its borrowed error")?
+    }
 
-impl[T, E] Result[T, E] {
     // Map as `map` does, with a transform whose state the caller keeps.
     pub fn map_inout[U, F: inout fn(sink value: T) -> U](sink self: Self, inout transform: F) -> Result[U, E] where carries(.Ok: self, transform), carries(.Err: self) {
         match self {
@@ -197,42 +210,40 @@ impl[T, E] Result[T, E] {
             Err(error) => .Err(error),
         }
     }
-}
 
-test fn a_mutable_map_calls_its_transform_only_for_ok() {
-    var calls = UInt8(0)
-    var transform = inout [inout calls] |sink value: UInt8| {
-        calls += 1
-        UInt64(value) + UInt64(calls)
+    test fn a_mutable_map_calls_its_transform_only_for_ok() {
+        var calls = UInt8(0)
+        var transform = inout [inout calls] |sink value: UInt8| {
+            calls += 1
+            UInt64(value) + UInt64(calls)
+        }
+        let success: Result[UInt8, ResultTestToken] = .Ok(4)
+        let failure: Result[UInt8, ResultTestToken] = .Err(.Number(9))
+        let mapped = success.map_inout(&transform).unwrap()
+        let preserved = failure.map_inout(&transform)
+        let error_number = match preserved { Ok(value) => UInt8(value), Err(Number(number)) => number }
+        testing.assert_eq(mapped, UInt64(5), "mutable Result.map returned the wrong success")?
+        testing.assert_eq(error_number, UInt8(9), "mutable Result.map lost its owned error")?
+        testing.assert_eq(calls, UInt8(1), "mutable Result.map ran for Err")?
     }
-    let success: Result[UInt8, ResultTestToken] = .Ok(4)
-    let failure: Result[UInt8, ResultTestToken] = .Err(.Number(9))
-    let mapped = success.map_inout(&transform).unwrap()
-    let preserved = failure.map_inout(&transform)
-    let error_number = match preserved { Ok(value) => UInt8(value), Err(Number(number)) => number }
-    testing.assert_eq(mapped, UInt64(5), "mutable Result.map returned the wrong success")?
-    testing.assert_eq(error_number, UInt8(9), "mutable Result.map lost its owned error")?
-    testing.assert_eq(calls, UInt8(1), "mutable Result.map ran for Err")?
-}
 
-test fn mutable_result_combinator_preserves_its_callers_protocol_capture() {
-    var transform = [sink token = ResultTestToken.Number(UInt8(7))] |sink value: UInt8| {
-        value + match read token { Number(number) => number }
+    test fn mutable_result_combinator_preserves_its_callers_protocol_capture() {
+        var transform = [sink token = ResultTestToken.Number(UInt8(7))] |sink value: UInt8| {
+            value + match read token { Number(number) => number }
+        }
+        let failure: Result[UInt8, UInt8] = .Err(3)
+        let success: Result[UInt8, UInt8] = .Ok(2)
+        let skipped = failure.map_inout(&transform)
+        let mapped = success.map_inout(&transform)
+        let { token } = transform.into_captures()
+        let recovered = match token { Number(number) => number }
+        let expected_error: Result[UInt8, UInt8] = .Err(3)
+        let expected_success: Result[UInt8, UInt8] = .Ok(9)
+        testing.assert_eq(skipped, expected_error, "mutable Result.map changed a skipped error")?
+        testing.assert_eq(mapped, expected_success, "mutable Result.map could not borrow a read callback")?
+        testing.assert_eq(recovered, UInt8(7), "mutable Result.map settled its caller's protocol capture")?
     }
-    let failure: Result[UInt8, UInt8] = .Err(3)
-    let success: Result[UInt8, UInt8] = .Ok(2)
-    let skipped = failure.map_inout(&transform)
-    let mapped = success.map_inout(&transform)
-    let { token } = transform.into_captures()
-    let recovered = match token { Number(number) => number }
-    let expected_error: Result[UInt8, UInt8] = .Err(3)
-    let expected_success: Result[UInt8, UInt8] = .Ok(9)
-    testing.assert_eq(skipped, expected_error, "mutable Result.map changed a skipped error")?
-    testing.assert_eq(mapped, expected_success, "mutable Result.map could not borrow a read callback")?
-    testing.assert_eq(recovered, UInt8(7), "mutable Result.map settled its caller's protocol capture")?
-}
 
-impl[T, E] Result[T, E] {
     // Transform an error with `transform`; a success passes through unchanged.
     // A variant constructor such as `.Code` wraps the error in a caller's
     // enum. The callback is dropped at the end.
@@ -240,55 +251,47 @@ impl[T, E] Result[T, E] {
         var transforming = transform
         self.map_err_inout(&transforming)
     }
-}
 
-test fn map_err_takes_a_transform_that_changes_a_lent_count() {
-    var calls = UInt8(0)
-    let failed: Result[UInt8, UInt8] = .Err(4)
-    let mapped = failed.map_err(
-        inout [inout calls] |sink error| {
-            calls += 1
-            UInt16(error) * 10
-        },
-    )
-    testing.assert_eq(mapped, .Err(40), "map_err did not transform Err")?
-    testing.assert_eq(calls, UInt8(1), "map_err did not call its transform once")?
-}
-
-test fn map_err_transforms_err_and_preserves_ok() {
-    let success: Result[UInt8, UInt8] = .Ok(5)
-    let mapped_success = success.map_err(|sink error| UInt16(error) + 1)
-    match mapped_success {
-        Ok(value) => testing.assert_eq(value, 5, "map_err changed the Ok payload")?,
-        Err(_) => testing.assert(false, "map_err changed Ok into Err")?,
+    test fn map_err_takes_a_transform_that_changes_a_lent_count() {
+        var calls = UInt8(0)
+        let failed: Result[UInt8, UInt8] = .Err(4)
+        let mapped = failed.map_err(
+            inout [inout calls] |sink error| {
+                calls += 1
+                UInt16(error) * 10
+            },
+        )
+        testing.assert_eq(mapped, .Err(40), "map_err did not transform Err")?
+        testing.assert_eq(calls, UInt8(1), "map_err did not call its transform once")?
     }
 
-    let failure: Result[UInt8, UInt8] = .Err(9)
-    let mapped_failure = failure.map_err(|sink error| UInt16(error) + 1)
-    match mapped_failure {
-        Ok(_) => testing.assert(false, "map_err changed Err into Ok")?,
-        Err(error) => testing.assert_eq(error, 10, "map_err did not transform the Err payload")?,
+    test fn map_err_transforms_err_and_preserves_ok() {
+        let success: Result[UInt8, UInt8] = .Ok(5)
+        let mapped_success = success.map_err(|sink error| UInt16(error) + 1)
+        match mapped_success {
+            Ok(value) => testing.assert_eq(value, 5, "map_err changed the Ok payload")?,
+            Err(_) => testing.assert(false, "map_err changed Ok into Err")?,
+        }
+
+        let failure: Result[UInt8, UInt8] = .Err(9)
+        let mapped_failure = failure.map_err(|sink error| UInt16(error) + 1)
+        match mapped_failure {
+            Ok(_) => testing.assert(false, "map_err changed Err into Ok")?,
+            Err(error) => testing.assert_eq(error, 10, "map_err did not transform the Err payload")?,
+        }
     }
-}
 
-// ResultMappedError is a caller's error enum that `map_err` wraps an error in.
-@derive(Equatable, Debug)
-enum ResultMappedError {
-    Code(UInt8),
-}
+    test fn map_err_wraps_an_error_in_the_contextual_enum() {
+        let success: Result[UInt8, UInt8] = .Ok(5)
+        let failure: Result[UInt8, UInt8] = .Err(9)
+        let mapped_success: Result[UInt8, ResultMappedError] = success.map_err(.Code)
+        let mapped_failure: Result[UInt8, ResultMappedError] = failure.map_err(.Code)
+        let expected_success: Result[UInt8, ResultMappedError] = .Ok(5)
+        let expected_failure: Result[UInt8, ResultMappedError] = .Err(.Code(9))
+        testing.assert_eq(mapped_success, expected_success, "wrapping an error changed the success")?
+        testing.assert_eq(mapped_failure, expected_failure, "wrapping an error lost its payload")?
+    }
 
-test fn map_err_wraps_an_error_in_the_contextual_enum() {
-    let success: Result[UInt8, UInt8] = .Ok(5)
-    let failure: Result[UInt8, UInt8] = .Err(9)
-    let mapped_success: Result[UInt8, ResultMappedError] = success.map_err(.Code)
-    let mapped_failure: Result[UInt8, ResultMappedError] = failure.map_err(.Code)
-    let expected_success: Result[UInt8, ResultMappedError] = .Ok(5)
-    let expected_failure: Result[UInt8, ResultMappedError] = .Err(.Code(9))
-    testing.assert_eq(mapped_success, expected_success, "wrapping an error changed the success")?
-    testing.assert_eq(mapped_failure, expected_failure, "wrapping an error lost its payload")?
-}
-
-impl[T, E] Result[T, E] {
     // Map an error as `map_err` does, with a transform whose state the caller
     // keeps.
     pub fn map_err_inout[U, F: inout fn(sink error: E) -> U](sink self: Self, inout transform: F) -> Result[T, U] where carries(.Ok: self), carries(.Err: self, transform) {
@@ -297,68 +300,64 @@ impl[T, E] Result[T, E] {
             Err(error) => .Err(&transform(error)),
         }
     }
-}
 
-test fn a_mutable_map_err_consumes_only_an_error() {
-    var calls = UInt8(0)
-    var transform = inout [inout calls] |sink error: ResultTestToken| {
-        calls += 1
-        match error { Number(value) => UInt64(value) + UInt64(calls) }
+    test fn a_mutable_map_err_consumes_only_an_error() {
+        var calls = UInt8(0)
+        var transform = inout [inout calls] |sink error: ResultTestToken| {
+            calls += 1
+            match error { Number(value) => UInt64(value) + UInt64(calls) }
+        }
+        let success: Result[UInt8, ResultTestToken] = .Ok(4)
+        let failure: Result[UInt8, ResultTestToken] = .Err(.Number(9))
+        let unchanged = success.map_err_inout(&transform)
+        let changed = failure.map_err_inout(&transform)
+        let expected_success: Result[UInt8, UInt64] = .Ok(4)
+        let expected_error: Result[UInt8, UInt64] = .Err(10)
+        testing.assert_eq(unchanged, expected_success, "mutable Result.map_err replaced Ok")?
+        testing.assert_eq(changed, expected_error, "mutable Result.map_err did not consume its error")?
+        testing.assert_eq(calls, UInt8(1), "mutable Result.map_err ran for Ok")?
     }
-    let success: Result[UInt8, ResultTestToken] = .Ok(4)
-    let failure: Result[UInt8, ResultTestToken] = .Err(.Number(9))
-    let unchanged = success.map_err_inout(&transform)
-    let changed = failure.map_err_inout(&transform)
-    let expected_success: Result[UInt8, UInt64] = .Ok(4)
-    let expected_error: Result[UInt8, UInt64] = .Err(10)
-    testing.assert_eq(unchanged, expected_success, "mutable Result.map_err replaced Ok")?
-    testing.assert_eq(changed, expected_error, "mutable Result.map_err did not consume its error")?
-    testing.assert_eq(calls, UInt8(1), "mutable Result.map_err ran for Ok")?
-}
 
-impl[T, E] Result[T, E] {
     // Transform a success into another Result; an error passes through
     // unchanged. The callback is dropped at the end.
     pub fn and_then[U, F: inout fn(sink value: T) -> Result[U, E]](sink self: Self, sink transform: F) -> Result[U, E] where carries(.Ok: self, transform), carries(.Err: self, transform), F: Discardable {
         var transforming = transform
         self.and_then_inout(&transforming)
     }
-}
 
-test fn and_then_takes_a_transform_that_changes_a_lent_count() {
-    var calls = UInt8(0)
-    let succeeded: Result[UInt8, UInt8] = .Ok(4)
-    let chained = succeeded.and_then(
-        inout [inout calls] |sink value| -> Result[UInt16, UInt8] {
-            calls += 1
-            .Ok(UInt16(value) * 2)
-        },
-    )
-    testing.assert_eq(chained, .Ok(8), "and_then did not chain Ok")?
-    testing.assert_eq(calls, UInt8(1), "and_then did not call its transform once")?
-}
-
-test fn and_then_transforms_ok_and_preserves_err() {
-    let success: Result[UInt8, UInt8] = .Ok(4)
-    let transformed_success: Result[UInt16, UInt8] = success.and_then(
-        |sink value| .Ok(UInt16(value) + 3),
-    )
-    match transformed_success {
-        Ok(value) => testing.assert_eq(value, 7, "and_then did not return the callback result")?,
-        Err(_) => testing.assert(false, "and_then changed Ok into Err")?,
+    test fn and_then_takes_a_transform_that_changes_a_lent_count() {
+        var calls = UInt8(0)
+        let succeeded: Result[UInt8, UInt8] = .Ok(4)
+        let chained = succeeded.and_then(
+            inout [inout calls] |sink value| -> Result[UInt16, UInt8] {
+                calls += 1
+                .Ok(UInt16(value) * 2)
+            },
+        )
+        testing.assert_eq(chained, .Ok(8), "and_then did not chain Ok")?
+        testing.assert_eq(calls, UInt8(1), "and_then did not call its transform once")?
     }
 
-    let failure: Result[UInt8, UInt8] = .Err(9)
-    let transformed_failure: Result[UInt16, UInt8] = failure.and_then(
-        |sink value| .Ok(UInt16(value)),
-    )
-    match transformed_failure {
-        Ok(_) => testing.assert(false, "and_then changed Err into Ok")?,
-        Err(error) => testing.assert_eq(error, 9, "and_then changed the Err payload")?,
-    }
-}
+    test fn and_then_transforms_ok_and_preserves_err() {
+        let success: Result[UInt8, UInt8] = .Ok(4)
+        let transformed_success: Result[UInt16, UInt8] = success.and_then(
+            |sink value| .Ok(UInt16(value) + 3),
+        )
+        match transformed_success {
+            Ok(value) => testing.assert_eq(value, 7, "and_then did not return the callback result")?,
+            Err(_) => testing.assert(false, "and_then changed Ok into Err")?,
+        }
 
-impl[T, E] Result[T, E] {
+        let failure: Result[UInt8, UInt8] = .Err(9)
+        let transformed_failure: Result[UInt16, UInt8] = failure.and_then(
+            |sink value| .Ok(UInt16(value)),
+        )
+        match transformed_failure {
+            Ok(_) => testing.assert(false, "and_then changed Err into Ok")?,
+            Err(error) => testing.assert_eq(error, 9, "and_then changed the Err payload")?,
+        }
+    }
+
     // Chain as `and_then` does, with a transform whose state the caller keeps.
     pub fn and_then_inout[U, F: inout fn(sink value: T) -> Result[U, E]](sink self: Self, inout transform: F) -> Result[U, E] where carries(.Ok: self, transform), carries(.Err: self, transform) {
         match self {
@@ -366,26 +365,24 @@ impl[T, E] Result[T, E] {
             Err(error) => .Err(error),
         }
     }
-}
 
-test fn a_mutable_and_then_calls_its_transform_only_for_ok() {
-    var calls = UInt8(0)
-    var chain = inout [inout calls] |sink value: UInt8| {
-        calls += 1
-        let result: Result[UInt64, ResultTestToken] = .Ok(UInt64(value))
-        result
+    test fn a_mutable_and_then_calls_its_transform_only_for_ok() {
+        var calls = UInt8(0)
+        var chain = inout [inout calls] |sink value: UInt8| {
+            calls += 1
+            let result: Result[UInt64, ResultTestToken] = .Ok(UInt64(value))
+            result
+        }
+        let available: Result[UInt8, ResultTestToken] = .Ok(7)
+        let rejected: Result[UInt8, ResultTestToken] = .Err(.Number(11))
+        let chained = available.and_then_inout(&chain).unwrap()
+        let skipped = rejected.and_then_inout(&chain)
+        let skipped_number = match skipped { Ok(value) => UInt8(value), Err(Number(number)) => number }
+        testing.assert_eq(chained, UInt64(7), "mutable Result.and_then returned the wrong success")?
+        testing.assert_eq(skipped_number, UInt8(11), "mutable Result.and_then lost its owned error")?
+        testing.assert_eq(calls, UInt8(1), "mutable Result.and_then ran for Err")?
     }
-    let available: Result[UInt8, ResultTestToken] = .Ok(7)
-    let rejected: Result[UInt8, ResultTestToken] = .Err(.Number(11))
-    let chained = available.and_then_inout(&chain).unwrap()
-    let skipped = rejected.and_then_inout(&chain)
-    let skipped_number = match skipped { Ok(value) => UInt8(value), Err(Number(number)) => number }
-    testing.assert_eq(chained, UInt64(7), "mutable Result.and_then returned the wrong success")?
-    testing.assert_eq(skipped_number, UInt8(11), "mutable Result.and_then lost its owned error")?
-    testing.assert_eq(calls, UInt8(1), "mutable Result.and_then ran for Err")?
-}
 
-impl[T, E] Result[T, E] {
     // Return the success, and panic on an error with the fixed message
     // `called Result.unwrap on Err`. The error payload is not rendered, so no
     // display bound is required.
@@ -395,22 +392,20 @@ impl[T, E] Result[T, E] {
             Err(_) => panic("called Result.unwrap on Err"),
         }
     }
-}
 
-test fn unwrap_returns_ok() {
-    let success: Result[ResultTestToken, UInt8] = .Ok(.Number(5))
-    match success.unwrap() {
-        Number(value) => testing.assert_eq(value, 5, "unwrap did not return the Ok payload")?,
+    test fn unwrap_returns_ok() {
+        let success: Result[ResultTestToken, UInt8] = .Ok(.Number(5))
+        match success.unwrap() {
+            Number(value) => testing.assert_eq(value, 5, "unwrap did not return the Ok payload")?,
+        }
     }
-}
 
-test trap fn unwrap_traps_on_err() -> Result[(), testing.Failure] {
-    let failure: Result[UInt8, UInt8] = .Err(3)
-    let _unwrapped = failure.unwrap()
-    .Ok(())
-}
+    test trap fn unwrap_traps_on_err() -> Result[(), testing.Failure] {
+        let failure: Result[UInt8, UInt8] = .Err(3)
+        let _unwrapped = failure.unwrap()
+        .Ok(())
+    }
 
-impl[T, E] Result[T, E] {
     // Return the success, or `fallback`. The fallback is built whether or not
     // it is used, and an error is dropped, so both must be Discardable.
     pub fn unwrap_or(sink self: Self, sink fallback: T) -> T where
@@ -423,85 +418,68 @@ impl[T, E] Result[T, E] {
             Err(_) => fallback,
         }
     }
-}
 
-test fn unwrap_or_returns_ok_or_the_eager_fallback() {
-    let success: Result[UInt8, UInt8] = .Ok(6)
-    testing.assert_eq(success.unwrap_or(9), 6, "unwrap_or returned its fallback for Ok")?
+    test fn unwrap_or_returns_ok_or_the_eager_fallback() {
+        let success: Result[UInt8, UInt8] = .Ok(6)
+        testing.assert_eq(success.unwrap_or(9), 6, "unwrap_or returned its fallback for Ok")?
 
-    let failure: Result[UInt8, UInt8] = .Err(4)
-    testing.assert_eq(failure.unwrap_or(9), 9, "unwrap_or did not return its fallback for Err")?
-}
-
-test fn an_eager_result_fallback_discards_affine_values_and_errors() {
-    let success: Result[ResultAffineValue, ResultAffineError] = .Ok(.{ number = 4 })
-    let selected = success.unwrap_or(.{ number = 9 })
-    testing.assert_eq(selected.number, UInt8(4), "an affine Ok payload was replaced by its fallback")?
-    let failure: Result[ResultAffineValue, ResultAffineError] = .Err(.{ code = 3 })
-    let fallback = failure.unwrap_or(.{ number = 9 })
-    testing.assert_eq(fallback.number, UInt8(9), "an affine error prevented returning the fallback")?
-}
-
-// Panic when called, for a fallback that must not run.
-fn result_test_fallback_must_not_run(sink error: ResultTestToken) -> UInt8 {
-    match error {
-        Number(_) => panic("unwrap_or_else called its fallback for Ok"),
+        let failure: Result[UInt8, UInt8] = .Err(4)
+        testing.assert_eq(failure.unwrap_or(9), 9, "unwrap_or did not return its fallback for Err")?
     }
-}
 
-impl[T, E] Result[T, E] {
+    test fn an_eager_result_fallback_discards_affine_values_and_errors() {
+        let success: Result[ResultAffineValue, ResultAffineError] = .Ok(.{ number = 4 })
+        let selected = success.unwrap_or(.{ number = 9 })
+        testing.assert_eq(selected.number, UInt8(4), "an affine Ok payload was replaced by its fallback")?
+        let failure: Result[ResultAffineValue, ResultAffineError] = .Err(.{ code = 3 })
+        let fallback = failure.unwrap_or(.{ number = 9 })
+        testing.assert_eq(fallback.number, UInt8(9), "an affine error prevented returning the fallback")?
+    }
+
     // Return the success, or hand the error to `fallback` to make a value only
     // when there is an error. The callback is dropped at the end.
     pub fn unwrap_or_else[F: inout fn(sink error: E) -> T](sink self: Self, sink fallback: F) -> T where carries(self, fallback), F: Discardable {
         var falling_back = fallback
         self.unwrap_or_else_inout(&falling_back)
     }
-}
 
-test fn unwrap_or_else_takes_a_fallback_that_changes_a_lent_count() {
-    var calls = UInt8(0)
-    let failed: Result[UInt8, UInt8] = .Err(4)
-    let value = failed.unwrap_or_else(
-        inout [inout calls] |sink error| {
-            calls += 1
-            error + 5
-        },
-    )
-    testing.assert_eq(value, UInt8(9), "unwrap_or_else did not return its fallback")?
-    testing.assert_eq(calls, UInt8(1), "unwrap_or_else did not call its fallback once")?
-}
+    test fn unwrap_or_else_takes_a_fallback_that_changes_a_lent_count() {
+        var calls = UInt8(0)
+        let failed: Result[UInt8, UInt8] = .Err(4)
+        let value = failed.unwrap_or_else(
+            inout [inout calls] |sink error| {
+                calls += 1
+                error + 5
+            },
+        )
+        testing.assert_eq(value, UInt8(9), "unwrap_or_else did not return its fallback")?
+        testing.assert_eq(calls, UInt8(1), "unwrap_or_else did not call its fallback once")?
+    }
 
-test fn unwrap_or_else_calls_only_for_err() {
-    let success: Result[UInt8, ResultTestToken] = .Ok(7)
-    testing.assert(
-        success.unwrap_or_else(result_test_fallback_must_not_run) == 7,
-        "unwrap_or_else did not return the Ok payload",
-    )?
+    test fn unwrap_or_else_calls_only_for_err() {
+        let success: Result[UInt8, ResultTestToken] = .Ok(7)
+        testing.assert(
+            success.unwrap_or_else(result_test_fallback_must_not_run) == 7,
+            "unwrap_or_else did not return the Ok payload",
+        )?
 
-    let failure: Result[UInt8, ResultTestToken] = .Err(.Number(8))
-    testing.assert(
-        failure.unwrap_or_else(|sink error| match error {
-            Number(value) => value + 1,
-        }) == 9,
-        "unwrap_or_else did not move the Err payload into its fallback",
-    )?
-}
+        let failure: Result[UInt8, ResultTestToken] = .Err(.Number(8))
+        testing.assert(
+            failure.unwrap_or_else(|sink error| match error {
+                Number(value) => value + 1,
+            }) == 9,
+            "unwrap_or_else did not move the Err payload into its fallback",
+        )?
+    }
 
-// Release an owned arena error and answer 7.
-fn result_test_close_error_arena(sink error: mem.Arena[mem.SystemAllocator]) -> UInt8 where carries() {
-    error.release()
-    7
-}
+    test fn a_result_fallback_can_close_an_owned_error_arena() {
+        // The eight-byte capacity is incidental: only the arena owner is consumed.
+        let arena = mem.Arena.open(mem.system(), 8)
+        let failure: Result[UInt8, mem.Arena[mem.SystemAllocator]] = .Err(arena)
+        let answer = failure.unwrap_or_else(result_test_close_error_arena)
+        testing.assert_eq(answer, UInt8(7), "result fallback did not consume its owned error")?
+    }
 
-test fn a_result_fallback_can_close_an_owned_error_arena() {
-    // The eight-byte capacity is incidental: only the arena owner is consumed.
-    let arena = mem.Arena.open(mem.system(), 8)
-    let failure: Result[UInt8, mem.Arena[mem.SystemAllocator]] = .Err(arena)
-    let answer = failure.unwrap_or_else(result_test_close_error_arena)
-    testing.assert_eq(answer, UInt8(7), "result fallback did not consume its owned error")?
-}
-
-impl[T, E] Result[T, E] {
     // Fall back as `unwrap_or_else` does, with a fallback whose state the
     // caller keeps.
     pub fn unwrap_or_else_inout[F: inout fn(sink error: E) -> T](sink self: Self, inout fallback: F) -> T where carries(self, fallback) {
@@ -510,21 +488,21 @@ impl[T, E] Result[T, E] {
             Err(error) => &fallback(error),
         }
     }
-}
 
-test fn a_mutable_fallback_consumes_only_an_error() {
-    var calls = UInt8(0)
-    var fallback = inout [inout calls] |sink error: ResultTestToken| {
-        calls += 1
-        match error { Number(value) => value + calls }
+    test fn a_mutable_fallback_consumes_only_an_error() {
+        var calls = UInt8(0)
+        var fallback = inout [inout calls] |sink error: ResultTestToken| {
+            calls += 1
+            match error { Number(value) => value + calls }
+        }
+        let available: Result[UInt8, ResultTestToken] = .Ok(7)
+        let rejected: Result[UInt8, ResultTestToken] = .Err(.Number(11))
+        let original = available.unwrap_or_else_inout(&fallback)
+        let recovered = rejected.unwrap_or_else_inout(&fallback)
+        testing.assert_eq(original, UInt8(7), "mutable Result fallback replaced Ok")?
+        testing.assert_eq(recovered, UInt8(12), "mutable Result fallback did not consume its error")?
+        testing.assert_eq(calls, UInt8(1), "mutable Result fallback ran for Ok")?
     }
-    let available: Result[UInt8, ResultTestToken] = .Ok(7)
-    let rejected: Result[UInt8, ResultTestToken] = .Err(.Number(11))
-    let original = available.unwrap_or_else_inout(&fallback)
-    let recovered = rejected.unwrap_or_else_inout(&fallback)
-    testing.assert_eq(original, UInt8(7), "mutable Result fallback replaced Ok")?
-    testing.assert_eq(recovered, UInt8(12), "mutable Result fallback did not consume its error")?
-    testing.assert_eq(calls, UInt8(1), "mutable Result fallback ran for Ok")?
 }
 
 // ResultTestSeal is a linear seal a refused parcel owns, so settling the
@@ -567,13 +545,13 @@ impl[T, E: release.Settle] Result[T, E] {
             Err(failure) => .Err(failure.settle()),
         }
     }
-}
 
-test fn settled_keeps_ok_and_reduces_err_to_its_reason() {
-    let delivered: Result[UInt8, ResultTestRefusedParcel] = .Ok(3)
-    let refused: Result[UInt8, ResultTestRefusedParcel] = .Err(.{ weight = 40, seal = .{ number = 1 } })
-    let kept = delivered.settled()
-    let reason = refused.settled()
-    testing.assert_eq(kept, .Ok(3), "settled changed a success")?
-    testing.assert_eq(reason, .Err(40), "settled lost the refused weight")?
+    test fn settled_keeps_ok_and_reduces_err_to_its_reason() {
+        let delivered: Result[UInt8, ResultTestRefusedParcel] = .Ok(3)
+        let refused: Result[UInt8, ResultTestRefusedParcel] = .Err(.{ weight = 40, seal = .{ number = 1 } })
+        let kept = delivered.settled()
+        let reason = refused.settled()
+        testing.assert_eq(kept, .Ok(3), "settled changed a success")?
+        testing.assert_eq(reason, .Err(40), "settled lost the refused weight")?
+    }
 }

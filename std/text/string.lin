@@ -43,39 +43,37 @@ impl TextError {
     }
 }
 
-impl[A: Allocator] String[A] {
-    // Start empty text. It allocates from `allocator` only when it grows.
-    pub fn new_in(allocator: A) -> String[A] where carries(allocator) {
-        .{ bytes = Vec.new_in(allocator) }
-    }
-}
-
-test fn empty_owned_text_needs_no_allocator_capacity() {
-    defer let arena = mem.Arena.open(mem.system(), 8)
-    let opened = String.new_in(arena.handle())
-    let opened_empty = opened.length() == 0 && opened.view() == ""
-    opened.release()
-    let copied = "".to_owned_in(arena.handle()).unwrap()
-    let copied_empty = copied.length() == 0 && copied.view() == ""
-    copied.release()
-    testing.assert(opened_empty && copied_empty, "empty text required allocator capacity")?
-}
-
 impl String[mem.SystemAllocator] {
     // Start empty text in the system allocator. It allocates only when it grows.
     pub fn new() -> String[mem.SystemAllocator] {
         String.new_in(mem.system())
     }
-}
 
-test fn new_owned_text_is_empty_system_text() {
-    let text: String[mem.SystemAllocator] = String.new()
-    let empty = text.length() == 0 && text.view() == ""
-    text.release()
-    testing.assert(empty, "new text was not empty")?
+    test fn new_owned_text_is_empty_system_text() {
+        let text: String[mem.SystemAllocator] = String.new()
+        let empty = text.length() == 0 && text.view() == ""
+        text.release()
+        testing.assert(empty, "new text was not empty")?
+    }
 }
 
 impl[A: Allocator] String[A] {
+    // Start empty text. It allocates from `allocator` only when it grows.
+    pub fn new_in(allocator: A) -> String[A] where carries(allocator) {
+        .{ bytes = Vec.new_in(allocator) }
+    }
+
+    test fn empty_owned_text_needs_no_allocator_capacity() {
+        defer let arena = mem.Arena.open(mem.system(), 8)
+        let opened = String.new_in(arena.handle())
+        let opened_empty = opened.length() == 0 && opened.view() == ""
+        opened.release()
+        let copied = "".to_owned_in(arena.handle()).unwrap()
+        let copied_empty = copied.length() == 0 && copied.view() == ""
+        copied.release()
+        testing.assert(opened_empty && copied_empty, "empty text required allocator capacity")?
+    }
+
     // Take the bytes as text when they are valid UTF-8, or hand them back with
     // where their encoding went wrong. Either way the bytes are not copied.
     pub fn from_bytes(sink bytes: Vec[UInt8, A]) -> Result[String[A], Utf8Failure[A]] where carries(.Ok: bytes), carries(.Err.bytes: bytes) {
@@ -84,407 +82,365 @@ impl[A: Allocator] String[A] {
             Err(error) => .Err(.{ bytes = bytes, error = error }),
         }
     }
-}
 
-test fn invalid_owned_bytes_are_returned_with_the_sequence_offset() {
-    // The bytes are ASCII a followed by ED A0 80, which would encode the
-    // forbidden surrogate U+D800.
-    let built: Result[Vec[UInt8], mem.Oom] = Vec.from_fn(
-        count: 4,
-        initializer: |index| match read index {
-            0 => UInt8(97),
-            1 => UInt8(237),
-            2 => UInt8(160),
-            _ => UInt8(128),
-        },
-    )
-    let bytes = built.unwrap()
-    match String.from_bytes(bytes) {
-        Ok(text) => {
-            text.release()
-            return testing.assert(false, "surrogate encoding became text")
-        },
-        Err(Utf8Failure { bytes: returned, error: error }) => {
-            let length = returned.length()
-            let retained = returned[1] == 237 && returned[2] == 160 && returned[3] == 128
-            returned.release()
-            testing.assert_eq(error.offset, UInt64(1), "invalid sequence offset changed after releasing returned bytes")?
-            testing.assert_eq(length, UInt64(4), "invalid byte owner lost its prefix")?
-            testing.assert(retained, "invalid bytes were changed")?
-        },
+    test fn invalid_owned_bytes_are_returned_with_the_sequence_offset() {
+        // The bytes are ASCII a followed by ED A0 80, which would encode the
+        // forbidden surrogate U+D800.
+        let built: Result[Vec[UInt8], mem.Oom] = Vec.from_fn(
+            count: 4,
+            initializer: |index| match read index {
+                0 => UInt8(97),
+                1 => UInt8(237),
+                2 => UInt8(160),
+                _ => UInt8(128),
+            },
+        )
+        let bytes = built.unwrap()
+        match String.from_bytes(bytes) {
+            Ok(text) => {
+                text.release()
+                return testing.assert(false, "surrogate encoding became text")
+            },
+            Err(Utf8Failure { bytes: returned, error: error }) => {
+                let length = returned.length()
+                let retained = returned[1] == 237 && returned[2] == 160 && returned[3] == 128
+                returned.release()
+                testing.assert_eq(error.offset, UInt64(1), "invalid sequence offset changed after releasing returned bytes")?
+                testing.assert_eq(length, UInt64(4), "invalid byte owner lost its prefix")?
+                testing.assert(retained, "invalid bytes were changed")?
+            },
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn valid_owned_bytes_keep_nul_and_bom() {
-    let original = "\u{0}\u{feff}a".to_owned().unwrap()
-    let bytes = original.into_bytes()
-    match String.from_bytes(bytes) {
-        Err(failure) => {
-            failure.release()
-            return testing.assert(false, "valid bytes were rejected")
-        },
-        Ok(text) => {
-            let intact = text.view() == "\u{0}\u{feff}a"
-            text.release()
-            testing.assert(intact, "byte construction removed NUL or BOM")?
-        },
+    test fn valid_owned_bytes_keep_nul_and_bom() {
+        let original = "\u{0}\u{feff}a".to_owned().unwrap()
+        let bytes = original.into_bytes()
+        match String.from_bytes(bytes) {
+            Err(failure) => {
+                failure.release()
+                return testing.assert(false, "valid bytes were rejected")
+            },
+            Ok(text) => {
+                let intact = text.view() == "\u{0}\u{feff}a"
+                text.release()
+                testing.assert(intact, "byte construction removed NUL or BOM")?
+            },
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-test fn validated_byte_transfer_does_not_allocate() {
-    // The cursor and first content reservation fill this arena.
-    defer let arena = mem.Arena.open(mem.system(), 16)
-    let original = "á".to_owned_in(arena.handle()).unwrap()
-    let bytes = original.into_bytes()
-    match String.from_bytes(bytes) {
-        Err(failure) => {
-            failure.release()
-            return testing.assert(false, "valid owned bytes could not transfer in a full arena")
-        },
-        Ok(text) => {
-            let intact = text.view() == "á"
-            text.release()
-            testing.assert(intact, "owned byte transfer changed the text")?
-        },
+    test fn validated_byte_transfer_does_not_allocate() {
+        // The cursor and first content reservation fill this arena.
+        defer let arena = mem.Arena.open(mem.system(), 16)
+        let original = "á".to_owned_in(arena.handle()).unwrap()
+        let bytes = original.into_bytes()
+        match String.from_bytes(bytes) {
+            Err(failure) => {
+                failure.release()
+                return testing.assert(false, "valid owned bytes could not transfer in a full arena")
+            },
+            Ok(text) => {
+                let intact = text.view() == "á"
+                text.release()
+                testing.assert(intact, "owned byte transfer changed the text")?
+            },
+        }
+        .Ok(())
     }
-    .Ok(())
-}
 
-impl[A: Allocator] String[A] {
     // Give up the text and return its encoded bytes.
     pub fn into_bytes(sink self: Self) -> Vec[UInt8, A] where carries(self) {
         let String { bytes: bytes } = self
         bytes
     }
-}
 
-test fn into_bytes_returns_the_encoded_bytes() {
-    defer let bytes = "olá".to_owned().unwrap().into_bytes()
-    testing.assert_eq(bytes.length(), UInt64(4), "the bytes lost part of the text")?
-    testing.assert_eq(bytes[2], UInt8(195), "the lead byte of á changed")?
-    .Ok(())
-}
+    test fn into_bytes_returns_the_encoded_bytes() {
+        defer let bytes = "olá".to_owned().unwrap().into_bytes()
+        testing.assert_eq(bytes.length(), UInt64(4), "the bytes lost part of the text")?
+        testing.assert_eq(bytes[2], UInt8(195), "the lead byte of á changed")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the length in encoded bytes.
     pub fn length(self: Self) -> UInt64 {
         self.bytes.length()
     }
-}
 
-test fn length_counts_the_encoded_bytes_of_owned_text() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert_eq(text.length(), UInt64(4), "a two-byte character was counted once")?
-    .Ok(())
-}
+    test fn length_counts_the_encoded_bytes_of_owned_text() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert_eq(text.length(), UInt64(4), "a two-byte character was counted once")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // View the text. The view borrows the String, which stays its owner.
     pub fn view(self: Self) -> Str where borrows(self) {
         .{ bytes = self.bytes.as_slice() }
     }
-}
 
-test fn view_reads_the_owned_text() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert_eq(text.view(), "olá", "the view changed the text")?
-    .Ok(())
-}
+    test fn view_reads_the_owned_text() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert_eq(text.view(), "olá", "the view changed the text")?
+        .Ok(())
+    }
 
-// Owned text answers the read operations of `Str` by forwarding to its view,
-// so the borrowed implementation stays the only one.
-impl[A: Allocator] String[A] {
+    // Owned text answers the read operations of `Str` by forwarding to its view,
+    // so the borrowed implementation stays the only one.
     // Copy the text into storage owned by `allocator`.
     pub fn to_owned_in[B: Allocator](self: Self, allocator: B) -> Result[String[B], Oom] where carries(.Ok: allocator) {
         self.view().to_owned_in(allocator)
     }
-}
 
-test fn owned_text_copies_into_another_allocator() {
-    defer let text = "olá".to_owned().unwrap()
-    defer let duplicate = text.to_owned().unwrap()
-    testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
-    .Ok(())
-}
+    test fn owned_text_copies_into_another_allocator() {
+        defer let text = "olá".to_owned().unwrap()
+        defer let duplicate = text.to_owned().unwrap()
+        testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Copy the text into storage owned by the system allocator.
     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], Oom] where carries() {
         self.to_owned_in(mem.system())
     }
-}
 
-test fn owned_text_copies_into_the_system_allocator_from_an_arena() {
-    defer let arena = mem.Arena.open(mem.system(), 64)
-    defer let text = "olá".to_owned_in(arena.handle()).unwrap()
-    defer let duplicate = text.to_owned().unwrap()
-    testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
-}
+    test fn owned_text_copies_into_the_system_allocator_from_an_arena() {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        defer let text = "olá".to_owned_in(arena.handle()).unwrap()
+        defer let duplicate = text.to_owned().unwrap()
+        testing.assert_eq(duplicate.view(), "olá", "the copy changed the text")?
+    }
 
-impl[A: Allocator] String[A] {
     // View the encoded bytes of the text.
     pub fn as_bytes(self: Self) -> mem.Slice[UInt8] where borrows(self) {
         self.view().as_bytes()
     }
-}
 
-test fn owned_text_views_its_encoded_bytes() {
-    defer let text = "olá".to_owned().unwrap()
-    let bytes = text.as_bytes()
-    testing.assert_eq(bytes.length(), UInt64(4), "the byte view lost a byte")?
-    testing.assert_eq(bytes[2], UInt8(195), "the byte view changed the lead byte of á")?
-    .Ok(())
-}
+    test fn owned_text_views_its_encoded_bytes() {
+        defer let text = "olá".to_owned().unwrap()
+        let bytes = text.as_bytes()
+        testing.assert_eq(bytes.length(), UInt64(4), "the byte view lost a byte")?
+        testing.assert_eq(bytes[2], UInt8(195), "the byte view changed the lead byte of á")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the byte at offset `i`, or None past the end.
     pub fn byte(self: Self, i: UInt64) -> Option[UInt8] where carries() {
         self.view().byte(i)
     }
-}
 
-test fn owned_text_reads_a_byte_by_offset() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert_eq(text.byte(0), Option.Some(UInt8(111)), "the first byte changed")?
-    testing.assert_eq(text.byte(4), Option.None, "a byte past the end was found")?
-    .Ok(())
-}
+    test fn owned_text_reads_a_byte_by_offset() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert_eq(text.byte(0), Option.Some(UInt8(111)), "the first byte changed")?
+        testing.assert_eq(text.byte(4), Option.None, "a byte past the end was found")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the text between byte offsets `from` and `to`, or None when they
     // are out of order, past the end, or inside a character.
     pub fn slice(self: Self, from: UInt64, to: UInt64) -> Option[Str] where borrows(.Some: self) {
         self.view().slice(from, to)
     }
-}
 
-test fn owned_text_slices_on_character_boundaries() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert_eq(text.slice(1, 4), Option.Some("lá"), "the slice changed the text")?
-    testing.assert(text.slice(3, 4).is_none(), "a slice began inside a character")?
-    .Ok(())
-}
+    test fn owned_text_slices_on_character_boundaries() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert_eq(text.slice(1, 4), Option.Some("lá"), "the slice changed the text")?
+        testing.assert(text.slice(3, 4).is_none(), "a slice began inside a character")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the byte offset of the first occurrence of `needle` at or after
     // `start`, or None when there is none.
     pub fn find(self: Self, needle: Str, start: UInt64 = 0) -> Option[UInt64] where carries() {
         self.view().find(needle, start)
     }
-}
 
-test fn owned_text_finds_a_needle() {
-    defer let text = "olá olá".to_owned().unwrap()
-    testing.assert_eq(text.find("á"), Option.Some(UInt64(2)), "the first match moved")?
-    testing.assert_eq(text.find("á", 4), Option.Some(UInt64(7)), "the search ignored its start")?
-    testing.assert(text.find("z").is_none(), "an absent needle was found")?
-    .Ok(())
-}
+    test fn owned_text_finds_a_needle() {
+        defer let text = "olá olá".to_owned().unwrap()
+        testing.assert_eq(text.find("á"), Option.Some(UInt64(2)), "the first match moved")?
+        testing.assert_eq(text.find("á", 4), Option.Some(UInt64(7)), "the search ignored its start")?
+        testing.assert(text.find("z").is_none(), "an absent needle was found")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return whether the text begins with `prefix`.
     pub fn starts_with(self: Self, prefix: Str) -> Bool {
         self.view().starts_with(prefix)
     }
-}
 
-test fn owned_text_checks_its_prefix() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert(text.starts_with("ol"), "a prefix was not recognised")?
-    testing.assert(!text.starts_with("lá"), "a non-prefix was accepted")?
-    .Ok(())
-}
+    test fn owned_text_checks_its_prefix() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert(text.starts_with("ol"), "a prefix was not recognised")?
+        testing.assert(!text.starts_with("lá"), "a non-prefix was accepted")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return whether the text ends with `suffix`.
     pub fn ends_with(self: Self, suffix: Str) -> Bool {
         self.view().ends_with(suffix)
     }
-}
 
-test fn owned_text_checks_its_suffix() {
-    defer let text = "olá".to_owned().unwrap()
-    testing.assert(text.ends_with("lá"), "a suffix was not recognised")?
-    testing.assert(!text.ends_with("ol"), "a non-suffix was accepted")?
-    .Ok(())
-}
+    test fn owned_text_checks_its_suffix() {
+        defer let text = "olá".to_owned().unwrap()
+        testing.assert(text.ends_with("lá"), "a suffix was not recognised")?
+        testing.assert(!text.ends_with("ol"), "a non-suffix was accepted")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return an iterator over the fields between occurrences of `separator`,
     // or refuse an empty separator.
     pub fn split(self: Self, separator: Str) -> Result[Split, SplitError] where borrows(.Ok: self), carries(.Ok: separator) {
         self.view().split(separator)
     }
-}
 
-test fn owned_text_splits_at_a_separator() {
-    defer let text = "a,b".to_owned().unwrap()
-    var fields = text.split(",").unwrap()
-    testing.assert_eq(&fields.next(), Option.Some("a"), "the first field changed")?
-    testing.assert_eq(&fields.next(), Option.Some("b"), "the second field changed")?
-    testing.assert(&fields.next().is_none(), "the split yielded an extra field")?
-    testing.assert(text.split("").is_err(), "an empty separator was accepted")?
-    .Ok(())
-}
+    test fn owned_text_splits_at_a_separator() {
+        defer let text = "a,b".to_owned().unwrap()
+        var fields = text.split(",").unwrap()
+        testing.assert_eq(&fields.next(), Option.Some("a"), "the first field changed")?
+        testing.assert_eq(&fields.next(), Option.Some("b"), "the second field changed")?
+        testing.assert(&fields.next().is_none(), "the split yielded an extra field")?
+        testing.assert(text.split("").is_err(), "an empty separator was accepted")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Split the text at the first occurrence of `separator`, or return None
     // when it does not occur.
     pub fn split_once(self: Self, separator: Str) -> Option[(Str, Str)] where borrows(.Some: self) {
         self.view().split_once(separator)
     }
-}
 
-test fn owned_text_splits_once_at_a_separator() {
-    defer let text = "a=b=c".to_owned().unwrap()
-    let (key, value) = text.split_once("=") else {
-        return testing.assert(false, "a present separator was not found")
+    test fn owned_text_splits_once_at_a_separator() {
+        defer let text = "a=b=c".to_owned().unwrap()
+        let (key, value) = text.split_once("=") else {
+            return testing.assert(false, "a present separator was not found")
+        }
+        testing.assert_eq(key, "a", "the part before the separator changed")?
+        testing.assert_eq(value, "b=c", "the part after the separator changed")?
+        testing.assert(text.split_once("&").is_none(), "an absent separator was found")?
+        .Ok(())
     }
-    testing.assert_eq(key, "a", "the part before the separator changed")?
-    testing.assert_eq(value, "b=c", "the part after the separator changed")?
-    testing.assert(text.split_once("&").is_none(), "an absent separator was found")?
-    .Ok(())
-}
 
-impl[A: Allocator] String[A] {
     // Return an iterator over the lines of the text, without their terminators.
     pub fn lines(self: Self) -> Lines where borrows(self) {
         self.view().lines()
     }
-}
 
-test fn owned_text_iterates_its_lines() {
-    defer let text = "a\r\nb".to_owned().unwrap()
-    var lines = text.lines()
-    testing.assert_eq(&lines.next(), Option.Some("a"), "the first line changed")?
-    testing.assert_eq(&lines.next(), Option.Some("b"), "the second line changed")?
-    testing.assert(&lines.next().is_none(), "the text had an extra line")?
-    .Ok(())
-}
+    test fn owned_text_iterates_its_lines() {
+        defer let text = "a\r\nb".to_owned().unwrap()
+        var lines = text.lines()
+        testing.assert_eq(&lines.next(), Option.Some("a"), "the first line changed")?
+        testing.assert_eq(&lines.next(), Option.Some("b"), "the second line changed")?
+        testing.assert(&lines.next().is_none(), "the text had an extra line")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the text without leading and trailing ASCII whitespace.
     pub fn trim_ascii(self: Self) -> Str where borrows(self) {
         self.view().trim_ascii()
     }
-}
 
-test fn owned_text_trims_ascii_whitespace() {
-    defer let text = "  olá\t".to_owned().unwrap()
-    testing.assert_eq(text.trim_ascii(), "olá", "ASCII whitespace remained")?
-    .Ok(())
-}
+    test fn owned_text_trims_ascii_whitespace() {
+        defer let text = "  olá\t".to_owned().unwrap()
+        testing.assert_eq(text.trim_ascii(), "olá", "ASCII whitespace remained")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return the text without leading and trailing Unicode whitespace.
     pub fn trim_unicode(self: Self) -> Str where borrows(self) {
         self.view().trim_unicode()
     }
-}
 
-test fn owned_text_trims_unicode_whitespace() {
-    defer let text = "\u{3000}olá\u{a0}".to_owned().unwrap()
-    testing.assert_eq(text.trim_unicode(), "olá", "Unicode whitespace remained")?
-    .Ok(())
-}
+    test fn owned_text_trims_unicode_whitespace() {
+        defer let text = "\u{3000}olá\u{a0}".to_owned().unwrap()
+        testing.assert_eq(text.trim_unicode(), "olá", "Unicode whitespace remained")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Parse a value through its Parse implementation.
     pub fn parse[T: Parse](self: Self) -> Result[T, ParseError] where carries() {
         self.view().parse()
     }
-}
 
-test fn owned_text_parses_a_value() {
-    defer let text = "150".to_owned().unwrap()
-    let value: UInt16 = text.parse().unwrap()
-    testing.assert_eq(value, UInt16(150), "the parsed value changed")?
-    .Ok(())
-}
+    test fn owned_text_parses_a_value() {
+        defer let text = "150".to_owned().unwrap()
+        let value: UInt16 = text.parse().unwrap()
+        testing.assert_eq(value, UInt16(150), "the parsed value changed")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return an iterator over the Unicode scalars of the text.
     pub fn scalars(self: Self) -> Scalars where borrows(self) {
         self.view().scalars()
     }
-}
 
-test fn owned_text_iterates_its_scalars() {
-    defer let text = "aá".to_owned().unwrap()
-    var cursor = text.scalars()
-    testing.assert_eq(&cursor.next().unwrap().value, UInt32(97), "the first scalar changed")?
-    testing.assert_eq(&cursor.next().unwrap().value, UInt32(225), "the second scalar changed")?
-    testing.assert(&cursor.next().is_none(), "the traversal exceeded the text")?
-    .Ok(())
-}
+    test fn owned_text_iterates_its_scalars() {
+        defer let text = "aá".to_owned().unwrap()
+        var cursor = text.scalars()
+        testing.assert_eq(&cursor.next().unwrap().value, UInt32(97), "the first scalar changed")?
+        testing.assert_eq(&cursor.next().unwrap().value, UInt32(225), "the second scalar changed")?
+        testing.assert(&cursor.next().is_none(), "the traversal exceeded the text")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Return whether the texts are equal ignoring ASCII case.
     pub fn equals_ascii_folded(self: Self, other: Str) -> Bool {
         self.view().equals_ascii_folded(other)
     }
-}
 
-test fn owned_text_compares_ignoring_ascii_case() {
-    defer let text = "Olá".to_owned().unwrap()
-    testing.assert(text.equals_ascii_folded("oLá"), "ASCII case changed equality")?
-    testing.assert(!text.equals_ascii_folded("olÁ"), "non-ASCII case was folded")?
-    .Ok(())
-}
+    test fn owned_text_compares_ignoring_ascii_case() {
+        defer let text = "Olá".to_owned().unwrap()
+        testing.assert(text.equals_ascii_folded("oLá"), "ASCII case changed equality")?
+        testing.assert(!text.equals_ascii_folded("olÁ"), "non-ASCII case was folded")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Append `text`. Room for all of it is reserved first, so a refusal leaves
     // the text unchanged.
     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
         &self.bytes.append_slice(text.as_bytes())
     }
-}
 
-test fn owned_text_copies_appends_and_transfers_bytes() {
-    var text = "olá".to_owned().unwrap()
-    &text.append(" 😀").unwrap()
-    let length = text.length()
-    let intact = text.view() == "olá 😀"
-    defer let bytes = text.into_bytes()
-    testing.assert_eq(length, UInt64(9), "owned text length did not count bytes")?
-    testing.assert(intact, "append changed UTF-8 text")?
-    testing.assert_eq(bytes.length(), UInt64(9), "byte transfer changed the length")?
-    testing.assert_eq(bytes[2], UInt8(195), "byte transfer changed an encoded scalar")?
-    .Ok(())
-}
+    test fn owned_text_copies_appends_and_transfers_bytes() {
+        var text = "olá".to_owned().unwrap()
+        &text.append(" 😀").unwrap()
+        let length = text.length()
+        let intact = text.view() == "olá 😀"
+        defer let bytes = text.into_bytes()
+        testing.assert_eq(length, UInt64(9), "owned text length did not count bytes")?
+        testing.assert(intact, "append changed UTF-8 text")?
+        testing.assert_eq(bytes.length(), UInt64(9), "byte transfer changed the length")?
+        testing.assert_eq(bytes[2], UInt8(195), "byte transfer changed an encoded scalar")?
+        .Ok(())
+    }
 
-test fn owned_text_append_failure_preserves_complete_text() {
-    // The 96-byte arena fits the initial text but not the 104-byte append.
-    defer let arena = mem.Arena.open(mem.system(), 96)
-    let allocator = arena.handle()
-    defer var text = "á".to_owned_in(allocator).unwrap()
-    let failed = &text.append("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").is_err()
-    testing.assert(failed, "bounded allocator did not refuse the append")?
-    testing.assert_eq(text.view(), "á", "failed append left a partial scalar or changed the original")?
-    .Ok(())
-}
+    test fn owned_text_append_failure_preserves_complete_text() {
+        // The 96-byte arena fits the initial text but not the 104-byte append.
+        defer let arena = mem.Arena.open(mem.system(), 96)
+        let allocator = arena.handle()
+        defer var text = "á".to_owned_in(allocator).unwrap()
+        let failed = &text.append("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").is_err()
+        testing.assert(failed, "bounded allocator did not refuse the append")?
+        testing.assert_eq(text.view(), "á", "failed append left a partial scalar or changed the original")?
+        .Ok(())
+    }
 
-// Walk every allocation a growing sequence of appends attempts, refusing
-// each in turn, to prove every regrowth along the way settles what came before.
-test fn each_allocation_failure_covers_every_growth_step_in_a_multi_append_text() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), Oom] {
-            defer var text = String.new_in(allocator)
-            &text.append("first")?
-            &text.append(" second, a little longer")?
-            &text.append(" third, long enough to force another regrowth of the backing buffer")?
-            return .Ok(())
-        },
-        Oom.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing append sequence was reported as failing")?
-    .Ok(())
-}
+    // Walk every allocation a growing sequence of appends attempts, refusing
+    // each in turn, to prove every regrowth along the way settles what came before.
+    test fn each_allocation_failure_covers_every_growth_step_in_a_multi_append_text() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), Oom] {
+                defer var text = String.new_in(allocator)
+                &text.append("first")?
+                &text.append(" second, a little longer")?
+                &text.append(" third, long enough to force another regrowth of the backing buffer")?
+                return .Ok(())
+            },
+            Oom.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing append sequence was reported as failing")?
+        .Ok(())
+    }
 
-impl[A: Allocator] String[A] {
     // Append `bytes` when they are valid UTF-8. The whole input is validated
     // and reserved before the owned text changes.
     pub fn append_bytes(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[(), TextError] where carries() {
@@ -492,46 +448,46 @@ impl[A: Allocator] String[A] {
         &self.bytes.append_slice(bytes)?
         .Ok(())
     }
-}
 
-test fn invalid_byte_append_leaves_text_and_input_unchanged() {
-    defer var text = "á".to_owned().unwrap()
-    let source = "😀".as_bytes().subspan(start: 0, count: 3).unwrap()
-    let rejected = match &text.append_bytes(source) {
-        Err(Encoding(problem)) => problem.offset == 0,
-        Err(Allocation(_)) => false,
-        Ok(_) => false,
+    test fn invalid_byte_append_leaves_text_and_input_unchanged() {
+        defer var text = "á".to_owned().unwrap()
+        let source = "😀".as_bytes().subspan(start: 0, count: 3).unwrap()
+        let rejected = match &text.append_bytes(source) {
+            Err(Encoding(problem)) => problem.offset == 0,
+            Err(Allocation(_)) => false,
+            Ok(_) => false,
+        }
+        testing.assert(rejected, "byte append did not report invalid encoding")?
+        testing.assert_eq(text.view(), "á", "invalid byte append changed owned text")?
+        testing.assert_eq(source.length(), UInt64(3), "byte append consumed its input view")?
+        &text.append_bytes("\u{0}b".as_bytes()).unwrap()
+        testing.assert_eq(text.view(), "á\u{0}b", "valid byte append changed encoded text")?
+        .Ok(())
     }
-    testing.assert(rejected, "byte append did not report invalid encoding")?
-    testing.assert_eq(text.view(), "á", "invalid byte append changed owned text")?
-    testing.assert_eq(source.length(), UInt64(3), "byte append consumed its input view")?
-    &text.append_bytes("\u{0}b".as_bytes()).unwrap()
-    testing.assert_eq(text.view(), "á\u{0}b", "valid byte append changed encoded text")?
-    .Ok(())
-}
 
-test fn byte_append_grows_text_in_an_arena() {
-    defer let arena = mem.Arena.open(mem.system(), 64)
-    var text = String.new_in(arena.handle())
-    &text.append_bytes("tea ".as_bytes()).unwrap()
-    &text.append_bytes("verde".as_bytes()).unwrap()
-    testing.assert_eq(text.view(), "tea verde", "byte append lost text in an arena")?
-    .Ok(())
-}
+    test fn byte_append_grows_text_in_an_arena() {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        var text = String.new_in(arena.handle())
+        &text.append_bytes("tea ".as_bytes()).unwrap()
+        &text.append_bytes("verde".as_bytes()).unwrap()
+        testing.assert_eq(text.view(), "tea verde", "byte append lost text in an arena")?
+        .Ok(())
+    }
 
-test fn each_allocation_failure_covers_every_byte_append() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), TextError] {
-            defer var text = String.new_in(allocator)
-            &text.append_bytes("first".as_bytes())?
-            &text.append_bytes(" second, long enough to grow the text again".as_bytes())?
-            return .Ok(())
-        },
-        TextError.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a growing byte append sequence was reported as failing")?
-    .Ok(())
+    test fn each_allocation_failure_covers_every_byte_append() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), TextError] {
+                defer var text = String.new_in(allocator)
+                &text.append_bytes("first".as_bytes())?
+                &text.append_bytes(" second, long enough to grow the text again".as_bytes())?
+                return .Ok(())
+            },
+            TextError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a growing byte append sequence was reported as failing")?
+        .Ok(())
+    }
 }
 
 impl[A: Allocator] Release for String[A] {

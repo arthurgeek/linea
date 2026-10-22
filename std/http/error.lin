@@ -24,18 +24,95 @@ struct Error[P: Allocator = mem.SystemAllocator] {
     headers: Option[ResponseHeaders[mem.Handle[P]]],
 }
 
+// Set `name: value` in `kept`, opening the list in `allocator` when there is
+// none yet.
+fn set_kept_header[A: Allocator, V: Display](inout kept: Option[ResponseHeaders[A]], allocator: A, name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(kept: allocator) {
+    let previous = kept
+    var headers = match previous {
+        Some(headers) => headers,
+        None => ResponseHeaders.new_in(allocator),
+    }
+    let set = &headers.set(name, value)
+    kept = .Some(headers)
+    set
+}
+
 impl[P: Allocator] Error[P] {
     // `Error.new` makes an error that answers `status` with its reason phrase.
     pub fn new(status: Status) -> Error[P] {
         .{ answer = copy(status), text = .None, headers = .None }
     }
-}
 
-test fn a_new_error_has_its_status_and_no_message() {
-    let error: Error = Error.new(.NotFound)
-    testing.assert_eq(error.status(), Status.NotFound, "the status changed")?
-    testing.assert_eq(error.message(), .None, "a new error had a message")?
-    .Ok(())
+    test fn a_new_error_has_its_status_and_no_message() {
+        let error: Error = Error.new(.NotFound)
+        testing.assert_eq(error.status(), Status.NotFound, "the status changed")?
+        testing.assert_eq(error.message(), .None, "a new error had a message")?
+        .Ok(())
+    }
+
+    // `status` returns the status this error answers with.
+    pub fn status(self: Self) -> Status {
+        copy(self.answer)
+    }
+
+    test fn status_returns_the_status_the_error_answers_with() {
+        let error: Error = Error.new(.UnsupportedMediaType)
+        testing.assert_eq(error.status(), Status.UnsupportedMediaType, "the status changed")?
+        .Ok(())
+    }
+
+    // `message` returns the message the handler gave, or `None` when the body is
+    // the reason phrase.
+    pub fn message(self: Self) -> Option[Str] where borrows(.Some: self) {
+        match read self.text {
+            Some(message) => .Some(message.view()),
+            None => .None,
+        }
+    }
+
+    // `set_header` sends the header `name: value` with this error, storing
+    // both in `request`'s arena, and replaces any value `name` already has,
+    // compared under ASCII case folding. `value` is any `Display` value. A 401
+    // names the scheme its client should authenticate with this way, in
+    // `WWW-Authenticate`. A name that is not a token, a value holding a line
+    // break, and a header the server writes itself are refused, as they are
+    // for a response.
+    pub fn set_header[V: Display](inout self: Self, request: Request[P], name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(self: request) {
+        set_kept_header(&self.headers, request.allocator(), name, value)
+    }
+
+    test fn an_error_sends_the_headers_it_is_given() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var refused = error(sent.request(), .Unauthorized, "who are you?")
+        testing.assert_eq(refused.header("WWW-Authenticate"), .None, "a new error had a header")?
+        &refused.set_header(sent.request(), "WWW-Authenticate", "Basic").unwrap()
+        &refused.set_header(sent.request(), "www-authenticate", "Bearer").unwrap()
+        let framing = &refused.set_header(sent.request(), "Content-Length", "3")
+        testing.assert_eq(refused.header("WWW-Authenticate"), Option.Some("Bearer"), "the header was not replaced")?
+        testing.assert_eq(framing, .Err(.Framing), "a framing header was set")?
+        testing.assert_eq(refused.message(), Option.Some("who are you?"), "the message changed")?
+        .Ok(())
+    }
+
+    // `header` returns the first value of the header `name` this error sends,
+    // compared under ASCII case folding.
+    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
+        match read self.headers {
+            Some(headers) => headers.get(name),
+            None => .None,
+        }
+    }
+
+    test fn header_compares_names_under_ascii_case_folding() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var busy = error(sent.request(), .ServiceUnavailable, "try again soon")
+        &busy.set_header(sent.request(), "Retry-After", "5").unwrap()
+        testing.assert_eq(busy.header("retry-after"), Option.Some("5"), "a header name matched only in its own case")?
+        testing.assert_eq(busy.header("Location"), .None, "a header that was never set was found")?
+        .Ok(())
+    }
 }
 
 // `error` makes an error that answers `status` with `message`, which it renders
@@ -73,30 +150,6 @@ test fn an_error_whose_message_does_not_fit_keeps_its_status() {
     .Ok(())
 }
 
-impl[P: Allocator] Error[P] {
-    // `status` returns the status this error answers with.
-    pub fn status(self: Self) -> Status {
-        copy(self.answer)
-    }
-}
-
-test fn status_returns_the_status_the_error_answers_with() {
-    let error: Error = Error.new(.UnsupportedMediaType)
-    testing.assert_eq(error.status(), Status.UnsupportedMediaType, "the status changed")?
-    .Ok(())
-}
-
-impl[P: Allocator] Error[P] {
-    // `message` returns the message the handler gave, or `None` when the body is
-    // the reason phrase.
-    pub fn message(self: Self) -> Option[Str] where borrows(.Some: self) {
-        match read self.text {
-            Some(message) => .Some(message.view()),
-            None => .None,
-        }
-    }
-}
-
 test fn an_error_reads_its_status_and_message() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
@@ -105,67 +158,6 @@ test fn an_error_reads_its_status_and_message() {
     testing.assert_eq(explained.status(), Status.Forbidden, "the status changed")?
     testing.assert_eq(explained.message(), Option.Some("no entry"), "the message changed")?
     testing.assert_eq(bare.message(), .None, "an error without a message had one")?
-    .Ok(())
-}
-
-// Set `name: value` in `kept`, opening the list in `allocator` when there is
-// none yet.
-fn set_kept_header[A: Allocator, V: Display](inout kept: Option[ResponseHeaders[A]], allocator: A, name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(kept: allocator) {
-    let previous = kept
-    var headers = match previous {
-        Some(headers) => headers,
-        None => ResponseHeaders.new_in(allocator),
-    }
-    let set = &headers.set(name, value)
-    kept = .Some(headers)
-    set
-}
-
-impl[P: Allocator] Error[P] {
-    // `set_header` sends the header `name: value` with this error, storing
-    // both in `request`'s arena, and replaces any value `name` already has,
-    // compared under ASCII case folding. `value` is any `Display` value. A 401
-    // names the scheme its client should authenticate with this way, in
-    // `WWW-Authenticate`. A name that is not a token, a value holding a line
-    // break, and a header the server writes itself are refused, as they are
-    // for a response.
-    pub fn set_header[V: Display](inout self: Self, request: Request[P], name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(self: request) {
-        set_kept_header(&self.headers, request.allocator(), name, value)
-    }
-}
-
-test fn an_error_sends_the_headers_it_is_given() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var refused = error(sent.request(), .Unauthorized, "who are you?")
-    testing.assert_eq(refused.header("WWW-Authenticate"), .None, "a new error had a header")?
-    &refused.set_header(sent.request(), "WWW-Authenticate", "Basic").unwrap()
-    &refused.set_header(sent.request(), "www-authenticate", "Bearer").unwrap()
-    let framing = &refused.set_header(sent.request(), "Content-Length", "3")
-    testing.assert_eq(refused.header("WWW-Authenticate"), Option.Some("Bearer"), "the header was not replaced")?
-    testing.assert_eq(framing, .Err(.Framing), "a framing header was set")?
-    testing.assert_eq(refused.message(), Option.Some("who are you?"), "the message changed")?
-    .Ok(())
-}
-
-impl[P: Allocator] Error[P] {
-    // `header` returns the first value of the header `name` this error sends,
-    // compared under ASCII case folding.
-    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
-        match read self.headers {
-            Some(headers) => headers.get(name),
-            None => .None,
-        }
-    }
-}
-
-test fn header_compares_names_under_ascii_case_folding() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var busy = error(sent.request(), .ServiceUnavailable, "try again soon")
-    &busy.set_header(sent.request(), "Retry-After", "5").unwrap()
-    testing.assert_eq(busy.header("retry-after"), Option.Some("5"), "a header name matched only in its own case")?
-    testing.assert_eq(busy.header("Location"), .None, "a header that was never set was found")?
     .Ok(())
 }
 

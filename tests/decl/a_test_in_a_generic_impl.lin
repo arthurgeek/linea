@@ -1,0 +1,23 @@
+// A test inside a generic impl is organized at module scope and creates
+// concrete instances of the type.
+import std.testing
+
+struct Box[T] {
+    val: T,
+}
+
+impl[T] Box[T] {
+    pub fn new(sink val: T) -> Self {
+        Self { val = val }
+    }
+
+    test fn creates_concrete_box() {
+        let b: Box[UInt32] = Box.new(100)
+        testing.assert_eq(b.val, 100, "box value")?
+        .Ok(())
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

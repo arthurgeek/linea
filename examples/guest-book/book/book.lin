@@ -56,71 +56,6 @@ struct Book {
     database: Database,
 }
 
-impl Book {
-    // Open the guest book at `path`, creating its file and `entries` table if
-    // neither exists yet. `wait_when_busy` makes two processes signing at
-    // once wait up to two seconds for each other rather than failing with
-    // `SQLITE_BUSY`.
-    pub fn open(path: Str) -> Result[Book, BookError] {
-        defer var database = Database.open(path)?
-        &database.wait_when_busy(2000)?
-        &database.execute(schema)?
-        .Ok(Book { database })
-    }
-}
-
-test fn open_creates_the_entries_table_in_a_file() {
-    let stamp = time.now().nanoseconds()
-    defer let path_text = fmt.render_owned("/tmp/linea-guest-book-{stamp}.db").unwrap()
-    let path = fs.Path.from_str(path_text.view()).unwrap()
-    defer {
-        let _ = fs.remove_file(path) else |_| {
-            ()
-        }
-    }
-    var book = Book.open(path_text.view()).unwrap()
-    &book.sign("Ada", "First note").unwrap()
-    book.close().unwrap()
-    .Ok(())
-}
-
-impl Book {
-    // Open a fresh guest book in memory, with its `entries` table created.
-    pub fn open_in_memory() -> Result[Book, BookError] {
-        Book.open(":memory:")
-    }
-}
-
-test fn open_in_memory_starts_with_no_entries() {
-    defer var book = Book.open_in_memory().unwrap()
-    defer let listed = &book.newest(10).unwrap()
-    testing.assert_eq(listed.length(), UInt64(0), "a new book was not empty")?
-    .Ok(())
-}
-
-impl Book {
-    // Record a visitor's signature. `?1` and `?2` bind the name and message as
-    // parameters, so quotes or SQL keywords in what a visitor wrote are stored
-    // as text and never read as SQL.
-    pub fn sign(inout self: Self, name: Str, message: Str) -> Result[(), BookError] {
-        defer var insert = &self.database.prepare("INSERT INTO entries (name, message) VALUES (?1, ?2)")?
-        &insert.bind_text(1, name)?
-        &insert.bind_text(2, message)?
-        &insert.run()?
-        .Ok(())
-    }
-}
-
-test fn sign_stores_text_holding_quotes_and_sql() {
-    defer var book = Book.open_in_memory().unwrap()
-    &book.sign("O'Connor", "'); DROP TABLE entries; --").unwrap()
-    defer let listed = &book.newest(10).unwrap()
-    testing.assert_eq(listed.length(), UInt64(1), "the entry was not stored")?
-    testing.assert_eq(listed[0].name.view(), "O'Connor", "the quote changed")?
-    testing.assert_eq(listed[0].message.view(), "'); DROP TABLE entries; --", "the message changed")?
-    .Ok(())
-}
-
 // Read one row's three columns into an `Entry`. `defer let` releases `name` or
 // `message` if reading a later column fails, and skips that release when all
 // three move into the returned `Entry`. Out-of-range timestamps return
@@ -136,6 +71,65 @@ fn read_entry(select: Statement) -> Result[Entry, BookError] {
 }
 
 impl Book {
+    // Open the guest book at `path`, creating its file and `entries` table if
+    // neither exists yet. `wait_when_busy` makes two processes signing at
+    // once wait up to two seconds for each other rather than failing with
+    // `SQLITE_BUSY`.
+    pub fn open(path: Str) -> Result[Book, BookError] {
+        defer var database = Database.open(path)?
+        &database.wait_when_busy(2000)?
+        &database.execute(schema)?
+        .Ok(Book { database })
+    }
+
+    test fn open_creates_the_entries_table_in_a_file() {
+        let stamp = time.now().nanoseconds()
+        defer let path_text = fmt.render_owned("/tmp/linea-guest-book-{stamp}.db").unwrap()
+        let path = fs.Path.from_str(path_text.view()).unwrap()
+        defer {
+            let _ = fs.remove_file(path) else |_| {
+                ()
+            }
+        }
+        var book = Book.open(path_text.view()).unwrap()
+        &book.sign("Ada", "First note").unwrap()
+        book.close().unwrap()
+        .Ok(())
+    }
+
+    // Open a fresh guest book in memory, with its `entries` table created.
+    pub fn open_in_memory() -> Result[Book, BookError] {
+        Book.open(":memory:")
+    }
+
+    test fn open_in_memory_starts_with_no_entries() {
+        defer var book = Book.open_in_memory().unwrap()
+        defer let listed = &book.newest(10).unwrap()
+        testing.assert_eq(listed.length(), UInt64(0), "a new book was not empty")?
+        .Ok(())
+    }
+
+    // Record a visitor's signature. `?1` and `?2` bind the name and message as
+    // parameters, so quotes or SQL keywords in what a visitor wrote are stored
+    // as text and never read as SQL.
+    pub fn sign(inout self: Self, name: Str, message: Str) -> Result[(), BookError] {
+        defer var insert = &self.database.prepare("INSERT INTO entries (name, message) VALUES (?1, ?2)")?
+        &insert.bind_text(1, name)?
+        &insert.bind_text(2, message)?
+        &insert.run()?
+        .Ok(())
+    }
+
+    test fn sign_stores_text_holding_quotes_and_sql() {
+        defer var book = Book.open_in_memory().unwrap()
+        &book.sign("O'Connor", "'); DROP TABLE entries; --").unwrap()
+        defer let listed = &book.newest(10).unwrap()
+        testing.assert_eq(listed.length(), UInt64(1), "the entry was not stored")?
+        testing.assert_eq(listed[0].name.view(), "O'Connor", "the quote changed")?
+        testing.assert_eq(listed[0].message.view(), "'); DROP TABLE entries; --", "the message changed")?
+        .Ok(())
+    }
+
     // Read up to `limit` entries, newest first. `defer var select` finishes the
     // statement when `newest` returns, and `defer var entries` releases any
     // entries already read if a later row or push fails; `.Ok(entries)` moves
@@ -153,109 +147,107 @@ impl Book {
         }
         .Ok(entries)
     }
-}
 
-test fn signing_and_listing_returns_newest_first_up_to_the_limit() {
-    defer var book = Book.open_in_memory().unwrap()
-    &book.sign("Ada", "First").unwrap()
-    &book.sign("Grace", "Second").unwrap()
-    &book.sign("Linus", "Third").unwrap()
-    defer let listed = &book.newest(2).unwrap()
-    testing.assert_eq(listed.length(), UInt64(2), "limit was not respected")?
-    testing.assert_eq(listed[0].name.view(), "Linus", "newest entry was not first")?
-    testing.assert_eq(listed[1].name.view(), "Grace", "second newest entry was not second")?
-    .Ok(())
-}
-
-test fn newest_refuses_a_negative_limit() {
-    defer var book = Book.open_in_memory().unwrap()
-    let refused = match &book.newest(-1) {
-        Ok(entries) => {
-            entries.release()
-            false
-        },
-        Err(error) => {
-            let is_negative = match read error {
-                NegativeLimit(limit) => limit == -1,
-                _ => false,
-            }
-            error.release()
-            is_negative
-        },
+    test fn signing_and_listing_returns_newest_first_up_to_the_limit() {
+        defer var book = Book.open_in_memory().unwrap()
+        &book.sign("Ada", "First").unwrap()
+        &book.sign("Grace", "Second").unwrap()
+        &book.sign("Linus", "Third").unwrap()
+        defer let listed = &book.newest(2).unwrap()
+        testing.assert_eq(listed.length(), UInt64(2), "limit was not respected")?
+        testing.assert_eq(listed[0].name.view(), "Linus", "newest entry was not first")?
+        testing.assert_eq(listed[1].name.view(), "Grace", "second newest entry was not second")?
+        .Ok(())
     }
-    testing.assert(refused, "a negative limit was accepted")?
-    .Ok(())
-}
 
-test fn newest_zero_returns_no_entries() {
-    defer var book = Book.open_in_memory().unwrap()
-    &book.sign("Ada", "Hello").unwrap()
-    defer let listed = &book.newest(0).unwrap()
-    testing.assert_eq(listed.length(), UInt64(0), "newest(0) returned entries")?
-    .Ok(())
-}
-
-test fn invalid_timestamps_are_refused_rather_than_faked() {
-    defer var book = Book.open_in_memory().unwrap()
-    // Year 10000+ Unix timestamp is outside Linea's representable range.
-    let invalid_stamp: Int64 = 300000000000
-    defer var insert = &book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
-    &insert.bind_integer(1, invalid_stamp).unwrap()
-    &insert.run().unwrap()
-
-    let refused = match &book.newest(10) {
-        Ok(entries) => {
-            entries.release()
-            false
-        },
-        Err(error) => {
-            let matches_stamp = match read error {
-                InvalidTimestamp(seconds) => seconds == invalid_stamp,
-                _ => false,
-            }
-            error.release()
-            matches_stamp
-        },
-    }
-    testing.assert(refused, "an invalid timestamp was silently accepted")?
-    .Ok(())
-}
-
-test fn a_refused_entry_push_settles_the_rejected_entry_and_earlier_rows() {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    var entries: Vec[Entry, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(log.allocator())
-    let first = Entry { name = "Ada".to_owned().unwrap(), message = "First".to_owned().unwrap(), signed = time.now() }
-    &entries.push(first).settled().unwrap()
-    log.refuse_attempt(log.attempts() + 1)
-    var exhausted = false
-    for _ in 0..16 {
-        let next = Entry { name = "Grace".to_owned().unwrap(), message = "Second".to_owned().unwrap(), signed = time.now() }
-        if &entries.push(next).settled().is_err() {
-            exhausted = true
-            break
+    test fn newest_refuses_a_negative_limit() {
+        defer var book = Book.open_in_memory().unwrap()
+        let refused = match &book.newest(-1) {
+            Ok(entries) => {
+                entries.release()
+                false
+            },
+            Err(error) => {
+                let is_negative = match read error {
+                    NegativeLimit(limit) => limit == -1,
+                    _ => false,
+                }
+                error.release()
+                is_negative
+            },
         }
+        testing.assert(refused, "a negative limit was accepted")?
+        .Ok(())
     }
-    entries.release()
-    let settled = log.all_disposed()
-    log.release()
-    testing.assert(exhausted, "the refused growth did not fail push")?
-    testing.assert(settled, "a vector growth refusal leaked storage")?
-    .Ok(())
-}
 
-impl Book {
+    test fn newest_zero_returns_no_entries() {
+        defer var book = Book.open_in_memory().unwrap()
+        &book.sign("Ada", "Hello").unwrap()
+        defer let listed = &book.newest(0).unwrap()
+        testing.assert_eq(listed.length(), UInt64(0), "newest(0) returned entries")?
+        .Ok(())
+    }
+
+    test fn invalid_timestamps_are_refused_rather_than_faked() {
+        defer var book = Book.open_in_memory().unwrap()
+        // Year 10000+ Unix timestamp is outside Linea's representable range.
+        let invalid_stamp: Int64 = 300000000000
+        defer var insert = &book.database.prepare("INSERT INTO entries (name, message, signed_at) VALUES ('Eve', 'Time traveler', ?1)").unwrap()
+        &insert.bind_integer(1, invalid_stamp).unwrap()
+        &insert.run().unwrap()
+
+        let refused = match &book.newest(10) {
+            Ok(entries) => {
+                entries.release()
+                false
+            },
+            Err(error) => {
+                let matches_stamp = match read error {
+                    InvalidTimestamp(seconds) => seconds == invalid_stamp,
+                    _ => false,
+                }
+                error.release()
+                matches_stamp
+            },
+        }
+        testing.assert(refused, "an invalid timestamp was silently accepted")?
+        .Ok(())
+    }
+
+    test fn a_refused_entry_push_settles_the_rejected_entry_and_earlier_rows() {
+        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        var entries: Vec[Entry, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(log.allocator())
+        let first = Entry { name = "Ada".to_owned().unwrap(), message = "First".to_owned().unwrap(), signed = time.now() }
+        &entries.push(first).settled().unwrap()
+        log.refuse_attempt(log.attempts() + 1)
+        var exhausted = false
+        for _ in 0..16 {
+            let next = Entry { name = "Grace".to_owned().unwrap(), message = "Second".to_owned().unwrap(), signed = time.now() }
+            if &entries.push(next).settled().is_err() {
+                exhausted = true
+                break
+            }
+        }
+        entries.release()
+        let settled = log.all_disposed()
+        log.release()
+        testing.assert(exhausted, "the refused growth did not fail push")?
+        testing.assert(settled, "a vector growth refusal leaked storage")?
+        .Ok(())
+    }
+
     // Close the guest book and its underlying SQLite connection.
     pub fn close(sink self: Self) -> Result[(), BookError] {
         let Book { database } = self
         database.close()?
         .Ok(())
     }
-}
 
-test fn close_consumes_the_book() {
-    let book = Book.open_in_memory().unwrap()
-    book.close().unwrap()
-    .Ok(())
+    test fn close_consumes_the_book() {
+        let book = Book.open_in_memory().unwrap()
+        book.close().unwrap()
+        .Ok(())
+    }
 }
 
 // `Release` closes the underlying connection and drops any refusal, so `defer

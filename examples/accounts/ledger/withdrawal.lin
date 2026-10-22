@@ -22,51 +22,46 @@ impl Account {
         self.balance = self.balance - amount - fee
         .Ok(self.balance)
     }
-}
 
-// `testing.assert_eq` compares whole `Result` values, so a wrong variant and a
-// wrong balance both fail the test.
-test fn withdrawal_deducts_the_amount_and_fee() {
-    var account = Account.open(10000)
-    let result = &account.withdraw(amount: 2500, fee: 100)
-    let balance = account.close()
-    let expected: Result[UInt64, WithdrawalError] = .Ok(7400)
-    testing.assert_eq(result, expected, "withdrawal returns the new balance")?
-    testing.assert_eq(balance, 7400, "balance after amount and fee")?
-}
+    // `testing.assert_eq` compares whole `Result` values, so a wrong variant and a
+    // wrong balance both fail the test.
+    test fn withdrawal_deducts_the_amount_and_fee() {
+        var account = Account.open(10000)
+        let result = &account.withdraw(amount: 2500, fee: 100)
+        let balance = account.close()
+        let expected: Result[UInt64, WithdrawalError] = .Ok(7400)
+        testing.assert_eq(result, expected, "withdrawal returns the new balance")?
+        testing.assert_eq(balance, 7400, "balance after amount and fee")?
+    }
 
-test fn declined_withdrawals_leave_the_balance_unchanged() {
-    var account = Account.open(100)
-    let too_much = &account.withdraw(amount: 101)
-    let fee_too_large = &account.withdraw(amount: 100, fee: 1)
-    let balance = account.close()
-    let expected: Result[UInt64, WithdrawalError] = .Err(.InsufficientFunds)
-    testing.assert_eq(too_much, expected, "amount exceeds balance")?
-    testing.assert_eq(fee_too_large, expected, "fee exceeds remainder")?
-    testing.assert_eq(balance, 100, "declined withdrawals preserve funds")?
-}
+    test fn declined_withdrawals_leave_the_balance_unchanged() {
+        var account = Account.open(100)
+        let too_much = &account.withdraw(amount: 101)
+        let fee_too_large = &account.withdraw(amount: 100, fee: 1)
+        let balance = account.close()
+        let expected: Result[UInt64, WithdrawalError] = .Err(.InsufficientFunds)
+        testing.assert_eq(too_much, expected, "amount exceeds balance")?
+        testing.assert_eq(fee_too_large, expected, "fee exceeds remainder")?
+        testing.assert_eq(balance, 100, "declined withdrawals preserve funds")?
+    }
 
-test fn withdrawing_the_full_balance_leaves_zero() {
-    var account = Account.open(100)
-    let result = &account.withdraw(amount: 100)
-    let balance = account.close()
-    let expected: Result[UInt64, WithdrawalError] = .Ok(0)
-    testing.assert_eq(result, expected, "full withdrawal uses the default zero fee")?
-    testing.assert_eq(balance, 0, "account can be emptied")?
-}
+    test fn withdrawing_the_full_balance_leaves_zero() {
+        var account = Account.open(100)
+        let result = &account.withdraw(amount: 100)
+        let balance = account.close()
+        let expected: Result[UInt64, WithdrawalError] = .Ok(0)
+        testing.assert_eq(result, expected, "full withdrawal uses the default zero fee")?
+        testing.assert_eq(balance, 0, "account can be emptied")?
+    }
 
-test fn a_large_fee_is_declined_without_overflow() {
-    // 2^64 - 1 is the largest balance; adding the fee directly would overflow.
-    let maximum: UInt64 = 18446744073709551615
-    var account = Account.open(maximum)
-    let result = &account.withdraw(amount: maximum, fee: 1)
-    let balance = account.close()
-    let expected: Result[UInt64, WithdrawalError] = .Err(.InsufficientFunds)
-    testing.assert_eq(result, expected, "fee exceeds all remaining funds")?
-    testing.assert_eq(balance, maximum, "funds are preserved")?
-}
-
-test fn an_empty_account_can_be_opened_and_closed() {
-    let account = Account.open(0)
-    testing.assert_eq(account.close(), 0, "empty account returns no funds")?
+    test fn a_large_fee_is_declined_without_overflow() {
+        // 2^64 - 1 is the largest balance; adding the fee directly would overflow.
+        let maximum: UInt64 = 18446744073709551615
+        var account = Account.open(maximum)
+        let result = &account.withdraw(amount: maximum, fee: 1)
+        let balance = account.close()
+        let expected: Result[UInt64, WithdrawalError] = .Err(.InsufficientFunds)
+        testing.assert_eq(result, expected, "fee exceeds all remaining funds")?
+        testing.assert_eq(balance, maximum, "funds are preserved")?
+    }
 }

@@ -96,6 +96,12 @@ impl App {
         let App { book, proxy_trust: _ } = self
         book.close()
     }
+
+    test fn app_close_settles_database() {
+        let app = App.in_memory().unwrap()
+        app.close().unwrap()
+        .Ok(())
+    }
 }
 
 fn home(inout app: App, request: http.Request) -> Result[http.Response, http.Error] {
@@ -269,7 +275,7 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     .Ok(())
 }
 
-test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
+test fn origin_spoofing_is_refused() {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     defer var app = App.in_memory().unwrap()
@@ -277,10 +283,12 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
 
     var cross_site = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     &cross_site.add_header("Host", "example.test").unwrap()
+    &cross_site.add_header("Origin", "http://evil.test").unwrap()
     &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
 
     var same_site_subdomain = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     &same_site_subdomain.add_header("Host", "example.test").unwrap()
+    &same_site_subdomain.add_header("Origin", "http://sub.example.test").unwrap()
     &same_site_subdomain.add_header("Sec-Fetch-Site", "same-site").unwrap()
 
     var null_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
@@ -361,11 +369,5 @@ test fn forwarded_proto_https_is_recognised_for_same_origin() {
     // With explicit proxy trust configured, forwarded https is recognized and 303 is answered.
     let response = &router.serve_http(&app_trusted, post.request()).unwrap()
     testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
-    .Ok(())
-}
-
-test fn app_close_settles_database() {
-    let app = App.in_memory().unwrap()
-    app.close().unwrap()
     .Ok(())
 }

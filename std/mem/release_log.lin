@@ -27,38 +27,34 @@ impl ReleaseLog {
     internal fn open(capacity: UInt64) -> ReleaseLog {
         ReleaseLog { buffer = system().acquire((capacity + 1) * release_word_bytes).unwrap() }
     }
-}
 
-test fn a_new_release_log_holds_no_releases() {
-    let log = ReleaseLog.open(2)
-    let nothing: [UInt64; 0] = []
-    let empty = log.holds([UInt64(0)].as_slice())
-    let none = log.holds(nothing.as_slice())
-    log.release()
-    testing.assert(!empty, "a new log recorded a release")?
-    testing.assert(none, "a new log did not hold the empty sequence")?
-}
+    test fn a_new_release_log_holds_no_releases() {
+        let log = ReleaseLog.open(2)
+        let nothing: [UInt64; 0] = []
+        let empty = log.holds([UInt64(0)].as_slice())
+        let none = log.holds(nothing.as_slice())
+        log.release()
+        testing.assert(!empty, "a new log recorded a release")?
+        testing.assert(none, "a new log did not hold the empty sequence")?
+    }
 
-impl ReleaseLog {
     // Make a tag that records `code` in this log when it is released.
     internal fn tag(self: Self, code: UInt64) -> ReleaseTag {
         .{ at = self.buffer.at, extent = self.buffer.len, code }
     }
-}
 
-test fn a_tag_records_its_code_when_it_is_released() {
-    let log = ReleaseLog.open(1)
-    let tag = log.tag(42)
-    let nothing: [UInt64; 0] = []
-    let before = log.holds(nothing.as_slice())
-    tag.release()
-    let after = log.holds([UInt64(42)].as_slice())
-    log.release()
-    testing.assert(before, "making a tag recorded a release")?
-    testing.assert(after, "releasing a tag did not record its code")?
-}
+    test fn a_tag_records_its_code_when_it_is_released() {
+        let log = ReleaseLog.open(1)
+        let tag = log.tag(42)
+        let nothing: [UInt64; 0] = []
+        let before = log.holds(nothing.as_slice())
+        tag.release()
+        let after = log.holds([UInt64(42)].as_slice())
+        log.release()
+        testing.assert(before, "making a tag recorded a release")?
+        testing.assert(after, "releasing a tag did not record its code")?
+    }
 
-impl ReleaseLog {
     // Return whether the log recorded exactly `codes`, in order.
     internal fn holds(self: Self, codes: Slice[UInt64]) -> Bool {
         let count = self.buffer.load(0)
@@ -72,21 +68,21 @@ impl ReleaseLog {
         }
         true
     }
-}
 
-test fn a_release_log_holds_its_codes_in_release_order() {
-    let log = ReleaseLog.open(2)
-    let first = log.tag(7)
-    let second = log.tag(9)
-    second.release()
-    first.release()
-    let ordered = log.holds([UInt64(9), 7].as_slice())
-    let reversed = log.holds([UInt64(7), 9].as_slice())
-    let shorter = log.holds([UInt64(9)].as_slice())
-    log.release()
-    testing.assert(ordered, "the log lost or reordered a release")?
-    testing.assert(!reversed, "the log ignored the release order")?
-    testing.assert(!shorter, "the log held fewer codes than it recorded")?
+    test fn a_release_log_holds_its_codes_in_release_order() {
+        let log = ReleaseLog.open(2)
+        let first = log.tag(7)
+        let second = log.tag(9)
+        second.release()
+        first.release()
+        let ordered = log.holds([UInt64(9), 7].as_slice())
+        let reversed = log.holds([UInt64(7), 9].as_slice())
+        let shorter = log.holds([UInt64(9)].as_slice())
+        log.release()
+        testing.assert(ordered, "the log lost or reordered a release")?
+        testing.assert(!reversed, "the log ignored the release order")?
+        testing.assert(!shorter, "the log held fewer codes than it recorded")?
+    }
 }
 
 impl Release for ReleaseLog {

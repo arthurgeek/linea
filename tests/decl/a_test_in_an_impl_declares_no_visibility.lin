@@ -1,0 +1,18 @@
+import std.io
+
+use io.IoError
+
+struct Box {
+    x: UInt8,
+}
+
+// A test declares no visibility, inside an impl or at top level.
+impl Box {
+    pub test fn a_thing_holds() -> Result[(), IoError] {
+        return .Ok({})
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

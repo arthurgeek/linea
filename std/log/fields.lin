@@ -84,12 +84,12 @@ impl[T: Display] Field[T] {
     pub fn and[U: Display](sink self: Self, sink key: Str, value: U) -> And[Field[T], U] where carries(.first: self), carries(.key: key), borrows(.value: value) {
         .{ first = self, key, value = borrow value }
     }
-}
 
-test fn and_adds_a_second_field_after_the_first() {
-    defer let two = fields_text(field("method", "GET").and("status", 200))
-    testing.assert_eq(two.view(), " method=GET status=200", "two fields changed")?
-    .Ok(())
+    test fn and_adds_a_second_field_after_the_first() {
+        defer let two = fields_text(field("method", "GET").and("status", 200))
+        testing.assert_eq(two.view(), " method=GET status=200", "two fields changed")?
+        .Ok(())
+    }
 }
 
 impl[F: Fields, T: Display] And[F, T] {
@@ -97,12 +97,12 @@ impl[F: Fields, T: Display] And[F, T] {
     pub fn and[U: Display](sink self: Self, sink key: Str, value: U) -> And[And[F, T], U] where carries(.first: self), carries(.key: key), borrows(.value: value) {
         .{ first = self, key, value = borrow value }
     }
-}
 
-test fn added_fields_are_written_in_order() {
-    defer let three = fields_text(field("method", "GET").and("status", 200).and("path", "/health"))
-    testing.assert_eq(three.view(), " method=GET status=200 path=/health", "three fields changed")?
-    .Ok(())
+    test fn added_fields_are_written_in_order() {
+        defer let three = fields_text(field("method", "GET").and("status", 200).and("path", "/health"))
+        testing.assert_eq(three.view(), " method=GET status=200 path=/health", "three fields changed")?
+        .Ok(())
+    }
 }
 
 // A value is quoted when it is empty or holds a space, `=`, `"` or an ASCII

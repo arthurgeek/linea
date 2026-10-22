@@ -361,7 +361,7 @@ error[T-Arity]: expected 0 argument(s), found 1
 5  |     defer let city = "Lisbon".to_owned(mem.system()) else |_| {
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
   ::: std/text/str.lin
-36 |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
+34 |     pub fn to_owned(self: Self) -> Result[String[mem.SystemAllocator], mem.Oom] where carries() {
    |            -------- declared here
    |
    = help: `to_owned` uses the system allocator; use `to_owned_in(allocator, …)` to choose the allocator

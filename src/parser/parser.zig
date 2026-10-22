@@ -1123,25 +1123,49 @@ const Parser = struct {
                 );
             }
 
-            // Read here so the member that carries it is refused by its own
-            // rule. Left to the dispatch below, `test` is a word no member form
-            // begins with, and what a reader is told is that an impl holds
-            // functions -- true, and not what they got wrong.
-            if (self.cursor.eat(.keyword_test) != null) {
-                _ = self.cursor.eat(.keyword_trap);
-                try self.reportAt(
-                    .s_test,
-                    at,
-                    "a test does not sit in an impl",
-                    "an impl holds what its type or its trait declares, and the compiler calls a test",
-                );
+            // A test may sit inside an inherent impl, organizing tests beside
+            // the type's members. In a trait implementation, in a template or
+            // with visibility it is refused by [S-Test].
+            const is_test = self.cursor.eat(.keyword_test) != null;
+            const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
+            if (is_test) {
+                if (is_template) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "a test does not sit in a template",
+                        "a template is instantiated for types that satisfy it, and the compiler calls a test",
+                    );
+                } else if (trait_ref.name != TokenId.none) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "a test does not sit in a trait implementation",
+                        "a trait implementation declares only what the trait requires",
+                    );
+                } else if (visibility != .private) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "a test declares no visibility",
+                        "the compiler writes the only call to a test, so nothing can import it",
+                    );
+                }
+                if (!self.cursor.at(.keyword_fn)) {
+                    try self.reportAt(
+                        .s_test,
+                        at,
+                        "only a function is a test",
+                        "a test is a body the compiler runs, and this declares none",
+                    );
+                }
             }
 
             const settles_a_type = self.atAssociatedType();
             const declares_a_traversal = self.atTraversal();
 
             const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(.member)
+                try self.parseFunction(if (is_test) .test_ else .member)
             else if (self.atProjection())
                 try self.parseProjection(.required)
             else if (self.atTraversal())
@@ -1209,6 +1233,8 @@ const Parser = struct {
                 self.builder.markVisibility(d, visibility, at);
                 self.builder.markOwner(d, of);
                 self.builder.markTrait(d, trait_ref);
+                self.builder.markTest(d, is_test);
+                self.builder.markExpectedTrap(d, expects_trap);
             } else {
                 try self.reportAt(.s_entry, at, "an impl holds functions, projections, traversals, constants and types", "expected `fn`, `proj`, `trav`, `let` or `type` here");
                 while (!self.cursor.atEnd() and !self.cursor.at(.r_brace) and

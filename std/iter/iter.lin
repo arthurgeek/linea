@@ -715,22 +715,22 @@ impl[
         let Map { iterator, transform: _ } = self
         iterator
     }
-}
 
-test fn map_into_inner_returns_the_advanced_iterator() {
-    let transaction = TransactionCursor { at = 0, stop = 2 }
-    var protocol = transaction.map(|sink item| UInt64(item) + 1)
-    match &protocol.next() {
-        Some(_) => {},
-        None => {},
-    }
-    let cursor = protocol.into_inner()
-    match testing.assert_eq(cursor.at, 1, "map.into_inner did not return the advanced iterator") {
-        Ok(_) => rollback_cursor(cursor),
-        Err(failure) => {
-            rollback_cursor(cursor)
-            return .Err(failure)
-        },
+    test fn map_into_inner_returns_the_advanced_iterator() {
+        let transaction = TransactionCursor { at = 0, stop = 2 }
+        var protocol = transaction.map(|sink item| UInt64(item) + 1)
+        match &protocol.next() {
+            Some(_) => {},
+            None => {},
+        }
+        let cursor = protocol.into_inner()
+        match testing.assert_eq(cursor.at, 1, "map.into_inner did not return the advanced iterator") {
+            Ok(_) => rollback_cursor(cursor),
+            Err(failure) => {
+                rollback_cursor(cursor)
+                return .Err(failure)
+            },
+        }
     }
 }
 
@@ -773,38 +773,38 @@ impl[I, U, F] Map[I, U, F] {
         let Map { iterator, transform } = self
         (iterator, transform)
     }
-}
 
-test fn map_recovers_the_advanced_source_and_mutated_callback() {
-    let source = Counter { at = 1, stop = 4 }
-    let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
-        calls += 1
-        item + calls
+    test fn map_recovers_the_advanced_source_and_mutated_callback() {
+        let source = Counter { at = 1, stop = 4 }
+        let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+            calls += 1
+            item + calls
+        }
+        var mapped = source.map(callback)
+        let first = &mapped.next()
+        let second = &mapped.next()
+        let (recovered, transform) = mapped.into_parts()
+        let { calls } = transform.into_captures()
+        testing.assert_eq(first, Option.Some(UInt8(2)), "map did not invoke its stored callback")?
+        testing.assert_eq(second, Option.Some(UInt8(4)), "map did not preserve callback state")?
+        testing.assert_eq(recovered.at, UInt8(3), "map recovery lost source progress")?
+        testing.assert_eq(calls, UInt8(2), "map recovery lost callback progress")?
     }
-    var mapped = source.map(callback)
-    let first = &mapped.next()
-    let second = &mapped.next()
-    let (recovered, transform) = mapped.into_parts()
-    let { calls } = transform.into_captures()
-    testing.assert_eq(first, Option.Some(UInt8(2)), "map did not invoke its stored callback")?
-    testing.assert_eq(second, Option.Some(UInt8(4)), "map did not preserve callback state")?
-    testing.assert_eq(recovered.at, UInt8(3), "map recovery lost source progress")?
-    testing.assert_eq(calls, UInt8(2), "map recovery lost callback progress")?
-}
 
-test fn empty_map_recovers_protocol_captures_without_settling_them() {
-    let source = TransactionCursor { at = 0, stop = 0 }
-    let transaction = TransactionCursor { at = 7, stop = 9 }
-    let callback = [sink transaction] |sink item: UInt8| item + transaction.at
-    var mapped = source.map(callback)
-    let exhausted = &mapped.next()
-    let (recovered, transform) = mapped.into_parts()
-    let { transaction: captured } = transform.into_captures()
-    let position = captured.at
-    rollback_cursor(recovered)
-    rollback_cursor(captured)
-    testing.assert(exhausted.is_none(), "empty map produced an item")?
-    testing.assert_eq(position, UInt8(7), "empty map changed its protocol capture")?
+    test fn empty_map_recovers_protocol_captures_without_settling_them() {
+        let source = TransactionCursor { at = 0, stop = 0 }
+        let transaction = TransactionCursor { at = 7, stop = 9 }
+        let callback = [sink transaction] |sink item: UInt8| item + transaction.at
+        var mapped = source.map(callback)
+        let exhausted = &mapped.next()
+        let (recovered, transform) = mapped.into_parts()
+        let { transaction: captured } = transform.into_captures()
+        let position = captured.at
+        rollback_cursor(recovered)
+        rollback_cursor(captured)
+        testing.assert(exhausted.is_none(), "empty map produced an item")?
+        testing.assert_eq(position, UInt8(7), "empty map changed its protocol capture")?
+    }
 }
 
 // Widen odd items and drop even ones.
@@ -951,31 +951,31 @@ impl[
         let FilterMap { iterator, transform: _ } = self
         iterator
     }
-}
 
-test fn filter_map_recovers_its_inner_iterator() {
-    let counter = TicketCounter { at = 0, stop = 3 }
-    var selected = counter.filter_map(|sink item| .Some(UInt64(item)))
-    match &selected.next() {
-        Some(value) => match testing.assert_eq(value, 0, "filter_map did not advance before recovery") {
-            Ok(_) => {},
-            Err(failure) => {
+    test fn filter_map_recovers_its_inner_iterator() {
+        let counter = TicketCounter { at = 0, stop = 3 }
+        var selected = counter.filter_map(|sink item| .Some(UInt64(item)))
+        match &selected.next() {
+            Some(value) => match testing.assert_eq(value, 0, "filter_map did not advance before recovery") {
+                Ok(_) => {},
+                Err(failure) => {
+                    selected.release()
+                    return .Err(failure)
+                },
+            },
+            None => {
                 selected.release()
+                return testing.assert(false, "filter_map ended before recovery")
+            },
+        }
+        let inner = selected.into_inner()
+        match testing.assert_eq(inner.at, 1, "filter_map.into_inner did not return the advanced iterator") {
+            Ok(_) => inner.release(),
+            Err(failure) => {
+                inner.release()
                 return .Err(failure)
             },
-        },
-        None => {
-            selected.release()
-            return testing.assert(false, "filter_map ended before recovery")
-        },
-    }
-    let inner = selected.into_inner()
-    match testing.assert_eq(inner.at, 1, "filter_map.into_inner did not return the advanced iterator") {
-        Ok(_) => inner.release(),
-        Err(failure) => {
-            inner.release()
-            return .Err(failure)
-        },
+        }
     }
 }
 
@@ -1018,28 +1018,28 @@ impl[I, U, F] FilterMap[I, U, F] {
         let FilterMap { iterator, transform } = self
         (iterator, transform)
     }
-}
 
-test fn filter_map_recovers_callback_state_after_exhaustion() {
-    let source = Counter { at = 0, stop = 3 }
-    let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
-        calls += 1
-        if item == 1 {
-            Option.Some(UInt64(calls))
-        } else {
-            .None
+    test fn filter_map_recovers_callback_state_after_exhaustion() {
+        let source = Counter { at = 0, stop = 3 }
+        let callback = inout [sink calls = UInt8(0)] |sink item: UInt8| {
+            calls += 1
+            if item == 1 {
+                Option.Some(UInt64(calls))
+            } else {
+                .None
+            }
         }
+        var selected = source.filter_map(callback)
+        let first = &selected.next()
+        let exhausted = &selected.next()
+        let still_exhausted = &selected.next()
+        let (recovered, transform) = selected.into_parts()
+        let { calls } = transform.into_captures()
+        testing.assert_eq(first, Option.Some(UInt64(2)), "filter_map lost callback updates before selection")?
+        testing.assert(exhausted.is_none() && still_exhausted.is_none(), "filter_map did not stay exhausted")?
+        testing.assert_eq(recovered.at, UInt8(3), "filter_map recovery lost source progress")?
+        testing.assert_eq(calls, UInt8(3), "filter_map invoked its callback after exhaustion")?
     }
-    var selected = source.filter_map(callback)
-    let first = &selected.next()
-    let exhausted = &selected.next()
-    let still_exhausted = &selected.next()
-    let (recovered, transform) = selected.into_parts()
-    let { calls } = transform.into_captures()
-    testing.assert_eq(first, Option.Some(UInt64(2)), "filter_map lost callback updates before selection")?
-    testing.assert(exhausted.is_none() && still_exhausted.is_none(), "filter_map did not stay exhausted")?
-    testing.assert_eq(recovered.at, UInt8(3), "filter_map recovery lost source progress")?
-    testing.assert_eq(calls, UInt8(3), "filter_map invoked its callback after exhaustion")?
 }
 
 test fn filter_skips_false_items_and_stays_exhausted() {
@@ -1167,22 +1167,22 @@ impl[
         let Filter { iterator, predicate: _ } = self
         iterator
     }
-}
 
-test fn filter_into_inner_returns_the_advanced_iterator() {
-    let transaction = TransactionCursor { at = 0, stop = 3 }
-    var selected = transaction.filter(|item| item >= 1)
-    match &selected.next() {
-        Some(_) => {},
-        None => {},
-    }
-    let cursor = selected.into_inner()
-    match testing.assert_eq(cursor.at, 2, "filter.into_inner did not return the advanced iterator") {
-        Ok(_) => rollback_cursor(cursor),
-        Err(failure) => {
-            rollback_cursor(cursor)
-            return .Err(failure)
-        },
+    test fn filter_into_inner_returns_the_advanced_iterator() {
+        let transaction = TransactionCursor { at = 0, stop = 3 }
+        var selected = transaction.filter(|item| item >= 1)
+        match &selected.next() {
+            Some(_) => {},
+            None => {},
+        }
+        let cursor = selected.into_inner()
+        match testing.assert_eq(cursor.at, 2, "filter.into_inner did not return the advanced iterator") {
+            Ok(_) => rollback_cursor(cursor),
+            Err(failure) => {
+                rollback_cursor(cursor)
+                return .Err(failure)
+            },
+        }
     }
 }
 
@@ -1193,21 +1193,21 @@ impl[I, F] Filter[I, F] {
         let Filter { iterator, predicate } = self
         (iterator, predicate)
     }
-}
 
-test fn filter_recovers_callback_state_after_rejected_items() {
-    let source = Counter { at = 0, stop = 4 }
-    let callback = inout [sink calls = UInt8(0)] |item: UInt8| {
-        calls += 1
-        item == 2
+    test fn filter_recovers_callback_state_after_rejected_items() {
+        let source = Counter { at = 0, stop = 4 }
+        let callback = inout [sink calls = UInt8(0)] |item: UInt8| {
+            calls += 1
+            item == 2
+        }
+        var selected = source.filter(callback)
+        let found = &selected.next()
+        let (recovered, predicate) = selected.into_parts()
+        let { calls } = predicate.into_captures()
+        testing.assert_eq(found, Option.Some(UInt8(2)), "filter selected the wrong item")?
+        testing.assert_eq(recovered.at, UInt8(3), "filter recovery lost source progress")?
+        testing.assert_eq(calls, UInt8(3), "filter did not retain rejected-item callback updates")?
     }
-    var selected = source.filter(callback)
-    let found = &selected.next()
-    let (recovered, predicate) = selected.into_parts()
-    let { calls } = predicate.into_captures()
-    testing.assert_eq(found, Option.Some(UInt8(2)), "filter selected the wrong item")?
-    testing.assert_eq(recovered.at, UInt8(3), "filter recovery lost source progress")?
-    testing.assert_eq(calls, UInt8(3), "filter did not retain rejected-item callback updates")?
 }
 
 impl[I: Iterator] Iterator for Enumerate[I] {
@@ -1259,13 +1259,13 @@ impl[I: Iterator] Enumerate[I] {
         let Enumerate { iterator, position: _ } = self
         iterator
     }
-}
 
-test fn enumerate_into_inner_returns_the_advanced_iterator() {
-    var numbered = (AskedSource { at = 0, stop = 4, asked = 0 }).enumerate()
-    let _first = &numbered.next()
-    let source = numbered.into_inner()
-    testing.assert_eq(source.asked, UInt8(1), "enumerate asked its source more than once per item")?
+    test fn enumerate_into_inner_returns_the_advanced_iterator() {
+        var numbered = (AskedSource { at = 0, stop = 4, asked = 0 }).enumerate()
+        let _first = &numbered.next()
+        let source = numbered.into_inner()
+        testing.assert_eq(source.asked, UInt8(1), "enumerate asked its source more than once per item")?
+    }
 }
 
 impl[I: Iterator + Release] Release for Enumerate[I] {
@@ -1331,15 +1331,15 @@ impl[A, B] Zip[A, B] {
         let Zip { first, second } = self
         (first, second)
     }
-}
 
-test fn zip_recovers_both_sources_as_far_as_each_advanced() {
-    var zipped = (AskedSource { at = 0, stop = 9, asked = 0 }).zip(AskedSource { at = 5, stop = 9, asked = 0 })
-    let first = &zipped.next()
-    let (left, right) = zipped.into_parts()
-    testing.assert_eq(first, Option.Some((UInt8(0), UInt8(5))), "zip changed its pair")?
-    testing.assert_eq(left.asked, UInt8(1), "zip recovery lost the first source's progress")?
-    testing.assert_eq(right.at, UInt8(6), "zip recovery lost the second source's progress")?
+    test fn zip_recovers_both_sources_as_far_as_each_advanced() {
+        var zipped = (AskedSource { at = 0, stop = 9, asked = 0 }).zip(AskedSource { at = 5, stop = 9, asked = 0 })
+        let first = &zipped.next()
+        let (left, right) = zipped.into_parts()
+        testing.assert_eq(first, Option.Some((UInt8(0), UInt8(5))), "zip changed its pair")?
+        testing.assert_eq(left.asked, UInt8(1), "zip recovery lost the first source's progress")?
+        testing.assert_eq(right.at, UInt8(6), "zip recovery lost the second source's progress")?
+    }
 }
 
 // Releasing a zip settles the second source and then the first, last component
@@ -1396,13 +1396,13 @@ impl[I: Iterator] Take[I] {
         let Take { iterator, remaining: _ } = self
         iterator
     }
-}
 
-test fn take_into_inner_returns_the_advanced_iterator() {
-    var taken = (AskedSource { at = 0, stop = 9, asked = 0 }).take(3)
-    let _first = &taken.next()
-    let source = taken.into_inner()
-    testing.assert_eq(source.asked, UInt8(1), "take recovered its source without the progress it made")?
+    test fn take_into_inner_returns_the_advanced_iterator() {
+        var taken = (AskedSource { at = 0, stop = 9, asked = 0 }).take(3)
+        let _first = &taken.next()
+        let source = taken.into_inner()
+        testing.assert_eq(source.asked, UInt8(1), "take recovered its source without the progress it made")?
+    }
 }
 
 impl[I: Iterator + Release] Release for Take[I] {
@@ -1461,13 +1461,13 @@ impl[I: Iterator] Skip[I] {
         let Skip { iterator, remaining: _ } = self
         iterator
     }
-}
 
-test fn skip_into_inner_returns_the_advanced_iterator() {
-    var skipped = (AskedSource { at = 0, stop = 9, asked = 0 }).skip(3)
-    let _first = &skipped.next()
-    let source = skipped.into_inner()
-    testing.assert_eq(source.asked, UInt8(4), "skip asked its source more than its count plus one")?
+    test fn skip_into_inner_returns_the_advanced_iterator() {
+        var skipped = (AskedSource { at = 0, stop = 9, asked = 0 }).skip(3)
+        let _first = &skipped.next()
+        let source = skipped.into_inner()
+        testing.assert_eq(source.asked, UInt8(4), "skip asked its source more than its count plus one")?
+    }
 }
 
 impl[I: Iterator + Release] Release for Skip[I] {

@@ -95,6 +95,80 @@ impl[S, A: Allocator] Closure[S, A] {
         let Storage { buffer, allocator: _, at: _, len: _ } = storage
         .Ok(.{ entry = closure_entry(shape), settle = closure_settle(shape), at, len, storage = buffer })
     }
+
+    test fn a_closure_calls_what_it_captured() {
+        let rate: UInt64 = 10
+        let discount = Closure.open(
+            [sink rate] |cents: UInt64| -> UInt64 {
+                cents - cents * rate / 100
+            },
+        ).unwrap()
+        let paid = discount(2000)
+        discount.release()
+        testing.assert_eq(paid, 1800, "the closure lost its rate")?
+        .Ok(())
+    }
+
+    test fn a_closure_keeps_its_captures_in_an_arena() {
+        defer let arena = Arena.open(system(), 64)
+        let rate: UInt64 = 10
+        // Arena storage is reclaimed with the arena, so this closure is dropped
+        // rather than released.
+        let discount = Closure.open_in(
+            arena.handle(),
+            [sink rate] |cents: UInt64| -> UInt64 {
+                cents - cents * rate / 100
+            },
+        ).unwrap()
+        testing.assert_eq(discount(2000), 1800, "the closure lost its rate in an arena")?
+        .Ok(())
+    }
+
+    test fn a_refused_allocation_releases_the_callback() {
+        let log = AllocationLog.open(system(), 0).unwrap()
+        var kept: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
+        let pushed = match &kept.push(7) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+        log.refuse_attempt(2)
+        let opened = Closure.open_in(
+            log.allocator(),
+            [sink kept] || -> UInt64 {
+                kept.length()
+            },
+        )
+        let refused = match opened {
+            Ok(closure) => {
+                closure.release()
+                false
+            },
+            Err(_) => true,
+        }
+        let settled = log.all_disposed()
+        log.release()
+        testing.assert(pushed, "the captured vector could not grow")?
+        testing.assert(refused, "the allocator's refusal was not reported")?
+        testing.assert(settled, "a refused closure left an allocation behind")?
+        .Ok(())
+    }
+
+    test fn a_lambda_that_captures_nothing_allocates_nothing() {
+        let log = AllocationLog.open(system(), 0).unwrap()
+        let doubling = Closure.open_in(
+            log.allocator(),
+            |value: UInt64| -> UInt64 {
+                value * 2
+            },
+        ).unwrap()
+        let doubled = doubling(21)
+        doubling.release()
+        let attempts = log.attempts()
+        log.release()
+        testing.assert_eq(doubled, 42, "the closure did not double")?
+        testing.assert_eq(attempts, 0, "a closure with no captures allocated")?
+        .Ok(())
+    }
 }
 
 impl[S] Closure[S, SystemAllocator] {
@@ -103,93 +177,19 @@ impl[S] Closure[S, SystemAllocator] {
     pub fn open[F: Release](sink callback: F) -> Result[Self, Oom] where carries(.Ok: callback) {
         Closure.erase(system(), callback)
     }
-}
 
-test fn a_closure_opened_in_the_system_allocator_calls_what_it_captured() {
-    let step: UInt64 = 5
-    let bump: Result[Closure[fn(value: UInt64) -> UInt64], Oom] = Closure.open(
-        [sink step] |value: UInt64| -> UInt64 {
-            value + step
-        },
-    )
-    let kept = bump.unwrap()
-    let raised = kept(10)
-    kept.release()
-    testing.assert_eq(raised, UInt64(15), "the closure lost its capture")?
-}
-
-test fn a_closure_calls_what_it_captured() {
-    let rate: UInt64 = 10
-    let discount = Closure.open(
-        [sink rate] |cents: UInt64| -> UInt64 {
-            cents - cents * rate / 100
-        },
-    ).unwrap()
-    let paid = discount(2000)
-    discount.release()
-    testing.assert_eq(paid, 1800, "the closure lost its rate")?
-    .Ok(())
-}
-
-test fn a_closure_keeps_its_captures_in_an_arena() {
-    defer let arena = Arena.open(system(), 64)
-    let rate: UInt64 = 10
-    // Arena storage is reclaimed with the arena, so this closure is dropped
-    // rather than released.
-    let discount = Closure.open_in(
-        arena.handle(),
-        [sink rate] |cents: UInt64| -> UInt64 {
-            cents - cents * rate / 100
-        },
-    ).unwrap()
-    testing.assert_eq(discount(2000), 1800, "the closure lost its rate in an arena")?
-    .Ok(())
-}
-
-test fn a_refused_allocation_releases_the_callback() {
-    let log = AllocationLog.open(system(), 0).unwrap()
-    var kept: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
-    let pushed = match &kept.push(7) {
-        Ok(_) => true,
-        Err(_) => false,
+    test fn a_closure_opened_in_the_system_allocator_calls_what_it_captured() {
+        let step: UInt64 = 5
+        let bump: Result[Closure[fn(value: UInt64) -> UInt64], Oom] = Closure.open(
+            [sink step] |value: UInt64| -> UInt64 {
+                value + step
+            },
+        )
+        let kept = bump.unwrap()
+        let raised = kept(10)
+        kept.release()
+        testing.assert_eq(raised, UInt64(15), "the closure lost its capture")?
     }
-    log.refuse_attempt(2)
-    let opened = Closure.open_in(
-        log.allocator(),
-        [sink kept] || -> UInt64 {
-            kept.length()
-        },
-    )
-    let refused = match opened {
-        Ok(closure) => {
-            closure.release()
-            false
-        },
-        Err(_) => true,
-    }
-    let settled = log.all_disposed()
-    log.release()
-    testing.assert(pushed, "the captured vector could not grow")?
-    testing.assert(refused, "the allocator's refusal was not reported")?
-    testing.assert(settled, "a refused closure left an allocation behind")?
-    .Ok(())
-}
-
-test fn a_lambda_that_captures_nothing_allocates_nothing() {
-    let log = AllocationLog.open(system(), 0).unwrap()
-    let doubling = Closure.open_in(
-        log.allocator(),
-        |value: UInt64| -> UInt64 {
-            value * 2
-        },
-    ).unwrap()
-    let doubled = doubling(21)
-    doubling.release()
-    let attempts = log.attempts()
-    log.release()
-    testing.assert_eq(doubled, 42, "the closure did not double")?
-    testing.assert_eq(attempts, 0, "a closure with no captures allocated")?
-    .Ok(())
 }
 
 impl[S, A: Allocator] Release for Closure[S, A] {
