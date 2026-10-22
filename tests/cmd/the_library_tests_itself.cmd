@@ -31,11 +31,14 @@ The library tests itself.
   ok    cli.options_all_collects_repeatable_options
   ok    cli.parse_args_parses_process_arguments
   ok    cli.parse_cursor_aliases_parse
+  ok    cli.parse_handles_optional_and_variadic_positionals
+  ok    cli.parse_handles_subcommand_variadic_positionals
   ok    cli.parse_parses_cursor_into_matches
   ok    cli.peek_inspects_token_without_advancing
   ok    cli.positional_as_parses_typed_positional
   ok    cli.positional_registers_positional_arguments
   ok    cli.positional_retrieves_positional_arguments
+  ok    cli.positionals_all_collects_variadic_positionals
   ok    cli.require_value_extracts_value_or_fails
   ok    cli.required_option_extracts_value_or_fails
   ok    cli.required_parsed_converts_present_option_or_fails
@@ -1402,4 +1405,4 @@ The library tests itself.
   ok    tuple.six_tuple_compares_and_hashes_by_every_component
   ok    tuple.three_tuple_compares_and_hashes_by_every_component
   
-  1399 passed, 0 failed
+  1402 passed, 0 failed
