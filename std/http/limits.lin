@@ -6,6 +6,9 @@ import std.testing
 // hold, and `max_form_pairs` how many a body sent as
 // `application/x-www-form-urlencoded` may, since the server decodes each into
 // the arena. Timeouts are milliseconds, and zero waits forever.
+// `first_byte_timeout_ms` bounds how long the server waits for the first byte
+// after accepting a connection, so an idle speculative connection is closed
+// without holding the accept loop for the full request timeout.
 // `read_timeout_ms` bounds the whole request, head and body together, counted
 // from the moment the connection is accepted, so a client that sends a byte at
 // a time is cut off as surely as a silent one. `write_timeout_ms` bounds each
@@ -22,13 +25,15 @@ pub struct Limits {
     max_form_pairs: UInt64,
     max_body_bytes: UInt64,
     request_arena_bytes: UInt64,
+    first_byte_timeout_ms: UInt64,
     read_timeout_ms: UInt64,
     write_timeout_ms: UInt64,
     connections: Option[UInt64],
 }
 
 // The default limits allow 8 KiB lines, 100 headers, 100 query pairs, 100 form
-// pairs, a 1 MiB body, a 48 MiB arena and five-second timeouts. The arena holds
+// pairs, a 1 MiB body, a 48 MiB arena, a 500 ms wait for the first byte and
+// five-second read and write timeouts. The arena holds
 // what a handler makes of a request within the other limits, which is more
 // than the request:
 //
@@ -55,6 +60,7 @@ let standard_limits: Limits = .{
     max_form_pairs = 100,
     max_body_bytes = 1048576,
     request_arena_bytes = 50331648,
+    first_byte_timeout_ms = 500,
     read_timeout_ms = 5000,
     write_timeout_ms = 5000,
     connections = .None,
@@ -76,5 +82,7 @@ test fn the_default_limits_bound_lines_headers_and_bodies() {
     testing.assert_eq(limits.max_query_pairs, UInt64(100), "the query bound changed")?
     testing.assert_eq(limits.max_form_pairs, UInt64(100), "the form bound changed")?
     testing.assert_eq(limits.max_body_bytes, UInt64(1048576), "the body bound changed")?
+    testing.assert_eq(limits.first_byte_timeout_ms, UInt64(500), "the first-byte timeout changed")?
+    testing.assert_eq(limits.read_timeout_ms, UInt64(5000), "the read timeout changed")?
     testing.assert(limits.connections.is_none(), "the default limits end serving")?
 }

@@ -144,25 +144,21 @@ test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
     let first = match prompt_with(&reader, &writer, "go> ", max_bytes: 3) {
-        Ok(line) => match line {
-            Some(value) => {
-                let good = value.view() == "one"
-                value.release()
-                good
-            },
-            None => false,
+        Ok(Some(value)) => {
+            let good = value.view() == "one"
+            value.release()
+            good
         },
+        Ok(None) => false,
         Err(_) => false,
     }
     let second = match &reader.read_line(max_bytes: 3) {
-        Ok(line) => match line {
-            Some(value) => {
-                let good = value.view() == "two"
-                value.release()
-                good
-            },
-            None => false,
+        Ok(Some(value)) => {
+            let good = value.view() == "two"
+            value.release()
+            good
         },
+        Ok(None) => false,
         Err(_) => false,
     }
     let source = reader.abandon()
@@ -182,7 +178,8 @@ test fn a_failed_prompt_write_does_not_read_input() {
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = true, fail_flush = false }
     let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 6) {
-        Err(error) => match read error { Write(failure) => failure.written == 0, _ => false },
+        Err(Write(failure)) => failure.written == 0,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -203,7 +200,8 @@ test fn a_failed_prompt_flush_does_not_read_input() {
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = true }
     let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 6) {
-        Err(error) => match read error { Flush(failure) => failure.written == 0, _ => false },
+        Err(Flush(failure)) => failure.written == 0,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
@@ -223,33 +221,30 @@ test fn a_failed_prompt_preserves_existing_input_lookahead() {
         return testing.assert(false, "reader allocation failed")
     }
     let first = match &reader.read_line(max_bytes: 3) {
-        Ok(line) => match line {
-            Some(value) => {
-                let good = value.view() == "one"
-                value.release()
-                good
-            },
-            None => false,
+        Ok(Some(value)) => {
+            let good = value.view() == "one"
+            value.release()
+            good
         },
+        Ok(None) => false,
         Err(_) => false,
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = true }
     let failed = match prompt_with(&reader, &writer, "> ", max_bytes: 3) {
-        Err(error) => match read error { Flush(_) => true, _ => false },
+        Err(Flush(_)) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false
         },
     }
     let second = match &reader.read_line(max_bytes: 3) {
-        Ok(line) => match line {
-            Some(value) => {
-                let good = value.view() == "two"
-                value.release()
-                good
-            },
-            None => false,
+        Ok(Some(value)) => {
+            let good = value.view() == "two"
+            value.release()
+            good
         },
+        Ok(None) => false,
         Err(_) => false,
     }
     let source = reader.abandon()
@@ -268,10 +263,8 @@ test fn a_prompt_reads_its_response_into_an_arena() {
     }
     var writer = PromptTestWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, flushed = false, fail_write = false, fail_flush = false }
     let answered = match prompt_with(&reader, &writer, "go> ", max_bytes: 64) {
-        Ok(line) => match line {
-            Some(value) => value.view() == "a response long enough to grow its record",
-            None => false,
-        },
+        Ok(Some(value)) => value.view() == "a response long enough to grow its record",
+        Ok(None) => false,
         Err(_) => false,
     }
     let _source = reader.abandon()
@@ -319,7 +312,8 @@ test fn prompt_writes_to_standard_error_and_reads_its_reader() {
         return testing.assert(false, "reader allocation failed")
     }
     let failed = match prompt(&reader, "", max_bytes: 8) {
-        Err(error) => match read error { Read(_) => true, _ => false },
+        Err(Read(_)) => true,
+        Err(_) => false,
         Ok(line) => {
             line.release()
             false

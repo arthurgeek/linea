@@ -1,0 +1,5 @@
+import names
+
+fn main() -> UInt8 {
+    names.check()
+}

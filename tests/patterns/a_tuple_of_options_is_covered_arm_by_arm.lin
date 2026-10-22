@@ -1,0 +1,15 @@
+// A pair of options has four shapes. Each arm names one, so together they
+// cover the pair and none of them is redundant.
+fn pick(sink pair: (Option[UInt8], Option[UInt8])) -> UInt8 {
+    match pair {
+        (Some(a), Some(b)) => a + b,
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let total = pick((.Some(1), .Some(2))) + pick((.Some(4), .None)) + pick((.None, .Some(5))) + pick((.None, .None))
+    total - 12
+}

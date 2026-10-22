@@ -8,5 +8,5 @@ does not have, as it is where that module is not loaded at all.
     --> $LINEA_ROOT/tests/cmd/fixtures/a_trait_no_import_can_name_is_not_offered/main.lin:11:8
      |
   11 |     if b.count() == 3 {
-     |        ^^^^^^^ no operation of this name is declared for this type
+     |        ^^^^^^^ `Sequence` declares it, and `shapes.Box` does not implement `Sequence`
   [1]

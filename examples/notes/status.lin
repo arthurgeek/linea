@@ -1,0 +1,72 @@
+import std.fmt
+import std.io
+import std.json
+import std.testing
+
+// The lifecycle status of a note.
+@(copyable, derive(Debug, Equatable, Release))
+pub enum Status {
+    Open,
+    Done,
+}
+
+impl Status {
+    // Parse status from string: "open" or "done" (case-insensitive).
+    pub fn parse(text: Str) -> Option[Status] {
+        if text.equals_ascii_folded("open") {
+            .Some(.Open)
+        } else if text.equals_ascii_folded("done") {
+            .Some(.Done)
+        } else {
+            .None
+        }
+    }
+
+    // Return the canonical lowercase representation.
+    pub fn as_str(self: Self) -> Str {
+        match read self {
+            Open => "open",
+            Done => "done",
+        }
+    }
+
+    test fn status_parses_case_insensitively_and_serializes() {
+        testing.assert_eq(Status.parse("open"), Option.Some(Status.Open), "open was not parsed")?
+        testing.assert_eq(Status.parse("OPEN"), Option.Some(Status.Open), "uppercase OPEN was not parsed")?
+        testing.assert_eq(Status.parse("done"), Option.Some(Status.Done), "done was not parsed")?
+        testing.assert_eq(Status.parse("Done"), Option.Some(Status.Done), "capitalized Done was not parsed")?
+        testing.assert(Status.parse("unknown").is_none(), "invalid status was accepted")?
+
+        testing.assert_eq(Status.Open.as_str(), "open", "open serialized incorrectly")?
+        testing.assert_eq(Status.Done.as_str(), "done", "done serialized incorrectly")?
+        .Ok(())
+    }
+}
+
+impl fmt.Display for Status {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(self.as_str())
+    }
+}
+
+impl json.Encode for Status {
+    fn encode[W: io.Writer](self: Self, inout encoder: json.Encoder, inout writer: W) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+        &encoder.string(&writer, self.as_str())
+    }
+}
+
+impl[A: Allocator] json.Decode[A] for Status {
+    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] {
+        let text = value.as_str() else {
+            return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
+        }
+        match Status.parse(text) {
+            Some(status) => .Ok(status),
+            None => .Err(json.DecodeError.failure_in(allocator, .OutOfRange)),
+        }
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}

@@ -1,0 +1,234 @@
+import std.fmt
+import std.fs
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+// Persistence error.
+@(copyable, derive(Debug, Release))
+pub enum StorageError {
+    ReadFailed,
+    WriteFailed,
+    DecodeFailed,
+    EncodeFailed,
+}
+
+impl fmt.Display for StorageError {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            ReadFailed => &w.write_str("failed to read data file"),
+            WriteFailed => &w.write_str("failed to write data file"),
+            DecodeFailed => &w.write_str("failed to parse notes JSON data"),
+            EncodeFailed => &w.write_str("failed to serialize notes JSON data"),
+        }
+    }
+}
+
+// Return whether a read failure was caused specifically by a missing file.
+pub fn is_not_found(error: fs.ReadTextError) -> Bool {
+    match read error {
+        Read(reason) => match read reason.primary {
+            Some(primary_err) => match read primary_err {
+                Open(failure) => match read failure.primary {
+                    Some(fs_err) => match read fs_err {
+                        Io(io_err) => io_err.category == io.IoCategory.NotFound,
+                        _ => false,
+                    },
+                    None => false,
+                },
+                _ => false,
+            },
+            None => false,
+        },
+        Encoding(_) => false,
+    }
+}
+
+// Local wrapper for decoding a list of notes from a raw JSON array.
+pub struct NoteList {
+    notes: Vec[Note],
+}
+
+impl Release for NoteList {
+    fn release(sink self: Self) {
+        let { notes } = self
+        notes.release()
+    }
+}
+
+impl json.Decode[mem.SystemAllocator] for NoteList {
+    fn decode(value: json.Value[mem.SystemAllocator], allocator: mem.SystemAllocator) -> Result[Self, json.DecodeError[mem.SystemAllocator]] {
+        let children = value.elements() else {
+            return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
+        }
+        defer var notes: Vec[Note] = Vec.new_in(allocator)
+        for index in UInt64(0)..children.length() {
+            let decoded: Result[Note, json.DecodeError] = json.from_value(children[index])
+            let note = match decoded {
+                Ok(n) => n,
+                Err(error) => return .Err(json.DecodeError.at_index(error, index)),
+            }
+            &notes.push(note).settled().unwrap()
+        }
+        .Ok(.{ notes })
+    }
+
+    fn missing(allocator: mem.SystemAllocator) -> Result[Self, json.DecodeError[mem.SystemAllocator]] {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}
+
+// In-memory note store with file-backed persistence.
+pub struct NoteStore {
+    notes: Vec[Note],
+    path: fs.Path,
+}
+
+impl Release for NoteStore {
+    fn release(sink self: Self) {
+        let { notes, path: _ } = self
+        notes.release()
+    }
+}
+
+impl NoteStore {
+    // Open storage from path. If file does not exist, starts empty.
+    // If reading fails for any other reason (permission denied, I/O error), returns error.
+    pub fn open(sink path: fs.Path) -> Result[Self, StorageError] {
+        let text_result = fs.read_text(path, max_bytes: 4194304)
+        let notes: Vec[Note] = match text_result {
+            Ok(content) => {
+                defer content.release()
+                let decoded: Result[NoteList, json.DecodeError] = json.decode(content.view())
+                match decoded {
+                    Ok(list) => {
+                        let { notes: n } = list
+                        n
+                    },
+                    Err(error) => {
+                        error.release()
+                        return .Err(.DecodeFailed)
+                    },
+                }
+            },
+            Err(read_error) => {
+                if is_not_found(read_error) {
+                    Vec.new()
+                } else {
+                    return .Err(.ReadFailed)
+                }
+            },
+        }
+        .Ok(.{ notes, path })
+    }
+
+    // Save in-memory notes atomically to the file path.
+    pub fn save(inout self: Self) -> Result[(), StorageError] {
+        defer let output = TableFormatter.render_filtered_json(self.notes.as_slice(), .None, .None)
+        let saved = fs.save_atomic(self.path, output.as_bytes(), .Replace)
+        match saved {
+            Ok(_) => .Ok(()),
+            Err(_) => .Err(.WriteFailed),
+        }
+    }
+
+    // Compute the next available note ID (maximum existing ID + 1).
+    fn next_id(self: Self) -> Result[UInt64, mem.Oom] {
+        var max_id: UInt64 = 0
+        for read note in self.notes {
+            if note.id > max_id {
+                max_id = note.id
+            }
+        }
+        if max_id == 18446744073709551615 {
+            return .Err(.Exhausted)
+        }
+        .Ok(max_id + 1)
+    }
+
+    // Add a new note and return its assigned ID.
+    pub fn add(inout self: Self, title: Str, priority: Priority, sink tags: Vec[String]) -> Result[UInt64, mem.Oom] {
+        let id = self.next_id() else |_| {
+            tags.release()
+            return .Err(.Exhausted)
+        }
+        let note = Note.new(id, title, priority, tags)?
+        &self.notes.push(note).settled()?
+        .Ok(id)
+    }
+
+    // Find note by ID.
+    pub fn get(self: Self, id: UInt64) -> Option[borrow Note] where borrows(.Some: self) {
+        let slice = self.notes.as_slice()
+        var i: UInt64 = 0
+        while i < slice.length() {
+            let note = slice.get(i).unwrap()
+            if note.id == id {
+                return .Some(note)
+            }
+            i += 1
+        }
+        .None
+    }
+
+    // Mark note with `id` as completed. Returns whether it was found.
+    pub fn mark_done(inout self: Self, id: UInt64) -> Bool {
+        for inout note in self.notes {
+            if note.id == id {
+                note.status = Status.Done
+                return true
+            }
+        }
+        false
+    }
+
+    // Remove note with `id` from the store. Returns whether it was found.
+    pub fn remove(inout self: Self, id: UInt64) -> Option[Note] {
+        var index: UInt64 = 0
+        while index < self.notes.length() {
+            if self.notes[index].id == id {
+                return &self.notes.remove(index)
+            }
+            index += 1
+        }
+        .None
+    }
+
+    // Return count of notes.
+    pub fn count(self: Self) -> UInt64 {
+        self.notes.length()
+    }
+
+    test fn note_store_crud_lifecycle() {
+        let path = fs.Path.from_str("test_notes.json").unwrap()
+        var store = NoteStore.open(path).unwrap()
+        defer store.release()
+
+        var tags1: Vec[String] = Vec.new()
+        &tags1.push("work".to_owned().unwrap()).unwrap()
+        let id1 = &store.add("Task 1", .High, tags1).unwrap()
+        testing.assert_eq(id1, UInt64(1), "first note id is not 1")?
+
+        var tags2: Vec[String] = Vec.new()
+        &tags2.push("home".to_owned().unwrap()).unwrap()
+        let id2 = &store.add("Task 2", .Low, tags2).unwrap()
+        testing.assert_eq(id2, UInt64(2), "second note id is not 2")?
+
+        testing.assert_eq(store.count(), UInt64(2), "store count is not 2")?
+
+        let found = store.get(1).unwrap()
+        testing.assert_eq(found.title.view(), "Task 1", "task 1 title differs")?
+        testing.assert_eq(found.status, Status.Open, "task 1 initial status is not open")?
+
+        let marked = &store.mark_done(1)
+        testing.assert(marked, "mark_done returned false for existing note")?
+        testing.assert_eq(store.get(1).unwrap().status, Status.Done, "task 1 status did not become done")?
+
+        defer let removed = &store.remove(2).unwrap()
+        testing.assert_eq(removed.id, UInt64(2), "wrong note removed")?
+        testing.assert_eq(store.count(), UInt64(1), "count after removal is not 1")?
+        testing.assert(store.get(2).is_none(), "removed note 2 was still found")?
+        .Ok(())
+    }
+}

@@ -2,4 +2,4 @@ error[T-Unreachable]: no value reaches this arm
  --> tests/ranges/a_wildcard_the_ranges_make_redundant.lin:6:9
   |
 6 |         _ => 2,
-  |         ^ every value is already covered
+  |         ^ the arms before it take every value it would

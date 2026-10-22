@@ -64,10 +64,8 @@ test fn a_connection_to_a_closed_port_is_refused() {
             let _closed = connection.close()
             false
         },
-        Err(error) => match read error {
-            Io(reason) => match read reason.category { ConnectionRefused => true, _ => false },
-            _ => false,
-        },
+        Err(Io(reason)) => match read reason.category { ConnectionRefused => true, _ => false },
+        Err(_) => false,
     }
     testing.assert(listener_closed, "closing the listener failed")?
     testing.assert(refused, "a connection to a closed port was not refused")?
@@ -98,29 +96,27 @@ impl Connection {
         self.deadline = .None
         .Ok(())
     }
-}
 
-test fn a_silent_peer_times_out_the_read() {
-    var listener = listen(loopback(0)).unwrap()
-    let client = connect(listener.local_address().unwrap()).unwrap()
-    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    var server = accepted
-    let configured = &server.set_timeouts(read_ms: 50, write_ms: 50).is_ok()
-    defer var buffer = mem.system().acquire(8).unwrap()
-    let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
-        Ok(_) => false,
-        Err(error) => match read error.category { TimedOut => true, _ => false },
+    test fn a_silent_peer_times_out_the_read() {
+        var listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+        var server = accepted
+        let configured = &server.set_timeouts(read_ms: 50, write_ms: 50).is_ok()
+        defer var buffer = mem.system().acquire(8).unwrap()
+        let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
+            Ok(_) => false,
+            Err(error) => match read error.category { TimedOut => true, _ => false },
+        }
+        let server_closed = server.close().is_ok()
+        let client_closed = client.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert(configured, "setting the timeouts failed")?
+        testing.assert(expired, "a read from a silent peer did not time out")?
+        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
+        .Ok(())
     }
-    let server_closed = server.close().is_ok()
-    let client_closed = client.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert(configured, "setting the timeouts failed")?
-    testing.assert(expired, "a read from a silent peer did not time out")?
-    testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
 
-impl Connection {
     // Bound all later reads together: once `within_ms` milliseconds have passed
     // since `started`, every read fails as timed out, even one whose bytes have
     // arrived, and a read that would wait past that moment is cut short at it.
@@ -135,61 +131,59 @@ impl Connection {
             self.deadline = .Some(Deadline { started = copy(started), budget_ms = within_ms })
         }
     }
-}
 
-test fn a_deadline_ends_reads_that_each_arrive_in_time() {
-    var listener = listen(loopback(0)).unwrap()
-    var client = connect(listener.local_address().unwrap()).unwrap()
-    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    var server = accepted
-    // Each byte arrives inside the 150 ms a single read may wait, yet the
-    // third read starts after the 200 ms deadline, which spans them all.
-    &server.set_timeouts(read_ms: 150, write_ms: 150).unwrap()
-    &server.set_deadline(time.Instant.now(), within_ms: 200)
-    defer var buffer = mem.system().acquire(8).unwrap()
-    var arrived: UInt64 = 0
-    var expired = false
-    var round: UInt64 = 0
-    while round < 4 && !expired {
-        round += 1
-        time.sleep(time.Duration.from_milliseconds(80))
-        let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
-        match &server.read_some(&buffer, offset: 0, count: 8) {
-            Ok(count) => arrived += count,
-            Err(error) => expired = match read error.category { TimedOut => true, _ => false },
+    test fn a_deadline_ends_reads_that_each_arrive_in_time() {
+        var listener = listen(loopback(0)).unwrap()
+        var client = connect(listener.local_address().unwrap()).unwrap()
+        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+        var server = accepted
+        // Each byte arrives inside the 150 ms a single read may wait, yet the
+        // third read starts after the 200 ms deadline, which spans them all.
+        &server.set_timeouts(read_ms: 150, write_ms: 150).unwrap()
+        &server.set_deadline(time.Instant.now(), within_ms: 200)
+        defer var buffer = mem.system().acquire(8).unwrap()
+        var arrived: UInt64 = 0
+        var expired = false
+        var round: UInt64 = 0
+        while round < 4 && !expired {
+            round += 1
+            time.sleep(time.Duration.from_milliseconds(80))
+            let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+            match &server.read_some(&buffer, offset: 0, count: 8) {
+                Ok(count) => arrived += count,
+                Err(error) => expired = match read error.category { TimedOut => true, _ => false },
+            }
         }
+        let server_closed = server.close().is_ok()
+        let client_closed = client.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert(expired, "reads that each arrived in time outlasted the deadline")?
+        testing.assert(arrived >= 1 && arrived < 4, "the deadline did not end the reads between the first and the last")?
+        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
+        .Ok(())
     }
-    let server_closed = server.close().is_ok()
-    let client_closed = client.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert(expired, "reads that each arrived in time outlasted the deadline")?
-    testing.assert(arrived >= 1 && arrived < 4, "the deadline did not end the reads between the first and the last")?
-    testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
 
-test fn a_deadline_of_zero_leaves_reads_unbounded() {
-    var listener = listen(loopback(0)).unwrap()
-    var client = connect(listener.local_address().unwrap()).unwrap()
-    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    var server = accepted
-    &server.set_deadline(time.Instant.now(), within_ms: 0)
-    time.sleep(time.Duration.from_milliseconds(30))
-    let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
-    defer var buffer = mem.system().acquire(8).unwrap()
-    let received = match &server.read_some(&buffer, offset: 0, count: 8) {
-        Ok(count) => count,
-        Err(_) => 0,
+    test fn a_deadline_of_zero_leaves_reads_unbounded() {
+        var listener = listen(loopback(0)).unwrap()
+        var client = connect(listener.local_address().unwrap()).unwrap()
+        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+        var server = accepted
+        &server.set_deadline(time.Instant.now(), within_ms: 0)
+        time.sleep(time.Duration.from_milliseconds(30))
+        let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+        defer var buffer = mem.system().acquire(8).unwrap()
+        let received = match &server.read_some(&buffer, offset: 0, count: 8) {
+            Ok(count) => count,
+            Err(_) => 0,
+        }
+        let server_closed = server.close().is_ok()
+        let client_closed = client.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert_eq(received, UInt64(1), "a zero deadline bounded the read")?
+        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
+        .Ok(())
     }
-    let server_closed = server.close().is_ok()
-    let client_closed = client.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert_eq(received, UInt64(1), "a zero deadline bounded the read")?
-    testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
 
-impl Connection {
     // Report the address of the peer at the other end of the connection.
     pub fn peer_address(self: Self) -> Result[Address, NetError] {
         let answer = linea_net_peer_address(self.fd)
@@ -198,23 +192,21 @@ impl Connection {
         }
         .Ok(Address.unpacked(answer))
     }
-}
 
-test fn a_client_reports_the_listener_as_its_peer() {
-    var listener = listen(loopback(0)).unwrap()
-    let bound = listener.local_address().unwrap()
-    let client = connect(bound).unwrap()
-    let peer = client.peer_address()
-    let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
-    let server_closed = server.close().is_ok()
-    let client_closed = client.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert_ok_eq(peer, bound, "the client's peer is not the listener")?
-    testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
+    test fn a_client_reports_the_listener_as_its_peer() {
+        var listener = listen(loopback(0)).unwrap()
+        let bound = listener.local_address().unwrap()
+        let client = connect(bound).unwrap()
+        let peer = client.peer_address()
+        let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
+        let server_closed = server.close().is_ok()
+        let client_closed = client.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert_ok_eq(peer, bound, "the client's peer is not the listener")?
+        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
+        .Ok(())
+    }
 
-impl Connection {
     // Tell the peer no more bytes follow, while reads remain open.
     pub fn shutdown_write(inout self: Self) -> Result[(), io.IoError] {
         let answer = linea_net_shutdown_write(self.fd)
@@ -223,59 +215,45 @@ impl Connection {
         }
         .Ok(())
     }
-}
 
-test fn a_shut_down_writer_ends_the_peer_input() {
-    var listener = listen(loopback(0)).unwrap()
-    var client = connect(listener.local_address().unwrap()).unwrap()
-    let shut = &client.shutdown_write().is_ok()
-    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    var server = accepted
-    defer var buffer = mem.system().acquire(8).unwrap()
-    let ended = match &server.read_some(&buffer, offset: 0, count: 8) {
-        Ok(count) => count == 0,
-        Err(_) => false,
+    test fn a_shut_down_writer_ends_the_peer_input() {
+        var listener = listen(loopback(0)).unwrap()
+        var client = connect(listener.local_address().unwrap()).unwrap()
+        let shut = &client.shutdown_write().is_ok()
+        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+        var server = accepted
+        defer var buffer = mem.system().acquire(8).unwrap()
+        let ended = match &server.read_some(&buffer, offset: 0, count: 8) {
+            Ok(count) => count == 0,
+            Err(_) => false,
+        }
+        let server_closed = server.close().is_ok()
+        let client_closed = client.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert(shut, "shutting down the client's writes failed")?
+        testing.assert(ended, "the server read past the client's shutdown")?
+        testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
+        .Ok(())
     }
-    let server_closed = server.close().is_ok()
-    let client_closed = client.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert(shut, "shutting down the client's writes failed")?
-    testing.assert(ended, "the server read past the client's shutdown")?
-    testing.assert(server_closed && client_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
 
-impl Connection {
     // Close the connection, reporting a failed close, which `Release` ignores.
     pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
         let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
         close_descriptor(fd)
     }
-}
 
-test fn a_connection_close_reports_success() {
-    var listener = listen(loopback(0)).unwrap()
-    let client = connect(listener.local_address().unwrap()).unwrap()
-    let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
-    let client_closed = client.close()
-    let server_closed = server.close().is_ok()
-    let listener_closed = listener.close().is_ok()
-    testing.assert_ok_eq(client_closed, (), "closing the client failed")?
-    testing.assert(server_closed && listener_closed, "a close failed")?
-    .Ok(())
-}
-
-// Generic code closes a connection through `io.Close`; this forwards to
-// `Connection.close`.
-impl io.Close for Connection {
-    type CloseError = io.IoError
-
-    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
-        Connection.close(self)
+    test fn a_connection_close_reports_success() {
+        var listener = listen(loopback(0)).unwrap()
+        let client = connect(listener.local_address().unwrap()).unwrap()
+        let Accepted { connection: server, address: _ } = &listener.accept().unwrap()
+        let client_closed = client.close()
+        let server_closed = server.close().is_ok()
+        let listener_closed = listener.close().is_ok()
+        testing.assert_ok_eq(client_closed, (), "closing the client failed")?
+        testing.assert(server_closed && listener_closed, "a close failed")?
+        .Ok(())
     }
-}
 
-impl Connection {
     // Close so the peer receives a reset rather than an orderly end of input,
     // discarding what is unsent. The descriptor is closed even when the reset
     // cannot be arranged, and that failure is the one reported.
@@ -287,41 +265,32 @@ impl Connection {
         }
         .Ok(())
     }
-}
 
-test fn a_reset_connection_is_reset_at_its_peer() {
-    var listener = listen(loopback(0)).unwrap()
-    var client = connect(listener.local_address().unwrap()).unwrap()
-    let _sent = io.write_all(&client, "GET".as_bytes()).unwrap()
-    let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    var server = accepted
-    let reset = client.reset()
-    defer var buffer = mem.system().acquire(8).unwrap()
-    // The bytes sent before the reset may or may not arrive; the reset ends
-    // the input either way.
-    var received = &server.read_some(&buffer, offset: 0, count: 8)
-    while match read received { Ok(count) => count > 0, Err(_) => false } {
-        received = &server.read_some(&buffer, offset: 0, count: 8)
+    test fn a_reset_connection_is_reset_at_its_peer() {
+        var listener = listen(loopback(0)).unwrap()
+        var client = connect(listener.local_address().unwrap()).unwrap()
+        let _sent = io.write_all(&client, "GET".as_bytes()).unwrap()
+        let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+        var server = accepted
+        let reset = client.reset()
+        defer var buffer = mem.system().acquire(8).unwrap()
+        // The bytes sent before the reset may or may not arrive; the reset ends
+        // the input either way.
+        var received = &server.read_some(&buffer, offset: 0, count: 8)
+        while match read received { Ok(count) => count > 0, Err(_) => false } {
+            received = &server.read_some(&buffer, offset: 0, count: 8)
+        }
+        let category = match read received {
+            Ok(_) => io.IoCategory.Other,
+            Err(error) => error.category,
+        }
+        server.close().unwrap()
+        listener.close().unwrap()
+        testing.assert_ok_eq(reset, (), "resetting failed")?
+        testing.assert_eq(category, io.IoCategory.ConnectionReset, "the peer did not see a reset")?
+        .Ok(())
     }
-    let category = match read received {
-        Ok(_) => io.IoCategory.Other,
-        Err(error) => error.category,
-    }
-    server.close().unwrap()
-    listener.close().unwrap()
-    testing.assert_ok_eq(reset, (), "resetting failed")?
-    testing.assert_eq(category, io.IoCategory.ConnectionReset, "the peer did not see a reset")?
-    .Ok(())
-}
 
-impl Release for Connection {
-    fn release(sink self: Self) {
-        let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
-        let _closed = close_descriptor(fd)
-    }
-}
-
-impl Connection {
     // Before a read, fail it as timed out when the deadline has passed, and
     // otherwise let it wait no longer than what remains, rounded up to a whole
     // millisecond because zero would wait forever, nor than the per-read
@@ -346,6 +315,23 @@ impl Connection {
             return .Err(io.IoError.from_os(.Configure, Int32(-answer)))
         }
         .Ok(())
+    }
+}
+
+// Generic code closes a connection through `io.Close`; this forwards to
+// `Connection.close`.
+impl io.Close for Connection {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        Connection.close(self)
+    }
+}
+
+impl Release for Connection {
+    fn release(sink self: Self) {
+        let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
+        let _closed = close_descriptor(fd)
     }
 }
 
@@ -376,8 +362,7 @@ impl io.ByteWriter for Connection {
         var descriptor = io.descriptor(self.fd)
         match &descriptor.write_some(bytes) {
             Ok(written) => .Ok(written),
-            Err(failure) => {
-                let WriteFailure { kind: kind, reason: reason, written: written } = failure
+            Err(WriteFailure { kind: kind, reason: reason, written: written }) => {
                 let reported: Option[io.IoError] = match reason {
                     Some(error) => .Some(timed_out(error)),
                     None => .None,

@@ -1,0 +1,57 @@
+error[T-Refine]: 5..=4 admits no value for `Closed`
+ --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:6:6
+  |
+6 | type Closed = UInt8 where it in 5..=4
+  |      ^^^^^^ widen the range, or write no clause at all
+error[T-Refine]: `Flag` refines `Bool`, which is not an integer type
+ --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:8:6
+  |
+8 | type Flag = Bool where it in 0..=1
+  |      ^^^^ only an integer type may be refined
+error[T-Cover]: this `match` does not cover `(_, B)`, `(_, C)`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:19:5
+   |
+19 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:27:9
+   |
+27 |         (_, A) => 2,
+   |         ^^^^^^ the arms before it take every value it would
+error[T-Cover]: this `match` does not cover `None`, `Some((B, _))`, `Some((C, _))`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:32:5
+   |
+32 |     match maybe {
+   |     ^^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Cover]: this `match` does not cover `(_, B)`, `(_, C)`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:38:5
+   |
+38 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Cover]: this `match` does not cover `None`, `Some((_, B))`, `Some((_, C))`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:44:5
+   |
+44 |     match maybe {
+   |     ^^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Cover]: this `match` does not cover `(_, B)`, `(_, C)`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:50:5
+   |
+50 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Cover]: this `match` does not cover `(_, B)`, `(_, C)`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:56:5
+   |
+56 |     match pair {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:64:9
+   |
+64 |         (_, A) => 2,
+   |         ^^^^^^ the arms before it take every value it would
+error[T-Refutable]: this pattern does not match every `(Closed, Mode)`
+  --> tests/patterns/a_wildcard_over_a_refused_refinement_leaves_the_rest_judged.lin:69:13
+   |
+69 |     let (_, A) = pair
+   |             ^ `(_, B)` is not matched
+   |
+   = help: take it apart with `match`, which has an arm for every case

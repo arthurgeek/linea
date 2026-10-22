@@ -142,8 +142,7 @@ fn serve_announcing[L: net.Acceptor + io.Close, H: Handler[(), P] + Observer, P:
     var stopped: Option[net.NetError] = .None
     while stopped.is_none() && !net.reached(limits.connections, served) {
         match net.accept_attempt(&accepting, &pause_ms) {
-            Connected(accepted) => {
-                let Accepted { connection, address: _ } = accepted
+            Connected(Accepted { connection, address: _ }) => {
                 match serve_connection(connection, &handler, arena.handle(), &refusal, limits, time.Instant.now()) {
                     Answered => &arena.rewind(),
                     ArenaRefused => mem.exchange(&arena, mem.Arena.open(parent, limits.request_arena_bytes)).release(),
@@ -197,39 +196,54 @@ test fn a_malformed_request_is_answered_and_serving_continues() {
 test fn a_silent_client_times_out_and_the_next_is_served() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
+    net.connect(bound).unwrap().close().unwrap()
     let silent = net.connect(bound).unwrap()
+    let partial = send(bound, "GET /health ")
     let valid = send(bound, health_request)
     defer var router = health_router()
-    let limits = Limits { read_timeout_ms = 100, ..serving(2) }
+    let limits = Limits { first_byte_timeout_ms = 50, read_timeout_ms = 100, ..serving(4) }
     let served = serve(listener, &router, limits: limits)
-    defer let timed_out = read_to_end(silent)
+    defer let idle = read_to_end(silent)
+    defer let timed_out = read_to_end(partial)
     defer let answered = read_to_end(valid)
     testing.assert_ok_eq(served, (), "serving failed")?
-    testing.assert_eq(timed_out.view(), "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "the silent client was not timed out")?
+    testing.assert_eq(idle.view(), "", "an idle client that sent no byte was answered")?
+    testing.assert_eq(timed_out.view(), "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a partial request that timed out was not answered 408")?
     testing.assert_eq(answered.view(), health_answer, "the next request was not answered")?
     .Ok(())
 }
 
-// The deadline counts from accept, so a request already sent in full is
-// refused as timed out when more than `read_timeout_ms` has passed since the
-// connection was accepted.
+// A connection that times out before its first byte is closed without an
+// exchange; once the first byte arrives within `first_byte_timeout_ms`, the
+// rest of the request is bounded by `read_timeout_ms` from accept.
 test fn a_request_read_after_its_deadline_from_accept_times_out() {
     var listener = net.listen(net.loopback(0)).unwrap()
-    let client = send(listener.local_address().unwrap(), health_request)
-    let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    let accepted_at = time.Instant.now()
-    time.sleep(time.Duration.from_milliseconds(150))
+    let bound = listener.local_address().unwrap()
     var recorded = Recorded.new()
-    let arena = mem.Arena.open(mem.system(), 1048576)
+    var arena = mem.Arena.open(mem.system(), 1048576)
     var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
-    let limits = Limits { read_timeout_ms = 100, ..serving(1) }
-    let _answered = serve_connection(connection, &recorded, arena.handle(), &refusal, limits, accepted_at)
+    // Elapsed past `first_byte_timeout_ms` before any byte is read: closed silently.
+    let idle_client = send(bound, health_request)
+    let Accepted { connection: idle_conn, address: _ } = &listener.accept().unwrap()
+    let idle_accepted = time.Instant.now()
+    time.sleep(time.Duration.from_milliseconds(80))
+    let _idle = serve_connection(idle_conn, &recorded, arena.handle(), &refusal, Limits { first_byte_timeout_ms = 50, read_timeout_ms = 500, ..serving(1) }, idle_accepted)
+    &arena.rewind()
+    idle_client.close().unwrap()
+    let idle_exchanges = recorded.exchanges
+    // First line read within `first_byte_timeout_ms`, stalled past `read_timeout_ms`: 408.
+    let partial_client = send(bound, "GET /health ")
+    let Accepted { connection: partial_conn, address: _ } = &listener.accept().unwrap()
+    let _partial = serve_connection(partial_conn, &recorded, arena.handle(), &refusal, Limits { first_byte_timeout_ms = 50, read_timeout_ms = 100, ..serving(1) }, time.Instant.now())
+    &arena.rewind()
+    defer let partial_answer = read_to_end(partial_client)
     refusal.release()
     arena.release()
     listener.close().unwrap()
-    client.close().unwrap()
-    testing.assert_eq(recorded.exchanges, UInt64(1), "the exchange was not reported")?
-    testing.assert_eq(recorded.timed_out, UInt64(1), "a request read after its deadline was not timed out")?
+    testing.assert_eq(idle_exchanges, UInt64(0), "a timeout before the first byte was reported as an exchange")?
+    testing.assert_eq(partial_answer.view(), "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a request stalled after its first bytes was not answered 408")?
+    testing.assert_eq(recorded.exchanges, UInt64(1), "the timed-out exchange was not reported")?
+    testing.assert_eq(recorded.timed_out, UInt64(1), "a request stalled past its deadline was not timed out")?
     .Ok(())
 }
 
@@ -255,7 +269,7 @@ test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served(
 
 test fn a_refused_body_left_unread_does_not_lose_the_answer() {
     let listener = net.listen(net.loopback(0)).unwrap()
-    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nContent-Length: 20000\r\n\r\n")
+    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 20000\r\n\r\n")
     // 200 writes of 100 bytes send the whole 20000-byte body.
     let chunk = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     for _ in 0..200 {
@@ -292,14 +306,15 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
     let bound = listener.local_address().unwrap()
     let requests = [
         health_request,
-        "GET /count HTTP/1.1\r\n\r\n",
-        "GET /broken HTTP/1.1\r\n\r\n",
-        "GET /nowhere HTTP/1.1\r\n\r\n",
-        "GET /echo/a%20b HTTP/1.1\r\n\r\n",
-        "HEAD /count HTTP/1.1\r\n\r\n",
+        "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /broken HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "GET /echo/a%20b HTTP/1.1\r\nHost: loopback\r\n\r\n",
+        "HEAD /count HTTP/1.1\r\nHost: loopback\r\n\r\n",
         "garbage\r\n\r\n",
         "",
-        "GET /fill HTTP/1.1\r\n\r\n",
+        "GET /health ",
+        "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n",
     ]
     var clients: Vec[net.Connection] = Vec.new()
     for request in requests {
@@ -309,12 +324,13 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
     let tables = mem.AllocationLog.open(mem.system(), 0).unwrap()
     var router = exchanges_router(tables.allocator())
     let limits = Limits {
+        first_byte_timeout_ms = 50,
         read_timeout_ms = 100,
         max_line_bytes = 1024,
         max_headers = 4,
         max_body_bytes = 16384,
         request_arena_bytes = 98304,
-        ..serving(9),
+        ..serving(10),
     }
     let served = serve_in(parent.allocator(), listener, &router, limits: limits)
     router.release()
@@ -336,7 +352,7 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
     // Serving takes one arena and one buffer for discarding refused input.
     testing.assert_eq(acquired, UInt64(2), "serving acquired more than its arena and discard buffer from the parent")?
     testing.assert(tables_settled, "the router kept an allocation after its release")?
-    testing.assert_eq(first_lines.view(), "200 OK|200 OK|reset|404 Not Found|200 OK|200 OK|400 Bad Request|408 Request Timeout|500 Internal Server Error|", "an exchange was answered wrongly")?
+    testing.assert_eq(first_lines.view(), "200 OK|200 OK|reset|404 Not Found|200 OK|200 OK|400 Bad Request||408 Request Timeout|500 Internal Server Error|", "an exchange was answered wrongly")?
     .Ok(())
 }
 
@@ -344,7 +360,7 @@ test fn an_arena_parent_serves_every_exchange_from_one_request_arena() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
-    let second = send(bound, "GET /echo/tea HTTP/1.1\r\n\r\n")
+    let second = send(bound, "GET /echo/tea HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -434,8 +450,8 @@ fn status_lines(answers: Vec[String]) -> String {
 test fn a_streamed_answer_goes_out_as_it_is_written() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let counted = send(bound, "GET /count HTTP/1.1\r\n\r\n")
-    let broken = send(bound, "GET /broken HTTP/1.1\r\n\r\n")
+    let counted = send(bound, "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let broken = send(bound, "GET /broken HTTP/1.1\r\nHost: loopback\r\n\r\n")
     defer var router = exchanges_router(mem.system())
     let served = serve(listener, &router, limits: serving(2))
     defer let full = read_to_end(counted)
@@ -542,7 +558,7 @@ fn exchanged_in_small_arena(headers: UInt64, length: UInt64) -> String {
     var listener = net.listen(net.loopback(0)).unwrap()
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     var request = String.new()
-    &request.append("POST /health HTTP/1.1\r\nContent-Length: 8192\r\n").unwrap()
+    &request.append("POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 8192\r\n").unwrap()
     for index in 0..headers {
         "X-{index}: ".fmt(&request).unwrap()
         for _ in 0..length {
@@ -747,10 +763,8 @@ test fn a_port_that_is_taken_is_a_listen_failure_and_the_handler_is_released() {
     log.release()
     held.close().unwrap()
     let refused = match read served {
-        Err(error) => match read error {
-            Listen(_) => true,
-            _ => false,
-        },
+        Err(Listen(_)) => true,
+        Err(_) => false,
         Ok(_) => false,
     }
     testing.assert(refused, "a taken port was not reported as a listen failure")?
@@ -1028,7 +1042,7 @@ fn served_form_at_limits(sink limits: Limits, pair_part: Str) -> String {
     }
     var request = String.new()
     let length = body.length()
-    "POST /health HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {length}\r\n\r\n".fmt(&request).unwrap()
+    "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {length}\r\n\r\n".fmt(&request).unwrap()
     &request.append(body.view()).unwrap()
     body.release()
     let _sent = io.write_all(&client, request.as_bytes()).unwrap()
@@ -1052,7 +1066,7 @@ test fn a_short_header_after_a_long_line_is_answered_in_the_smallest_arena() {
 
 // `served_at_limits` sends `GET /health` with a request line of
 // `line_length` bytes, whose query is `query_part` repeated, `header_lines`
-// header lines of `line_length` bytes, a short `Y: b` header,
+// header lines of `line_length` bytes, a short `Host: loopback` header,
 // `Content-Length` and a body at the body limit, serves it in
 // `smallest_arena(limits)`, and returns what the client read. Each line
 // counts its CRLF.
@@ -1084,7 +1098,7 @@ fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt
         &request.append("\r\n").unwrap()
     }
     let body = limits.max_body_bytes
-    "Y: b\r\nContent-Length: {body}\r\n\r\n".fmt(&request).unwrap()
+    "Host: loopback\r\nContent-Length: {body}\r\n\r\n".fmt(&request).unwrap()
     for _ in 0..body {
         &request.append("b").unwrap()
     }
@@ -1140,18 +1154,73 @@ test fn limits_beyond_every_arena_are_refused_without_overflowing() {
     .Ok(())
 }
 
+// `RequestReader` reads a request from `connection`, waiting at most
+// `first_wait_ms` from `accepted` for the first read and `read_timeout_ms`
+// from `accepted` once the first bytes have arrived.
+@linear
+struct RequestReader {
+    connection: net.Connection,
+    accepted: time.Instant,
+    first_wait_ms: UInt64,
+    read_timeout_ms: UInt64,
+    write_timeout_ms: UInt64,
+    started: Bool,
+    extended: Bool,
+}
+
+impl RequestReader {
+    fn into_connection(sink self: Self) -> net.Connection {
+        let RequestReader { connection, accepted: _, first_wait_ms: _, read_timeout_ms: _, write_timeout_ms: _, started: _, extended: _ } = self
+        connection
+    }
+}
+
+impl io.Reader for RequestReader {
+    type Error = io.IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        if self.started && !self.extended {
+            self.extended = true
+            if self.first_wait_ms != self.read_timeout_ms {
+                &self.connection.set_timeouts(self.read_timeout_ms, self.write_timeout_ms)?
+                &self.connection.set_deadline(self.accepted, self.read_timeout_ms)
+            }
+        }
+        let received = &self.connection.read_some(&buffer, offset, count)?
+        if received > 0 {
+            self.started = true
+        }
+        .Ok(received)
+    }
+}
+
+// `first_byte_wait` returns how long to wait for a request's first byte,
+// given `first_byte_timeout_ms` and `read_timeout_ms`, where 0 means no
+// bound of that kind: the shorter of the two bounds that are set.
+fn first_byte_wait(first_byte_timeout_ms: UInt64, read_timeout_ms: UInt64) -> UInt64 {
+    if first_byte_timeout_ms == 0 {
+        return read_timeout_ms
+    }
+    if read_timeout_ms == 0 || first_byte_timeout_ms < read_timeout_ms {
+        return first_byte_timeout_ms
+    }
+    read_timeout_ms
+}
+
 // Answer one request on `connection` from `memory`, the serving arena, and
 // close it. Every failure is reported to `handler` through `observe` rather
-// than returned, so one connection never stops the server. The whole request,
-// head and body, must be read within `limits.read_timeout_ms` of `accepted`,
-// the instant the connection was accepted; each write may take
-// `limits.write_timeout_ms`.
+// than returned, so one connection never stops the server. The first byte
+// must arrive within `limits.first_byte_timeout_ms` of `accepted` (or
+// `limits.read_timeout_ms` when shorter), and the whole request, head and
+// body, must be read within `limits.read_timeout_ms` of `accepted`; each
+// write may take `limits.write_timeout_ms`.
 fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, accepted: time.Instant) -> Served {
     var configured = connection
-    // The deadline bounds the whole request. Each read also waits at most the
+    let first_wait = first_byte_wait(limits.first_byte_timeout_ms, limits.read_timeout_ms)
+    // The deadline bounds the request. Each read also waits at most the
     // read budget, which is the longest the deadline lets one wait, so a read
     // never blocks without a bound.
-    match &configured.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms) {
+    match &configured.set_timeouts(first_wait, limits.write_timeout_ms) {
         Ok(_) => {},
         Err(error) => {
             close_connection(configured)
@@ -1160,25 +1229,34 @@ fn serve_connection[H: Handler[(), P] + Observer, P: Allocator](sink connection:
             return .Answered
         },
     }
-    &configured.set_deadline(accepted, limits.read_timeout_ms)
-    answer_exchange(configured, &handler, memory, &refusal, limits)
+    &configured.set_deadline(accepted, first_wait)
+    let source = RequestReader {
+        connection = configured,
+        accepted = copy(accepted),
+        first_wait_ms = first_wait,
+        read_timeout_ms = limits.read_timeout_ms,
+        write_timeout_ms = limits.write_timeout_ms,
+        started = false,
+        extended = false,
+    }
+    answer_exchange(source, &handler, memory, &refusal, limits)
 }
 
 // Read a request into `memory`, answer it through `handler`, close the
 // connection, and tell `handler` how the exchange ended. Nothing this
 // allocates in `memory` outlives the call.
-fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) -> Served {
-    var reader = io.BufferedReader.open_in(memory, capacity: request_buffer_bytes, reader: connection) else |failure| {
+fn answer_exchange[H: Handler[(), P] + Observer, P: Allocator](sink source: RequestReader, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) -> Served {
+    var reader = io.BufferedReader.open_in(memory, capacity: request_buffer_bytes, reader: source) else |failure| {
         let BufferOpenFailure { resource, reason: _ } = failure
-        return refuse_for_want_of_arena(resource, &handler, memory, &refusal, limits)
+        return refuse_for_want_of_arena(resource.into_connection(), &handler, memory, &refusal, limits)
     }
     // The buffer a refusal discards input into is reserved before reading,
     // so a request that fills the arena can still be refused cleanly.
     var discarded = memory.acquire(request_buffer_bytes) else |_| {
-        return refuse_for_want_of_arena(reader.abandon(), &handler, memory, &refusal, limits)
+        return refuse_for_want_of_arena(reader.abandon().into_connection(), &handler, memory, &refusal, limits)
     }
     let received = read_request(&reader, memory, limits)
-    var connection = reader.abandon()
+    var connection = reader.abandon().into_connection()
     let message = received else |error| {
         let status = error.status()
         let refused = match read status {
@@ -1321,8 +1399,7 @@ fn settle_answer[P: Allocator](sink body: BodyWriter[P], sink written: Result[()
                 close_connection(connection)
                 return .{ delivery = .Whole, body_bytes }
             },
-            Err(failure) => {
-                let ResponseFailure { connection, error } = failure
+            Err(ResponseFailure { connection, error }) => {
                 reset_connection(connection)
                 return .{ delivery = .Write(error), body_bytes }
             },
@@ -1428,7 +1505,7 @@ fn reset_connection(sink connection: net.Connection) {
 }
 
 // A test sends this GET of `/health` and nothing else.
-let health_request: Str = "GET /health HTTP/1.1\r\n\r\n"
+let health_request: Str = "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n"
 
 // A client reads this answer to `health_request`.
 let health_answer: Str = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok"
@@ -1532,14 +1609,8 @@ impl Observer for Recorded {
             Exchanged(exchange) => {
                 self.exchanges += 1
                 match read exchange.failure {
-                    Some(failure) => match read failure {
-                        Unread(error) => match read error {
-                            Io(reason) => match read reason.category { TimedOut => self.timed_out += 1, _ => {} },
-                            _ => {},
-                        },
-                        _ => {},
-                    },
-                    None => {},
+                    Some(Unread(Io(reason))) => match read reason.category { TimedOut => self.timed_out += 1, _ => {} },
+                    _ => {},
                 }
             },
             Listening(_) => {},

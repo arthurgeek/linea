@@ -1,0 +1,15 @@
+import std.ffi
+
+// SQLite says whether text ends a complete SQL statement. The library names
+// `sqlite3` under `link`, and the program that depends on it links it.
+extern fn sqlite3_complete(sql: ffi.CText) -> Int32
+
+// Whether `sql` is one or more complete statements.
+pub fn is_complete(sql: Str) -> Bool {
+    let copied = ffi.CString.open(sql) else |_| {
+        return false
+    }
+    let complete = sqlite3_complete(copied.text()) != 0
+    copied.release()
+    complete
+}

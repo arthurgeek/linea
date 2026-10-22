@@ -1,0 +1,6 @@
+import labels
+
+fn main() -> UInt8 {
+    let _found: labels.Found = .Missing
+    0
+}

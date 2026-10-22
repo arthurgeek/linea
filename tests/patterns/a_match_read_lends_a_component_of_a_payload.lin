@@ -1,0 +1,17 @@
+// `match read` lends each binder the part its pattern selects, however deep:
+// `name` is a lend of the `String` inside the pair inside `Some`, and `port`
+// reads its number. Nothing is copied, and `found` stays whole for its owner
+// to release.
+fn describe(found: Option[(String, UInt64)]) -> UInt64 {
+    match read found {
+        Some((name, port)) => name.length() + port,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let found: Option[(String, UInt64)] = .Some((String.new(), 80))
+    let described = describe(found)
+    found.release()
+    UInt8(described - 80)
+}

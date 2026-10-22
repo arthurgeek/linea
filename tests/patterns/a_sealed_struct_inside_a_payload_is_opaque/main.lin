@@ -1,0 +1,12 @@
+import vault
+
+use vault.Secret
+
+// A sealed struct cannot be taken apart outside its module, wherever its
+// pattern stands.
+fn main() -> UInt8 {
+    match vault.find() {
+        Some(Secret { value }) => value,
+        None => 0,
+    }
+}

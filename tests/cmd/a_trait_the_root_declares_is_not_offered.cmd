@@ -7,5 +7,5 @@ the call is reported as one to an operation the type does not have.
    --> $LINEA_ROOT/tests/cmd/fixtures/a_trait_the_root_declares_is_not_offered/shapes/shapes.lin:8:8
     |
   8 |     if b.count() == 3 {
-    |        ^^^^^^^ no operation of this name is declared for this type
+    |        ^^^^^^^ `Sequence` declares it, and `Box` does not implement `Sequence`
   [1]

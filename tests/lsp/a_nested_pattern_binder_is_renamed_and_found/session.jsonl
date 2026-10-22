@@ -1,0 +1,7 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"struct Point { x: UInt8, y: UInt8 }\n\nfn main() -> UInt8 {\n    let found: Option[Point] = .Some(Point { x = 3, y = 4 })\n    match found {\n        Some(Point { x, y: vertical }) => x + vertical,\n        None => 0,\n    }\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":46},"newName":"height"}}
+{"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{"textDocument":{"uri":"main.lin"},"context":{"includeDeclaration":true},"position":{"line":5,"character":42}}}
+{"jsonrpc":"2.0","id":4,"method":"textDocument/rename","params":{"textDocument":{"uri":"main.lin"},"position":{"line":0,"character":15},"newName":"left"}}
+{"jsonrpc":"2.0","id":5,"method":"textDocument/hover","params":{"textDocument":{"uri":"main.lin"},"position":{"line":5,"character":46}}}
+{"jsonrpc":"2.0","id":6,"method":"shutdown"}

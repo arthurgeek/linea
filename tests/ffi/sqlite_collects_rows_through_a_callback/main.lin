@@ -1,0 +1,18 @@
+import std.io
+import sqlite
+
+use sqlite.Database
+
+fn main() -> Result[UInt8, io.IoError] {
+    let sql = "CREATE TABLE guests (name TEXT, visits INTEGER); INSERT INTO guests VALUES ('Grace', 3), ('Ada', 1); SELECT name, visits FROM guests ORDER BY visits;"
+    var database = Database.open() else |_| {
+        return .Ok(1)
+    }
+    let rows = &database.rows_of(sql)
+    database.close()
+    defer let lines = rows else |_| {
+        return .Ok(2)
+    }
+    io.print(lines.view())?
+    .Ok(0)
+}

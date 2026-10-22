@@ -1,0 +1,8 @@
+import std.ffi
+import shelf
+
+// `main` is not granted, so `std.ffi` is out of its reach.
+fn main() -> UInt8 {
+    let _lent = ffi.bytes("shelf")
+    UInt8(shelf.width())
+}

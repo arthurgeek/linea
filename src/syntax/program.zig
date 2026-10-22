@@ -342,6 +342,13 @@ pub const Program = struct {
     named_module: bool = false,
     /// The files the program's `embed` and `embed_bytes` expressions read.
     embeds: Embeds = .{},
+    /// The C sources the manifest names under `native`, each joined to the
+    /// manifest's directory, which a build compiles and links beside the
+    /// program. Owned.
+    native: []const []const u8 = &.{},
+    /// The C libraries the manifest names under `link`, which a build links
+    /// as `-l<name>`. Owned.
+    link: []const []const u8 = &.{},
     ast: Ast,
 
     pub fn root(self: *const Program) *const Module {
@@ -494,6 +501,10 @@ pub const Program = struct {
             gpa.free(r.dependencies);
         }
         gpa.free(self.roots);
+        for (self.native) |path| gpa.free(path);
+        gpa.free(self.native);
+        for (self.link) |name| gpa.free(name);
+        gpa.free(self.link);
         gpa.free(self.modules);
         // The paths and bytes have the sources' lifetime, as the file table's
         // entries do; the two lists are the program's.

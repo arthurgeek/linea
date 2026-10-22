@@ -1,0 +1,15 @@
+error[T-ExternCallback]: a callback takes only what crosses the boundary, with a context as its first, `inout` parameter
+ --> tests/ffi/a_callback_crosses_and_pairs_its_context/visits/visits.lin:6:30
+  |
+6 | extern fn visit_flags(visit: fn(flag: Bool) -> Int32) -> Int32
+  |                              ^^^^^^^^^^^^^^^^^^^^^^^ `flag` cannot come from C
+error[T-ExternCallback]: C hands a callback back the context the call lent it
+ --> tests/ffi/a_callback_crosses_and_pairs_its_context/visits/visits.lin:9:34
+  |
+9 | extern fn _visit_unpaired(visit: fn(inout tally: Tally, square: Int32) -> Int32) -> Int32
+  |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ give the `extern` exactly one `inout` parameter of type `Tally` to lend it
+error[T-ExternCallback]: C may call a callback any number of times, so it is a plain `fn`
+  --> tests/ffi/a_callback_crosses_and_pairs_its_context/visits/visits.lin:12:30
+   |
+12 | extern fn _visit_once(visit: sink fn(square: Int32) -> Int32) -> Int32
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ write `fn(...)`, without `inout` or `sink`

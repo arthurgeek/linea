@@ -1,0 +1,23 @@
+import std.ffi
+import std.io
+import c
+
+// The program's own label around the library's handle names the same object,
+// so it is a handle too: resetting through it ends what was read through the
+// handle inside it.
+type Wrap = c.Named
+
+extern fn n_name(read h: c.Named) -> ffi.CText where borrows(h)
+
+extern fn n_reset(h: Wrap)
+
+fn main() -> Result[UInt8, io.IoError] {
+    var wrapped = Wrap(c.open())
+    let name = match read wrapped {
+        Wrap(inner) => n_name(inner),
+    }
+    n_reset(wrapped)
+    io.println("{name.length()}")?
+    let Wrap(_) = wrapped
+    .Ok(0)
+}

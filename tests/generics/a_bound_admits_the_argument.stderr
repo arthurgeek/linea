@@ -22,12 +22,3 @@ error[O-Leak]: `k` (a linear `Key`) is still owned when this path leaves
    | - the block ends here
    |
    = help: take it apart with a `match`, or give it to something that takes it
-error[O-Leak]: `_kept` (a linear `Held[Key]`) is still owned when this path leaves
-  --> tests/generics/a_bound_admits_the_argument.lin:28:9
-   |
-28 |     let _kept: Held[Key] = .{ v = Key.Forged(2) }
-   |         ^^^^^ never settled on the path that reaches the end of this block
-31 | }
-   | - the block ends here
-   |
-   = help: give it to something that takes it

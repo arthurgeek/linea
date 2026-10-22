@@ -1,0 +1,1 @@
+{ "extern": ["measure"], "native": ["measure/measure.c"] }

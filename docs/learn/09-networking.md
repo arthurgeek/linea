@@ -83,13 +83,12 @@ fn main() -> UInt8 {
         let _closed = listener.close()
         return 1
     }
-    let accepted = &listener.accept() else |error| {
+    let Accepted { connection, address: _ } = &listener.accept() else |error| {
         io.eprintln("cannot accept: {error}")
         let _client = client.close()
         let _closed = listener.close()
         return 1
     }
-    let Accepted { connection, address: _ } = accepted
     var server = connection
     let exchanged = exchange(&client, &server)
     // Every connection and the listener are closed whatever happened above.
@@ -429,6 +428,7 @@ connection in `accept_clients`, after `echo` has borrowed it.
 // client. Add a number, as in `tcp_echo serve PORT 3`, to stop after that many
 // clients. `tcp_echo send PORT MESSAGE...` connects, sends each message as a
 // line, and prints what comes back.
+import std.cli
 import std.env
 import std.io
 import std.mem
@@ -438,57 +438,78 @@ use mem.Lender
 use net.Accepted
 use net.Acceptor
 
+fn build_cli() -> cli.Command {
+    var cmd = cli.Command.new("tcp_echo", "Echo text over TCP")
+    var serve_cmd = cli.Command.new("serve", "listen for and echo connections")
+    &serve_cmd.positional("port", "port to listen on", required: true)
+    &serve_cmd.positional("clients", "number of clients to serve", required: false)
+    &cmd.subcommand(serve_cmd)
+
+    var send_cmd = cli.Command.new("send", "send messages to an echo server")
+    &send_cmd.positional("port", "server port to connect to", required: true)
+    &send_cmd.positional("message", "messages to send", required: true, variadic: true)
+    &cmd.subcommand(send_cmd)
+    cmd
+}
+
 fn main() -> UInt8 {
-    let args = env.args()
-    let mode = args.at(1) else {
-        return usage()
+    defer var cmd = build_cli()
+    var cursor = cli.ArgCursor.new(env.args())
+    defer let matches = cmd.parse(&cursor) else |_| {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    let port = port_argument(args) else {
-        return usage()
+    if matches.is_help() {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
     }
-    if mode == "serve" {
-        let clients = clients_argument(args) else {
-            return usage()
+    let sub = matches.subcommand() else {
+        defer let u = cmd.usage()
+        io.eprintln(u.view())
+        return 64
+    }
+    if sub.name == "serve" {
+        let port: UInt16 = sub.matches.positional_as("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        let clients_opt: Option[UInt64] = match sub.matches.positional("clients") {
+            Some(s) => match s.parse[UInt64]() {
+                Ok(v) => .Some(v),
+                Err(_) => {
+                    defer let u = cmd.usage()
+                    io.eprintln(u.view())
+                    return 64
+                },
+            },
+            None => .None,
+        }
+        let clients = match clients_opt {
+            Some(c) => c,
+            None => UInt64.max,
         }
         return serve(port, clients)
     }
-    if mode == "send" && args.count() > 3 {
-        return send(port, args)
+    if sub.name == "send" {
+        let port: UInt16 = sub.matches.positional_as("port") else |_| {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        defer let messages = sub.matches.positionals_all("message")
+        if messages.length() == 0 {
+            defer let u = cmd.usage()
+            io.eprintln(u.view())
+            return 64
+        }
+        return send(port, messages)
     }
-    usage()
-}
-
-// Print this when the arguments are not a mode and a port.
-let usage_text =
-    \\usage: tcp_echo serve PORT [CLIENTS]
-    \\       tcp_echo send PORT MESSAGE...
-
-fn usage() -> UInt8 {
-    io.eprintln(usage_text)
+    defer let u = cmd.usage()
+    io.eprintln(u.view())
     64
-}
-
-// Read the port from the third argument. `?` returns `.None` early when the
-// argument is missing, and `else |_|` does the same when it is not a number.
-fn port_argument(args: env.Args) -> Option[UInt16] {
-    let text = args.at(2)?
-    let port = text.parse[UInt16]() else |_| {
-        return .None
-    }
-    .Some(port)
-}
-
-// Read how many clients to serve from the fourth argument. Without one, the
-// server never stops.
-fn clients_argument(args: env.Args) -> Option[UInt64] {
-    if args.count() == 3 {
-        return .Some(UInt64.max)
-    }
-    let text = args.at(3)?
-    let clients = text.parse[UInt64]() else |_| {
-        return .None
-    }
-    .Some(clients)
 }
 
 fn serve(port: UInt16, clients: UInt64) -> UInt8 {
@@ -523,12 +544,12 @@ fn serve(port: UInt16, clients: UInt64) -> UInt8 {
 fn accept_clients(inout listener: net.Listener, clients: UInt64) -> Bool {
     var served: UInt64 = 0
     while served < clients {
-        let accepted = &listener.accept() else |error| {
+        // `Accepted` holds the connection and the address of the client, and
+        // the pattern takes both out of it as soon as `accept` succeeds.
+        let Accepted { connection, address } = &listener.accept() else |error| {
             io.eprintln("cannot accept a client: {error}")
             return false
         }
-        // `Accepted` holds the connection and the address of the client.
-        let Accepted { connection, address } = accepted
         var open = connection
         echo(&open, address)
         // The connection is closed here, once, whether or not the echo worked.
@@ -555,12 +576,12 @@ fn echo(inout connection: net.Connection, client: net.Address) {
     io.eprintln("echoed {received.length()} bytes to {client}")
 }
 
-fn send(port: UInt16, args: env.Args) -> UInt8 {
+fn send(port: UInt16, messages: Vec[Str]) -> UInt8 {
     var connection = net.connect(net.loopback(port)) else |error| {
         io.eprintln("cannot connect to port {port}: {error}")
         return 1
     }
-    let echoed = exchange(&connection, args)
+    let echoed = exchange(&connection, messages)
     // The connection is closed here, once, whether or not the exchange worked.
     let closed = connection.close()
     if closed.is_err() {
@@ -574,16 +595,11 @@ fn send(port: UInt16, args: env.Args) -> UInt8 {
     }
 }
 
-// Send the messages from the fourth argument on, one per line, and print what
-// the server sends back. Report the first step that fails and answer whether
-// every step worked.
-fn exchange(inout connection: net.Connection, args: env.Args) -> Bool {
+// Send the messages, one per line, and print what the server sends back. Report
+// the first step that fails and answer whether every step worked.
+fn exchange(inout connection: net.Connection, messages: Vec[Str]) -> Bool {
     defer var text = String.new()
-    for index in 3..args.count() {
-        let message = args.at(index) else {
-            io.eprintln("a message must be valid UTF-8")
-            return false
-        }
+    for read message in messages {
         let _line = io.line(message, &text) else |_| {
             io.eprintln("a message is too long to send")
             return false
@@ -999,6 +1015,8 @@ The response helpers each build one kind of answer:
 | Helper | Answers with |
 | --- | --- |
 | `http.text(request, value)` | any `Display` value as `text/plain`, interpolations included |
+| `http.html(request, value)` | any `Display` value as `text/html; charset=utf-8` |
+| `http.redirect(request, status, location)` | a redirect with the status and `Location` header |
 | `http.json(request, value)` | any `json.Encode` value as `application/json`; `@derive(json.Encode)` writes the encoder |
 | `http.bytes(request, bytes)` | bytes already built in the request's arena |
 | `http.status(request, .NoContent)` | a status with an empty body |
@@ -1007,9 +1025,40 @@ The response helpers each build one kind of answer:
 
 A response can take extra headers with `&response.set_header(name, value)?`
 before it is returned, and cookies with `&response.set_cookie(name, value)?`
-([Cookies](#cookies)). A page of HTML is `http.text` with a
-`text/html; charset=utf-8` content type, and it escapes the text a visitor
-supplied with [`html.escaped`](08-text.md#escaping-text-for-html).
+([Cookies](#cookies)). `set_header` accepts any `Display` value. A page of HTML
+is built with `http.html`, escaping any text a visitor supplied with
+[`html.escaped`](08-text.md#escaping-text-for-html).
+
+A handler that changes something in answer to a posted form usually answers
+`303 See Other`, `http.Status.SeeOther`, with a `Location` header: the browser
+then fetches that page with a `GET`, so reloading it does not post the form a
+second time. `http.redirect` builds the redirect response:
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Lender
+
+// A posted form is answered with 303, so the browser fetches `/` next with a GET.
+fn signed(request: http.Request) -> Result[http.Response, http.Error] {
+    http.redirect(request, .SeeOther, "/")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let sent = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
+    let response = signed(sent.request()).unwrap()
+    let status = response.status()
+    io.println("{status.code()} {status.reason()}, Location: {response.header("Location").unwrap()}")?
+    .Ok(0)
+}
+```
+
+```
+303 See Other, Location: /
+```
 
 Errors travel with `?` like any other `Result`. The library's own failures —
 a body that is not JSON, an arena that is full, a push that ran out of room —
@@ -1391,16 +1440,68 @@ where a parameter holds the `Path`, and `?` answers the request with the
 refusal. The [calendar
 export](../../examples/calendar-export/main.lin) does this.
 
+### Percent-encoding text for a URL
+
+A path segment, a query value and a cookie can each hold only some
+characters: a space, `/`, `?`, `&` or `é` in a title would end the segment or
+the value early, or not be sent at all. Percent-encoding writes such a byte as
+`%` and two hexadecimal digits, so `Zoë` becomes `Zo%C3%AB`.
+`http.percent_encoded(text)` writes every byte but the ASCII letters, digits,
+`-`, `.`, `_` and `~` that way, which is safe in all three places; like
+`html.escaped`, it is interpolated and allocates nothing. `http.percent_decode`
+reads the text back into a `String`, and `percent_decode_in(allocator, text)`
+into one from another allocator, such as `request.allocator()`:
+
+```linea
+import std.http
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let title = "Zoë & friends: 100%"
+    // Every byte but letters, digits, `-`, `.`, `_` and `~` becomes `%XX`, so
+    // the whole title fits in one path segment.
+    io.println("/notes/{http.percent_encoded(title)}")?
+
+    // Decoding reads each `%XX` back as its byte. A `+` stays a `+`.
+    defer let decoded = http.percent_decode("Zo%C3%AB%20%26%20friends+more").unwrap()
+    io.println(decoded.view())?
+
+    // A `%` that is not followed by two hexadecimal digits is refused.
+    match http.percent_decode("100%") {
+        Ok(text) => text.release(),
+        Err(error) => io.println("refused: {error}")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+/notes/Zo%C3%AB%20%26%20friends%3A%20100%25
+Zoë & friends+more
+refused: the % at byte 3 is not followed by two hexadecimal digits
+```
+
+Decoding refuses rather than guesses: a `%` without two hexadecimal digits
+after it is `PercentError.Escape`, since no encoder writes one, and bytes that
+are not UTF-8 once decoded are `PercentError.Encoding`, since the result is
+text. Propagated with `?` in a handler, either answers 400, because the text
+came from the client. A `+` means a space only in an HTML form's encoding,
+which the query and a form body use and which `http.Query` and `http.Form`
+decode for you; in a path or a cookie `+` is itself, so `/notes/C++` names
+`C++`, and `percent_decode` keeps it. The router decodes path values with the
+same routine.
+
 ### Cookies
 
 A browser sends the cookies it holds in a `Cookie` header, `theme=dark;
 visits=3`, and a server sets one with a `Set-Cookie` header on a response.
-`request.cookie(name)` returns the value of the cookie with that name, or
-`None`; `request.cookies()` walks every `name=value` pair in the order they
-arrived. Both borrow the request and allocate nothing. Names are case-sensitive,
-whitespace around a pair is ignored, a pair that is not `name=value` is skipped
-without hiding the others, and the value is exactly what the browser sent: no
-decoding, and the quotes dropped if it sent any.
+`request.cookie(name)` returns the value of the cookie with that name, decoded
+into the request's arena, or `None`; `?` passes on the error when the arena is
+full. `request.cookies()` walks every `name=value` pair in the order they
+arrived, borrowing the request and allocating nothing, with each value exactly
+as the browser sent it. Names are case-sensitive, whitespace around a pair is
+ignored, a pair that is not `name=value` is skipped without hiding the others,
+and quotes around a value are dropped.
 
 `&response.set_cookie(name, value, ...)?` adds a `Set-Cookie` header. Its
 attributes are named arguments, each left out unless given: `path` and `domain`,
@@ -1423,8 +1524,8 @@ fn main() -> Result[UInt8, io.IoError] {
     let request = sent.request()
 
     // `cookie` finds one cookie by name; `cookies` walks them all.
-    io.println("theme: {request.cookie("theme"):?}")?
-    io.println("lang: {request.cookie("lang"):?}")?
+    io.println("theme: {request.cookie("theme").unwrap():?}")?
+    io.println("lang: {request.cookie("lang").unwrap():?}")?
     for pair in request.cookies() {
         io.println("{pair.name} = {pair.value}")?
     }
@@ -1433,8 +1534,8 @@ fn main() -> Result[UInt8, io.IoError] {
     &response.set_cookie("visits", "4", path: "/", max_age: .Some(3600), http_only: true, same_site: .Some(.Lax)).unwrap()
     io.println(response.header("Set-Cookie").unwrap())?
 
-    // A value that holds `;` would end the cookie early, so it is refused.
-    match &response.set_cookie("note", "a;b") {
+    // A name must be an HTTP token, so one holding a space is refused.
+    match &response.set_cookie("full name", "Ada") {
         Ok(_) => io.println("accepted")?,
         Err(error) => io.println("refused: {error}")?,
     }
@@ -1448,15 +1549,58 @@ lang: None
 theme = dark
 visits = 3
 visits=4; Path=/; Max-Age=3600; SameSite=Lax; HttpOnly
-refused: the cookie value holds a byte a cookie cannot carry
+refused: the cookie name must be an HTTP token: ASCII letters, digits and !#$%&'*+-.^_`|~, with no space, `=`, `;` or other separator
 ```
 
+A value may hold any text. A cookie value can carry only some ASCII bytes, so
+`set_cookie` writes the value [percent-encoded](#percent-encoding-text-for-a-url)
+and `cookie` decodes it: a name with a space, an `ë` or a `<` comes back as it
+went in.
+
+```linea
+import std.http
+import std.io
+import std.mem
+
+use mem.Lender
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    let signing = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
+    var response = http.text(signing.request(), "signed").unwrap()
+    &response.set_cookie("name", "Zoë Lovelace <b>", path: "/").unwrap()
+    let header = response.header("Set-Cookie").unwrap()
+    io.println(header)?
+
+    // The browser sends back the pair before the first `;` on the next visit.
+    let (pair, _attributes) = header.split_once("; ").unwrap()
+    var visit = http.new_request(arena.handle(), "GET", "/", "").unwrap()
+    &visit.add_header("Cookie", pair).unwrap()
+    let name = visit.request().cookie("name").unwrap().unwrap()
+    io.println("welcome back, {name}")?
+    .Ok(0)
+}
+```
+
+```
+name=Zo%C3%AB%20Lovelace%20%3Cb%3E; Path=/
+welcome back, Zoë Lovelace <b>
+```
+
+A cookie `set_cookie` wrote always decodes. One whose value holds a `%`
+without two hexadecimal digits after it, or bytes that are not UTF-8 once
+decoded, was written by another program on the domain or changed by the
+client, and `cookie` reads it as `None`. The browser keeps sending such a
+cookie until it expires, so refusing the request would lock the visitor out;
+read as absent, the handler takes the path a first visit takes, and its next
+`set_cookie` replaces the cookie. `cookies()` still shows the value as sent,
+and `http.percent_decode` reports what is wrong with it.
+
 `set_cookie` refuses a cookie that would be sent malformed rather than send it,
-with a `CookieError`: a name that is not an HTTP token, a value holding a space,
-`"`, `,`, `;`, `\`, a control byte or anything outside ASCII (encode such text,
-for example in hexadecimal), a path that does not start with `/` or holds a
-space, `;`, a control byte or anything outside ASCII (percent-encode it), and a
-domain that is not letters, digits, hyphens and dots. It also refuses what
+with a `CookieError`: a name that is not an HTTP token, a path that does not
+start with `/` or holds a space, `;`, a control byte or anything outside ASCII
+(percent-encode it), and a domain that is not letters, digits, hyphens and
+dots. It also refuses what
 browsers would silently discard: `SameSite=None` without `secure`, an `expires`
 before 1601, a name starting with `__Secure-` without `secure`, and a name
 starting with `__Host-` without `secure`, with a `domain`, or with a `path`
@@ -1806,6 +1950,7 @@ it was given reaches every request.
 | `max_body_bytes` | 1 MiB | the body |
 | `request_arena_bytes` | 48 MiB | the arena each request is served from; it holds the request, what decoding its JSON body reserves, and the response |
 | `read_timeout_ms` | 5000 | how long the whole request, head and body together, may take from the moment the connection is accepted, in milliseconds; a slower one is answered 408 |
+| `first_byte_timeout_ms` | 500 | how long to wait for the first byte of a request, in milliseconds; an idle connection that sends nothing within this time is closed silently without a 408 |
 | `write_timeout_ms` | 5000 | how long one write may wait, in milliseconds |
 | `connections` | `.None` | how many connections to serve before `serve` returns; `.None` serves until the program ends |
 
@@ -1992,7 +2137,8 @@ header, which the response's own status writes; `set_header` refuses it as it
 refuses `Content-Length`. And a 200 response whose `Location` is a path on the
 same server, such as `/thanks`, is a local redirect: the web server answers
 the browser with that path's response instead and drops yours. To send the
-browser elsewhere, answer a redirect status such as 303 with the `Location`.
+browser elsewhere, answer a redirect status such as `.SeeOther`, 303, with the
+`Location`.
 
 ### CGI or `listen_and_serve`
 
@@ -2009,7 +2155,8 @@ Both run the same handler; what differs is who owns the process.
 
 The [party RSVP](../../examples/party_rsvp.lin) example is a complete CGI
 program: an HTML form, a reply checked and confirmed as JSON, and a date read
-with `env.variable`.
+with `env.variable`. [A guest book](12-a-guest-book.md) builds a complete web
+application that runs both ways and stores its entries in SQLite.
 
 ## What you have seen
 
@@ -2022,6 +2169,9 @@ with `env.variable`.
   type of your own that implements `http.Extract` is read straight into its
   parameter. `request.extract[T]()` reads one in a handler's body, which
   `route_raw` registers.
+- `http.percent_encoded(text)` writes text safely into a path segment, a
+  query value or a cookie, and `http.percent_decode` reads it back, refusing
+  a malformed `%`.
 - Every request lives in an arena that `serve` rewinds; `http.new_request`
   and `&router.serve_http(state, request)` drive the same steps by hand.
 - `state: app` hands the state to `listen_and_serve`, which lends it to each

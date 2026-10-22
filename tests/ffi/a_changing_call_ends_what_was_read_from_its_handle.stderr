@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ffi/a_changing_call_ends_what_was_read_from_its_handle/named/named.lin:28:9
+   |
+28 |         named_reset(self.handle)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+29 |         let held = name.copy_bytes(length: 1).unwrap()
+   |                    ---- the observation is still used here

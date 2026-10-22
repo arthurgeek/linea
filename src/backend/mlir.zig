@@ -209,13 +209,18 @@ pub fn emit(
         for (0..f.param_count) |pi| {
             if (pi > 0 or indirect) try w.writeAll(", ");
             try w.writeAll(paramTypeOf(module, id, f, pi));
+            if (!module.arrivesByAddress(f, pi)) try writeForeignExtension(w, module, f.locals[pi]);
         }
         try w.writeAll(")");
         // The callable signature records the declared result even though an
         // external has no local body. Verification holds every call to it.
         const answered = module.types.erased(module.types.get(f.signature).callable.result);
         if (resultTypeOf(module, id, answered)) |t| {
-            try w.print(" -> {s}", .{t});
+            if (foreignExtension(module, answered)) |extension| {
+                try w.print(" -> ({s} {s})", .{ t, extension });
+            } else {
+                try w.print(" -> {s}", .{t});
+            }
         }
         if (answered == .never) try w.writeAll(" attributes {passthrough = [\"noreturn\"]}");
         try w.writeAll("\n");
@@ -238,7 +243,24 @@ pub fn emit(
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
         const name = module.exportedNameOf(id) orelse continue;
-        try emitExportThunk(w, module, f, id, name);
+        try emitForeignEntry(w, module, f, id, .{ .exported = name });
+    }
+
+    // One C-callable entry per function passed to C as a callback, found in
+    // one scan of the instructions.
+    const called_back = try gpa.alloc(bool, module.functions.len);
+    defer gpa.free(called_back);
+    @memset(called_back, false);
+    for (module.functions, 0..) |*f, i| {
+        if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
+        for (0..f.insts.len) |at| {
+            const inst = InstId.at(@intCast(at));
+            if (f.tagOf(inst) == .foreign_function_addr) called_back[f.functionOf(inst).index()] = true;
+        }
+    }
+    for (module.functions, called_back, 0..) |*f, wanted, i| {
+        if (!wanted) continue;
+        try emitForeignEntry(w, module, f, FunctionId.at(@intCast(i)), .called_back);
     }
 
     try w.writeAll("}\n");
@@ -338,30 +360,102 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module) std.Io.Writer.Erro
 
 /// The width one exported parameter or answer crosses the boundary in.
 ///
-/// The declared type's own width, which is what a C declaration spells. Not the
-/// width the body computes in: that is an implementation choice about where
-/// overflow is caught, and publishing it would make this module's calling
-/// convention something every caller has to match forever.
+/// The type a value crosses the C boundary as: its storage representation,
+/// which for an integer is the declared width rather than the width the body
+/// computes in. That width is an implementation choice about where overflow is
+/// caught, and publishing it would make this module's calling convention
+/// something every caller has to match forever.
 ///
-/// Only an integer reaches here. [T-Export] admits nothing else across, so a
-/// width the layout table never produces is a compiler defect rather than a
-/// signature to print.
-fn foreignTypeOf(ty: TypeId) []const u8 {
-    // The same question `[T-Export]` refused the signature by, so a type
-    // reaching here has already been admitted by it. A panic is therefore a
-    // defect in that check rather than a program a user can write.
-    const bits = ty.foreignWidth() orelse
-        std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{});
-    return switch (bits) {
-        8 => "i8",
-        16 => "i16",
-        32 => "i32",
-        64 => "i64",
-        else => unreachable,
+/// Only an integer, a `Float64` or a newtype over one reaches here: the
+/// checker refused every other type ([T-Extern], [T-Export]), so another
+/// representation is a compiler defect rather than a signature to print.
+fn foreignTypeOf(module: *const Module, ty: TypeId) []const u8 {
+    const representation = module.representationOf(ty).storage;
+    if (representation != .code_pointer and !types_mod.crossesForeign(&module.types, ty))
+        std.debug.panic("compiler defect: a type the checker refused crosses the foreign boundary", .{});
+    return switch (representation) {
+        .integer => |integer| switch (integer.bits) {
+            8 => "i8",
+            16 => "i16",
+            32 => "i32",
+            64 => "i64",
+            else => std.debug.panic("compiler defect: a {d}-bit integer crosses the foreign boundary", .{integer.bits}),
+        },
+        .float64 => float_type,
+        // A callback crosses as the address of its C-callable entry.
+        .code_pointer => "!llvm.ptr",
+        else => std.debug.panic("compiler defect: this type does not cross the foreign boundary", .{}),
     };
 }
 
-/// The symbol the outside world links against, which is never the body.
+/// The extension a C caller or callee expects of an integer narrower than 32
+/// bits, or null for a wider one.
+///
+/// Both supported C ABIs (AArch64 and x86-64 SysV) leave the register bits
+/// above an `int8_t` or `int16_t` to whoever produces the value: the caller for
+/// an argument, the callee for a result. Clang compiles C against that promise,
+/// so C reads `(int)value` as the whole register. Marking the declaration makes
+/// LLVM extend by the declared type's signedness on every call through it and
+/// in every thunk that answers one.
+fn foreignExtension(module: *const Module, ty: TypeId) ?[]const u8 {
+    return switch (module.representationOf(ty).storage) {
+        .integer => |integer| if (integer.bits >= 32)
+            null
+        else if (integer.signedness == .signed)
+            "{llvm.signext}"
+        else
+            "{llvm.zeroext}",
+        else => null,
+    };
+}
+
+/// Whether a value's foreign type differs from the type the body computes it
+/// in, so a boundary narrows it going out and widens it coming in. Only an
+/// integer narrower than the computation width does.
+fn adaptsAtBoundary(module: *const Module, ty: TypeId) bool {
+    return !std.mem.eql(u8, foreignTypeOf(module, ty), computationType(module.representationOf(ty).computation));
+}
+
+/// How a narrow integer is widened to the computation width: by its declared
+/// signedness, so an unsigned type widens with zeroes and a signed one with
+/// its sign.
+fn widening(module: *const Module, ty: TypeId) []const u8 {
+    return switch (module.representationOf(ty).storage) {
+        .integer => |integer| if (integer.signedness == .signed) "extsi" else "extui",
+        else => std.debug.panic("compiler defect: a non-integer is widened at the foreign boundary", .{}),
+    };
+}
+
+fn writeForeignExtension(w: *std.Io.Writer, module: *const Module, ty: TypeId) std.Io.Writer.Error!void {
+    if (foreignExtension(module, ty)) |extension| try w.print(" {s}", .{extension});
+}
+
+/// Which C-callable entry to a body is being written: the symbol an export
+/// publishes, or the private entry a callback passed to C is called through.
+const ForeignEntry = union(enum) {
+    exported: []const u8,
+    called_back,
+};
+
+/// Writes the name of a callback's C-callable entry.
+fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.Writer.Error!void {
+    try w.writeByte('@');
+    try writeSymbolName(w, module.nameOf(id), symbol_names.callback_prefix);
+}
+
+/// The function type of a body's C-callable entry, as `func.constant` names it.
+fn writeForeignEntryType(w: *std.Io.Writer, module: *const Module, mir: *const Mir) std.Io.Writer.Error!void {
+    try w.writeAll("(");
+    for (0..mir.param_count) |i| {
+        if (i > 0) try w.writeAll(", ");
+        try w.writeAll(if (module.arrivesByAddress(mir, i)) "!llvm.ptr" else foreignTypeOf(module, mir.locals[i]));
+    }
+    try w.writeAll(") -> ");
+    if (mir.return_type == .unit) try w.writeAll("()") else try w.writeAll(foreignTypeOf(module, mir.return_type));
+}
+
+/// A C-callable entry to a body: the symbol the outside world links against
+/// for an export, and the private entry C calls a callback through.
 ///
 /// It takes the declared types' widths, widens each to the convention the body
 /// was compiled for, calls it, and narrows the answer back. The narrowing
@@ -376,12 +470,12 @@ fn foreignTypeOf(ty: TypeId) []const u8 {
 /// The body stays internal behind it, so a library has the shape a program
 /// already has: bodies with every caller in hand, and a wrapper that is the one
 /// symbol anything outside names.
-fn emitExportThunk(
+fn emitForeignEntry(
     w: *std.Io.Writer,
     module: *const Module,
     mir: *const Mir,
     id: FunctionId,
-    name: []const u8,
+    entry: ForeignEntry,
 ) std.Io.Writer.Error!void {
     // What the thunk itself answers: the declared type, or nothing where that
     // is Unit, because a C function returning void sets no register.
@@ -394,14 +488,32 @@ fn emitExportThunk(
     // the compiler, would be the one to say so.
     const callee_answers = resultTypeOf(module, id, mir.return_type);
 
-    try w.print("  func.func @{s}(", .{name});
+    switch (entry) {
+        .exported => |name| try w.print("  func.func @{s}(", .{name}),
+        .called_back => {
+            try w.writeAll("  func.func private ");
+            try writeCalledBackName(w, module, id);
+            try w.writeAll("(");
+        },
+    }
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const ty = if (module.arrivesByAddress(mir, i)) "!llvm.ptr" else foreignTypeOf(mir.locals[i]);
+        const by_address = module.arrivesByAddress(mir, i);
+        const ty = if (by_address) "!llvm.ptr" else foreignTypeOf(module, mir.locals[i]);
         try w.print("%p{d}: {s}", .{ i, ty });
+        if (!by_address) try writeForeignExtension(w, module, mir.locals[i]);
     }
     try w.writeAll(")");
-    if (answers) try w.print(" -> {s}", .{foreignTypeOf(mir.return_type)});
+    if (answers) {
+        if (foreignExtension(module, mir.return_type)) |extension| {
+            try w.print(" -> ({s} {s})", .{ foreignTypeOf(module, mir.return_type), extension });
+        } else {
+            try w.print(" -> {s}", .{foreignTypeOf(module, mir.return_type)});
+        }
+    }
+    // A callback's entry is reached only through the address the program
+    // hands C, so the object publishes no symbol for it, as for a body.
+    if (entry == .called_back) try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>}");
     try w.writeAll(" {\n");
 
     // A value narrower than the convention arrives narrow and is widened the
@@ -411,14 +523,9 @@ fn emitExportThunk(
     for (0..mir.param_count) |i| {
         if (module.arrivesByAddress(mir, i)) continue;
         const ty = mir.locals[i];
-        const foreign = foreignTypeOf(ty);
-        if (std.mem.eql(u8, foreign, int_type)) continue;
-        const signed = switch (module.representationOf(ty).computation) {
-            .integer => |signedness| signedness == .signed,
-            else => std.debug.panic("compiler defect: a non-integer crosses the exported value boundary", .{}),
-        };
+        if (!adaptsAtBoundary(module, ty)) continue;
         try w.print("    %w{d} = arith.{s} %p{d} : {s} to {s}\n", .{
-            i, if (signed) "extsi" else "extui", i, foreign, int_type,
+            i, widening(module, ty), i, foreignTypeOf(module, ty), int_type,
         });
     }
 
@@ -431,8 +538,7 @@ fn emitExportThunk(
     try w.writeAll("(");
     for (0..mir.param_count) |i| {
         if (i > 0) try w.writeAll(", ");
-        const widened = !module.arrivesByAddress(mir, i) and
-            !std.mem.eql(u8, foreignTypeOf(mir.locals[i]), int_type);
+        const widened = !module.arrivesByAddress(mir, i) and adaptsAtBoundary(module, mir.locals[i]);
         try w.print("{s}{d}", .{ if (widened) "%w" else "%p", i });
     }
     try w.writeAll(") : (");
@@ -450,8 +556,8 @@ fn emitExportThunk(
         return;
     }
 
-    const foreign = foreignTypeOf(mir.return_type);
-    if (std.mem.eql(u8, foreign, int_type)) {
+    const foreign = foreignTypeOf(module, mir.return_type);
+    if (!adaptsAtBoundary(module, mir.return_type)) {
         try w.print("    func.return %answer : {s}\n  }}\n", .{foreign});
         return;
     }
@@ -1007,6 +1113,21 @@ const FunctionEmitter = struct {
                 try self.here(span);
             },
 
+            .foreign_function_addr => {
+                const n = id.index();
+                const target = mir.functionOf(id);
+                const body = self.module.functionOf(target);
+                try self.w.print("    %fa{d} = func.constant ", .{n});
+                try writeCalledBackName(self.w, self.module, target);
+                try self.w.writeAll(" : ");
+                try writeForeignEntryType(self.w, self.module, body);
+                try self.here(span);
+                try self.w.print("    %v{d} = builtin.unrealized_conversion_cast %fa{d} : ", .{ n, n });
+                try writeForeignEntryType(self.w, self.module, body);
+                try self.w.writeAll(" to !llvm.ptr");
+                try self.here(span);
+            },
+
             .address_bits => {
                 try self.w.print("    %v{d} = llvm.ptrtoint ", .{id.index()});
                 try self.writeValue(mir.unaryOf(id));
@@ -1115,17 +1236,14 @@ const FunctionEmitter = struct {
         const indirect = module.returnsIndirectly(c.func);
         const ty = if (is_noreturn) TypeId.never else mir.typeOf(id);
 
-        const widens = !is_noreturn and external and !indirect and ty != .unit and
-            !std.mem.eql(u8, foreignTypeOf(ty), computationType(module.representationOf(ty).computation));
+        const widens = !is_noreturn and external and !indirect and ty != .unit and adaptsAtBoundary(module, ty);
 
         if (external) for (c.args, 0..) |a, i| {
             if (module.arrivesByAddress(callee, i)) continue;
             const parameter = callee.locals[i];
-            const internal = computationType(module.representationOf(parameter).computation);
-            const foreign = foreignTypeOf(parameter);
-            if (std.mem.eql(u8, internal, foreign)) continue;
+            if (!adaptsAtBoundary(module, parameter)) continue;
             try w.print("    %va{d}_{d} = arith.trunci %v{d} : {s} to {s}", .{
-                n, i, a.index(), internal, foreign,
+                n, i, a.index(), computationType(module.representationOf(parameter).computation), foreignTypeOf(module, parameter),
             });
             try self.here(span);
         };
@@ -1144,8 +1262,7 @@ const FunctionEmitter = struct {
         }
         for (c.args, 0..) |a, i| {
             if (i > 0 or indirect) try w.writeAll(", ");
-            const adapted = external and !module.arrivesByAddress(callee, i) and
-                !std.mem.eql(u8, foreignTypeOf(callee.locals[i]), computationType(module.representationOf(callee.locals[i]).computation));
+            const adapted = external and !module.arrivesByAddress(callee, i) and adaptsAtBoundary(module, callee.locals[i]);
             if (adapted) try w.print("%va{d}_{d}", .{ n, i }) else try self.writeValue(a);
         }
         try w.writeAll(") : (");
@@ -1179,13 +1296,8 @@ const FunctionEmitter = struct {
             try w.print("    %v{d} = arith.constant 0 : {s}", .{ n, int_type });
             try self.here(span);
         } else if (widens) {
-            const signed = switch (module.representationOf(ty).computation) {
-                .integer => |signedness| signedness == .signed,
-                else => std.debug.panic("compiler defect: a non-integer returns through an integer foreign boundary", .{}),
-            };
-            const foreign = foreignTypeOf(ty);
             try w.print("    %v{d} = arith.{s} %vr{d} : {s} to {s}", .{
-                n, if (signed) "extsi" else "extui", n, foreign, computationType(module.representationOf(ty).computation),
+                n, widening(module, ty), n, foreignTypeOf(module, ty), computationType(module.representationOf(ty).computation),
             });
             try self.here(span);
         }
@@ -2221,7 +2333,7 @@ fn paramTypeOf(module: *const Module, id: FunctionId, callee: *const Mir, i: usi
     // A parameter arriving by address is a pointer whatever it holds.
     if (module.arrivesByAddress(callee, i)) return "!llvm.ptr";
     const ty = callee.locals[i];
-    if (module.isExternal(id)) return foreignTypeOf(ty);
+    if (module.isExternal(id)) return foreignTypeOf(module, ty);
     return computationType(module.representationOf(ty).computation);
 }
 
@@ -2244,7 +2356,7 @@ fn resultTypeOf(module: *const Module, id: FunctionId, ret: TypeId) ?[]const u8 
     if (module.returnsIndirectly(id)) return null;
     if (ret == .never) return null;
     if (module.isExternal(id) and ret == .unit) return null;
-    if (module.isExternal(id)) return foreignTypeOf(ret);
+    if (module.isExternal(id)) return foreignTypeOf(module, ret);
     return computationType(module.representationOf(ret).computation);
 }
 

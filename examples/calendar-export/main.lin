@@ -4,6 +4,7 @@
 // whole in memory first. A year that is not a number is answered 400, naming
 // the path value, and a year past 1 to 9999 is answered 400 after the handler
 // logs it. Every request is logged to standard error.
+import std.cli
 import std.env
 import std.http
 import std.io
@@ -165,28 +166,22 @@ struct Options {
 
 // Read `--port PORT` and an optional `--requests N`, in either order.
 fn parse_options(args: env.Args) -> Option[Options] {
-    var port: Option[UInt16] = .None
-    var requests: Option[UInt64] = .None
-    var index: UInt64 = 1
-    while index < args.count() {
-        let flag = args.at(index)?
-        let value = args.at(index + 1)?
-        if flag == "--port" {
-            let number = value.parse[UInt16]() else |_| {
-                return .None
-            }
-            port = .Some(number)
-        } else if flag == "--requests" {
-            let number = value.parse[UInt64]() else |_| {
-                return .None
-            }
-            requests = .Some(number)
-        } else {
-            return .None
-        }
-        index += 2
+    defer var cmd = cli.Command.new("calendar-export", "Calendar export server")
+    &cmd.option("port", "--port", "port to listen on", required: true)
+    &cmd.option("requests", "--requests", "number of requests to serve")
+
+    var cursor = cli.ArgCursor.new(args)
+    defer let matches = cmd.parse(&cursor) else |_| {
+        return .None
     }
-    .Some(.{ port = port?, requests })
+
+    let port: UInt16 = matches.get("port") else |_| {
+        return .None
+    }
+    let requests: Option[UInt64] = matches.get_optional("requests") else |_| {
+        return .None
+    }
+    .Some(.{ port, requests })
 }
 
 test fn leap_years_follow_the_gregorian_rule() {
@@ -251,12 +246,8 @@ test fn a_year_streams_one_line_per_day() {
     let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
     let csv = &router.serve_http(&app, sent.request()).unwrap().recorded_body().unwrap()
     let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
-    var lines: UInt64 = 0
-    for byte in calendar_text.as_bytes() {
-        if *byte == 10 {
-            lines += 1
-        }
-    }
+    // `filter` keeps the newline bytes, and `count` says how many there are.
+    let lines = calendar_text.as_bytes().filter(|byte| *byte == 10).count()
     testing.assert(calendar_text.starts_with("date,weekday,day_of_year\n2024-01-01,Monday,1\n"), "the calendar's first lines changed")?
     testing.assert(calendar_text.ends_with("2024-12-31,Tuesday,366\n"), "the calendar's last line changed")?
     testing.assert_eq(lines, 367, "a leap year did not have 366 days and a header")?

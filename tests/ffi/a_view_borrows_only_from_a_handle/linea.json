@@ -1,0 +1,1 @@
+{ "extern": ["named"], "native": ["named/named.c"] }

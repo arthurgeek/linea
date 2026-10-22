@@ -104,57 +104,54 @@ impl[A: Allocator] ResponseHeaders[A] {
     fn new_in(allocator: A) -> ResponseHeaders[A] where carries(allocator) {
         .{ allocator = copy(allocator), fields = Vec.new_in(allocator) }
     }
-}
 
-test fn a_new_header_list_is_empty() {
-    defer let headers = ResponseHeaders.new_in(mem.system())
-    testing.assert_eq(headers.get("Content-Type"), .None, "a new list held a header")?
-    .Ok(())
-}
+    test fn a_new_header_list_is_empty() {
+        defer let headers = ResponseHeaders.new_in(mem.system())
+        testing.assert_eq(headers.get("Content-Type"), .None, "a new list held a header")?
+        .Ok(())
+    }
 
-impl[A: Allocator] ResponseHeaders[A] {
     // Replace every value of `name`, compared under ASCII case folding. The
-    // new header is copied before any old value is dropped, so a refusal
-    // leaves the list unchanged.
-    fn set(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: self) {
+    // new header is rendered and checked before any old value is dropped, so a
+    // refusal leaves the list unchanged.
+    fn set[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(self: self) {
         let header = pending_header(self.allocator, name, value)?
         &self.remove(name)
         &self.push(header)?
         .Ok(())
     }
-}
 
-test fn setting_a_header_replaces_every_value() {
-    defer var headers = ResponseHeaders.new_in(mem.system())
-    let added = &headers.add("Cache-Control", "no-cache")
-    let again = &headers.add("cache-control", "no-store")
-    let set = &headers.set("CACHE-CONTROL", "max-age=60")
-    testing.assert_ok_eq(added, (), "adding failed")?
-    testing.assert_ok_eq(again, (), "adding again failed")?
-    testing.assert_ok_eq(set, (), "setting failed")?
-    // A value left behind would come first, before the one just set.
-    testing.assert_eq(headers.get("Cache-Control"), Option.Some("max-age=60"), "the header kept an old value")?
-    let refused = &headers.set("X-Split", "a\r\nX-Smuggled: b")
-    testing.assert_eq(refused, .Err(HeaderError.ControlByte), "a value holding CRLF was accepted")?
-    .Ok(())
-}
+    test fn setting_a_header_replaces_every_value() {
+        defer var headers = ResponseHeaders.new_in(mem.system())
+        let added = &headers.add("Cache-Control", "no-cache")
+        let again = &headers.add("cache-control", "no-store")
+        let seconds = 60
+        let set = &headers.set("CACHE-CONTROL", "max-age={seconds}")
+        testing.assert_ok_eq(added, (), "adding failed")?
+        testing.assert_ok_eq(again, (), "adding again failed")?
+        testing.assert_ok_eq(set, (), "setting failed")?
+        // A value left behind would come first, before the one just set.
+        testing.assert_eq(headers.get("Cache-Control"), Option.Some("max-age=60"), "the header kept an old value")?
+        let refused = &headers.set("X-Split", "a\r\nX-Smuggled: {seconds}")
+        testing.assert_eq(refused, .Err(HeaderError.ControlByte), "a value holding CRLF was accepted")?
+        .Ok(())
+    }
 
-// A 1 KiB arena holds the first header, but not a 2 KiB replacement value.
-test fn a_replacement_refused_for_memory_keeps_the_old_value() {
-    defer let arena = mem.Arena.open(mem.system(), size: 1024)
-    defer let long = Vec.filled(2048, UInt8(120)).unwrap()
-    defer var headers = ResponseHeaders.new_in(arena.handle())
-    let added = &headers.add("Cache-Control", "no-cache")
-    let replaced = &headers.set("Cache-Control", Str.from_bytes(long.as_slice()).unwrap())
-    testing.assert_ok_eq(added, (), "adding failed")?
-    testing.assert_eq(replaced, .Err(HeaderError.Allocation(.Exhausted)), "a replacement past the arena was accepted")?
-    testing.assert_eq(headers.get("cache-control"), Option.Some("no-cache"), "a refused replacement lost the old value")?
-    .Ok(())
-}
+    // A 1 KiB arena holds the first header, but not a 2 KiB replacement value.
+    test fn a_replacement_refused_for_memory_keeps_the_old_value() {
+        defer let arena = mem.Arena.open(mem.system(), size: 1024)
+        defer let long = Vec.filled(2048, UInt8(120)).unwrap()
+        defer var headers = ResponseHeaders.new_in(arena.handle())
+        let added = &headers.add("Cache-Control", "no-cache")
+        let replaced = &headers.set("Cache-Control", Str.from_bytes(long.as_slice()).unwrap())
+        testing.assert_ok_eq(added, (), "adding failed")?
+        testing.assert_eq(replaced, .Err(HeaderError.Allocation(.Exhausted)), "a replacement past the arena was accepted")?
+        testing.assert_eq(headers.get("cache-control"), Option.Some("no-cache"), "a refused replacement lost the old value")?
+        .Ok(())
+    }
 
-impl[A: Allocator] ResponseHeaders[A] {
     // Append a value, keeping any the name already has.
-    fn add(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries(), retains(self: self) {
+    fn add[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries(), retains(self: self) {
         let header = pending_header(self.allocator, name, value)?
         &self.push(header)?
         .Ok(())
@@ -166,35 +163,33 @@ impl[A: Allocator] ResponseHeaders[A] {
         &self.fields.push(header).settled()?
         .Ok(())
     }
-}
 
-test fn adding_a_header_keeps_earlier_values() {
-    defer var headers = ResponseHeaders.new_in(mem.system())
-    let first = &headers.add("Vary", "Accept")
-    let second = &headers.add("Vary", "Origin")
-    testing.assert_ok_eq(first, (), "adding failed")?
-    testing.assert_ok_eq(second, (), "adding a second value failed")?
-    testing.assert_eq(headers.get("vary"), Option.Some("Accept"), "the first value was replaced")?
-    let bad_name = &headers.add("Bad Name", "x")
-    let connection = &headers.add("connection", "keep-alive")
-    let empty = &headers.add("", "x")
-    let length = &headers.add("Content-Length", "3")
-    let coding = &headers.add("TRANSFER-ENCODING", "chunked")
-    let status = &headers.add("status", "302 Found")
-    testing.assert_eq(bad_name, .Err(HeaderError.NotAToken), "a name with a space was accepted")?
-    testing.assert_eq(connection, .Err(HeaderError.Framing), "a Connection header was accepted")?
-    testing.assert_eq(length, .Err(HeaderError.Framing), "a Content-Length header was accepted")?
-    testing.assert_eq(coding, .Err(HeaderError.Framing), "a Transfer-Encoding header was accepted")?
-    testing.assert_eq(status, .Err(HeaderError.Framing), "a Status header was accepted")?
-    testing.assert_eq(empty, .Err(HeaderError.NotAToken), "an empty name was accepted")?
-    testing.assert_eq(headers.get("Bad Name"), .None, "a refused name was kept")?
-    testing.assert_eq(headers.get("Connection"), .None, "a refused Connection header was kept")?
-    testing.assert_eq(headers.get("Content-Length"), .None, "a refused Content-Length header was kept")?
-    testing.assert_eq(headers.get("Transfer-Encoding"), .None, "a refused Transfer-Encoding header was kept")?
-    .Ok(())
-}
+    test fn adding_a_header_keeps_earlier_values() {
+        defer var headers = ResponseHeaders.new_in(mem.system())
+        let first = &headers.add("Vary", "Accept")
+        let second = &headers.add("Vary", "Origin")
+        testing.assert_ok_eq(first, (), "adding failed")?
+        testing.assert_ok_eq(second, (), "adding a second value failed")?
+        testing.assert_eq(headers.get("vary"), Option.Some("Accept"), "the first value was replaced")?
+        let bad_name = &headers.add("Bad Name", "x")
+        let connection = &headers.add("connection", "keep-alive")
+        let empty = &headers.add("", "x")
+        let length = &headers.add("Content-Length", "3")
+        let coding = &headers.add("TRANSFER-ENCODING", "chunked")
+        let status = &headers.add("status", "302 Found")
+        testing.assert_eq(bad_name, .Err(HeaderError.NotAToken), "a name with a space was accepted")?
+        testing.assert_eq(connection, .Err(HeaderError.Framing), "a Connection header was accepted")?
+        testing.assert_eq(length, .Err(HeaderError.Framing), "a Content-Length header was accepted")?
+        testing.assert_eq(coding, .Err(HeaderError.Framing), "a Transfer-Encoding header was accepted")?
+        testing.assert_eq(status, .Err(HeaderError.Framing), "a Status header was accepted")?
+        testing.assert_eq(empty, .Err(HeaderError.NotAToken), "an empty name was accepted")?
+        testing.assert_eq(headers.get("Bad Name"), .None, "a refused name was kept")?
+        testing.assert_eq(headers.get("Connection"), .None, "a refused Connection header was kept")?
+        testing.assert_eq(headers.get("Content-Length"), .None, "a refused Content-Length header was kept")?
+        testing.assert_eq(headers.get("Transfer-Encoding"), .None, "a refused Transfer-Encoding header was kept")?
+        .Ok(())
+    }
 
-impl[A: Allocator] ResponseHeaders[A] {
     // Drop every value of `name`, compared under ASCII case folding. One
     // pass moves each kept header down over the matches before it, keeping
     // their order, and truncating releases the matches collected at the end,
@@ -213,20 +208,18 @@ impl[A: Allocator] ResponseHeaders[A] {
         }
         &self.fields.truncate(kept)
     }
-}
 
-test fn removing_a_header_drops_every_value() {
-    defer var headers = ResponseHeaders.new_in(mem.system())
-    testing.assert_ok_eq(&headers.add("Vary", "Accept"), (), "adding failed")?
-    testing.assert_ok_eq(&headers.add("Allow", "GET"), (), "adding failed")?
-    testing.assert_ok_eq(&headers.add("vary", "Origin"), (), "adding failed")?
-    &headers.remove("VARY")
-    testing.assert_eq(headers.get("Vary"), .None, "a value survived its removal")?
-    testing.assert_eq(headers.get("Allow"), Option.Some("GET"), "another header was removed")?
-    .Ok(())
-}
+    test fn removing_a_header_drops_every_value() {
+        defer var headers = ResponseHeaders.new_in(mem.system())
+        testing.assert_ok_eq(&headers.add("Vary", "Accept"), (), "adding failed")?
+        testing.assert_ok_eq(&headers.add("Allow", "GET"), (), "adding failed")?
+        testing.assert_ok_eq(&headers.add("vary", "Origin"), (), "adding failed")?
+        &headers.remove("VARY")
+        testing.assert_eq(headers.get("Vary"), .None, "a value survived its removal")?
+        testing.assert_eq(headers.get("Allow"), Option.Some("GET"), "another header was removed")?
+        .Ok(())
+    }
 
-impl[A: Allocator] ResponseHeaders[A] {
     // `get` returns the first value of `name`, compared under ASCII case folding.
     fn get(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
         for header in self.fields.as_slice() {
@@ -236,14 +229,14 @@ impl[A: Allocator] ResponseHeaders[A] {
         }
         .None
     }
-}
 
-test fn a_header_is_read_by_its_folded_name() {
-    defer var headers = ResponseHeaders.new_in(mem.system())
-    testing.assert_ok_eq(&headers.add("Content-Type", "text/html"), (), "adding failed")?
-    testing.assert_eq(headers.get("content-type"), Option.Some("text/html"), "the value was not found")?
-    testing.assert_eq(headers.get("Content-Length"), .None, "an absent header was found")?
-    .Ok(())
+    test fn a_header_is_read_by_its_folded_name() {
+        defer var headers = ResponseHeaders.new_in(mem.system())
+        testing.assert_ok_eq(&headers.add("Content-Type", "text/html"), (), "adding failed")?
+        testing.assert_eq(headers.get("content-type"), Option.Some("text/html"), "the value was not found")?
+        testing.assert_eq(headers.get("Content-Length"), .None, "an absent header was found")?
+        .Ok(())
+    }
 }
 
 // `empty_header` makes a header whose name and value hold no storage yet, to
@@ -252,37 +245,34 @@ fn empty_header[A: Allocator](allocator: A) -> PendingHeader[A] where carries(al
     .{ name = String.new_in(allocator), value = String.new_in(allocator) }
 }
 
-// Refuse a header whose name is not a token, whose name frames the response
-// or names its status, or whose value holds a control byte other than a tab.
-fn refuse_invalid(name: Str, value: Str) -> Result[(), HeaderError] {
+// Refuse a header whose name is not a token, or whose name frames the response
+// or names its status.
+fn refuse_invalid_name(name: Str) -> Result[(), HeaderError] {
     if !is_token(name) {
         return .Err(.NotAToken)
     }
     if name.equals_ascii_folded("Connection") || name.equals_ascii_folded("Content-Length") || name.equals_ascii_folded("Transfer-Encoding") || name.equals_ascii_folded("Status") {
         return .Err(.Framing)
     }
-    if !is_field_value(value) {
-        return .Err(.ControlByte)
-    }
     .Ok(())
 }
 
-// Validate a header and copy its name and value.
-fn pending_header[A: Allocator](allocator: A, name: Str, value: Str) -> Result[PendingHeader[A], HeaderError] where carries(.Ok: allocator) {
-    refuse_invalid(name, value)?
-    let owned_name = owned(allocator, name)?
-    let owned_value = owned(allocator, value) else |error| {
-        owned_name.release()
-        return .Err(error)
+// Render `value`, validate `name` and the rendered value, and copy `name`.
+fn pending_header[A: Allocator, V: Display](allocator: A, name: Str, value: V) -> Result[PendingHeader[A], HeaderError] where carries(.Ok: allocator) {
+    refuse_invalid_name(name)?
+    defer let owned_value = rendered(allocator, value)?
+    if !is_field_value(owned_value.view()) {
+        return .Err(.ControlByte)
     }
+    let owned_name = rendered(allocator, name)?
     .Ok(.{ name = owned_name, value = owned_value })
 }
 
-// Copy `part` into new storage from `allocator`.
-fn owned[A: Allocator](allocator: A, part: Str) -> Result[String[A], HeaderError] where carries(.Ok: allocator) {
+// Format `part` into new storage from `allocator`.
+fn rendered[A: Allocator, V: Display](allocator: A, part: V) -> Result[String[A], HeaderError] where carries(.Ok: allocator) {
     var stored = String.new_in(allocator)
-    // A refused append releases the partial text; returning it moves it out.
+    // A refused write releases the partial text; returning it moves it out.
     defer stored.release()
-    &stored.append(part)?
+    part.fmt(&stored)?
     .Ok(stored)
 }

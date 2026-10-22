@@ -1,0 +1,15 @@
+// A literal outside a newtype's refinement names a value its base never holds,
+// so the arm is reached by no value.
+type Port = UInt16 where it in 1..=65535
+
+fn class(sink port: Port) -> UInt8 {
+    match port {
+        Port(0) => 0,
+        Port(1..=1023) => 1,
+        Port(1024..=65535) => 2,
+    }
+}
+
+fn main() -> UInt8 {
+    class(Port(80)) - 1
+}

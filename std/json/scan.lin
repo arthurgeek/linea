@@ -1,5 +1,7 @@
+import std.fmt
 import std.mem
 import std.testing
+import std.text
 
 // Return whether the byte at `at` is an ASCII digit, 0 (48) through 9 (57).
 fn number_digit(input: Str, at: UInt64) -> Bool where carries() {
@@ -150,16 +152,10 @@ fn unicode_unit(input: Str, inout at: UInt64) -> Result[UInt32, ParseError] wher
         let byte = input.byte(at) else {
             return .Err(.{ kind = .InvalidEscape, offset = input.length() })
         }
-        let digit: UInt32 = if byte >= 48 && byte <= 57 {
-            UInt32(byte - 48)
-        } else if byte >= 65 && byte <= 70 {
-            UInt32(byte - 65) + 10
-        } else if byte >= 97 && byte <= 102 {
-            UInt32(byte - 97) + 10
-        } else {
+        let digit = text.hex_digit_value(byte) else {
             return .Err(.{ kind = .InvalidEscape, offset = at })
         }
-        unit = unit * 16 + digit
+        unit = unit * 16 + UInt32(digit)
         at += 1
     }
     .Ok(unit)
@@ -298,7 +294,6 @@ test fn unicode_escapes_cover_each_utf8_width_boundary() {
 }
 
 test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes() {
-    let hex = "0123456789abcdef"
     for code in UInt64(0)..32 {
         var raw_bytes = Vec.filled(count: 3, value: UInt8(34)).unwrap()
         raw_bytes[1] = UInt8(code)
@@ -314,14 +309,7 @@ test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes()
                 testing.assert_eq(error, expected, "raw control error changed")?
             },
         }
-        var escaped_bytes = Vec.filled(count: 8, value: UInt8(48)).unwrap()
-        escaped_bytes[0] = 34
-        escaped_bytes[1] = 92
-        escaped_bytes[2] = 117
-        escaped_bytes[5] = hex.byte(code / 16).unwrap()
-        escaped_bytes[6] = hex.byte(code % 16).unwrap()
-        escaped_bytes[7] = 34
-        defer let escaped = String.from_bytes(escaped_bytes).unwrap()
+        defer let escaped = fmt.render_owned("\"\\u{code:04x}\"").unwrap()
         var escaped_at: UInt64 = 0
         defer let value = scan_string(mem.system(), escaped.view(), &escaped_at, 1).unwrap()
         testing.assert_eq(value.byte(0).unwrap(), UInt8(code), "escaped control decoded incorrectly")?

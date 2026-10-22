@@ -83,6 +83,41 @@ test fn a_text_response_past_the_arena_is_refused() {
     .Ok(())
 }
 
+// `html` answers 200 with `body` rendered into the request's arena and sets
+// `Content-Type: text/html; charset=utf-8`. `body` is any `Display` value, so
+// an interpolated literal or a page type builds the markup in place; it does
+// not escape text on its own, so pass untrusted text through `html.escaped`.
+pub fn html[P: Allocator, T: Display](request: Request[P], body: T) -> Result[Response[P], Error[P]] {
+    var rendered = String.new_in(request.allocator())
+    body.fmt(&rendered)?
+    var response = held(request, rendered.into_bytes())
+    &response.set_header("Content-Type", "text/html; charset=utf-8")?
+    .Ok(response)
+}
+
+test fn an_html_response_holds_its_rendered_body_and_content_type() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    let count = 3
+    let response = html(sent.request(), "<p>{count} items</p>").unwrap()
+    testing.assert_eq(response.status(), Status.Ok, "the status changed")?
+    testing.assert_eq(response.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the content type changed")?
+    testing.assert_ok_eq(response.text(), "<p>3 items</p>", "the body changed")?
+    .Ok(())
+}
+
+test fn an_html_response_past_the_arena_is_refused() {
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let long = Vec.filled(512, UInt8(120)).unwrap()
+    let refused = match html(sent.request(), Str.from_bytes(long.as_slice()).unwrap()) {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error.status()),
+    }
+    testing.assert_eq(refused, Option.Some(Status.InternalServerError), "a body past the arena was accepted")?
+    .Ok(())
+}
+
 // A test encodes a `Greeting` as JSON.
 @derive(json_format.Encode)
 struct Greeting {
@@ -115,12 +150,44 @@ pub fn status[P: Allocator](request: Request[P], status: Status) -> Response[P] 
     held(request, empty).with_status(status)
 }
 
+// `no_content` answers 204 No Content with no body.
+pub fn no_content[P: Allocator](request: Request[P]) -> Response[P] {
+    status(request, .NoContent)
+}
+
 test fn a_status_response_has_no_body() {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "DELETE", "/items/1", body: "").unwrap()
     let response = status(sent.request(), .NoContent)
     testing.assert_eq(response.status(), Status.NoContent, "the status changed")?
     testing.assert_ok_eq(response.text(), "", "an empty response had a body")?
+    .Ok(())
+}
+
+// `redirect` answers `status` with an empty body and sets `Location` to
+// `location`, which may be any `Display` value. A location holding a control
+// byte or a full arena is refused with `HeaderError`, which `?` converts into
+// a 500 `Error`.
+pub fn redirect[P: Allocator, L: Display](request: Request[P], status: Status, location: L) -> Result[Response[P], Error[P]] {
+    let empty: Vec[UInt8, mem.Handle[P]] = Vec.new_in(request.allocator())
+    var response = held(request, empty).with_status(status)
+    &response.set_header("Location", location)?
+    .Ok(response)
+}
+
+test fn a_redirect_sets_its_status_and_location_and_refuses_a_control_byte() {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    let sent = new_request(arena.handle(), "POST", "/sign", body: "").unwrap()
+    let prefix = "/cgi-bin/book"
+    let response = redirect(sent.request(), .SeeOther, "{prefix}/").unwrap()
+    testing.assert_eq(response.status(), Status.SeeOther, "the status changed")?
+    testing.assert_eq(response.header("Location"), Option.Some("/cgi-bin/book/"), "the location changed")?
+    testing.assert_ok_eq(response.text(), "", "a redirect had a body")?
+    let smuggled = match redirect(sent.request(), .TemporaryRedirect, "/\r\nSet-Cookie: a=b") {
+        Ok(_) => Option.None,
+        Err(error) => Option.Some(error.status()),
+    }
+    testing.assert_eq(smuggled, Option.Some(Status.InternalServerError), "a location with CRLF was accepted")?
     .Ok(())
 }
 
@@ -194,136 +261,6 @@ fn held[P: Allocator](request: Request[P], sink body: Vec[UInt8, mem.Handle[P]])
     .{ answer = .Ok, headers = ResponseHeaders.new_in(request.allocator()), content = .Held(body) }
 }
 
-impl[P: Allocator] Response[P] {
-    // `with_status` returns this response with `status` in place of its own.
-    pub fn with_status(sink self: Self, status: Status) -> Response[P] where carries(self) {
-        Self { answer = copy(status), ..self }
-    }
-}
-
-test fn a_response_takes_another_status() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/items", body: "").unwrap()
-    let response = text(sent.request(), "made").unwrap().with_status(.Created)
-    testing.assert_eq(response.status(), Status.Created, "the status did not change")?
-    testing.assert_ok_eq(response.text(), "made", "changing the status changed the body")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // Replace every value of `name`, compared under ASCII case folding. A
-    // handler that propagates a refusal with `?` answers 500.
-    pub fn set_header(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries() {
-        &self.headers.set(name, value)
-    }
-}
-
-test fn set_header_replaces_every_value_of_a_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    let set = &response.set_header("Cache-Control", "no-store")
-    let replaced = &response.set_header("cache-control", "max-age=60")
-    let framing = &response.set_header("Content-Length", "2")
-    testing.assert_ok_eq(set, (), "setting failed")?
-    testing.assert_ok_eq(replaced, (), "replacing failed")?
-    testing.assert_eq(framing, .Err(HeaderError.Framing), "a framing header was accepted")?
-    testing.assert_eq(response.header("Cache-Control"), Option.Some("max-age=60"), "the header kept an old value")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // Append a value, keeping any the name already has.
-    pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), HeaderError] where carries() {
-        &self.headers.add(name, value)
-    }
-}
-
-test fn add_header_keeps_the_values_a_name_already_has() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    let first = &response.add_header("Vary", "Accept")
-    let second = &response.add_header("vary", "Origin")
-    testing.assert_ok_eq(first, (), "adding failed")?
-    testing.assert_ok_eq(second, (), "adding a second value failed")?
-    testing.assert_eq(response.header("Vary"), Option.Some("Accept"), "the first value was replaced")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // Drop every value of `name`, compared under ASCII case folding.
-    pub fn remove_header(inout self: Self, name: Str) {
-        &self.headers.remove(name)
-    }
-}
-
-test fn remove_header_drops_every_value_of_a_name() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var response = text(sent.request(), "ok").unwrap()
-    &response.add_header("Vary", "Accept").unwrap()
-    &response.add_header("vary", "Origin").unwrap()
-    &response.add_header("Allow", "GET").unwrap()
-    &response.remove_header("VARY")
-    testing.assert_eq(response.header("Vary"), .None, "a removed header survived")?
-    testing.assert_eq(response.header("Allow"), Option.Some("GET"), "another header was removed")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // `header` returns the first value of `name`, compared under ASCII case
-    // folding.
-    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
-        self.headers.get(name)
-    }
-}
-
-test fn header_reads_the_first_value_under_ascii_case_folding() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    let response = json(sent.request(), Greeting { hello = "hi" }).unwrap()
-    testing.assert_eq(response.header("CONTENT-TYPE"), Option.Some("application/json"), "a header name matched only in its own case")?
-    testing.assert_eq(response.header("Cache-Control"), .None, "an absent header was found")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // `status` returns the status this response answers with.
-    pub fn status(self: Self) -> Status {
-        copy(self.answer)
-    }
-}
-
-test fn a_response_reads_its_status() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    let held = text(sent.request(), "abc").unwrap().with_status(.Accepted)
-    testing.assert_eq(held.status(), Status.Accepted, "the status changed")?
-    .Ok(())
-}
-
-impl[P: Allocator] Response[P] {
-    // `body` returns the body held in the arena, or `None` for a streamed body,
-    // which exists only as it is written.
-    pub fn body(self: Self) -> Option[mem.Slice[UInt8]] where borrows(.Some: self) {
-        match read self.content {
-            Held(bytes) => .Some(bytes.as_slice()),
-            Streamed(_) => .None,
-        }
-    }
-}
-
-test fn a_response_reads_its_held_body_and_no_streamed_one() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    let held = text(sent.request(), "abc").unwrap()
-    let streamed = stream(sent.request(), count_to_three).unwrap()
-    testing.assert_ok_eq(held.text(), "abc", "the held body changed")?
-    testing.assert(streamed.body().is_none(), "a streamed body was held")?
-    .Ok(())
-}
-
 // A BodyTextError says why a response body cannot be read as text: it is
 // streamed, so it exists only as it is written, or the bytes it holds are not
 // valid UTF-8.
@@ -346,6 +283,125 @@ impl Display for BodyTextError {
 }
 
 impl[P: Allocator] Response[P] {
+    // `with_status` returns this response with `status` in place of its own.
+    pub fn with_status(sink self: Self, status: Status) -> Response[P] where carries(self) {
+        Self { answer = copy(status), ..self }
+    }
+
+    test fn a_response_takes_another_status() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "POST", "/items", body: "").unwrap()
+        let response = text(sent.request(), "made").unwrap().with_status(.Created)
+        testing.assert_eq(response.status(), Status.Created, "the status did not change")?
+        testing.assert_ok_eq(response.text(), "made", "changing the status changed the body")?
+        .Ok(())
+    }
+
+    // Replace every value of `name`, compared under ASCII case folding. `value`
+    // is any `Display` value. A handler that propagates a refusal with `?`
+    // answers 500.
+    pub fn set_header[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries() {
+        &self.headers.set(name, value)
+    }
+
+    test fn set_header_replaces_every_value_of_a_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        let set = &response.set_header("Cache-Control", "no-store")
+        let seconds = 60
+        let replaced = &response.set_header("cache-control", "max-age={seconds}")
+        let framing = &response.set_header("Content-Length", 2)
+        testing.assert_ok_eq(set, (), "setting failed")?
+        testing.assert_ok_eq(replaced, (), "replacing failed")?
+        testing.assert_eq(framing, .Err(HeaderError.Framing), "a framing header was accepted")?
+        testing.assert_eq(response.header("Cache-Control"), Option.Some("max-age=60"), "the header kept an old value")?
+        .Ok(())
+    }
+
+    // Append a value, keeping any the name already has. `value` is any
+    // `Display` value.
+    pub fn add_header[V: Display](inout self: Self, name: Str, value: V) -> Result[(), HeaderError] where carries() {
+        &self.headers.add(name, value)
+    }
+
+    test fn add_header_keeps_the_values_a_name_already_has() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        let first = &response.add_header("Vary", "Accept")
+        let second = &response.add_header("vary", "Origin")
+        testing.assert_ok_eq(first, (), "adding failed")?
+        testing.assert_ok_eq(second, (), "adding a second value failed")?
+        testing.assert_eq(response.header("Vary"), Option.Some("Accept"), "the first value was replaced")?
+        .Ok(())
+    }
+
+    // Drop every value of `name`, compared under ASCII case folding.
+    pub fn remove_header(inout self: Self, name: Str) {
+        &self.headers.remove(name)
+    }
+
+    test fn remove_header_drops_every_value_of_a_name() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        var response = text(sent.request(), "ok").unwrap()
+        &response.add_header("Vary", "Accept").unwrap()
+        &response.add_header("vary", "Origin").unwrap()
+        &response.add_header("Allow", "GET").unwrap()
+        &response.remove_header("VARY")
+        testing.assert_eq(response.header("Vary"), .None, "a removed header survived")?
+        testing.assert_eq(response.header("Allow"), Option.Some("GET"), "another header was removed")?
+        .Ok(())
+    }
+
+    // `header` returns the first value of `name`, compared under ASCII case
+    // folding.
+    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
+        self.headers.get(name)
+    }
+
+    test fn header_reads_the_first_value_under_ascii_case_folding() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        let response = json(sent.request(), Greeting { hello = "hi" }).unwrap()
+        testing.assert_eq(response.header("CONTENT-TYPE"), Option.Some("application/json"), "a header name matched only in its own case")?
+        testing.assert_eq(response.header("Cache-Control"), .None, "an absent header was found")?
+        .Ok(())
+    }
+
+    // `status` returns the status this response answers with.
+    pub fn status(self: Self) -> Status {
+        copy(self.answer)
+    }
+
+    test fn a_response_reads_its_status() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        let held = text(sent.request(), "abc").unwrap().with_status(.Accepted)
+        testing.assert_eq(held.status(), Status.Accepted, "the status changed")?
+        .Ok(())
+    }
+
+    // `body` returns the body held in the arena, or `None` for a streamed body,
+    // which exists only as it is written.
+    pub fn body(self: Self) -> Option[mem.Slice[UInt8]] where borrows(.Some: self) {
+        match read self.content {
+            Held(bytes) => .Some(bytes.as_slice()),
+            Streamed(_) => .None,
+        }
+    }
+
+    test fn a_response_reads_its_held_body_and_no_streamed_one() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        let held = text(sent.request(), "abc").unwrap()
+        let streamed = stream(sent.request(), count_to_three).unwrap()
+        testing.assert_ok_eq(held.text(), "abc", "the held body changed")?
+        testing.assert(streamed.body().is_none(), "a streamed body was held")?
+        .Ok(())
+    }
+
     // `text` returns the body held in the arena as text, or why it is not text:
     // a streamed body is not held, and the held bytes may not be UTF-8. Running
     // a streamed body into memory consumes the response, which
@@ -359,47 +415,41 @@ impl[P: Allocator] Response[P] {
             Err(error) => .Err(.Encoding(error)),
         }
     }
-}
 
-test fn a_response_body_is_text_only_when_it_is_held_utf8() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    testing.assert_ok_eq(text(sent.request(), "olá").unwrap().text(), "olá", "the held text changed")?
-    testing.assert_ok_eq(text(sent.request(), "").unwrap().text(), "", "an empty body was not empty text")?
-    let streamed = stream(sent.request(), count_to_three).unwrap()
-    testing.assert(match read streamed.text() {
-        Err(reason) => match read reason {
-            Streamed => true,
-            Encoding(_) => false,
-        },
-        Ok(_) => false,
-    }, "a streamed body was read as text")?
-    var raw: Vec[UInt8, mem.Handle[mem.SystemAllocator]] = Vec.new_in(sent.request().allocator())
-    &raw.push(104).unwrap()
-    &raw.push(195).unwrap()
-    let broken = bytes(sent.request(), raw)
-    let invalid_at: Option[UInt64] = match broken.text() {
-        Err(reason) => match reason {
-            Encoding(error) => .Some(error.offset),
-            Streamed => .None,
-        },
-        Ok(_) => .None,
+    test fn a_response_body_is_text_only_when_it_is_held_utf8() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        testing.assert_ok_eq(text(sent.request(), "olá").unwrap().text(), "olá", "the held text changed")?
+        testing.assert_ok_eq(text(sent.request(), "").unwrap().text(), "", "an empty body was not empty text")?
+        let streamed = stream(sent.request(), count_to_three).unwrap()
+        testing.assert(match read streamed.text() {
+            Err(Streamed) => true,
+            Err(Encoding(_)) => false,
+            Ok(_) => false,
+        }, "a streamed body was read as text")?
+        var raw: Vec[UInt8, mem.Handle[mem.SystemAllocator]] = Vec.new_in(sent.request().allocator())
+        &raw.push(104).unwrap()
+        &raw.push(195).unwrap()
+        let broken = bytes(sent.request(), raw)
+        let invalid_at: Option[UInt64] = match broken.text() {
+            Err(Encoding(error)) => .Some(error.offset),
+            Err(Streamed) => .None,
+            Ok(_) => .None,
+        }
+        testing.assert_eq(invalid_at, .Some(1), "bytes ending inside a character were text")?
+        defer let encoding = match broken.text() {
+            Err(error) => fmt.render_owned("{error}").unwrap(),
+            Ok(_) => "".to_owned().unwrap(),
+        }
+        testing.assert_eq(encoding.view(), "the body is not UTF-8: invalid UTF-8 sequence at byte 1", "a body that is not UTF-8 did not say so")?
+        defer let reason = match streamed.text() {
+            Err(error) => fmt.render_owned("{error}").unwrap(),
+            Ok(_) => "".to_owned().unwrap(),
+        }
+        testing.assert_eq(reason.view(), "the body is streamed, so it is not held as text", "a streamed body's refusal changed")?
+        .Ok(())
     }
-    testing.assert_eq(invalid_at, .Some(1), "bytes ending inside a character were text")?
-    defer let encoding = match broken.text() {
-        Err(error) => fmt.render_owned("{error}").unwrap(),
-        Ok(_) => "".to_owned().unwrap(),
-    }
-    testing.assert_eq(encoding.view(), "the body is not UTF-8: invalid UTF-8 sequence at byte 1", "a body that is not UTF-8 did not say so")?
-    defer let reason = match streamed.text() {
-        Err(error) => fmt.render_owned("{error}").unwrap(),
-        Ok(_) => "".to_owned().unwrap(),
-    }
-    testing.assert_eq(reason.view(), "the body is streamed, so it is not held as text", "a streamed body's refusal changed")?
-    .Ok(())
-}
 
-impl[P: Allocator] Response[P] {
     // `recorded_body` produces the whole body in the request's arena and
     // returns it, running a streamed body's closure into memory, so a test
     // reads what a client would receive after the head. An error the closure
@@ -426,21 +476,21 @@ impl[P: Allocator] Response[P] {
         produced?
         .Ok(bytes)
     }
-}
 
-test fn a_recorded_body_is_what_a_client_would_read() {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/count?to=2", body: "").unwrap()
-    let streamed = stream(sent.request(), count_to_query).unwrap().recorded_body().unwrap()
-    let last: UInt64 = 3
-    let captured = stream(sent.request(), inout [sink last] |inout body| count_to(last, &body)).unwrap().recorded_body().unwrap()
-    let held = text(sent.request(), "held").unwrap().recorded_body().unwrap()
-    let failed = stream(sent.request(), fail_after_one).unwrap().recorded_body()
-    testing.assert_ok_eq(Str.from_bytes(streamed.as_slice()), "1\n2\n", "the streamed body changed")?
-    testing.assert_ok_eq(Str.from_bytes(captured.as_slice()), "1\n2\n3\n", "the captured number did not reach the body")?
-    testing.assert_ok_eq(Str.from_bytes(held.as_slice()), "held", "the held body changed")?
-    testing.assert(match read failed { Ok(_) => false, Err(error) => error.status() == Status.InternalServerError }, "a failed stream was recorded as whole")?
-    .Ok(())
+    test fn a_recorded_body_is_what_a_client_would_read() {
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let sent = new_request(arena.handle(), "GET", "/count?to=2", body: "").unwrap()
+        let streamed = stream(sent.request(), count_to_query).unwrap().recorded_body().unwrap()
+        let last: UInt64 = 3
+        let captured = stream(sent.request(), inout [sink last] |inout body| count_to(last, &body)).unwrap().recorded_body().unwrap()
+        let held = text(sent.request(), "held").unwrap().recorded_body().unwrap()
+        let failed = stream(sent.request(), fail_after_one).unwrap().recorded_body()
+        testing.assert_ok_eq(Str.from_bytes(streamed.as_slice()), "1\n2\n", "the streamed body changed")?
+        testing.assert_ok_eq(Str.from_bytes(captured.as_slice()), "1\n2\n3\n", "the captured number did not reach the body")?
+        testing.assert_ok_eq(Str.from_bytes(held.as_slice()), "held", "the held body changed")?
+        testing.assert(match read failed { Ok(_) => false, Err(error) => error.status() == Status.InternalServerError }, "a failed stream was recorded as whole")?
+        .Ok(())
+    }
 }
 
 // A `BodyWriter` writes a response to its connection, or to standard output
@@ -561,15 +611,13 @@ impl[P: Allocator] BodyWriter[P] {
     pub fn request(self: Self) -> Request[P] where carries(self) {
         copy(self.answering)
     }
-}
 
-test fn a_streamed_body_reads_its_request() {
-    defer let received = exchanged(.Get, stream_of("/count?to=2", count_to_query))
-    testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n1\n2\n", "the body did not read its request")?
-    .Ok(())
-}
+    test fn a_streamed_body_reads_its_request() {
+        defer let received = exchanged(.Get, stream_of("/count?to=2", count_to_query))
+        testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n1\n2\n", "the body did not read its request")?
+        .Ok(())
+    }
 
-impl[P: Allocator] BodyWriter[P] {
     // Buffer the writing of a response to `connection`, which answers
     // `request`, in the request's arena. A refused buffer returns the
     // connection.
@@ -587,8 +635,7 @@ impl[P: Allocator] BodyWriter[P] {
             Some(error) => .Err(.{ connection = output.abort(), error }),
             None => match output.finish() {
                 Ok(connection) => .Ok(connection),
-                Err(failed) => {
-                    let FinishFailure { writer, failure } = failed
+                Err(FinishFailure { writer, failure }) => {
                     return .Err(.{ connection = writer.abort(), error = failure.into() })
                 },
             },
@@ -710,8 +757,7 @@ test fn a_failed_write_is_reported_by_every_later_write() {
             connection.close().unwrap()
             Option.None
         },
-        Err(failure) => {
-            let ResponseFailure { connection, error } = failure
+        Err(ResponseFailure { connection, error }) => {
             let _closed = connection.close()
             Option.Some(error)
         },
@@ -747,7 +793,7 @@ fn write_response[P: Allocator](inout body: BodyWriter[P], sink response: Respon
         return .Err(.Io(failure.into()))
     }
     body.in_body = true
-    if head_only {
+    if head_only || answer.is_bodyless() {
         return .Ok(())
     }
     match content {
@@ -800,6 +846,22 @@ test fn a_head_request_is_answered_with_the_head_alone() {
 test fn a_streamed_body_follows_the_head() {
     defer let received = exchanged(.Get, stream_of("/count", count_to_three))
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n1\n2\n3\n", "the streamed body changed")?
+    .Ok(())
+}
+
+test fn bodyless_statuses_emit_no_content_type_and_no_body() {
+    let no_content_reply = Reply { target = "/no-content", body = "", produce = .None }
+    let not_modified_reply = Reply { target = "/not-modified", body = "", produce = .None }
+    let no_content_custom = Reply { target = "/no-content-with-headers", body = "", produce = .None }
+    let not_modified_custom = Reply { target = "/not-modified-with-headers", body = "", produce = .None }
+    defer let received_no_content = exchanged(.Get, no_content_reply)
+    defer let received_not_modified = exchanged(.Get, not_modified_reply)
+    defer let received_no_content_custom = exchanged(.Get, no_content_custom)
+    defer let received_not_modified_custom = exchanged(.Get, not_modified_custom)
+    testing.assert_eq(received_no_content.view(), "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n", "204 response emitted headers or body")?
+    testing.assert_eq(received_not_modified.view(), "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n", "304 response emitted headers or body")?
+    testing.assert_eq(received_no_content_custom.view(), "HTTP/1.1 204 No Content\r\nConnection: close\r\nX-Custom: kept\r\n\r\n", "204 response did not suppress illegal Content-Type or body")?
+    testing.assert_eq(received_not_modified_custom.view(), "HTTP/1.1 304 Not Modified\r\nConnection: close\r\nETag: \"xyz\"\r\n\r\n", "304 response emitted unexpected headers or body")?
     .Ok(())
 }
 
@@ -869,7 +931,7 @@ fn write_error[P: Allocator](inout body: BodyWriter[P], error: Error[P], head_on
         return .Err(.Io(failure.into()))
     }
     body.in_body = true
-    if head_only {
+    if head_only || error.status().is_bodyless() {
         return .Ok(())
     }
     let message = error.message().unwrap_or(error.status().reason())
@@ -903,12 +965,25 @@ fn write_head[W: io.ByteWriter, A: Allocator](inout writer: W, status: Status, h
         Cgi => put(&writer, &written, "\r\n")?,
     }
     for header in headers.fields.as_slice() {
+        // Content-Type is suppressed for all bodyless statuses.
+        if status.is_bodyless() {
+            if header.name.view().equals_ascii_folded("Content-Type") {
+                continue
+            }
+        }
+        // Content-Length is prohibited on 204 and 1xx. ResponseHeaders already
+        // refuses Content-Length as framing, but write_head defensively filters it too.
+        if status == .NoContent || (status.code() >= 100 && status.code() < 200) {
+            if header.name.view().equals_ascii_folded("Content-Length") {
+                continue
+            }
+        }
         put(&writer, &written, header.name.view())?
         put(&writer, &written, ": ")?
         put(&writer, &written, header.value.view())?
         put(&writer, &written, "\r\n")?
     }
-    if headers.get("Content-Type").is_none() {
+    if !status.is_bodyless() && headers.get("Content-Type").is_none() {
         put(&writer, &written, "Content-Type: ")?
         put(&writer, &written, default_content_type)?
         put(&writer, &written, "\r\n")?
@@ -1041,6 +1116,22 @@ fn answered(request: Request, answer: Reply) -> Result[Response, Error] where ca
     }
     if answer.target == "/refused" {
         return .Err(Error.new(.Other(Code(422))))
+    }
+    if answer.target == "/no-content" {
+        return .Ok(no_content(request))
+    }
+    if answer.target == "/no-content-with-headers" {
+        var res = text(request, "unexpected body")?.with_status(.NoContent)
+        &res.add_header("X-Custom", "kept")?
+        return .Ok(res)
+    }
+    if answer.target == "/not-modified" {
+        return .Ok(status(request, .NotModified))
+    }
+    if answer.target == "/not-modified-with-headers" {
+        var res = text(request, "unexpected body")?.with_status(.NotModified)
+        &res.add_header("ETag", "\"xyz\"")?
+        return .Ok(res)
     }
     if answer.target == "/challenged" {
         var refusal = error(request, .Unauthorized, "sign in first")

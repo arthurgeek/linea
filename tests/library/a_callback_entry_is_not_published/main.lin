@@ -1,0 +1,18 @@
+struct Tally {
+    total: Int64,
+}
+
+// C calls `add` through an entry the compiler writes. The entry is internal
+// to the object, so a library publishes only what it exports.
+extern fn visit(visit: fn(inout tally: Tally, value: Int32) -> Int32, inout tally: Tally) -> Int32
+
+fn add(inout tally: Tally, value: Int32) -> Int32 {
+    tally.total += Int64(value)
+    0
+}
+
+export fn visited() -> Int64 {
+    var tally = Tally { total = 0 }
+    let _status = visit(add, &tally)
+    tally.total
+}

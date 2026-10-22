@@ -804,6 +804,7 @@ pub const GuideChapter = struct {
     name: []const u8,
     file: []const u8,
     text: []const u8 = "",
+    root: ?struct { io: std.Io, dir: std.Io.Dir } = null,
 };
 
 /// Every chapter `docs/learn/README.md` links to, in the order it lists them.
@@ -909,6 +910,8 @@ const GuideFence = struct {
     unchecked: bool,
     /// The N of a `<!-- guide: first N diagnostics -->` line directly above.
     first: ?usize,
+    /// The path of a `<!-- guide: excerpt PATH -->` line directly above.
+    excerpt: ?[]const u8 = null,
 
     /// A block that could be a program's output. One directly after a
     /// program is its output whatever line stands above it.
@@ -947,21 +950,27 @@ const GuideFence = struct {
 
 const marker_open = "<!-- guide:";
 const marker_close = "-->";
-const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->` and `<!-- guide: first N diagnostics -->`, and each is complete";
+const marker_help = "the guide markers are `<!-- guide: unchecked REASON -->`, `<!-- guide: first N diagnostics -->` and `<!-- guide: excerpt PATH -->`, and each is complete";
 
 const Marker = union(enum) {
     unchecked,
     first: usize,
+    excerpt: []const u8,
 };
 
-/// The marker a `<!-- guide: ... -->` line holds, or null when it is neither
-/// kind.
+/// The marker a `<!-- guide: ... -->` line holds, or null when it is none of
+/// the three kinds.
 fn guideMarker(bare: []const u8) ?Marker {
     if (!std.mem.endsWith(u8, bare, marker_close)) return null;
     const inner = std.mem.trim(u8, bare[marker_open.len .. bare.len - marker_close.len], " \t");
     var words = std.mem.tokenizeAny(u8, inner, " \t");
     const kind = words.next() orelse return null;
     if (std.mem.eql(u8, kind, "unchecked")) return if (words.next() != null) .unchecked else null;
+    if (std.mem.eql(u8, kind, "excerpt")) {
+        const path = words.next() orelse return null;
+        if (words.next() != null or path.len == 0 or path[0] == '/') return null;
+        return .{ .excerpt = path };
+    }
     if (!std.mem.eql(u8, kind, "first")) return null;
     const count = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
     const noun = words.next() orelse return null;
@@ -1024,7 +1033,11 @@ fn guideFences(
                 .unchecked = if (pending) |p| p.marker == .unchecked else false,
                 .first = if (pending) |p| switch (p.marker) {
                     .first => |count| count,
-                    .unchecked => null,
+                    .unchecked, .excerpt => null,
+                } else null,
+                .excerpt = if (pending) |p| switch (p.marker) {
+                    .excerpt => |path| path,
+                    .unchecked, .first => null,
                 } else null,
             }) catch @panic("out of memory");
             label = null;
@@ -1149,6 +1162,27 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
                 .line = fence.line,
                 .message = "`<!-- guide: first N diagnostics -->` belongs directly above the output block it describes",
             }) catch @panic("out of memory");
+        }
+        if (fence.excerpt) |path| {
+            if (!is_linea) {
+                problems.append(gpa, .{
+                    .chapter = chapter.file,
+                    .line = fence.line,
+                    .message = "`<!-- guide: excerpt PATH -->` belongs directly above a `linea` block",
+                }) catch @panic("out of memory");
+                if (fence.isOutput()) continue;
+            } else {
+                fragments += 1;
+                strandData(gpa, chapter, &problems, &data, data_line);
+                if (checkExcerpt(gpa, chapter, path, fence.body)) |message| {
+                    problems.append(gpa, .{
+                        .chapter = chapter.file,
+                        .line = fence.line,
+                        .message = message,
+                    }) catch @panic("out of memory");
+                }
+                continue;
+            }
         }
         if (fence.unchecked) {
             excluded += 1;
@@ -1283,6 +1317,41 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
         .excluded = excluded,
         .unrun_output = unrun_output.toOwnedSlice(gpa) catch @panic("out of memory"),
     };
+}
+
+/// Why `fragment` is not a verbatim run of consecutive lines of `path` under
+/// `chapter.root`, or null when it is.
+fn checkExcerpt(gpa: std.mem.Allocator, chapter: GuideChapter, path: []const u8, fragment: []const u8) ?[]const u8 {
+    const root = chapter.root orelse return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
+    const file_text = root.dir.readFileAlloc(root.io, path, gpa, .limited(1 << 22)) catch {
+        return std.fmt.allocPrint(gpa, "the excerpt file `{s}` could not be read", .{path}) catch @panic("out of memory");
+    };
+    if (isExcerptOf(gpa, fragment, file_text)) return null;
+    return std.fmt.allocPrint(gpa, "the excerpt does not match consecutive lines of `{s}`", .{path}) catch @panic("out of memory");
+}
+
+fn isExcerptOf(gpa: std.mem.Allocator, fragment: []const u8, file_text: []const u8) bool {
+    var wanted: std.ArrayList([]const u8) = .empty;
+    var frag_iter = std.mem.splitScalar(u8, fragment, '\n');
+    while (frag_iter.next()) |raw| {
+        wanted.append(gpa, std.mem.trimEnd(u8, raw, "\r")) catch @panic("out of memory");
+    }
+    if (wanted.items.len == 0) return false;
+
+    var lines: std.ArrayList([]const u8) = .empty;
+    var file_iter = std.mem.splitScalar(u8, file_text, '\n');
+    while (file_iter.next()) |raw| {
+        lines.append(gpa, std.mem.trimEnd(u8, raw, "\r")) catch @panic("out of memory");
+    }
+    if (wanted.items.len > lines.items.len) return false;
+    const limit = lines.items.len - wanted.items.len + 1;
+    outer: for (0..limit) |start| {
+        for (wanted.items, 0..) |line, offset| {
+            if (!std.mem.eql(u8, lines.items[start + offset], line)) continue :outer;
+        }
+        return true;
+    }
+    return false;
 }
 
 /// Reports data blocks no program took, and forgets them: a file written beside

@@ -1,0 +1,7 @@
+import notes
+
+use notes.Note
+
+fn main() -> UInt8 {
+    UInt8(Note.open(0).length())
+}

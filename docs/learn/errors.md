@@ -8,8 +8,11 @@ for the code in brackets to reach the rule itself.
 
 | Code | Kind | First shown in | Rule |
 | --- | --- | --- | --- |
+| `M-Dependency` | error | Calling C: [A library that wraps C](11-calling-c.md#a-library-that-wraps-c) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Dependency]` |
 | `M-Embed` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-Embed]` |
 | `M-EmbedText` | error | Text: [Text from a file the program carries](08-text.md#text-from-a-file-the-program-carries) | [§3.7 Modules](../linea-semantics.md#37-modules), at `[M-EmbedText]` |
+| `M-Extern` | error | Calling C: [Only a trusted module declares C](11-calling-c.md#only-a-trusted-module-declares-c) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Extern]` |
+| `M-Foreign` | error | Calling C: [`std.ffi` stays inside the trusted module](11-calling-c.md#stdffi-stays-inside-the-trusted-module) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Foreign]` |
 | `M-Opaque` | error | Copying, settling and sealing: [`@opaque`: only the module can make one](04-copying-settling-and-sealing.md#opaque-only-the-module-can-make-one) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Opaque]` |
 | `M-Unused` | error | Testing: [Helpers that tests share](10-testing.md#helpers-that-tests-share) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Unused]` |
 | `M-Vis` | error | Linea in an hour: [Modules](01-linea-in-an-hour.md#modules) | [§3.8 Visibility](../linea-semantics.md#38-visibility), at `[M-Vis]` |
@@ -45,6 +48,8 @@ for the code in brackets to reach the rule itself.
 | `T-DeferLet` | error | Copying, settling and sealing: [`defer let`: bind a value and schedule its release](04-copying-settling-and-sealing.md#defer-let-bind-a-value-and-schedule-its-release) | [§4 Types](../linea-semantics.md#4-types), at `[T-DeferLet]` |
 | `T-Derive` | error | Calling things: [`@derive`: implementations the compiler writes](02-calling-things.md#derive-implementations-the-compiler-writes) | [§4 Types](../linea-semantics.md#4-types), at `[T-Derive]` |
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
+| `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
+| `T-ExternHandle` | error | Calling C: [Text and bytes: `std.ffi`](11-calling-c.md#text-and-bytes-stdffi) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
 | `T-Impl` | error | Text: [Reading text as a value](08-text.md#reading-text-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
@@ -56,6 +61,7 @@ for the code in brackets to reach the rule itself.
 | `T-Operands` | error | Linea in an hour: [Values and their types](01-linea-in-an-hour.md#values-and-their-types) | [§4 Types](../linea-semantics.md#4-types), at `[T-Operands]` |
 | `T-Overflow` | error | Linea in an hour: [Arithmetic is checked](01-linea-in-an-hour.md#arithmetic-is-checked) | [§4 Types](../linea-semantics.md#4-types), at `[T-Overflow]` |
 | `T-Refine` | error | Errors: [Limiting the values](03-errors.md#limiting-the-values) | [§4 Types](../linea-semantics.md#4-types), at `[T-Refine]` |
+| `T-Refutable` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-Refutable]` |
 | `T-TryAnswer` | error | Errors: [`?` converts errors with `From`](03-errors.md#-converts-errors-with-from) | [§4 Types](../linea-semantics.md#4-types), at `[T-TryAnswer]` |
 | `T-UnknownOperation` | error | Calling things: [A dot call reaches operations, not free functions](02-calling-things.md#a-dot-call-reaches-operations-not-free-functions) | [§3 Names](../linea-semantics.md#3-names), at `[T-UnknownOperation]` |
 

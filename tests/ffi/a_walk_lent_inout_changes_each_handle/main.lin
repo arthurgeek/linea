@@ -1,0 +1,7 @@
+import std.io
+import named
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{named.reset_all_and_measure()}")?
+    .Ok(0)
+}

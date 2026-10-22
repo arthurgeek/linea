@@ -1,0 +1,18 @@
+import std.io
+
+use io.IoError
+
+struct Box {
+    x: UInt8,
+}
+
+impl Box {
+    test fn a_thing_holds() -> Result[(), IoError] {
+        return .Ok({})
+    }
+}
+
+fn main() -> Result[UInt8, IoError] {
+    a_thing_holds()?
+    return .Ok(0)
+}

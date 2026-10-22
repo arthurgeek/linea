@@ -4,7 +4,7 @@ fn main() -> UInt8 {
     let literal = (1, 2)
     let lone = (3, 4)
     let first = match literal {
-        (a, 1) => a,
+        (a, b, c, d, e, f, g, h, i) => a,
         (a, b) => a + b,
     }
     let second = match lone {

@@ -1,7 +1,7 @@
 //! Compiles every complete program the guide pastes and holds the output
 //! pasted beside it to what the compiler prints.
 //!
-//! Usage: `guide-gate <guide directory> <linea> <scratch directory> <tests directory> [walkers]`.
+//! Usage: `guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]`.
 //! Reading the guide is `source.zig`'s job and judging a result is too; this
 //! file only runs the compiler and reports.
 
@@ -72,12 +72,14 @@ pub fn main(init: std.process.Init) !u8 {
     const gpa = init.arena.allocator();
     const io = init.io;
     const args = try init.minimal.args.toSlice(gpa);
-    if (args.len < 5) {
-        std.debug.print("usage: guide-gate <guide directory> <linea> <scratch directory> <tests directory> [walkers]\n", .{});
+    if (args.len < 6) {
+        std.debug.print("usage: guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]\n", .{});
         return 2;
     }
     const guide = args[1];
-    const wanted: ?usize = if (args.len > 5) try std.fmt.parseInt(usize, args[5], 10) else null;
+    var root = try std.Io.Dir.cwd().openDir(io, args[5], .{});
+    defer root.close(io);
+    const wanted: ?usize = if (args.len > 6) try std.fmt.parseInt(usize, args[6], 10) else null;
 
     const read = struct {
         fn file(i: std.Io, a: std.mem.Allocator, directory: []const u8, name: []const u8) ![]const u8 {
@@ -99,6 +101,7 @@ pub fn main(init: std.process.Init) !u8 {
     for (listed) |entry| {
         var chapter = entry;
         chapter.text = try read(io, gpa, guide, chapter.file);
+        chapter.root = .{ .io = io, .dir = root };
         const reading = source.readGuideChapter(gpa, chapter);
         for (reading.problems) |problem| {
             std.debug.print("{s}/{s}:{d}: {s}\n", .{ guide, problem.chapter, problem.line, problem.message });

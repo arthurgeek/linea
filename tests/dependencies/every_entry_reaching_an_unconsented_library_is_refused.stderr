@@ -1,0 +1,10 @@
+error[M-Dependency]: `a` reaches `c`, whose manifest grants it `extern`, and this manifest does not consent to it
+ --> tests/dependencies/every_entry_reaching_an_unconsented_library_is_refused/linea.json:3:9
+  |
+3 |         "a": { "path": "a" },
+  |         ^^^ name `c` under `dependencies` here with `"extern": true` to trust the signatures it declares
+error[M-Dependency]: `b` reaches `c`, whose manifest grants it `extern`, and this manifest does not consent to it
+ --> tests/dependencies/every_entry_reaching_an_unconsented_library_is_refused/linea.json:4:9
+  |
+4 |         "b": { "path": "b" }
+  |         ^^^ name `c` under `dependencies` here with `"extern": true` to trust the signatures it declares

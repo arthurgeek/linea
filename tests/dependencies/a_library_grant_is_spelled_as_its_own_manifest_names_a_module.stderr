@@ -1,0 +1,5 @@
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and the linea.json of `c` does not list "inner"
+ --> tests/dependencies/a_library_grant_is_spelled_as_its_own_manifest_names_a_module/c/inner/inner.lin:3:11
+  |
+3 | extern fn c_squares(count: Int32) -> Int64
+  |           ^^^^^^^^^ list this module under "extern" in the linea.json of `c` to trust it with C, or call a module that is granted

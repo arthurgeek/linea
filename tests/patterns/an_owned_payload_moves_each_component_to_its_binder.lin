@@ -1,0 +1,19 @@
+// A plain `match` takes the value apart at every depth: each `String` in the
+// pair inside `Some` moves to its own binder, which must settle it.
+fn entry(present: Bool) -> Option[(String, String)] {
+    if !present {
+        return .None
+    }
+    .Some((String.new(), String.new()))
+}
+
+fn main() -> UInt8 {
+    match entry(true) {
+        Some((name, value)) => {
+            name.release()
+            value.release()
+            0
+        },
+        None => 1,
+    }
+}

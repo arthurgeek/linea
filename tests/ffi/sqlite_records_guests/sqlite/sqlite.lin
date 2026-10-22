@@ -1,0 +1,176 @@
+import std.ffi
+
+// A `sqlite3 *` and a `sqlite3_stmt *` are addresses this module keeps in
+// sealed linear newtypes, so every one opened reaches its close.
+@(opaque, linear)
+type DatabaseHandle = UInt64
+
+@(opaque, linear)
+type StatementHandle = UInt64
+
+extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: Int32, vfs: UInt64) -> Int32
+
+// `close_v2` always releases the handle: a statement still open keeps the
+// connection alive until the statement is finalized.
+extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
+
+extern fn sqlite3_errmsg(read database: DatabaseHandle) -> ffi.CText where borrows(database)
+
+extern fn sqlite3_prepare_v2(database: DatabaseHandle, sql: ffi.Bytes, length: Int32, inout statement: UInt64, tail: UInt64) -> Int32
+
+extern fn sqlite_shim_bind_text(statement: StatementHandle, index: Int32, text: ffi.Bytes, length: Int32) -> Int32
+
+extern fn sqlite3_bind_int64(statement: StatementHandle, index: Int32, value: Int64) -> Int32
+
+extern fn sqlite3_step(statement: StatementHandle) -> Int32
+
+// The text lives inside the statement until it steps again or is finalized.
+extern fn sqlite3_column_text(read statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
+
+extern fn sqlite3_column_int64(read statement: StatementHandle, column: Int32) -> Int64
+
+extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
+
+// SQLite's result codes: success, a row is ready, and no more rows.
+let ok: Int32 = 0
+
+let row: Int32 = 100
+
+let done: Int32 = 101
+
+// Open read-write, creating the file if it is missing.
+let read_write_create: Int32 = 6
+
+// SQLITE_NOMEM: SQLite, or the copy of a path for it, could not allocate.
+let out_of_memory: Int32 = 7
+
+// A result code SQLite refused with. `Database.message` says why in words.
+@copyable
+pub struct Error {
+    code: Int32,
+}
+
+// Copy C's text out, or empty text when it cannot be read as UTF-8.
+fn copied(text: ffi.CText) -> String {
+    match text.to_owned() {
+        Ok(owned) => owned,
+        Err(_) => String.new(),
+    }
+}
+
+// A connection to a database. It must be closed.
+@(opaque, linear)
+struct Database { handle: DatabaseHandle }
+
+// A compiled statement, stepped one row at a time. It must be finished.
+@(opaque, linear)
+struct Statement { handle: StatementHandle }
+
+impl Database {
+    pub fn open(path: Str) -> Result[Database, Error] {
+        let filename = ffi.CString.open(path) else |_| {
+            return .Err(.{ code = out_of_memory })
+        }
+        var address: UInt64 = 0
+        let code = sqlite3_open_v2(filename.text(), &address, read_write_create, 0)
+        filename.release()
+        if address == 0 {
+            return .Err(.{ code = out_of_memory })
+        }
+        // SQLite hands back a connection even when it reports a failure, and
+        // that connection must be closed too.
+        let database = Database { handle = DatabaseHandle(address) }
+        if code != ok {
+            database.close()
+            return .Err(.{ code = code })
+        }
+        .Ok(database)
+    }
+
+    // What SQLite said about the last call on this connection that failed.
+    pub fn message(self: Self) -> String {
+        copied(sqlite3_errmsg(self.handle))
+    }
+
+    // Preparing changes the connection's error state, which `message` reads,
+    // so it takes the connection `inout`.
+    pub fn prepare(inout self: Self, sql: Str) -> Result[Statement, Error] {
+        var address: UInt64 = 0
+        let code = sqlite3_prepare_v2(self.handle, ffi.bytes(sql), Int32(sql.length()), &address, 0)
+        if code != ok {
+            if address != 0 {
+                let _finalized = sqlite3_finalize(StatementHandle(address))
+            }
+            return .Err(.{ code = code })
+        }
+        .Ok(.{ handle = StatementHandle(address) })
+    }
+
+    // Run one statement that answers no rows.
+    pub fn execute(inout self: Self, sql: Str) -> Result[(), Error] {
+        defer var statement = &self.prepare(sql)?
+        let _row = &statement.step()?
+        .Ok(())
+    }
+
+    pub fn close(sink self: Self) {
+        let Database { handle: handle } = self
+        let _closed = sqlite3_close_v2(handle)
+    }
+}
+
+impl Release for Database {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+impl Statement {
+    pub fn bind_text(inout self: Self, index: Int32, text: Str) -> Result[(), Error] {
+        let code = sqlite_shim_bind_text(self.handle, index, ffi.bytes(text), Int32(text.length()))
+        if code != ok {
+            return .Err(.{ code = code })
+        }
+        .Ok(())
+    }
+
+    pub fn bind_integer(inout self: Self, index: Int32, value: Int64) -> Result[(), Error] {
+        let code = sqlite3_bind_int64(self.handle, index, value)
+        if code != ok {
+            return .Err(.{ code = code })
+        }
+        .Ok(())
+    }
+
+    // Advance to the next row: true when one is ready, false when there are
+    // no more. `inout` is what makes text read from the last row stale.
+    pub fn step(inout self: Self) -> Result[Bool, Error] {
+        let code = sqlite3_step(self.handle)
+        if code == row {
+            return .Ok(true)
+        }
+        if code == done {
+            return .Ok(false)
+        }
+        .Err(.{ code = code })
+    }
+
+    pub fn text(self: Self, column: Int32) -> String {
+        copied(sqlite3_column_text(self.handle, column))
+    }
+
+    pub fn integer(self: Self, column: Int32) -> Int64 {
+        sqlite3_column_int64(self.handle, column)
+    }
+
+    pub fn finish(sink self: Self) {
+        let Statement { handle: handle } = self
+        let _finalized = sqlite3_finalize(handle)
+    }
+}
+
+impl Release for Statement {
+    fn release(sink self: Self) {
+        self.finish()
+    }
+}

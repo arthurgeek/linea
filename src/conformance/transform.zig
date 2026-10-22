@@ -619,10 +619,7 @@ fn visibleCallOwner(gpa: std.mem.Allocator, semantics: Semantics, call: ExprId, 
             if (binding != .none) try unavailable.put(gpa, binding, {});
         } else {
             if (data.pattern == .none) continue;
-            for (ast.call(data.pattern).args) |argument| {
-                const binding = res.targetOf(argument);
-                if (binding != .none and res.kindOf(binding) == .binder) try unavailable.put(gpa, binding, {});
-            }
+            try putPatternBinders(gpa, ast, res, &unavailable, data.pattern);
         }
     }
 
@@ -1218,6 +1215,102 @@ fn memberRegion(
     return .{ .start = first.start, .end = last.end, .written = out.written() };
 }
 
+/// Whether no value matches both patterns, as far as what they write shows:
+/// two variants with different names, two integer literals with different
+/// values, or two patterns of the same shape with some part apart. A range or
+/// anything else the text does not settle answers no, which keeps a match
+/// from being rotated rather than rotating one whose meaning would change.
+fn patternsApart(ast: *const Ast, text: []const u8, a: ExprId, b: ExprId) bool {
+    const ta = ast.exprTag(a);
+    const tb = ast.exprTag(b);
+    if (ast.partBinds(a) or ast.partBinds(b) or isCatchAll(ast, a) or isCatchAll(ast, b)) return false;
+    if (literalInterval(ast, text, a)) |x| if (literalInterval(ast, text, b)) |y| return x[1] < y[0] or y[1] < x[0];
+    const variant_a = ta == .name_ref or ta == .call;
+    const variant_b = tb == .name_ref or tb == .call;
+    if (variant_a and variant_b) {
+        const name_a = ast.tokenText(ast.exprMain(a));
+        const name_b = ast.tokenText(ast.exprMain(b));
+        if (!std.mem.eql(u8, name_a, name_b)) return true;
+        if (ta != .call or tb != .call) return false;
+        return partsApart(ast, text, ast.call(a).args, ast.call(b).args);
+    }
+    if (ta == .tuple_pattern and tb == .tuple_pattern) return partsApart(ast, text, ast.call(a).args, ast.call(b).args);
+    if (ta == .struct_pattern and tb == .struct_pattern) {
+        const fa = ast.call(a).args;
+        const fb = ast.call(b).args;
+        var i: usize = 0;
+        while (i + 1 < fa.len) : (i += 2) {
+            var j: usize = 0;
+            while (j + 1 < fb.len) : (j += 2) {
+                if (!std.mem.eql(u8, ast.tokenText(ast.exprMain(fa[i])), ast.tokenText(ast.exprMain(fb[j])))) continue;
+                if (patternsApart(ast, text, fa[i + 1], fb[j + 1])) return true;
+            }
+        }
+    }
+    return false;
+}
+
+/// The closed interval an integer literal or a range of integer literals
+/// matches, or null where its text is anything else.
+fn literalInterval(ast: *const Ast, text: []const u8, e: ExprId) ?[2]i128 {
+    switch (ast.exprTag(e)) {
+        .int_literal, .negate => {
+            const v = literalValue(ast, text, e) orelse return null;
+            return .{ v, v };
+        },
+        .range => {
+            const ends = ast.rangeEnds(e);
+            const lo = literalValue(ast, text, ends.lhs) orelse return null;
+            const hi = literalValue(ast, text, ends.rhs) orelse return null;
+            return .{ lo, if (ast.rangeInclusive(e)) hi else hi - 1 };
+        },
+        else => return null,
+    }
+}
+
+fn literalValue(ast: *const Ast, text: []const u8, e: ExprId) ?i128 {
+    if (ast.exprTag(e) == .negate) return -(literalValue(ast, text, ast.unaryOperand(e)) orelse return null);
+    if (ast.exprTag(e) != .int_literal) return null;
+    var digits: [64]u8 = undefined;
+    var n: usize = 0;
+    for (ast.exprSpan(e).slice(text)) |c| {
+        if (c == '_') continue;
+        if (n == digits.len) return null;
+        digits[n] = c;
+        n += 1;
+    }
+    return std.fmt.parseInt(i128, digits[0..n], 0) catch null;
+}
+
+/// Whether two lists of parts, taken position by position, hold a pair no
+/// value matches both of.
+fn partsApart(ast: *const Ast, text: []const u8, a: []const ExprId, b: []const ExprId) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |x, y| {
+        if (patternsApart(ast, text, x, y)) return true;
+    }
+    return false;
+}
+
+/// Adds every binder of a pattern, at any depth, to `into`.
+fn putPatternBinders(
+    gpa: std.mem.Allocator,
+    ast: *const Ast,
+    res: *const Resolution,
+    into: *std.AutoHashMapUnmanaged(BindingId, void),
+    pattern: ExprId,
+) std.mem.Allocator.Error!void {
+    var parts = ast.patternParts(pattern);
+    while (parts.next()) |part| {
+        if (!ast.partBinds(part)) {
+            try putPatternBinders(gpa, ast, res, into, part);
+            continue;
+        }
+        const binding = res.targetOf(part);
+        if (binding != .none and res.kindOf(binding) == .binder) try into.put(gpa, binding, {});
+    }
+}
+
 fn rootedInReflection(ast: *const Ast, id: ExprId) bool {
     var at = id;
     while (true) switch (ast.exprTag(at)) {
@@ -1236,7 +1329,10 @@ fn rootedInReflection(ast: *const Ast, id: ExprId) bool {
 /// only a reordering can tell the difference.
 ///
 /// A `_` arm is excluded: it is defined to come last, so moving it to the
-/// front is a different program rather than the same one rewritten.
+/// front is a different program rather than the same one rewritten. So is a
+/// match whose arms are not shown apart by what they write: where one arm
+/// takes a value another also takes, the first written answers, and moving it
+/// changes which one does.
 fn rotateMatchArms(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
     const Region = struct { start: u32, end: u32, arms: []const u8 };
 
@@ -1255,6 +1351,9 @@ fn rotateMatchArms(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?
         for (0..count) |a| {
             const pattern = args[a * 2];
             if (isCatchAll(ast, pattern) or rootedInReflection(ast, pattern)) eligible = false;
+            for (0..a) |b| {
+                if (!patternsApart(ast, text, pattern, args[b * 2])) eligible = false;
+            }
         }
         if (!eligible) continue;
 

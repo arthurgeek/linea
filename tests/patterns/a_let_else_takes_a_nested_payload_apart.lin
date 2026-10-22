@@ -1,0 +1,24 @@
+// The pattern of a `let ... else` binds what `Some` or `Ok` carries, and may take
+// it apart at any depth, as long as it matches every value of that type.
+struct Entry {
+    name: Str,
+    span: (UInt8, UInt8),
+}
+
+fn find(present: Bool) -> Option[Entry] {
+    if !present {
+        return .None
+    }
+    .Some(Entry { name = "window", span = (3, 10) })
+}
+
+fn main() -> UInt8 {
+    let Entry { name, span: (start, end) } = find(true) else {
+        return 1
+    }
+    if name == "window" {
+        end - start - 7
+    } else {
+        2
+    }
+}

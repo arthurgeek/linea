@@ -98,8 +98,7 @@ pub fn write_all[W: ByteWriter](inout writer: W, bytes: mem.Slice[UInt8]) -> Res
                 }
                 written += count
             },
-            Err(failure) => {
-                let WriteFailure { kind: kind, reason: reason, written: count } = failure
+            Err(WriteFailure { kind: kind, reason: reason, written: count }) => {
                 if count > remaining {
                     return .Err(.{ kind = .InvalidProgress, reason = reason, written = written })
                 }

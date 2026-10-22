@@ -23,6 +23,21 @@ impl Index[Int64] for Week via readings
 // week's readings in order.
 impl Week {
     trav positions via readings
+
+    test fn the_first_temperature_at_the_threshold_triggers_ventilation() {
+        let w = Week { readings = [12, 19, 23, 17, 30] }
+
+        testing.assert_eq(first_at_least(w, 20), .Some(23), "the first reading above twenty is 23")?
+        testing.assert_eq(first_at_least(w, 23), .Some(23), "a reading equal to the threshold must qualify")?
+        testing.assert_eq(first_at_least(w, 100), .None, "no reading reaches one hundred")?
+    }
+
+    test fn calibration_adjusts_each_daily_temperature() {
+        var w = Week { readings = [1, 2, 3, 4, 5] }
+        calibrate(&w, 10)
+        testing.assert_eq(w.readings, [11, 12, 13, 14, 15], "every reading moves up by the shift")?
+        testing.assert_eq(w[0], 11, "indexing the week reads Monday's calibrated reading")?
+    }
 }
 
 // Return the first reading at or above `limit`, or `None` if none qualifies.
@@ -34,27 +49,12 @@ fn first_at_least(w: Week, limit: UInt64) -> Option[UInt64] {
     }
 }
 
-test fn the_first_temperature_at_the_threshold_triggers_ventilation() {
-    let w = Week { readings = [12, 19, 23, 17, 30] }
-
-    testing.assert_eq(first_at_least(w, 20), .Some(23), "the first reading above twenty is 23")?
-    testing.assert_eq(first_at_least(w, 23), .Some(23), "a reading equal to the threshold must qualify")?
-    testing.assert_eq(first_at_least(w, 100), .None, "no reading reaches one hundred")?
-}
-
 // `inout w` lets `calibrate` change the caller's week, and `for inout` lends
 // each reading to the loop, so `r += shift` changes it in place.
 fn calibrate(inout w: Week, shift: UInt64) {
     for inout r in w {
         r += shift
     }
-}
-
-test fn calibration_adjusts_each_daily_temperature() {
-    var w = Week { readings = [1, 2, 3, 4, 5] }
-    calibrate(&w, 10)
-    testing.assert_eq(w.readings, [11, 12, 13, 14, 15], "every reading moves up by the shift")?
-    testing.assert_eq(w[0], 11, "indexing the week reads Monday's calibrated reading")?
 }
 
 fn main() -> Result[UInt8, IoError] {

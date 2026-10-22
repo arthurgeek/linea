@@ -1,0 +1,19 @@
+// `count` walks a sequence to its end and answers how many items it yielded.
+// An iterator is a sequence of itself, so counting it counts the items it has
+// left after a search.
+fn main() -> UInt8 {
+    let word = "café"
+    let scalars = word.scalars().count()
+    let bytes = word.as_bytes().count()
+    let empty = (UInt64(0)..0).count()
+    let long = [UInt64(3), 15, 8, 42].as_slice().filter(|value| *value > 5).count()
+
+    var arrivals = (UInt64(1)..6).iterate()
+    let _report = &arrivals.find_counted(|item| item == 2)
+    let left = arrivals.count()
+    if scalars == 4 && bytes == 5 && empty == 0 && long == 3 && left == 3 {
+        0
+    } else {
+        1
+    }
+}

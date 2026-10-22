@@ -1,0 +1,8 @@
+error[N-Immutable]: a bracket reaches as far as the implementation's `self` declares, and this one declares `read`
+ --> tests/slice_iteration/a_slice_lends_no_element_writably.lin:7:5
+  |
+7 |     for inout value in view {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^ this walk lends the places it reaches
+ ::: std/mem/slice.lin
+L |     proj at(self: Self, i: UInt64) -> T where carries(self) {
+  |             ---- declared `read` here

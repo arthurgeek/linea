@@ -1,0 +1,8 @@
+// A count is a number, so it observes nothing: the text whose pieces were
+// counted may be released while the count is still used.
+fn main() -> UInt8 {
+    let owner = "red,green,blue".to_owned().unwrap()
+    let colours = owner.view().split(",").unwrap().count()
+    owner.release()
+    UInt8(colours)
+}

@@ -107,8 +107,7 @@ impl Allocator for SystemAllocator {
     }
 
     fn dispose(sink b: Buffer[SystemAllocator]) {
-        let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: obligation } = b
-        let SystemAllocation {} = obligation
+        let Buffer { at: at, len: _length, allocated: allocated, allocator: allocator, obligation: SystemAllocation {} } = b
         match allocator {
             System => linea_free(at, allocated, Buffer.alignment),
         }

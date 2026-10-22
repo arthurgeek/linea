@@ -1,0 +1,37 @@
+import std.ffi
+
+@(opaque, linear)
+type Name = UInt64
+
+extern fn named_open() -> Name
+
+// C only reads the object here, which `read` says.
+extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+
+// Without `read`, C may change the object: this one frees the name it held.
+extern fn named_reset(handle: Name)
+
+extern fn named_close(sink handle: Name)
+
+@(opaque, linear)
+struct Named { handle: Name }
+
+impl Named {
+    pub fn open() -> Named {
+        .{ handle = named_open() }
+    }
+
+    // The lambda's parameter is only lent to read, so resetting through it
+    // is refused, though the method around it takes `inout self`.
+    pub fn resetter(inout self: Self) -> fn(held: Named) {
+        let _length = named_name(self.handle).length()
+        |held: Named| {
+            named_reset(held.handle)
+        }
+    }
+
+    pub fn close(sink self: Self) {
+        let Named { handle: handle } = self
+        named_close(handle)
+    }
+}

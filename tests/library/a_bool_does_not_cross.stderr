@@ -1,0 +1,5 @@
+error[T-Export]: `Bool` may not cross the foreign boundary: only an integer, a `Float64` or a newtype over one has a C representation the language fixes
+ --> tests/library/a_bool_does_not_cross/main.lin:1:11
+  |
+1 | export fn is_even(num: Int32) -> Bool {
+  |           ^^^^^^^ pass what it is made of, as integers or `Float64`

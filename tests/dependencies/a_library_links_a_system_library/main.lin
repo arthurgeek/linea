@@ -1,0 +1,7 @@
+import std.io
+import statements
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{statements.is_complete("select 1;")} {statements.is_complete("select 1")}")?
+    .Ok(0)
+}

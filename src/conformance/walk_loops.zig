@@ -253,12 +253,14 @@ const Writer = struct {
     }
 
     /// The `Some` arm of a written-out loop, which hands `body` the element.
-    /// A name binder is the arm's own binder; a tuple pattern cannot sit in
-    /// a variant's payload, so the arm binds the element whole and the body
-    /// begins by taking it apart.
+    /// The loop's binder, a name or a tuple pattern, is the arm's payload
+    /// pattern -- except a name that does not bind there: inside a pattern a
+    /// capitalised name is a variant, so the arm binds the element and the
+    /// body begins by naming it.
     fn arm(self: *Writer, binder: ExprId, body: ExprId, n: u32) std.Io.Writer.Error!void {
         const w = &self.out.writer;
-        if (self.semantics.ast.exprTag(binder) != .tuple_pattern) {
+        const ast = self.semantics.ast;
+        if (ast.exprTag(binder) == .tuple_pattern or ast.partBinds(binder)) {
             try w.writeAll("Some(");
             try self.part(binder);
             try w.writeAll(") => ");
@@ -497,9 +499,8 @@ test "a walk with a tuple binder is written out as a loop that takes the element
         \\
     )).?;
 
-    // A tuple pattern cannot sit in a variant's payload, so the arm binds the
-    // element and the body takes it apart.
-    try testing.expect(std.mem.indexOf(u8, got, "Some(_walked0_item) => { let (a, b) = _walked0_item") != null);
+    // The loop's tuple pattern is the arm's payload pattern.
+    try testing.expect(std.mem.indexOf(u8, got, "Some((a, b)) => ") != null);
     try testing.expect(try checks(gpa, got));
 }
 

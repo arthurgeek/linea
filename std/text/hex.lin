@@ -1,0 +1,240 @@
+import std.mem
+import std.testing
+
+// Hexadecimal writes each byte as two base-16 digits, `0` to `9` and `a` to
+// `f`, so any bytes fit in text: 255 is `ff` and the bytes of "Ada" are
+// `416461`. An interpolation writes one integer in base 16 with the format
+// spec `x` or `X`, as in `"{color:06x}"`; `hex_encoded` writes a run of
+// bytes, and `hex_decode` reads them back.
+
+// A LetterCase chooses lowercase or capital letters for the base-16 digits
+// ten through fifteen: `a` to `f`, or `A` to `F`.
+@(copyable, derive(Debug, Equatable))
+pub enum LetterCase {
+    Lower,
+    Upper,
+}
+
+// `HexEncoded` is bytes waiting to be written in hexadecimal: it displays as
+// two digits a byte, high four bits first, so an interpolation can write
+// what it holds, as in `"{text.hex_encoded(digest)}"`. It borrows the bytes
+// and allocates nothing.
+@(opaque, copyable)
+struct HexEncoded {
+    bytes: mem.Slice[UInt8],
+    case: LetterCase,
+}
+
+impl Display for HexEncoded {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        for index in 0..self.bytes.length() {
+            let byte = self.bytes[index]
+            &w.write_str(hex_digit(byte / 16, case: self.case).unwrap())?
+            &w.write_str(hex_digit(byte % 16, case: self.case).unwrap())?
+        }
+        .Ok(())
+    }
+}
+
+// `hex_encoded` makes the `HexEncoded` form of `bytes`, with lowercase
+// letters unless `case` is `.Upper`.
+pub fn hex_encoded(bytes: mem.Slice[UInt8], case: LetterCase = .Lower) -> HexEncoded where carries(bytes) {
+    .{ bytes = copy(bytes), case }
+}
+
+test fn hex_encoding_writes_two_digits_a_byte() {
+    let bytes = [UInt8(0), 15, 16, 171, 255]
+    defer var lower = String.new()
+    hex_encoded(bytes.as_slice()).fmt(&lower).unwrap()
+    defer var upper = String.new()
+    hex_encoded(bytes.as_slice(), case: .Upper).fmt(&upper).unwrap()
+    let none: [UInt8; 0] = []
+    defer var empty = String.new()
+    hex_encoded(none.as_slice()).fmt(&empty).unwrap()
+    testing.assert_eq(lower.view(), "000f10abff", "a byte was not written as two lowercase digits")?
+    testing.assert_eq(upper.view(), "000F10ABFF", "a byte was not written as two capital digits")?
+    testing.assert_eq(empty.view(), "", "no bytes wrote digits")?
+    .Ok(())
+}
+
+test fn hex_encoded_bytes_read_in_an_interpolation() {
+    defer var line = String.new()
+    "sha: {hex_encoded("Ada".as_bytes())}".fmt(&line).unwrap()
+    testing.assert_eq(line.view(), "sha: 416461", "the interpolated bytes were not encoded")?
+    .Ok(())
+}
+
+// `hex_digit` spells `value` as one hexadecimal digit in `case`, or `None`
+// when `value` is 16 or more and needs more than one digit.
+pub fn hex_digit(value: UInt8, case: LetterCase = .Lower) -> Option[Str] {
+    if value >= 16 {
+        return .None
+    }
+    let alphabet = match read case {
+        Lower => "0123456789abcdef",
+        Upper => "0123456789ABCDEF",
+    }
+    alphabet.slice(UInt64(value), UInt64(value) + 1)
+}
+
+test fn a_value_below_16_is_one_hex_digit() {
+    testing.assert_eq(hex_digit(0), Option.Some("0"), "zero is not 0")?
+    testing.assert_eq(hex_digit(9), Option.Some("9"), "nine is not 9")?
+    testing.assert_eq(hex_digit(10), Option.Some("a"), "ten is not a")?
+    testing.assert_eq(hex_digit(15, case: .Upper), Option.Some("F"), "fifteen is not F")?
+    testing.assert_eq(hex_digit(16), .None, "sixteen was spelled as one digit")?
+    .Ok(())
+}
+
+// `hex_digit_value` returns the value of the hexadecimal digit `byte`, in
+// either case: the ASCII digits `0` to `9` are 48 through 57, `A` to `F` are
+// 65 through 70, and `a` to `f` are 97 through 102. Any other byte is `None`.
+pub fn hex_digit_value(byte: UInt8) -> Option[UInt8] {
+    if byte >= 48 && byte <= 57 {
+        .Some(byte - 48)
+    } else if byte >= 65 && byte <= 70 {
+        .Some(byte - 55)
+    } else if byte >= 97 && byte <= 102 {
+        .Some(byte - 87)
+    } else {
+        .None
+    }
+}
+
+test fn a_hex_digit_has_its_value_in_either_case() {
+    testing.assert_eq(hex_digit_value(48), Option.Some(UInt8(0)), "0 is not zero")?
+    testing.assert_eq(hex_digit_value(57), Option.Some(UInt8(9)), "9 is not nine")?
+    testing.assert_eq(hex_digit_value(65), Option.Some(UInt8(10)), "A is not ten")?
+    testing.assert_eq(hex_digit_value(102), Option.Some(UInt8(15)), "f is not fifteen")?
+    testing.assert_eq(hex_digit_value(71), .None, "G was read as a digit")?
+    testing.assert_eq(hex_digit_value(47), .None, "/ was read as a digit")?
+    .Ok(())
+}
+
+// `hex_byte` returns the byte the hexadecimal digits `high` and `low` spell,
+// in either case, high four bits first, or `None` when either is not a digit.
+pub fn hex_byte(high: UInt8, low: UInt8) -> Option[UInt8] {
+    let first = hex_digit_value(high)?
+    let second = hex_digit_value(low)?
+    .Some(first * 16 + second)
+}
+
+test fn two_hex_digits_spell_one_byte() {
+    testing.assert_eq(hex_byte(50, 70), Option.Some(UInt8(47)), "2F is not 47")?
+    testing.assert_eq(hex_byte(99, 51), Option.Some(UInt8(195)), "c3 is not 195")?
+    testing.assert_eq(hex_byte(102, 102), Option.Some(UInt8(255)), "ff is not 255")?
+    testing.assert_eq(hex_byte(71, 48), .None, "a byte was spelled with G")?
+    testing.assert_eq(hex_byte(48, 71), .None, "a byte was spelled with G")?
+    .Ok(())
+}
+
+// A HexError says why hexadecimal text did not decode: a byte that is not a
+// hexadecimal digit, at the offset `NotADigit` holds; an odd count of digits
+// (`OddLength`), since each byte is two; or an allocator that refused the
+// storage (`Allocation`). `?` wraps an `Oom` in `Allocation`.
+@(copyable, derive(Equatable, Debug, From[mem.Oom]))
+pub enum HexError {
+    NotADigit(UInt64),
+    OddLength,
+    Allocation(mem.Oom),
+}
+
+impl Display for HexError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            NotADigit(offset) => "the byte at {offset} is not a hexadecimal digit".fmt(&w),
+            OddLength => &w.write_str("hexadecimal digits come in pairs, and this text holds an odd count"),
+            Allocation(_) => &w.write_str("no memory to hold the decoded bytes"),
+        }
+    }
+}
+
+test fn a_hex_error_displays_its_reason() {
+    defer var digit = String.new()
+    HexError.NotADigit(3).fmt(&digit).unwrap()
+    defer var odd = String.new()
+    HexError.OddLength.fmt(&odd).unwrap()
+    defer var memory = String.new()
+    HexError.Allocation(.Exhausted).fmt(&memory).unwrap()
+    testing.assert_eq(digit.view(), "the byte at 3 is not a hexadecimal digit", "the digit reason changed")?
+    testing.assert_eq(odd.view(), "hexadecimal digits come in pairs, and this text holds an odd count", "the length reason changed")?
+    testing.assert_eq(memory.view(), "no memory to hold the decoded bytes", "the memory reason changed")?
+    .Ok(())
+}
+
+// Decode the hexadecimal `digits`, in either case, into bytes allocated from
+// `allocator`, two digits a byte, high four bits first. A byte that is not a
+// digit is refused with `NotADigit` and its offset, the first such byte
+// counted from the start, then an odd count of digits with `OddLength`, and a
+// refused allocation with `Allocation`. Nothing is allocated for digits that
+// do not decode.
+pub fn hex_decode_in[A: Allocator](allocator: A, digits: Str) -> Result[Vec[UInt8, A], HexError] where carries(.Ok: allocator) {
+    let text = digits.as_bytes()
+    for at in 0..text.length() {
+        if hex_digit_value(text[at]).is_none() {
+            return .Err(.NotADigit(at))
+        }
+    }
+    if text.length() % 2 != 0 {
+        return .Err(.OddLength)
+    }
+    defer var bytes: Vec[UInt8, A] = Vec.new_in(allocator)
+    &bytes.reserve(text.length() / 2)?
+    var at: UInt64 = 0
+    while at < text.length() {
+        // The storage was reserved above, so the push does not allocate.
+        &bytes.push(hex_byte(text[at], text[at + 1]).unwrap()).unwrap()
+        at += 2
+    }
+    .Ok(bytes)
+}
+
+test fn hex_decoding_reads_two_digits_a_byte_in_either_case() {
+    defer let arena = mem.Arena.open(mem.system(), size: 64)
+    let bytes = hex_decode_in(arena.handle(), "000f10ABfF").unwrap()
+    let expected = [UInt8(0), 15, 16, 171, 255]
+    testing.assert_eq(bytes.as_slice(), expected.as_slice(), "the digits did not decode to their bytes")?
+    let empty = hex_decode_in(arena.handle(), "").unwrap()
+    testing.assert_eq(empty.length(), UInt64(0), "no digits decoded to bytes")?
+    .Ok(())
+}
+
+test fn hex_decoding_reports_a_full_allocator() {
+    defer let arena = mem.Arena.open(mem.system(), size: 8)
+    let full = match hex_decode_in(arena.handle(), "00112233445566778899aabbccddeeff") {
+        Ok(bytes) => {
+            bytes.release()
+            false
+        },
+        Err(error) => error == .Allocation(.Exhausted),
+    }
+    testing.assert(full, "a full allocator was not reported")?
+    .Ok(())
+}
+
+// Decode the hexadecimal `digits` into bytes allocated from the system
+// allocator. See `hex_decode_in`.
+pub fn hex_decode(digits: Str) -> Result[Vec[UInt8, mem.SystemAllocator], HexError] {
+    hex_decode_in(mem.system(), digits)
+}
+
+test fn hex_decoding_refuses_an_odd_count_or_a_letter_past_f() {
+    testing.assert(refusal_of("abc") == .Some(.OddLength), "an odd count of digits decoded")?
+    testing.assert(refusal_of("0g") == .Some(.NotADigit(1)), "a letter past f decoded, or its offset was lost")?
+    testing.assert(refusal_of("ab 0") == .Some(.NotADigit(2)), "a space decoded")?
+    testing.assert(refusal_of("é0") == .Some(.NotADigit(0)), "a byte above ASCII decoded")?
+    testing.assert(refusal_of("cafe") == .None, "valid digits were refused")?
+    .Ok(())
+}
+
+// `refusal_of` decodes `digits` from the system allocator and answers the
+// refusal, or `None` when they decode.
+fn refusal_of(digits: Str) -> Option[HexError] {
+    match hex_decode(digits) {
+        Ok(bytes) => {
+            bytes.release()
+            .None
+        },
+        Err(error) => .Some(error),
+    }
+}

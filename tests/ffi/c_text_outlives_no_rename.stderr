@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ffi/c_text_outlives_no_rename/greeter/greeter.lin:30:9
+   |
+30 |         &self.rename()
+   |         ^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+31 |         name.is_null()
+   |         ---- the observation is still used here

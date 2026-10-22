@@ -178,29 +178,6 @@ pub const TypeId = enum(u32) {
         };
     }
 
-    /// The width this type crosses a foreign boundary in, or null where it may
-    /// not cross at all.
-    ///
-    /// One question with one answer, asked by the checker to refuse a
-    /// signature and by the backend to print one. Two predicates here would
-    /// disagree somewhere, and the disagreement is a type the checker accepts
-    /// and the backend cannot emit -- which is a compiler crash on source a
-    /// programmer was told was fine.
-    ///
-    /// An integer's width and its signedness are the whole of its
-    /// representation, so both sides of a boundary already agree about it.
-    /// Nothing else does: where a structure's fields sit is the compiler's to
-    /// decide, a float carries a representation this language does not fix
-    /// across an ABI, and a linear value cannot cross code ownership never
-    /// read.
-    pub fn foreignWidth(self: TypeId) ?u8 {
-        const info = self.integerInfo() orelse return null;
-        return switch (info.bits) {
-            8, 16, 32, 64 => info.bits,
-            else => null,
-        };
-    }
-
     /// The values a type can represent.
     ///
     /// Wide enough for `UInt64`'s maximum and `Int64`'s minimum together, which is
@@ -1657,12 +1634,43 @@ fn sameContractPath(a: ContractPath, b: ContractPath) bool {
     return std.meta.eql(a.root, b.root) and sameSelectors(a.fields, b.fields);
 }
 
+/// Whether a value of `t` crosses a foreign boundary ([T-Extern],
+/// [T-Export]): an integer of 8, 16, 32 or 64 bits, a `Float64`, or an
+/// unrefined newtype over one. Every bit pattern of these is a value on both
+/// sides, so nothing C hands back can be a value Linea does not define. A
+/// refined newtype is refused because C could hand back a value outside its
+/// range; a newtype's ownership policy is the declaration's to state with its
+/// parameter convention. The checker refuses a signature by this answer and
+/// the backend holds what it renders to it, so `pool` is a pool being built or
+/// a finished one.
+pub fn crossesForeign(pool: anytype, t: TypeId) bool {
+    if (t == .f64) return true;
+    if (t.integerInfo()) |info| return switch (info.bits) {
+        8, 16, 32, 64 => true,
+        else => false,
+    };
+    return switch (pool.get(t)) {
+        .newtype => |newtype| !newtype.refined and crossesForeign(pool, newtype.base),
+        else => false,
+    };
+}
+
 fn dependencyFreeScalar(pool: anytype, ty: TypeId) bool {
     return switch (pool.get(ty)) {
         .integer, .open_integer, .float, .boolean, .unit, .never => true,
-        .newtype => |named| dependencyFreeScalar(pool, named.base),
+        // A newtype over a scalar holds no part a dependency could live in,
+        // unless its declaration is one whose dependencies originate at the
+        // value, as `std.ffi`'s views of C addresses are.
+        .newtype => |named| !seedsDependencies(pool, ty) and dependencyFreeScalar(pool, named.base),
         else => false,
     };
+}
+
+/// Whether `ty`'s own declaration makes dependencies originate at its values,
+/// asked of a finished typing or of a pool being built.
+fn seedsDependencies(pool: anytype, ty: TypeId) bool {
+    if (@TypeOf(pool.*) == Typing) return pool.hasDirectDependencies(ty);
+    return pool.view().hasDirectDependencies(ty);
 }
 
 pub fn sameContracts(a: []const CallableContract, b: []const CallableContract) bool {
@@ -5401,6 +5409,11 @@ pub const Typing = struct {
     /// does not fit its context is absent, though its recorded type is
     /// poison too.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// Written types whose arguments lack a capability a bound of their
+    /// declaration asks for, each reported by [T-Bound]. Such a type promises
+    /// nothing about its capabilities, so a value of it is not reported for
+    /// owing a settlement.
+    broken_types: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
     /// The whole number each accepted bracket's index operand folds to, keyed
     /// by the operand, or by the count under a `^`. An operand that folds to
     /// nothing, or to a negative number, is absent.
@@ -5819,6 +5832,7 @@ pub const Typing = struct {
         self.borrowed_temporaries.deinit(gpa);
         self.interpolation_positions.deinit(gpa);
         self.refused.deinit(gpa);
+        self.broken_types.deinit(gpa);
         self.folded_indices.deinit(gpa);
         gpa.free(self.dependency_containment);
         gpa.free(self.writer_containment);
@@ -6714,6 +6728,9 @@ pub const Typing = struct {
         }
         const declaration = self.declOfType(t) orelse return false;
         if (self.raw_accesses.slice != .none and declaration == self.raw_accesses.slice) return true;
+        for (self.raw_accesses.foreign_views) |view| {
+            if (view != .none and declaration == view) return true;
+        }
         if (self.raw_accesses.buffer != .none and declaration == self.raw_accesses.buffer) return true;
         return self.raw_accesses.storage != .none and declaration == self.raw_accesses.storage and self.instanceOf(t) == null;
     }
@@ -7562,6 +7579,7 @@ pub const Typing = struct {
         certified_storage: DeclId = .none,
         certified_buffer: DeclId = .none,
         certified_slice: DeclId = .none,
+        certified_foreign_views: [3]DeclId = .{ .none, .none, .none },
         /// `mem.ClosureEntry`: its instance at a callable type is the entry
         /// signature an erased closure is called through.
         certified_closure_entry: DeclId = .none,
@@ -9502,7 +9520,7 @@ pub const Typing = struct {
         pub fn view(self: *const Builder) Typing {
             return .{
                 .constant_pool = self.constant_pool.*,
-                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .closure_entry_type = self.certified_closure_entry },
+                .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .closure_entry_type = self.certified_closure_entry, .foreign_views = self.certified_foreign_views },
                 .tuple_decls = self.tuple_decls,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
@@ -10998,6 +11016,7 @@ pub const Typing = struct {
             b.certified_storage = t.raw_accesses.storage;
             b.certified_buffer = t.raw_accesses.buffer;
             b.certified_slice = t.raw_accesses.slice;
+            b.certified_foreign_views = t.raw_accesses.foreign_views;
             b.certified_closure_entry = t.raw_accesses.closure_entry_type;
             b.tuple_decls = t.tuple_decls;
             b.implementations_settled = true;

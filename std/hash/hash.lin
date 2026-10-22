@@ -35,17 +35,15 @@ impl Hasher {
     pub fn new() -> Hasher {
         .{ low = initial_digest, high = 0 }
     }
-}
 
-test fn hasher_new_starts_with_an_empty_stream() {
-    let first = Hasher.new()
-    let second = Hasher.new()
-    let empty_digest: UInt64 = 5381
-    testing.assert_eq(first.finish(), empty_digest, "empty stream has the wrong initial digest")?
-    testing.assert_eq(second.finish(), empty_digest, "new hash state retained another stream")?
-}
+    test fn hasher_new_starts_with_an_empty_stream() {
+        let first = Hasher.new()
+        let second = Hasher.new()
+        let empty_digest: UInt64 = 5381
+        testing.assert_eq(first.finish(), empty_digest, "empty stream has the wrong initial digest")?
+        testing.assert_eq(second.finish(), empty_digest, "new hash state retained another stream")?
+    }
 
-impl Hasher {
     // Add one byte to the stream. The low limb's carry moves into the high
     // limb, and the high limb's carry past 2^32 is dropped, which is the
     // reduction modulo 2^64.
@@ -54,45 +52,43 @@ impl Hasher {
         self.high = (self.high * multiplier + product / limb_base) % limb_base
         self.low = product % limb_base
     }
-}
 
-test fn hasher_write_byte_preserves_byte_extremes_and_limb_carries() {
-    var zero = Hasher.new()
-    &zero.write_byte(0)
-    let zero_digest: UInt64 = 352988220
-    testing.assert_eq(zero.finish(), zero_digest, "a zero byte was omitted")?
-    var maximum = Hasher.new()
-    &maximum.write_byte(255)
-    let maximum_digest: UInt64 = 352988475
-    testing.assert_eq(maximum.finish(), maximum_digest, "the high byte bit was lost")?
-    for _i in 0..7 {
+    test fn hasher_write_byte_preserves_byte_extremes_and_limb_carries() {
+        var zero = Hasher.new()
+        &zero.write_byte(0)
+        let zero_digest: UInt64 = 352988220
+        testing.assert_eq(zero.finish(), zero_digest, "a zero byte was omitted")?
+        var maximum = Hasher.new()
         &maximum.write_byte(255)
+        let maximum_digest: UInt64 = 352988475
+        testing.assert_eq(maximum.finish(), maximum_digest, "the high byte bit was lost")?
+        for _i in 0..7 {
+            &maximum.write_byte(255)
+        }
+        // This is the eight-byte polynomial reduced modulo 2^64 with every limb
+        // carry applied.
+        let eight_bytes_digest: UInt64 = 11751299930513722117
+        testing.assert_eq(maximum.finish(), eight_bytes_digest, "byte hashing lost a carry or failed to wrap")?
+        var mixed = Hasher.new()
+        for byte in [UInt8(0), 1, 127, 128, 254, 255] {
+            &mixed.write_byte(byte)
+        }
+        let mixed_digest: UInt64 = 12447061161526545416
+        testing.assert_eq(mixed.finish(), mixed_digest, "mixed bytes changed the polynomial remainder")?
     }
-    // This is the eight-byte polynomial reduced modulo 2^64 with every limb
-    // carry applied.
-    let eight_bytes_digest: UInt64 = 11751299930513722117
-    testing.assert_eq(maximum.finish(), eight_bytes_digest, "byte hashing lost a carry or failed to wrap")?
-    var mixed = Hasher.new()
-    for byte in [UInt8(0), 1, 127, 128, 254, 255] {
-        &mixed.write_byte(byte)
-    }
-    let mixed_digest: UInt64 = 12447061161526545416
-    testing.assert_eq(mixed.finish(), mixed_digest, "mixed bytes changed the polynomial remainder")?
-}
 
-test fn long_streams_keep_checked_arithmetic_in_range() {
-    var first = Hasher.new()
-    var second = Hasher.new()
-    for _i in 0..10000 {
-        &first.write_byte(255)
-        &second.write_byte(255)
+    test fn long_streams_keep_checked_arithmetic_in_range() {
+        var first = Hasher.new()
+        var second = Hasher.new()
+        for _i in 0..10000 {
+            &first.write_byte(255)
+            &second.write_byte(255)
+        }
+        testing.assert_eq(first.finish(), second.finish(), "identical streams have different hashes")?
+        &second.write_byte(0)
+        testing.assert(first.finish() != second.finish(), "a trailing zero was lost")?
     }
-    testing.assert_eq(first.finish(), second.finish(), "identical streams have different hashes")?
-    &second.write_byte(0)
-    testing.assert(first.finish() != second.finish(), "a trailing zero was lost")?
-}
 
-impl Hasher {
     // Feed all eight bytes in little-endian order, independent of host layout.
     pub fn write_u64(inout self: Self, value: UInt64) {
         var remaining = value
@@ -101,46 +97,44 @@ impl Hasher {
             remaining = remaining / 256
         }
     }
-}
 
-test fn hasher_write_u64_preserves_all_bytes_in_little_endian_order() {
-    // Its little-endian bytes are 8, 7, 6, 5, 4, 3, 2, 1.
-    let little_endian_word: UInt64 = 72623859790382856
-    var word = Hasher.new()
-    &word.write_u64(little_endian_word)
-    var bytes = Hasher.new()
-    for byte in [UInt8(8), 7, 6, 5, 4, 3, 2, 1] {
-        &bytes.write_byte(byte)
+    test fn hasher_write_u64_preserves_all_bytes_in_little_endian_order() {
+        // Its little-endian bytes are 8, 7, 6, 5, 4, 3, 2, 1.
+        let little_endian_word: UInt64 = 72623859790382856
+        var word = Hasher.new()
+        &word.write_u64(little_endian_word)
+        var bytes = Hasher.new()
+        for byte in [UInt8(8), 7, 6, 5, 4, 3, 2, 1] {
+            &bytes.write_byte(byte)
+        }
+        let expected_word_digest: UInt64 = 8137289761530033153
+        testing.assert_eq(word.finish(), expected_word_digest, "word hashing changed the polynomial remainder")?
+        testing.assert_eq(word.finish(), bytes.finish(), "word hashing omitted or reordered bytes")?
+        var other = Hasher.new()
+        &other.write_u64(little_endian_word + 1)
+        testing.assert(word.finish() != other.finish(), "different input words were conflated")?
     }
-    let expected_word_digest: UInt64 = 8137289761530033153
-    testing.assert_eq(word.finish(), expected_word_digest, "word hashing changed the polynomial remainder")?
-    testing.assert_eq(word.finish(), bytes.finish(), "word hashing omitted or reordered bytes")?
-    var other = Hasher.new()
-    &other.write_u64(little_endian_word + 1)
-    testing.assert(word.finish() != other.finish(), "different input words were conflated")?
-}
 
-impl Hasher {
     // Return the digest of the bytes written so far. The stream is unchanged,
     // so writing may continue after it.
     pub fn finish(self: Self) -> UInt64 {
         self.high * limb_base + self.low
     }
-}
 
-test fn hasher_finish_observes_without_resetting_or_consuming_the_stream() {
-    var state = Hasher.new()
-    &state.write_byte(255)
-    let first = state.finish()
-    let again = state.finish()
-    for _i in 0..7 {
+    test fn hasher_finish_observes_without_resetting_or_consuming_the_stream() {
+        var state = Hasher.new()
         &state.write_byte(255)
+        let first = state.finish()
+        let again = state.finish()
+        for _i in 0..7 {
+            &state.write_byte(255)
+        }
+        let one_byte_digest: UInt64 = 352988475
+        let eight_bytes_digest: UInt64 = 11751299930513722117
+        testing.assert_eq(first, one_byte_digest, "finish returned the wrong digest")?
+        testing.assert_eq(again, first, "finish reset or changed the state")?
+        testing.assert_eq(state.finish(), eight_bytes_digest, "writing after finish lost the existing prefix")?
     }
-    let one_byte_digest: UInt64 = 352988475
-    let eight_bytes_digest: UInt64 = 11751299930513722117
-    testing.assert_eq(first, one_byte_digest, "finish returned the wrong digest")?
-    testing.assert_eq(again, first, "finish reset or changed the state")?
-    testing.assert_eq(state.finish(), eight_bytes_digest, "writing after finish lost the existing prefix")?
 }
 
 // An integer hashes a sign byte and then its magnitude as eight little-endian

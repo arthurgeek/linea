@@ -56,3 +56,7 @@ defer_let/a_defer_let_in_a_loop_releases_each_iteration.lin
 defer_let/a_defer_var_releases_the_value_held_at_the_exit.lin
 # A callable head: declaration reversal, renamed head parameters, reformatted source.
 traits/callable_heads/a_callable_type_heads_a_trait_implementation.lin
+# Nested patterns: arms over a pair of options, variants inside variants, and literals inside payloads.
+patterns/a_tuple_of_options_is_covered_arm_by_arm.lin
+patterns/a_variant_inside_a_variant_is_matched.lin
+patterns/a_tag_is_tested_before_its_payload_is_read.lin

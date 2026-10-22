@@ -1,0 +1,14 @@
+// The manifest builds `arithmetic.c` beside the program and lets this module
+// declare the functions it defines. The declarations stay private, and this
+// module publishes ordinary functions that call them.
+extern fn arithmetic_square(value: Int32) -> Int32
+
+extern fn arithmetic_sum(left: Int64, right: Int64) -> Int64
+
+pub fn square(value: Int32) -> Int32 {
+    arithmetic_square(value)
+}
+
+pub fn sum(left: Int64, right: Int64) -> Int64 {
+    arithmetic_sum(left, right)
+}

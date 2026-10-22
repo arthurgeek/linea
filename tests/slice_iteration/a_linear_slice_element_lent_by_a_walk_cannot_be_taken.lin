@@ -1,0 +1,22 @@
+// A walk over a slice lends each element, and the vector behind the view
+// still owns it, so the body cannot take a linear element out.
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+fn main() -> UInt8 {
+    var tickets: Vec[Ticket] = Vec.new()
+    &tickets.push(.{ number = 4 }).unwrap()
+    var total: UInt64 = 0
+    for read ticket in tickets.as_slice() {
+        let Ticket { number } = ticket
+        total += number
+    }
+    var pending = tickets.drain()
+    for ticket in &pending {
+        let Ticket { number: _ } = ticket
+    }
+    pending.finish().unwrap()
+    UInt8(total)
+}

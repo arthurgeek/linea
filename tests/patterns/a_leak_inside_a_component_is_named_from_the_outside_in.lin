@@ -1,0 +1,38 @@
+// A `_` that drops a linear value deep inside a pattern leaks it. The report
+// names where the `_` stands from the outermost part inwards: first the
+// component or field, then what the variant there carries.
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+struct Holder {
+    kept: UInt8,
+    slot: Option[(UInt8, Ticket)],
+}
+
+fn issue() -> (UInt8, Option[Ticket]) {
+    (1, .Some(Ticket { number = 1 }))
+}
+
+fn hold() -> Holder {
+    Holder { kept = 1, slot = .Some((1, Ticket { number = 2 })) }
+}
+
+fn issued_count() -> UInt8 {
+    match issue() {
+        (count, Some(_)) => count,
+        (count, None) => count,
+    }
+}
+
+fn held_count() -> UInt8 {
+    match hold() {
+        Holder { kept, slot: Some((_, _)) } => kept,
+        Holder { kept, slot: None } => kept,
+    }
+}
+
+fn main() -> UInt8 {
+    issued_count() + held_count()
+}

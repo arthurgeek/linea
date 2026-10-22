@@ -1,0 +1,3 @@
+export fn is_even(num: Int32) -> Bool {
+    num % 2 == 0
+}

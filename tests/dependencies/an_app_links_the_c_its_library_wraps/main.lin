@@ -1,0 +1,7 @@
+import std.io
+import tally
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{tally.sum_of_squares(4)}")?
+    .Ok(0)
+}

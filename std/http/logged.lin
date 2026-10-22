@@ -66,11 +66,9 @@ impl[H: Observer, S: log.Sink, A: Allocator] Observer for Logged[H, S, A] where 
 fn level_of[P: Allocator](exchange: Exchange[P]) -> log.Level {
     let answered = match read exchange.failure {
         None => true,
-        Some(failure) => match read failure {
-            Refused(_) => true,
-            Unread(_) => true,
-            _ => false,
-        },
+        Some(Refused(_)) => true,
+        Some(Unread(_)) => true,
+        Some(_) => false,
     }
     let code = match read exchange.status {
         Some(status) => status.code(),
@@ -196,8 +194,8 @@ test fn the_bound_address_is_logged_as_listening() {
 test fn a_logged_router_logs_each_exchange_it_serves() {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
-    let found = send(bound, "GET /health HTTP/1.1\r\n\r\n")
-    let missing = send(bound, "GET /nowhere HTTP/1.1\r\n\r\n")
+    let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\n")
+    let missing = send(bound, "GET /nowhere HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let malformed = send(bound, "garbage\r\n\r\n")
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), health_router())

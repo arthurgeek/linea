@@ -145,8 +145,11 @@ pub const Code = enum {
     /// A sealed type's representation reached from outside the module that
     /// declares it: built, taken apart, or read into.
     m_opaque,
-    /// An `extern` declaration outside the standard library.
+    /// An `extern` declaration in a module its root's manifest does not grant.
     m_extern,
+    /// `std.ffi` imported by a module its root does not grant, or one of its
+    /// types named in what a granted module publishes.
+    m_foreign,
     /// An `export` that designates no single foreign entry point: a generic,
     /// or one written in a program.
     m_export,
@@ -282,8 +285,14 @@ pub const Code = enum {
     /// inside a declaration that declares an allocator parameter of its own.
     t_defaulted_allocator,
     t_cover,
-    t_variants,
+    /// A `match`'s coverage check would build more matrix cells than its
+    /// budget allows. Nested patterns make exhaustiveness NP-complete, so the
+    /// budget is what bounds the cost of checking one `match`.
+    t_cover_limit,
     t_unreachable,
+    /// A pattern that must match every value of its type, in a `let`, a
+    /// `let read`, a `let … else`, a `for` or a lambda parameter, misses one.
+    t_refutable,
     /// A type holds itself inline, so computing its size requires its size.
     /// About layout rather than about recursion: a type that reaches itself
     /// through an indirection is well formed, and this rule outlives the one
@@ -330,6 +339,12 @@ pub const Code = enum {
     t_extern,
     /// Two `extern` declarations of one symbol whose signatures disagree.
     t_extern_agreement,
+    /// A callback an `extern` takes is not one C can call: its form, its
+    /// context, or an argument with no fixed function behind it.
+    t_extern_callback,
+    /// A C function that may change the object a sealed handle holds is
+    /// called from somewhere that does not hold the object whole.
+    t_extern_handle,
     /// An `extern` in the runtime's `linea_` namespace whose symbol the
     /// runtime does not declare, or whose signature is not the runtime's.
     t_extern_runtime,
@@ -424,6 +439,7 @@ pub const Code = enum {
             .m_entry => "M-Entry",
             .m_opaque => "M-Opaque",
             .m_extern => "M-Extern",
+            .m_foreign => "M-Foreign",
             .m_export => "M-Export",
             .o_universe => "O-Universe",
             .o_capture => "O-Capture",
@@ -476,8 +492,9 @@ pub const Code = enum {
             .t_argument_default => "T-ArgumentDefault",
             .t_defaulted_allocator => "T-DefaultedAllocator",
             .t_cover => "T-Cover",
-            .t_variants => "T-Variants",
+            .t_cover_limit => "T-CoverLimit",
             .t_unreachable => "T-Unreachable",
+            .t_refutable => "T-Refutable",
             .t_infinite_layout => "T-InfiniteLayout",
             .l_size => "L-Size",
             .t_unknown_field => "T-UnknownField",
@@ -496,6 +513,8 @@ pub const Code = enum {
             .t_let_else => "T-LetElse",
             .t_extern => "T-Extern",
             .t_extern_agreement => "T-ExternAgreement",
+            .t_extern_callback => "T-ExternCallback",
+            .t_extern_handle => "T-ExternHandle",
             .t_extern_runtime => "T-ExternRuntime",
             .t_export => "T-Export",
             .t_phantom => "T-Phantom",

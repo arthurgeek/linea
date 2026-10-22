@@ -1583,6 +1583,13 @@ const Discovery = struct {
                 _ = try self.table.intern(.{ .body = .{ .declaration = runtime_decl }, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
             }
         }
+        // A call to an `extern` answering `ffi.Errno` is followed by the
+        // runtime's read of `errno`.
+        if (self.ast.declIsExtern(decl) and self.raw_accesses.errno_read != .none and
+            try self.raw_accesses.errnoSignature(self.gpa, self.pool, self.typing.declSignature(decl)) != null)
+        {
+            _ = try self.table.intern(.{ .body = .{ .declaration = self.raw_accesses.errno_read }, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
+        }
         // An erased closure's entry and release are bodies this compiler
         // generates for the callable type the call settled.
         if (decl == self.raw_accesses.closure_entry or decl == self.raw_accesses.closure_settle) {

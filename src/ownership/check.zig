@@ -471,6 +471,8 @@ const Checker = struct {
     /// failures, so all three read this and differ only in which type they
     /// hand it -- a binding's, a written place's, or a discarded value's.
     fn owes(self: *const Checker, t: TypeId) bool {
+        // A type [T-Bound] refused promises no capability to judge a value by.
+        if (self.typing.broken_types.contains(t)) return false;
         return self.typing.mustConsumeWithin(self.current_owner, t);
     }
 
@@ -1026,6 +1028,48 @@ const Checker = struct {
         return cfg_mod.exitSpan(self.ast, exit);
     }
 
+    /// Where a part a nested pattern stands at sits, from the outermost
+    /// pattern inwards: "component `_1`, then what `Some` carries". A
+    /// variant's step reads as it does alone, so `Some(_)` and `(n, Some(_))`
+    /// describe the payload in the same words. Bounded by the pattern's
+    /// depth.
+    fn partPlace(self: *Checker, part: ExprId) std.mem.Allocator.Error![]const u8 {
+        const arena = self.sink.arena;
+        // The walk runs from the part outwards, so each step is kept and the
+        // steps are written in the reverse order.
+        var steps: std.ArrayList([]const u8) = .empty;
+        var at = part;
+        while (self.cfg.pattern_parts.get(at)) |step| {
+            const parent = step.holder;
+            if (parent == ExprId.none) break;
+            const args = self.ast.call(parent).args;
+            const index = for (args, 0..) |a, i| {
+                if (a == at) break i;
+            } else 0;
+            try steps.append(arena, switch (self.ast.exprTag(parent)) {
+                .tuple_pattern => try std.fmt.allocPrint(arena, "component `_{d}`", .{index}),
+                .struct_pattern => try std.fmt.allocPrint(arena, "field `{s}`", .{self.ast.tokenText(self.ast.exprMain(args[index - 1]))}),
+                else => blk: {
+                    const name = self.ast.tokenText(self.ast.exprMain(self.ast.call(parent).callee));
+                    break :blk if (args.len > 1)
+                        try std.fmt.allocPrint(arena, "payload {d} of what `{s}` carries", .{ index, name })
+                    else
+                        try std.fmt.allocPrint(arena, "what `{s}` carries", .{name});
+                },
+            });
+            if (step.within == ExprId.none) break;
+            at = step.within;
+        }
+        var text: std.ArrayList(u8) = .empty;
+        var i = steps.items.len;
+        while (i > 0) {
+            i -= 1;
+            try text.appendSlice(arena, steps.items[i]);
+            if (i > 0) try text.appendSlice(arena, ", then ");
+        }
+        return text.items;
+    }
+
     fn reportLeak(self: *Checker, group: []const Leak) std.mem.Allocator.Error!void {
         const arena = self.sink.arena;
         const b = group[0].binding;
@@ -1034,8 +1078,9 @@ const Checker = struct {
         // A `_` in a tuple pattern stands at a component the tuple's
         // declaration names, and the label says which one it left unsettled.
         const component: ?[]const u8 = if (discard) blk: {
+            if (self.cfg.binder_parts.get(b)) |part| break :blk try self.partPlace(part);
             const selected = self.typing.fieldSelection(tok) orelse break :blk null;
-            break :blk self.typing.fieldName(selected.receiver, selected.field.index());
+            break :blk try std.fmt.allocPrint(arena, "`{s}`", .{self.typing.fieldName(selected.receiver, selected.field.index())});
         } else null;
         // A derive's generated body is reported at the derive, so every label
         // in it lands on one span and only the primary says anything.
@@ -1059,7 +1104,7 @@ const Checker = struct {
             .file = self.ast.fileOf(tok),
             .span = self.ast.tokenSpan(tok),
             .message = if (component) |name|
-                try std.fmt.allocPrint(arena, "`_` does not settle `{s}`", .{name})
+                try std.fmt.allocPrint(arena, "`_` does not settle {s}", .{name})
             else if (discard)
                 "`_` does not settle it"
             else if (primary != null)
@@ -1289,6 +1334,10 @@ const Checker = struct {
                 if (self.ast.declParams(op).len > 1) "…" else "",
             }) catch return error.OutOfMemory;
             if (apart) |hint| w.print(", or take it apart with {s}", .{hint}) catch return error.OutOfMemory;
+        } else if (try self.releasingFunction(t)) |release| {
+            // A handle a module wraps is taken apart only by forgetting what
+            // it holds, so the function that releases it leads.
+            w.print("{s} `{s}({s})`", .{ lead, self.ast.tokenText(self.ast.declName(release)), receiver orelse "…" }) catch return error.OutOfMemory;
         } else if (apart) |hint| {
             w.print("take it apart with {s}, or give it to something that takes it", .{hint}) catch return error.OutOfMemory;
         } else {
@@ -1375,6 +1424,27 @@ const Checker = struct {
         return null;
     }
 
+    /// The function that takes a sealed newtype `t` by `sink` in the module
+    /// that declares it, such as an `extern` that closes a C handle the
+    /// newtype holds, where this function sits in that module; null
+    /// elsewhere. Bounded by the declarations of that one module.
+    fn releasingFunction(self: *const Checker, t: TypeId) std.mem.Allocator.Error!?node.DeclId {
+        const d = self.typing.declOfType(t) orelse return null;
+        if (self.ast.declTag(d) != .newtype or self.ast.declVisibility(d) != .opaque_) return null;
+        if (self.current_owner == .none) return null;
+        const module = self.program.moduleOf(d);
+        if (self.program.moduleOf(self.current_owner) != module) return null;
+        for (self.program.declsOf(module)) |candidate| {
+            if (self.ast.declTag(candidate) != .function) continue;
+            const signature = self.typing.declSignature(candidate);
+            if (signature == .poison or self.typing.get(signature) != .callable) continue;
+            for (self.typing.callableParams(self.typing.get(signature).callable)) |param| {
+                if (param.convention == .sink and param.ty == t) return candidate;
+            }
+        }
+        return null;
+    }
+
     /// How a value of `t` is taken apart, where the function's module may take
     /// it apart and doing so settles everything it holds; null elsewhere.
     fn takingApartHint(self: *const Checker, t: TypeId, receiver: []const u8) std.mem.Allocator.Error!?[]const u8 {
@@ -1448,21 +1518,29 @@ const Checker = struct {
     fn reportDiscarded(self: *Checker, arm: ExprId, scrutinee: ExprId) std.mem.Allocator.Error!void {
         const arena = self.sink.arena;
         const ty = self.typing.exprType(scrutinee);
-        const named = self.ast.exprTag(scrutinee) == .name_ref;
-        const labels = try arena.alloc(Label, 2);
+        // A variant nested inside a pattern is its own source: the part it
+        // drops is the one it stands at, so one label says so.
+        const nested = arm == scrutinee;
+        const named = !nested and self.ast.exprTag(scrutinee) == .name_ref;
+        const labels = try arena.alloc(Label, if (nested) 1 else 2);
         labels[0] = .{
             .file = self.ast.fileOfExpr(arm),
             .span = self.ast.exprSpan(arm),
-            .message = if (isCatchAll(self.ast, arm)) "`_` does not settle what it holds" else "this arm names none of what it holds",
+            .message = if (isCatchAll(self.ast, arm))
+                "`_` does not settle what it holds"
+            else if (nested)
+                "this pattern names none of what it holds"
+            else
+                "this arm names none of what it holds",
         };
-        labels[1] = .{
+        if (!nested) labels[1] = .{
             .file = self.ast.fileOfExpr(scrutinee),
             .span = self.ast.exprSpan(scrutinee),
             .message = "taken apart here",
             .style = .secondary,
         };
         const notes = try arena.alloc([]const u8, 1);
-        notes[0] = "name what it holds in the arm, so something can settle it";
+        notes[0] = if (nested) "name what it holds in the pattern, so something can settle it" else "name what it holds in the arm, so something can settle it";
         try self.emit(.{
             .severity = .err,
             .code = .o_leak,
@@ -2173,27 +2251,62 @@ const Checker = struct {
         }
         slots.shrinkRetainingCapacity(kept);
 
+        // Each predecessor after the first joins in only the slots its own
+        // path edits; in every other slot it holds what the dominator held,
+        // which joins in once after the walk. The join is a maximum and the
+        // site the one written first, so the order they arrive in changes
+        // nothing. The work is the edits each path makes, each found among
+        // the slots by binary search, plus the slots once -- never the
+        // predecessors times the slots, which a `match` of n binding arms
+        // made quadratic.
+        try flow.windToBase(self.gpa, b);
+        const base_state = try self.gpa.alloc(State, slots.items.len);
+        defer self.gpa.free(base_state);
+        const base_at = try self.gpa.alloc(ExprId, slots.items.len);
+        defer self.gpa.free(base_at);
+        const stamp = try self.gpa.alloc(u32, slots.items.len);
+        defer self.gpa.free(stamp);
+        const edited_by = try self.gpa.alloc(u32, slots.items.len);
+        defer self.gpa.free(edited_by);
+        for (slots.items, base_state, base_at) |s, *state, *at| {
+            state.* = flow.state[s];
+            at.* = flow.state_at[s];
+        }
+        @memset(stamp, 0);
+        @memset(edited_by, 0);
+
         merged.clearRetainingCapacity();
         merged_at.clearRetainingCapacity();
-        var first = true;
+        var later: u32 = 0;
         for (preds.of(b)) |p| {
             if (!flow.computed[p]) continue;
             try flow.wind(self.gpa, p);
-            if (first) {
+            if (merged.items.len == 0) {
                 for (slots.items) |s| {
                     try merged.append(self.gpa, flow.state[s]);
                     try merged_at.append(self.gpa, flow.state_at[s]);
                 }
-                first = false;
                 continue;
             }
-            for (slots.items, 0..) |s, k| {
-                merged.items[k] = State.join(merged.items[k], flow.state[s]);
-                // The site does not drive the sweep, so which of two survives
-                // is settled by where they are written rather than by the order
-                // the blocks were walked in.
-                merged_at.items[k] = self.writtenFirst(merged_at.items[k], flow.state_at[s]);
+            later += 1;
+            for (flow.path.items[base..]) |q| {
+                for (flow.editsOf(q)) |e| {
+                    const k = std.sort.binarySearch(u32, slots.items, e.slot, orderSlot) orelse continue;
+                    if (stamp[k] == later) continue;
+                    stamp[k] = later;
+                    edited_by[k] += 1;
+                    merged.items[k] = State.join(merged.items[k], flow.state[e.slot]);
+                    // The site does not drive the sweep, so which of two
+                    // survives is settled by where they are written rather
+                    // than by the order the blocks were walked in.
+                    merged_at.items[k] = self.writtenFirst(merged_at.items[k], flow.state_at[e.slot]);
+                }
             }
+        }
+        for (slots.items, 0..) |_, k| {
+            if (edited_by[k] == later) continue;
+            merged.items[k] = State.join(merged.items[k], base_state[k]);
+            merged_at.items[k] = self.writtenFirst(merged_at.items[k], base_at[k]);
         }
 
         // A slot is asked about because some predecessor's edits named it, or
@@ -2895,8 +3008,39 @@ const Checker = struct {
         }
         asked.shrinkRetainingCapacity(kept);
 
+        // What the dominator holds in each asked slot: the value of every
+        // predecessor whose path does not edit that slot.
+        try flow.windToBase(self.gpa, b);
+        const base_state = try self.gpa.alloc(State, asked.items.len);
+        defer self.gpa.free(base_state);
+        const base_at = try self.gpa.alloc(ExprId, asked.items.len);
+        defer self.gpa.free(base_at);
+        for (asked.items, base_state, base_at) |s, *state, *at| {
+            state.* = flow.state[s];
+            at.* = flow.state_at[s];
+        }
+        // Per asked slot: the last predecessor whose path edited it, how many
+        // after the first did, and whether a disagreement is to be reported.
+        const stamp = try self.gpa.alloc(u32, asked.items.len);
+        defer self.gpa.free(stamp);
+        const edited_by = try self.gpa.alloc(u32, asked.items.len);
+        defer self.gpa.free(edited_by);
+        const disagrees = try self.gpa.alloc(bool, asked.items.len);
+        defer self.gpa.free(disagrees);
+        @memset(stamp, 0);
+        @memset(edited_by, 0);
+        @memset(disagrees, false);
+
+        // Each predecessor after the first is compared with it only in the
+        // slots its own path edits; in every other slot it holds what the
+        // dominator held, which is compared once after the walk. So the work
+        // is the edits each path makes, each found among the asked slots by
+        // binary search, plus the asked slots once -- the predecessors times
+        // the asked slots, which a `match` of n binding arms made quadratic,
+        // is never paid.
         first.clearRetainingCapacity();
         first_at.clearRetainingCapacity();
+        var later: u32 = 0;
         for (preds.of(b)) |p| {
             if (!flow.computed[p]) continue;
             try flow.wind(self.gpa, p);
@@ -2907,51 +3051,82 @@ const Checker = struct {
                 }
                 continue;
             }
-
-            for (asked.items, first.items, first_at.items) |s, *was_slot, *was_at_slot| {
-                // A path through a refused construct holds an unknown state,
-                // which agrees and disagrees with nothing: it is left out, and
-                // every other path is compared with the first known one.
-                if (flow.state[s] == .unknown) continue;
-                if (was_slot.* == .unknown) {
-                    was_slot.* = flow.state[s];
-                    was_at_slot.* = flow.state_at[s];
-                    continue;
-                }
-                const was = was_slot.*;
-                const was_at = was_at_slot.*;
-                if (was == flow.state[s]) continue;
-                const binding = roots[s];
-                if (!self.isTracked(binding, b)) continue;
-
-                switch (action) {
-                    .mark_origins => {
-                        for ([_]ExprId{ was_at, flow.state_at[s] }) |at| {
-                            if (at == .none) continue;
-                            const origin = try self.merge_origins.getOrPut(self.gpa, .{ .at = at, .binding = binding });
-                            if (!origin.found_existing) origin.value_ptr.* = b;
-                        }
-                    },
-                    .report => {
-                        // A path that holds the value as moved only because an
-                        // earlier join merged it pessimistically carries that
-                        // join's disagreement here, and it was said there.
-                        const moved_at = if (was == .moved) was_at else if (flow.state[s] == .moved) flow.state_at[s] else ExprId.none;
-                        if (moved_at != .none) {
-                            if (self.merge_origins.get(.{ .at = moved_at, .binding = binding })) |join| {
-                                if (join != b) continue;
-                            }
-                        }
-                        try self.report(
-                            .o_merge,
-                            self.cfg.blocks[f.blocks.start + b].at,
-                            "consume it on the other path too, or on neither",
-                            "the paths here disagree about `{s}`",
-                            .{try self.nameOf(binding)},
-                        );
-                    },
+            later += 1;
+            for (flow.path.items[base..]) |q| {
+                for (flow.editsOf(q)) |e| {
+                    const i = std.sort.binarySearch(u32, asked.items, e.slot, orderSlot) orelse continue;
+                    if (stamp[i] == later) continue;
+                    stamp[i] = later;
+                    edited_by[i] += 1;
+                    try self.compareAtMerge(b, roots[asked.items[i]], &first.items[i], &first_at.items[i], flow.state[e.slot], flow.state_at[e.slot], &disagrees[i], action);
                 }
             }
+        }
+        for (asked.items, 0..) |s, i| {
+            if (edited_by[i] < later) {
+                try self.compareAtMerge(b, roots[s], &first.items[i], &first_at.items[i], base_state[i], base_at[i], &disagrees[i], action);
+            }
+            if (!disagrees[i]) continue;
+            try self.report(
+                .o_merge,
+                self.cfg.blocks[f.blocks.start + b].at,
+                "consume it on the other path too, or on neither",
+                "the paths here disagree about `{s}`",
+                .{try self.nameOf(roots[s])},
+            );
+        }
+    }
+
+    fn orderSlot(key: u32, item: u32) std.math.Order {
+        return std.math.order(key, item);
+    }
+
+    /// One predecessor's value of a slot against the first known one, at the
+    /// start of block `join`. A path through a refused construct holds an
+    /// unknown state, which agrees and disagrees with nothing: it is left
+    /// out, and every other path is compared with the first known one. Only a
+    /// binding tracked at `join` is compared (`isTracked`).
+    fn compareAtMerge(
+        self: *Checker,
+        join: u32,
+        binding: BindingId,
+        was_slot: *State,
+        was_at_slot: *ExprId,
+        now: State,
+        now_at: ExprId,
+        disagrees: *bool,
+        action: MergeAction,
+    ) std.mem.Allocator.Error!void {
+        if (now == .unknown) return;
+        if (was_slot.* == .unknown) {
+            was_slot.* = now;
+            was_at_slot.* = now_at;
+            return;
+        }
+        const was = was_slot.*;
+        const was_at = was_at_slot.*;
+        if (was == now) return;
+        if (!self.isTracked(binding, join)) return;
+        switch (action) {
+            .mark_origins => {
+                for ([_]ExprId{ was_at, now_at }) |at| {
+                    if (at == .none) continue;
+                    const origin = try self.merge_origins.getOrPut(self.gpa, .{ .at = at, .binding = binding });
+                    if (!origin.found_existing) origin.value_ptr.* = join;
+                }
+            },
+            .report => {
+                // A path that holds the value as moved only because an
+                // earlier join merged it pessimistically carries that join's
+                // disagreement here, and it was said there.
+                const moved_at = if (was == .moved) was_at else if (now == .moved) now_at else ExprId.none;
+                if (moved_at != .none) {
+                    if (self.merge_origins.get(.{ .at = moved_at, .binding = binding })) |origin| {
+                        if (origin != join) return;
+                    }
+                }
+                disagrees.* = true;
+            },
         }
     }
 

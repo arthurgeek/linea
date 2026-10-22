@@ -78,8 +78,8 @@ fn main() -> UInt8 {
     }
     let result = filter_lines(&input, &output, minimum)
     let output_failed = match read result {
-        Err(error) => match read error { Output => true, _ => false },
-        Ok(_) => false,
+        Err(Output) => true,
+        _ => false,
     }
     if output_failed {
         let _stdout = output.abort()
@@ -102,10 +102,8 @@ fn main() -> UInt8 {
 fn filter_lines(inout input: Input, inout output: Output, minimum: UInt64) -> Result[(), LogFailure] {
     loop {
         let line = match &input.read_line_borrowed(max_bytes: max_line_bytes) {
-            Ok(line) => match line {
-                None => return .Ok(()),
-                Some(value) => value,
-            },
+            Ok(None) => return .Ok(()),
+            Ok(Some(value)) => value,
             Err(error) => {
                 let recoverable = match read error {
                     Limit => true,

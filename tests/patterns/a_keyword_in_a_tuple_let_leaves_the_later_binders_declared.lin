@@ -1,0 +1,10 @@
+// A keyword cannot stand in a destructuring `let`. The `let` is refused for
+// it alone: the binder after it is still declared, so the next line reads it.
+fn second(sink pair: (UInt8, UInt8)) -> UInt8 {
+    let (return, count) = pair
+    count
+}
+
+fn main() -> UInt8 {
+    second((1, 2)) - 2
+}

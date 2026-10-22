@@ -1,0 +1,106 @@
+import std.ffi
+
+@(opaque, linear)
+type DatabaseHandle = UInt64
+
+extern fn sqlite3_open_v2(filename: ffi.CText, inout database: UInt64, flags: Int32, vfs: UInt64) -> Int32
+
+extern fn sqlite3_close_v2(sink database: DatabaseHandle) -> Int32
+
+// What the row callback keeps between rows. C holds it only as a `void *`
+// and hands it back with every row.
+struct Rows {
+    lines: String,
+    unreadable: UInt64,
+}
+
+// `sqlite3_exec` runs every statement in `sql`, calling `row` once per result
+// row with that row's values and column names, and handing back `rows`. The
+// last parameter, `char **errmsg`, is a null pointer, so SQLite keeps its
+// message to itself.
+extern fn sqlite3_exec(database: DatabaseHandle, sql: ffi.CText, row: fn(inout rows: Rows, count: Int32, values: ffi.CTextList, names: ffi.CTextList) -> Int32, inout rows: Rows, message: UInt64) -> Int32
+
+let ok: Int32 = 0
+
+let read_write_create: Int32 = 6
+
+// Append `name=value` for each column of a row, and a line break after it.
+// The values live only during this call, so they are copied out.
+fn collect(inout rows: Rows, count: Int32, values: ffi.CTextList, names: ffi.CTextList) -> Int32 {
+    let columns = UInt64(count)
+    for column in 0..columns {
+        let name = names.get(column, count: columns).to_owned()
+        let value = values.get(column, count: columns).to_owned()
+        match name {
+            Ok(text) => {
+                let _appended = &rows.lines.append(text.view())
+                text.release()
+            },
+            Err(_) => rows.unreadable += 1,
+        }
+        let _equals = &rows.lines.append("=")
+        match value {
+            Ok(text) => {
+                let _appended = &rows.lines.append(text.view())
+                text.release()
+            },
+            Err(_) => rows.unreadable += 1,
+        }
+        let _space = &rows.lines.append(
+            if column + 1 == columns {
+                "\n"
+            } else {
+                " "
+            },
+        )
+    }
+    0
+}
+
+pub enum Failure { OutOfMemory, Refused(Int32) }
+
+// A connection to an in-memory database. It must be closed.
+@(opaque, linear)
+struct Database { handle: DatabaseHandle }
+
+impl Database {
+    pub fn open() -> Result[Database, Failure] {
+        let path = ffi.CString.open(":memory:") else |_| {
+            return .Err(.OutOfMemory)
+        }
+        var address: UInt64 = 0
+        let opened = sqlite3_open_v2(path.text(), &address, read_write_create, 0)
+        path.release()
+        if address == 0 {
+            return .Err(.OutOfMemory)
+        }
+        let database = Database { handle = DatabaseHandle(address) }
+        if opened != ok {
+            database.close()
+            return .Err(.Refused(opened))
+        }
+        .Ok(database)
+    }
+
+    // Run `sql` and answer every row it produced, one line per row.
+    // Running statements changes the database, so it is lent `inout`.
+    pub fn rows_of(inout self: Self, sql: Str) -> Result[String, Failure] {
+        let statements = ffi.CString.open(sql) else |_| {
+            return .Err(.OutOfMemory)
+        }
+        var rows = Rows { lines = String.new(), unreadable = 0 }
+        let ran = sqlite3_exec(self.handle, statements.text(), collect, &rows, 0)
+        statements.release()
+        let Rows { lines: lines, unreadable: _unreadable } = rows
+        if ran != ok {
+            lines.release()
+            return .Err(.Refused(ran))
+        }
+        .Ok(lines)
+    }
+
+    pub fn close(sink self: Self) {
+        let Database { handle: handle } = self
+        let _closed = sqlite3_close_v2(handle)
+    }
+}

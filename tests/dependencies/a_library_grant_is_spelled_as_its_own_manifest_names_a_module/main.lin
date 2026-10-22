@@ -1,0 +1,7 @@
+import std.io
+import c
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{c.squares(4)}")?
+    .Ok(0)
+}

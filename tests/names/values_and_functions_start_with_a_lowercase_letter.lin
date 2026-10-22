@@ -53,10 +53,10 @@ fn main() -> UInt8 {
         return Reason
     }
     let found = match Option.Some(sum) {
-        Some(Inner) => Inner,
+        Some(inner) => inner,
         None => 0,
     }
-    let Counter { Count: Held } = Counter { Count = 1 }
+    let Held = Counter { Count = 1 }.Count
     let _whole = Strings.parse_float64("1.5")
     Add(apply(Clamp, found)) + shift() + halved + Held - 11 + For()
 }

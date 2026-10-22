@@ -1,0 +1,5 @@
+error[T-Cover]: this `match` does not cover `Unset`, `One(1..=255)`, `Two(1..=255)`, `Three(1..=255)`, `Four(1..=255)`, `Five(1..=255)`, `Six(1..=255)`, `Seven(1..=255)`, and more
+  --> tests/patterns/an_unnamed_variant_is_named_before_the_gaps_after_it.lin:18:5
+   |
+18 |     match dial {
+   |     ^^^^^^^^^^^^ add the missing arms, or a `_`

@@ -1,0 +1,23 @@
+// A test trap may sit inside an inherent impl.
+struct Divider {
+    divisor: UInt32,
+}
+
+fn runtime_zero() -> UInt32 {
+    0
+}
+
+impl Divider {
+    pub fn new(divisor: UInt32) -> Divider {
+        Divider { divisor = divisor }
+    }
+
+    test trap fn divides_by_zero() {
+        let d = Divider.new(runtime_zero())
+        let _q = 10 / d.divisor
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

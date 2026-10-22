@@ -1,0 +1,16 @@
+import std.io
+import named
+
+// Each reads the name before C changes the object, so each answers 5.
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("self_reset: {named.self_reset()}")?
+    io.println("self_replace: {named.self_replace()}")?
+    io.println("local_reset: {named.local_reset()}")?
+    io.println("local_replace: {named.local_replace()}")?
+    io.println("local_close: {named.local_close()}")?
+    io.println("field_reset: {named.field_reset()}")?
+    io.println("param_reset: {named.param_reset()}")?
+    io.println("field_replace: {named.field_replace()}")?
+    io.println("param_replace: {named.param_replace()}")?
+    .Ok(0)
+}

@@ -1,0 +1,5 @@
+import visits
+
+fn main() -> UInt8 {
+    UInt8(visits.run())
+}

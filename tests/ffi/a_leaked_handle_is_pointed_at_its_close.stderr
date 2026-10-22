@@ -1,0 +1,9 @@
+error[O-Leak]: `handle` (a linear `Handle`) is still owned when this path leaves
+  --> tests/ffi/a_leaked_handle_is_pointed_at_its_close/counter/counter.lin:22:13
+   |
+20 |         let Counter { handle: handle } = self
+   |                               ------ acquired here
+22 |             return false
+   |             ^^^^^^ still owned here
+   |
+   = help: settle it first with `counter_close(handle)`

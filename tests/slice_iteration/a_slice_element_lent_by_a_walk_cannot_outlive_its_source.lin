@@ -1,0 +1,11 @@
+// A borrow of an element a walk lends observes the vector behind the slice,
+// so the vector cannot be released while that borrow is still used.
+fn main() -> UInt8 {
+    let values = Vec.filled(count: 2, value: UInt8(7)).unwrap()
+    var kept: Option[borrow UInt8] = .None
+    for read value in values.as_slice() {
+        kept = .Some(borrow value)
+    }
+    values.release()
+    *kept.unwrap()
+}

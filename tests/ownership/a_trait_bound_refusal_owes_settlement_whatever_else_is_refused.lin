@@ -1,0 +1,22 @@
+import std.cmp
+
+// `NeedsCopy[Session]` breaks a capability bound and `NeedsEq[Session]` only a
+// trait bound. Only the first promises no capability; `held` is still a
+// linear value left unsettled, whatever is refused elsewhere.
+struct NeedsCopy[T: Copyable] { value: T }
+
+struct NeedsEq[R: cmp.Equatable] { value: R }
+
+@linear
+struct Session { id: UInt64 }
+
+fn elsewhere() -> UInt8 {
+    let _copied: NeedsCopy[Session] = .{ value = Session { id = 2 } }
+    0
+}
+
+fn main() -> UInt8 {
+    let opened: NeedsEq[Session] = .{ value = Session { id = 1 } }
+    let _held: NeedsEq[Session] = opened
+    elsewhere()
+}

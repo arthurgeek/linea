@@ -1,0 +1,15 @@
+// An integer literal or range may stand inside a payload, and the arms are
+// tried in order: `Some(0)` before `Some(1..=9)` before the `Some(_)` that
+// takes the rest.
+fn bucket(value: Option[UInt8]) -> UInt8 {
+    match read value {
+        Some(0) => 1,
+        Some(1..=9) => 2,
+        Some(_) => 3,
+        None => 4,
+    }
+}
+
+fn main() -> UInt8 {
+    bucket(.Some(0)) + bucket(.Some(5)) + bucket(.Some(200)) + bucket(.None) - 10
+}

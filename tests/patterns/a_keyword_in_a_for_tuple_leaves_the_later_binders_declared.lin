@@ -1,0 +1,14 @@
+// A keyword cannot stand in the tuple a `for` takes each element apart with.
+// The loop is refused for it alone: the binder after it is still declared, so
+// the body reads it.
+fn total(sink pairs: [(UInt8, UInt8); 2]) -> UInt8 {
+    var sum: UInt8 = 0
+    for (fn, count) in pairs {
+        sum = sum + count
+    }
+    sum
+}
+
+fn main() -> UInt8 {
+    total([(1, 1), (2, 2)]) - 3
+}

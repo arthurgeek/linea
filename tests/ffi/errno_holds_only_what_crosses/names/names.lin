@@ -1,0 +1,27 @@
+import std.ffi
+
+// C returns a pointer or an integer, never Linea text.
+extern fn getlogin() -> ffi.Errno[Str]
+
+// C cannot be handed what a previous call answered, because only Linea knows
+// how an `Errno` is laid out.
+extern fn reuse(earlier: ffi.Errno[Int32]) -> Int32
+
+// A copy of an `Errno` copies what C returned, so a value that must not be
+// duplicated, such as a linear handle, is wrapped after the call succeeds.
+@(opaque, linear)
+type Session = UInt64
+
+extern fn session_open() -> ffi.Errno[Session]
+
+pub fn check() -> UInt8 {
+    let _session = session_open()
+    let _name = getlogin()
+    UInt8(reuse(reuse_seed()))
+}
+
+fn reuse_seed() -> ffi.Errno[Int32] {
+    seed()
+}
+
+extern fn seed() -> ffi.Errno[Int32]

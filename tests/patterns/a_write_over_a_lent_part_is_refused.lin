@@ -1,0 +1,15 @@
+// Writing the whole value while a binder lends a part of it overlaps that lend.
+fn bump(inout counts: Option[(UInt64, UInt64)]) {
+    match read counts {
+        Some((hits, _)) => {
+            counts = .Some((hits + 1, 0))
+        },
+        None => {},
+    }
+}
+
+fn main() -> UInt8 {
+    var counts: Option[(UInt64, UInt64)] = .Some((0, 0))
+    bump(&counts)
+    0
+}

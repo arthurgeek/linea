@@ -26,6 +26,10 @@ enum linea_io_category {
     LINEA_IO_ADDRESS_IN_USE = 18
 };
 uint8_t linea_io_category(int code);
+/* `errno` as the call just made left it. The compiler calls this immediately
+ * after a call to an `extern` declared to answer `ffi.Errno`, with no other
+ * code in between that could change it. */
+int linea_errno(void);
 
 long linea_read_some(int fd, unsigned long at, unsigned long len);
 long linea_write_some(int fd, unsigned long at, unsigned long len);

@@ -63,34 +63,30 @@ impl[A: Allocator] DecodeFailure[A] {
     pub fn reason(self: Self) -> DecodeReason {
         self.cause
     }
-}
 
-test fn reason_says_why_a_value_did_not_decode() {
-    defer let error = DecodeError.failure(.MissingField)
-    let reason: Option[DecodeReason] = match read error { Value(failure) => .Some(failure.reason()), _ => .None }
-    testing.assert_eq(reason, Option.Some(DecodeReason.MissingField), "the reason changed")?
-}
+    test fn reason_says_why_a_value_did_not_decode() {
+        defer let error = DecodeError.failure(.MissingField)
+        let reason: Option[DecodeReason] = match read error { Value(failure) => .Some(failure.reason()), _ => .None }
+        testing.assert_eq(reason, Option.Some(DecodeReason.MissingField), "the reason changed")?
+    }
 
-test fn a_decode_error_written_without_an_allocator_is_the_system_error() {
-    let short: DecodeError = DecodeError.failure(.WrongKind)
-    let long: DecodeError[mem.SystemAllocator] = short
-    long.release()
-}
+    test fn a_decode_error_written_without_an_allocator_is_the_system_error() {
+        let short: DecodeError = DecodeError.failure(.WrongKind)
+        let long: DecodeError[mem.SystemAllocator] = short
+        long.release()
+    }
 
-impl[A: Allocator] DecodeFailure[A] {
     // Return how many segments lead from the root to the failing value.
     pub fn path_length(self: Self) -> UInt64 {
         self.path.length()
     }
-}
 
-test fn path_length_counts_every_segment_to_the_failing_value() {
-    defer let error = DecodeError.failure(.WrongKind).at_index(2).at_field("ports")
-    let length = match read error { Value(failure) => failure.path_length(), _ => 99 }
-    testing.assert_eq(length, UInt64(2), "the path lost or gained a segment")?
-}
+    test fn path_length_counts_every_segment_to_the_failing_value() {
+        defer let error = DecodeError.failure(.WrongKind).at_index(2).at_field("ports")
+        let length = match read error { Value(failure) => failure.path_length(), _ => 99 }
+        testing.assert_eq(length, UInt64(2), "the path lost or gained a segment")?
+    }
 
-impl[A: Allocator] DecodeFailure[A] {
     // Borrow the segment `index` steps from the root, or None past the end.
     pub fn segment(self: Self, index: UInt64) -> Option[borrow PathSegment[A]] where borrows(.Some: self) {
         if index >= self.path.length() {
@@ -98,25 +94,25 @@ impl[A: Allocator] DecodeFailure[A] {
         }
         self.path.as_slice().get(self.path.length() - index - 1)
     }
-}
 
-test fn segment_reads_the_path_root_first() {
-    defer let error = DecodeError.failure(.WrongKind).at_index(1).at_field("ports")
-    let outer = match read error {
-        Value(failure) => match read *failure.segment(0).unwrap() { Field(name) => name.view() == "ports", Index(_) => false },
-        _ => false,
+    test fn segment_reads_the_path_root_first() {
+        defer let error = DecodeError.failure(.WrongKind).at_index(1).at_field("ports")
+        let outer = match read error {
+            Value(failure) => match read *failure.segment(0).unwrap() { Field(name) => name.view() == "ports", Index(_) => false },
+            _ => false,
+        }
+        let inner = match read error {
+            Value(failure) => match read *failure.segment(1).unwrap() { Index(position) => position == 1, Field(_) => false },
+            _ => false,
+        }
+        let beyond = match read error {
+            Value(failure) => failure.segment(2).is_none(),
+            _ => false,
+        }
+        testing.assert(outer, "the root segment was not the outer field")?
+        testing.assert(inner, "the inner segment was not the array index")?
+        testing.assert(beyond, "a segment past the path was found")?
     }
-    let inner = match read error {
-        Value(failure) => match read *failure.segment(1).unwrap() { Index(position) => position == 1, Field(_) => false },
-        _ => false,
-    }
-    let beyond = match read error {
-        Value(failure) => failure.segment(2).is_none(),
-        _ => false,
-    }
-    testing.assert(outer, "the root segment was not the outer field")?
-    testing.assert(inner, "the inner segment was not the array index")?
-    testing.assert(beyond, "a segment past the path was found")?
 }
 
 // DecodeError says why decoding failed: the text did not parse, a value did
@@ -136,17 +132,28 @@ impl[A: Allocator] From[mem.Oom] for DecodeError[A] {
     }
 }
 
-impl[A: Allocator] DecodeError[A] {
-    // Start a value error for `reason`, with an empty path.
-    pub fn failure_in(allocator: A, reason: DecodeReason) -> Self where carries(allocator) {
-        .Value(.{ cause = reason, path = Vec.new_in(allocator) })
+// Add `segment` at the outer end of a value error's path. A parse or
+// allocation error drops it.
+fn append_error_segment[A: Allocator](sink error: DecodeError[A], sink segment: PathSegment[A]) -> DecodeError[A] where carries(error, segment) {
+    match error {
+        Parse(reason) => {
+            segment.release()
+            return .Parse(reason)
+        },
+        Allocation => {
+            segment.release()
+            return .Allocation
+        },
+        Value(DecodeFailure { cause, path: previous_path }) => {
+            var path = previous_path
+            // `settled()` releases a segment the path could not hold.
+            if &path.push(segment).settled().is_err() {
+                path.release()
+                return .Allocation
+            }
+            return .Value(.{ cause, path })
+        },
     }
-}
-
-test fn failure_starts_a_value_error_at_the_root() {
-    defer let error = DecodeError.failure(.UnknownField)
-    defer let shown = fmt.render_owned(error).unwrap()
-    testing.assert_eq(shown.view(), "unknown field at $", "a new failure had a path")?
 }
 
 impl DecodeError[mem.SystemAllocator] {
@@ -155,15 +162,38 @@ impl DecodeError[mem.SystemAllocator] {
     pub fn failure(reason: DecodeReason) -> Self {
         DecodeError.failure_in(mem.system(), reason)
     }
-}
 
-test fn failure_starts_a_value_error_in_the_system_allocator() {
-    defer let error = DecodeError.failure(.MissingField)
-    defer let shown = fmt.render_owned(error).unwrap()
-    testing.assert_eq(shown.view(), "missing field at $", "a new failure had a path")?
+    test fn failure_starts_a_value_error_in_the_system_allocator() {
+        defer let error = DecodeError.failure(.MissingField)
+        defer let shown = fmt.render_owned(error).unwrap()
+        testing.assert_eq(shown.view(), "missing field at $", "a new failure had a path")?
+    }
+
+    // Record that the error lies under the field `name`, copying the name
+    // into the system allocator, as `at_field_in` does.
+    pub fn at_field(sink self: Self, name: Str) -> Self where carries(self) {
+        self.at_field_in(mem.system(), name)
+    }
+
+    test fn at_field_copies_the_name_into_the_system_allocator() {
+        defer let error = DecodeError.failure(.MissingField).at_field("port")
+        defer let shown = fmt.render_owned(error).unwrap()
+        testing.assert_eq(shown.view(), r#"missing field at $["port"]"#, "the field was not recorded")?
+    }
 }
 
 impl[A: Allocator] DecodeError[A] {
+    // Start a value error for `reason`, with an empty path.
+    pub fn failure_in(allocator: A, reason: DecodeReason) -> Self where carries(allocator) {
+        .Value(.{ cause = reason, path = Vec.new_in(allocator) })
+    }
+
+    test fn failure_starts_a_value_error_at_the_root() {
+        defer let error = DecodeError.failure(.UnknownField)
+        defer let shown = fmt.render_owned(error).unwrap()
+        testing.assert_eq(shown.view(), "unknown field at $", "a new failure had a path")?
+    }
+
     // Record that the error lies under the field `name`, copying the name. A
     // parse or allocation error passes through unchanged, and a refused copy
     // becomes Allocation.
@@ -178,129 +208,86 @@ impl[A: Allocator] DecodeError[A] {
         let segment: PathSegment[A] = .Field(owned)
         append_error_segment(self, segment)
     }
-}
 
-test fn decode_error_paths_own_names_and_expose_root_first_segments() {
-    let allocator = mem.system()
-    let name = "retries".to_owned().unwrap()
-    let leaf = DecodeError.failure(.OutOfRange)
-    let indexed = DecodeError.at_index(leaf, 2)
-    let named = DecodeError.at_field(indexed, name.view())
-    name.release()
-    defer let error = DecodeError.at_field(named, "settings")
-    var rendered = String.new_in(allocator)
-    error.debug(&rendered).unwrap()
-    defer rendered.release()
-    testing.assert_eq(rendered.view(), r#"OutOfRange at $["settings"]["retries"][2]"#, "decode path lost its segment order or owned name")?
-}
-
-impl DecodeError[mem.SystemAllocator] {
-    // Record that the error lies under the field `name`, copying the name
-    // into the system allocator, as `at_field_in` does.
-    pub fn at_field(sink self: Self, name: Str) -> Self where carries(self) {
-        self.at_field_in(mem.system(), name)
+    test fn decode_error_paths_own_names_and_expose_root_first_segments() {
+        let allocator = mem.system()
+        let name = "retries".to_owned().unwrap()
+        let leaf = DecodeError.failure(.OutOfRange)
+        let indexed = DecodeError.at_index(leaf, 2)
+        let named = DecodeError.at_field(indexed, name.view())
+        name.release()
+        defer let error = DecodeError.at_field(named, "settings")
+        var rendered = String.new_in(allocator)
+        error.debug(&rendered).unwrap()
+        defer rendered.release()
+        testing.assert_eq(rendered.view(), r#"OutOfRange at $["settings"]["retries"][2]"#, "decode path lost its segment order or owned name")?
     }
-}
 
-test fn at_field_copies_the_name_into_the_system_allocator() {
-    defer let error = DecodeError.failure(.MissingField).at_field("port")
-    defer let shown = fmt.render_owned(error).unwrap()
-    testing.assert_eq(shown.view(), r#"missing field at $["port"]"#, "the field was not recorded")?
-}
-
-test fn decode_error_allocation_failure_releases_owned_path_segments() {
-    defer let arena = mem.Arena.open(mem.system(), 4096)
-    let allocator = arena.handle()
-    let leaf = DecodeError.failure_in(allocator, .WrongKind)
-    let partial = DecodeError.at_field_in(leaf, allocator, "inner")
-    var exhausted = false
-    while !exhausted {
-        match allocator.acquire(8) {
-            Ok(buffer) => buffer.release(),
-            Err(_) => exhausted = true,
-        }
-    }
-    let error = DecodeError.at_field_in(partial, allocator, "outer")
-    let failed = match read error { Allocation => true, _ => false }
-    error.release()
-    testing.assert(failed, "an exhausted field path did not become Allocation")?
-}
-
-test fn each_allocation_failure_covers_every_segment_of_a_field_path() -> Result[(), testing.Failure] {
-    let checked = testing.each_allocation_failure(
-        mem.system(),
-        |allocator| -> Result[(), mem.Oom] {
-            let leaf = DecodeError.failure_in(allocator, .WrongKind)
-            let inner = DecodeError.at_field_in(leaf, allocator, "retries")
-            let middle = DecodeError.at_field_in(inner, allocator, "settings")
-            let error = DecodeError.at_field_in(middle, allocator, "service")
-            let refused = error.ran_out_of_memory()
-            error.release()
-            if refused {
-                return .Err(.Exhausted)
+    test fn decode_error_allocation_failure_releases_owned_path_segments() {
+        defer let arena = mem.Arena.open(mem.system(), 4096)
+        let allocator = arena.handle()
+        let leaf = DecodeError.failure_in(allocator, .WrongKind)
+        let partial = DecodeError.at_field_in(leaf, allocator, "inner")
+        var exhausted = false
+        while !exhausted {
+            match allocator.acquire(8) {
+                Ok(buffer) => buffer.release(),
+                Err(_) => exhausted = true,
             }
-            return .Ok(())
-        },
-        mem.Oom.is_refusal,
-    )
-    testing.assert(checked.is_ok(), "a field path was reported as failing")?
-    .Ok(())
-}
+        }
+        let error = DecodeError.at_field_in(partial, allocator, "outer")
+        let failed = match read error { Allocation => true, _ => false }
+        error.release()
+        testing.assert(failed, "an exhausted field path did not become Allocation")?
+    }
 
-impl[A: Allocator] DecodeError[A] {
+    test fn each_allocation_failure_covers_every_segment_of_a_field_path() -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), mem.Oom] {
+                let leaf = DecodeError.failure_in(allocator, .WrongKind)
+                let inner = DecodeError.at_field_in(leaf, allocator, "retries")
+                let middle = DecodeError.at_field_in(inner, allocator, "settings")
+                let error = DecodeError.at_field_in(middle, allocator, "service")
+                let refused = error.ran_out_of_memory()
+                error.release()
+                if refused {
+                    return .Err(.Exhausted)
+                }
+                return .Ok(())
+            },
+            mem.Oom.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "a field path was reported as failing")?
+        .Ok(())
+    }
+
     // Record that the error lies under the array element at `index`.
     pub fn at_index(sink self: Self, index: UInt64) -> Self where carries(self) {
         let segment: PathSegment[A] = .Index(index)
         append_error_segment(self, segment)
     }
-}
 
-test fn at_index_records_an_array_position() {
-    defer let error = DecodeError.failure(.NotInteger).at_index(3)
-    defer let shown = fmt.render_owned(error).unwrap()
-    testing.assert_eq(shown.view(), "number is not an integer at $[3]", "the index was not recorded")?
-}
-
-test fn decode_error_path_allocation_failure_settles_the_partial_error() {
-    defer let arena = mem.Arena.open(mem.system(), 0)
-    let error = DecodeError.failure_in(arena.handle(), .WrongKind)
-    let refused = DecodeError.at_field_in(error, arena.handle(), "name")
-    let allocation = match read refused { Allocation => true, _ => false }
-    refused.release()
-    testing.assert(allocation, "field-path allocation failure lost its allocation reason")?
-    let leaf = DecodeError.failure_in(arena.handle(), .WrongKind)
-    let indexed = DecodeError.at_index(leaf, 0)
-    let index_allocation = match read indexed { Allocation => true, _ => false }
-    indexed.release()
-    testing.assert(index_allocation, "index-path allocation failure lost its allocation reason")?
-}
-
-// Add `segment` at the outer end of a value error's path. A parse or
-// allocation error drops it.
-fn append_error_segment[A: Allocator](sink error: DecodeError[A], sink segment: PathSegment[A]) -> DecodeError[A] where carries(error, segment) {
-    match error {
-        Parse(reason) => {
-            segment.release()
-            return .Parse(reason)
-        },
-        Allocation => {
-            segment.release()
-            return .Allocation
-        },
-        Value(failure) => {
-            let DecodeFailure { cause, path: previous_path } = failure
-            var path = previous_path
-            // `settled()` releases a segment the path could not hold.
-            if &path.push(segment).settled().is_err() {
-                path.release()
-                return .Allocation
-            }
-            return .Value(.{ cause, path })
-        },
+    test fn at_index_records_an_array_position() {
+        defer let error = DecodeError.failure(.NotInteger).at_index(3)
+        defer let shown = fmt.render_owned(error).unwrap()
+        testing.assert_eq(shown.view(), "number is not an integer at $[3]", "the index was not recorded")?
     }
-}
 
-impl[A: Allocator] DecodeError[A] {
+    test fn decode_error_path_allocation_failure_settles_the_partial_error() {
+        defer let arena = mem.Arena.open(mem.system(), 0)
+        let error = DecodeError.failure_in(arena.handle(), .WrongKind)
+        let refused = DecodeError.at_field_in(error, arena.handle(), "name")
+        let allocation = match read refused { Allocation => true, _ => false }
+        refused.release()
+        testing.assert(allocation, "field-path allocation failure lost its allocation reason")?
+        let leaf = DecodeError.failure_in(arena.handle(), .WrongKind)
+        let indexed = DecodeError.at_index(leaf, 0)
+        let index_allocation = match read indexed { Allocation => true, _ => false }
+        indexed.release()
+        testing.assert(index_allocation, "index-path allocation failure lost its allocation reason")?
+    }
+
     // `ran_out_of_memory` says whether decoding failed because an allocation
     // failed, while parsing or while building the value. Every other decode
     // error is a fault in the input.
@@ -311,17 +298,17 @@ impl[A: Allocator] DecodeError[A] {
             Allocation => true,
         }
     }
-}
 
-test fn a_decode_error_runs_out_of_memory_only_when_an_allocation_failed() {
-    defer let full: DecodeError = .Allocation
-    defer let parser_full: DecodeError = .Parse(.{ kind = .Allocation, offset = 9 })
-    defer let malformed: DecodeError = .Parse(.{ kind = .Syntax, offset = 0 })
-    defer let wrong = DecodeError.failure(.WrongKind)
-    testing.assert(full.ran_out_of_memory(), "a failed allocation was the input's fault")?
-    testing.assert(parser_full.ran_out_of_memory(), "a parser that ran out of memory was the input's fault")?
-    testing.assert(!malformed.ran_out_of_memory(), "malformed input ran out of memory")?
-    testing.assert(!wrong.ran_out_of_memory(), "a value of the wrong kind ran out of memory")?
+    test fn a_decode_error_runs_out_of_memory_only_when_an_allocation_failed() {
+        defer let full: DecodeError = .Allocation
+        defer let parser_full: DecodeError = .Parse(.{ kind = .Allocation, offset = 9 })
+        defer let malformed: DecodeError = .Parse(.{ kind = .Syntax, offset = 0 })
+        defer let wrong = DecodeError.failure(.WrongKind)
+        testing.assert(full.ran_out_of_memory(), "a failed allocation was the input's fault")?
+        testing.assert(parser_full.ran_out_of_memory(), "a parser that ran out of memory was the input's fault")?
+        testing.assert(!malformed.ran_out_of_memory(), "malformed input ran out of memory")?
+        testing.assert(!wrong.ran_out_of_memory(), "a value of the wrong kind ran out of memory")?
+    }
 }
 
 impl[A: Allocator] Debug for DecodeError[A] {

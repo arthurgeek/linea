@@ -1,0 +1,5 @@
+import checksum
+
+fn main() -> UInt8 {
+    UInt8(checksum.grown_while_lent())
+}

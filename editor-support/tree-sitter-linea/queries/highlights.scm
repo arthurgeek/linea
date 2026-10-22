@@ -152,6 +152,10 @@
 (variant name: (type_identifier) @constructor)
 (variant_reference (type_identifier) @constructor)
 (variant_pattern (type_identifier) @constructor)
+; Inside a pattern a bare name binds or names a variant by its case.
+((variant_pattern (identifier) @constructor) (#match? @constructor "^_*[A-Z]"))
+((tuple_pattern (identifier) @constructor) (#match? @constructor "^_*[A-Z]"))
+((field_pattern (identifier) @constructor) (#match? @constructor "^_*[A-Z]"))
 
 ; -- Operators and punctuation ---------------------------------------------
 ["+" "-" "*" "/" "==" "!=" "<" "<=" ">" ">=" "=" "&" "!" "&&" "||" "|" ".." "..=" "^"] @operator

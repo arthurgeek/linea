@@ -2,4 +2,4 @@ error[T-Unreachable]: no value reaches this arm
  --> tests/ranges/an_arm_the_ranges_shadow_is_unreached.lin:6:9
   |
 6 |         7 => 2,
-  |         ^ this interval is already covered
+  |         ^ the arms before it take every value it would

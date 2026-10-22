@@ -1,0 +1,139 @@
+import std.ffi
+import handles
+
+use handles.Name
+
+// `Name` is sealed in the library `handles`, whose manifest trusts it with
+// C, so it is a handle in this module's `extern` declarations too.
+fn named_open() -> Name {
+    handles.open()
+}
+
+extern fn named_name(read handle: Name) -> ffi.CText where borrows(handle)
+
+extern fn named_reset(handle: Name)
+
+extern fn named_replace(inout handle: Name)
+
+extern fn named_close(sink handle: Name)
+
+@linear
+struct Box {
+    handle: Name,
+}
+
+impl Box {
+    fn close(sink self: Self) {
+        let Box { handle: handle } = self
+        named_close(handle)
+    }
+
+    // A field of `inout self`, then `reset`.
+    pub fn self_field_reset(inout self: Self) -> UInt64 {
+        let name = named_name(self.handle)
+        named_reset(self.handle)
+        let length = name.length()
+        length
+    }
+
+    // A field of `inout self`, then `replace`.
+    pub fn self_field_replace(inout self: Self) -> UInt64 {
+        let name = named_name(self.handle)
+        named_replace(&self.handle)
+        let length = name.length()
+        length
+    }
+}
+
+// A local, then `reset`.
+pub fn local_reset() -> UInt64 {
+    var held = named_open()
+    let name = named_name(held)
+    named_reset(held)
+    let length = name.length()
+    named_close(held)
+    length
+}
+
+// A local, then `replace`.
+pub fn local_replace() -> UInt64 {
+    var held = named_open()
+    let name = named_name(held)
+    named_replace(&held)
+    let length = name.length()
+    named_close(held)
+    length
+}
+
+// A local, then `close`.
+pub fn local_close() -> UInt64 {
+    var held = named_open()
+    let name = named_name(held)
+    named_close(held)
+    let length = name.length()
+    length
+}
+
+// A field of a local structure, then `reset`.
+pub fn field_reset() -> UInt64 {
+    var box = Box { handle = named_open() }
+    let name = named_name(box.handle)
+    named_reset(box.handle)
+    let length = name.length()
+    box.close()
+    length
+}
+
+// An `inout` parameter, then `reset`.
+fn lent_reset(inout handle: Name) -> UInt64 {
+    let name = named_name(handle)
+    named_reset(handle)
+    let length = name.length()
+    length
+}
+
+pub fn param_reset() -> UInt64 {
+    var held = named_open()
+    let length = lent_reset(&held)
+    named_close(held)
+    length
+}
+
+// A field of a local structure, then `replace`.
+pub fn field_replace() -> UInt64 {
+    var box = Box { handle = named_open() }
+    let name = named_name(box.handle)
+    named_replace(&box.handle)
+    let length = name.length()
+    box.close()
+    length
+}
+
+// An `inout` parameter, then `replace`.
+fn lent_replace(inout handle: Name) -> UInt64 {
+    let name = named_name(handle)
+    named_replace(&handle)
+    let length = name.length()
+    length
+}
+
+pub fn param_replace() -> UInt64 {
+    var held = named_open()
+    let length = lent_replace(&held)
+    named_close(held)
+    length
+}
+
+pub fn self_reset() -> UInt64 {
+    var box = Box { handle = named_open() }
+    let length = &box.self_field_reset()
+    box.close()
+    length
+}
+
+pub fn self_replace() -> UInt64 {
+    var box = Box { handle = named_open() }
+    let length = &box.self_field_replace()
+    box.close()
+    length
+}

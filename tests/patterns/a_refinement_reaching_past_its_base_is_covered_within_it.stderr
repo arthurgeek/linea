@@ -1,0 +1,10 @@
+error[T-Refine]: 0..=300 reaches outside `UInt8`, which `Level` refines
+ --> tests/patterns/a_refinement_reaching_past_its_base_is_covered_within_it.lin:4:6
+  |
+4 | type Level = UInt8 where it in 0..=300
+  |      ^^^^^ narrow the range to what the base can hold
+error[T-Refine]: -3..=3 reaches outside `UInt8`, which `Offset` refines
+ --> tests/patterns/a_refinement_reaching_past_its_base_is_covered_within_it.lin:6:6
+  |
+6 | type Offset = UInt8 where it in -3..=3
+  |      ^^^^^^ narrow the range to what the base can hold

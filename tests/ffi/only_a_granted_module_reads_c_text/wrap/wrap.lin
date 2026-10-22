@@ -1,0 +1,54 @@
+import std.ffi
+import std.iter
+
+// C's `getenv`, whose answer the environment owns rather than its argument.
+extern fn getenv(name: ffi.Bytes) -> ffi.CText where carries()
+
+// Each of these hands a `CText` out of this module in a way no rule about
+// what it publishes could list: inside a newtype, inside a private struct
+// inside a public one, as an iterator's item, and as a callback's argument.
+pub type Env = ffi.CText
+
+struct Inner {
+    text: ffi.CText,
+}
+
+pub struct Found {
+    inner: Inner,
+}
+
+fn home_text() -> ffi.CText {
+    getenv(ffi.bytes("HOME\0"))
+}
+
+pub fn home() -> Env {
+    Env(home_text())
+}
+
+pub fn found() -> Found {
+    .{ inner = .{ text = home_text() } }
+}
+
+pub struct Once {
+    done: Bool,
+}
+
+impl iter.Iterator for Once {
+    type Item = ffi.CText
+
+    fn next(inout self: Self) -> Option[ffi.CText] where carries(.Some: self) {
+        if self.done {
+            return .None
+        }
+        self.done = true
+        .Some(home_text())
+    }
+}
+
+pub fn once() -> Once {
+    .{ done = false }
+}
+
+pub fn with_home[F: fn(text: ffi.CText) -> UInt64](visit: F) -> UInt64 {
+    visit(home_text())
+}

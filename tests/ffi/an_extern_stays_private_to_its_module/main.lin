@@ -1,0 +1,5 @@
+import wrapper
+
+fn main() -> UInt8 {
+    UInt8(wrapper.distance(3, 5))
+}

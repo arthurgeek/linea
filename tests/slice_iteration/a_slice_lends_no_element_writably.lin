@@ -1,0 +1,11 @@
+// A slice is a view that may be copied freely and may observe storage nothing
+// may write, such as a constant or the process's arguments, so its bracket
+// declares `read self` and a walk cannot lend its elements writably.
+fn main() -> UInt8 {
+    var values = [UInt8(1), 2, 3]
+    var view = values.as_slice()
+    for inout value in view {
+        value += 1
+    }
+    values[0]
+}

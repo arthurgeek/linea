@@ -1,0 +1,23 @@
+// A test may sit inside an inherent impl, organizing tests beside the type's
+// members at module scope.
+import std.testing
+
+struct Box {
+    value: UInt32,
+}
+
+impl Box {
+    pub fn new(value: UInt32) -> Box {
+        Box { value = value }
+    }
+
+    test fn holds_its_value() {
+        let b = Box.new(42)
+        testing.assert_eq(b.value, 42, "the box holds its value")?
+        .Ok(())
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

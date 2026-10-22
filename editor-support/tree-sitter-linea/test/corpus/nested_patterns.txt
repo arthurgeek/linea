@@ -1,0 +1,97 @@
+==================
+A pattern nests wherever a binder stands
+==================
+
+fn main() -> UInt8 {
+    match found {
+        Some((name, port)) => port,
+        Ok(Point { x, y: Some(y) }) => x,
+        (Some(a), None) => a,
+        Err(Read(Limit)) => 0,
+        Some(1..=9) => 1,
+        _ => 2,
+    }
+    let Frame { origin: Point { x, y: _ }, scale } = frame
+    let read (id, (start, end)) = row
+    0
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (tuple_pattern
+                (identifier)
+                (identifier)))
+            (identifier))
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (struct_pattern
+                (type_identifier)
+                (field_pattern
+                  (identifier))
+                (field_pattern
+                  (identifier)
+                  (variant_pattern
+                    (type_identifier)
+                    (identifier)))))
+            (identifier))
+          (match_arm
+            (tuple_pattern
+              (variant_pattern
+                (type_identifier)
+                (identifier))
+              (identifier))
+            (identifier))
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (variant_pattern
+                (type_identifier)
+                (identifier)))
+            (integer_literal))
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (range_pattern
+                (integer_literal)
+                (integer_literal)))
+            (integer_literal))
+          (match_arm
+            (wildcard_pattern)
+            (integer_literal))))
+      (let_statement
+        (struct_pattern
+          (type_identifier)
+          (field_pattern
+            (identifier)
+            (struct_pattern
+              (type_identifier)
+              (field_pattern
+                (identifier))
+              (field_pattern
+                (identifier)
+                (wildcard_pattern))))
+          (field_pattern
+            (identifier)))
+        (identifier))
+      (let_statement
+        (tuple_pattern
+          (identifier)
+          (tuple_pattern
+            (identifier)
+            (identifier)))
+        (identifier))
+      (expression_statement
+        (integer_literal)))))

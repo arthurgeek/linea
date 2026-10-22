@@ -1,8 +1,8 @@
-error[M-Extern]: an `extern` is only declared in a root whose manifest grants `"extern": true`
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
  --> tests/float/math_functions/counterfeit_math_extern.lin:1:11
   |
 1 | extern fn linea_math_sqrt(value: Float64) -> Float64
-  |           ^^^^^^^^^^^^^^^ call it through the standard library, which declares the ones that exist
+  |           ^^^^^^^^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted
 error[T-Extern]: `linea_math_sqrt` is a compiler-owned runtime symbol and cannot be declared with this foreign signature
  --> tests/float/math_functions/counterfeit_math_extern.lin:1:11
   |

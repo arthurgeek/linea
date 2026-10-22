@@ -1,0 +1,16 @@
+import label
+import std.io
+
+// `main` is not granted and names nothing from `std.ffi`.
+fn main() -> Result[UInt8, io.IoError] {
+    let first = label.Label.open("Ada")
+    let name = first.name()
+    first.close()
+    let second = label.Label.open("Zed")
+    let got = label.spell(name)
+    second.close()
+    let shown = io.println("read back: {got.view()}")
+    got.release()
+    shown?
+    .Ok(0)
+}

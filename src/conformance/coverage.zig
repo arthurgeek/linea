@@ -564,6 +564,7 @@ pub fn reachOfInst(tag: Inst.Tag) Reach {
         .float_math => .{ .impossible = "generated programs declare no trusted scalar math primitives" },
 
         .function_addr, .call_indirect => .generated,
+        .foreign_function_addr => .{ .impossible = "generated programs declare no `extern`, so they pass C no callback" },
 
         // The generator has no uninhabited expression with which to call a
         // Never-returning function, directly or through a code pointer.
