@@ -26,4 +26,9 @@ is refused before any code is checked.
     |
   3 |     "sqlite": {
     |     ^^^^^^^^ write `"extern": true` in this entry to trust the signatures it declares
+  error[T-Infer]: the type of this variant cannot be determined
+   --> app/main.lin:7:5
+    |
+  7 |     .Ok(())
+    |     ^^^ name its enum, or give the binding a type
   [1]
