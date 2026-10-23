@@ -13,6 +13,16 @@ const BindingId = @import("../sema/ids.zig").BindingId;
 const resolve_mod = @import("../sema/resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const types = @import("../sema/types.zig");
+const helpTypeName = @import("../sema/typecheck.zig").helpTypeName;
+const importNote = @import("../sema/typecheck.zig").importNote;
+const clauseEdit = @import("../sema/typecheck.zig").clauseEdit;
+const lambdaClauseEdit = @import("../sema/typecheck.zig").lambdaClauseEdit;
+const implementsAnyOf = @import("../sema/typecheck.zig").implementsAnyOf;
+const importEdit = @import("../sema/typecheck.zig").importEdit;
+const resultSiteOf = @import("../sema/typecheck.zig").resultSiteOf;
+const lambdaResultSite = @import("../sema/typecheck.zig").lambdaResultSite;
+const ModuleId = @import("../syntax/program.zig").ModuleId;
+const TokenId = @import("../lexer/token.zig").TokenId;
 const intrinsics = @import("../sema/intrinsics.zig");
 const Typing = types.Typing;
 const Sink = @import("../diagnostics/sink.zig").Sink;
@@ -926,6 +936,13 @@ const Analysis = struct {
     /// The capture sources that lent a place `inout`, each of which ended
     /// the earlier observations of that place. Sized likewise.
     lend_sites: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The [O-Escapes] reports `reviseEscapes` writes again with the
+    /// function's whole clause. Sized by the function's escapes.
+    pending_escapes: std.ArrayList(PendingEscape) = .empty,
+    /// The parameters the signature's contract covers at some exit, which a
+    /// clause written where none was must keep. Sized by the function's
+    /// parameters.
+    covered_owners: std.AutoHashMapUnmanaged(BindingId, void) = .empty,
 
     const Arrival = struct { cell: Cell, owner: BindingId };
 
@@ -940,6 +957,8 @@ const Analysis = struct {
         self.escape_exits.deinit(self.gpa);
         self.escaped_owners.deinit(self.gpa);
         self.lend_sites.deinit(self.gpa);
+        self.pending_escapes.deinit(self.gpa);
+        self.covered_owners.deinit(self.gpa);
         self.walk_sources.deinit(self.gpa);
         self.reported.deinit(self.gpa);
         self.selections.deinit(self.gpa);
@@ -1334,9 +1353,17 @@ const Analysis = struct {
     /// Reports each invalidation `set` records, at the operation that
     /// invalidated the place, with `need` as the later point that requires it.
     fn stale(self: *Analysis, set: SetId, need: Need, report: bool) !void {
+        return self.staleExcept(set, need, report, &.{});
+    }
+
+    /// As `stale`, passing over every observation of an owner in `escaped`:
+    /// a local that [O-Escapes] reports leaving at this exit, which ending
+    /// before the observation does is the same mistake.
+    fn staleExcept(self: *Analysis, set: SetId, need: Need, report: bool, escaped: []const BindingId) !void {
         if (!report or set == .empty or self.inspected_sets.contains(set)) return;
         for (self.store.facts(set)) |fact| {
             if (fact.invalid == .none) continue;
+            if (std.mem.indexOfScalar(BindingId, escaped, fact.origin.place.root) != null) continue;
             if (fact.origin.temporary != .none) {
                 switch (need) {
                     .used, .walked => |at| try self.temporaryOutlived(fact.origin.temporary, at, false),
@@ -1419,7 +1446,10 @@ const Analysis = struct {
             .returned => |result| result,
             .retained => null,
         };
-        if (later) |at| if (self.borrowSite(at, owner)) |site| try labels.append(arena, .{
+        // A derive's generated body is reported at the derive, where the
+        // exit is already labelled, so a borrow inside it adds nothing to
+        // point at.
+        if (later) |at| if (self.borrowSite(at, owner)) |site| if (self.program.generatedOriginAt(self.ast.fileOfExpr(site), self.ast.exprSpan(site)) == null) try labels.append(arena, .{
             .file = self.ast.fileOfExpr(site),
             .span = self.ast.exprSpan(site),
             .message = "borrowed here",
@@ -1558,9 +1588,12 @@ const Analysis = struct {
         try kept.append(self.gpa, fact);
     }
 
-    fn write(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, report: bool) !void {
+    /// `arrived` is the expression whose value is written: an assignment's
+    /// right-hand side rather than its target, which is where a report about
+    /// what the binding holds points.
+    fn write(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, arrived: ExprId, report: bool) !void {
         const value_set = try self.heldAs(written, self.typing.bindingType(root));
-        try self.noteArrivalsOf(Cell.binding(root), value_set, at, true);
+        try self.noteArrivalsOf(Cell.binding(root), value_set, arrived, true);
         if (report and !self.reported.contains(at) and try self.store.containsLocalOrigin(value_set, root)) {
             try self.reported.put(self.gpa, at, {});
             try self.sink.addErrorFmt(.o_escapes, self.ast.fileOfExpr(at), self.ast.exprSpan(at), "keep an observation outside the owner it observes", "this write would make a value contain an observation of itself", .{});
@@ -1622,7 +1655,8 @@ const Analysis = struct {
             result = try self.store.intern(combined.items);
         } else if (source != .none) {
             result = try self.value(state, source);
-            try self.noteArrivals(Cell.expression(id), result, source);
+            // An owner that ended before the value left still supplied it.
+            try self.noteArrivalsOf(Cell.expression(id), result, source, true);
         } else switch (self.ast.exprTag(id)) {
             .borrow => {
                 result = try self.borrowed(state, self.ast.unaryOperand(id));
@@ -2028,7 +2062,7 @@ const Analysis = struct {
             const path = endpoint.selected.path;
             const added = try self.sourceFacts(state, normalized, contract.source, contract.borrows_source, false);
             const previous = try self.store.select(state.get(Cell.binding(root)) orelse .empty, path);
-            try self.write(state, root, path, try self.store.join(previous, added), id, report);
+            try self.write(state, root, path, try self.store.join(previous, added), id, id, report);
         }
     }
 
@@ -2104,17 +2138,31 @@ const Analysis = struct {
         return site;
     }
 
-    /// Where a returned value that carries `owner` is reported: what
-    /// `carriedFrom` finds, and past a block no join leads out of, its tail,
-    /// which is the value a reader would change rather than the braces.
-    /// Each step into a tail moves inside the block, so the walk ends within
-    /// the block's nesting.
-    fn returnedFrom(self: *const Analysis, start: ExprId, owner: BindingId) ExprId {
+    /// Where an escaping value took its dependency on `owner`: what
+    /// `carriedFrom` finds from the exit's expression, then on into a block's
+    /// tail where no join leads out of it, and from a local binding to the
+    /// value written into it, so the report points at the value a reader
+    /// would change: the tail rather than the braces, and the literal that
+    /// stored a view rather than the name that returns it.
+    ///
+    /// **Bound:** each step moves into a block's tail, which nests inside
+    /// it, or to a distinct recorded arrival.
+    fn escapeSite(self: *const Analysis, start: ExprId, owner: BindingId) ExprId {
         var site = self.carriedFrom(start, owner);
-        while (self.ast.exprTag(site) == .block) {
-            const tail = self.ast.blockOf(site).tail;
-            if (tail == .none) break;
-            site = self.carriedFrom(self.ast.withoutGroups(tail), owner);
+        var steps: usize = 0;
+        while (steps <= self.arrivals.count() + self.ast.exprCount()) : (steps += 1) {
+            if (self.ast.exprTag(site) == .block) {
+                const tail = self.ast.blockOf(site).tail;
+                if (tail == .none) break;
+                site = self.carriedFrom(self.ast.withoutGroups(tail), owner);
+                continue;
+            }
+            if (!self.ast.refersToBinding(site)) break;
+            const binding = self.res.targetOf(site);
+            if (binding == .none or binding == owner) break;
+            const written = self.arrivals.get(.{ .cell = Cell.binding(binding), .owner = owner }) orelse break;
+            if (written == site) break;
+            site = self.carriedFrom(written, owner);
         }
         return site;
     }
@@ -2137,15 +2185,33 @@ const Analysis = struct {
         return self.res.captureConvention(binding) == .inout;
     }
 
-    fn escape(self: *Analysis, at: ExprId, site: EscapeSite, escaped: Escaped, origin: ?Origin) !void {
+    /// Where an escaping observation leaves: the function's result, with the
+    /// owners the signature's contract already covered at that exit, or an
+    /// `inout` parameter that keeps it.
+    const Leaving = union(enum) { returned: Returned, retained: BindingId };
+
+    /// What a returned escape knows besides its origins: the owners the
+    /// contract covered at that exit, and where each further escaping origin
+    /// took its dependency, which the report points at too.
+    const Returned = struct { covered: []const BindingId = &.{}, also: []const EscapeSite = &.{}, exit: ExprId = .none };
+
+    /// `held` is the type of the part of the result or parameter that holds
+    /// the escaping observation, where its path names one.
+    fn escape(self: *Analysis, at: ExprId, site: EscapeSite, escaped: Escaped, leaving: Leaving, origins: []const Origin, held: ?types.TypeId) !void {
         if (self.reported.contains(at) and !self.escape_exits.contains(at)) return;
         try self.reported.put(self.gpa, at, {});
         try self.escape_exits.put(self.gpa, at, {});
         if ((try self.escaped_sites.getOrPut(self.gpa, site)).found_existing) return;
         const arena = self.sink.arena;
         switch (escaped) {
-            .observation => if (origin) |from| {
-                if ((try self.escaped_owners.getOrPut(self.gpa, from.place.root)).found_existing) return;
+            // One view returned at several exits is one missing clause: the
+            // report is made where some owner it names is new.
+            .observation => if (leaving == .returned) {
+                var fresh = origins.len == 0;
+                for (origins) |from| {
+                    if (!(try self.escaped_owners.getOrPut(self.gpa, from.place.root)).found_existing) fresh = true;
+                }
+                if (!fresh) return;
             },
             // Every exit that carries one lend is the same mistake, so the
             // lend is reported once.
@@ -2185,7 +2251,7 @@ const Analysis = struct {
         const sig = if (self.function.decl == .none) null else self.typing.adopted_contracts.get(self.function.decl);
         const promised = switch (self.typing.get(if (sig) |declared| self.typing.declSignature(declared) else .poison)) {
             .callable => |callable| callable,
-            else => return self.escapeUnderCarrierDefault(primary, message, origin),
+            else => return self.escapeWithoutAdoptedContract(primary, message, leaving, origins, held),
         };
         const written = self.ast.declParams(sig.?);
         const names = try self.sink.arena.alloc([]const u8, written.len);
@@ -2201,43 +2267,538 @@ const Analysis = struct {
         try self.sink.add(.{ .severity = .err, .code = .o_escapes, .message = message, .labels = labels });
     }
 
-    /// An [O-Escapes] for a function whose contract may be its carrier
-    /// parameter's default: the report names that parameter and, where the
-    /// escaping value came from another parameter, the clause that says so.
-    fn escapeUnderCarrierDefault(self: *Analysis, primary: diagnostics.Label, message: []const u8, origin: ?Origin) !void {
-        const carrier_binding = if (self.function.default_carrier) |index| self.function.parameters[index] else return self.sink.addError(.o_escapes, primary.file, primary.span, message, primary.message);
+    /// An [O-Escapes] for a function that adopts no trait's contract, made
+    /// where it is found so the reports keep their order, and revised by
+    /// `reviseEscapes` once the function is walked, when every escape's
+    /// sources are known and each report can name the one clause they need.
+    fn escapeWithoutAdoptedContract(self: *Analysis, primary: diagnostics.Label, message: []const u8, leaving: Leaving, origins: []const Origin, held: ?types.TypeId) !void {
         const arena = self.sink.arena;
-        const carrier_name = self.ast.tokenText(self.res.declaringToken(carrier_binding));
-        var notes: std.ArrayList([]const u8) = .empty;
-        // The verb is the one the signature's computed contract carries.
-        const verb: []const u8 = verb: {
-            const signature = switch (self.typing.get(self.function.signature)) {
-                .callable => |callable| callable,
-                else => break :verb "carries",
-            };
-            for (signature.contracts) |contract| {
-                switch (contract.source.root) {
-                    .parameter => |index| if (index == self.function.default_carrier.?) break :verb @tagName(contract.kind),
-                    else => {},
-                }
+        const pending: PendingEscape = .{
+            .index = self.sink.items().len,
+            .primary = primary,
+            .message = message,
+            .leaving = switch (leaving) {
+                .returned => |at| .{ .returned = .{ .covered = try arena.dupe(BindingId, at.covered), .also = try arena.dupe(EscapeSite, at.also), .exit = at.exit } },
+                .retained => leaving,
+            },
+            .origins = try arena.dupe(Origin, origins),
+            .held = held,
+        };
+        try self.pending_escapes.append(self.gpa, pending);
+        try self.sink.add(try self.escapeReport(pending));
+    }
+
+    /// One [O-Escapes] report waiting for its function's walk to end.
+    const PendingEscape = struct {
+        index: usize,
+        primary: diagnostics.Label,
+        message: []const u8,
+        leaving: Leaving,
+        origins: []const Origin,
+        held: ?types.TypeId,
+    };
+
+    /// Each report made by `escapeWithoutAdoptedContract`, written again with
+    /// the clause every escape of the function needs: one function has one
+    /// clause, so a report naming only its own sources would be undone by
+    /// the next report's.
+    ///
+    /// **Bound:** the function's escape reports, each built once more.
+    fn reviseEscapes(self: *Analysis) !void {
+        for (self.pending_escapes.items) |pending| try self.sink.revise(pending.index, try self.escapeReport(pending));
+    }
+
+    /// What an escape's origins say a clause could name: the parameters it
+    /// comes from, as sources at their positions, a local owner, and a
+    /// consumed parameter whose own place is observed, which ends with the
+    /// function like a local and no clause can name.
+    const EscapeSources = struct {
+        sources: []const types.ClauseSource,
+        positions: []const u32,
+        local: ?BindingId,
+        consumed: ?BindingId,
+    };
+
+    fn escapeSources(self: *const Analysis, origins: []const Origin) !EscapeSources {
+        const arena = self.sink.arena;
+        var sources: std.ArrayList(types.ClauseSource) = .empty;
+        var positions: std.ArrayList(u32) = .empty;
+        var local: ?BindingId = null;
+        var consumed: ?BindingId = null;
+        for (origins) |origin| {
+            if (origin.temporary != .none or origin.lent != .none) continue;
+            const root = origin.place.root;
+            const position: ?u32 = for (self.function.parameters, 0..) |parameter, at| {
+                if (parameter == root) break @intCast(at);
+            } else null;
+            if (position == null) {
+                if (!origin.external and local == null) local = root;
+                continue;
             }
-            break :verb "carries";
+            const convention = self.res.parameterConvention(self.ast, root) orelse .read;
+            if (!origin.external and !types.suppliesEscapingPlace(convention)) {
+                if (consumed == null) consumed = root;
+                continue;
+            }
+            const spelling = self.ast.tokenText(self.res.declaringToken(root));
+            const listed = for (sources.items) |source| {
+                if (std.mem.eql(u8, source.spelling, spelling)) break true;
+            } else false;
+            if (listed) continue;
+            try sources.append(arena, .{ .spelling = spelling, .borrows = !origin.external });
+            try positions.append(arena, position.?);
+        }
+        return .{ .sources = sources.items, .positions = positions.items, .local = local, .consumed = consumed };
+    }
+
+    /// The whole clause the function needs, from `wholeClause`: what the
+    /// signature wrote, with every source its escapes return and every
+    /// retention its `inout` parameters keep. One written where none was
+    /// replaces the contract the signature inferred, so it keeps the sources
+    /// that contract covered at any exit. A `borrows` written for a consumed
+    /// parameter, which [T-BorrowContract] refuses, is written `carries`.
+    fn functionClause(self: *const Analysis) ![]const u8 {
+        const arena = self.sink.arena;
+        const signature: ?types.CallableSignature = if (self.function.decl == .none or self.typing.adopted_contracts.get(self.function.decl) == null) switch (self.typing.get(self.function.signature)) {
+            .callable => |callable| callable,
+            else => null,
+        } else null;
+        const names = try arena.alloc([]const u8, self.function.parameters.len);
+        for (self.function.parameters, names) |parameter, *name| name.* = self.ast.tokenText(self.res.declaringToken(parameter));
+        const wrote_clause = if (self.function.decl != .none)
+            self.ast.declContracts(self.function.decl).len != 0
+        else if (self.function.lambda != .none) wrote: {
+            const contracts = self.ast.lambda(self.function.lambda).contracts;
+            break :wrote contracts.end != contracts.start;
+        } else false;
+        var keep: std.ArrayList(u32) = .empty;
+        if (!wrote_clause) for (self.function.parameters, 0..) |parameter, index| {
+            if (self.covered_owners.contains(parameter)) try keep.append(arena, @intCast(index));
         };
-        try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is a carrier and this signature writes no clause, so its contract is `where {s}({s})`", .{ carrier_name, verb, carrier_name }));
-        if (origin) |from| for (self.function.parameters) |parameter| {
-            if (parameter != from.place.root) continue;
-            const name = self.ast.tokenText(self.res.declaringToken(parameter));
-            const kind = if (from.external) "carries" else "borrows";
-            try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from `{s}`; write `where {s}({s})` to say so", .{ name, kind, name }));
-            break;
+        var written: std.ArrayList(types.CallableContract) = .empty;
+        if (signature) |callable| for (callable.contracts) |contract| {
+            var kept = contract;
+            switch (contract.source.root) {
+                .parameter => |at| if (contract.kind == .borrows and at < self.function.parameters.len) {
+                    const convention = self.res.parameterConvention(self.ast, self.function.parameters[at]) orelse .read;
+                    if (!types.suppliesEscapingPlace(convention)) kept.kind = .carries;
+                },
+                else => {},
+            }
+            try written.append(arena, kept);
         };
-        try self.sink.add(.{
+        // Each source at its parameter's position, so the clause lists them
+        // in the order the signature declares them.
+        const Placed = struct { position: u32, source: types.ClauseSource, destination: ?BindingId };
+        var placed: std.ArrayList(Placed) = .empty;
+        for (self.pending_escapes.items) |pending| {
+            const found = try self.escapeSources(pending.origins);
+            for (found.sources, found.positions) |source, position| try placed.append(arena, .{
+                .position = position,
+                .source = source,
+                .destination = switch (pending.leaving) {
+                    .returned => null,
+                    .retained => |destination| destination,
+                },
+            });
+        }
+        std.mem.sort(Placed, placed.items, {}, struct {
+            fn before(_: void, a: Placed, b: Placed) bool {
+                return a.position < b.position;
+            }
+        }.before);
+        var returning: std.ArrayList(types.ClauseSource) = .empty;
+        var retaining: std.ArrayList(types.ClauseRetention) = .empty;
+        for (placed.items) |one| if (one.destination) |destination| try retaining.append(arena, .{
+            .destination = self.ast.tokenText(self.res.declaringToken(destination)),
+            .source = one.source.spelling,
+            .borrows = one.source.borrows,
+        }) else try returning.append(arena, one.source);
+        return types.wholeClause(arena, written.items, names, if (wrote_clause) null else keep.items, returning.items, retaining.items);
+    }
+
+    /// The [O-Escapes] report for `pending`, with help naming the edit each
+    /// origin calls for. A parameter's: the function's whole clause, from
+    /// `functionClause`, which also says that this exit's value comes from
+    /// it, or that an `inout` parameter keeps it. A local's: that it ends
+    /// with the function. Where the result's type declares `to_owned`, the
+    /// owned copy that observes nothing. A carrier that supplied the
+    /// contract by default is named first.
+    fn escapeReport(self: *const Analysis, pending: PendingEscape) !diagnostics.Diagnostic {
+        const arena = self.sink.arena;
+        const leaving = pending.leaving;
+        const held = pending.held;
+        const primary = pending.primary;
+        var notes: std.ArrayList([]const u8) = .empty;
+        if (leaving == .returned) if (self.function.default_carrier) |index| {
+            const carrier_name = self.ast.tokenText(self.res.declaringToken(self.function.parameters[index]));
+            // The verb is the one the signature's computed contract carries.
+            const verb: []const u8 = verb: {
+                const signature = switch (self.typing.get(self.function.signature)) {
+                    .callable => |callable| callable,
+                    else => break :verb "carries",
+                };
+                for (signature.contracts) |contract| {
+                    switch (contract.source.root) {
+                        .parameter => |at| if (at == index) break :verb @tagName(contract.kind),
+                        else => {},
+                    }
+                }
+                break :verb "carries";
+            };
+            try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is a carrier and this signature writes no clause, so its contract is `where {s}({s})`", .{ carrier_name, verb, carrier_name }));
+        };
+
+        const found = try self.escapeSources(pending.origins);
+        const sources = found.sources;
+        const local = found.local;
+        const consumed = found.consumed;
+        var named: std.ArrayList(u8) = .empty;
+        for (sources, 0..) |source, i| {
+            const joiner = if (i == 0) "" else if (i + 1 == sources.len) " and " else ", ";
+            try named.print(arena, "{s}`{s}`", .{ joiner, source.spelling });
+        }
+        const clause = try self.functionClause();
+        // Whether the clause also names what another report of this function
+        // needs, which the help says, so a reader does not take the extra
+        // sources for this exit's.
+        const shared = for (self.pending_escapes.items) |other| {
+            if (other.index != pending.index) break true;
+        } else false;
+        const fixed = if (sources.len > 0) try self.fixedSignatureRefusing(leaving, sources, found.positions, clause) else null;
+        // Where a local owner or a consumed parameter also supplies the
+        // value, the clause answers only the part that comes from parameters,
+        // and the help says so rather than offering it as the fix.
+        const partial = local != null or consumed != null;
+        // The clause help, where there is one, is also a fix a tool can
+        // write: the whole clause in place of the one the signature wrote.
+        // Only where the clause answers every origin leaving here: a local
+        // owner or a consumed parameter is one no clause can permit.
+        const edit = if (sources.len > 0 and fixed == null and !partial)
+            if (self.function.decl != .none)
+                try clauseEdit(arena, self.ast, self.function.decl, clause)
+            else
+                try lambdaClauseEdit(arena, self.ast, self.function.lambda, clause)
+        else
+            null;
+        var fixes: std.ArrayList(diagnostics.Fix) = .empty;
+        if (edit) |clause_edit| try fixes.append(arena, .{ .note = @intCast(notes.items.len), .edits = try arena.dupe(diagnostics.Edit, &.{clause_edit}) });
+        const others: []const u8 = if (shared) try std.fmt.allocPrint(arena, ", which also names what {s}'s other escapes need", .{try self.functionName()}) else "";
+        if (sources.len > 0) if (fixed) |why| try notes.append(arena, why) else if (partial) {
+            try notes.append(arena, try std.fmt.allocPrint(arena, "part of the value comes from {s}, which `{s}` would permit; the rest no clause can", .{ named.items, clause }));
+        } else switch (leaving) {
+            .returned => try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from {s}; write `{s}` to say so{s}", .{ named.items, clause, others })),
+            .retained => |destination| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` keeps a value that comes from {s}; write `{s}` to say so{s}", .{ self.ast.tokenText(self.res.declaringToken(destination)), named.items, clause, others })),
+        };
+        if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
+            self.ast.tokenText(self.res.declaringToken(owner)),
+            try self.functionName(),
+        }));
+        // A value built in an allocator the function opens: the local lends
+        // handles, and what leaves is not the handle itself, which ends with
+        // its allocator whoever supplies it.
+        const lends = lends: {
+            const owner = local orelse break :lends false;
+            const lender = self.program.libraryDeclIn("mem", "Lender") orelse break :lends false;
+            if (!try implementsAnyOf(self.gpa, &self.typing.impl_index, self.typing.implementations, self.typing, lender, self.typing.bindingType(owner))) break :lends false;
+            const allocator = self.program.libraryDeclIn("mem", "Allocator") orelse break :lends false;
+            break :lends !try implementsAnyOf(self.gpa, &self.typing.impl_index, self.typing.implementations, self.typing, allocator, held orelse break :lends false);
+        };
+        if (local) |owner| {
+            const function = try self.functionName();
+            // An allocator the function opens ends with it, and so does what
+            // was built in it: the caller has to supply the allocator.
+            if (lends and self.function.decl != .none) try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is an allocator {s} opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `{s}_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives", .{
+                self.ast.tokenText(self.res.declaringToken(owner)),
+                function,
+                self.ast.tokenText(self.ast.declName(self.function.decl)),
+            })) else try notes.append(arena, switch (leaving) {
+                .returned => try std.fmt.allocPrint(arena, "`{s}` belongs to {s} and ends when it returns, so nothing returned may observe it", .{ self.ast.tokenText(self.res.declaringToken(owner)), function }),
+                .retained => |destination| try std.fmt.allocPrint(arena, "`{s}` belongs to {s} and ends when it returns, so `{s}` may not keep an observation of it", .{ self.ast.tokenText(self.res.declaringToken(owner)), function, self.ast.tokenText(self.res.declaringToken(destination)) }),
+            });
+        }
+        // A clause is not always the fix, and the owned copy needs none. It
+        // names the type that owns the text and the failure making it can
+        // report, so the edit can be written as read.
+        // Under a fixed signature the result type is fixed with it, so a
+        // returned view has no owned copy to become.
+        const result_fixed = leaving == .returned and fixed != null;
+        var missing: std.ArrayList([]const u8) = .empty;
+        var failure_missing: std.ArrayList([]const u8) = .empty;
+        if (!result_fixed and (sources.len > 0 or local != null or consumed != null)) if (try self.ownedCopyOf(held, self.res.moduleOfFile(primary.file), &missing, &failure_missing)) |owned| {
+            const in_result = if (self.function.signature != .poison) switch (self.typing.get(self.function.signature)) {
+                .callable => |callable| held != null and held.? == callable.result,
+                else => false,
+            } else false;
+            const local_owns = if (local) |owner|
+                self.typing.declOfType(self.typing.bindingType(owner)) == self.typing.declOfType(owned.ty) and !try self.deferWouldDie(owner, if (leaving == .returned) leaving.returned.exit else .none)
+            else
+                false;
+            const owned_note = notes.items.len;
+            try notes.append(arena, if (lends)
+                try std.fmt.allocPrint(arena, "or keep it in the system allocator: declare `{s}` in place of the type built in `{s}`, and build it with `….to_owned()`, which can fail with `{s}`", .{ owned.name, self.ast.tokenText(self.res.declaringToken(local.?)), owned.failure })
+            else if (leaving == .returned and local_owns)
+                try std.fmt.allocPrint(arena, "`{s}` owns the text already: put `{s}` itself where its view is, declaring `{s}` {s}", .{
+                    self.ast.tokenText(self.res.declaringToken(local.?)),
+                    self.ast.tokenText(self.res.declaringToken(local.?)),
+                    owned.name,
+                    if (in_result) "as the result" else "there",
+                })
+            else switch (leaving) {
+                .returned => if (in_result)
+                    try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare the result `Result[{s}, {s}]` and return `….to_owned()`, which copies the text and can fail with `{s}`", .{ owned.name, owned.failure, owned.failure })
+                else
+                    try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where the result holds the view, and store `….to_owned()` there, which copies the text and can fail with `{s}`", .{ owned.name, owned.failure }),
+                .retained => |destination| try std.fmt.allocPrint(arena, "an owned copy observes nothing and needs no clause: declare `{s}` where `{s}` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `{s}`", .{ owned.name, self.ast.tokenText(self.res.declaringToken(destination)), owned.failure }),
+            });
+            // The owner itself is written as its type alone; a copy's result
+            // also names the failure.
+            if (!(leaving == .returned and local_owns)) for (failure_missing.items) |route| {
+                const listed = for (missing.items) |earlier| {
+                    if (std.mem.eql(u8, earlier, route)) break true;
+                } else false;
+                if (!listed) try missing.append(arena, route);
+            };
+            if (try importNote(arena, missing.items)) |note| try notes.append(arena, note);
+            // The result the help names, written, and what it says to return
+            // in place of the view: the owner itself, or a copy of what every
+            // exit returns.
+            if (leaving == .returned and in_result and !lends) {
+                const help: u32 = @intCast(owned_note);
+                if (local_owns) {
+                    if (try self.ownerInPlaceEdits(primary, local.?, owned.name, missing.items)) |edits| try fixes.append(arena, .{ .note = help, .edits = edits });
+                } else if (try self.ownedCopyEdits(primary.file, try std.fmt.allocPrint(arena, "Result[{s}, {s}]", .{ owned.name, owned.failure }), missing.items)) |edits| try fixes.append(arena, .{ .note = help, .edits = edits });
+            }
+        };
+        var labels: std.ArrayList(diagnostics.Label) = .empty;
+        try labels.append(arena, primary);
+        if (leaving == .returned) for (leaving.returned.also) |site| try labels.append(arena, .{
+            .file = site.file,
+            .span = site.span,
+            .message = "this leaves the function as well",
+            .style = .secondary,
+        });
+        return .{
             .severity = .err,
             .code = .o_escapes,
-            .message = message,
-            .labels = try arena.dupe(diagnostics.Label, &.{primary}),
-            .notes = try notes.toOwnedSlice(arena),
-        });
+            .message = pending.message,
+            .labels = labels.items,
+            .notes = notes.items,
+            .fixes = fixes.items,
+        };
+    }
+
+    /// Where this function's result type is written, or goes.
+    fn resultSite(self: *const Analysis) ?@import("../sema/typecheck.zig").ResultSite {
+        if (self.function.decl != .none) return resultSiteOf(self.ast, self.function.decl);
+        return lambdaResultSite(self.ast, self.function.lambda);
+    }
+
+    /// The edits answering with `result` and returning `….to_owned()` of the
+    /// value every exit returns, with the imports `missing` names: the fix of
+    /// the owned copy's help. Null where the result has no site.
+    ///
+    /// **Bound:** the function's operations.
+    fn ownedCopyEdits(self: *const Analysis, file: FileId, result: []const u8, missing: []const []const u8) !?[]const diagnostics.Edit {
+        const arena = self.sink.arena;
+        const site = self.resultSite() orelse return null;
+        var edits: std.ArrayList(diagnostics.Edit) = .empty;
+        try edits.append(arena, try site.edit(arena, file, result));
+        var seen: std.ArrayList(ExprId) = .empty;
+        for (0..self.function.blocks.end - self.function.blocks.start) |index| {
+            var ops = self.cfg.opsOf(self.cfg.blocks[self.function.blocks.start + index]);
+            while (ops.next()) |op| {
+                if (self.cfg.opTag(op) != .returned) continue;
+                // A `?`'s failing path returns the failure, not the view.
+                if (self.cfg.ops.items(.projection)[op.index()] == .payload) continue;
+                var exits = self.cfg.ops.items(.source)[op.index()];
+                if (exits == .none) continue;
+                exits = self.ast.withoutGroups(exits);
+                while (self.ast.exprTag(exits) == .block) {
+                    const tail = self.ast.blockOf(exits).tail;
+                    if (tail == .none) break;
+                    exits = self.ast.withoutGroups(tail);
+                }
+                if (self.ast.exprTag(exits) == .block) continue;
+                if (std.mem.indexOfScalar(ExprId, seen.items, exits) != null) continue;
+                try seen.append(arena, exits);
+                const span = self.ast.exprSpan(exits);
+                const at = self.ast.fileOfExpr(exits);
+                const postfix = switch (self.ast.exprTag(exits)) {
+                    .name_ref, .call, .field, .index, .copy_, .str_literal, .interp, .grouped, .try_ => true,
+                    else => false,
+                };
+                if (!postfix) try edits.append(arena, .{ .file = at, .span = .{ .start = span.start, .end = span.start }, .text = "(" });
+                try edits.append(arena, .{ .file = at, .span = .{ .start = span.end, .end = span.end }, .text = if (postfix) ".to_owned()" else ").to_owned()" });
+            }
+        }
+        if (seen.items.len == 0) return null;
+        if (try importEdit(arena, self.ast, self.ast.exprMain(seen.items[0]), missing)) |edit| try edits.append(arena, edit);
+        return edits.items;
+    }
+
+    /// The edits putting `owner` where its view `primary` is, written as
+    /// `owner.view()`, and declaring the result `owned`: the fix of the help
+    /// saying the local owns the text already. Null where the view is written
+    /// some other way.
+    fn ownerInPlaceEdits(self: *const Analysis, primary: diagnostics.Label, owner: BindingId, owned: []const u8, missing: []const []const u8) !?[]const diagnostics.Edit {
+        const arena = self.sink.arena;
+        const site = self.resultSite() orelse return null;
+        const name = self.ast.tokenText(self.res.declaringToken(owner));
+        const token = self.res.declaringToken(owner);
+        const source = self.ast.partOf(token).source;
+        if (primary.file != self.ast.fileOf(token) or primary.span.end > source.len) return null;
+        const written = source[primary.span.start..primary.span.end];
+        const view = try std.fmt.allocPrint(arena, "{s}.view()", .{name});
+        if (!std.mem.eql(u8, written, view)) return null;
+        var edits: std.ArrayList(diagnostics.Edit) = .empty;
+        try edits.append(arena, try site.edit(arena, primary.file, owned));
+        try edits.append(arena, .{ .file = primary.file, .span = primary.span, .text = name });
+        if (try importEdit(arena, self.ast, token, missing)) |edit| try edits.append(arena, edit);
+        return edits.items;
+    }
+
+    /// How a help names the function being checked: by its name, or as
+    /// "this closure".
+    fn functionName(self: *const Analysis) ![]const u8 {
+        if (self.function.decl == .none) return "this closure";
+        return std.fmt.allocPrint(self.sink.arena, "`{s}`", .{self.ast.tokenText(self.ast.declName(self.function.decl))});
+    }
+
+    /// Why the clause naming `sources` (at `positions` among the function's
+    /// parameters) cannot be written, where the signature is not the
+    /// program's to change: a member of a trait implementation answers to the
+    /// signature its trait declares, and a function named as a value answers
+    /// to the callable type it was passed as. Either may still write a clause
+    /// its fixed signature permits, so null where that signature declares
+    /// every source the clause would name, and where nothing fixes it.
+    ///
+    /// **Bound:** one lookup of the signature a member supplies, one pass
+    /// over the program's function values, and the fixed signature's
+    /// contracts once per source, once per report.
+    fn fixedSignatureRefusing(self: *const Analysis, leaving: Leaving, sources: []const types.ClauseSource, positions: []const u32, clause: []const u8) std.mem.Allocator.Error!?[]const u8 {
+        const decl = self.function.decl;
+        if (decl == .none) return null;
+        const name = self.ast.tokenText(self.ast.declName(decl));
+        var fixed: types.TypeId = .poison;
+        var why: []const u8 = "";
+        if (self.typing.supply_index.signatureOf(decl)) |sig| {
+            fixed = self.typing.declSignature(sig);
+            const trait = self.ast.declOwner(sig);
+            const module = self.program.moduleOf(sig);
+            const qualifier = if (module == self.program.moduleOf(decl)) "" else try std.fmt.allocPrint(self.sink.arena, "{s}.", .{self.program.get(module).name});
+            // The program can widen a trait it declares, and only that one.
+            const widen = if (self.program.get(module).library) "" else try std.fmt.allocPrint(self.sink.arena, ", or write the source into `{s}{s}.{s}`'s clause and this one alike", .{ qualifier, self.ast.tokenText(trait), self.ast.tokenText(self.ast.declName(sig)) });
+            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` implements `{s}{s}`, whose signature does not permit `{s}`, so it cannot be added here: {s} what that signature permits{s}", .{
+                name,
+                qualifier,
+                self.ast.tokenText(trait),
+                clause,
+                if (leaving == .returned) "return" else "keep only",
+                widen,
+            });
+        } else if (self.typing.fixed_functions.get(decl)) |received| {
+            fixed = received.signature;
+            why = try std.fmt.allocPrint(self.sink.arena, "`{s}` is passed where a callable type is expected, and that type does not permit `{s}`, so it cannot be added here: {s} what that type permits{s}", .{
+                name,
+                clause,
+                if (leaving == .returned) "return" else "keep only",
+                // The program can widen a callable type it wrote, and only
+                // that one.
+                if (received.in_library) "" else ", or write the source into that type where it is written and into this signature alike",
+            });
+        }
+        const contracts = switch (self.typing.get(fixed)) {
+            .callable => |callable| callable.contracts,
+            else => return null,
+        };
+        for (sources, positions) |source, position| {
+            const permitted = for (contracts) |contract| {
+                const from = switch (contract.source.root) {
+                    .parameter => |at| at,
+                    else => continue,
+                };
+                if (from != position) continue;
+                switch (leaving) {
+                    .returned => switch (contract.kind) {
+                        .borrows => break true,
+                        .carries => if (!source.borrows) break true,
+                        .retains => {},
+                    },
+                    .retained => |destination| {
+                        if (contract.kind != .retains or (source.borrows and !contract.borrows_source)) continue;
+                        const kept = contract.destination orelse continue;
+                        switch (kept.root) {
+                            .parameter => |at| if (self.function.parameters[at] == destination) break true,
+                            else => {},
+                        }
+                    },
+                }
+            } else false;
+            if (!permitted) return why;
+        }
+        return null;
+    }
+
+    /// Whether putting `owner` where its view was would leave the `defer`
+    /// that releases it with nothing to do: some schedule of this function
+    /// consumes `owner`, and it is placed at no exit other than `exit` except
+    /// where a move already cancelled it. Read from the schedules and
+    /// cancellations ownership decided, which [O-DeferDead] is reported from,
+    /// so a `return` or `?` inside a closure is not counted as this
+    /// function's exit.
+    ///
+    /// **Bound:** the function's operations, then the program's placements,
+    /// once per report.
+    fn deferWouldDie(self: *const Analysis, owner: BindingId, exit: ExprId) std.mem.Allocator.Error!bool {
+        var schedules: std.ArrayList(ExprId) = .empty;
+        defer schedules.deinit(self.gpa);
+        for (0..self.function.blocks.end - self.function.blocks.start) |index| {
+            var ops = self.cfg.opsOf(self.cfg.blocks[self.function.blocks.start + index]);
+            while (ops.next()) |op| {
+                const schedule = self.cfg.opSchedule(op);
+                if (schedule == .none or self.cfg.opTag(op) != .consume or self.cfg.opPlace(op).root != owner) continue;
+                if (std.mem.indexOfScalar(ExprId, schedules.items, schedule) == null) try schedules.append(self.gpa, schedule);
+            }
+        }
+        if (schedules.items.len == 0) return false;
+        for (self.cfg.placements) |placement| {
+            if (std.mem.indexOfScalar(ExprId, schedules.items, placement.schedule) == null) continue;
+            if (placement.exit == exit or self.cancelled.contains(placement)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    /// What `held`, the type holding the escaping observation, copies itself
+    /// into with `to_owned`, the library's name for the copy that owns what it
+    /// holds: the success its result carries and the failure it may report,
+    /// each written as a help writes a type for the module `from`, where the
+    /// report is, with the modules the success needs imported added to
+    /// `missing` and those the failure needs to `failure_missing`. Null where `held`
+    /// declares no `to_owned` answering a `Result`.
+    ///
+    /// **Bound:** the members `held`'s declaration holds, once per report.
+    fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId, missing: *std.ArrayList([]const u8), failure_missing: *std.ArrayList([]const u8)) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
+        const declared = self.typing.declOfType(held orelse return null) orelse return null;
+        var members = self.res.membersOfType(declared);
+        while (members.next()) |member| {
+            const sig = self.res.declaredBy(member);
+            if (!std.mem.eql(u8, self.ast.tokenText(self.ast.declName(sig)), "to_owned")) continue;
+            const result = switch (self.typing.get(self.typing.declSignature(sig))) {
+                .callable => |callable| callable.result,
+                else => return null,
+            };
+            const instance = self.typing.instanceOf(result) orelse return null;
+            const args = self.typing.argsOf(instance);
+            if (args.len != 2) return null;
+            return .{
+                .ty = args[0],
+                .name = try helpTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[0], missing),
+                .failure = try helpTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[1], failure_missing),
+            };
+        }
+        return null;
     }
 
     fn childType(self: *const Analysis, ty: types.TypeId, head: u96) ?types.TypeId {
@@ -2407,6 +2968,16 @@ const Analysis = struct {
             result = try self.store.prefixed(result, try self.store.prepend(payloadHead(variant, 0), .root));
         };
         result = try self.carriedBy(result, signature.result);
+        // Every observation the result may not carry is one mistake at this
+        // exit, reported once with every source it names. A lend, or a place
+        // lent to a closure, is a mistake of its own and is reported per lend.
+        var uncovered: std.ArrayList(Origin) = .empty;
+        defer uncovered.deinit(self.gpa);
+        var first_escape: ?struct { site: EscapeSite, escaped: Escaped, held: ?types.TypeId } = null;
+        var covered: std.ArrayList(BindingId) = .empty;
+        defer covered.deinit(self.gpa);
+        var also: std.ArrayList(EscapeSite) = .empty;
+        defer also.deinit(self.gpa);
         if (!self.function.contract_declined) for (self.store.facts(result)) |fact| {
             // A temporary ends with its statement, before the caller could
             // read what the function returns.
@@ -2423,14 +2994,38 @@ const Analysis = struct {
                     try targets.append(self.gpa, try self.resultPath(contract.target));
                 }
             }
-            if (!try self.coveredFact(signature.result, fact, &targets))
-                try self.escape(at, self.exprSite(self.returnedFrom(returned_value, fact.origin.place.root)), if (fact.origin.lent != .none)
-                    .{ .lend = fact.origin.lent }
-                else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation, fact.origin);
+            if (try self.coveredFact(signature.result, fact, &targets)) {
+                try covered.append(self.gpa, fact.origin.place.root);
+                try self.covered_owners.put(self.gpa, fact.origin.place.root, {});
+                continue;
+            }
+            const site = self.exprSite(self.escapeSite(returned_value, fact.origin.place.root));
+            const held = self.typeAtPath(signature.result, fact.path);
+            const escaped: Escaped = if (fact.origin.lent != .none)
+                .{ .lend = fact.origin.lent }
+            else if (self.isLentCapture(fact.origin.place.root)) .from_lent_capture else .observation;
+            if (escaped != .observation) {
+                try self.escape(at, site, escaped, .{ .returned = .{} }, &.{fact.origin}, held);
+                continue;
+            }
+            if (first_escape == null) {
+                first_escape = .{ .site = site, .escaped = escaped, .held = held };
+            } else if (!std.meta.eql(first_escape.?.site, site)) {
+                const seen = for (also.items) |earlier| {
+                    if (std.meta.eql(earlier, site)) break true;
+                } else false;
+                if (!seen) try also.append(self.gpa, site);
+            }
+            try uncovered.append(self.gpa, fact.origin);
         };
-        try self.stale(result, .{ .returned = returned_value }, report);
+        if (first_escape) |escaping| try self.escape(at, escaping.site, escaping.escaped, .{ .returned = .{ .covered = covered.items, .also = also.items, .exit = at } }, uncovered.items, escaping.held);
+        var escaped: std.ArrayList(BindingId) = .empty;
+        defer escaped.deinit(self.gpa);
+        for (uncovered.items) |origin| if (self.isLocalOwner(origin)) try escaped.append(self.gpa, origin.place.root);
+        try self.staleExcept(result, .{ .returned = returned_value }, report, escaped.items);
         for (self.function.inouts) |parameter| {
             const retained = try self.carriedBy(state.get(Cell.binding(parameter)) orelse .empty, self.typing.bindingType(parameter));
+            escaped.clearRetainingCapacity();
             for (self.store.facts(retained)) |fact| {
                 if (fact.origin.temporary != .none) {
                     try self.temporaryOutlived(fact.origin.temporary, at, true);
@@ -2460,11 +3055,20 @@ const Analysis = struct {
                         EscapeSite{ .file = self.ast.fileOf(self.res.declaringToken(parameter)), .span = self.ast.tokenSpan(self.res.declaringToken(parameter)) };
                     try self.escape(at, site, if (fact.origin.lent != .none)
                         .{ .lend = fact.origin.lent }
-                    else if (self.isLentCapture(parameter)) .into_lent_capture else .observation, null);
+                    else if (self.isLentCapture(parameter)) .into_lent_capture else .observation, .{ .retained = parameter }, &.{fact.origin}, self.typeAtPath(self.typing.bindingType(parameter), fact.path));
+                    if (self.isLocalOwner(fact.origin)) try escaped.append(self.gpa, fact.origin.place.root);
                 }
             }
-            try self.stale(retained, .{ .retained = parameter }, report);
+            try self.staleExcept(retained, .{ .retained = parameter }, report, escaped.items);
         }
+    }
+
+    /// Whether `origin` is an observation of an owner local to this
+    /// function: neither a parameter nor anything reached through one, nor a
+    /// temporary or a lend, each of which is reported its own way.
+    fn isLocalOwner(self: *const Analysis, origin: Origin) bool {
+        if (origin.external or origin.temporary != .none or origin.lent != .none) return false;
+        return std.mem.indexOfScalar(BindingId, self.function.parameters, origin.place.root) == null;
     }
 
     const TransferMode = enum { probe, solve, report };
@@ -2578,7 +3182,7 @@ const Analysis = struct {
                         try self.put(state, Cell.alias(place.root), try self.store.intern(aliases.items));
                     }
                     if (assignment) try self.invalidate(state, .{ .root = place.root, .path = path }, null, at);
-                    try self.write(state, place.root, path, incoming, at, report);
+                    try self.write(state, place.root, path, incoming, at, if (assignment and source != .none) source else at, report);
                 },
                 .dies => try self.invalidate(state, null, self.cfg.opRun(op), at),
                 .temporaries_end => try self.invalidateTemporaries(state, at),
@@ -2899,6 +3503,7 @@ const Analysis = struct {
             while (input.next()) |entry| try state.put(self.gpa, entry.key_ptr.*, entry.value_ptr.*);
             try self.transfer(&state, index, .report);
         }
+        try self.reviseEscapes();
     }
 };
 

@@ -6,7 +6,10 @@ error[O-Borrow]: this operation invalidates a place that a later observation sti
 15 |     a
    |     - the observation is still used here
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:15:5
+  --> tests/mem/a_nested_arena_handle_cannot_escape_its_owner.lin:13:13
    |
-15 |     a
-   |     ^ escape observations only from the signature's declared sources
+13 |     let a = inner.handle()
+   |             ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: part of the value comes from `outer`, which `where borrows(outer)` would permit; the rest no clause can
+   = help: `inner` is an allocator `scratch` opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `scratch_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives

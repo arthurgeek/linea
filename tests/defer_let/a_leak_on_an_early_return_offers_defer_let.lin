@@ -1,0 +1,24 @@
+// A value released only at the end of the main path leaks on an early return.
+// `defer let` releases it on every path, and a parameter, which no `let` binds,
+// gets the same from `defer note.release()` written where it arrives.
+import std.io
+
+fn shout(sink note: String) -> UInt8 {
+    if note.length() > 100 {
+        return 2
+    }
+    note.release()
+    0
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let note = "Buy milk".to_owned() else |_| {
+        return .Ok(1)
+    }
+    if note.length() > 100 {
+        return .Ok(2)
+    }
+    io.println(note.view())?
+    note.release()
+    .Ok(shout(String.new()))
+}

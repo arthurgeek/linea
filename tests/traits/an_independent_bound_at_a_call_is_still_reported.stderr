@@ -1,0 +1,10 @@
+error[T-Bound]: `Q` requires `Protocol`, and `UInt16` does not implement it
+  --> tests/traits/an_independent_bound_at_a_call_is_still_reported.lin:20:31
+   |
+20 |     let _wrong: Chan[UInt8] = open(UInt16(4))
+   |                               ^^^^ implement it for that type, or drop the bound
+error[T-Bound]: `P` requires `Protocol`, and `UInt8` does not implement it
+  --> tests/traits/an_independent_bound_at_a_call_is_still_reported.lin:20:17
+   |
+20 |     let _wrong: Chan[UInt8] = open(UInt16(4))
+   |                 ^^^^ implement it for that type, or drop the bound

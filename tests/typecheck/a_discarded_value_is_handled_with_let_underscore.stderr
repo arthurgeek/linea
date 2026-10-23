@@ -1,0 +1,5 @@
+error[T-Discard]: this expression produces a `Result[UInt8, Bad]` that is discarded
+  --> tests/typecheck/a_discarded_value_is_handled_with_let_underscore.lin:12:5
+   |
+12 |     parse()
+   |     ^^^^^^^ match it, or handle the failure with `let _ = … else |_| { … }`

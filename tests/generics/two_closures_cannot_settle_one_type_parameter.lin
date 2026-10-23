@@ -1,0 +1,11 @@
+// `pair` takes both callbacks as one type parameter `F`, and each closure has
+// a type of its own, so the second cannot settle `F` again. The report says
+// so and names the edits: a type parameter for each, or one `mem.Closure`
+// type for both.
+fn pair[F: fn(read x: UInt8) -> UInt8](first: F, second: F) -> UInt8 {
+    first(1) + second(2)
+}
+
+fn main() -> UInt8 {
+    pair(|x| x + 1, |x| x + 2)
+}

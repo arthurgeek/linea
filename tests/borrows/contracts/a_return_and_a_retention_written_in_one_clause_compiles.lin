@@ -1,0 +1,20 @@
+// The clause the reports on `note` reach, applied.
+struct Seen {
+    last: Str,
+}
+
+fn note(inout seen: Seen, _a: String, b: String, flag: Bool) -> Str where borrows(_a, b), retains(seen: borrow b) {
+    seen.last = b.view()
+    if flag {
+        return b.view()
+    }
+    let v = b.view()
+    v
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    var seen = Seen { last = "" }
+    UInt8(note(&seen, a, b, true).length())
+}

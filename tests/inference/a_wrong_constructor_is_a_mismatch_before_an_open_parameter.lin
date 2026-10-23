@@ -1,0 +1,30 @@
+// `send` takes a channel whose protocol is `Send[T, N]`, and this channel's is
+// `Recv[UInt64, End]`. The argument cannot have the parameter's shape, which is
+// the mistake to report, rather than that nothing settles `N`.
+trait Protocol {}
+
+struct End {}
+
+struct Send[phantom T, phantom N: Protocol] {}
+
+struct Recv[phantom T, phantom N: Protocol] {}
+
+impl Protocol for End {}
+
+impl[T, N: Protocol] Protocol for Send[T, N] {}
+
+impl[T, N: Protocol] Protocol for Recv[T, N] {}
+
+struct Chan[phantom P: Protocol] {
+    endpoint: UInt64,
+}
+
+fn send[T, N: Protocol](c: Chan[Send[T, N]], _value: T) -> Chan[N] {
+    .{ endpoint = c.endpoint }
+}
+
+fn main() -> UInt8 {
+    let receiving: Chan[Recv[UInt64, End]] = .{ endpoint = 1 }
+    let sent = send(receiving, UInt64(3))
+    UInt8(sent.endpoint)
+}

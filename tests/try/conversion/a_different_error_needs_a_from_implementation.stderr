@@ -2,4 +2,4 @@ error[T-TryAnswer]: this `?` may fail with `Parse`, and no `From[Parse] for Io` 
   --> tests/try/conversion/a_different_error_needs_a_from_implementation.lin:17:13
    |
 17 |     let n = parsed()?
-   |             ^^^^^^^^^ `?` converts a different error through `From`: implement it, or convert the error before `?`
+   |             ^^^^^^^^^ `?` converts a different error through `From`: implement `From[Parse]` for `Io`, or convert it before `?` with `.map_err(…)`

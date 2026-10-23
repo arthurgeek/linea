@@ -1,0 +1,14 @@
+// A callable bound is named in a report as the program wrote it, with unit
+// written `()` wherever it appears.
+fn run[F: inout fn(n: UInt8, done: ()) -> Result[(), UInt8]](inout body: F) {
+    let _outcome = &body(1, ())
+}
+
+fn main() -> UInt8 {
+    var count = inout [] |n: UInt64, _done: ()| -> Result[(), UInt8] {
+        let _seen = n
+        .Ok(())
+    }
+    run(&count)
+    0
+}

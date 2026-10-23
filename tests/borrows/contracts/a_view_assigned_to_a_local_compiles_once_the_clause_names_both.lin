@@ -1,0 +1,15 @@
+// The clause the report on `pick` names, applied: the written clause with `b`
+// added beside `a`.
+fn pick(a: String, b: String, flag: Bool) -> Str where borrows(a, b) {
+    var v = a.view()
+    if flag {
+        v = b.view()
+    }
+    v
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(pick(a, b, true).length())
+}

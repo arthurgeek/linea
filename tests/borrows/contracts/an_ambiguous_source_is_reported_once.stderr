@@ -2,4 +2,4 @@ error[T-BorrowContract]: the result has more than one eligible observation sourc
  --> tests/borrows/contracts/an_ambiguous_source_is_reported_once.lin:3:4
   |
 3 | fn pick(left: Str, right: Str) -> Str {
-  |    ^^^^ the result may borrow from `left` or `right`; add `where borrows(left)` or `where borrows(right)`, or list several sources in one clause
+  |    ^^^^ the result may come from `left` or `right`; add `where carries(left)` or `where carries(right)`, or `where carries(left, right)` where it may come from either

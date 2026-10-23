@@ -1,5 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/constructor_callables/contextual_variants/borrowed_payload_cannot_escape_its_owner.lin:7:12
+ --> tests/constructor_callables/contextual_variants/borrowed_payload_cannot_escape_its_owner.lin:6:46
   |
-7 |     return mapped
-  |            ^^^^^^ escape observations only from the signature's declared sources
+6 |     let mapped: Result[UInt8, RenderError] = source.map_err(.Allocation)
+  |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `owner` belongs to `escaped` and ends when it returns, so nothing returned may observe it

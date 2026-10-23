@@ -1,0 +1,15 @@
+// `x` is a `var`, so the binding that handles the failure in place of `?` is
+// a `var` too.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[UInt8, Bad] {
+    .Ok(4)
+}
+
+fn main() -> UInt8 {
+    var x = parse()?
+    x = x + 1
+    x
+}

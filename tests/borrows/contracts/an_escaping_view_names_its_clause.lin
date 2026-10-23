@@ -1,0 +1,22 @@
+// `label` returns a view into its parameter `station`, and its signature says
+// nothing about where the result comes from. The report names the clause that
+// says so, and the owned copy that needs none.
+import std.io
+
+@derive(Release)
+struct Station {
+    name: String,
+}
+
+fn label(station: Station) -> Str {
+    station.name.view()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let name = "Harbour".to_owned() else |_| {
+        return .Ok(1)
+    }
+    defer let station = Station { name = name }
+    io.println(label(station))?
+    .Ok(0)
+}

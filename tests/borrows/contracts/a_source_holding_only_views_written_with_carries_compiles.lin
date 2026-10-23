@@ -1,0 +1,17 @@
+// The clause the report on `pick` names, applied: both sources carried.
+struct Box {
+    v: Str,
+}
+
+fn pick(sink t: Box, u: Box, first: Bool) -> Box where carries(t, u) {
+    if first {
+        t
+    } else {
+        Box { v = copy(u.v) }
+    }
+}
+
+fn main() -> UInt8 {
+    let b = pick(Box { v = "a" }, Box { v = "bc" }, true)
+    UInt8(b.v.length())
+}

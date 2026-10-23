@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/ownership/a_view_of_a_released_local_is_reported_once.lin:7:5
+  |
+7 |     &seen.push(local.view()).settled()?
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `local` belongs to `remember` and ends when it returns, so `seen` may not keep an observation of it

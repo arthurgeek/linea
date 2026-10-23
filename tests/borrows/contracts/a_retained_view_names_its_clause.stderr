@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/borrows/contracts/a_retained_view_names_its_clause.lin:7:5
+  |
+7 |     &seen.push(field).settled()
+  |     ^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `seen` keeps a value that comes from `field`; write `where retains(seen: field)` to say so

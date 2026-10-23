@@ -1,0 +1,17 @@
+// `line` belongs to `greeting` and is released when it returns, so no view of
+// it can be returned. The report says so, and offers the owned copy.
+import std.io
+
+fn greeting(name: Str) -> Str {
+    var line = String.new()
+    defer line.release()
+    if &line.append("hello, ").is_err() || &line.append(name).is_err() {
+        return "hello"
+    }
+    line.view()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println(greeting("Ada"))?
+    .Ok(0)
+}

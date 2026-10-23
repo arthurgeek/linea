@@ -1,0 +1,12 @@
+error[T-BorrowContract]: a consumed parameter cannot supply escaping place storage
+ --> tests/borrows/contracts/a_clause_refused_for_a_consumed_parameter_is_not_named_again.lin:9:57
+  |
+9 | fn make[X, Y](sink x: X, sink y: Y) -> Pair[X, Y] where borrows(x) {
+  |                                                         ^^^^^^^ borrow a read or inout parameter
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/contracts/a_clause_refused_for_a_consumed_parameter_is_not_named_again.lin:10:5
+   |
+10 |     Pair[X, Y] { x = x, y = y }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `y`; write `where carries(x, y)` to say so

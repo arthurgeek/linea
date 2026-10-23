@@ -1,0 +1,19 @@
+// `Twin[T]` writes `T` for both of `Pair`'s parameters, so `Twin.make` needs
+// its two arguments to be one type, and these are a `UInt8` and a `Bool`.
+struct Pair[X, Y] {
+    x: X,
+    y: Y,
+}
+
+impl[X, Y] Pair[X, Y] {
+    fn make(sink x: X, sink y: Y) -> Self where carries(x, y) {
+        .{ x, y }
+    }
+}
+
+alias Twin[T] = Pair[T, T]
+
+fn main() -> UInt8 {
+    let twin = Twin.make(UInt8(1), true)
+    twin.x
+}

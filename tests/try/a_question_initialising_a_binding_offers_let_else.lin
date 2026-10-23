@@ -1,0 +1,10 @@
+// The `?` is the whole initialiser of `count`, so the failure can be handled
+// right there with `let … else`.
+fn parse() -> Result[UInt8, Str] {
+    .Ok(1)
+}
+
+fn main() -> UInt8 {
+    let count = parse()?
+    count
+}

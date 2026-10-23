@@ -1,0 +1,22 @@
+// `empty` belongs to `Pair[UInt8, B]`, so the call settles the first argument
+// and leaves `B` open. The annotation the report shows writes the whole type,
+// with `UInt8` in place and `B` to fill.
+struct Pair[A, B] {
+    a: Option[A],
+    b: Option[B],
+}
+
+impl[B] Pair[UInt8, B] {
+    fn empty() -> Self {
+        .{ a = .None, b = .None }
+    }
+}
+
+fn main() -> UInt8 {
+    let pair = Pair.empty()
+    if pair.a.is_some() {
+        1
+    } else {
+        4
+    }
+}

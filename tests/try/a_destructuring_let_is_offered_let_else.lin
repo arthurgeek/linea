@@ -1,0 +1,15 @@
+// `main` answers with a `UInt8`, so `?` cannot hand `parse`'s failure on.
+// The help offers the result type that could, or `let … else` written with
+// the same pattern, which takes the pair apart where the failure is handled.
+enum Bad {
+    Broken,
+}
+
+fn parse() -> Result[(UInt8, UInt8), Bad] {
+    .Ok((1, 2))
+}
+
+fn main() -> UInt8 {
+    let (a, b) = parse()?
+    a + b
+}

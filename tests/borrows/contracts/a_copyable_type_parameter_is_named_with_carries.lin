@@ -1,0 +1,16 @@
+// `T` is bounded by `Copyable`, so no argument holds storage of its own and
+// a copy of one keeps what it observes: the clause names `carries`.
+fn pick[T: Copyable](a: T, b: T, c: T, w: UInt8) -> T {
+    if w == 0 {
+        copy(a)
+    } else if w == 1 {
+        copy(b)
+    } else {
+        copy(c)
+    }
+}
+
+fn main() -> UInt8 {
+    let a: Str = "a"
+    UInt8(pick(a, "b", "c", 1).length())
+}

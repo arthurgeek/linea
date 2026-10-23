@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 6 |     borrow x
   |     ^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `point` belongs to `escaped` and ends when it returns, so nothing returned may observe it

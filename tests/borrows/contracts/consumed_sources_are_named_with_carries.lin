@@ -1,0 +1,16 @@
+// `make` consumes `x` and `y`, so its result can never observe their places:
+// what it may keep is what they already carry. The report names `carries`,
+// the only clause a consumed parameter can supply.
+struct Pair[X, Y] {
+    x: X,
+    y: Y,
+}
+
+fn make[X, Y](sink x: X, sink y: Y) -> Pair[X, Y] {
+    Pair[X, Y] { x = x, y = y }
+}
+
+fn main() -> UInt8 {
+    let p = make(UInt8(1), UInt8(2))
+    p.x
+}

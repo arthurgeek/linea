@@ -1,0 +1,22 @@
+// The edit the report on `pick` names, applied: `Pick.pick` and the member
+// both say the result may borrow from `other` as well as from `self`.
+trait Pick {
+    fn pick(self: Self, other: String) -> Str where borrows(self, other)
+}
+
+@derive(Release)
+struct Station {
+    code: String,
+}
+
+impl Pick for Station {
+    fn pick(_self: Self, other: String) -> Str where borrows(_self, other) {
+        other.view()
+    }
+}
+
+fn main() -> UInt8 {
+    defer let s = Station { code = String.new() }
+    defer let o = String.new()
+    UInt8(Pick.pick(s, o).length())
+}

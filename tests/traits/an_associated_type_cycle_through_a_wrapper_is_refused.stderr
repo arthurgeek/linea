@@ -1,0 +1,5 @@
+error[T-Impl]: this associated type is defined through itself: `A.D` is `Option[B.D]`, `B.D` is `Option[A.D]`
+  --> tests/traits/an_associated_type_cycle_through_a_wrapper_is_refused.lin:13:14
+   |
+13 |     type D = Option[B.D]
+   |              ^^^^^^^^^^^ define it as a type that does not read back to itself

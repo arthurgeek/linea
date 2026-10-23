@@ -1,5 +1,7 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
- --> tests/mem/owner_borrows/a_partial_assignment_preserves_the_possible_error_observation.lin:7:17
+ --> tests/mem/owner_borrows/a_partial_assignment_preserves_the_possible_error_observation.lin:3:48
   |
-7 |     let value = answer?
-  |                 ^^^^^^ escape observations only from the signature's declared sources
+3 |     var answer: Result[UInt8, borrow UInt64] = .Err(borrow local)
+  |                                                ^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `local` belongs to `work` and ends when it returns, so nothing returned may observe it

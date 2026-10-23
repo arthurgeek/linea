@@ -1,0 +1,16 @@
+// `make` consumes `x` and `y`, so its result may carry what they hold but
+// observe neither. The `borrows(x)` it writes is refused, and the escape's
+// help names the clause with `carries` for both.
+struct Pair[X, Y] {
+    x: X,
+    y: Y,
+}
+
+fn make[X, Y](sink x: X, sink y: Y) -> Pair[X, Y] where borrows(x) {
+    Pair[X, Y] { x = x, y = y }
+}
+
+fn main() -> UInt8 {
+    let p = make(UInt8(1), UInt8(2))
+    p.x
+}

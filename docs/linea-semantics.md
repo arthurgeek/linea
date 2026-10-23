@@ -2016,7 +2016,8 @@ exempt because it exposes the declaration to other modules.
 A `use` that binds a trait is exempt: a method call can use a trait without
 naming it (`a.acquire(n)` requires `Allocator` in scope even if it appears only
 in the `use`), and these calls are resolved after name resolution. Unused
-aliases of types and functions remain diagnosed.
+aliases of types and functions remain diagnosed. An import or `use` that names
+nothing is refused by [M-Import], and is not also reported as unused.
 
 Prelude imports are exempt. The prelude imports every library module so its
 implementations are loaded and available for lookup, and a module that only
@@ -2186,7 +2187,10 @@ omitted parameter types and its result type is the expectation on the body. A
 non-capturing lambda whose completed signature satisfies that interface then
 converts to that one structural code-pointer type. A structural callable bound
 supplies the same parameter and result context without erasing the lambda's
-unique type. Callable-bound satisfaction also compares outer parameters by
+unique type, so two closures passed for one type parameter are two types, and
+the call is [T-Mismatch]: the report says each closure has its own type and
+names a type parameter for each, with the same bound. Callable-bound
+satisfaction also compares outer parameters by
 position, independently of their binder names. Label differences require no
 runtime adapter and introduce no parameter or result type variance.
 
@@ -2388,8 +2392,10 @@ included, name the trait's parameters, and read the types an implementation
 settles, `Self.Iter`, but nothing a particular implementation holds. A body
 provided by a trait with parameters, `Scale[K]`, runs at the arguments of the
 implementation it was reached through. An implementation does not supply a
-provided operation, and one that does is refused under this rule. `Sequence`
-provides `map` this way:
+provided operation, and one that does is refused under this rule. A member
+refused for being there at all is dropped by the fix, so its body is not checked
+for ownership: what it would return or keep is not a mistake of its own.
+`Sequence` provides `map` this way:
 
 ```linea
 pub trait Sequence {
@@ -2520,6 +2526,20 @@ An associated type definition cannot use a settled reference: `type Item =
 Self.Other` would define one associated type through another in the same
 implementation. An implementation defines each associated type exactly once;
 duplicate definitions are [N-Duplicate].
+
+A definition may read another implementation's settled type, `type Dual =
+Pong.Dual`, and means what that definition means, whichever implementation is
+written first. A definition that reads back to itself through such references,
+`Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
+inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
+once per cycle at the definition on it written first, naming each definition
+and the type it is written as. The reference may sit inside an argument:
+`type D = Option[B.D]` with `type D = Option[A.D]` is the same cycle. A
+definition that only reads into such a cycle is that report's consequence. A
+cycle that passes through a type's field rather than through definitions,
+`type Iter = S[Box]` where `S[T]` has a field of type `T.Iter`, defines `Iter` as
+an ordinary type; it is the layout of `S[Box]` that contains itself, and
+[T-InfiniteLayout] reports it.
 
 An implementation supplies the trait's type arguments, as in
 `impl Holds[UInt8] for Coins` for `Holds[T]`. A wrong argument count is rejected
@@ -3561,6 +3581,12 @@ variant's checked payload types. Any remaining parameter is [T-Infer]:
 `Option.Some(3)` determines a type, but `Option.None` does not, and
 `Result.Ok(3)` leaves the error type unknown.
 
+An argument built by another constructor than the one its parameter's type
+writes around a parameter the call leaves open can never settle it, and is
+[T-Mismatch] rather than [T-Infer]: `Chan[Recv[UInt64, End]]` passed for
+`Chan[Send[T, N]]` is reported against `Chan[Send[UInt64, N]]`, with what the
+call settled filled in and the open parameter by its name.
+
 Inference does not use later statements, with two exceptions: an integer
 literal's open type ([T-Literal]) and a function value's open type parameters
 ([N-NotAValue]) are settled by their uses within the body. `let x = Option.None;`
@@ -3971,7 +3997,11 @@ handed on with `?`, returned, or passed to something that takes it. A `Result`
 reports whether the computation succeeded, so this binder cannot discard it
 without acknowledging the alternatives. [T-Discard] governs expression
 statements, while [T-DiscardFailure] governs binders; a bare call in statement
-position is covered by [T-Discard], and an unread name by [N-Unused].
+position is covered by [T-Discard], and an unread name by [N-Unused]. Both
+reports offer `?` only where it would be accepted ([T-TryAnswer]): the function
+answers with a `Result` whose error the failure is or converts to, or, for a
+failure that settles to such a reason, `.settled()?`. Otherwise they offer
+`let … else |_| { … }`, which handles the failure where it happens.
 
 Explicit acknowledgement is sufficient. A `match` with only a `_` arm satisfies
 this rule by deliberately treating all alternatives alike; intentionally ignoring
@@ -4343,7 +4373,18 @@ the operand of `?`, and a `Result`'s error must be the function's error type or
 convert into it. Success payload types may differ: a function returning
 `Option[String]` may use `?` on `Option[UInt8]` because failure returns no
 payload. There is no conversion between `Option` and `Result`. Using `?` in a
-function returning `UInt8` violates this rule.
+function returning `UInt8` violates this rule; the report names the result type
+that would carry the failure, `Result[UInt8, E]` with the operand's error. Where
+the `?` is the whole of a statement, it also offers handling the failure there:
+`let count = … else |_| { … }` for the initialiser of `let count` (`var` for a
+`var`), and
+`let _ = … else |_| { … }` for an expression kept for its effect. `else` stands
+nowhere else, so a `?` inside a larger expression is offered only the signature.
+A destructuring `let` is offered `let … else` with its own pattern,
+`let (a, b) = … else |_| { … }`. A closure that writes no result, and is given
+none by a callable type it is passed as, answers with what its body gives, so a
+`?` in it is held to that type once the body is checked, and the report offers
+the closure's result, `|| -> Result[UInt8, E] { … }`.
 
 A failing `Result` returns its error. An error of the function's own error type
 passes through unchanged and needs no implementation. An error of a different
@@ -5116,7 +5157,10 @@ Callable source clauses describe dependencies at a boundary:
 Source paths name parameters and fixed fields and can dereference observations.
 A message that prints a `fn` type's contracts names a parameter as `#n`, its
 position counted from 1, because a parameter's name is not part of the type;
-a program names the parameter. `carries(reference)` preserves the descriptor's
+a program names the parameter, and a mismatch that prints such a clause says
+so. What a callable requirement's result may carry from the callable itself is
+implied by the requirement and written by no program, so a message leaves it
+out. `carries(reference)` preserves the descriptor's
 dependencies; `carries(*reference)` preserves those contained in its referent.
 Retention destinations cannot cross readonly observation storage. A clause can
 list several sources. `borrows` and `retains` require a source; only `carries()`
@@ -5299,7 +5343,10 @@ terminates the process.
 scope exit, a consuming `match` leaves its contents unnamed, a write overwrites
 it, or a structure literal writes over a field of its base that holds one.
 `let _ = k` is not exempt: `_` marks intentional non-use, not permission to
-discard a Linear value.
+discard a Linear value. The report names the operations that settle the value,
+and where it is left on an early exit and its type implements `Release`, the
+schedule that settles it on every path: `defer let` or `defer var` for a
+single-name binding, and `defer name.release()` where it is bound otherwise.
 
 A consuming arm can discard a payload with `_` or by naming the variant without
 binding its contents: `Has =>` and `_ =>` have the same effect. The match has
@@ -5450,8 +5497,14 @@ referent of an observation carried by any parameter convention. Result targets
 and retention destinations cannot cross observation storage. An ambiguous
 inferred source requires an explicit `borrows` or `carries` clause; the ambiguity
 is the only error reported, and the body is not checked against a contract nobody
-declared. Where several of the sources are carriers the report says so and names
-them. A clause whose source, destination or target is refused is likewise the only
+declared. The report names each candidate's clause and the one clause listing them
+all: `borrows` for a parameter it does not consume whose place the result may
+observe, or that may hold storage of its own a view would point into and holds
+no view; `carries` for one that holds a view, such as a `Str` or a struct with
+one, for a type parameter its bounds make copyable, and for one it consumes. A consumed parameter ends with
+the function, so no clause lets anything observe its place past the return, and
+[O-Escapes] says so instead of naming one. Where several of the sources are carriers the report says so and
+names them. A clause whose source, destination or target is refused is likewise the only
 error: the body is not checked against what remains of the clause. A trait
 implementation's member cannot promise more than its signature. Bodies must obey
 these signature contracts.
@@ -5491,6 +5544,50 @@ Exits include explicit returns, trailing expressions and writes through `inout`
 parameters. Deferred owner disposal still occurs before the recipient can use a
 returned observation, so returning a view into a local owner is rejected. An
 independent owned value may leave its scope through the ordinary move rules.
+
+A report is made once per exit for the observations leaving there, and once per
+lend; it is placed where the escaping value took its dependency, following a
+block to its tail and a local binding back to the value written into it. It
+names the edit each source calls for, spelled as [T-BorrowContract] spells it:
+the one clause listing every parameter the value comes from (`where
+borrows(first, second)`), the retention clause for a value an `inout` parameter
+keeps (`where retains(seen: field)`), or, for a local owner, that it ends when the
+function returns. Each further place the value took a dependency is pointed at
+as well. The clause named is the whole clause to write, and a function has one:
+every report of one function names the same clause, listing every source its
+escapes return and every retention its `inout` parameters keep, so writing the
+clause any report names answers them all. One the signature wrote keeps its
+sources, with a `borrows` written for a consumed parameter, which
+[T-BorrowContract] refuses, named `carries`; one written where the signature
+wrote none replaces the contract it inferred, so it also lists the sources that
+contract covered at any exit: `where borrows(self), carries(other)`.
+
+An observation of a local owner leaving the function is one mistake: the owner
+ending, or a `defer` releasing it, before the observation's use outside is that
+escape's consequence, and [O-Borrow] does not report it again. Where the local is
+an allocator the function opens and what leaves was built in it, the report names
+the form that takes the allocator as a parameter, `load_in` with `A: Allocator`
+and `allocator: A` first, so the caller's allocator decides how long the result
+lives, and the owned copy in the system allocator.
+
+A member of a trait implementation answers to its trait's signature, and a
+function received by a written callable type or a callable bound answers to that
+type. Where that fixed signature does not permit the clause, the report names
+the clause, says it cannot be added there, and offers what the program can
+change: returning or keeping what the fixed signature permits, or widening the
+trait or callable type where the program wrote it, and this signature with it.
+
+Where the type holding the observation declares `to_owned`, the report also
+offers the owned copy, which observes nothing and needs no clause, naming the
+type that holds it and the failure copying can report: `Result[String, mem.Oom]`
+for a result that was the view, `String` where a part of the result or an
+`inout` parameter held it. Where a local owner of that type supplied the view,
+it offers the owner itself instead, unless a `defer` releases the owner and runs
+at no other exit of the function, where moving it would leave the `defer`
+nothing to release. Under a
+fixed signature the result type is fixed too, so a returned view is offered no
+copy; a stored view still is, which is the fix for a route handler that keeps a
+request's text in its state.
 
 **[O-Temporary]** A value that is borrowed where it is written without being a
 place, such as `log.field("count", 3)`'s `3`, an argument `base + 2` to a

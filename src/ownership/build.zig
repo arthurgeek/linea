@@ -98,7 +98,7 @@ pub fn buildRemaining(
     // decided with the body it is written in, so the closure loop reads this
     // rather than repeating why a body is skipped: a template member, a
     // generated body a failed requirement suppressed, a retained body, a
-    // declaration with no body.
+    // member its implementation was refused for, a declaration with no body.
     var walked = try std.DynamicBitSetUnmanaged.initEmpty(gpa, program.ast.declCount());
     defer walked.deinit(gpa);
 
@@ -115,6 +115,7 @@ pub fn buildRemaining(
                 continue;
             }
             if (retained) |checked| if (checked.contains(d)) continue;
+            if (typing.refused_members.contains(d)) continue;
             const body = switch (program.ast.declTag(d)) {
                 .function => program.ast.declBody(d),
                 .traversal_ => program.ast.declInit(d),
@@ -659,6 +660,7 @@ const Builder = struct {
         if (self.at != .none) try self.markExit(self.at);
         try self.functions.append(self.gpa, .{
             .decl = .none,
+            .lambda = descriptor.expr,
             .owner = descriptor.enclosing,
             .entry = .at(first),
             .signature = descriptor.signature,

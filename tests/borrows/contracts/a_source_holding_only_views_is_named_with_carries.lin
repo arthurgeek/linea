@@ -1,0 +1,19 @@
+// `Box` holds a view and no storage of its own, so a result taken from `u`
+// keeps what `u` observes rather than observing `u`: the clause names
+// `carries`, as the report on the body would.
+struct Box {
+    v: Str,
+}
+
+fn pick(sink t: Box, u: Box, first: Bool) -> Box {
+    if first {
+        t
+    } else {
+        Box { v = copy(u.v) }
+    }
+}
+
+fn main() -> UInt8 {
+    let b = pick(Box { v = "a" }, Box { v = "bc" }, true)
+    UInt8(b.v.length())
+}

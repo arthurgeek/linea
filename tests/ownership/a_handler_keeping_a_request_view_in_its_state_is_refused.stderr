@@ -1,5 +1,8 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> tests/ownership/a_handler_keeping_a_request_view_in_its_state_is_refused.lin:14:9
+  --> tests/ownership/a_handler_keeping_a_request_view_in_its_state_is_refused.lin:14:21
    |
 14 |         self.path = request.path()
-   |         ^^^^^^^^^ escape observations only from the signature's declared sources
+   |                     ^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `serve_http` implements `http.Handler`, whose signature does not permit `where borrows(self), carries(request), retains(self: request)`, so it cannot be added here: keep only what that signature permits
+   = help: an owned copy observes nothing and needs no clause: declare `String` where `self` holds the view, and copy the text in, with `….to_owned()` for a new value or `&….append(…)` into one it already holds; either can fail with `mem.Oom`

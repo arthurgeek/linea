@@ -1,0 +1,23 @@
+// The result of `longer` borrows from `first` on one branch and from `second`
+// on the other. Both are owned `String`s, so neither is a source the signature
+// infers, and the report names the one clause that lists both.
+import std.io
+
+fn longer(first: String, second: String) -> Str {
+    if first.length() >= second.length() {
+        first.view()
+    } else {
+        second.view()
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let north = "north".to_owned() else |_| {
+        return .Ok(1)
+    }
+    defer let southwest = "southwest".to_owned() else |_| {
+        return .Ok(1)
+    }
+    io.println(longer(north, southwest))?
+    .Ok(0)
+}

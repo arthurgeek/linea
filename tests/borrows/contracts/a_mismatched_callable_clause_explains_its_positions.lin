@@ -1,0 +1,22 @@
+// `Picker.f` and `pick`'s bound each say the result comes from `a`, and
+// `second`'s from `b`. A `fn` type's clause names a parameter by position, as
+// `#1`, which the mismatch explains; the bound is written as the program wrote it.
+struct Picker {
+    f: fn(read a: String, read b: String) -> Str where borrows(a),
+}
+
+fn second(_a: String, b: String) -> Str where borrows(b) {
+    b.view()
+}
+
+fn pick[F: fn(read a: String, read b: String) -> Str where borrows(a)](f: F, a: String, b: String) -> UInt64 {
+    f(a, b).length()
+}
+
+fn main() -> UInt8 {
+    let p = Picker { f = second }
+    defer let a = String.new()
+    defer let b = String.new()
+    let f = p.f
+    UInt8(f(a, b).length() + pick(second, a, b))
+}

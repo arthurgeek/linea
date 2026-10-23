@@ -28,6 +28,7 @@ const fieldBase = @import("../sema/typecheck.zig").fieldBase;
 const checkOwnership = @import("../ownership/check.zig").check;
 const loader = @import("../driver/loader.zig");
 const FileTable = @import("../support/source.zig").FileTable;
+const FileId = @import("../support/source.zig").FileId;
 const ProgramKind = @import("../syntax/program.zig").Kind;
 
 /// A change to a program that must stop it compiling.
@@ -1771,6 +1772,30 @@ pub const Verdict = struct {
 };
 
 pub fn verdictOf(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Verdict {
+    const sink = (try diagnose(gpa, text, kind)).sink;
+    var codes: std.ArrayList(u8) = .empty;
+    for (sink.list.items) |d| {
+        if (d.severity != .err) continue;
+        const code = d.code orelse continue;
+        const name = code.ruleName();
+        // One rule reported at several places is one rule broken. The set is
+        // what the mutation answers for, so a citation already in it says
+        // nothing further.
+        if (cites(codes.items, name)) continue;
+        try codes.appendSlice(gpa, name);
+        try codes.append(gpa, ' ');
+    }
+    return .{ .rejected = sink.hasErrors(), .text = try codes.toOwnedSlice(gpa) };
+}
+
+/// What the compiler reports about one file of text, checked the way a case
+/// of that kind is, through ownership. The one compilation every property
+/// that edits a program and asks again shares, so a mutation and a help's
+/// edit are judged by the same passes. The sink is allocated from `gpa`,
+/// and `file` is the file the text was loaded as.
+pub const Diagnosed = struct { sink: Sink, file: FileId };
+
+pub fn diagnose(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Diagnosed {
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
 
@@ -1795,20 +1820,7 @@ pub fn verdictOf(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !V
         var c = try checkOwnership(gpa, gpa, &expanded, &res, &typing, &sink);
         c.deinit(gpa);
     }
-
-    var codes: std.ArrayList(u8) = .empty;
-    for (sink.list.items) |d| {
-        if (d.severity != .err) continue;
-        const code = d.code orelse continue;
-        const name = code.ruleName();
-        // One rule reported at several places is one rule broken. The set is
-        // what the mutation answers for, so a citation already in it says
-        // nothing further.
-        if (cites(codes.items, name)) continue;
-        try codes.appendSlice(gpa, name);
-        try codes.append(gpa, ' ');
-    }
-    return .{ .rejected = sink.hasErrors(), .text = try codes.toOwnedSlice(gpa) };
+    return .{ .sink = sink, .file = program.primaryFile() };
 }
 
 /// Whether a space-separated list of rule names holds one.
